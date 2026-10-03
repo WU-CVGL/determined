@@ -1,9 +1,10 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import UIProvider, { DefaultTheme } from 'hew/Theme';
 import { ConfirmationProvider } from 'hew/useConfirm';
 import { MemoryRouter } from 'react-router-dom';
 
+import userStore from 'stores/users';
 import { CommandState, CommandTask, CommandType } from 'types';
 import { NOTEBOOK_ACCESS_DENIED } from 'utils/wait';
 
@@ -16,11 +17,13 @@ vi.mock('hooks/usePermissions', () => ({
   }),
 }));
 vi.mock('routes/utils', () => ({
-  paths: { taskLogs: () => '/logs' },
+  paths: { shellTerminal: (id: string) => `/shells/${id}/terminal`, taskLogs: () => '/logs' },
   serverAddress: () => 'http://localhost',
 }));
 const mocks = vi.hoisted(() => ({ getJupyterLab: vi.fn() }));
 vi.mock('services/api', () => ({ getJupyterLab: mocks.getJupyterLab, killTask: vi.fn() }));
+const feature = vi.hoisted(() => ({ on: true }));
+vi.mock('hooks/useFeature', () => ({ default: () => ({ isOn: () => feature.on }) }));
 
 const task: CommandTask = {
   id: 'task-1',
@@ -52,6 +55,26 @@ const notebook: Partial<CommandTask> = {
   type: CommandType.JupyterLab,
 };
 
+const openContextMenu = (ownerId: number, overrides: Partial<CommandTask> = {}) => {
+  render(
+    <MemoryRouter>
+      <UIProvider theme={DefaultTheme.Light}>
+        <ConfirmationProvider>
+          <TaskActionDropdown task={{ ...task, userId: ownerId, ...overrides }}>
+            <div>task row</div>
+          </TaskActionDropdown>
+        </ConfirmationProvider>
+      </UIProvider>
+    </MemoryRouter>,
+  );
+  fireEvent.contextMenu(screen.getByText('task row'));
+};
+
+const runningShell: Partial<CommandTask> = { state: CommandState.Running, type: CommandType.Shell };
+
+const setCurrentUser = (id: number, isAdmin = false) =>
+  userStore.updateCurrentUser({ id, isActive: true, isAdmin, username: `user-${id}` });
+
 describe('TaskActionDropdown', () => {
   it('hides Kill for another user’s task', async () => {
     await openMenu(102);
@@ -77,5 +100,54 @@ describe('TaskActionDropdown', () => {
     await userEvent.click(screen.getByText('Connect'));
     expect(await screen.findByText(NOTEBOOK_ACCESS_DENIED)).toBeInTheDocument();
     expect(screen.queryByText('http://localhost/proxy/nb-1/')).not.toBeInTheDocument();
+  });
+
+  describe('Open Terminal', () => {
+    beforeEach(() => {
+      feature.on = true;
+      setCurrentUser(101);
+    });
+
+    it('opens the terminal of the user’s own running shell in a tab', async () => {
+      const open = vi.spyOn(window, 'open').mockReturnValue(null);
+      await openMenu(101, runningShell);
+      await userEvent.click(screen.getByText('Open Terminal'));
+      expect(open).toHaveBeenCalledWith('/shells/task-1/terminal', 'shell-terminal-task-1');
+      // The CLI command is still offered.
+      expect(screen.getByText('Connect via CLI')).toBeInTheDocument();
+      open.mockRestore();
+    });
+
+    it('is in the context menu, too', async () => {
+      openContextMenu(101, runningShell);
+      expect(await screen.findByText('Open Terminal')).toBeInTheDocument();
+    });
+
+    it('is hidden for another user’s shell', async () => {
+      await openMenu(102, runningShell);
+      expect(screen.queryByText('Open Terminal')).not.toBeInTheDocument();
+    });
+
+    it('is shown to admins for any running shell', async () => {
+      setCurrentUser(1, true);
+      await openMenu(102, runningShell);
+      expect(screen.getByText('Open Terminal')).toBeInTheDocument();
+    });
+
+    it('is hidden for shells that are not running and for other tasks', async () => {
+      await openMenu(101, { ...runningShell, state: CommandState.Queued });
+      expect(screen.queryByText('Open Terminal')).not.toBeInTheDocument();
+    });
+
+    it('is hidden for commands', async () => {
+      await openMenu(101, { state: CommandState.Running, type: CommandType.Command });
+      expect(screen.queryByText('Open Terminal')).not.toBeInTheDocument();
+    });
+
+    it('is hidden when the master turns the terminal off', async () => {
+      feature.on = false;
+      await openMenu(101, runningShell);
+      expect(screen.queryByText('Open Terminal')).not.toBeInTheDocument();
+    });
   });
 });

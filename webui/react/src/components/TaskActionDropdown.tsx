@@ -4,20 +4,25 @@ import Icon from 'hew/Icon';
 import { useModal } from 'hew/Modal';
 import { useToast } from 'hew/Toast';
 import useConfirm from 'hew/useConfirm';
+import { Loadable } from 'hew/utils/loadable';
+import { useObservable } from 'micro-observables';
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import css from 'components/ActionDropdown/ActionDropdown.module.scss';
 import TaskConnectModalComponent, { TaskConnectField } from 'components/TaskConnectModal';
+import useFeature from 'hooks/useFeature';
 import usePermissions from 'hooks/usePermissions';
 import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
 import { paths, serverAddress } from 'routes/utils';
 import { killTask } from 'services/api';
+import { openShellTerminalTab } from 'services/shellTerminal';
+import userStore from 'stores/users';
 import { TaskAction as Action, CommandState, CommandTask, CommandType, DetailedUser } from 'types';
 import { copyToClipboard } from 'utils/dom';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import { capitalize } from 'utils/string';
-import { isTaskKillable } from 'utils/task';
+import { canOpenShellTerminal, isTaskKillable } from 'utils/task';
 import { getJupyterLabAddress, NOTEBOOK_ACCESS_DENIED } from 'utils/wait';
 
 interface Props {
@@ -31,6 +36,8 @@ interface Props {
 const TaskActionDropdown: React.FC<Props> = ({ task, onComplete, children }: Props) => {
   const { canModifyWorkspaceNSC } = usePermissions();
   const resourcesEnabled = useTaskResourcesEnabled();
+  const terminalEnabled = useFeature().isOn('shell_terminal');
+  const currentUser = Loadable.getOrElse(undefined, useObservable(userStore.currentUser));
   const { openToast } = useToast();
   const TaskConnectModal = useModal(TaskConnectModalComponent);
   // Listings never include a notebook's Jupyter token, so it is fetched when connecting.
@@ -84,11 +91,17 @@ const TaskActionDropdown: React.FC<Props> = ({ task, onComplete, children }: Pro
     ) {
       items.push({ key: Action.Kill, label: 'Kill' });
     }
+    if (terminalEnabled && canOpenShellTerminal(task, currentUser)) {
+      items.push({ key: Action.OpenTerminal, label: 'Open Terminal' });
+    }
     if (isConnectable(task)) {
-      items.push({ key: Action.Connect, label: 'Connect' });
+      items.push({
+        key: Action.Connect,
+        label: task.type === CommandType.Shell ? 'Connect via CLI' : 'Connect',
+      });
     }
     return items;
-  }, [task, canModifyWorkspaceNSC, resourcesEnabled]);
+  }, [task, canModifyWorkspaceNSC, resourcesEnabled, terminalEnabled, currentUser]);
 
   const navigate = useNavigate();
 
@@ -105,6 +118,10 @@ const TaskActionDropdown: React.FC<Props> = ({ task, onComplete, children }: Pro
             setJupyterLabAddress(address);
           }
           TaskConnectModal.open();
+          break;
+        case Action.OpenTerminal:
+          openShellTerminalTab(task.id);
+          onComplete?.(key);
           break;
         case Action.Kill:
           confirm({

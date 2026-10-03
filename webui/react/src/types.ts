@@ -949,6 +949,7 @@ export const TaskAction = {
   Connect: 'Connect',
   CopyTaskID: 'Copy Task ID',
   Kill: 'Kill',
+  OpenTerminal: 'Open Terminal',
   ViewLogs: 'View Logs',
   ViewResources: 'View Resources',
 } as const;
