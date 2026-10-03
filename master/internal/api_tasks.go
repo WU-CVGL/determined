@@ -255,7 +255,7 @@ func (a *apiServer) canEditAllocation(ctx context.Context, allocationID string) 
 func (a *apiServer) AllocationReady(
 	ctx context.Context, req *apiv1.AllocationReadyRequest,
 ) (*apiv1.AllocationReadyResponse, error) {
-	if err := a.canEditAllocation(ctx, req.AllocationId); err != nil {
+	if err := a.canControlAllocation(ctx, req.AllocationId); err != nil {
 		return nil, err
 	}
 
@@ -269,7 +269,7 @@ func (a *apiServer) AllocationReady(
 func (a *apiServer) AllocationWaiting(
 	ctx context.Context, req *apiv1.AllocationWaitingRequest,
 ) (*apiv1.AllocationWaitingResponse, error) {
-	if err := a.canEditAllocation(ctx, req.AllocationId); err != nil {
+	if err := a.canControlAllocation(ctx, req.AllocationId); err != nil {
 		return nil, err
 	}
 
@@ -286,7 +286,7 @@ func (a *apiServer) AllocationAllGather(
 	if req.AllocationId == "" {
 		return nil, status.Error(codes.InvalidArgument, "allocation ID missing")
 	}
-	if err := a.canEditAllocation(ctx, req.AllocationId); err != nil {
+	if err := a.canControlAllocation(ctx, req.AllocationId); err != nil {
 		return nil, err
 	}
 
@@ -340,10 +340,7 @@ func (a *apiServer) PostAllocationProxyAddress(
 	if req.AllocationId == "" {
 		return nil, status.Error(codes.InvalidArgument, "allocation ID missing")
 	}
-	if err := a.canEditAllocation(ctx, req.AllocationId); err != nil {
-		return nil, err
-	}
-	if err := canSetAllocationProxyAddress(ctx, model.AllocationID(req.AllocationId)); err != nil {
+	if err := a.canControlAllocation(ctx, req.AllocationId); err != nil {
 		return nil, err
 	}
 	// Tasks post the IP address of their own container (prep_container --proxy).
@@ -367,11 +364,28 @@ func (a *apiServer) PostAllocationProxyAddress(
 	return &apiv1.PostAllocationProxyAddressResponse{}, nil
 }
 
-// canSetAllocationProxyAddress allows only the owner of an allocation's job, or an admin, to set
-// where the master proxies the allocation's services, in every authz mode. The legitimate caller
-// is the task's own container, whose allocation session authenticates as the owner. Being able to
-// see a task is not enough: the address decides where other users' proxied requests go.
-func canSetAllocationProxyAddress(ctx context.Context, allocationID model.AllocationID) error {
+// canControlAllocation checks that a request may change an allocation's state or take part in its
+// rendezvous: it must pass canEditAllocation, and come from the allocation's own task session, the
+// owner of the allocation's job, or an admin, in every authz mode. The legitimate callers are the
+// task's own containers (prep_container, check_ready_logs, the Core API's preemption helpers and
+// the distributed launchers), which authenticate with the allocation session. Being able to see a
+// task is not enough.
+func (a *apiServer) canControlAllocation(ctx context.Context, allocationID string) error {
+	if err := a.canEditAllocation(ctx, allocationID); err != nil {
+		return err
+	}
+	return checkAllocationController(ctx, model.AllocationID(allocationID))
+}
+
+func checkAllocationController(ctx context.Context, allocationID model.AllocationID) error {
+	session, err := grpcutil.GetAllocationSession(ctx)
+	if err != nil {
+		return err
+	}
+	if session != nil && session.AllocationID == allocationID {
+		return nil
+	}
+
 	curUser, _, err := grpcutil.GetUser(ctx)
 	if err != nil {
 		return err
@@ -395,7 +409,7 @@ func canSetAllocationProxyAddress(ctx context.Context, allocationID model.Alloca
 		return nil
 	}
 	return status.Error(codes.PermissionDenied,
-		"only the owner of an allocation or an admin may set its proxy address")
+		"only the allocation's own task, its owner, or an admin may change an allocation")
 }
 
 func (a *apiServer) GetTaskAcceleratorData(
@@ -447,7 +461,7 @@ func (a *apiServer) PostAllocationAcceleratorData(
 		return nil, status.Error(codes.InvalidArgument, "allocation ID missing")
 	}
 
-	if err := a.canEditAllocation(ctx, req.AllocationId); err != nil {
+	if err := a.canControlAllocation(ctx, req.AllocationId); err != nil {
 		return nil, err
 	}
 

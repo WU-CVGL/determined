@@ -118,6 +118,18 @@ func getAllocationSessionBun(ctx context.Context) (*model.AllocationSession, err
 	}
 }
 
+// GetAllocationSession returns the allocation session that authenticated the request, or nil if
+// the request carries no allocation token or is authenticated as a user. Like GetUser, it prefers
+// a user token whenever the request carries one.
+func GetAllocationSession(ctx context.Context) (*model.AllocationSession, error) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok || len(md[userTokenHeader]) > 0 || len(md[gatewayTokenHeader]) > 0 ||
+		len(md[AllocationTokenHeader]) == 0 {
+		return nil, nil
+	}
+	return getAllocationSessionBun(ctx)
+}
+
 // GetUser returns the currently logged in user.
 func GetUser(ctx context.Context) (*model.User, *model.UserSession, error) {
 	if user, ok := ctx.Value(userContextKey{}).(*model.User); ok {
