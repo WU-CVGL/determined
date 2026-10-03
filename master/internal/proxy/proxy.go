@@ -7,7 +7,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httputil"
+	"net/textproto"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -145,8 +147,12 @@ func (p *Proxy) NewProxyHandler(serviceID string) echo.HandlerFunc {
 			}
 		}
 
-		// Set proxy headers.
+		// The proxied service runs whatever its task's owner chose, so it must never see the
+		// visitor's master credentials.
 		req := c.Request()
+		stripMasterCredentials(req.Header, !service.AllowUnauthenticated)
+
+		// Set proxy headers.
 		if req.Header.Get(echo.HeaderXRealIP) == "" {
 			req.Header.Set(echo.HeaderXRealIP, c.RealIP())
 		}
@@ -175,6 +181,63 @@ func (p *Proxy) NewProxyHandler(serviceID string) echo.HandlerFunc {
 		proxy.ServeHTTP(c.Response(), req)
 
 		return nil
+	}
+}
+
+// masterAuthCookies are the cookies that carry a master session: "auth" is set at login and by
+// the web UI, and "det_jwt" holds an external session token.
+var masterAuthCookies = map[string]bool{"auth": true, "det_jwt": true}
+
+// stripMasterCredentials removes the master's own credentials from a request that is about to be
+// forwarded to a proxied service. Master session cookies are always removed; other cookies, such as
+// JupyterLab's, are kept. When the master authenticated the request (authenticated is true), an
+// Authorization header with the Bearer scheme can only hold a master token, since any other bearer
+// token fails master authentication, so it is removed too. Other schemes are kept, such as the
+// "token" scheme that JupyterLab uses for its notebook token. Services that allow unauthenticated
+// access keep their Authorization header: browsers never attach one by themselves, and it may hold
+// the service's own credentials.
+func stripMasterCredentials(header http.Header, authenticated bool) {
+	stripCookies(header, masterAuthCookies)
+	if !authenticated {
+		return
+	}
+
+	values := header.Values(echo.HeaderAuthorization)
+	header.Del(echo.HeaderAuthorization)
+	for _, v := range values {
+		if fields := strings.Fields(v); len(fields) > 0 && strings.EqualFold(fields[0], "Bearer") {
+			continue
+		}
+		header.Add(echo.HeaderAuthorization, v)
+	}
+}
+
+// stripCookies removes the named cookies from the request's Cookie headers. Every other cookie is
+// kept exactly as the client sent it; re-encoding would drop the quotes from values such as
+// Tornado's signed cookies.
+func stripCookies(header http.Header, names map[string]bool) {
+	var kept []string
+	removed := false
+	for _, line := range header.Values(echo.HeaderCookie) {
+		for _, pair := range strings.Split(line, ";") {
+			pair = textproto.TrimString(pair)
+			if pair == "" {
+				continue
+			}
+			if name, _, _ := strings.Cut(pair, "="); names[textproto.TrimString(name)] {
+				removed = true
+				continue
+			}
+			kept = append(kept, pair)
+		}
+	}
+	if !removed {
+		return
+	}
+
+	header.Del(echo.HeaderCookie)
+	if len(kept) > 0 {
+		header.Set(echo.HeaderCookie, strings.Join(kept, "; "))
 	}
 }
 

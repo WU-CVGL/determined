@@ -315,6 +315,41 @@ func TestByToken(t *testing.T) {
 	require.Equal(t, session.ID, sessionID)
 }
 
+func TestByTokenRejectsTokensOfOtherSessionTables(t *testing.T) {
+	admin, err := addTestUser(nil, func(u *model.User) { u.Admin = true })
+	require.NoError(t, err)
+	_, err = StartSession(context.TODO(), admin)
+	require.NoError(t, err)
+	var adminSession model.UserSession
+	require.NoError(t, db.Bun().NewSelect().Model(&adminSession).
+		Where("user_id = ?", admin.ID).Scan(context.TODO()))
+	other, err := addTestUser(nil)
+	require.NoError(t, err)
+
+	// Another user's allocation session can have the same ID as the admin's user session.
+	allocationToken, err := paseto.NewV2().Sign(db.GetTokenKeys().PrivateKey,
+		&model.AllocationSession{ID: adminSession.ID, AllocationID: "task.1", OwnerID: &other.ID},
+		nil)
+	require.NoError(t, err)
+	_, _, err = ByToken(context.TODO(), allocationToken, &model.ExternalSessions{})
+	require.ErrorIs(t, err, db.ErrNotFound)
+
+	// A notebook session token never names a user session either.
+	notebookToken, err := db.GenerateNotebookSessionToken(admin.ID, "task")
+	require.NoError(t, err)
+	_, _, err = ByToken(context.TODO(), notebookToken, &model.ExternalSessions{})
+	require.Error(t, err)
+
+	// The admin's own token still works, inherited claims included.
+	claims := map[string]string{"k": "v"}
+	token, err := StartSession(context.TODO(), admin, WithInheritedClaims(claims))
+	require.NoError(t, err)
+	u, session, err := ByToken(context.TODO(), token, &model.ExternalSessions{})
+	require.NoError(t, err)
+	require.Equal(t, admin.ID, u.ID)
+	require.Equal(t, claims, session.InheritedClaims)
+}
+
 func TestByUsername(t *testing.T) {
 	user, err := addTestUser(nil)
 	require.NoError(t, err)

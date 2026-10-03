@@ -1301,7 +1301,7 @@ func (a *apiServer) AllocationPreemptionSignal(
 func (a *apiServer) AckAllocationPreemptionSignal(
 	ctx context.Context, req *apiv1.AckAllocationPreemptionSignalRequest,
 ) (*apiv1.AckAllocationPreemptionSignalResponse, error) {
-	if err := a.canEditAllocation(ctx, req.AllocationId); err != nil {
+	if err := a.canControlAllocation(ctx, req.AllocationId); err != nil {
 		return nil, err
 	}
 
@@ -1316,7 +1316,7 @@ func (a *apiServer) AllocationPendingPreemptionSignal(
 	ctx context.Context,
 	req *apiv1.AllocationPendingPreemptionSignalRequest,
 ) (*apiv1.AllocationPendingPreemptionSignalResponse, error) {
-	if err := a.canEditAllocation(ctx, req.AllocationId); err != nil {
+	if err := a.canControlAllocation(ctx, req.AllocationId); err != nil {
 		return nil, err
 	}
 
@@ -1335,7 +1335,7 @@ func (a *apiServer) NotifyContainerRunning(
 	ctx context.Context,
 	req *apiv1.NotifyContainerRunningRequest,
 ) (*apiv1.NotifyContainerRunningResponse, error) {
-	if err := a.canEditAllocation(ctx, req.AllocationId); err != nil {
+	if err := a.canControlAllocation(ctx, req.AllocationId); err != nil {
 		return nil, err
 	}
 
@@ -1356,7 +1356,7 @@ func (a *apiServer) NotifyContainerRunning(
 func (a *apiServer) MarkAllocationResourcesDaemon(
 	ctx context.Context, req *apiv1.MarkAllocationResourcesDaemonRequest,
 ) (*apiv1.MarkAllocationResourcesDaemonResponse, error) {
-	if err := a.canEditAllocation(ctx, req.AllocationId); err != nil {
+	if err := a.canControlAllocation(ctx, req.AllocationId); err != nil {
 		return nil, err
 	}
 
@@ -1578,7 +1578,7 @@ func (a *apiServer) AllocationRendezvousInfo(
 	if req.AllocationId == "" {
 		return nil, status.Error(codes.InvalidArgument, "allocation ID missing")
 	}
-	if err := a.canEditAllocation(ctx, req.AllocationId); err != nil {
+	if err := a.canControlAllocation(ctx, req.AllocationId); err != nil {
 		return nil, err
 	}
 
