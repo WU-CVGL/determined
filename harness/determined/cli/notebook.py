@@ -78,6 +78,12 @@ def open_notebook(args: argparse.Namespace) -> None:
 
     nb = bindings.get_GetNotebook(sess, notebookId=notebook_id).notebook
     assert nb.serviceAddress is not None, "missing tensorboard serviceAddress"
+    # The master returns the notebook's Jupyter token only to its owner or an administrator.
+    if "token=" not in nb.serviceAddress:
+        raise cli.errors.CliError(
+            f"Cannot open notebook {nb.id}: only the user who started it or an administrator "
+            "can open it."
+        )
 
     nb_path = ntsc.make_interactive_task_url(
         task_id=nb.id,

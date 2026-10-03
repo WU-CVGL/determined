@@ -348,18 +348,17 @@ func (c *Command) ToV1Command() *commandv1.Command {
 }
 
 // ToV1Notebook takes a *Command from the command service registry & returns a *notebookv1.Notebook.
+// Its service address never includes the notebook's Jupyter token; see NotebookToken.
 func (c *Command) ToV1Notebook() *notebookv1.Notebook {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	allo := c.refreshAllocationState()
-	notebookToken := c.Base.ExtraEnvVars[model.NotebookSessionEnvVar]
-	notebookAddress := fmt.Sprintf("%s?token=%s", c.serviceAddress(), notebookToken)
 	return &notebookv1.Notebook{
 		Id:             c.stringID(),
 		State:          enrichState(allo.State),
 		Description:    c.Config.Description,
 		Container:      allo.SingleContainer().ToProto(),
-		ServiceAddress: notebookAddress,
+		ServiceAddress: c.serviceAddress(),
 		StartTime:      protoutils.ToTimestamp(c.registeredTime),
 		Username:       c.Base.Owner.Username,
 		UserId:         int32(c.Base.Owner.ID),
@@ -369,6 +368,21 @@ func (c *Command) ToV1Notebook() *notebookv1.Notebook {
 		JobId:          c.jobID.String(),
 		WorkspaceId:    int32(c.GenericCommandSpec.Metadata.WorkspaceID),
 	}
+}
+
+// NotebookToken returns the token that the notebook's Jupyter server accepts as a login. It runs
+// code as the notebook's user, so callers may hand it only to the notebook's owner or an admin.
+func (c *Command) NotebookToken() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.Base.ExtraEnvVars[model.NotebookSessionEnvVar]
+}
+
+// NotebookServiceAddress returns the address that opens a notebook in JupyterLab: its proxied
+// service address with the Jupyter token.
+func NotebookServiceAddress(serviceAddress, token string) string {
+	return fmt.Sprintf("%s?token=%s", serviceAddress, token)
 }
 
 // ToV1Shell takes a *Command from the command service registry & returns a *shellv1.Shell.

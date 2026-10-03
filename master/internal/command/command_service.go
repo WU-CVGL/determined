@@ -351,6 +351,19 @@ func (cs *CommandService) GetNotebook(req *apiv1.GetNotebookRequest) (*apiv1.Get
 	}, nil
 }
 
+// GetNotebookToken returns the Jupyter token of a notebook. Callers must make sure that the
+// requesting user owns the notebook or is an admin.
+func (cs *CommandService) GetNotebookToken(notebookID string) (string, error) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	c, err := cs.getNTSC(model.TaskID(notebookID), model.TaskTypeNotebook)
+	if err != nil {
+		return "", api.NotFoundErrs("notebook", notebookID, true)
+	}
+	return c.NotebookToken(), nil
+}
+
 // GetShells returns all shells in the command service registry matching the workspace ID.
 func (cs *CommandService) GetShells(req *apiv1.GetShellsRequest) (*apiv1.GetShellsResponse, error) {
 	cs.mu.Lock()

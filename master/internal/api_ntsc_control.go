@@ -24,3 +24,11 @@ func authorizeNSCControl(
 		ctx, user, workspaceID, ownerID,
 	), nil, nil)
 }
+
+// canReadTaskCredential reports whether a user may receive a credential that acts as a task's
+// owner inside the task, such as a shell's SSH private key or a notebook's Jupyter token. Only the
+// owner and admins may, in every authz mode; workspace permissions such as RBAC's UPDATE_NSC are
+// not enough.
+func canReadTaskCredential(user model.User, ownerID int32) bool {
+	return user.Admin || ownerID > 0 && user.ID == model.UserID(ownerID)
+}

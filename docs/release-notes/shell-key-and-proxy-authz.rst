@@ -14,6 +14,14 @@
    shell's details, but ``det shell open`` and ``det shell show-ssh-command`` now stop with an
    error for them. ``det shell start`` is unchanged.
 
+-  Notebook: **Important:** Notebook listings no longer include the Jupyter token in each
+   notebook's address, and ``GET /api/v1/notebooks/{id}`` includes it only for the user who started
+   the notebook or an administrator, under every authorization mode. Before this change, any
+   signed-in user could read the token of every notebook and run code in it as the notebook's
+   user. The WebUI and ``det notebook open`` now fetch the token when the owner opens or connects
+   to a notebook. Other users see a message that only the owner or an administrator can open it.
+   Launching a notebook from the WebUI or with ``det notebook start`` is unchanged.
+
 -  API: Only a task's own containers, its owner, or an administrator can set the address that the
    master uses to reach the task's proxied services, under every authorization mode. This is
    ``POST /api/v1/allocations/{id}/proxy_address``. Before this change, any user who could see a

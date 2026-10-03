@@ -97,22 +97,13 @@ func (a *apiServer) GetShells(
 func (a *apiServer) GetShell(
 	ctx context.Context, req *apiv1.GetShellRequest,
 ) (*apiv1.GetShellResponse, error) {
-	curUser, _, err := grpcutil.GetUser(ctx)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := command.DefaultCmdService.GetShell(req)
+	resp, curUser, err := a.getShell(ctx, req.ShellId)
 	if err != nil {
 		return nil, err
 	}
 
-	ctx = audit.SupplyEntityID(ctx, req.ShellId)
-	if err := command.AuthZProvider.Get().CanGetNSC(
-		ctx, *curUser, model.AccessScopeID(resp.Shell.WorkspaceId)); err != nil {
-		return nil, authz.SubIfUnauthorized(err, api.NotFoundErrs("shell", req.ShellId, true))
-	}
-
-	if canReadShellPrivateKey(*curUser, resp.Shell.UserId) {
+	// The key logs in to the shell's sshd as the shell's user.
+	if canReadTaskCredential(*curUser, resp.Shell.UserId) {
 		resp.Shell.PrivateKey, err = command.DefaultCmdService.GetShellPrivateKey(req.ShellId)
 		if err != nil {
 			return nil, err
@@ -121,11 +112,25 @@ func (a *apiServer) GetShell(
 	return resp, nil
 }
 
-// canReadShellPrivateKey reports whether a user may receive a shell's SSH private key. The key
-// logs in to the shell's sshd as the shell's user, so only the owner and admins may read it, in
-// every authz mode; workspace permissions such as RBAC's UPDATE_NSC are not enough.
-func canReadShellPrivateKey(user model.User, ownerID int32) bool {
-	return user.Admin || ownerID > 0 && user.ID == model.UserID(ownerID)
+// getShell returns a shell, without its private key, if the current user may see it.
+func (a *apiServer) getShell(
+	ctx context.Context, shellID string,
+) (*apiv1.GetShellResponse, *model.User, error) {
+	curUser, _, err := grpcutil.GetUser(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	resp, err := command.DefaultCmdService.GetShell(&apiv1.GetShellRequest{ShellId: shellID})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ctx = audit.SupplyEntityID(ctx, shellID)
+	if err := command.AuthZProvider.Get().CanGetNSC(
+		ctx, *curUser, model.AccessScopeID(resp.Shell.WorkspaceId)); err != nil {
+		return nil, nil, authz.SubIfUnauthorized(err, api.NotFoundErrs("shell", shellID, true))
+	}
+	return resp, curUser, nil
 }
 
 func (a *apiServer) KillShell(
@@ -137,7 +142,7 @@ func (a *apiServer) KillShell(
 		}
 	}()
 
-	getResponse, err := a.GetShell(ctx, &apiv1.GetShellRequest{ShellId: req.ShellId})
+	getResponse, _, err := a.getShell(ctx, req.ShellId)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +177,7 @@ func (a *apiServer) SetShellPriority(
 		}
 	}()
 
-	getResponse, err := a.GetShell(ctx, &apiv1.GetShellRequest{ShellId: req.ShellId})
+	getResponse, _, err := a.getShell(ctx, req.ShellId)
 	if err != nil {
 		return nil, err
 	}

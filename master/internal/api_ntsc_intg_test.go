@@ -302,6 +302,9 @@ func ntscUserCtx(t *testing.T, u model.User) context.Context {
 		metadata.Pairs("x-user-token", "Bearer "+token))
 }
 
+// nonOwnerCase names the test case of a user who neither owns a task nor is an admin.
+const nonOwnerCase = "other"
+
 func TestShellPrivateKeyOnlyForOwnerOrAdmin(t *testing.T) {
 	api, authz, _, adminCtx := setupNTSCAuthzTest(t)
 	// Allow every workspace-level check, as RBAC does for a workspace member with UPDATE_NSC.
@@ -329,7 +332,7 @@ func TestShellPrivateKeyOnlyForOwnerOrAdmin(t *testing.T) {
 	shellID := launched.ToV1Shell().Id
 
 	for name, ctx := range map[string]context.Context{
-		"owner": ownerCtx, "admin": adminCtx, "other": otherCtx,
+		"owner": ownerCtx, "admin": adminCtx, nonOwnerCase: otherCtx,
 	} {
 		shells, err := api.GetShells(ctx, &apiv1.GetShellsRequest{})
 		require.NoError(t, err, name)
@@ -340,21 +343,82 @@ func TestShellPrivateKeyOnlyForOwnerOrAdmin(t *testing.T) {
 		shell, err := api.GetShell(ctx, &apiv1.GetShellRequest{ShellId: shellID})
 		require.NoError(t, err, name)
 		require.Equal(t, shellID, shell.Shell.Id, name)
-		if name == "other" {
+		if name == nonOwnerCase {
 			require.Empty(t, shell.Shell.PrivateKey, "GetShell returned a key to a non-owner")
 		} else {
 			require.Equal(t, *req.Spec.Metadata.PrivateKey, shell.Shell.PrivateKey, name)
 		}
 	}
 
-	// A non-owner whom authz lets control the shell still gets no key back.
+	// A non-owner whom authz lets control the shell still gets no key back, and an admin who
+	// controls it does not read the key.
 	prio, err := api.SetShellPriority(otherCtx,
 		&apiv1.SetShellPriorityRequest{ShellId: shellID, Priority: 10})
 	require.NoError(t, err)
 	require.Empty(t, prio.Shell.PrivateKey)
-	killed, err := api.KillShell(otherCtx, &apiv1.KillShellRequest{ShellId: shellID})
+	killed, err := api.KillShell(adminCtx, &apiv1.KillShellRequest{ShellId: shellID})
 	require.NoError(t, err)
 	require.Empty(t, killed.Shell.PrivateKey)
+}
+
+func TestNotebookTokenOnlyForOwnerOrAdmin(t *testing.T) {
+	api, authz, _, adminCtx := setupNTSCAuthzTest(t)
+	// Allow every workspace-level check, as RBAC does for a workspace member with UPDATE_NSC.
+	// The token must still reach only the owner and admins.
+	authz.On("CanGetNSC", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	authz.On("AccessibleScopes", mock.Anything, mock.Anything, mock.Anything).
+		Return(model.AccessScopeSet{model.DefaultWorkspaceID: true}, nil)
+	authz.On("CanTerminateNSC", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	authz.On("CanSetNSCsPriority", mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything).Return(nil)
+	authz.On("CanControlGenericTask", mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything).Return(nil)
+	api.m.rm.(*mocks.ResourceManager).On("Release", mock.Anything).Return()
+
+	req := mockGenericReq(t, api.m.db)
+	req.Spec.Metadata.WorkspaceID = model.DefaultWorkspaceID
+	req.Spec.Base.ExtraEnvVars = map[string]string{}
+	owner, err := user.ByID(context.TODO(), req.Spec.Base.Owner.ID)
+	require.NoError(t, err)
+	ownerCtx := ntscUserCtx(t, owner.ToUser())
+	otherCtx := ntscUserCtx(t, db.RequireMockUser(t, api.m.db))
+
+	launched, err := command.DefaultCmdService.LaunchNotebookCommand(req, req.Spec.Base.Owner)
+	require.NoError(t, err)
+	notebookID := launched.ToV1Notebook().Id
+	token := launched.NotebookToken()
+	require.NotEmpty(t, token)
+	address := "/proxy/" + notebookID + "/"
+
+	for name, ctx := range map[string]context.Context{
+		"owner": ownerCtx, "admin": adminCtx, nonOwnerCase: otherCtx,
+	} {
+		notebooks, err := api.GetNotebooks(ctx, &apiv1.GetNotebooksRequest{})
+		require.NoError(t, err, name)
+		require.Len(t, notebooks.Notebooks, 1, name)
+		require.Equal(t, address, notebooks.Notebooks[0].ServiceAddress,
+			"GetNotebooks returned a token to %s", name)
+
+		notebook, err := api.GetNotebook(ctx, &apiv1.GetNotebookRequest{NotebookId: notebookID})
+		require.NoError(t, err, name)
+		if name == nonOwnerCase {
+			require.Equal(t, address, notebook.Notebook.ServiceAddress,
+				"GetNotebook returned a token to a non-owner")
+		} else {
+			require.Equal(t, address+"?token="+token, notebook.Notebook.ServiceAddress, name)
+		}
+	}
+
+	// Control calls never return the token, and an admin's control calls are not token reads.
+	prio, err := api.SetNotebookPriority(otherCtx,
+		&apiv1.SetNotebookPriorityRequest{NotebookId: notebookID, Priority: 10})
+	require.NoError(t, err)
+	require.Equal(t, address, prio.Notebook.ServiceAddress)
+	_, err = api.IdleNotebook(adminCtx, &apiv1.IdleNotebookRequest{NotebookId: notebookID})
+	require.NoError(t, err)
+	killed, err := api.KillNotebook(adminCtx, &apiv1.KillNotebookRequest{NotebookId: notebookID})
+	require.NoError(t, err)
+	require.Equal(t, address, killed.Notebook.ServiceAddress)
 }
 
 // launchOwnedCommand launches a command with a proxied port for a new user. It returns the owner,
