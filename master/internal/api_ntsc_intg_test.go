@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
+	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -305,8 +307,42 @@ func ntscUserCtx(t *testing.T, u model.User) context.Context {
 // nonOwnerCase names the test case of a user who neither owns a task nor is an admin.
 const nonOwnerCase = "other"
 
+// credentialReadLogs captures the audit lines for credential reads until the test ends.
+func credentialReadLogs(t *testing.T) func() []*logrus.Entry {
+	logger := logrus.StandardLogger()
+	old := logrus.LevelHooks{}
+	for level, hooks := range logger.Hooks {
+		old[level] = append([]logrus.Hook(nil), hooks...)
+	}
+	hook := &logrustest.Hook{}
+	logger.AddHook(hook)
+	t.Cleanup(func() { logger.ReplaceHooks(old) })
+	return func() []*logrus.Entry {
+		var entries []*logrus.Entry
+		for _, e := range hook.AllEntries() {
+			if e.Message == "admin read the credential of another user's task" {
+				entries = append(entries, e)
+			}
+		}
+		return entries
+	}
+}
+
+func requireCredentialReadLog(
+	t *testing.T, entries []*logrus.Entry, admin model.User, credential, taskID string,
+	ownerID int32,
+) {
+	require.Len(t, entries, 1)
+	require.Equal(t, logrus.InfoLevel, entries[0].Level)
+	require.Equal(t, logrus.Fields{
+		"user": admin.Username, "user_id": admin.ID, "owner_id": ownerID,
+		"task_id": taskID, "credential": credential,
+	}, entries[0].Data)
+}
+
 func TestShellPrivateKeyOnlyForOwnerOrAdmin(t *testing.T) {
-	api, authz, _, adminCtx := setupNTSCAuthzTest(t)
+	api, authz, admin, adminCtx := setupNTSCAuthzTest(t)
+	audits := credentialReadLogs(t)
 	// Allow every workspace-level check, as RBAC does for a workspace member with UPDATE_NSC.
 	// The key must still reach only the owner and admins.
 	authz.On("CanGetNSC", mock.Anything, mock.Anything, mock.Anything).Return(nil)
@@ -350,6 +386,10 @@ func TestShellPrivateKeyOnlyForOwnerOrAdmin(t *testing.T) {
 		}
 	}
 
+	// Only the admin's read of another user's key is logged.
+	requireCredentialReadLog(t, audits(), admin, "shell private key", shellID,
+		launched.ToV1Shell().UserId)
+
 	// A non-owner whom authz lets control the shell still gets no key back, and an admin who
 	// controls it does not read the key.
 	prio, err := api.SetShellPriority(otherCtx,
@@ -359,10 +399,12 @@ func TestShellPrivateKeyOnlyForOwnerOrAdmin(t *testing.T) {
 	killed, err := api.KillShell(adminCtx, &apiv1.KillShellRequest{ShellId: shellID})
 	require.NoError(t, err)
 	require.Empty(t, killed.Shell.PrivateKey)
+	require.Len(t, audits(), 1)
 }
 
 func TestNotebookTokenOnlyForOwnerOrAdmin(t *testing.T) {
-	api, authz, _, adminCtx := setupNTSCAuthzTest(t)
+	api, authz, admin, adminCtx := setupNTSCAuthzTest(t)
+	audits := credentialReadLogs(t)
 	// Allow every workspace-level check, as RBAC does for a workspace member with UPDATE_NSC.
 	// The token must still reach only the owner and admins.
 	authz.On("CanGetNSC", mock.Anything, mock.Anything, mock.Anything).Return(nil)
@@ -408,6 +450,8 @@ func TestNotebookTokenOnlyForOwnerOrAdmin(t *testing.T) {
 			require.Equal(t, address+"?token="+token, notebook.Notebook.ServiceAddress, name)
 		}
 	}
+	requireCredentialReadLog(t, audits(), admin, "notebook token", notebookID,
+		launched.ToV1Notebook().UserId)
 
 	// Control calls never return the token, and an admin's control calls are not token reads.
 	prio, err := api.SetNotebookPriority(otherCtx,
@@ -419,6 +463,7 @@ func TestNotebookTokenOnlyForOwnerOrAdmin(t *testing.T) {
 	killed, err := api.KillNotebook(adminCtx, &apiv1.KillNotebookRequest{NotebookId: notebookID})
 	require.NoError(t, err)
 	require.Equal(t, address, killed.Notebook.ServiceAddress)
+	require.Len(t, audits(), 1)
 }
 
 // launchOwnedCommand launches a command with a proxied port for a new user. It returns the owner,

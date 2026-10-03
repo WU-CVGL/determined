@@ -108,6 +108,7 @@ func (a *apiServer) GetShell(
 		if err != nil {
 			return nil, err
 		}
+		logCredentialRead(*curUser, "shell private key", req.ShellId, resp.Shell.UserId)
 	}
 	return resp, nil
 }

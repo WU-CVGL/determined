@@ -105,6 +105,7 @@ func (a *apiServer) GetNotebook(
 		}
 		resp.Notebook.ServiceAddress = command.NotebookServiceAddress(
 			resp.Notebook.ServiceAddress, token)
+		logCredentialRead(*curUser, "notebook token", req.NotebookId, resp.Notebook.UserId)
 	}
 	return resp, nil
 }

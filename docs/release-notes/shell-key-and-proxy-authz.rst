@@ -22,6 +22,9 @@
    to a notebook. Other users see a message that only the owner or an administrator can open it.
    Launching a notebook from the WebUI or with ``det notebook start`` is unchanged.
 
+-  Shell, Notebook: The master logs an info-level message each time an administrator reads the SSH
+   key of another user's shell or the Jupyter token of another user's notebook.
+
 -  API: Only a task's own containers, its owner, or an administrator can set the address that the
    master uses to reach the task's proxied services, under every authorization mode. This is
    ``POST /api/v1/allocations/{id}/proxy_address``. Before this change, any user who could see a
