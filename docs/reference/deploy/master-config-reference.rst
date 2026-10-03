@@ -1638,6 +1638,86 @@ Specifies whether Determined enables Prometheus monitoring routes. See :ref:`Pro
 
 Whether Prometheus endpoints are present. Defaults to ``true``.
 
+.. _master-config-shell-terminal:
+
+********************
+ ``shell_terminal``
+********************
+
+Configures the terminals that users open in their shells from the WebUI (see
+:ref:`shell-web-terminal`). The master serves them on ``/ws/shells/<shell ID>/terminal``: it
+connects to the shell's SSH server with the shell's own key and relays the terminal to the browser
+over a WebSocket. To turn the terminals off, add ``-shell_terminal`` to ``feature_switches``.
+
+``allow_admin``
+===============
+
+Whether administrators can open terminals in other users' shells. The user who started a shell can
+always open terminals in it. No other permission, including the ``Editor`` role of RBAC, allows it.
+Defaults to ``true``.
+
+``max_sessions_per_user``
+=========================
+
+The number of terminals that one user can have open at the same time. Defaults to ``8``.
+
+``max_sessions``
+================
+
+The number of terminals that all users together can have open at the same time. Defaults to
+``256``.
+
+``idle_timeout``
+================
+
+How long a terminal can go without input or output before the master closes it, as a duration
+string such as ``30m``. ``0s`` turns the timeout off. Defaults to ``1h``.
+
+``max_session_duration``
+========================
+
+How long a terminal can stay open. A terminal also closes when the login session that opened it
+expires. Defaults to ``24h``.
+
+``recheck_interval``
+====================
+
+How often the master checks that the login session of an open terminal is still valid and that its
+user may still use the shell. Terminals close after the user signs out, the user's token is revoked
+or expires, the user is deactivated, or an administrator loses administrator rights. Between
+``1s`` and ``5m``. Defaults to ``1m``.
+
+``trusted_proxies``
+===================
+
+IP addresses or CIDR ranges of reverse proxies that set the ``X-Real-IP`` header. The master logs
+every terminal session with the client's address: the ``X-Real-IP`` header of a request from one of
+these proxies, and the address of the connecting host otherwise. ``X-Forwarded-For`` is never used.
+Defaults to an empty list.
+
+Deployment notes:
+
+-  The master accepts a terminal only from a page on its own origin: the WebSocket's ``Origin``
+   header must match its ``Host`` header. A reverse proxy in front of the master must pass the
+   ``Host`` header through (in nginx, ``proxy_set_header Host $host``, or ``$http_host`` when the
+   site uses a port other than 443 or 80) and must forward WebSocket upgrades.
+
+-  The master pings the browser every 30 seconds, which keeps idle terminals alive behind proxies
+   with read timeouts of a minute or more. Raising the proxy's read timeout for the master (for
+   example, ``proxy_read_timeout 3600s`` in nginx) adds a margin.
+
+-  The terminal's SSH session ends at the master, so terminal input and output, including any
+   passwords typed into it, travel between the browser and the master over the WebSocket. Serve
+   the master over TLS, or allow only the TLS-terminating reverse proxy and the cluster's nodes to
+   reach the master's port.
+
+-  The origin check stops other sites, but not pages that the master itself serves. Task services
+   under ``/proxy/``, such as notebooks, TensorBoards and ``proxy_ports`` of commands and generic
+   tasks, run on the master's origin. A page there that a user opens can act with that user's
+   session, including opening terminals in the user's shells, and, for an administrator, in other
+   users' shells. Open task services only from users you trust, and consider setting
+   ``allow_admin`` to ``false``.
+
 *************
  ``logging``
 *************

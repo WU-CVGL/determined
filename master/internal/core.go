@@ -1591,6 +1591,14 @@ func (m *Master) Run(ctx context.Context, gRPCLogInitDone chan struct{}) error {
 	handler := proxy.DefaultProxy.NewProxyHandler("service")
 	m.echo.Any("/proxy/:service/*", handler)
 
+	if !slices.Contains(m.config.FeatureSwitches, shellTerminalOffSwitch) {
+		shellTerminals, err := newShellTerminalService(ctx, m.config.ShellTerminal)
+		if err != nil {
+			return err
+		}
+		m.echo.GET(shellTerminalRoute, shellTerminals.handle)
+	}
+
 	for _, ps := range m.config.InternalConfig.ProxiedServers {
 		psGroup := m.echo.Group(ps.PathPrefix)
 		psTarget, err := url.Parse(ps.Destination)

@@ -12,6 +12,7 @@ export type ValidFeature =
   | 'rp_binding'
   | 'genai'
   | 'flat_runs'
+  | 'shell_terminal'
   | 'streaming_updates'
   | 'task_templates'
   | 'webhook_improvement';
@@ -45,6 +46,13 @@ export const FEATURES: Record<ValidFeature, FeatureDescription> = {
     defaultValue: true,
     description: 'Allow resource pools to be assigned to workspaces',
     friendlyName: 'Resource Pool Binding',
+  },
+  shell_terminal: {
+    defaultValue: true,
+    description:
+      'Open terminals in shells from the browser. Turn off with the master feature switch -shell_terminal',
+    friendlyName: 'Shell Terminal',
+    noUserControl: true,
   },
   streaming_updates: {
     defaultValue: false,
@@ -115,5 +123,12 @@ const IsOn = (
 
   return isOn;
 };
+
+/**
+ * Reads a feature switch outside React components. It ignores user settings, so use it only for
+ * features without user control.
+ */
+export const isFeatureOn = (feature: ValidFeature): boolean =>
+  IsOn(feature, determinedStore.info.get(), null);
 
 export default useFeature;

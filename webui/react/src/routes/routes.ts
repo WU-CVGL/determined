@@ -10,6 +10,12 @@ const routes: RouteConfig[] = [
     title: 'Interactive Task',
   },
   {
+    id: 'shellTerminal',
+    needAuth: true,
+    path: '/shells/:taskId/terminal',
+    title: 'Shell Terminal',
+  },
+  {
     id: 'workspaceDetails',
     needAuth: true,
     path: '/workspaces/:workspaceId/:tab',
