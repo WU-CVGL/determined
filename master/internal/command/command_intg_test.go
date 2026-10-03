@@ -12,6 +12,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/job/jobservice"
@@ -122,6 +124,17 @@ func TestShellManagerLifecycle(t *testing.T) {
 	require.NotNil(t, resp1)
 	require.NoError(t, err)
 
+	// Summaries never carry the private key; it is read separately after an ownership check.
+	require.Empty(t, cmd1.PrivateKey)
+	require.Empty(t, resp1.Shell.PrivateKey)
+	key, err := DefaultCmdService.GetShellPrivateKey(cmd1.Id)
+	require.NoError(t, err)
+	require.Equal(t, "pass", key)
+	_, err = DefaultCmdService.GetShellPrivateKey(launchCommand(t, db).Id)
+	require.Equal(t, codes.NotFound, status.Code(err))
+	_, err = DefaultCmdService.GetShellPrivateKey(uuid.NewString())
+	require.Equal(t, codes.NotFound, status.Code(err))
+
 	// Launch another Shell.
 	cmd2 := launchShell(t, db)
 
@@ -130,6 +143,9 @@ func TestShellManagerLifecycle(t *testing.T) {
 	require.NotNil(t, resp2)
 	require.NoError(t, err)
 	require.Len(t, resp2.Shells, 2)
+	for _, s := range resp2.Shells {
+		require.Empty(t, s.PrivateKey)
+	}
 
 	// Kill 1 Shell.
 	resp3, err := DefaultCmdService.KillNTSC(cmd2.Id, model.TaskTypeShell)
@@ -138,11 +154,13 @@ func TestShellManagerLifecycle(t *testing.T) {
 
 	shell3 := resp3.ToV1Shell()
 	require.Equal(t, taskv1.State_STATE_TERMINATED, shell3.State)
+	require.Empty(t, shell3.PrivateKey)
 
 	// Set Shell priority.
 	resp4, err := DefaultCmdService.SetNTSCPriority(cmd1.Id, 0, model.TaskTypeShell)
 	require.NotNil(t, resp4)
 	require.NoError(t, err)
+	require.Empty(t, resp4.ToV1Shell().PrivateKey)
 }
 
 func TestTensorboardManagerLifecycle(t *testing.T) {

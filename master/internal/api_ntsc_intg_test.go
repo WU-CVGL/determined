@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	apiPkg "github.com/determined-ai/determined/master/internal/api"
@@ -21,6 +22,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/job/jobservice"
 	"github.com/determined-ai/determined/master/internal/mocks"
+	"github.com/determined-ai/determined/master/internal/user"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
@@ -284,6 +286,69 @@ func TestNSCControlChecksOwnerBeforeMutation(t *testing.T) {
 	require.Equal(t, states, []interface{}{notebook.ToV1Notebook().State,
 		cmd.ToV1Command().State, shell.ToV1Shell().State, tensorboard.ToV1Tensorboard().State})
 	authz.AssertExpectations(t)
+}
+
+// ntscUserCtx starts a session for u and returns a context that authenticates as u.
+func ntscUserCtx(t *testing.T, u model.User) context.Context {
+	token, err := user.StartSession(context.TODO(), &u)
+	require.NoError(t, err)
+	return metadata.NewIncomingContext(context.TODO(),
+		metadata.Pairs("x-user-token", "Bearer "+token))
+}
+
+func TestShellPrivateKeyOnlyForOwnerOrAdmin(t *testing.T) {
+	api, authz, _, adminCtx := setupNTSCAuthzTest(t)
+	// Allow every workspace-level check, as RBAC does for a workspace member with UPDATE_NSC.
+	// The key must still reach only the owner and admins.
+	authz.On("CanGetNSC", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	authz.On("AccessibleScopes", mock.Anything, mock.Anything, mock.Anything).
+		Return(model.AccessScopeSet{model.DefaultWorkspaceID: true}, nil)
+	authz.On("CanTerminateNSC", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	authz.On("CanSetNSCsPriority", mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything).Return(nil)
+	authz.On("CanControlGenericTask", mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything).Return(nil)
+	api.m.rm.(*mocks.ResourceManager).On("Release", mock.Anything).Return()
+
+	req := mockGenericReq(t, api.m.db)
+	req.Spec.Metadata.WorkspaceID = model.DefaultWorkspaceID
+	owner, err := user.ByID(context.TODO(), req.Spec.Base.Owner.ID)
+	require.NoError(t, err)
+	ownerCtx := ntscUserCtx(t, owner.ToUser())
+	otherCtx := ntscUserCtx(t, db.RequireMockUser(t, api.m.db))
+
+	launched, err := command.DefaultCmdService.LaunchGenericCommand(
+		model.TaskTypeShell, model.JobTypeShell, req)
+	require.NoError(t, err)
+	shellID := launched.ToV1Shell().Id
+
+	for name, ctx := range map[string]context.Context{
+		"owner": ownerCtx, "admin": adminCtx, "other": otherCtx,
+	} {
+		shells, err := api.GetShells(ctx, &apiv1.GetShellsRequest{})
+		require.NoError(t, err, name)
+		require.Len(t, shells.Shells, 1, name)
+		require.Equal(t, shellID, shells.Shells[0].Id, name)
+		require.Empty(t, shells.Shells[0].PrivateKey, "GetShells returned a key to %s", name)
+
+		shell, err := api.GetShell(ctx, &apiv1.GetShellRequest{ShellId: shellID})
+		require.NoError(t, err, name)
+		require.Equal(t, shellID, shell.Shell.Id, name)
+		if name == "other" {
+			require.Empty(t, shell.Shell.PrivateKey, "GetShell returned a key to a non-owner")
+		} else {
+			require.Equal(t, *req.Spec.Metadata.PrivateKey, shell.Shell.PrivateKey, name)
+		}
+	}
+
+	// A non-owner whom authz lets control the shell still gets no key back.
+	prio, err := api.SetShellPriority(otherCtx,
+		&apiv1.SetShellPriorityRequest{ShellId: shellID, Priority: 10})
+	require.NoError(t, err)
+	require.Empty(t, prio.Shell.PrivateKey)
+	killed, err := api.KillShell(otherCtx, &apiv1.KillShellRequest{ShellId: shellID})
+	require.NoError(t, err)
+	require.Empty(t, killed.Shell.PrivateKey)
 }
 
 func TestAuthZCanSetNSCsPriority(t *testing.T) {

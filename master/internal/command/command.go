@@ -372,6 +372,7 @@ func (c *Command) ToV1Notebook() *notebookv1.Notebook {
 }
 
 // ToV1Shell takes a *Command from the command service registry & returns a *shellv1.Shell.
+// The shell's private key is never included; see ShellPrivateKey.
 func (c *Command) ToV1Shell() *shellv1.Shell {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -383,7 +384,6 @@ func (c *Command) ToV1Shell() *shellv1.Shell {
 		Description:    c.Config.Description,
 		StartTime:      protoutils.ToTimestamp(c.registeredTime),
 		Container:      allo.SingleContainer().ToProto(),
-		PrivateKey:     *c.Metadata.PrivateKey,
 		PublicKey:      *c.Metadata.PublicKey,
 		Username:       c.Base.Owner.Username,
 		UserId:         int32(c.Base.Owner.ID),
@@ -395,6 +395,18 @@ func (c *Command) ToV1Shell() *shellv1.Shell {
 		JobId:          c.jobID.String(),
 		WorkspaceId:    int32(c.GenericCommandSpec.Metadata.WorkspaceID),
 	}
+}
+
+// ShellPrivateKey returns the shell's SSH private key. The key logs in to the shell's sshd as the
+// shell's user, so callers may hand it only to the shell's owner or an admin.
+func (c *Command) ShellPrivateKey() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.Metadata.PrivateKey == nil {
+		return ""
+	}
+	return *c.Metadata.PrivateKey
 }
 
 // ToV1Tensorboard takes a *Command from the command service registry & returns a *tensorboardv1.Tensorboard.

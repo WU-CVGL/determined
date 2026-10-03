@@ -111,7 +111,21 @@ func (a *apiServer) GetShell(
 		ctx, *curUser, model.AccessScopeID(resp.Shell.WorkspaceId)); err != nil {
 		return nil, authz.SubIfUnauthorized(err, api.NotFoundErrs("shell", req.ShellId, true))
 	}
+
+	if canReadShellPrivateKey(*curUser, resp.Shell.UserId) {
+		resp.Shell.PrivateKey, err = command.DefaultCmdService.GetShellPrivateKey(req.ShellId)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return resp, nil
+}
+
+// canReadShellPrivateKey reports whether a user may receive a shell's SSH private key. The key
+// logs in to the shell's sshd as the shell's user, so only the owner and admins may read it, in
+// every authz mode; workspace permissions such as RBAC's UPDATE_NSC are not enough.
+func canReadShellPrivateKey(user model.User, ownerID int32) bool {
+	return user.Admin || ownerID > 0 && user.ID == model.UserID(ownerID)
 }
 
 func (a *apiServer) KillShell(
@@ -277,8 +291,12 @@ func (a *apiServer) LaunchShell(
 		return nil, err
 	}
 
+	// The caller owns the new shell and needs its key to connect (`det shell start`).
+	shell := cmd.ToV1Shell()
+	shell.PrivateKey = cmd.ShellPrivateKey()
+
 	return &apiv1.LaunchShellResponse{
-		Shell:    cmd.ToV1Shell(),
+		Shell:    shell,
 		Config:   protoutils.ToStruct(launchReq.Spec.Config),
 		Warnings: pkgCommand.LaunchWarningToProto(launchWarnings),
 	}, nil

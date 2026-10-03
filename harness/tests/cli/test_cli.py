@@ -144,6 +144,35 @@ def test_uuid_prefix(requests_mock: requests_mock.Mocker) -> None:
         cli.main(["shell", "config", "x"])
 
 
+@pytest.mark.parametrize("subcommand", ["open", "show-ssh-command"])
+def test_shell_without_key_fails_clearly(
+    requests_mock: requests_mock.Mocker, capsys: pytest.CaptureFixture[str], subcommand: str
+) -> None:
+    # The master returns a shell's private key only to its owner or an administrator.
+    shell_id = str(uuid.uuid4())
+    requests_mock.get("/info", status_code=200, json={"version": "1.0"})
+    requests_mock.get(
+        "/api/v1/me", status_code=200, json={"username": constants.DEFAULT_DETERMINED_USER}
+    )
+    fake_user = {"username": "fakeuser", "admin": False, "active": True}
+    requests_mock.post(
+        "/api/v1/auth/login", status_code=200, json={"token": "fake-token", "user": fake_user}
+    )
+    requests_mock.get(
+        f"/api/v1/shells/{shell_id}",
+        status_code=requests.codes.ok,
+        json={"shell": {"id": shell_id, "privateKey": "", "agentUserGroup": {"user": "u"}}},
+    )
+
+    with mock.patch("subprocess.run") as run, mock.patch("subprocess.call") as call:
+        with pytest.raises(SystemExit) as e:
+            cli.main(["shell", subcommand, shell_id])
+        run.assert_not_called()
+        call.assert_not_called()
+    assert e.value.code == 1
+    assert "only the user who started it or an administrator" in capsys.readouterr().err
+
+
 def test_create_reject_large_model_def(
     requests_mock: requests_mock.Mocker, tmp_path: pathlib.Path
 ) -> None:
