@@ -123,27 +123,58 @@ func TestSetWaiting(t *testing.T) {
 }
 
 func TestSetProxyAddress(t *testing.T) {
-	proxy.InitProxy(nil)
-	closeDB, _, id, _, exitFuture := requireStarted(t, func(ar *sproto.AllocateRequest) {
-		ar.ProxyPorts = append(ar.ProxyPorts, &sproto.ProxyPortConfig{
-			ServiceID: "someid",
-			Port:      25,
+	cases := []struct {
+		name          string
+		resourcesType *sproto.ResourcesType // nil: not allocated yet.
+		wantErr       error
+	}{
+		{"kubernetes", ptrs.Ptr(sproto.ResourcesTypeK8sJob), nil},
+		{"slurm", ptrs.Ptr(sproto.ResourcesTypeSlurmJob), nil},
+		{
+			"agent", ptrs.Ptr(sproto.ResourcesTypeDockerContainer),
+			BehaviorUnsupportedError{Behavior: "setting a proxy address"},
+		},
+		{"not allocated", nil, AllocationUnfulfilledError{Action: "setting a proxy address"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			serviceID := uuid.NewString()
+			closeDB, _, id, q, exitFuture := requireStarted(t, func(ar *sproto.AllocateRequest) {
+				ar.ProxyPorts = append(ar.ProxyPorts, &sproto.ProxyPortConfig{
+					ServiceID: serviceID,
+					Port:      25,
+				})
+			})
+			defer closeDB()
+			defer requireKilled(t, id, exitFuture)
+			if proxy.DefaultProxy == nil {
+				proxy.InitProxy(nil) // Needs the database.
+			}
+			state := model.AllocationStatePending
+			if tc.resourcesType != nil {
+				requireAssignedManyOfType(t, id, q, 1, *tc.resourcesType)
+				state = model.AllocationStateAssigned
+			}
+
+			addr := "10.1.2.3"
+			err := DefaultService.SetProxyAddress(context.TODO(), id, addr)
+			_, dbState := requireState(t, id, state)
+			svc := proxy.DefaultProxy.GetService(serviceID)
+			if tc.wantErr != nil {
+				require.Equal(t, tc.wantErr, err)
+				require.Nil(t, dbState.ProxyAddress)
+				require.Nil(t, svc)
+				return
+			}
+
+			require.NoError(t, err)
+			require.NotNil(t, dbState.ProxyAddress)
+			require.Equal(t, addr, *dbState.ProxyAddress)
+			require.NotNil(t, svc)
+			require.Equal(t, addr+":25", svc.URL.Host)
+			require.False(t, svc.ProxyTCP)
 		})
-	})
-	defer closeDB()
-	defer requireKilled(t, id, exitFuture)
-
-	addr := "localhost"
-	err := DefaultService.SetProxyAddress(context.TODO(), id, addr)
-	require.NoError(t, err)
-
-	_, dbState := requireState(t, id, model.AllocationStatePending)
-	require.NotNil(t, dbState.ProxyAddress)
-	require.Equal(t, addr, *dbState.ProxyAddress)
-
-	svc := proxy.DefaultProxy.GetService("someid")
-	require.NotNil(t, svc)
-	require.False(t, svc.ProxyTCP)
+	}
 }
 
 func TestServiceRendezvous(t *testing.T) {
@@ -652,6 +683,16 @@ func requireAssignedMany(
 	q *queue.Queue[sproto.ResourcesEvent],
 	numResources int,
 ) map[sproto.ResourcesID]*mocks.Resources {
+	return requireAssignedManyOfType(t, id, q, numResources, sproto.ResourcesTypeDockerContainer)
+}
+
+func requireAssignedManyOfType(
+	t *testing.T,
+	id model.AllocationID,
+	q *queue.Queue[sproto.ResourcesEvent],
+	numResources int,
+	resourcesType sproto.ResourcesType,
+) map[sproto.ResourcesID]*mocks.Resources {
 	resources := map[sproto.ResourcesID]*mocks.Resources{}
 	assigned := map[sproto.ResourcesID]sproto.Resources{}
 	for i := 0; i < numResources; i++ {
@@ -662,7 +703,7 @@ func requireAssignedMany(
 		r.On("Summary").Return(sproto.ResourcesSummary{
 			AllocationID:  id,
 			ResourcesID:   rID,
-			ResourcesType: sproto.ResourcesTypeDockerContainer,
+			ResourcesType: resourcesType,
 			AgentDevices:  map[aproto.ID][]device.Device{stubAgentName: nil},
 		})
 		r.On("Kill", mock.Anything).Return().Run(func(_ mock.Arguments) {

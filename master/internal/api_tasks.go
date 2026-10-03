@@ -2,7 +2,9 @@ package internal
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"net"
 	"slices"
 	"strings"
 	"time"
@@ -341,16 +343,59 @@ func (a *apiServer) PostAllocationProxyAddress(
 	if err := a.canEditAllocation(ctx, req.AllocationId); err != nil {
 		return nil, err
 	}
+	if err := canSetAllocationProxyAddress(ctx, model.AllocationID(req.AllocationId)); err != nil {
+		return nil, err
+	}
+	// Tasks post the IP address of their own container (prep_container --proxy).
+	if net.ParseIP(req.ProxyAddress) == nil {
+		return nil, status.Error(codes.InvalidArgument, "proxy address must be an IP address")
+	}
 
 	err := task.DefaultService.SetProxyAddress(
 		ctx,
 		model.AllocationID(req.AllocationId),
 		req.ProxyAddress,
 	)
-	if err != nil {
+	var unfulfilled task.AllocationUnfulfilledError
+	var unsupported task.BehaviorUnsupportedError
+	switch {
+	case errors.As(err, &unfulfilled), errors.As(err, &unsupported):
+		return nil, status.Error(codes.FailedPrecondition, err.Error())
+	case err != nil:
 		return nil, err
 	}
 	return &apiv1.PostAllocationProxyAddressResponse{}, nil
+}
+
+// canSetAllocationProxyAddress allows only the owner of an allocation's job, or an admin, to set
+// where the master proxies the allocation's services, in every authz mode. The legitimate caller
+// is the task's own container, whose allocation session authenticates as the owner. Being able to
+// see a task is not enough: the address decides where other users' proxied requests go.
+func canSetAllocationProxyAddress(ctx context.Context, allocationID model.AllocationID) error {
+	curUser, _, err := grpcutil.GetUser(ctx)
+	if err != nil {
+		return err
+	}
+
+	var ownerID *model.UserID
+	err = db.Bun().NewSelect().
+		ColumnExpr("j.owner_id").
+		TableExpr("allocations AS a").
+		Join("JOIN tasks AS t ON t.task_id = a.task_id").
+		Join("JOIN jobs AS j ON j.job_id = t.job_id").
+		Where("a.allocation_id = ?", allocationID).
+		Scan(ctx, &ownerID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return api.NotFoundErrs("allocation", string(allocationID), true)
+	} else if err != nil {
+		return err
+	}
+
+	if curUser.Admin || ownerID != nil && *ownerID == curUser.ID {
+		return nil
+	}
+	return status.Error(codes.PermissionDenied,
+		"only the owner of an allocation or an admin may set its proxy address")
 }
 
 func (a *apiServer) GetTaskAcceleratorData(

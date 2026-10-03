@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
@@ -22,8 +23,11 @@ import (
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/job/jobservice"
 	"github.com/determined-ai/determined/master/internal/mocks"
+	"github.com/determined-ai/determined/master/internal/proxy"
 	"github.com/determined-ai/determined/master/internal/user"
 	"github.com/determined-ai/determined/master/pkg/model"
+	"github.com/determined-ai/determined/master/pkg/ptrs"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 )
@@ -349,6 +353,99 @@ func TestShellPrivateKeyOnlyForOwnerOrAdmin(t *testing.T) {
 	killed, err := api.KillShell(otherCtx, &apiv1.KillShellRequest{ShellId: shellID})
 	require.NoError(t, err)
 	require.Empty(t, killed.Shell.PrivateKey)
+}
+
+func TestPostAllocationProxyAddressOwnerOrAdmin(t *testing.T) {
+	api, authz, _, adminCtx := setupNTSCAuthzTest(t)
+	// Everyone can see every task, as under basic authz.
+	authz.On("CanGetNSC", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	if proxy.DefaultProxy == nil {
+		proxy.InitProxy(processProxyAuthentication)
+	}
+
+	launch := func() (model.User, model.AllocationID, string) {
+		req := mockGenericReq(t, api.m.db)
+		req.Spec.Base.ExtraProxyPorts = expconf.ProxyPortsConfig{{
+			RawProxyPort: 8080, RawDefaultServiceID: ptrs.Ptr(true),
+		}}
+		owner, err := user.ByID(context.TODO(), req.Spec.Base.Owner.ID)
+		require.NoError(t, err)
+		cmd, err := command.DefaultCmdService.LaunchGenericCommand(
+			model.TaskTypeCommand, model.JobTypeCommand, req)
+		require.NoError(t, err)
+		taskID := cmd.ToV1Command().Id
+		return owner.ToUser(), model.AllocationID(taskID + ".1"), taskID
+	}
+	owner, allocationID, serviceID := launch()
+	other, otherAllocationID, _ := launch()
+
+	taskSessionCtx := func(id model.AllocationID, u model.User) context.Context {
+		token, err := db.StartAllocationSession(context.TODO(), id, &u)
+		require.NoError(t, err)
+		return metadata.NewIncomingContext(context.TODO(),
+			metadata.Pairs("x-allocation-token", "Bearer "+token))
+	}
+	post := func(ctx context.Context, address string) error {
+		_, err := api.PostAllocationProxyAddress(ctx, &apiv1.PostAllocationProxyAddressRequest{
+			AllocationId: string(allocationID), ProxyAddress: address,
+		})
+		return err
+	}
+	requireUnchanged := func() {
+		a, err := db.AllocationByID(context.TODO(), allocationID)
+		require.NoError(t, err)
+		require.Nil(t, a.ProxyAddress)
+		require.Nil(t, proxy.DefaultProxy.GetService(serviceID))
+	}
+
+	// Users who can see the task but do not own it are refused, as is another task's session.
+	for name, ctx := range map[string]context.Context{
+		"user":              ntscUserCtx(t, other),
+		"other task":        taskSessionCtx(otherAllocationID, other),
+		"user, bad address": ntscUserCtx(t, other),
+	} {
+		address := "10.0.0.66"
+		if name == "user, bad address" {
+			address = "attacker.example:443"
+		}
+		require.Equal(t, codes.PermissionDenied, status.Code(post(ctx, address)), name)
+		requireUnchanged()
+	}
+
+	_, err := api.PostAllocationProxyAddress(adminCtx, &apiv1.PostAllocationProxyAddressRequest{
+		AllocationId: "missing.1", ProxyAddress: "10.0.0.1",
+	})
+	require.Equal(t, codes.NotFound, status.Code(err))
+
+	// A job without an owner is refused for everyone but admins.
+	jobID, taskID := model.NewJobID(), model.NewTaskID()
+	require.NoError(t, db.AddJob(&model.Job{JobID: jobID, JobType: model.JobTypeCommand}))
+	require.NoError(t, db.AddTask(context.TODO(), &model.Task{
+		TaskID: taskID, TaskType: model.TaskTypeCommand, JobID: &jobID,
+		StartTime: time.Now().UTC().Truncate(time.Millisecond),
+	}))
+	require.NoError(t, db.AddAllocation(context.TODO(), &model.Allocation{
+		TaskID: taskID, AllocationID: model.AllocationID(taskID + ".1"),
+		Slots: 1, ResourcePool: "default",
+	}))
+	_, err = api.PostAllocationProxyAddress(ntscUserCtx(t, owner),
+		&apiv1.PostAllocationProxyAddressRequest{
+			AllocationId: string(taskID) + ".1", ProxyAddress: "10.0.0.1",
+		})
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+
+	// The owner, the task's own session and admins pass the ownership check; the address must be
+	// an IP, and an allocation that has no resources yet cannot take one.
+	for name, ctx := range map[string]context.Context{
+		"owner":        ntscUserCtx(t, owner),
+		"task session": taskSessionCtx(allocationID, owner),
+		"admin":        adminCtx,
+	} {
+		require.Equal(t, codes.InvalidArgument,
+			status.Code(post(ctx, "attacker.example:443")), name)
+		require.Equal(t, codes.FailedPrecondition, status.Code(post(ctx, "10.0.0.1")), name)
+		requireUnchanged()
+	}
 }
 
 func TestAuthZCanSetNSCsPriority(t *testing.T) {
