@@ -64,21 +64,29 @@ var (
 func allocationSessionByTokenBun(token string) (*model.AllocationSession, error) {
 	v2 := paseto.NewV2()
 
-	var session model.AllocationSession
-	err := v2.Verify(token, db.GetTokenKeys().PublicKey, &session, nil)
+	var claims model.AllocationSession
+	err := v2.Verify(token, db.GetTokenKeys().PublicKey, &claims, nil)
 	if err != nil {
 		log.WithError(err).Debug("failed to verify allocation_session token")
 		return nil, db.ErrNotFound
 	}
 
-	err = db.Bun().NewSelect().Model(&session).Where("id = ?", session.ID).Scan(context.Background())
+	var session model.AllocationSession
+	err = db.Bun().NewSelect().Model(&session).Where("id = ?", claims.ID).Scan(context.Background())
 	if errors.Cause(err) == sql.ErrNoRows {
-		log.WithField("allocation_sessions.id", session.ID).Debug("allocation_session not found")
+		log.WithField("allocation_sessions.id", claims.ID).Debug("allocation_session not found")
 		return nil, db.ErrNotFound
 	} else if err != nil {
-		log.WithError(err).WithField("allocation_sessions.id", session.ID).
+		log.WithError(err).WithField("allocation_sessions.id", claims.ID).
 			Debug("failed to lookup allocation_session")
 		return nil, err
+	}
+	// User session tokens are signed with the same key, and their IDs count user_sessions rows.
+	// Such a token has no allocation_id claim, so it never names this session's allocation.
+	if claims.AllocationID != session.AllocationID {
+		log.WithField("allocation_sessions.id", claims.ID).
+			Debug("token does not belong to this allocation_session")
+		return nil, db.ErrNotFound
 	}
 
 	return &session, nil

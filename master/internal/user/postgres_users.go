@@ -399,22 +399,30 @@ func ByID(ctx context.Context, userID model.UserID) (*model.FullUser, error) {
 func ByToken(ctx context.Context, token string, ext *model.ExternalSessions) (
 	*model.User, *model.UserSession, error,
 ) {
-	var session model.UserSession
+	var claims model.UserSession
 
 	if ext.JwtKey != "" {
 		return saas.GetAndMaybeProvisionUserByToken(ctx, token, ext)
 	}
 
 	v2 := paseto.NewV2()
-	if err := v2.Verify(token, db.GetTokenKeys().PublicKey, &session, nil); err != nil {
+	if err := v2.Verify(token, db.GetTokenKeys().PublicKey, &claims, nil); err != nil {
 		return nil, nil, db.ErrNotFound
 	}
 
+	// Keep fields that only the token carries, such as InheritedClaims.
+	session := claims
 	if err := db.Bun().NewSelect().
 		Model(&session).
-		Where("id = ?", session.ID).
+		Where("id = ?", claims.ID).
 		Scan(ctx); err != nil {
 		return nil, nil, err
+	}
+	// The master signs allocation and notebook session tokens with the same key, and their IDs
+	// count rows of other tables. Such a token has no user_id claim, so it never names the user of
+	// the user session that happens to have the same ID.
+	if claims.UserID != session.UserID {
+		return nil, nil, db.ErrNotFound
 	}
 
 	if session.Expiry.Before(time.Now().UTC()) {

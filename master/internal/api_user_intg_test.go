@@ -160,6 +160,54 @@ func fetchUserIds(ctx context.Context, t *testing.T, api *apiServer, req *apiv1.
 	return ids
 }
 
+func TestGetUserRejectsTokensOfOtherSessionTables(t *testing.T) {
+	api, admin, _ := setupAPITest(t, nil)
+	other := db.RequireMockUser(t, api.m.db)
+	getUser := func(header, token string) (*model.User, error) {
+		u, _, err := grpcutil.GetUser(metadata.NewIncomingContext(context.TODO(),
+			metadata.Pairs(header, "Bearer "+token)))
+		return u, err
+	}
+
+	// Both session tables count from their own serials, which advance at a similar pace on a real
+	// cluster. Line them up so that the other user's next allocation session and the admin's next
+	// user session get the same ID.
+	ctx := context.TODO()
+	// allocation_sessions was renamed from task_sessions and kept its sequence.
+	var next int64
+	require.NoError(t, db.Bun().NewRaw(`SELECT GREATEST(
+		nextval('user_sessions_id_seq'), nextval('task_sessions_id_seq')) + 1`).Scan(ctx, &next))
+	_, err := db.Bun().NewRaw(`SELECT setval('user_sessions_id_seq', ?, false),
+		setval('task_sessions_id_seq', ?, false)`, next, next).Exec(ctx)
+	require.NoError(t, err)
+
+	task := db.RequireMockTask(t, api.m.db, &other.ID)
+	allocationID := db.RequireMockAllocation(t, api.m.db, task.TaskID).AllocationID
+	allocationToken, err := db.StartAllocationSession(ctx, allocationID, &other)
+	require.NoError(t, err)
+	adminToken, err := user.StartSession(ctx, &admin)
+	require.NoError(t, err)
+	var ids []int64
+	require.NoError(t, db.Bun().NewRaw(`SELECT id FROM allocation_sessions WHERE allocation_id = ?
+		UNION ALL SELECT max(id) FROM user_sessions WHERE user_id = ?`, allocationID, admin.ID).
+		Scan(ctx, &ids))
+	require.Equal(t, []int64{next, next}, ids)
+
+	// Each token authenticates only as its own session.
+	u, err := getUser("x-allocation-token", allocationToken)
+	require.NoError(t, err)
+	require.Equal(t, other.ID, u.ID)
+	u, err = getUser("x-user-token", adminToken)
+	require.NoError(t, err)
+	require.Equal(t, admin.ID, u.ID)
+
+	// Neither is accepted as the other kind of token.
+	_, err = getUser("x-user-token", allocationToken)
+	require.Equal(t, codes.Unauthenticated, status.Code(err))
+	_, err = getUser("x-allocation-token", adminToken)
+	require.Equal(t, codes.Unauthenticated, status.Code(err))
+}
+
 func TestProcessAuth(t *testing.T) {
 	api, _, _ := setupAPITest(t, nil)
 	extConfig := model.ExternalSessions{}

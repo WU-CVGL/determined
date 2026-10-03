@@ -2,6 +2,11 @@
 
 **Security Fixes**
 
+-  API: **Important:** The master no longer accepts a task's session token as a user's login token,
+   or a login token as a task's session token. Before this change, such a token could authenticate
+   as an unrelated session that had the same internal ID, which could belong to another user,
+   including an administrator. Tokens used as intended are unaffected.
+
 -  Shell: **Important:** Shell listings no longer include each shell's SSH private key, and
    ``GET /api/v1/shells/{id}`` returns the key only to the user who started the shell or to an
    administrator, under every authorization mode. Before this change, any signed-in user could read
