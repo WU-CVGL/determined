@@ -18,12 +18,15 @@
    the master serves TLS itself, or a reverse proxy listed in the new ``security.trusted_proxies``
    setting sets ``X-Forwarded-Proto`` to ``https``. A reverse proxy that terminates TLS and forwards
    plain HTTP leaves the cookie without ``Secure`` unless it is listed there, or the new
-   ``security.session_cookie.secure`` setting is ``always``. Its default, ``auto``, keeps plain-HTTP
-   deployments working; ``never`` turns the attribute off. Browsers keep one ``auth`` cookie per
-   host name, whatever the port: once a browser holds a ``Secure`` cookie from the HTTPS address,
-   signing in over plain HTTP at the same host name, for example on another port, does not work
-   until that cookie expires or the user signs out over HTTPS. Reach plain-HTTP ports by another
-   host name or address, or leave the cookie without ``Secure``.
+   ``security.session_cookie.secure`` setting is ``always``. List only proxies that set
+   ``X-Forwarded-Proto`` themselves, replacing what clients send, and not an address that also
+   passes connections through unchanged, such as an nginx ``stream`` port: clients could then set
+   the header themselves. Its default, ``auto``, keeps plain-HTTP deployments working; ``never``
+   turns the attribute off. Browsers keep one ``auth`` cookie per host name, whatever the port: once
+   a browser holds a ``Secure`` cookie from the HTTPS address, signing in over plain HTTP at the
+   same host name, for example on another port, does not work until that cookie expires or the user
+   signs out over HTTPS. Reach plain-HTTP ports by another host name or address, or leave the cookie
+   without ``Secure``.
 
 -  API: **Important:** Requests that rely on the session cookie must now come from the master's own
    pages when they can change something: every method but ``GET``, ``HEAD``, and ``OPTIONS``, and
@@ -42,10 +45,12 @@
    as ``http://determined.example.com:8080``, to the new ``security.csrf.trusted_origins`` setting,
    or the WebUI cannot sign in or change anything. A proxy listed in ``security.trusted_proxies``
    may instead pass the original host in ``X-Forwarded-Host``. Over HTTPS, current browsers report
-   whether a request is same-origin themselves, and the ``Host`` header does not matter for this
-   check. The master's WebSocket endpoints also check the ``Origin`` header themselves, as before:
-   it must name the host in the ``Host`` header, and ``trusted_origins`` and ``X-Forwarded-Host`` do
-   not apply. Forwarding ``Host`` unchanged keeps both checks working.
+   whether an ordinary request is same-origin themselves, and the ``Host`` header does not matter
+   for it. They do not report it for WebSocket connections, so these are compared with the ``Host``
+   header over HTTPS too. The master's WebSocket endpoints also check the ``Origin`` header
+   themselves, as before: it must name the host in the ``Host`` header, and ``trusted_origins`` and
+   ``X-Forwarded-Host`` do not apply. Forwarding ``Host`` unchanged, including any port, keeps all
+   of these checks working.
 
 -  WebUI: A session token in the WebUI's address (``?jwt=``) is now accepted only when the cluster
    has an external sign-in page, which is what sends it. The WebUI removes the token from the

@@ -1634,7 +1634,9 @@ and logs a warning with the headers it saw.
 
 A list of IP addresses or CIDR ranges of the reverse proxies in front of the master. The master
 believes the ``X-Forwarded-Proto`` and ``X-Forwarded-Host`` headers only in requests from these
-peers, since any client can send them. Defaults to an empty list, which ignores both headers.
+peers, since any client can send them. List only proxies that set both headers themselves, replacing
+what clients send, and not an address that also passes connections through unchanged, such as an
+nginx ``stream`` port. Defaults to an empty list, which ignores both headers.
 
 **************
  ``webhooks``
