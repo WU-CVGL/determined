@@ -7,13 +7,16 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"github.com/uptrace/bun"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -439,6 +442,98 @@ func TestKillPausedGenericTaskEndsItsSchedulingRegistration(t *testing.T) {
 	_, err = api.KillGenericTask(ctx, &apiv1.KillGenericTaskRequest{TaskId: taskID.String()})
 	require.NoError(t, err)
 	requireStopped(t, stopped)
+}
+
+// taskUpdateInterceptor runs a function before the first UPDATE that names a task, to put another
+// request between a read of the task and that write. bun cannot remove a query hook, so one
+// interceptor is added once and does nothing while it is not armed.
+type taskUpdateInterceptor struct {
+	armed atomic.Pointer[taskUpdateInterception]
+}
+
+type taskUpdateInterception struct {
+	taskID model.TaskID
+	fired  atomic.Bool
+	run    func()
+}
+
+func (h *taskUpdateInterceptor) BeforeQuery(ctx context.Context, e *bun.QueryEvent) context.Context {
+	i := h.armed.Load()
+	if i == nil || !strings.HasPrefix(strings.TrimSpace(e.Query), "UPDATE") ||
+		!strings.Contains(e.Query, i.taskID.String()) {
+		return ctx
+	}
+	// The function's own queries come through here too.
+	if i.fired.CompareAndSwap(false, true) {
+		i.run()
+	}
+	return ctx
+}
+
+func (*taskUpdateInterceptor) AfterQuery(context.Context, *bun.QueryEvent) {}
+
+var (
+	addTaskUpdateInterceptor sync.Once
+	theTaskUpdateInterceptor = &taskUpdateInterceptor{}
+)
+
+// beforeTaskUpdate runs run before the next UPDATE that names the task, and reports whether it ran.
+func beforeTaskUpdate(t *testing.T, taskID model.TaskID, run func()) (ran func() bool) {
+	addTaskUpdateInterceptor.Do(func() { db.Bun().AddQueryHook(theTaskUpdateInterceptor) })
+	i := &taskUpdateInterception{taskID: taskID, run: run}
+	theTaskUpdateInterceptor.armed.Store(i)
+	t.Cleanup(func() { theTaskUpdateInterceptor.armed.Store(nil) })
+	return i.fired.Load
+}
+
+// A kill that arrives while a pause's exit hook runs ends the task as canceled. The allocation
+// service removes the allocation before it calls the hook, so the kill finds no allocation and
+// cancels the task itself, after the hook started for a task that was stopping for the pause and
+// before the hook writes the task's end. The hook must not mark the canceled task PAUSED, which
+// would let it be unpaused, nor keep its scheduling registration as if it were paused.
+func TestKillDuringPauseExitHookCancelsTheTask(t *testing.T) {
+	for name, kill := range map[string]func(*testing.T, *apiServer, context.Context, model.TaskID){
+		"kill request": func(t *testing.T, api *apiServer, ctx context.Context, taskID model.TaskID) {
+			_, err := api.KillGenericTask(ctx, &apiv1.KillGenericTaskRequest{TaskId: taskID.String()})
+			require.NoError(t, err)
+		},
+		// The kill has canceled the task but not yet ended its job, which is up to the hook then.
+		"kill's state change": func(t *testing.T, _ *apiServer, ctx context.Context, taskID model.TaskID) {
+			_, err := cancelGenericTaskResumeMembers(ctx, []model.Task{{TaskID: taskID}})
+			require.NoError(t, err)
+			require.NoError(t, finishGenericTaskKillWithoutAllocation(ctx, taskID))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			api, owner, ctx := setupAPITest(t, nil)
+			taskID, jobID, j := addGenericTaskJobForTest(ctx, t, api, owner, "pausing")
+			service := &lifecycleAllocationService{running: map[model.AllocationID]bool{}}
+			oldService := task.DefaultService
+			task.DefaultService = service
+			t.Cleanup(func() { task.DefaultService = oldService })
+
+			// A pause stopped the task's allocation, which has ended and left the allocation service.
+			_, err := db.Bun().NewUpdate().Table("tasks").Set("task_state = ?", model.TaskStateStoppingPaused).
+				Where("task_id = ?", taskID).Exec(ctx)
+			require.NoError(t, err)
+			_, err = db.Bun().NewUpdate().Table("allocations").Set("end_time = ?", time.Now().UTC()).
+				Where("allocation_id = ?", j.allocationID).Exec(ctx)
+			require.NoError(t, err)
+			stopped := watchJobStopped(jobID)
+
+			killed := beforeTaskUpdate(t, taskID, func() { kill(t, api, ctx, taskID) })
+			onExit := getGenericTaskOnAllocationExit(ctx, taskID, j.allocationID, jobID, logger.Context{})
+			onExit(&task.AllocationExited{})
+			require.True(t, killed(), "the kill did not run before the hook's write")
+
+			got, err := db.TaskByID(ctx, taskID)
+			require.NoError(t, err)
+			require.Equal(t, model.TaskStateCanceled, *got.State)
+			requireStopped(t, stopped)
+			_, err = api.UnpauseGenericTask(ctx, &apiv1.UnpauseGenericTaskRequest{TaskId: taskID.String()})
+			require.Equal(t, codes.FailedPrecondition, status.Code(err), "%v", err)
+		})
+	}
 }
 
 func TestCreateGenericTaskRefusesInvalidSchedulingParameters(t *testing.T) {

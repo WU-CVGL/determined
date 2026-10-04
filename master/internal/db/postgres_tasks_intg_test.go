@@ -492,6 +492,51 @@ func TestTaskCompleted(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestEndGenericTaskAllocation(t *testing.T) {
+	ctx := context.Background()
+	pgDB, closeDB := MustResolveTestPostgres(t)
+	defer closeDB()
+	MustMigrateTestPostgres(t, pgDB, MigrationsFromDB)
+
+	for _, c := range []struct {
+		state  model.TaskState
+		failed bool
+		end    model.TaskState
+	}{
+		{model.TaskStateActive, false, model.TaskStateCompleted},
+		{model.TaskStateActive, true, model.TaskStateError},
+		{model.TaskStateStoppingPaused, false, model.TaskStatePaused},
+		{model.TaskStateStoppingPaused, true, model.TaskStateError},
+		{model.TaskStateStoppingCanceled, false, model.TaskStateCanceled},
+		{model.TaskStateStoppingCanceled, true, model.TaskStateError},
+		// A task that has already ended, e.g. canceled by a kill, keeps its state and end time.
+		{model.TaskStateCanceled, false, model.TaskStateCanceled},
+		{model.TaskStateCanceled, true, model.TaskStateCanceled},
+		{model.TaskStateCompleted, true, model.TaskStateCompleted},
+		{model.TaskStateError, false, model.TaskStateError},
+	} {
+		t.Run(fmt.Sprintf("%s failed=%v", c.state, c.failed), func(t *testing.T) {
+			tIn := RequireMockTask(t, SingleDB(), nil)
+			_, err := Bun().NewUpdate().Table("tasks").Set("task_state = ?", c.state).
+				Where("task_id = ?", tIn.TaskID).Exec(ctx)
+			require.NoError(t, err)
+
+			endTime := time.Now().UTC().Truncate(time.Millisecond)
+			paused, err := EndGenericTaskAllocation(ctx, tIn.TaskID, endTime, c.failed)
+			require.NoError(t, err)
+			require.Equal(t, c.end == model.TaskStatePaused, paused)
+			got, err := TaskByID(ctx, tIn.TaskID)
+			require.NoError(t, err)
+			require.Equal(t, c.end, *got.State)
+			if c.end == c.state {
+				require.Nil(t, got.EndTime)
+			} else {
+				require.Equal(t, &endTime, got.EndTime)
+			}
+		})
+	}
+}
+
 func TestAddAllocation(t *testing.T) {
 	ctx := context.Background()
 	pgDB, closeDB := MustResolveTestPostgres(t)

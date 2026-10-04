@@ -99,4 +99,5 @@
 -  Generic tasks: Killing a paused generic task, or a tree whose root is paused, now cancels it and
    kills the rest of the tree. Previously the kill failed on the paused task's missing allocation,
    left it in ``STOPPING_CANCELED`` for good, and marked its running descendants as stopping without
-   stopping them.
+   stopping them. A kill that arrives while a pause is finishing also ends the task as
+   ``CANCELED``; the finishing pause does not turn it into a ``PAUSED`` task that can be unpaused.
