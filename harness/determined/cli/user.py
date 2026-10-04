@@ -122,6 +122,12 @@ def change_password(args: argparse.Namespace) -> None:
         # The default user should have been set by now by autologin.
         raise errors.CliError("Please log in as an admin or user to change passwords")
 
+    # The master requires the current password when users change their own password.
+    own_password = username == d.get_session_username()
+    current_password = None
+    if own_password:
+        current_password = getpass.getpass("Current password for user '{}': ".format(username))
+
     password = getpass.getpass("New password for user '{}': ".format(username))
     check_password = getpass.getpass("Confirm password: ")
 
@@ -129,11 +135,16 @@ def change_password(args: argparse.Namespace) -> None:
         raise errors.CliError("Passwords do not match")
 
     user_obj = d.get_user_by_name(username)
-    user_obj.change_password(new_password=password)
+    try:
+        user_obj.change_password(new_password=password, current_password=current_password)
+    except api.errors.ForbiddenException:
+        if own_password:
+            raise errors.CliError("The current password is incorrect")
+        raise
 
-    # If the target user's password isn't being changed by another user, reauthenticate after
-    # password change so that the user doesn't have to do so manually.
-    if args.target_user is None:
+    # Changing a password ends the user's sessions. When users change their own password, sign
+    # them in again so that they do not have to do so manually.
+    if own_password:
         token_store = authentication.TokenStore(args.master)
         sess = authentication.login(args.master, username, password, cli.cert)
         token_store.set_token(sess.username, sess.token)
