@@ -78,7 +78,8 @@ func (c CSRFConfig) IsTrustedOrigin(origin string) bool {
 }
 
 // NormalizeOrigin checks that s is an origin as browsers send it in the Origin header (scheme,
-// host and optional port, nothing else) and returns it in lower case without a trailing slash.
+// host and optional port, nothing else) and returns it the way browsers do: in lower case, without
+// a trailing slash, and without the scheme's default port (80 for http, 443 for https).
 func NormalizeOrigin(s string) (string, error) {
 	u, err := url.Parse(strings.TrimSuffix(strings.TrimSpace(s), "/"))
 	switch {
@@ -89,7 +90,12 @@ func NormalizeOrigin(s string) (string, error) {
 	case u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "":
 		return "", fmt.Errorf("%q is not an origin: use scheme://host[:port] only", s)
 	}
-	return strings.ToLower(u.Scheme + "://" + u.Host), nil
+	host := u.Host
+	if port := u.Port(); (u.Scheme == schemeHTTP && port == "80") ||
+		(u.Scheme == schemeHTTPS && port == "443") {
+		host = strings.TrimSuffix(host, ":"+port)
+	}
+	return strings.ToLower(u.Scheme + "://" + host), nil
 }
 
 // TrustedProxies lists the reverse proxies, as IP addresses or CIDR ranges, whose

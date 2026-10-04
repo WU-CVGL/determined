@@ -27,6 +27,30 @@ func TestCSRFConfig(t *testing.T) {
 	require.False(t, c.IsTrustedOrigin("https://localhost:3000"))
 	require.False(t, c.IsTrustedOrigin("null"))
 	require.False(t, c.IsTrustedOrigin(""))
+	// Browsers leave the scheme's default port out of the Origin header; an entry or a header
+	// that spells it out still matches.
+	require.True(t, c.IsTrustedOrigin("https://dev.example:443"))
+	c = CSRFConfig{TrustedOrigins: []string{"http://gpu.example:80", "https://gpu.example:443/"}}
+	require.Empty(t, c.Validate())
+	require.True(t, c.IsTrustedOrigin("http://gpu.example"))
+	require.True(t, c.IsTrustedOrigin("https://gpu.example"))
+	require.False(t, c.IsTrustedOrigin("http://gpu.example:443"))
+	require.False(t, c.IsTrustedOrigin("https://gpu.example:80"))
+
+	for in, want := range map[string]string{
+		"HTTPS://GPU.Example:443/": "https://gpu.example",
+		"http://gpu.example:443":   "http://gpu.example:443",
+		"https://gpu.example:80":   "https://gpu.example:80",
+		"https://gpu.example:4430": "https://gpu.example:4430",
+		"http://[::1]:80":          "http://[::1]",
+		"https://[FD00::1]:443":    "https://[fd00::1]",
+		"http://[::1]:8080":        "http://[::1]:8080",
+		"http://[fd00::80]":        "http://[fd00::80]",
+	} {
+		got, err := NormalizeOrigin(in)
+		require.NoError(t, err, in)
+		require.Equal(t, want, got, in)
+	}
 
 	for _, bad := range []string{
 		"localhost:3000", "ftp://example", "https://example/path", "https://example?q=1",

@@ -105,6 +105,14 @@ func TestCheckSameOrigin(t *testing.T) {
 			map[string]string{"Origin": "http://localhost:3000"},
 			true,
 		},
+		{
+			"old browser, trusted origin listed with its default port", "127.0.0.1:8080", "",
+			map[string]string{"Origin": "http://lab.example"},
+			true,
+		},
+		{"trusted origin listed with its default port", "127.0.0.1:8080", "", map[string]string{
+			"Sec-Fetch-Site": "same-site", "Origin": "https://lab.example",
+		}, true},
 		{"forwarded host from untrusted peer", "10.0.1.6:8080", "192.0.2.1:5000", map[string]string{
 			"Origin": "https://gpu.example", "X-Forwarded-Host": "gpu.example",
 		}, false},
@@ -116,7 +124,9 @@ func TestCheckSameOrigin(t *testing.T) {
 		}, false},
 	}
 	withSecurityConfig(t, func(s *config.SecurityConfig) {
-		s.CSRF.TrustedOrigins = []string{"http://localhost:3000"}
+		s.CSRF.TrustedOrigins = []string{
+			"http://localhost:3000", "http://lab.example:80", "https://lab.example:443",
+		}
 		s.TrustedProxies = []string{"10.0.1.66"}
 	})
 	for _, tc := range cases {
