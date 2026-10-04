@@ -6,6 +6,8 @@ import { createMemoryRouter, MemoryRouter, RouterProvider, useLocation } from 'r
 import { getCurrentUser, storeSessionToken } from 'services/api';
 import authStore from 'stores/auth';
 import determinedStore, { DeterminedInfo } from 'stores/determinedInfo';
+import userStore from 'stores/users';
+import { reloadPage } from 'utils/browser';
 import { DetError, ErrorType } from 'utils/error';
 import { routeToExternalUrl } from 'utils/routes';
 
@@ -32,6 +34,8 @@ vi.mock('routes/utils', () => ({
 }));
 
 vi.mock('utils/routes', () => ({ routeToExternalUrl: vi.fn() }));
+
+vi.mock('utils/browser', () => ({ reloadPage: vi.fn() }));
 
 const SIGNED_OUT = () => new DetError(new Response(null, { status: 401 }));
 
@@ -82,10 +86,12 @@ describe('useAuthCheck', () => {
   beforeEach(() => {
     setInfo({ ssoProviders: [] });
     authStore.reset();
+    userStore.reset();
     vi.mocked(getCurrentUser).mockReset();
     vi.mocked(storeSessionToken).mockReset().mockResolvedValue(undefined);
     vi.mocked(routeToExternalUrl).mockReset();
     routeAll.mockReset();
+    vi.mocked(reloadPage).mockReset();
     window.localStorage.clear();
     cookieJar().removeAllCookiesSync();
 
@@ -272,6 +278,33 @@ describe('useAuthCheck', () => {
 
     expect(router.state.location.pathname).toBe('/det/workspaces');
     expect(getCurrentUser).toHaveBeenCalledTimes(1);
+  });
+
+  it('reloads the page when another tab signed in as someone else', async () => {
+    userStore.updateCurrentUser(USER);
+    vi.mocked(getCurrentUser).mockResolvedValue({ ...USER, id: 2, username: 'other' });
+    const { result } = setup('/det/models');
+
+    expect(await check(result)).toBe(true);
+    // This tab's requests now run as the other user, so it must not keep showing the one it loaded.
+    expect(reloadPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reload the page while the same user is signed in', async () => {
+    userStore.updateCurrentUser(USER);
+    vi.mocked(getCurrentUser).mockResolvedValue({ ...USER, username: 'renamed' });
+    const { result } = setup('/det/models');
+
+    expect(await check(result)).toBe(true);
+    expect(reloadPage).not.toHaveBeenCalled();
+  });
+
+  it('does not reload the page before it has loaded its user', async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({ ...USER, id: 2, username: 'other' });
+    const { result } = setup('/det/models');
+
+    expect(await check(result)).toBe(true);
+    expect(reloadPage).not.toHaveBeenCalled();
   });
 
   it('replaces a session cookie that scripts can read with the HttpOnly one', async () => {

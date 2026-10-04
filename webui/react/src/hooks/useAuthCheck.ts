@@ -1,3 +1,4 @@
+import { Loadable } from 'hew/utils/loadable';
 import { useObservable } from 'micro-observables';
 import { useCallback, useInsertionEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -7,6 +8,8 @@ import { paths, routeAll } from 'routes/utils';
 import { getCurrentUser, storeSessionToken } from 'services/api';
 import authStore from 'stores/auth';
 import determinedStore from 'stores/determinedInfo';
+import userStore from 'stores/users';
+import { reloadPage } from 'utils/browser';
 import handleError from 'utils/error';
 import { routeToExternalUrl } from 'utils/routes';
 import { isAuthFailure, isRemoteUserTokenExpired } from 'utils/service';
@@ -146,7 +149,12 @@ const useAuthCheck = (): (() => Promise<boolean>) => {
     const hardLogout = window.location.href.includes('hard_logout=true');
 
     try {
-      await getCurrentUser({});
+      const user = await getCurrentUser({});
+      // Every tab shares the session cookie. If another tab has signed in as someone else since
+      // this one loaded its user, this tab's requests now run as them while the page still shows
+      // the user it loaded (with their filters and permissions), so reload it.
+      const loadedUser = Loadable.getOrElse(undefined, userStore.currentUser.get());
+      if (loadedUser && loadedUser.id !== user.id) reloadPage();
       authStore.setAuth({ isAuthenticated: true });
       authStore.setAuthChecked();
       return true;

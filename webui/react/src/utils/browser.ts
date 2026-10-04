@@ -79,6 +79,9 @@ export const refreshPage = (): void => {
   routeToExternalUrl(url.toString());
 };
 
+/* Loads the page again, dropping everything the web UI holds in memory. */
+export const reloadPage = (): void => window.location.reload();
+
 export const simulateLogsDownload = (numCharacters: number): number => {
   const start = Date.now();
   const MAX_PART_SIZE = 128 * Math.pow(2, 20); // 128m * CHAR_SIZE
