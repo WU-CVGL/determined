@@ -148,7 +148,7 @@ func TestSetProxyAddress(t *testing.T) {
 			defer closeDB()
 			defer requireKilled(t, id, exitFuture)
 			if proxy.DefaultProxy == nil {
-				proxy.InitProxy(nil) // Needs the database.
+				proxy.InitProxy(nil, nil) // Needs the database.
 			}
 			state := model.AllocationStatePending
 			if tc.resourcesType != nil {

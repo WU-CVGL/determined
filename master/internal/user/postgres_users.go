@@ -404,6 +404,19 @@ func ByID(ctx context.Context, userID model.UserID) (*model.FullUser, error) {
 	return &fu, nil
 }
 
+// IsMasterSignedToken reports whether the master signed the token: user sessions, access tokens,
+// task sessions and notebook tokens all are. It only checks the signature, not whether the session
+// is still valid, so it also recognizes expired and revoked tokens. Use it to identify the master's
+// credentials, never to authenticate.
+func IsMasterSignedToken(token string) bool {
+	keys := db.GetTokenKeys()
+	if keys == nil {
+		return false
+	}
+	// With no payload to decode, Verify checks only the signature.
+	return paseto.NewV2().Verify(token, keys.PublicKey, nil, nil) == nil
+}
+
 // ByToken returns a user session given an authentication token. If a session belonging to a remote (SSO) user
 // is found but has expired, ErrRemoteUserTokenExpired will be returned.
 func ByToken(ctx context.Context, token string, ext *model.ExternalSessions) (

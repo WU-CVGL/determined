@@ -3,6 +3,7 @@ package proxy
 import (
 	"bufio"
 	"context"
+	"crypto/ed25519"
 	"fmt"
 	"net"
 	"net/http"
@@ -13,16 +14,59 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/o1egl/paseto"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 )
 
-const (
-	masterToken = "v2.public.master-session"
-	// A JupyterLab session: Tornado quotes its signed cookie values.
-	serviceCookies = `_xsrf=2|1a2b|3c4d|1700000000; ` +
-		`username-host-8888="2|1:0|10:1700000000|19:username-host-8888|4:e30=|abcdef"`
+// A JupyterLab session: Tornado quotes its signed cookie values.
+const serviceCookies = `_xsrf=2|1a2b|3c4d|1700000000; ` +
+	`username-host-8888="2|1:0|10:1700000000|19:username-host-8888|4:e30=|abcdef"`
+
+func mustGenerateKey() (ed25519.PublicKey, ed25519.PrivateKey) {
+	public, private, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		panic(err)
+	}
+	return public, private
+}
+
+func mustSign(key ed25519.PrivateKey, expiration time.Time) string {
+	token, err := paseto.NewV2().Sign(key, paseto.JSONToken{Expiration: expiration}, nil)
+	if err != nil {
+		panic(err)
+	}
+	return token
+}
+
+var (
+	masterPublicKey, masterPrivateKey = mustGenerateKey()
+	_, foreignPrivateKey              = mustGenerateKey()
+
+	masterToken        = mustSign(masterPrivateKey, time.Now().Add(time.Hour))
+	expiredMasterToken = mustSign(masterPrivateKey, time.Now().Add(-time.Hour))
+	// A PASETO token that the master did not sign, such as one the service issues itself.
+	foreignToken = mustSign(foreignPrivateKey, time.Now().Add(time.Hour))
 )
+
+// isTestMasterToken checks the signature only, like user.IsMasterSignedToken.
+func isTestMasterToken(token string) bool {
+	return paseto.NewV2().Verify(token, masterPublicKey, nil, nil) == nil
+}
+
+// masterTokenHeaderLines are the gRPC metadata headers in which clients send master tokens, as a
+// client may spell them: the Python SDK sends a task's session token in the first.
+var masterTokenHeaderLines = []string{
+	"Grpc-Metadata-x-allocation-token: Bearer " + masterToken,
+	"Grpc-Metadata-X-User-Token: Bearer " + masterToken,
+	"grpc-metadata-grpcgateway-authorization: Bearer " + masterToken,
+}
+
+func requireNoMasterTokenHeaders(t *testing.T, got http.Header) {
+	for _, name := range masterTokenHeaders {
+		require.Empty(t, got.Values(name), name)
+	}
+}
 
 // visitorCookies are what a signed-in browser sends to /proxy/: the master's session cookies are
 // mixed in with the service's own cookies.
@@ -40,8 +84,9 @@ func newTestProxy(t *testing.T, sawAuthCookie *string) (*Proxy, string) {
 			}
 			return false, nil
 		},
-		services: map[string]*Service{},
-		syslog:   logrus.WithField("component", "proxy"),
+		IsMasterToken: isTestMasterToken,
+		services:      map[string]*Service{},
+		syslog:        logrus.WithField("component", "proxy"),
 	}
 	e := echo.New()
 	e.Any("/proxy/:service/*", p.NewProxyHandler("service"))
@@ -59,7 +104,16 @@ var credentialCases = []struct {
 	{"authenticated, master bearer token", false, "Bearer " + masterToken, nil},
 	{"authenticated, lowercase bearer", false, "bearer " + masterToken, nil},
 	{"authenticated, notebook token", false, "token nb", []string{"token nb"}},
+	{"unauthenticated, master bearer token", true, "Bearer " + masterToken, nil},
+	{"unauthenticated, lowercase master bearer", true, "bearer " + masterToken, nil},
+	{"unauthenticated, expired master bearer token", true, "Bearer " + expiredMasterToken, nil},
 	{"unauthenticated, service bearer token", true, "Bearer svc-key", []string{"Bearer svc-key"}},
+	{
+		"unauthenticated, bearer token signed by another key", true, "Bearer " + foreignToken,
+		[]string{"Bearer " + foreignToken},
+	},
+	{"unauthenticated, basic", true, "Basic dXNlcjpwYXNz", []string{"Basic dXNlcjpwYXNz"}},
+	{"unauthenticated, notebook token", true, "token nb", []string{"token nb"}},
 	{"unauthenticated, no authorization", true, "", nil},
 }
 
@@ -84,6 +138,10 @@ func TestProxyStripsMasterCredentialsHTTP(t *testing.T) {
 			for _, line := range visitorCookies {
 				req.Header.Add("Cookie", line)
 			}
+			for _, line := range masterTokenHeaderLines {
+				name, value, _ := strings.Cut(line, ": ")
+				req.Header.Add(name, value)
+			}
 			if tc.authorization != "" {
 				req.Header.Set("Authorization", tc.authorization)
 			}
@@ -95,6 +153,7 @@ func TestProxyStripsMasterCredentialsHTTP(t *testing.T) {
 			got := <-upstreamHeaders
 			require.Equal(t, []string{serviceCookies}, got.Values("Cookie"))
 			require.Equal(t, tc.wantAuthorization, got.Values("Authorization"))
+			requireNoMasterTokenHeaders(t, got)
 			if !tc.unauthenticated {
 				require.Equal(t, masterToken, sawAuthCookie)
 			}
@@ -140,6 +199,9 @@ func TestProxyStripsMasterCredentialsWebSocket(t *testing.T) {
 			for _, line := range visitorCookies {
 				fmt.Fprintf(&upgrade, "Cookie: %s\r\n", line)
 			}
+			for _, line := range masterTokenHeaderLines {
+				fmt.Fprintf(&upgrade, "%s\r\n", line)
+			}
 			if tc.authorization != "" {
 				fmt.Fprintf(&upgrade, "Authorization: %s\r\n", tc.authorization)
 			}
@@ -151,6 +213,7 @@ func TestProxyStripsMasterCredentialsWebSocket(t *testing.T) {
 			case got := <-upstreamHeaders:
 				require.Equal(t, []string{serviceCookies}, got.Values("Cookie"))
 				require.Equal(t, tc.wantAuthorization, got.Values("Authorization"))
+				requireNoMasterTokenHeaders(t, got)
 			case <-time.After(5 * time.Second):
 				require.FailNow(t, "the upgrade request never reached the service")
 			}

@@ -1286,7 +1286,7 @@ func (m *Master) Run(ctx context.Context, gRPCLogInitDone chan struct{}) error {
 	user.InitService(m.db, &m.config.InternalConfig.ExternalSessions)
 	userService := user.GetService()
 
-	proxy.InitProxy(processProxyAuthentication)
+	proxy.InitProxy(processProxyAuthentication, user.IsMasterSignedToken)
 	portregistry.InitPortRegistry(config.GetMasterConfig().ReservedPorts)
 
 	go periodicallyAggregateResourceAllocation(m.db)
