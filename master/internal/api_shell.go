@@ -97,21 +97,41 @@ func (a *apiServer) GetShells(
 func (a *apiServer) GetShell(
 	ctx context.Context, req *apiv1.GetShellRequest,
 ) (*apiv1.GetShellResponse, error) {
-	curUser, _, err := grpcutil.GetUser(ctx)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := command.DefaultCmdService.GetShell(req)
+	resp, curUser, err := a.getShell(ctx, req.ShellId)
 	if err != nil {
 		return nil, err
 	}
 
-	ctx = audit.SupplyEntityID(ctx, req.ShellId)
-	if err := command.AuthZProvider.Get().CanGetNSC(
-		ctx, *curUser, model.AccessScopeID(resp.Shell.WorkspaceId)); err != nil {
-		return nil, authz.SubIfUnauthorized(err, api.NotFoundErrs("shell", req.ShellId, true))
+	// The key logs in to the shell's sshd as the shell's user.
+	if canReadTaskCredential(*curUser, resp.Shell.UserId) {
+		resp.Shell.PrivateKey, err = command.DefaultCmdService.GetShellPrivateKey(req.ShellId)
+		if err != nil {
+			return nil, err
+		}
+		logCredentialRead(*curUser, "shell private key", req.ShellId, resp.Shell.UserId)
 	}
 	return resp, nil
+}
+
+// getShell returns a shell, without its private key, if the current user may see it.
+func (a *apiServer) getShell(
+	ctx context.Context, shellID string,
+) (*apiv1.GetShellResponse, *model.User, error) {
+	curUser, _, err := grpcutil.GetUser(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	resp, err := command.DefaultCmdService.GetShell(&apiv1.GetShellRequest{ShellId: shellID})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ctx = audit.SupplyEntityID(ctx, shellID)
+	if err := command.AuthZProvider.Get().CanGetNSC(
+		ctx, *curUser, model.AccessScopeID(resp.Shell.WorkspaceId)); err != nil {
+		return nil, nil, authz.SubIfUnauthorized(err, api.NotFoundErrs("shell", shellID, true))
+	}
+	return resp, curUser, nil
 }
 
 func (a *apiServer) KillShell(
@@ -123,7 +143,7 @@ func (a *apiServer) KillShell(
 		}
 	}()
 
-	getResponse, err := a.GetShell(ctx, &apiv1.GetShellRequest{ShellId: req.ShellId})
+	getResponse, _, err := a.getShell(ctx, req.ShellId)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +178,7 @@ func (a *apiServer) SetShellPriority(
 		}
 	}()
 
-	getResponse, err := a.GetShell(ctx, &apiv1.GetShellRequest{ShellId: req.ShellId})
+	getResponse, _, err := a.getShell(ctx, req.ShellId)
 	if err != nil {
 		return nil, err
 	}
@@ -277,8 +297,12 @@ func (a *apiServer) LaunchShell(
 		return nil, err
 	}
 
+	// The caller owns the new shell and needs its key to connect (`det shell start`).
+	shell := cmd.ToV1Shell()
+	shell.PrivateKey = cmd.ShellPrivateKey()
+
 	return &apiv1.LaunchShellResponse{
-		Shell:    cmd.ToV1Shell(),
+		Shell:    shell,
 		Config:   protoutils.ToStruct(launchReq.Spec.Config),
 		Warnings: pkgCommand.LaunchWarningToProto(launchWarnings),
 	}, nil

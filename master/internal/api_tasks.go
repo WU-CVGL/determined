@@ -2,7 +2,9 @@ package internal
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"net"
 	"slices"
 	"strings"
 	"time"
@@ -253,7 +255,7 @@ func (a *apiServer) canEditAllocation(ctx context.Context, allocationID string) 
 func (a *apiServer) AllocationReady(
 	ctx context.Context, req *apiv1.AllocationReadyRequest,
 ) (*apiv1.AllocationReadyResponse, error) {
-	if err := a.canEditAllocation(ctx, req.AllocationId); err != nil {
+	if err := a.canControlAllocation(ctx, req.AllocationId); err != nil {
 		return nil, err
 	}
 
@@ -267,7 +269,7 @@ func (a *apiServer) AllocationReady(
 func (a *apiServer) AllocationWaiting(
 	ctx context.Context, req *apiv1.AllocationWaitingRequest,
 ) (*apiv1.AllocationWaitingResponse, error) {
-	if err := a.canEditAllocation(ctx, req.AllocationId); err != nil {
+	if err := a.canControlAllocation(ctx, req.AllocationId); err != nil {
 		return nil, err
 	}
 
@@ -284,7 +286,7 @@ func (a *apiServer) AllocationAllGather(
 	if req.AllocationId == "" {
 		return nil, status.Error(codes.InvalidArgument, "allocation ID missing")
 	}
-	if err := a.canEditAllocation(ctx, req.AllocationId); err != nil {
+	if err := a.canControlAllocation(ctx, req.AllocationId); err != nil {
 		return nil, err
 	}
 
@@ -338,8 +340,12 @@ func (a *apiServer) PostAllocationProxyAddress(
 	if req.AllocationId == "" {
 		return nil, status.Error(codes.InvalidArgument, "allocation ID missing")
 	}
-	if err := a.canEditAllocation(ctx, req.AllocationId); err != nil {
+	if err := a.canControlAllocation(ctx, req.AllocationId); err != nil {
 		return nil, err
+	}
+	// Tasks post the IP address of their own container (prep_container --proxy).
+	if net.ParseIP(req.ProxyAddress) == nil {
+		return nil, status.Error(codes.InvalidArgument, "proxy address must be an IP address")
 	}
 
 	err := task.DefaultService.SetProxyAddress(
@@ -347,10 +353,63 @@ func (a *apiServer) PostAllocationProxyAddress(
 		model.AllocationID(req.AllocationId),
 		req.ProxyAddress,
 	)
-	if err != nil {
+	var unfulfilled task.AllocationUnfulfilledError
+	var unsupported task.BehaviorUnsupportedError
+	switch {
+	case errors.As(err, &unfulfilled), errors.As(err, &unsupported):
+		return nil, status.Error(codes.FailedPrecondition, err.Error())
+	case err != nil:
 		return nil, err
 	}
 	return &apiv1.PostAllocationProxyAddressResponse{}, nil
+}
+
+// canControlAllocation checks that a request may change an allocation's state or take part in its
+// rendezvous: it must pass canEditAllocation, and come from the allocation's own task session, the
+// owner of the allocation's job, or an admin, in every authz mode. The legitimate callers are the
+// task's own containers (prep_container, check_ready_logs, the Core API's preemption helpers and
+// the distributed launchers), which authenticate with the allocation session. Being able to see a
+// task is not enough.
+func (a *apiServer) canControlAllocation(ctx context.Context, allocationID string) error {
+	if err := a.canEditAllocation(ctx, allocationID); err != nil {
+		return err
+	}
+	return checkAllocationController(ctx, model.AllocationID(allocationID))
+}
+
+func checkAllocationController(ctx context.Context, allocationID model.AllocationID) error {
+	session, err := grpcutil.GetAllocationSession(ctx)
+	if err != nil {
+		return err
+	}
+	if session != nil && session.AllocationID == allocationID {
+		return nil
+	}
+
+	curUser, _, err := grpcutil.GetUser(ctx)
+	if err != nil {
+		return err
+	}
+
+	var ownerID *model.UserID
+	err = db.Bun().NewSelect().
+		ColumnExpr("j.owner_id").
+		TableExpr("allocations AS a").
+		Join("JOIN tasks AS t ON t.task_id = a.task_id").
+		Join("JOIN jobs AS j ON j.job_id = t.job_id").
+		Where("a.allocation_id = ?", allocationID).
+		Scan(ctx, &ownerID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return api.NotFoundErrs("allocation", string(allocationID), true)
+	} else if err != nil {
+		return err
+	}
+
+	if curUser.Admin || ownerID != nil && *ownerID == curUser.ID {
+		return nil
+	}
+	return status.Error(codes.PermissionDenied,
+		"only the allocation's own task, its owner, or an admin may change an allocation")
 }
 
 func (a *apiServer) GetTaskAcceleratorData(
@@ -402,7 +461,7 @@ func (a *apiServer) PostAllocationAcceleratorData(
 		return nil, status.Error(codes.InvalidArgument, "allocation ID missing")
 	}
 
-	if err := a.canEditAllocation(ctx, req.AllocationId); err != nil {
+	if err := a.canControlAllocation(ctx, req.AllocationId); err != nil {
 		return nil, err
 	}
 

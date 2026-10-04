@@ -327,7 +327,8 @@ func (a *allocation) Signal(sig AllocationSignal, reason string) {
 }
 
 // SetProxyAddress sets the proxy address of the allocation and sets up proxies for any services
-// it provides.
+// it provides. Only tasks on resource managers that do not report container addresses (Kubernetes
+// and Slurm/PBS) post one, from a running container.
 func (a *allocation) SetProxyAddress(ctx context.Context, address string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -335,6 +336,14 @@ func (a *allocation) SetProxyAddress(ctx context.Context, address string) error 
 	if len(a.req.ProxyPorts) == 0 {
 		a.syslog.Debug("no ports to proxy, skipping proxy registration.")
 		return nil
+	}
+	if a.exited != nil || len(a.resources) == 0 {
+		// Proxies registered after exit would never be unregistered.
+		return AllocationUnfulfilledError{Action: "setting a proxy address"}
+	}
+	if a.resources.first().Summary().ResourcesType == sproto.ResourcesTypeDockerContainer {
+		// The agent reports container addresses itself, and agent tasks never post one.
+		return BehaviorUnsupportedError{Behavior: "setting a proxy address"}
 	}
 	a.model.ProxyAddress = &address
 	if err := db.UpdateAllocationProxyAddress(ctx, a.model); err != nil {

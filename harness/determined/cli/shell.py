@@ -145,6 +145,13 @@ def _open_shell(
     retain_keys_and_print: bool,
     print_only: bool,
 ) -> None:
+    # The master returns a shell's SSH key only to the shell's owner or an administrator.
+    if not shell.get("privateKey"):
+        raise cli.errors.CliError(
+            f"Cannot open shell {shell['id']}: only the user who started it or an administrator "
+            "can connect to it."
+        )
+
     cli.wait_ntsc_ready(sess, api.NTSC_Kind.shell, shell["id"])
 
     cache_dir = None

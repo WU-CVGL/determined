@@ -8,10 +8,15 @@ import useUI from 'components/ThemeProvider';
 import { terminalCommandStates } from 'constants/states';
 import { serverAddress } from 'routes/utils';
 import { getTask } from 'services/api';
-import { CommandState } from 'types';
+import { CommandState, CommandType } from 'types';
 import handleError, { ErrorType } from 'utils/error';
 import { capitalize } from 'utils/string';
-import { WaitStatus } from 'utils/wait';
+import {
+  getJupyterLabAddress,
+  hasJupyterToken,
+  NOTEBOOK_ACCESS_DENIED,
+  WaitStatus,
+} from 'utils/wait';
 
 import css from './Wait.module.scss';
 
@@ -27,14 +32,17 @@ const Wait: React.FC = () => {
   const [searchParams] = useSearchParams();
   const { taskType } = useParams<Params>();
   const [waitStatus, setWaitStatus] = useState<WaitStatus>();
+  const [accessDenied, setAccessDenied] = useState(false);
   const serviceAddr = searchParams.get('serviceAddr');
 
   const capitalizedTaskType = capitalize(taskType ?? '');
-  const isLoading = !waitStatus || !terminalCommandStates.has(waitStatus.state);
+  const isLoading = !accessDenied && (!waitStatus || !terminalCommandStates.has(waitStatus.state));
 
   let message = `Waiting for ${capitalizedTaskType} ...`;
   if (!serviceAddr) {
     message = 'Missing required parameters.';
+  } else if (accessDenied) {
+    message = NOTEBOOK_ACCESS_DENIED;
   } else if (waitStatus && terminalCommandStates.has(waitStatus.state)) {
     message = `${capitalizedTaskType} has been terminated.`;
   } else if (
@@ -76,7 +84,17 @@ const Wait: React.FC = () => {
           clearInterval(ival);
         } else if (lastRun.isReady) {
           clearInterval(ival);
-          window.location.assign(serverAddress(serviceAddr));
+          let address: string | undefined = serviceAddr;
+          // Listings never include a notebook's Jupyter token; only its owner and administrators
+          // can read it, and JupyterLab does not open without it.
+          if (taskType === CommandType.JupyterLab && !hasJupyterToken(serviceAddr)) {
+            address = await getJupyterLabAddress(taskId);
+          }
+          if (address) {
+            window.location.assign(serverAddress(address));
+          } else {
+            setAccessDenied(true);
+          }
         }
         // TODO: use task.endTime to determine if the task is terminated.
         setWaitStatus(lastRun);
@@ -84,7 +102,7 @@ const Wait: React.FC = () => {
         handleTaskError(e as Error);
       }
     }, 1000);
-  }, [serviceAddr]);
+  }, [serviceAddr, taskType]);
 
   return (
     <PageMessage title={capitalizedTaskType}>

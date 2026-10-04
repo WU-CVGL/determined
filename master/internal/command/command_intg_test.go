@@ -12,6 +12,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/job/jobservice"
@@ -81,21 +83,28 @@ func TestNotebookManagerLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, resp2.Notebooks, 2)
 
-	// Verify Notebooks return valid tokens.
+	// Summaries never carry the Jupyter token; it is read separately after an ownership check,
+	// and it is a valid notebook token for its own task.
+	require.Equal(t, "/proxy/"+cmd1.Id+"/", resp1.Notebook.ServiceAddress)
 	for _, resp := range resp2.Notebooks {
-		re := regexp.MustCompile(`^/proxy/(.*)/\?token=(.*)`)
+		re := regexp.MustCompile(`^/proxy/([^/?]+)/$`)
 		addrMatches := re.FindStringSubmatch(resp.ServiceAddress)
-		require.Len(t, addrMatches, 3)
+		require.Len(t, addrMatches, 2, resp.ServiceAddress)
+		taskID := addrMatches[1]
 
-		taskID, token := addrMatches[1], addrMatches[2]
+		token, err := DefaultCmdService.GetNotebookToken(resp.Id)
+		require.NoError(t, err)
 		require.NotEmpty(t, token)
-		require.NotEmpty(t, taskID)
+		require.Equal(t, "/proxy/"+taskID+"/?token="+token,
+			NotebookServiceAddress(resp.ServiceAddress, token))
 
 		usr, notebookSession, err := user.GetService().UserAndNotebookSessionFromToken(token)
 		require.NoError(t, err)
 		require.Equal(t, resp.UserId, int32(usr.ID))
 		require.Equal(t, taskID, string(notebookSession.TaskID))
 	}
+	_, err = DefaultCmdService.GetNotebookToken(launchCommand(t, db).Id)
+	require.Equal(t, codes.NotFound, status.Code(err))
 
 	// Kill 1 Notebook.
 	resp3, err := DefaultCmdService.KillNTSC(cmd2.Id, model.TaskTypeNotebook)
@@ -104,6 +113,7 @@ func TestNotebookManagerLifecycle(t *testing.T) {
 
 	nb3 := resp3.ToV1Notebook()
 	require.Equal(t, taskv1.State_STATE_TERMINATED, nb3.State)
+	require.NotContains(t, nb3.ServiceAddress, "token")
 
 	// Set Notebook priority.
 	resp4, err := DefaultCmdService.SetNTSCPriority(cmd1.Id, 0, model.TaskTypeNotebook)
@@ -122,6 +132,17 @@ func TestShellManagerLifecycle(t *testing.T) {
 	require.NotNil(t, resp1)
 	require.NoError(t, err)
 
+	// Summaries never carry the private key; it is read separately after an ownership check.
+	require.Empty(t, cmd1.PrivateKey)
+	require.Empty(t, resp1.Shell.PrivateKey)
+	key, err := DefaultCmdService.GetShellPrivateKey(cmd1.Id)
+	require.NoError(t, err)
+	require.Equal(t, "pass", key)
+	_, err = DefaultCmdService.GetShellPrivateKey(launchCommand(t, db).Id)
+	require.Equal(t, codes.NotFound, status.Code(err))
+	_, err = DefaultCmdService.GetShellPrivateKey(uuid.NewString())
+	require.Equal(t, codes.NotFound, status.Code(err))
+
 	// Launch another Shell.
 	cmd2 := launchShell(t, db)
 
@@ -130,6 +151,9 @@ func TestShellManagerLifecycle(t *testing.T) {
 	require.NotNil(t, resp2)
 	require.NoError(t, err)
 	require.Len(t, resp2.Shells, 2)
+	for _, s := range resp2.Shells {
+		require.Empty(t, s.PrivateKey)
+	}
 
 	// Kill 1 Shell.
 	resp3, err := DefaultCmdService.KillNTSC(cmd2.Id, model.TaskTypeShell)
@@ -138,11 +162,13 @@ func TestShellManagerLifecycle(t *testing.T) {
 
 	shell3 := resp3.ToV1Shell()
 	require.Equal(t, taskv1.State_STATE_TERMINATED, shell3.State)
+	require.Empty(t, shell3.PrivateKey)
 
 	// Set Shell priority.
 	resp4, err := DefaultCmdService.SetNTSCPriority(cmd1.Id, 0, model.TaskTypeShell)
 	require.NotNil(t, resp4)
 	require.NoError(t, err)
+	require.Empty(t, resp4.ToV1Shell().PrivateKey)
 }
 
 func TestTensorboardManagerLifecycle(t *testing.T) {
