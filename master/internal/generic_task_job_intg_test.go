@@ -5,6 +5,7 @@ package internal
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sync"
 	"testing"
@@ -16,8 +17,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/configpolicy"
 	"github.com/determined-ai/determined/master/internal/db"
+	"github.com/determined-ai/determined/master/internal/mocks"
 	"github.com/determined-ai/determined/master/internal/rm"
 	"github.com/determined-ai/determined/master/internal/rm/tasklist"
 	"github.com/determined-ai/determined/master/internal/sproto"
@@ -475,6 +478,73 @@ func TestCreateGenericTaskRefusesInvalidSchedulingParameters(t *testing.T) {
 	require.Equal(t, codes.InvalidArgument, status.Code(create(beyond)))
 	require.Empty(t, service.reqs, "no task may be started by a refused create")
 	require.NoError(t, create(within))
+}
+
+// poolDefaultPriorityRM is a resource manager whose pools have a priority scheduler with a default
+// priority.
+type poolDefaultPriorityRM struct {
+	*mocks.ResourceManager
+	defaultPriority int
+}
+
+func (m poolDefaultPriorityRM) ResourcePoolSchedulerConfig(string) (*config.SchedulerConfig, bool) {
+	return &config.SchedulerConfig{
+		Priority: &config.PrioritySchedulerConfig{DefaultPriority: &m.defaultPriority},
+	}, true
+}
+
+// A task created without a priority gets the pool's default priority, which the workspace's task
+// config policy limits as it limits a priority set in the config.
+func TestCreateGenericTaskChecksPoolDefaultPriorityAgainstPolicy(t *testing.T) {
+	api, _, ctx := setupAPITest(t, nil)
+	api.m.rm = poolDefaultPriorityRM{ResourceManager: api.m.rm.(*mocks.ResourceManager), defaultPriority: 50}
+	smallerHigher, err := api.m.rm.SmallerValueIsHigherPriority()
+	require.NoError(t, err)
+	require.True(t, smallerHigher, "the limits below assume that a smaller value is a higher priority")
+	service := &captureAllocationService{}
+	oldService := task.DefaultService
+	task.DefaultService = service
+	t.Cleanup(func() { task.DefaultService = oldService })
+
+	workspaceID, _ := db.RequireMockWorkspaceID(t, db.SingleDB(), "")
+	projectID, _ := db.RequireMockProjectID(t, db.SingleDB(), workspaceID, false)
+	admin, err := user.ByUsername(ctx, "admin")
+	require.NoError(t, err)
+	setLimit := func(limit int) {
+		require.NoError(t, configpolicy.SetTaskConfigPolicies(ctx, &model.TaskConfigPolicies{
+			WorkspaceID: &workspaceID, WorkloadType: model.NTSCType, LastUpdatedBy: admin.ID,
+			Constraints: ptrs.Ptr(fmt.Sprintf(`{"priority_limit": %d}`, limit)),
+		}))
+	}
+	create := func(resources string) (model.TaskID, error) {
+		resp, err := api.CreateGenericTask(ctx, &apiv1.CreateGenericTaskRequest{
+			ProjectId: ptrs.Ptr(int32(projectID)),
+			Config:    "entrypoint: [\"true\"]\nresources:\n  slots: 0\n" + resources,
+		})
+		if err != nil {
+			return "", err
+		}
+		return model.TaskID(resp.TaskId), nil
+	}
+
+	// The pool's default of 50 is a higher priority than the limit of 80 allows, whether the
+	// config sets it or leaves the priority out.
+	setLimit(80)
+	_, err = create("  priority: 50\n")
+	require.Equal(t, codes.InvalidArgument, status.Code(err), "%v", err)
+	_, err = create("")
+	require.Equal(t, codes.InvalidArgument, status.Code(err), "%v", err)
+	require.Empty(t, service.reqs, "no task may be started by a refused create")
+	_, err = create("  priority: 80\n")
+	require.NoError(t, err)
+
+	// Within the limit, the task runs with the pool's default priority.
+	setLimit(30)
+	taskID, err := create("")
+	require.NoError(t, err)
+	_, spec, err := getGenericTaskSpec(ctx, taskID)
+	require.NoError(t, err)
+	require.Equal(t, 50, *spec.GenericTaskConfig.Resources.RawPriority)
 }
 
 func TestGetGenericTasksRefusesANegativeLimit(t *testing.T) {
