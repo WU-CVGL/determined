@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -20,6 +21,7 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	detContext "github.com/determined-ai/determined/master/internal/context"
+	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/user"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
@@ -241,6 +243,54 @@ func TestPatchUserRenameSelfRequiresCurrentPassword(t *testing.T) {
 	requireLogin(t, api, adminName, password, true)
 }
 
+// requireProxySignIn checks that the proxied services send a browser whose session cookie holds
+// token to sign in again.
+func requireProxySignIn(t *testing.T, token string) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "http://gpu.example/proxy/abc/", nil)
+	req.AddCookie(&http.Cookie{Name: user.SessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	c.SetParamNames("service")
+	c.SetParamValues("abc")
+	done, err := processProxyAuthentication(&detContext.DetContext{Context: c})
+	require.True(t, done)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusSeeOther, rec.Code)
+	require.True(t, strings.HasPrefix(rec.Header().Get("Location"), "/det/login?redirect="),
+		rec.Header().Get("Location"))
+}
+
+// TestExpiredRemoteSessionIsUnauthenticated checks that an expired session of a remote (SSO) user,
+// which ByToken reports apart from other ended sessions, is refused as unauthenticated everywhere.
+func TestExpiredRemoteSessionIsUnauthenticated(t *testing.T) {
+	api, _, _ := setupAPITest(t, nil)
+	srv := browserSessionServer(t, api)
+	u := addPasswordUser(t, "Old-password-1")
+	ctx := context.Background()
+	_, err := db.Bun().NewUpdate().Table("users").Set("remote = true").
+		Where("id = ?", u.ID).Exec(ctx)
+	require.NoError(t, err)
+	token, err := user.StartSession(ctx, &u)
+	require.NoError(t, err)
+	_, err = db.Bun().NewUpdate().Table("user_sessions").
+		Set("expiry = ?", time.Now().UTC().Add(-time.Hour)).
+		Where("user_id = ?", u.ID).Exec(ctx)
+	require.NoError(t, err)
+	_, _, err = user.ByToken(ctx, token, &model.ExternalSessions{})
+	require.ErrorIs(t, err, user.ErrRemoteUserTokenExpired)
+
+	for _, r := range []browserRequest{
+		{method: http.MethodGet, path: "/users/me", authorization: "Bearer " + token},
+		{method: http.MethodGet, path: "/users/me", cookie: token},
+		{method: http.MethodGet, path: "/api/v1/me", cookie: token},
+	} {
+		resp, body := r.send(t, srv)
+		require.Equal(t, http.StatusUnauthorized, resp.StatusCode, "%s %s", r.path, body)
+	}
+	requireProxySignIn(t, token)
+}
+
 func TestPasswordChangeRevokesAccessTokens(t *testing.T) {
 	api, _, adminCtx := setupAPITest(t, nil)
 	srv := browserSessionServer(t, api)
@@ -273,23 +323,9 @@ func TestPasswordChangeRevokesAccessTokens(t *testing.T) {
 			resp, body := r.send(t, srv)
 			require.Equal(t, want, resp.StatusCode, "%s %s", r.path, body)
 		}
-		if valid {
-			return
+		if !valid {
+			requireProxySignIn(t, token)
 		}
-
-		// The proxied services send the browser to sign in again.
-		req := httptest.NewRequest(http.MethodGet, "http://gpu.example/proxy/abc/", nil)
-		req.AddCookie(&http.Cookie{Name: user.SessionCookieName, Value: token})
-		rec := httptest.NewRecorder()
-		c := echo.New().NewContext(req, rec)
-		c.SetParamNames("service")
-		c.SetParamValues("abc")
-		done, err := processProxyAuthentication(&detContext.DetContext{Context: c})
-		require.True(t, done)
-		require.NoError(t, err)
-		require.Equal(t, http.StatusSeeOther, rec.Code)
-		require.True(t, strings.HasPrefix(rec.Header().Get("Location"), "/det/login?redirect="),
-			rec.Header().Get("Location"))
 	}
 
 	// Changes other than the password leave access tokens alone.

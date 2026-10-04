@@ -12,7 +12,8 @@ import (
 )
 
 // SessionCookieName is the name of the cookie that holds a browser's session token. The master
-// sets it when a user signs in; the web UI never reads or writes it.
+// sets it when a user signs in; the web UI only looks for one that an earlier version left
+// readable to scripts, to replace or expire it.
 const SessionCookieName = "auth"
 
 // NewSessionCookie returns the cookie that keeps token as a browser's session. It is HttpOnly, so
