@@ -140,7 +140,7 @@ func processProxyAuthentication(c echo.Context) (done bool, err error) {
 		usr, _, err = user.GetService().UserAndSessionFromRequest(c.Request())
 	}
 
-	if errors.Is(err, db.ErrNotFound) {
+	if errors.Is(err, db.ErrNotFound) || errors.Is(err, user.ErrAccessTokenRevoked) {
 		return true, redirectToLogin(c)
 	} else if err != nil {
 		return true, err

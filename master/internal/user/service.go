@@ -223,7 +223,8 @@ func (s *Service) ProcessAuthentication(next echo.HandlerFunc) echo.HandlerFunc 
 			c.(*detContext.DetContext).SetUser(*user)
 			c.(*detContext.DetContext).SetUserSession(*session)
 			return next(c)
-		case db.ErrNotFound:
+		case db.ErrNotFound, ErrAccessTokenRevoked:
+			// The session has ended, or the access token was revoked (by a new password, for one).
 			return echo.NewHTTPError(http.StatusUnauthorized)
 		default:
 			return err

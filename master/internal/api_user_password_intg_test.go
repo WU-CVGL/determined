@@ -6,15 +6,20 @@ package internal
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
+	detContext "github.com/determined-ai/determined/master/internal/context"
 	"github.com/determined-ai/determined/master/internal/user"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
@@ -238,6 +243,7 @@ func TestPatchUserRenameSelfRequiresCurrentPassword(t *testing.T) {
 
 func TestPasswordChangeRevokesAccessTokens(t *testing.T) {
 	api, _, adminCtx := setupAPITest(t, nil)
+	srv := browserSessionServer(t, api)
 	u := addPasswordUser(t, "Old-password-1")
 	newToken := func() string {
 		resp, err := api.PostAccessToken(adminCtx, &apiv1.PostAccessTokenRequest{UserId: int32(u.ID)})
@@ -252,6 +258,38 @@ func TestPasswordChangeRevokesAccessTokens(t *testing.T) {
 		} else {
 			require.ErrorIs(t, err, user.ErrAccessTokenRevoked)
 		}
+
+		// The legacy routes refuse a revoked token as unauthenticated, like the gateway, whether
+		// it comes in the Authorization header or the session cookie.
+		want := http.StatusOK
+		if !valid {
+			want = http.StatusUnauthorized
+		}
+		for _, r := range []browserRequest{
+			{method: http.MethodGet, path: "/users/me", authorization: "Bearer " + token},
+			{method: http.MethodGet, path: "/users/me", cookie: token},
+			{method: http.MethodGet, path: "/api/v1/me", authorization: "Bearer " + token},
+		} {
+			resp, body := r.send(t, srv)
+			require.Equal(t, want, resp.StatusCode, "%s %s", r.path, body)
+		}
+		if valid {
+			return
+		}
+
+		// The proxied services send the browser to sign in again.
+		req := httptest.NewRequest(http.MethodGet, "http://gpu.example/proxy/abc/", nil)
+		req.AddCookie(&http.Cookie{Name: user.SessionCookieName, Value: token})
+		rec := httptest.NewRecorder()
+		c := echo.New().NewContext(req, rec)
+		c.SetParamNames("service")
+		c.SetParamValues("abc")
+		done, err := processProxyAuthentication(&detContext.DetContext{Context: c})
+		require.True(t, done)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusSeeOther, rec.Code)
+		require.True(t, strings.HasPrefix(rec.Header().Get("Location"), "/det/login?redirect="),
+			rec.Header().Get("Location"))
 	}
 
 	// Changes other than the password leave access tokens alone.
