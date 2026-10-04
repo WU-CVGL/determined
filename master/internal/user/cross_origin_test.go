@@ -99,6 +99,26 @@ func TestCheckSameOrigin(t *testing.T) {
 			true,
 		},
 		{
+			"old browser, http default port in Host", "gpu.example:80", "",
+			map[string]string{"Origin": "http://gpu.example"},
+			true,
+		},
+		{
+			"old browser, default port of the other scheme in Host", "gpu.example:443", "",
+			map[string]string{"Origin": "http://gpu.example"},
+			false,
+		},
+		{
+			"old browser, http default port in Host for https", "gpu.example:80", "",
+			map[string]string{"Origin": "https://gpu.example"},
+			false,
+		},
+		{
+			"old browser, https default port in Origin", "gpu.example:80", "",
+			map[string]string{"Origin": "https://gpu.example:443"},
+			false,
+		},
+		{
 			"old browser, same non-default port", "gpu.example:8080", "",
 			map[string]string{"Origin": "http://gpu.example:8080"},
 			true,

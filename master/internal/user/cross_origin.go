@@ -2,7 +2,6 @@ package user
 
 import (
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -70,7 +69,8 @@ func IsWebSocketHandshake(r *http.Request) bool {
 // net/http.CrossOriginProtection from Go 1.25:
 //   - Sec-Fetch-Site "same-origin" or "none" (typed into the address bar) passes; any other value
 //     ("same-site", "cross-site") fails.
-//   - Without Sec-Fetch-Site (older browsers), the Origin header's host must be the request's host.
+//   - Without Sec-Fetch-Site (older browsers), the Origin header must name the request's host and
+//     port (sameHost).
 //   - Without either header, the request did not come from a browser, or came from an old browser
 //     on the same origin, and passes.
 //
@@ -94,11 +94,9 @@ func CheckSameOrigin(r *http.Request) error {
 	if origin == "" {
 		return nil
 	}
-	if u, err := url.Parse(origin); err == nil && u.Host != "" {
-		for _, host := range requestHosts(r) {
-			if sameHost(u.Host, host) {
-				return nil
-			}
+	for _, host := range requestHosts(r) {
+		if sameHost(origin, host) {
+			return nil
 		}
 	}
 	if isTrustedOrigin(origin) {
@@ -158,15 +156,16 @@ func requestHosts(r *http.Request) []string {
 	return hosts
 }
 
-// sameHost compares two host[:port] values, ignoring case and the default ports 80 and 443, which
-// browsers leave out of the Origin header.
-func sameHost(a, b string) bool {
-	canonical := func(h string) string {
-		h = strings.ToLower(h)
-		for _, port := range []string{":80", ":443"} {
-			h = strings.TrimSuffix(h, port)
-		}
-		return h
+// sameHost reports whether origin, an Origin header, names host, a request's host[:port]. Case does
+// not matter, and a missing port is the default one of the origin's scheme, which browsers leave
+// out of the header: http://gpu.example names gpu.example and gpu.example:80, but not
+// gpu.example:443. Origins that config.NormalizeOrigin refuses name no host.
+func sameHost(origin, host string) bool {
+	o, err := config.NormalizeOrigin(origin)
+	if err != nil {
+		return false
 	}
-	return a != "" && canonical(a) == canonical(b)
+	scheme, _, _ := strings.Cut(o, "://")
+	h, err := config.NormalizeOrigin(scheme + "://" + host)
+	return err == nil && h == o
 }
