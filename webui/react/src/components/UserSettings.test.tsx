@@ -1,5 +1,5 @@
 import { waitFor } from '@testing-library/dom';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DefaultTheme, UIProvider } from 'hew/Theme';
 import { useInitApi } from 'hew/Toast';
@@ -13,6 +13,7 @@ import authStore from 'stores/auth';
 import userStore from 'stores/users';
 import userSettings from 'stores/userSettings';
 import { DetailedUser } from 'types';
+import { DetError } from 'utils/error';
 
 import { CURRENT_PASSWORD_LABEL, OK_BUTTON_LABEL } from './UsernameChangeModal';
 import UserSettings from './UserSettings';
@@ -94,6 +95,14 @@ const setup = (currentUser = CURRENT_USER) =>
     </UIProvider>,
   );
 
+/* Closes the Change Username modal, which asks for the current password, without renaming. */
+const cancelPasswordPrompt = () =>
+  user.click(
+    within(screen.getByRole('dialog', { name: 'Change Username' })).getByRole('button', {
+      name: 'Cancel',
+    }),
+  );
+
 describe('UserSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -136,6 +145,41 @@ describe('UserSettings', () => {
         userParams: { oldPassword: 'Current-1', username: `${USERNAME}a` },
       }),
     );
+  });
+  it('shows the saved username when the current password prompt is cancelled', async () => {
+    setup();
+    await user.click(await screen.findByTestId('edit-username'));
+    await user.type(screen.getByPlaceholderText('Add username'), 'XYZ');
+    await user.click(screen.getByTestId('submit-username'));
+    await screen.findByLabelText(CURRENT_PASSWORD_LABEL);
+    await cancelPasswordPrompt();
+
+    // The username was not changed, and the profile says so.
+    await waitFor(() => expect(screen.getByTestId('value-username')).toHaveTextContent(USERNAME));
+    expect(screen.getByTestId('value-username').textContent).toBe(USERNAME);
+    expect(screen.queryByTestId('reset-username')).not.toBeInTheDocument();
+    // Also after editing again and cancelling that.
+    await user.click(screen.getByTestId('edit-username'));
+    await user.click(screen.getByTestId('reset-username'));
+    expect(screen.getByTestId('value-username').textContent).toBe(USERNAME);
+    expect(mockPatchUser).not.toHaveBeenCalled();
+  });
+  it('shows the saved username when the master refuses the new one', async () => {
+    vi.mocked(mockPatchUser).mockRejectedValueOnce(
+      new DetError(new Response(null, { status: 403 })),
+    );
+    setup();
+    await user.click(await screen.findByTestId('edit-username'));
+    await user.type(screen.getByPlaceholderText('Add username'), 'XYZ');
+    await user.click(screen.getByTestId('submit-username'));
+    await user.type(await screen.findByLabelText(CURRENT_PASSWORD_LABEL), 'wrong');
+    await user.click(screen.getByRole('button', { name: OK_BUTTON_LABEL }));
+    // The master refuses the current password, and the user gives up.
+    await waitFor(() => expect(mockPatchUser).toHaveBeenCalledTimes(1));
+    await cancelPasswordPrompt();
+
+    await waitFor(() => expect(screen.getByTestId('value-username')).toHaveTextContent(USERNAME));
+    expect(screen.getByTestId('value-username').textContent).toBe(USERNAME);
   });
   it('does not offer remote users a new username', async () => {
     setup({ ...CURRENT_USER, remote: true });

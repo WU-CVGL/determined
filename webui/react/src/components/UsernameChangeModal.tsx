@@ -26,6 +26,8 @@ interface FormInputs {
 
 interface Props {
   newUsername: string;
+  /** Called when the modal closes without renaming the user. */
+  onClose?: () => void;
   onSubmit?: () => void;
 }
 
@@ -34,7 +36,11 @@ interface Props {
  * username, so the master needs the current password to rename yourself, as it does to change your
  * password: a stolen session could otherwise lock you out.
  */
-const UsernameChangeModalComponent: React.FC<Props> = ({ newUsername, onSubmit }: Props) => {
+const UsernameChangeModalComponent: React.FC<Props> = ({
+  newUsername,
+  onClose,
+  onSubmit,
+}: Props) => {
   const idPrefix = useId();
   const [form] = Form.useForm<FormInputs>();
   const currentUser = Loadable.getOrElse(undefined, useObservable(userStore.currentUser));
@@ -72,7 +78,10 @@ const UsernameChangeModalComponent: React.FC<Props> = ({ newUsername, onSubmit }
         text: OK_BUTTON_LABEL,
       }}
       title={MODAL_HEADER_LABEL}
-      onClose={() => form.resetFields()}>
+      onClose={() => {
+        form.resetFields();
+        onClose?.();
+      }}>
       <p>Enter your current password to change your username to {newUsername}.</p>
       <Form form={form} id={idPrefix + FORM_ID}>
         <Form.Item label={CURRENT_PASSWORD_LABEL} name={CURRENT_PASSWORD_NAME}>

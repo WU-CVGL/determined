@@ -25,20 +25,27 @@ vi.mock('services/api', () => ({ patchUser: vi.fn() }));
 
 const user = userEvent.setup();
 
-const Container: React.FC<{ onSubmit: () => void }> = ({ onSubmit }) => {
+const Container: React.FC<{ onClose?: () => void; onSubmit: () => void }> = ({
+  onClose,
+  onSubmit,
+}) => {
   const UsernameChangeModal = useModal(UsernameChangeModalComponent);
   return (
     <div>
       <Button onClick={UsernameChangeModal.open}>{OPEN_MODAL_TEXT}</Button>
-      <UsernameChangeModal.Component newUsername={NEW_USERNAME} onSubmit={onSubmit} />
+      <UsernameChangeModal.Component
+        newUsername={NEW_USERNAME}
+        onClose={onClose}
+        onSubmit={onSubmit}
+      />
     </div>
   );
 };
 
-const setup = async (onSubmit = vi.fn()) => {
+const setup = async (onSubmit = vi.fn(), onClose?: () => void) => {
   const view = render(
     <UIProvider theme={DefaultTheme.Light}>
-      <Container onSubmit={onSubmit} />
+      <Container onClose={onClose} onSubmit={onSubmit} />
     </UIProvider>,
   );
   await user.click(await view.findByText(OPEN_MODAL_TEXT));
@@ -95,5 +102,17 @@ describe('Username Change Modal', () => {
     // The modal stays open for another try.
     expect(screen.getByLabelText(CURRENT_PASSWORD_LABEL)).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('tells the caller when it closes without renaming the user', async () => {
+    const onClose = vi.fn();
+    const onSubmit = vi.fn();
+    await setup(onSubmit, onClose);
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(mockPatchUser).not.toHaveBeenCalled();
   });
 });

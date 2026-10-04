@@ -152,6 +152,8 @@ const UserSettings: React.FC<Props> = ({ show, onClose }: Props) => {
                   required
                   rules={[{ message: 'Please input your username', required: true }]}
                   testId="username"
+                  // Show the saved username, not one typed and then left unsaved.
+                  value={currentUser?.username ?? ''}
                   onCancel={() => setEditingUsername(false)}
                   onEdit={() => setEditingUsername(true)}
                   onSubmit={handleSaveUsername}>
@@ -159,6 +161,7 @@ const UserSettings: React.FC<Props> = ({ show, onClose }: Props) => {
                 </InlineForm>
                 <UsernameChangeModal.Component
                   newUsername={newUsername}
+                  onClose={() => setEditingUsername(false)}
                   onSubmit={() => setEditingUsername(false)}
                 />
                 <InlineForm<string>
