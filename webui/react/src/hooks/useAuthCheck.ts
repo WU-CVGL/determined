@@ -1,6 +1,6 @@
 import { Loadable } from 'hew/utils/loadable';
 import { useObservable } from 'micro-observables';
-import { useCallback, useInsertionEffect, useRef } from 'react';
+import { useCallback, useEffect, useInsertionEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { samlUrl } from 'ee/SamlAuth';
@@ -86,8 +86,8 @@ const removeTokenFromHistory = (): void => {
 const useAuthCheck = (): (() => Promise<boolean>) => {
   const info = useObservable(determinedStore.info);
   const [searchParams, setSearchParams] = useSearchParams();
-  // setSearchParams changes on every navigation, and App checks the session again whenever
-  // checkAuth changes, so checkAuth reaches it through a ref instead of depending on it.
+  // setSearchParams changes on every navigation, and useSessionCheck checks the session again
+  // whenever checkAuth changes, so checkAuth reaches it through a ref instead of depending on it.
   const setSearchParamsRef = useRef(setSearchParams);
   useInsertionEffect(() => {
     setSearchParamsRef.current = setSearchParams;
@@ -193,6 +193,24 @@ const useAuthCheck = (): (() => Promise<boolean>) => {
   ]);
 
   return checkAuth;
+};
+
+/**
+ * Checks the session once the master can be reached, and again whenever the tab becomes visible:
+ * every tab shares the session cookie, so another tab may have signed in as someone else meanwhile.
+ */
+export const useSessionCheck = (isServerReachable: boolean): void => {
+  const checkAuth = useAuthCheck();
+
+  useEffect(() => {
+    if (!isServerReachable) return;
+    checkAuth();
+    const checkWhenVisible = () => {
+      if (!document.hidden) checkAuth();
+    };
+    document.addEventListener('visibilitychange', checkWhenVisible);
+    return () => document.removeEventListener('visibilitychange', checkWhenVisible);
+  }, [checkAuth, isServerReachable]);
 };
 
 export default useAuthCheck;

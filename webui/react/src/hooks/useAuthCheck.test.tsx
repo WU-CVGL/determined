@@ -1,6 +1,6 @@
 import { act, render, renderHook, waitFor } from '@testing-library/react';
 import { WritableObservable } from 'micro-observables';
-import React, { useEffect } from 'react';
+import React from 'react';
 import { createMemoryRouter, MemoryRouter, RouterProvider, useLocation } from 'react-router-dom';
 
 import { getCurrentUser, storeSessionToken } from 'services/api';
@@ -11,7 +11,7 @@ import { reloadPage } from 'utils/browser';
 import { DetError, ErrorType } from 'utils/error';
 import { routeToExternalUrl } from 'utils/routes';
 
-import useAuthCheck from './useAuthCheck';
+import useAuthCheck, { useSessionCheck } from './useAuthCheck';
 
 const { routeAll } = vi.hoisted(() => ({ routeAll: vi.fn() }));
 
@@ -70,6 +70,19 @@ const setup = (url: string) => {
     <MemoryRouter initialEntries={[url]}>{children}</MemoryRouter>
   );
   return renderHook(() => ({ check: useAuthCheck(), location: useLocation() }), { wrapper });
+};
+
+/* App's session check. */
+const SessionCheck = () => {
+  useSessionCheck(true);
+  return null;
+};
+
+/* Tells the page that the tab was hidden or shown. */
+const setTabHidden = async (hidden: boolean) => {
+  vi.spyOn(document, 'hidden', 'get').mockReturnValue(hidden);
+  document.dispatchEvent(new Event('visibilitychange'));
+  await act(() => Promise.resolve());
 };
 
 const check = async (result: ReturnType<typeof setup>['result']): Promise<boolean> => {
@@ -257,15 +270,8 @@ describe('useAuthCheck', () => {
       isAdmin: false,
       username: 'u',
     });
-    // Like App, which checks the session whenever checkAuth changes.
-    const AppLike = () => {
-      const checkAuth = useAuthCheck();
-      useEffect(() => {
-        checkAuth();
-      }, [checkAuth]);
-      return null;
-    };
-    const router = createMemoryRouter([{ element: <AppLike />, path: '*' }], {
+    // App's session check runs again whenever checkAuth changes.
+    const router = createMemoryRouter([{ element: <SessionCheck />, path: '*' }], {
       initialEntries: ['/det/dashboard'],
     });
     render(<RouterProvider router={router} />);
@@ -305,6 +311,27 @@ describe('useAuthCheck', () => {
 
     expect(await check(result)).toBe(true);
     expect(reloadPage).not.toHaveBeenCalled();
+  });
+
+  it('checks the session again when the tab becomes visible', async () => {
+    userStore.updateCurrentUser(USER);
+    vi.mocked(getCurrentUser).mockResolvedValue(USER);
+    render(
+      <MemoryRouter initialEntries={['/det/models']}>
+        <SessionCheck />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(authStore.isAuthenticated.get()).toBe(true));
+    expect(getCurrentUser).toHaveBeenCalledTimes(1);
+
+    // While the tab is hidden, another tab signs out and signs in as someone else.
+    await setTabHidden(true);
+    expect(getCurrentUser).toHaveBeenCalledTimes(1);
+    vi.mocked(getCurrentUser).mockResolvedValue({ ...USER, id: 2, username: 'other' });
+
+    await setTabHidden(false);
+    await waitFor(() => expect(reloadPage).toHaveBeenCalledTimes(1));
+    expect(getCurrentUser).toHaveBeenCalledTimes(2);
   });
 
   it('replaces a session cookie that scripts can read with the HttpOnly one', async () => {
