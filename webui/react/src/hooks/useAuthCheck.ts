@@ -1,5 +1,5 @@
 import { useObservable } from 'micro-observables';
-import { useCallback } from 'react';
+import { useCallback, useInsertionEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { samlUrl } from 'ee/SamlAuth';
@@ -38,6 +38,12 @@ const removeTokenFromHistory = (): void => {
 const useAuthCheck = (): (() => Promise<boolean>) => {
   const info = useObservable(determinedStore.info);
   const [searchParams, setSearchParams] = useSearchParams();
+  // setSearchParams changes on every navigation, and App checks the session again whenever
+  // checkAuth changes, so checkAuth reaches it through a ref instead of depending on it.
+  const setSearchParamsRef = useRef(setSearchParams);
+  useInsertionEffect(() => {
+    setSearchParamsRef.current = setSearchParams;
+  }, [setSearchParams]);
 
   const redirectToExternalSignin = useCallback(() => {
     const { pathname: path, origin, href } = window.location;
@@ -67,7 +73,7 @@ const useAuthCheck = (): (() => Promise<boolean>) => {
       const jwt = searchParams.getAll(JWT_PARAM);
       const rest = new URLSearchParams(searchParams);
       rest.delete(JWT_PARAM);
-      setSearchParams(rest, { replace: true });
+      setSearchParamsRef.current(rest, { replace: true });
 
       // Only the external sign-in page sends a token. Accepting one from any link would let the
       // link's author sign visitors in to an account of their choosing.
@@ -124,7 +130,6 @@ const useAuthCheck = (): (() => Promise<boolean>) => {
     info.externalLoginUri,
     info.ssoProviders,
     searchParams,
-    setSearchParams,
     redirectToExternalSignin,
     redirectToSSO,
   ]);

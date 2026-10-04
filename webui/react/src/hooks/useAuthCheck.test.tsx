@@ -1,7 +1,7 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, render, renderHook, waitFor } from '@testing-library/react';
 import { WritableObservable } from 'micro-observables';
-import React from 'react';
-import { MemoryRouter, useLocation } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { createMemoryRouter, MemoryRouter, RouterProvider, useLocation } from 'react-router-dom';
 
 import { getCurrentUser, storeSessionToken } from 'services/api';
 import authStore from 'stores/auth';
@@ -214,6 +214,36 @@ describe('useAuthCheck', () => {
     expect(await check(result)).toBe(false);
     expect(routeToExternalUrl).toHaveBeenCalledWith('https://sso/oidc');
     expect(authStore.isAuthenticated.get()).toBe(false);
+  });
+
+  it('checks the session once, not again on every navigation', async () => {
+    vi.mocked(getCurrentUser).mockResolvedValue({
+      id: 1,
+      isActive: true,
+      isAdmin: false,
+      username: 'u',
+    });
+    // Like App, which checks the session whenever checkAuth changes.
+    const AppLike = () => {
+      const checkAuth = useAuthCheck();
+      useEffect(() => {
+        checkAuth();
+      }, [checkAuth]);
+      return null;
+    };
+    const router = createMemoryRouter([{ element: <AppLike />, path: '*' }], {
+      initialEntries: ['/det/dashboard'],
+    });
+    render(<RouterProvider router={router} />);
+    await waitFor(() => expect(authStore.isAuthenticated.get()).toBe(true));
+
+    for (const path of ['/det/models', '/det/experiments', '/det/workspaces']) {
+      await act(() => router.navigate(path));
+    }
+    await act(() => Promise.resolve());
+
+    expect(router.state.location.pathname).toBe('/det/workspaces');
+    expect(getCurrentUser).toHaveBeenCalledTimes(1);
   });
 
   it('keeps what it knew when the master cannot be reached', async () => {
