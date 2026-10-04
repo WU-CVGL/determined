@@ -261,6 +261,19 @@ func TestBrowserSessionLogoutAndSessionCookie(t *testing.T) {
 	resp, _ = browserRequest{method: http.MethodGet, path: "/api/v1/me", cookie: token}.send(t, srv)
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 
+	// Signing out with a session that has already ended fails, and still removes the cookie,
+	// which the web UI cannot remove itself.
+	for _, path := range []string{"/api/v1/auth/logout", "/logout"} {
+		resp, _ = browserRequest{
+			method: http.MethodPost, path: path, cookie: token, origin: self, fetchSite: sameOrigin,
+		}.send(t, srv)
+		require.Equal(t, http.StatusUnauthorized, resp.StatusCode, path)
+		c := sessionCookieOf(t, resp)
+		require.Empty(t, c.Value, path)
+		require.Equal(t, "/", c.Path, path)
+		require.Negative(t, c.MaxAge, path)
+	}
+
 	// Another site cannot sign the visitor out.
 	token = newToken()
 	resp, _ = browserRequest{

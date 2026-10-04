@@ -422,10 +422,14 @@ func ByToken(ctx context.Context, token string, ext *model.ExternalSessions) (
 
 	// Keep fields that only the token carries, such as InheritedClaims.
 	session := claims
-	if err := db.Bun().NewSelect().
+	switch err := db.Bun().NewSelect().
 		Model(&session).
 		Where("id = ?", claims.ID).
-		Scan(ctx); err != nil {
+		Scan(ctx); {
+	case errors.Is(err, sql.ErrNoRows):
+		// The session has ended: signed out, or removed by a password change.
+		return nil, nil, db.ErrNotFound
+	case err != nil:
 		return nil, nil, err
 	}
 	// The master signs allocation and notebook session tokens with the same key, and their IDs
