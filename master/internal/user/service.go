@@ -424,13 +424,8 @@ func (s *Service) patchUser(c echo.Context) (interface{}, error) {
 			return nil, canViewUserErrorHandle(currUser, *user,
 				errors.Wrap(forbiddenError, err.Error()), userNotFoundErr)
 		}
-		switch err = CheckCurrentPassword(ctx, currUser, user.ID, params.OldPassword, true); {
-		case err == nil:
-		case errors.Is(err, ErrCurrentPasswordIncorrect):
-			return nil, echo.NewHTTPError(http.StatusForbidden, err.Error())
-		case errors.Is(err, ErrCurrentPasswordRequired), errors.Is(err, ErrRemoteUserPassword):
-			return nil, echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		default:
+		err = checkCurrentPasswordHTTP(ctx, currUser, user.ID, OwnPasswordChange, params.OldPassword)
+		if err != nil {
 			return nil, err
 		}
 
@@ -483,6 +478,24 @@ func (s *Service) patchUser(c echo.Context) (interface{}, error) {
 	}, nil
 }
 
+// checkCurrentPasswordHTTP wraps CheckCurrentPassword with HTTP status codes, for the legacy
+// routes. Their current password is salted and hashed like their passwords.
+func checkCurrentPasswordHTTP(
+	ctx context.Context, curUser model.User, targetID model.UserID, change OwnAccountChange,
+	currentPassword *string,
+) error {
+	switch err := CheckCurrentPassword(ctx, curUser, targetID, change, currentPassword, true); {
+	case err == nil:
+		return nil
+	case errors.Is(err, ErrCurrentPasswordIncorrect):
+		return echo.NewHTTPError(http.StatusForbidden, err.Error())
+	case errors.Is(err, ErrCurrentPasswordRequired), errors.Is(err, ErrNoPasswordSignIn):
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	default:
+		return err
+	}
+}
+
 func (s *Service) patchUsername(c echo.Context) (interface{}, error) {
 	if s.extConfig.Enabled() {
 		return nil, externalSessionsError
@@ -490,6 +503,9 @@ func (s *Service) patchUsername(c echo.Context) (interface{}, error) {
 	type (
 		request struct {
 			NewUsername *string `json:"username,omitempty"`
+			// OldPassword is the current password, salted and hashed like the passwords of the
+			// legacy routes. Users who rename themselves must send it.
+			OldPassword *string `json:"old_password,omitempty"`
 		}
 		response struct {
 			message string
@@ -537,6 +553,10 @@ func (s *Service) patchUsername(c echo.Context) (interface{}, error) {
 	if params.NewUsername == nil {
 		malformedRequestError := echo.NewHTTPError(http.StatusBadRequest, "username is required")
 		return nil, malformedRequestError
+	}
+	err = checkCurrentPasswordHTTP(ctx, currUser, user.ID, OwnUsernameChange, params.OldPassword)
+	if err != nil {
+		return nil, err
 	}
 
 	switch u, uErr := ByUsername(ctx, *params.NewUsername); {

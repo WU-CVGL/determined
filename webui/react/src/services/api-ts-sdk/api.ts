@@ -7635,7 +7635,7 @@ export interface V1PatchUser {
      */
     remote?: boolean;
     /**
-     * The user's current password, pre-salted and hashed if is_hashed is set. Required when users change their own password; ignored otherwise. Users without a password send an empty string.
+     * The user's current password, pre-salted and hashed if is_hashed is set. Required when users change their own password or username; ignored otherwise. Users without a password send an empty string.
      * @type {string}
      * @memberof V1PatchUser
      */

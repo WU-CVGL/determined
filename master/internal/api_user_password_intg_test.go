@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/determined-ai/determined/master/internal/user"
 	"github.com/determined-ai/determined/master/pkg/model"
@@ -188,4 +189,109 @@ func TestChangeOwnPasswordBlankAndRemoteUsers(t *testing.T) {
 			require.Contains(t, err.Error(), "remote users")
 		}
 	}
+}
+
+func TestPatchUserRenameSelfRequiresCurrentPassword(t *testing.T) {
+	api, _, adminCtx := setupAPITest(t, nil)
+	const password = "Old-password-1"
+	u := addPasswordUser(t, password)
+	rename := func(username string, old *string, hashed bool) *apiv1.PatchUserRequest {
+		return &apiv1.PatchUserRequest{UserId: int32(u.ID), User: &userv1.PatchUser{
+			Username: ptrs.Ptr(username), OldPassword: old, IsHashed: hashed,
+		}}
+	}
+	ctx := sessionContext(t, u)
+
+	// Renaming yourself locks you out of the name you sign in with, like a new password.
+	newName := uuid.New().String()
+	_, err := api.PatchUser(ctx, rename(newName, nil, false))
+	requireCode(t, codes.InvalidArgument, err)
+	require.Contains(t, err.Error(), "to change your own username")
+	_, err = api.PatchUser(ctx, rename(newName, ptrs.Ptr("wrong"), false))
+	requireCode(t, codes.PermissionDenied, err)
+	requireLogin(t, api, u.Username, password, true)
+	requireLogin(t, api, newName, password, false)
+
+	// Sending the current username is not a rename (the web UI's user editor does that).
+	_, err = api.PatchUser(ctx, rename(u.Username, nil, false))
+	require.NoError(t, err)
+
+	_, err = api.PatchUser(ctx, rename(newName, ptrs.Ptr(password), false))
+	require.NoError(t, err)
+	requireLogin(t, api, newName, password, true)
+
+	// The current password is hashed like a password when is_hashed is set.
+	newerName := uuid.New().String()
+	_, err = api.PatchUser(ctx, rename(newerName, ptrs.Ptr(password), true))
+	requireCode(t, codes.PermissionDenied, err)
+	_, err = api.PatchUser(ctx, rename(newerName,
+		ptrs.Ptr(user.ReplicateClientSideSaltAndHash(password)), true))
+	require.NoError(t, err)
+	requireLogin(t, api, newerName, password, true)
+
+	// An administrator needs no current password to rename another user.
+	adminName := uuid.New().String()
+	_, err = api.PatchUser(adminCtx, rename(adminName, nil, false))
+	require.NoError(t, err)
+	requireLogin(t, api, adminName, password, true)
+}
+
+func TestPasswordChangeRevokesAccessTokens(t *testing.T) {
+	api, _, adminCtx := setupAPITest(t, nil)
+	u := addPasswordUser(t, "Old-password-1")
+	newToken := func() string {
+		resp, err := api.PostAccessToken(adminCtx, &apiv1.PostAccessTokenRequest{UserId: int32(u.ID)})
+		require.NoError(t, err)
+		return resp.Token
+	}
+	requireValid := func(token string, valid bool) {
+		t.Helper()
+		_, _, err := user.ByToken(context.Background(), token, &model.ExternalSessions{})
+		if valid {
+			require.NoError(t, err)
+		} else {
+			require.ErrorIs(t, err, user.ErrAccessTokenRevoked)
+		}
+	}
+
+	// Changes other than the password leave access tokens alone.
+	token := newToken()
+	_, err := api.PatchUser(adminCtx, &apiv1.PatchUserRequest{UserId: int32(u.ID), User: &userv1.PatchUser{
+		DisplayName: ptrs.Ptr(uuid.New().String()),
+	}})
+	require.NoError(t, err)
+	_, err = api.PatchUser(adminCtx, &apiv1.PatchUserRequest{UserId: int32(u.ID), User: &userv1.PatchUser{
+		Username: ptrs.Ptr(uuid.New().String()),
+	}})
+	require.NoError(t, err)
+	requireValid(token, true)
+
+	// A new password revokes them, however it is set: a stolen session may have created them, and
+	// changing the password is how users take their account back.
+	_, err = api.SetUserPassword(adminCtx, &apiv1.SetUserPasswordRequest{
+		UserId: int32(u.ID), Password: "New-password-1",
+	})
+	require.NoError(t, err)
+	requireValid(token, false)
+
+	token = newToken()
+	_, err = api.PatchUser(sessionContext(t, u), &apiv1.PatchUserRequest{
+		UserId: int32(u.ID), User: &userv1.PatchUser{
+			Password: ptrs.Ptr("New-password-2"), OldPassword: ptrs.Ptr("New-password-1"),
+		},
+	})
+	require.NoError(t, err)
+	requireValid(token, false)
+
+	// Deactivating the user still revokes them.
+	_, err = api.PatchUser(adminCtx, &apiv1.PatchUserRequest{UserId: int32(u.ID), User: &userv1.PatchUser{
+		Active: wrapperspb.Bool(true),
+	}})
+	require.NoError(t, err)
+	token = newToken()
+	_, err = api.PatchUser(adminCtx, &apiv1.PatchUserRequest{UserId: int32(u.ID), User: &userv1.PatchUser{
+		Active: wrapperspb.Bool(false),
+	}})
+	require.NoError(t, err)
+	requireValid(token, false)
 }

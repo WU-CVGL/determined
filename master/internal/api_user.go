@@ -360,14 +360,14 @@ func (a *apiServer) PostUser(
 
 // checkCurrentPassword wraps user.CheckCurrentPassword with gRPC status codes.
 func checkCurrentPassword(
-	ctx context.Context, curUser model.User, targetID model.UserID, currentPassword *string,
-	isHashed bool,
+	ctx context.Context, curUser model.User, targetID model.UserID, change user.OwnAccountChange,
+	currentPassword *string, isHashed bool,
 ) error {
-	err := user.CheckCurrentPassword(ctx, curUser, targetID, currentPassword, isHashed)
+	err := user.CheckCurrentPassword(ctx, curUser, targetID, change, currentPassword, isHashed)
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, user.ErrCurrentPasswordRequired), errors.Is(err, user.ErrRemoteUserPassword):
+	case errors.Is(err, user.ErrCurrentPasswordRequired), errors.Is(err, user.ErrNoPasswordSignIn):
 		return status.Error(codes.InvalidArgument, err.Error())
 	case errors.Is(err, user.ErrCurrentPasswordIncorrect):
 		return status.Error(codes.PermissionDenied, err.Error())
@@ -402,7 +402,7 @@ func (a *apiServer) SetUserPassword(
 		return nil, status.Error(codes.PermissionDenied, err.Error())
 	}
 	if err = checkCurrentPassword(
-		ctx, *curUser, targetUser.ID, req.OldPassword, false,
+		ctx, *curUser, targetUser.ID, user.OwnPasswordChange, req.OldPassword, false,
 	); err != nil {
 		return nil, err
 	}
@@ -497,6 +497,13 @@ func (a *apiServer) PatchUser(
 		if willBeRemote {
 			return nil, status.Error(codes.InvalidArgument, "Cannot set username for remote users")
 		}
+		// Users who rename themselves could no longer sign in with the name they know.
+		if err = checkCurrentPassword(
+			ctx, *curUser, targetUser.ID, user.OwnUsernameChange, req.User.OldPassword,
+			req.User.IsHashed,
+		); err != nil {
+			return nil, err
+		}
 
 		username, err := clearUsername(targetUser, *req.User.Username, 2)
 		if err != nil {
@@ -546,7 +553,8 @@ func (a *apiServer) PatchUser(
 			return nil, status.Error(codes.InvalidArgument, "Cannot set password for remote users")
 		}
 		if err = checkCurrentPassword(
-			ctx, *curUser, targetUser.ID, req.User.OldPassword, req.User.IsHashed,
+			ctx, *curUser, targetUser.ID, user.OwnPasswordChange, req.User.OldPassword,
+			req.User.IsHashed,
 		); err != nil {
 			return nil, err
 		}

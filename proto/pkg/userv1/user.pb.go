@@ -318,8 +318,8 @@ type PatchUser struct {
 	// password.
 	Remote *bool `protobuf:"varint,8,opt,name=remote,proto3,oneof" json:"remote,omitempty"`
 	// The user's current password, pre-salted and hashed if is_hashed is set.
-	// Required when users change their own password; ignored otherwise. Users
-	// without a password send an empty string.
+	// Required when users change their own password or username; ignored
+	// otherwise. Users without a password send an empty string.
 	OldPassword *string `protobuf:"bytes,9,opt,name=old_password,json=oldPassword,proto3,oneof" json:"old_password,omitempty"`
 }
 
