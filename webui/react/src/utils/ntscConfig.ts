@@ -1,4 +1,4 @@
-import { cloneDeep, isEqual, isPlainObject } from 'lodash';
+import { cloneDeep, isEqual, isNil, isPlainObject } from 'lodash';
 
 import { CommandType, RawJson } from 'types';
 
@@ -104,12 +104,17 @@ const dropNulls = (value: RawJson): RawJson => {
 /**
  * Keeps only the keys of `config` whose values differ from `defaults`.
  * Objects are compared key by key, everything else (including arrays) as a whole.
+ *
+ * A null clears a setting, so it is kept where the default sets one. Where the
+ * default is null or missing too, it changes nothing and is dropped, as are
+ * the nulls inside an object that has no default object to compare with.
  */
 export const minimalDiff = (config: RawJson, defaults: RawJson): RawJson => {
   const out: RawJson = {};
   Object.entries(config).forEach(([key, value]) => {
     const base = defaults[key];
-    if (isEqual(value, base)) return;
+    if (value === undefined || isEqual(value, base)) return;
+    if (value === null && isNil(base)) return;
     const valueObject = asObject(value);
     const baseObject = asObject(base);
     if (valueObject && baseObject) {
@@ -117,7 +122,7 @@ export const minimalDiff = (config: RawJson, defaults: RawJson): RawJson => {
       if (Object.keys(diff).length !== 0) out[key] = diff;
       return;
     }
-    out[key] = value;
+    out[key] = valueObject ? dropNulls(valueObject) : value;
   });
   return out;
 };
@@ -125,11 +130,16 @@ export const minimalDiff = (config: RawJson, defaults: RawJson): RawJson => {
 /**
  * Builds a template from a launch config.
  *
- * It applies sanitizeConfig, always drops the description (a template should
- * not name every task launched from it) and null values (a null in a template
- * overrides the cluster default). When the cluster defaults for the same
- * workspace, pool and slots are known, only the settings that differ from them
- * are kept, so the template keeps following later changes to the defaults.
+ * It applies sanitizeConfig and always drops the description (a template
+ * should not name every task launched from it). A null in a template clears
+ * the cluster default, like a null in a launch config does.
+ *
+ * When the cluster defaults for the same workspace, pool and slots are known,
+ * only the settings that differ from them are kept (see minimalDiff), so the
+ * template keeps following later changes to the defaults. A null that clears
+ * a default is one of those settings. Without the defaults, every null is
+ * dropped, since there is no telling an unset setting from a cleared one.
+ *
  * The resource pool and slots are always kept: the master ignores template
  * resources for notebooks and shells, and the launch form copies them into its
  * fields when the template is picked.
@@ -142,7 +152,7 @@ export const templateFromConfig = (config: RawJson, defaults?: RawJson): RawJson
 
   const cleanDefaults = sanitizeConfig(defaults);
   delete cleanDefaults.description;
-  const out = minimalDiff(full, dropNulls(cleanDefaults));
+  const out = minimalDiff(clean, cleanDefaults);
   const resources = asObject(full.resources);
   if (resources) {
     const kept: RawJson = {};

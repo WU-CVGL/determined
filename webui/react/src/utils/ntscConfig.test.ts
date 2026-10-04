@@ -102,6 +102,29 @@ describe('ntscConfig', () => {
         resources: { resource_pool: 'gpu', slots: 2 },
       });
     });
+
+    it('keeps a null work_dir that clears the default one', () => {
+      const defaults = { ...mergedShellConfig, work_dir: '/cluster/default-dir' };
+      expect(templateFromConfig(mergedShellConfig, defaults)).toEqual({
+        resources: { resource_pool: 'gpu', slots: 2 },
+        work_dir: null,
+      });
+    });
+
+    it('keeps a nested null that clears a default', () => {
+      const devices = [{ container_path: '/dev/fuse', host_path: '/dev/fuse', mode: 'mrw' }];
+      const defaults = {
+        ...mergedShellConfig,
+        resources: { ...mergedShellConfig.resources, devices },
+      };
+      const config = {
+        ...mergedShellConfig,
+        resources: { ...mergedShellConfig.resources, devices: null },
+      };
+      expect(templateFromConfig(config, defaults)).toEqual({
+        resources: { devices: null, resource_pool: 'gpu', slots: 2 },
+      });
+    });
   });
 
   describe('minimalDiff', () => {
@@ -112,6 +135,15 @@ describe('ntscConfig', () => {
           { a: 1, b: { c: 2, d: 4 }, e: [1], f: 'x' },
         ),
       ).toEqual({ b: { d: 3 }, e: [1, 2] });
+    });
+
+    it('keeps a null only where the default is set', () => {
+      expect(
+        minimalDiff(
+          { a: null, b: null, c: null, d: { e: null, f: 1 }, g: { h: null, i: 1 } },
+          { a: 'x', b: null, d: { e: 2, f: 1 } },
+        ),
+      ).toEqual({ a: null, d: { e: null }, g: { i: 1 } });
     });
   });
 
