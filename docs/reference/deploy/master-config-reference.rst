@@ -1595,6 +1595,44 @@ valid, enhancing security while supporting automation.
 -  ``max_lifespan_days``: Specifies the maximum allowed lifespan (in days) for access tokens.
    Setting this to ``-1`` allows for an infinite token lifespan. Defaults to ``-1``.
 
+``session_cookie``
+==================
+
+Configures the ``auth`` cookie that holds a browser's session. The master sets it when a user signs
+in to the WebUI; it is ``HttpOnly`` and ``SameSite=Lax``.
+
+-  ``secure``: Whether the cookie is marked ``Secure``, so that browsers send it only over HTTPS.
+   One of ``auto``, ``always``, or ``never``. With ``auto``, the cookie is ``Secure`` when the
+   request that sets it arrived over HTTPS: the master serves TLS itself, or a reverse proxy listed
+   in ``trusted_proxies`` sets ``X-Forwarded-Proto`` to ``https``. Set ``always`` when browsers
+   reach the master only over HTTPS through a reverse proxy that forwards plain HTTP and is not
+   listed in ``trusted_proxies``. Defaults to ``auto``.
+
+``csrf``
+========
+
+Configures the check that requests relying on the session cookie come from the master's own pages.
+The master applies it to requests with any method but ``GET``, ``HEAD``, and ``OPTIONS``, and to
+WebSocket connections, unless they carry an ``Authorization: Bearer`` header, as the CLI, the Python
+SDK, and tasks do. It accepts a request when the browser's ``Sec-Fetch-Site`` header is
+``same-origin`` or ``none``. Browsers send that header only over HTTPS and to ``localhost``; without
+it, the host and port in the ``Origin`` header must match the request's ``Host`` header, or the
+``X-Forwarded-Host`` header from a proxy listed in ``trusted_proxies``. Requests with neither header
+do not come from a browser page and pass. The master refuses other requests with
+``403 Forbidden`` and logs a warning with the headers it saw.
+
+-  ``trusted_origins``: A list of other origins, written as ``scheme://host[:port]``, whose pages
+   the master also accepts such requests from. Add the address that users reach the master at when
+   a reverse proxy in front of it forwards plain HTTP and changes the ``Host`` header, or drops its
+   port, for example ``http://determined.example.com:8080``. Defaults to an empty list.
+
+``trusted_proxies``
+===================
+
+A list of IP addresses or CIDR ranges of the reverse proxies in front of the master. The master
+believes the ``X-Forwarded-Proto`` and ``X-Forwarded-Host`` headers only in requests from these
+peers, since any client can send them. Defaults to an empty list, which ignores both headers.
+
 **************
  ``webhooks``
 **************
