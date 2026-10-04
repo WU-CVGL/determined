@@ -10,6 +10,7 @@ import (
 func RegisterAPIHandler(echo *echo.Echo, m *Service, middleware ...echo.MiddlewareFunc) {
 	echo.POST("/logout", api.Route(m.postLogout), middleware...)
 	echo.POST("/login", api.Route(m.postLogin))
+	echo.POST("/auth/session-cookie", api.Route(m.postSessionCookie), middleware...)
 	usersGroup := echo.Group("/users", middleware...)
 	usersGroup.GET("", api.Route(m.getUsers))
 	usersGroup.POST("", api.Route(m.postUser))

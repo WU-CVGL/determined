@@ -1,6 +1,5 @@
 import { sha512 } from 'js-sha512';
 
-import { globalStorage } from 'globalStorage';
 import { serverAddress } from 'routes/utils';
 import * as Api from 'services/api-ts-sdk';
 import * as decoder from 'services/decoder';
@@ -11,45 +10,50 @@ import * as Type from 'types';
 import { ensureArray } from 'utils/data';
 import { identity, noOp } from 'utils/service';
 
+/*
+ * Requests to the master authenticate with its HttpOnly session cookie, which the browser sends by
+ * itself; the web UI holds no token and sends no Authorization header. A development server that
+ * talks to a master on another origin (SERVER_ADDRESS) has to ask for the cookie to be sent.
+ */
+const apiFetch: Api.FetchAPI = (url, init) =>
+  window.fetch(url, process.env.IS_DEV ? { credentials: 'include', ...init } : init);
+
 const updatedApiConfigParams = (
   apiConfig?: Api.ConfigurationParameters,
-): Api.ConfigurationParameters => {
-  const config: Api.ConfigurationParameters = {
-    basePath: serverAddress(),
-    ...apiConfig,
-  };
-  if (globalStorage.authToken !== '') {
-    config.apiKey = `Bearer ${globalStorage.authToken}`;
-  }
-  return config;
-};
+): Api.ConfigurationParameters => ({
+  basePath: serverAddress(),
+  ...apiConfig,
+});
 
 const generateApiConfig = (apiConfig?: Api.ConfigurationParameters) => {
   const config = updatedApiConfigParams(apiConfig);
+  const api = <T>(
+    Constructor: new (c: Api.ConfigurationParameters, b: undefined, f: Api.FetchAPI) => T,
+  ): T => new Constructor(config, undefined, apiFetch);
   return {
-    Alpha: new Api.AlphaApi(config),
-    Auth: new Api.AuthenticationApi(config),
-    Checkpoint: new Api.CheckpointsApi(config),
-    Cluster: new Api.ClusterApi(config),
-    Commands: new Api.CommandsApi(config),
-    Experiments: new Api.ExperimentsApi(config),
-    Internal: new Api.InternalApi(config),
-    Models: new Api.ModelsApi(config),
-    Notebooks: new Api.NotebooksApi(config),
-    Projects: new Api.ProjectsApi(config),
-    RBAC: new Api.RBACApi(config),
-    Shells: new Api.ShellsApi(config),
+    Alpha: api(Api.AlphaApi),
+    Auth: api(Api.AuthenticationApi),
+    Checkpoint: api(Api.CheckpointsApi),
+    Cluster: api(Api.ClusterApi),
+    Commands: api(Api.CommandsApi),
+    Experiments: api(Api.ExperimentsApi),
+    Internal: api(Api.InternalApi),
+    Models: api(Api.ModelsApi),
+    Notebooks: api(Api.NotebooksApi),
+    Projects: api(Api.ProjectsApi),
+    RBAC: api(Api.RBACApi),
+    Shells: api(Api.ShellsApi),
     StreamingCluster: Api.ClusterApiFetchParamCreator(config),
     StreamingExperiments: Api.ExperimentsApiFetchParamCreator(config),
     StreamingInternal: Api.InternalApiFetchParamCreator(config),
     StreamingJobs: Api.JobsApiFetchParamCreator(config),
     StreamingProfiler: Api.ProfilerApiFetchParamCreator(config),
-    Tasks: new Api.TasksApi(config),
-    Templates: new Api.TemplatesApi(config),
-    TensorBoards: new Api.TensorboardsApi(config),
-    Users: new Api.UsersApi(config),
-    Webhooks: new Api.WebhooksApi(config),
-    Workspaces: new Api.WorkspacesApi(config),
+    Tasks: api(Api.TasksApi),
+    Templates: api(Api.TemplatesApi),
+    TensorBoards: api(Api.TensorboardsApi),
+    Users: api(Api.UsersApi),
+    Webhooks: api(Api.WebhooksApi),
+    Workspaces: api(Api.WorkspacesApi),
   };
 };
 
@@ -96,6 +100,25 @@ export const logout: DetApi<EmptyParams, Api.V1LogoutResponse, void> = {
   name: 'logout',
   postProcess: noOp,
   request: () => detApi.Auth.logout(),
+};
+
+/*
+ * Asks the master to keep token, which a page outside the web UI handed over in the URL (?jwt=),
+ * as the browser's session: the master checks the token and sets its HttpOnly session cookie, which
+ * scripts cannot write.
+ */
+export const storeSessionToken: DetApi<Service.StoreSessionTokenParams, Response, void> = {
+  name: 'storeSessionToken',
+  postProcess: noOp,
+  request: async (params, options) => {
+    const response = await apiFetch(serverAddress('/auth/session-cookie'), {
+      ...options,
+      headers: { Authorization: `Bearer ${params.token}` },
+      method: 'POST',
+    });
+    if (!response.ok) throw response;
+    return response;
+  },
 };
 
 export const getCurrentUser: DetApi<EmptyParams, Api.V1CurrentUserResponse, Type.DetailedUser> = {
@@ -162,7 +185,11 @@ export const setUserPassword: DetApi<
 > = {
   name: 'setUserPassword',
   postProcess: (response) => response,
-  request: (params) => detApi.Users.setUserPassword(params.userId, params.password),
+  request: (params) =>
+    detApi.Users.setUserPassword(params.userId, {
+      oldPassword: params.oldPassword,
+      password: params.password,
+    }),
 };
 
 export const patchUser: DetApi<

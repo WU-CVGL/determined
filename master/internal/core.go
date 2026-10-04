@@ -1372,7 +1372,7 @@ func (m *Master) Run(ctx context.Context, gRPCLogInitDone chan struct{}) error {
 	for _, ps := range m.config.InternalConfig.ProxiedServers {
 		proxiedRoutes = append(proxiedRoutes, ps.PathPrefix)
 	}
-	m.echo.Use(processAuthWithRedirect(proxiedRoutes))
+	useAuthenticationMiddleware(m.echo, proxiedRoutes)
 
 	m.echo.Logger = logger.New()
 	m.echo.HideBanner = true

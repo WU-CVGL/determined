@@ -129,6 +129,10 @@ message SetUserPasswordRequest {
   int32 user_id = 3;
   // The password of the user.
   string password = 2;
+  // The user's current password. Required when users change their own
+  // password; ignored when an administrator changes another user's password.
+  // Users without a password send an empty string.
+  optional string old_password = 4;
 }
 // Response to SetUserPasswordRequest.
 message SetUserPasswordResponse {

@@ -1,9 +1,6 @@
 import Button from 'hew/Button';
-import CodeSample from 'hew/CodeSample';
 import Divider from 'hew/Divider';
 import Form from 'hew/Form';
-import { useTheme } from 'hew/Theme';
-import { notification } from 'hew/Toast';
 import { useObservable } from 'micro-observables';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
@@ -13,11 +10,10 @@ import LogoOkta from 'assets/images/logo-sso-okta-white.svg?url';
 import DeterminedAuth from 'components/DeterminedAuth';
 import Logo from 'components/Logo';
 import Page from 'components/Page';
-import PageMessage from 'components/PageMessage';
 import useUI from 'components/ThemeProvider';
 import { handleRelayState, samlUrl } from 'ee/SamlAuth';
 import { globalStorage, sessionStorage } from 'globalStorage';
-import useAuthCheck from 'hooks/useAuthCheck';
+import useAuthCheck, { JWT_PARAM } from 'hooks/useAuthCheck';
 import usePolling from 'hooks/usePolling';
 import { defaultRoute, rbacDefaultRoute } from 'routes';
 import { routeAll } from 'routes/utils';
@@ -42,15 +38,8 @@ const SignIn: React.FC = () => {
   const info = useObservable(determinedStore.info);
   const [canceler] = useState(new AbortController());
   const { rbacEnabled } = useObservable(determinedStore.info);
-  const {
-    themeSettings: { className: themeClass },
-  } = useTheme();
   const queries = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const ssoQueries = handleRelayState(queries);
-
-  const externalAuthError = useMemo(() => {
-    return isAuthChecked && !isAuthenticated && !info.externalLoginUri && queries.get('jwt');
-  }, [isAuthChecked, isAuthenticated, info.externalLoginUri, queries]);
 
   /*
    * Check every so often to see if the user is authenticated.
@@ -58,8 +47,9 @@ const SignIn: React.FC = () => {
    * and this will pick up that auth and automatically redirect them into
    * their previous app. We don't run immediately because the router also
    * performs an auth check there as well upon the first page load.
+   * Each check asks the master (the session cookie is HttpOnly), so it does not run every second.
    */
-  usePolling(useAuthCheck(), { interval: 1000, runImmediately: false });
+  usePolling(useAuthCheck(), { interval: 5000, runImmediately: false });
 
   /*
    * Check for when `isAuthenticated` becomes true and redirect
@@ -73,15 +63,6 @@ const SignIn: React.FC = () => {
     if (isAuthenticated) {
       // Stop the spinner, prepping for user redirect.
       uiActions.hideSpinner();
-
-      // Show auth token via notification if requested via query parameters.
-      if (queries.get('cli') === 'true')
-        notification.open({
-          className: themeClass,
-          description: <CodeSample text={globalStorage.authToken || 'Auth token not found.'} />,
-          duration: 0,
-          message: 'Your Determined Authentication Token',
-        });
 
       // Reroute the authenticated user to the app.
       if (!queries.has('redirect')) {
@@ -98,7 +79,7 @@ const SignIn: React.FC = () => {
     } else if (isAuthChecked) {
       uiActions.hideSpinner();
     }
-  }, [isAuthenticated, isAuthChecked, info, location, queries, uiActions, rbacEnabled, themeClass]);
+  }, [isAuthenticated, isAuthChecked, info, location, queries, uiActions, rbacEnabled]);
 
   useEffect(() => {
     uiActions.hideChrome();
@@ -125,18 +106,9 @@ const SignIn: React.FC = () => {
     (queries.get('remote_expired') ||
       info.ssoProviders?.some((ssoProvider) => ssoProvider.alwaysRedirect));
 
-  if (queries.has('jwt') || info.externalLoginUri || !isAuthChecked || redirectToSSO) return null;
-
-  /*
-   * An external auth error occurs when there are external auth urls,
-   * auth fails with a jwt.
-   */
-  if (externalAuthError)
-    return (
-      <PageMessage title="Cluster Not Available">
-        <p>Cluster is not ready. Please try again later.</p>
-      </PageMessage>
-    );
+  if (queries.has(JWT_PARAM) || info.externalLoginUri || !isAuthChecked || redirectToSSO) {
+    return null;
+  }
 
   return (
     <Page breadcrumb={[]} docTitle="Sign In" ignorePermissions noScroll>

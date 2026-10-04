@@ -21,6 +21,11 @@ export interface LoginResponse {
   user: DetailedUser;
 }
 
+export interface StoreSessionTokenParams {
+  /** A session token for the master, from a page outside the web UI. */
+  token: string;
+}
+
 export interface ApiSorter<T = string> {
   descend: boolean;
   key: T;
@@ -384,6 +389,8 @@ export interface GetAgentsParams {
 }
 
 export interface SetUserPasswordParams {
+  /** The current password; required when users change their own password. */
+  oldPassword?: string;
   password: string;
   userId: number;
 }

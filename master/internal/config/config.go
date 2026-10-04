@@ -136,6 +136,7 @@ func DefaultConfig() *Config {
 				MaxLifespanDays:     DefaultTokenLifespanDays,
 				DefaultLifespanDays: DefaultTokenLifespanDays,
 			},
+			SessionCookie: SessionCookieConfig{Secure: SessionCookieSecureAuto},
 		},
 		// If left unspecified, the port is later filled in with 8080 (no TLS) or 8443 (TLS).
 		Port: 0,
@@ -481,6 +482,14 @@ type SecurityConfig struct {
 	Token       TokenConfig          `json:"token"`
 
 	InitialUserPassword string `json:"initial_user_password"`
+
+	// SessionCookie configures the cookie that holds a browser's session token.
+	SessionCookie SessionCookieConfig `json:"session_cookie"`
+	// CSRF configures the check against cross-site requests that rely on that cookie.
+	CSRF CSRFConfig `json:"csrf"`
+	// TrustedProxies lists the reverse proxies whose X-Forwarded-Proto and X-Forwarded-Host
+	// headers the master believes.
+	TrustedProxies TrustedProxies `json:"trusted_proxies"`
 }
 
 // TokenConfig is the configuration setting for tokens.

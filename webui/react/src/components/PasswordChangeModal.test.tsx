@@ -6,16 +6,17 @@ import { DefaultTheme, UIProvider } from 'hew/Theme';
 import React, { useCallback, useEffect } from 'react';
 
 import { setUserPassword as mockSetUserPassword } from 'services/api';
-import { V1LoginRequest } from 'services/api-ts-sdk';
 import authStore from 'stores/auth';
 import userStore from 'stores/users';
 import { DetailedUser } from 'types';
+import { DetError } from 'utils/error';
 
 vi.useFakeTimers();
 
 import PasswordChangeModalComponent, {
   API_SUCCESS_MESSAGE,
   CONFIRM_PASSWORD_LABEL,
+  INCORRECT_PASSWORD_MESSAGE,
   OK_BUTTON_LABEL,
   OLD_PASSWORD_LABEL,
 } from './PasswordChangeModal';
@@ -46,13 +47,6 @@ vi.mock('services/api', () => ({
         },
       ],
     }),
-  login: ({ password, username }: V1LoginRequest) => {
-    if (password === FIRST_PASSWORD_VALUE && username === USERNAME) {
-      return Promise.resolve();
-    } else {
-      return Promise.reject();
-    }
-  },
   setUserPassword: vi.fn(),
 }));
 
@@ -108,9 +102,31 @@ describe('Password Change Modal', () => {
     });
 
     // Check that the API method was called with the correct parameters.
+    // The master checks the current password; the modal no longer signs in again to check it.
     expect(mockSetUserPassword).toHaveBeenCalledWith({
+      oldPassword: FIRST_PASSWORD_VALUE,
       password: SECOND_PASSWORD_VALUE,
       userId: USER_ID,
     });
+  });
+
+  it('marks the old password incorrect when the master refuses it', async () => {
+    // The form shows errors after timers that the fake ones would hold back.
+    vi.useRealTimers();
+    try {
+      // The master answers 403 Forbidden for a wrong current password.
+      vi.mocked(mockSetUserPassword).mockRejectedValueOnce(
+        new DetError(new Response(null, { status: 403 })),
+      );
+      await setup();
+
+      await user.type(screen.getByLabelText(OLD_PASSWORD_LABEL), 'wrong');
+      await user.type(screen.getByLabelText(CONFIRM_PASSWORD_LABEL), SECOND_PASSWORD_VALUE);
+      await user.click(screen.getByRole('button', { name: OK_BUTTON_LABEL }));
+
+      expect(await screen.findByText(INCORRECT_PASSWORD_MESSAGE)).toBeInTheDocument();
+    } finally {
+      vi.useFakeTimers();
+    }
   });
 } /* { timeout: 10000 } */);

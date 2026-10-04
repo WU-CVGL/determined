@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/golang-jwt/jwt/v4"
 	// TODO switch to google.golang.org/protobuf/proto/.
@@ -36,7 +35,6 @@ const (
 	// AllocationTokenHeader is the header used to pass the allocation token.
 	AllocationTokenHeader = "x-allocation-token"
 	userTokenHeader       = "x-user-token"
-	cookieName            = "auth"
 )
 
 type (
@@ -276,21 +274,16 @@ func authZInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
-func userTokenResponse(_ context.Context, w http.ResponseWriter, resp proto.Message) error {
-	switch r := resp.(type) {
-	case *apiv1.LoginResponse:
-		http.SetCookie(w, &http.Cookie{
-			Name:    cookieName,
-			Value:   r.Token,
-			Expires: time.Now().Add(user.SessionDuration),
-			Path:    "/",
-		})
-	case *apiv1.LogoutResponse:
-		http.SetCookie(w, &http.Cookie{
-			Name:    cookieName,
-			Value:   "",
-			Expires: time.Unix(0, 0),
-		})
+// sessionCookieSecureKey holds whether the session cookie set for a gateway request is Secure.
+type sessionCookieSecureKey struct{}
+
+// userTokenResponse sets the browser's session cookie on sign-in. The web UI relies on it, since
+// it cannot write the HttpOnly cookie itself. user.ClearSessionCookieOnLogout removes the cookie on
+// sign-out, whether or not the logout call succeeds.
+func userTokenResponse(ctx context.Context, w http.ResponseWriter, resp proto.Message) error {
+	if r, ok := resp.(*apiv1.LoginResponse); ok {
+		secure, _ := ctx.Value(sessionCookieSecureKey{}).(bool)
+		http.SetCookie(w, user.NewSessionCookie(r.Token, secure))
 	}
 	return nil
 }

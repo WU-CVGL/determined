@@ -6,7 +6,6 @@ import TaskResourcesPanel from './TaskResourcesPanel';
 
 vi.mock('hooks/useTaskResourcesEnabled', () => ({
   default: () => true,
-  taskResourcesHeaders: () => ({}),
 }));
 vi.mock('components/TaskResourceChart', () => ({
   default: ({ series }: { series: { labels: { allocation_id: string } }[] }) => (

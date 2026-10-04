@@ -52,6 +52,8 @@ const ROLE_NAME = 'roles';
 export const BUTTON_NAME = 'Save';
 const ACTIVE_NAME = 'active';
 const FORM_ID = 'create-user-form';
+export const OWN_PASSWORD_MESSAGE =
+  'To change your own password, use Change Password in your user settings, which asks for your current password.';
 
 interface Props {
   user?: DetailedUser;
@@ -88,6 +90,9 @@ const CreateUserModalComponent: React.FC<Props> = ({
   const knownRoles = useObservable(roleStore.roles);
 
   const [isRemote, setIsRemote] = useState(false);
+  // The master needs users' current password to change their own, so editing yourself here
+  // leaves the password alone.
+  const isSelf = !!user && currentUser?.id === user.id;
 
   const editPasswordRules = PASSWORD_RULES.map((rule) => {
     return (form: FormInstance) => (form.getFieldValue(USER_PASSWORD_NAME) ? rule : { min: 0 });
@@ -115,7 +120,7 @@ const CreateUserModalComponent: React.FC<Props> = ({
           remote: formData[REMOTE_NAME],
           username: formData[USER_NAME_NAME],
         };
-        if (formData[USER_PASSWORD_NAME]?.length > 0) {
+        if (!isSelf && formData[USER_PASSWORD_NAME]?.length > 0) {
           patchParams.password = formData[USER_PASSWORD_NAME];
         }
         await patchUser({ userId: user.id, userParams: patchParams });
@@ -240,7 +245,12 @@ const CreateUserModalComponent: React.FC<Props> = ({
               />
             </Form.Item>
           )}
-          {!isRemote && (
+          {!isRemote && isSelf && (
+            <Body data-testid="ownPasswordMessage" inactive>
+              {OWN_PASSWORD_MESSAGE}
+            </Body>
+          )}
+          {!isRemote && !isSelf && (
             <>
               <Form.Item
                 initialValue=""
