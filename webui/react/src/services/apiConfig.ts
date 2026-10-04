@@ -162,7 +162,11 @@ export const setUserPassword: DetApi<
 > = {
   name: 'setUserPassword',
   postProcess: (response) => response,
-  request: (params) => detApi.Users.setUserPassword(params.userId, params.password),
+  request: (params) =>
+    detApi.Users.setUserPassword(params.userId, {
+      oldPassword: params.oldPassword,
+      password: params.password,
+    }),
 };
 
 export const patchUser: DetApi<

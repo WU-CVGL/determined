@@ -7634,6 +7634,12 @@ export interface V1PatchUser {
      * @memberof V1PatchUser
      */
     remote?: boolean;
+    /**
+     * The user's current password, pre-salted and hashed if is_hashed is set. Required when users change their own password; ignored otherwise. Users without a password send an empty string.
+     * @type {string}
+     * @memberof V1PatchUser
+     */
+    oldPassword?: string;
 }
 /**
  * Response to PatchUserRequest.
@@ -10743,6 +10749,31 @@ export interface V1SetTensorboardPriorityResponse {
      * @memberof V1SetTensorboardPriorityResponse
      */
     tensorboard?: V1Tensorboard;
+}
+/**
+ * Set the requested user's passwords.
+ * @export
+ * @interface V1SetUserPasswordRequest
+ */
+export interface V1SetUserPasswordRequest {
+    /**
+     * The id of the user.
+     * @type {number}
+     * @memberof V1SetUserPasswordRequest
+     */
+    userId?: number;
+    /**
+     * The password of the user.
+     * @type {string}
+     * @memberof V1SetUserPasswordRequest
+     */
+    password?: string;
+    /**
+     * The user's current password. Required when users change their own password; ignored when an administrator changes another user's password. Users without a password send an empty string.
+     * @type {string}
+     * @memberof V1SetUserPasswordRequest
+     */
+    oldPassword?: string;
 }
 /**
  * Response to SetUserPasswordRequest.
@@ -35111,11 +35142,11 @@ export const UsersApiFetchParamCreator = function (configuration?: Configuration
          * 
          * @summary Set the requested user's password.
          * @param {number} userId The id of the user.
-         * @param {string} body The password of the user.
+         * @param {V1SetUserPasswordRequest} body
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        setUserPassword(userId: number, body: string, options: any = {}): FetchArgs {
+        setUserPassword(userId: number, body: V1SetUserPasswordRequest, options: any = {}): FetchArgs {
             // verify required parameter 'userId' is not null or undefined
             if (userId === null || userId === undefined) {
                 throw new RequiredError('userId','Required parameter userId was null or undefined when calling setUserPassword.');
@@ -35144,8 +35175,7 @@ export const UsersApiFetchParamCreator = function (configuration?: Configuration
             objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
             objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
             localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
-            const needsSerialization = localVarRequestOptions.headers['Content-Type'] === 'application/json';
-            localVarRequestOptions.body = needsSerialization ? JSON.stringify(body) : body
+            localVarRequestOptions.body = JSON.stringify(body)
             
             return {
                 url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
@@ -35360,11 +35390,11 @@ export const UsersApiFp = function (configuration?: Configuration) {
          * 
          * @summary Set the requested user's password.
          * @param {number} userId The id of the user.
-         * @param {string} body The password of the user.
+         * @param {V1SetUserPasswordRequest} body
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        setUserPassword(userId: number, body: string, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1SetUserPasswordResponse> {
+        setUserPassword(userId: number, body: V1SetUserPasswordRequest, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1SetUserPasswordResponse> {
             const localVarFetchArgs = UsersApiFetchParamCreator(configuration).setUserPassword(userId, body, options);
             return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
                 return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
@@ -35494,11 +35524,11 @@ export const UsersApiFactory = function (configuration?: Configuration, fetch?: 
          * 
          * @summary Set the requested user's password.
          * @param {number} userId The id of the user.
-         * @param {string} body The password of the user.
+         * @param {V1SetUserPasswordRequest} body
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        setUserPassword(userId: number, body: string, options?: any) {
+        setUserPassword(userId: number, body: V1SetUserPasswordRequest, options?: any) {
             return UsersApiFp(configuration).setUserPassword(userId, body, options)(fetch, basePath);
         },
     }
@@ -35640,12 +35670,12 @@ export class UsersApi extends BaseAPI {
      * 
      * @summary Set the requested user's password.
      * @param {number} userId The id of the user.
-     * @param {string} body The password of the user.
+     * @param {V1SetUserPasswordRequest} body
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      * @memberof UsersApi
      */
-    public setUserPassword(userId: number, body: string, options?: any) {
+    public setUserPassword(userId: number, body: V1SetUserPasswordRequest, options?: any) {
         return UsersApiFp(this.configuration).setUserPassword(userId, body, options)(this.fetch, this.basePath)
     }
     

@@ -370,8 +370,11 @@ func (s *Service) patchUser(c echo.Context) (interface{}, error) {
 	type (
 		request struct {
 			Password *string `json:"password,omitempty"`
-			Active   *bool   `json:"active,omitempty"`
-			Admin    *bool   `json:"admin,omitempty"`
+			// OldPassword is the current password, hashed like Password. Users who change their
+			// own password must send it.
+			OldPassword *string `json:"old_password,omitempty"`
+			Active      *bool   `json:"active,omitempty"`
+			Admin       *bool   `json:"admin,omitempty"`
 
 			AgentUserGroup *agentUserGroup `json:"agent_user_group,omitempty"`
 		}
@@ -415,6 +418,15 @@ func (s *Service) patchUser(c echo.Context) (interface{}, error) {
 		if err = AuthZProvider.Get().CanSetUsersPassword(ctx, currUser, *user); err != nil {
 			return nil, canViewUserErrorHandle(currUser, *user,
 				errors.Wrap(forbiddenError, err.Error()), userNotFoundErr)
+		}
+		switch err = CheckCurrentPassword(ctx, currUser, user.ID, params.OldPassword, true); {
+		case err == nil:
+		case errors.Is(err, ErrCurrentPasswordIncorrect):
+			return nil, echo.NewHTTPError(http.StatusForbidden, err.Error())
+		case errors.Is(err, ErrCurrentPasswordRequired), errors.Is(err, ErrRemoteUserPassword):
+			return nil, echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		default:
+			return nil, err
 		}
 
 		if err = user.UpdatePasswordHash(*params.Password); err != nil {

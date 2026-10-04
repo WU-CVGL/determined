@@ -322,3 +322,47 @@ func TestAuthzGetUserImage(t *testing.T) {
 	_, err = svc.getUserImage(ctx)
 	require.Equal(t, db.ErrNotFound.Error(), err.Error())
 }
+
+func TestPatchUserOwnPasswordNeedsCurrentPassword(t *testing.T) {
+	svc, closeDB, authzUser, ctx := setup(t)
+	defer closeDB()
+
+	hashedOld := ReplicateClientSideSaltAndHash("Old-password-1")
+	u := model.User{Username: uuid.New().String(), Active: true}
+	require.NoError(t, u.UpdatePasswordHash(hashedOld))
+	id, err := Add(stdContext.TODO(), &u, nil)
+	require.NoError(t, err)
+	u.ID = id
+	dc := ctx.(*context.DetContext)
+	dc.SetUser(u)
+	defer dc.SetUser(model.User{})
+
+	hashedNew := ReplicateClientSideSaltAndHash("New-password-1")
+	cases := []struct {
+		body string
+		code int
+	}{
+		{fmt.Sprintf(`{"password":%q}`, hashedNew), http.StatusBadRequest},
+		{fmt.Sprintf(`{"password":%q,"old_password":"wrong"}`, hashedNew), http.StatusForbidden},
+		{fmt.Sprintf(`{"password":%q,"old_password":%q}`, hashedNew, hashedOld), 0},
+	}
+	for _, tc := range cases {
+		ctx.SetParamNames("username")
+		ctx.SetParamValues(u.Username)
+		ctx.SetRequest(httptest.NewRequest(http.MethodPatch, "/", strings.NewReader(tc.body)))
+		authzUser.On("CanSetUsersPassword", mock.Anything, u, mock.Anything).Return(nil).Once()
+
+		_, err := svc.patchUser(ctx)
+		if tc.code == 0 {
+			require.NoError(t, err)
+			continue
+		}
+		var httpErr *echo.HTTPError
+		require.ErrorAs(t, err, &httpErr)
+		require.Equal(t, tc.code, httpErr.Code)
+	}
+
+	updated, err := ByUsername(stdContext.TODO(), u.Username)
+	require.NoError(t, err)
+	require.True(t, updated.ValidatePassword(hashedNew))
+}

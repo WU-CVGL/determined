@@ -195,7 +195,7 @@ service Determined {
       returns (SetUserPasswordResponse) {
     option (google.api.http) = {
       post: "/api/v1/users/{user_id}/password"
-      body: "password"
+      body: "*"
     };
     option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
       tags: "Users"

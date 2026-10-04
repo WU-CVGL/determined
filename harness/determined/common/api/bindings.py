@@ -10319,6 +10319,7 @@ class v1PatchUser(Printable):
     agentUserGroup: "typing.Optional[v1AgentUserGroup]" = None
     displayName: "typing.Optional[str]" = None
     isHashed: "typing.Optional[bool]" = None
+    oldPassword: "typing.Optional[str]" = None
     password: "typing.Optional[str]" = None
     remote: "typing.Optional[bool]" = None
     username: "typing.Optional[str]" = None
@@ -10331,6 +10332,7 @@ class v1PatchUser(Printable):
         agentUserGroup: "typing.Union[v1AgentUserGroup, None, Unset]" = _unset,
         displayName: "typing.Union[str, None, Unset]" = _unset,
         isHashed: "typing.Union[bool, None, Unset]" = _unset,
+        oldPassword: "typing.Union[str, None, Unset]" = _unset,
         password: "typing.Union[str, None, Unset]" = _unset,
         remote: "typing.Union[bool, None, Unset]" = _unset,
         username: "typing.Union[str, None, Unset]" = _unset,
@@ -10345,6 +10347,8 @@ class v1PatchUser(Printable):
             self.displayName = displayName
         if not isinstance(isHashed, Unset):
             self.isHashed = isHashed
+        if not isinstance(oldPassword, Unset):
+            self.oldPassword = oldPassword
         if not isinstance(password, Unset):
             self.password = password
         if not isinstance(remote, Unset):
@@ -10366,6 +10370,8 @@ class v1PatchUser(Printable):
             kwargs["displayName"] = obj["displayName"]
         if "isHashed" in obj:
             kwargs["isHashed"] = obj["isHashed"]
+        if "oldPassword" in obj:
+            kwargs["oldPassword"] = obj["oldPassword"]
         if "password" in obj:
             kwargs["password"] = obj["password"]
         if "remote" in obj:
@@ -10387,6 +10393,8 @@ class v1PatchUser(Printable):
             out["displayName"] = self.displayName
         if not omit_unset or "isHashed" in vars(self):
             out["isHashed"] = self.isHashed
+        if not omit_unset or "oldPassword" in vars(self):
+            out["oldPassword"] = self.oldPassword
         if not omit_unset or "password" in vars(self):
             out["password"] = self.password
         if not omit_unset or "remote" in vars(self):
@@ -14750,6 +14758,49 @@ class v1SetTensorboardPriorityResponse(Printable):
         }
         if not omit_unset or "tensorboard" in vars(self):
             out["tensorboard"] = None if self.tensorboard is None else self.tensorboard.to_json(omit_unset)
+        return out
+
+class v1SetUserPasswordRequest(Printable):
+    """Set the requested user's passwords."""
+    oldPassword: "typing.Optional[str]" = None
+    password: "typing.Optional[str]" = None
+    userId: "typing.Optional[int]" = None
+
+    def __init__(
+        self,
+        *,
+        oldPassword: "typing.Union[str, None, Unset]" = _unset,
+        password: "typing.Union[str, None, Unset]" = _unset,
+        userId: "typing.Union[int, None, Unset]" = _unset,
+    ):
+        if not isinstance(oldPassword, Unset):
+            self.oldPassword = oldPassword
+        if not isinstance(password, Unset):
+            self.password = password
+        if not isinstance(userId, Unset):
+            self.userId = userId
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1SetUserPasswordRequest":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+        }
+        if "oldPassword" in obj:
+            kwargs["oldPassword"] = obj["oldPassword"]
+        if "password" in obj:
+            kwargs["password"] = obj["password"]
+        if "userId" in obj:
+            kwargs["userId"] = obj["userId"]
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+        }
+        if not omit_unset or "oldPassword" in vars(self):
+            out["oldPassword"] = self.oldPassword
+        if not omit_unset or "password" in vars(self):
+            out["password"] = self.password
+        if not omit_unset or "userId" in vars(self):
+            out["userId"] = self.userId
         return out
 
 class v1SetUserPasswordResponse(Printable):
@@ -24312,12 +24363,11 @@ def post_SetTensorboardPriority(
 def post_SetUserPassword(
     session: "api.BaseSession",
     *,
-    body: str,
+    body: "v1SetUserPasswordRequest",
     userId: int,
 ) -> "v1SetUserPasswordResponse":
     """Set the requested user's password.
 
-    - body: The password of the user.
     - userId: The id of the user.
     """
     _params = None
@@ -24325,7 +24375,7 @@ def post_SetUserPassword(
         method="POST",
         path=f"/api/v1/users/{userId}/password",
         params=_params,
-        json=body,
+        json=body.to_json(True),
         data=None,
         headers=None,
         timeout=None,

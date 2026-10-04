@@ -358,6 +358,26 @@ func (a *apiServer) PostUser(
 	return &apiv1.PostUserResponse{User: fullUser}, err
 }
 
+// checkCurrentPassword wraps user.CheckCurrentPassword with gRPC status codes.
+func checkCurrentPassword(
+	ctx context.Context, curUser model.User, targetID model.UserID, currentPassword *string,
+	isHashed bool,
+) error {
+	err := user.CheckCurrentPassword(ctx, curUser, targetID, currentPassword, isHashed)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, user.ErrCurrentPasswordRequired), errors.Is(err, user.ErrRemoteUserPassword):
+		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, user.ErrCurrentPasswordIncorrect):
+		return status.Error(codes.PermissionDenied, err.Error())
+	case errors.Is(err, db.ErrNotFound):
+		return api.NotFoundErrs("user", "", true)
+	default:
+		return err
+	}
+}
+
 func (a *apiServer) SetUserPassword(
 	ctx context.Context, req *apiv1.SetUserPasswordRequest,
 ) (*apiv1.SetUserPasswordResponse, error) {
@@ -380,6 +400,11 @@ func (a *apiServer) SetUserPassword(
 			return nil, authz.SubIfUnauthorized(canGetErr, api.NotFoundErrs("user", "", true))
 		}
 		return nil, status.Error(codes.PermissionDenied, err.Error())
+	}
+	if err = checkCurrentPassword(
+		ctx, *curUser, targetUser.ID, req.OldPassword, false,
+	); err != nil {
+		return nil, err
 	}
 
 	if err = targetUser.UpdatePasswordHash(user.ReplicateClientSideSaltAndHash(req.Password)); err != nil {
@@ -519,6 +544,11 @@ func (a *apiServer) PatchUser(
 
 		if willBeRemote {
 			return nil, status.Error(codes.InvalidArgument, "Cannot set password for remote users")
+		}
+		if err = checkCurrentPassword(
+			ctx, *curUser, targetUser.ID, req.User.OldPassword, req.User.IsHashed,
+		); err != nil {
+			return nil, err
 		}
 
 		hashedPassword := *req.User.Password

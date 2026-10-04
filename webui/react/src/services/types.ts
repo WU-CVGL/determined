@@ -369,6 +369,8 @@ export interface GetAgentsParams {
 }
 
 export interface SetUserPasswordParams {
+  /** The current password; required when users change their own password. */
+  oldPassword?: string;
   password: string;
   userId: number;
 }
