@@ -14,21 +14,31 @@ from tests.cli import util
 
 @contextlib.contextmanager
 def cached_session_rsps(
-    cached_user: str = "det-user", relogin: Optional[Tuple[str, str]] = None
+    cached_user: str = "det-user",
+    relogin: Optional[Tuple[str, str]] = None,
+    moved_to: Optional[str] = None,
 ) -> Iterator[responses.RequestsMock]:
     """Like util.standard_cli_rsps, with the session's token cached under cached_user.
 
-    With relogin=(username, token), it also expects the CLI to store a new token for username.
+    It expects exactly these token cache calls: with relogin=(username, token), the CLI also stores
+    a new token for username; with moved_to, it moves the cached token to that name.
     """
     with contextlib.ExitStack() as es:
         es.enter_context(util.setenv_optional("DET_USER", "det-user"))
         es.enter_context(util.setenv_optional("DET_USER_TOKEN", "det-token"))
-        mts = es.enter_context(util.MockTokenStore(strict=False))
+        mts = es.enter_context(util.MockTokenStore(strict=True))
         mts.get_active_user(retval=cached_user)
         mts.get_token(cached_user, retval="det-token")
         if relogin is not None:
             mts.set_token(*relogin)
             mts.set_active(relogin[0])
+        if moved_to is not None:
+            mts.get_token(cached_user, retval="det-token")
+            mts.get_token(moved_to, retval=None)
+            mts.set_token(moved_to, "det-token")
+            mts.get_active_user(retval=cached_user)
+            mts.set_active(moved_to)
+            mts.drop_user(cached_user)
         rsps = es.enter_context(
             responses.RequestsMock(
                 registry=registries.OrderedRegistry, assert_all_requests_are_fired=True
@@ -244,9 +254,10 @@ def test_user_change_own_password_wrong_current_password(
 
 @mock.patch("getpass.getpass")
 def test_user_edit_own_username_asks_for_current_password(mock_getpass: mock.MagicMock) -> None:
-    # Renaming yourself needs your current password, like changing it.
+    # Renaming yourself needs your current password, like changing it. The CLI then keeps your
+    # session under your new name.
     mock_getpass.side_effect = ["current-password"]
-    with util.standard_cli_rsps() as rsps:
+    with cached_session_rsps(moved_to="new-name") as rsps:
         userobj = bindings.v1User(active=True, admin=False, username="det-user", id=107)
         rsps.get(
             "http://localhost:8080/api/v1/users/det-user/by-username",
@@ -254,6 +265,7 @@ def test_user_edit_own_username_asks_for_current_password(mock_getpass: mock.Mag
             json={"user": userobj.to_json()},
         )
         expect_whoami(rsps, userobj)
+        renamed = bindings.v1User(active=True, admin=False, username="new-name", id=107)
         rsps.patch(
             "http://localhost:8080/api/v1/users/107",
             status=200,
@@ -267,7 +279,7 @@ def test_user_edit_own_username_asks_for_current_password(mock_getpass: mock.Mag
                     }
                 )
             ],
-            json={"user": userobj.to_json()},
+            json={"user": renamed.to_json()},
         )
         cli.main(
             ["user", "edit", "det-user", "--username", "new-name", "--display-name", "New Name"]
@@ -338,7 +350,7 @@ def test_user_edit_other_username_or_own_display_name_does_not_prompt(
 @mock.patch("getpass.getpass")
 def test_user_rename_self_asks_for_current_password(mock_getpass: mock.MagicMock) -> None:
     mock_getpass.side_effect = ["current-password"]
-    with util.standard_cli_rsps() as rsps:
+    with cached_session_rsps(moved_to="new-name") as rsps:
         userobj = bindings.v1User(active=True, admin=False, username="det-user", id=111)
         rsps.get(
             "http://localhost:8080/api/v1/users/det-user/by-username",
@@ -346,6 +358,7 @@ def test_user_rename_self_asks_for_current_password(mock_getpass: mock.MagicMock
             json={"user": userobj.to_json()},
         )
         expect_whoami(rsps, userobj)
+        renamed = bindings.v1User(active=True, admin=False, username="new-name", id=111)
         rsps.patch(
             "http://localhost:8080/api/v1/users/111",
             status=200,
@@ -358,12 +371,12 @@ def test_user_rename_self_asks_for_current_password(mock_getpass: mock.MagicMock
                     }
                 )
             ],
-            json={"user": userobj.to_json()},
+            json={"user": renamed.to_json()},
         )
         rsps.get(
             "http://localhost:8080/api/v1/users/111",
             status=200,
-            json={"user": userobj.to_json()},
+            json={"user": renamed.to_json()},
         )
         cli.main(["user", "rename", "det-user", "new-name"])
 
@@ -424,8 +437,9 @@ def test_user_edit_own_username_after_renaming_yourself(
 ) -> None:
     # The session was cached as alice, who has since renamed herself bob.
     mock_getpass.side_effect = ["current-password"]
-    with cached_session_rsps("alice") as rsps:
+    with cached_session_rsps("alice", moved_to="carol") as rsps:
         me = bindings.v1User(active=True, admin=False, username="bob", id=113)
+        renamed = bindings.v1User(active=True, admin=False, username="carol", id=113)
         rsps.get(
             "http://localhost:8080/api/v1/users/bob/by-username",
             status=200,
@@ -444,17 +458,61 @@ def test_user_edit_own_username_after_renaming_yourself(
                     }
                 )
             ],
-            json={"user": me.to_json()},
+            json={"user": renamed.to_json()},
         )
         if args[0] == "rename":
             rsps.get(
                 "http://localhost:8080/api/v1/users/113",
                 status=200,
-                json={"user": me.to_json()},
+                json={"user": renamed.to_json()},
             )
         cli.main(["user", *args])
     prompts = [c.args[0] for c in mock_getpass.call_args_list]
     assert prompts == ["Current password for user 'bob': "]
+
+
+@pytest.mark.parametrize("new_name_cached", [False, True])
+@mock.patch("getpass.getpass")
+def test_user_edit_own_username_leaves_other_tokens_alone(
+    mock_getpass: mock.MagicMock, new_name_cached: bool
+) -> None:
+    # The CLI does not cache a token that did not come from the cache, here DET_USER_TOKEN, nor
+    # replace a token already cached under the new name.
+    mock_getpass.side_effect = ["current-password"]
+    with contextlib.ExitStack() as es:
+        es.enter_context(util.setenv_optional("DET_USER", "det-user"))
+        es.enter_context(util.setenv_optional("DET_USER_TOKEN", "det-token"))
+        mts = es.enter_context(util.MockTokenStore(strict=True))
+        rsps = es.enter_context(
+            responses.RequestsMock(
+                registry=registries.OrderedRegistry, assert_all_requests_are_fired=True
+            )
+        )
+        util.expect_get_info(rsps)
+        if new_name_cached:
+            mts.get_active_user(retval="det-user")
+            mts.get_token("det-user", retval="det-token")
+            mts.get_token("det-user", retval="det-token")
+            mts.get_token("new-name", retval="other-token")
+            rsps.get("http://localhost:8080/api/v1/me", status=200)
+        else:
+            mts.get_active_user(retval=None)
+            mts.get_token("determined", retval=None)
+            mts.get_token("det-user", retval=None)
+        userobj = bindings.v1User(active=True, admin=False, username="det-user", id=116)
+        rsps.get(
+            "http://localhost:8080/api/v1/users/det-user/by-username",
+            status=200,
+            json={"user": userobj.to_json()},
+        )
+        expect_whoami(rsps, userobj)
+        renamed = bindings.v1User(active=True, admin=False, username="new-name", id=116)
+        rsps.patch(
+            "http://localhost:8080/api/v1/users/116",
+            status=200,
+            json={"user": renamed.to_json()},
+        )
+        cli.main(["user", "edit", "det-user", "--username", "new-name"])
 
 
 @mock.patch("getpass.getpass")

@@ -114,6 +114,24 @@ def _is_caller(d: client.Determined, user_obj: client.User) -> bool:
     return d.whoami().user_id == user_obj.user_id
 
 
+def _move_cached_session(args: argparse.Namespace, sess: api.Session, new_username: str) -> None:
+    # Renaming does not end sessions. Cache the session's token under the new name, or commands
+    # that go by the session's username, like listing your own experiments, would use the old one.
+    token_store = authentication.TokenStore(args.master)
+    old_username = sess.username
+    if (
+        # Leave tokens that did not come from the cache, like DET_USER_TOKEN, alone.
+        token_store.get_token(old_username) != sess.token
+        # Do not replace another token cached under the new name.
+        or token_store.get_token(new_username) is not None
+    ):
+        return
+    token_store.set_token(new_username, sess.token)
+    if token_store.get_active_user() == old_username:
+        token_store.set_active(new_username)
+    token_store.drop_user(old_username)
+
+
 def rename(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
     d = client.Determined._from_session(sess)
@@ -127,6 +145,8 @@ def rename(args: argparse.Namespace) -> None:
         if own:
             raise errors.CliError(CURRENT_PASSWORD_INCORRECT) from e
         raise
+    if own and user_obj.username:
+        _move_cached_session(args, sess, user_obj.username)
 
 
 def change_password(args: argparse.Namespace) -> None:
@@ -247,11 +267,13 @@ def edit(args: argparse.Namespace) -> None:
         patch_user.oldPassword = api.salt_and_hash(_prompt_current_password(args.target_user))
         patch_user.isHashed = True
     try:
-        bindings.patch_PatchUser(sess, body=patch_user, userId=user_obj.user_id)
+        resp = bindings.patch_PatchUser(sess, body=patch_user, userId=user_obj.user_id)
     except api.errors.ForbiddenException as e:
         if own_rename:
             raise errors.CliError(CURRENT_PASSWORD_INCORRECT) from e
         raise
+    if own_rename:
+        _move_cached_session(args, sess, resp.user.username)
     print("Changes made to the following fields: " + ", ".join(changes))
 
 
