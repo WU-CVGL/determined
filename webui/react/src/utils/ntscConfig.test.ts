@@ -29,6 +29,31 @@ const mergedShellConfig = {
   work_dir: null,
 };
 
+/** A Kubernetes pod spec with credentials written out in container env entries. */
+const podSpecConfig = {
+  environment: {
+    pod_spec: {
+      apiVersion: 'v1',
+      kind: 'Pod',
+      spec: {
+        containers: [
+          {
+            env: [
+              { name: 'HF_TOKEN', value: 'hf-secret-value' },
+              { name: 'LANG', value: 'C.UTF-8' },
+              { name: 'WANDB_API_KEY', valueFrom: { secretKeyRef: { key: 'key', name: 'wandb' } } },
+            ],
+            name: 'determined-container',
+          },
+        ],
+        initContainers: [
+          { env: [{ name: 'GIT_PASSWORD', value: 'git-secret-value' }], name: 'fetch-code' },
+        ],
+      },
+    },
+  },
+};
+
 describe('ntscConfig', () => {
   describe('sanitizeConfig', () => {
     it('deletes launch-specific and secret keys and keeps the rest', () => {
@@ -199,6 +224,34 @@ describe('ntscConfig', () => {
         cuda: [],
       });
       expect(mergedShellConfig.environment.environment_variables.cpu).toContain('HF_TOKEN=abc');
+    });
+
+    it('finds written-out values in pod spec container env, not valueFrom references', () => {
+      expect(sensitiveEnvNames(podSpecConfig)).toEqual(['GIT_PASSWORD', 'HF_TOKEN']);
+      expect(
+        sensitiveEnvNames({
+          environment: {
+            environment_variables: ['MY_PASSWORD=x'],
+            pod_spec: { spec: { containers: [{ env: [{ name: 'AWS_SECRET_KEY', value: 'y' }] }] } },
+          },
+        }),
+      ).toEqual(['AWS_SECRET_KEY', 'MY_PASSWORD']);
+      expect(
+        sensitiveEnvNames({ environment: { pod_spec: { spec: { containers: 'x' } } } }),
+      ).toEqual([]);
+    });
+
+    it('removes them from pod spec containers and init containers', () => {
+      const { config, redacted } = redactSensitiveEnv(podSpecConfig);
+      expect(redacted).toEqual(['GIT_PASSWORD', 'HF_TOKEN']);
+      const { spec } = config.environment.pod_spec;
+      expect(spec.containers[0].env).toEqual([
+        { name: 'LANG', value: 'C.UTF-8' },
+        { name: 'WANDB_API_KEY', valueFrom: { secretKeyRef: { key: 'key', name: 'wandb' } } },
+      ]);
+      expect(spec.initContainers[0]).toEqual({ env: [], name: 'fetch-code' });
+      expect(JSON.stringify(config)).not.toMatch(/secret-value/);
+      expect(JSON.stringify(podSpecConfig)).toContain('hf-secret-value');
     });
   });
 

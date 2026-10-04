@@ -8,8 +8,10 @@
  * What is stored, in window.localStorage under `u:<user id>/launch-history/<type>`:
  * the launch config the master returned (after sanitizeConfig: no entrypoint,
  * no registry_auth, no generated description, no priority), with environment
- * variables whose names look like credentials removed, plus the workspace id,
- * the save time and the names of the removed variables. Nothing else, and
+ * variables whose names look like credentials removed (from
+ * environment_variables and from the env of the containers in a Kubernetes
+ * pod_spec; see sensitiveEnvNames), plus the workspace id, the save time and
+ * the names of the removed variables. Nothing else, and
  * never a shell's SSH key. At most LAUNCH_HISTORY_LIMIT entries per user and
  * type are kept.
  *

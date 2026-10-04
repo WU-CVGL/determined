@@ -84,6 +84,29 @@ describe('TemplateCreateModal with a starting config', () => {
     expect(mocks.updateTaskTemplate).not.toHaveBeenCalled();
   });
 
+  it('warns about credential-like env entries of Kubernetes pod spec containers', async () => {
+    await setup(`environment:
+  pod_spec:
+    spec:
+      containers:
+        - name: determined-container
+          env:
+            - name: HF_TOKEN
+              value: abc
+            - name: WANDB_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: wandb
+                  key: key
+      initContainers:
+        - name: fetch-code
+          env:
+            - name: GIT_PASSWORD
+              value: def
+`);
+    expect(screen.getByText(/look like credentials: GIT_PASSWORD, HF_TOKEN\./)).toBeInTheDocument();
+  });
+
   it('keeps the workspace selectable', async () => {
     await setup(CONFIG);
     expect(screen.getByLabelText('Workspace')).not.toBeDisabled();

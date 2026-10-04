@@ -203,10 +203,37 @@ const ENV_RUNTIMES = ['cpu', 'cuda', 'rocm', 'gpu'];
 const envVarName = (entry: unknown): string | undefined =>
   typeof entry === 'string' ? entry.split('=')[0] : undefined;
 
+/** The lists of a Kubernetes pod spec whose containers have env entries. */
+const POD_SPEC_CONTAINER_LISTS = ['containers', 'initContainers'];
+
+/** The containers and init containers of environment.pod_spec (Kubernetes only). */
+const podSpecContainers = (config: RawJson): RawJson[] => {
+  const spec = asObject(asObject(asObject(config.environment)?.pod_spec)?.spec);
+  return POD_SPEC_CONTAINER_LISTS.flatMap((key) => {
+    const containers: unknown = spec?.[key];
+    return Array.isArray(containers) ? containers : [];
+  })
+    .map(asObject)
+    .filter((container): container is RawJson => container !== undefined);
+};
+
 /**
- * Lists the names of environment variables that look like credentials.
- * environment_variables is either a list of NAME=VALUE strings or a map of
- * such lists per runtime (cpu, cuda, rocm).
+ * The name of a pod spec env entry ({ name, value }) whose name looks like a
+ * credential and whose value is written out. An entry that only refers to a
+ * value elsewhere (valueFrom) is left alone.
+ */
+const sensitivePodEnvName = (entry: unknown): string | undefined => {
+  const item = asObject(entry);
+  if (typeof item?.name !== 'string' || isNil(item.value)) return undefined;
+  return SECRET_ENV_NAME.test(item.name) ? item.name : undefined;
+};
+
+/**
+ * Lists the names of environment variables that look like credentials:
+ * - environment_variables, either a list of NAME=VALUE strings or a map of
+ *   such lists per runtime (cpu, cuda, rocm);
+ * - the env entries with a value of the containers and init containers in
+ *   environment.pod_spec (Kubernetes only).
  */
 export const sensitiveEnvNames = (config: RawJson): string[] => {
   const variables = asObject(config.environment)?.environment_variables;
@@ -218,12 +245,19 @@ export const sensitiveEnvNames = (config: RawJson): string[] => {
     const name = envVarName(entry);
     if (name && SECRET_ENV_NAME.test(name)) names.add(name);
   });
+  podSpecContainers(config).forEach((container) => {
+    if (!Array.isArray(container.env)) return;
+    container.env.forEach((entry: unknown) => {
+      const name = sensitivePodEnvName(entry);
+      if (name) names.add(name);
+    });
+  });
   return [...names].sort();
 };
 
 /**
- * Removes environment variables whose names look like credentials and returns
- * the removed names.
+ * Removes the environment variables and pod spec env entries that
+ * sensitiveEnvNames lists and returns their names.
  */
 export const redactSensitiveEnv = (config: RawJson): { config: RawJson; redacted: string[] } => {
   const redacted = sensitiveEnvNames(config);
@@ -248,6 +282,11 @@ export const redactSensitiveEnv = (config: RawJson): { config: RawJson; redacted
       });
     }
   }
+  podSpecContainers(out).forEach((container) => {
+    if (Array.isArray(container.env)) {
+      container.env = container.env.filter((entry: unknown) => !sensitivePodEnvName(entry));
+    }
+  });
   return { config: out, redacted };
 };
 

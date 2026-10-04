@@ -61,6 +61,38 @@ describe('launchHistory', () => {
     expect(raw).not.toMatch(/private_?key/i);
   });
 
+  it('leaves out credential-like env entries of Kubernetes pod spec containers', () => {
+    const config = {
+      ...launchConfig('a'),
+      environment: {
+        image: { cpu: 'img' },
+        pod_spec: {
+          spec: {
+            containers: [
+              {
+                env: [
+                  { name: 'HF_TOKEN', value: 'hf-secret-value' },
+                  { name: 'LANG', value: 'C.UTF-8' },
+                ],
+                name: 'determined-container',
+              },
+            ],
+            initContainers: [{ env: [{ name: 'GIT_PASSWORD', value: 'git-secret-value' }] }],
+          },
+        },
+      },
+    };
+    recordLaunch(1, SHELL, { config, workspaceId: 1 });
+    const [entry] = listLaunchHistory(1, SHELL);
+    expect(entry.redactedEnv).toEqual(['GIT_PASSWORD', 'HF_TOKEN']);
+    expect(entry.config.environment.pod_spec.spec.containers[0].env).toEqual([
+      { name: 'LANG', value: 'C.UTF-8' },
+    ]);
+
+    const raw = window.localStorage.getItem('u:1/launch-history/shell') ?? '';
+    expect(raw).not.toContain('secret-value');
+  });
+
   it('does nothing without a user, a config or a workspace', () => {
     recordLaunch(undefined, SHELL, { config: launchConfig('a'), workspaceId: 1 });
     recordLaunch(1, SHELL, { config: undefined, workspaceId: 1 });

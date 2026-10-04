@@ -21,8 +21,9 @@
       this browser. They are kept in the browser's local storage under your user ID. Only the launch
       config is stored, plus its workspace and time, without the entrypoint, registry credentials or
       environment variables whose names look like credentials (``TOKEN``, ``SECRET``, ``PASSW``,
-      ``KEY``, ``AUTH``, ``CRED``). The list is a convenience only and can be cleared from the
-      picker.
+      ``KEY``, ``AUTH``, ``CRED``). This covers ``environment_variables`` and the ``env`` entries
+      with a ``value`` of the containers and init containers in a Kubernetes ``pod_spec``. The list
+      is a convenience only and can be cleared from the picker.
 
    -  **Templates**: picking a template now also fills in its resource pool and slots, which the
       master does not apply from a template for shells and JupyterLabs. The template of your last
