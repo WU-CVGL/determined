@@ -311,27 +311,54 @@ func TestBridgeIdleTimeout(t *testing.T) {
 	require.Equal(t, CloseTimeout, stats.CloseCode)
 }
 
-func TestBridgeMaxSessionLength(t *testing.T) {
+// The maximum session length and the expiry of the login session end a busy session with
+// different close codes: the user may reconnect after the first, but must sign in again after the
+// second.
+func TestBridgeDeadlines(t *testing.T) {
 	signer, pub, _ := shellKeys(t, config.KeyTypeED25519)
 	sshd := newFakeSSHD(t, signer, pub, behaviorEcho)
-	opts := fastOptions()
-	opts.IdleTimeout = time.Hour
-	opts.Deadline = time.Now().Add(time.Second)
 	target := Target{Addr: sshd.Addr(), User: "root", Signer: signer, HostKey: pub}
-	srv := newBridgeServer(context.Background(), t, target, opts)
 
-	ws := srv.dial(t)
-	c := readTerm(ws)
-	go func() {
-		for i := 0; i < 100; i++ {
-			if ws.WriteMessage(websocket.BinaryMessage, []byte("busy\r")) != nil {
-				return
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-	}()
-	require.Equal(t, CloseTimeout, c.closeCode(t))
-	require.Equal(t, ErrCodeTimeLimit, c.errorCode())
+	for _, tc := range []struct {
+		name                  string
+		deadline, loginExpiry time.Duration
+		code                  int
+		errCode, reason       string
+	}{
+		{
+			name: "max session length", deadline: time.Second, loginExpiry: time.Hour,
+			code: CloseTimeout, errCode: ErrCodeTimeLimit, reason: "maximum session length",
+		},
+		{
+			name: "login expiry", deadline: time.Hour, loginExpiry: time.Second,
+			code: CloseUnauthenticated, errCode: ErrCodeUnauthenticate, reason: "login session expired",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := fastOptions()
+			opts.IdleTimeout = time.Hour
+			opts.Deadline = time.Now().Add(tc.deadline)
+			opts.LoginExpiry = time.Now().Add(tc.loginExpiry)
+			srv := newBridgeServer(context.Background(), t, target, opts)
+
+			ws := srv.dial(t)
+			c := readTerm(ws)
+			go func() {
+				for i := 0; i < 100; i++ {
+					if ws.WriteMessage(websocket.BinaryMessage, []byte("busy\r")) != nil {
+						return
+					}
+					time.Sleep(50 * time.Millisecond)
+				}
+			}()
+			require.Equal(t, tc.code, c.closeCode(t))
+			require.Equal(t, tc.errCode, c.errorCode())
+			stats := srv.waitStats(t, 5*time.Second)
+			require.True(t, stats.Started)
+			require.Equal(t, tc.code, stats.CloseCode)
+			require.Contains(t, stats.Reason, tc.reason)
+		})
+	}
 }
 
 func TestBridgeKeepaliveTimeout(t *testing.T) {

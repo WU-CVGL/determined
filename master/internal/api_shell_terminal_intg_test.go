@@ -509,6 +509,23 @@ func TestShellTerminalRecheck(t *testing.T) {
 	})
 }
 
+func TestShellTerminalLoginExpiry(t *testing.T) {
+	env := setupShellTerminalTest(t, shelltermtest.Silent, nil)
+	// The login session expires long before the maximum session length and the next recheck.
+	env.token(t, env.owner)
+	_, err := db.Bun().NewUpdate().Table("user_sessions").
+		Set("expiry = ?", time.Now().Add(3*time.Second)).
+		Where("user_id = ?", env.owner.ID).Exec(context.TODO())
+	require.NoError(t, err)
+
+	ws := env.open(t, &env.owner, env.shellID, "", nil)
+	frames := readTermFrames(ws)
+	frames.waitControl(t, "ready")
+	// The page asks the user to sign in again, rather than offering to reconnect.
+	require.Equal(t, shellterm.CloseUnauthenticated, frames.closeCode(t))
+	require.Equal(t, shellterm.ErrCodeUnauthenticate, frames.waitControl(t, "error").Code)
+}
+
 func TestShellTerminalLimits(t *testing.T) {
 	env := setupShellTerminalTest(t, shelltermtest.Silent, func(c *config.ShellTerminalConfig) {
 		c.MaxSessionsPerUser = 1

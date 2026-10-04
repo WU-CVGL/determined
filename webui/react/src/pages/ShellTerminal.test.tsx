@@ -190,9 +190,23 @@ describe('ShellTerminal', () => {
     vi.mocked(getTask).mockResolvedValue(taskWith(true));
     setup();
     await waitFor(() => expect(sockets).toHaveLength(1));
+    // How the master closes a terminal when its login session expires or is revoked.
     closeSession({ code: 4401, errorCode: 'session_expired' });
-    expect(await screen.findByText(/Your login session has ended/)).toBeInTheDocument();
+    expect(
+      await screen.findByText('Your login session has ended. Sign in again to open a terminal.'),
+    ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reconnect' })).not.toBeInTheDocument();
+  });
+
+  it('offers to reconnect after the maximum session length', async () => {
+    vi.mocked(getTask).mockResolvedValue(taskWith(true));
+    setup();
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    closeSession({ code: 4408, errorCode: 'time_limit' });
+    expect(
+      await screen.findByText('The terminal reached its maximum session length.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reconnect' })).toBeInTheDocument();
   });
 
   it('shows an ended shell without connecting', async () => {

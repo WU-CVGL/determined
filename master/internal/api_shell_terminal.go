@@ -219,9 +219,8 @@ func (s *shellTerminalService) serve(
 	opts.Lang = shellterm.ValidLang(query.Get("lang"))
 	opts.IdleTimeout = time.Duration(s.cfg.IdleTimeout)
 	opts.Deadline = time.Now().Add(time.Duration(s.cfg.MaxSessionDuration))
-	if !loginSession.Expiry.IsZero() && loginSession.Expiry.Before(opts.Deadline) {
-		opts.Deadline = loginSession.Expiry
-	}
+	// The terminal also ends when its login session expires, which asks the user to sign in again.
+	opts.LoginExpiry = loginSession.Expiry
 
 	start := time.Now()
 	who := curUser.Username

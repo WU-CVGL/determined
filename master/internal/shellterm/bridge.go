@@ -73,8 +73,12 @@ type Options struct {
 	KeepaliveTimeout  time.Duration
 	// IdleTimeout ends a session without input or output for this long. Zero disables it.
 	IdleTimeout time.Duration
-	// Deadline, when set, ends the session at that time.
+	// Deadline, when set, ends the session at that time with CloseTimeout: the session has
+	// reached its maximum length.
 	Deadline time.Time
+	// LoginExpiry, when set, ends the session at that time with CloseUnauthenticated: the login
+	// session that opened the terminal expires then.
+	LoginExpiry time.Time
 
 	// Dial opens the TCP connection to the shell's sshd. It defaults to a net.Dialer.
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
@@ -197,9 +201,16 @@ func Serve(ctx context.Context, ws *websocket.Conn, t Target, o Options, log *lo
 	goFn(func() { s.readLoop(ctx) })
 	goFn(func() { s.writeLoop(ctx) })
 	goFn(func() { s.watchIdle(ctx) })
+	// Each deadline ends the session with its own close code; the first to pass sets it.
 	if !o.Deadline.IsZero() {
 		timer := time.AfterFunc(time.Until(o.Deadline), func() {
 			cancel(NewCloseError(CloseTimeout, ErrCodeTimeLimit, "maximum session length reached"))
+		})
+		defer timer.Stop()
+	}
+	if !o.LoginExpiry.IsZero() {
+		timer := time.AfterFunc(time.Until(o.LoginExpiry), func() {
+			cancel(NewCloseError(CloseUnauthenticated, ErrCodeUnauthenticate, "login session expired"))
 		})
 		defer timer.Stop()
 	}
