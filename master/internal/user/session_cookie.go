@@ -63,9 +63,19 @@ var signInPaths = map[string]bool{
 	"/auth/session-cookie": true,
 }
 
+// sessionCookiePath returns the path of r the way signInPaths and logoutPaths list it. The gateway
+// serves other paths as the same routes: its echo route removes a trailing slash, and grpc-gateway
+// then splits a custom verb off the last segment at its last colon, so /api/v1/auth/login: and
+// /api/v1/auth/login:/ sign in like /api/v1/auth/login, and must not escape the origin check.
+// echo serves the legacy routes at their own paths only; matching them more widely only checks
+// requests that echo does not serve.
+func sessionCookiePath(r *http.Request) string {
+	return strings.TrimSuffix(strings.TrimSuffix(r.URL.Path, "/"), ":")
+}
+
 // changesSessionCookie reports whether the reply to r sets or clears the session cookie.
 func changesSessionCookie(r *http.Request) bool {
-	path := strings.TrimSuffix(r.URL.Path, "/")
+	path := sessionCookiePath(r)
 	return signInPaths[path] || logoutPaths[path]
 }
 
@@ -77,7 +87,7 @@ func changesSessionCookie(r *http.Request) bool {
 func ClearSessionCookieOnLogout(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		r := c.Request()
-		if r.Method == http.MethodPost && logoutPaths[strings.TrimSuffix(r.URL.Path, "/")] {
+		if r.Method == http.MethodPost && logoutPaths[sessionCookiePath(r)] {
 			c.SetCookie(ExpiredSessionCookie(SessionCookieSecure(r)))
 		}
 		return next(c)

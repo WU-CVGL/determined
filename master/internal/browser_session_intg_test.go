@@ -355,6 +355,85 @@ func TestBrowserSessionLogoutAndSessionCookie(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
+// TestBrowserSessionRouteAliases checks the origin of sign-in and sign-out requests sent to the
+// other paths that serve them. grpc-gateway splits a custom verb off the last path segment at its
+// last colon, and serves the empty one of /api/v1/auth/login: as /api/v1/auth/login; the gateway's
+// route removes a trailing slash before, so login:/ is the same route too.
+func TestBrowserSessionRouteAliases(t *testing.T) {
+	apiSrv, _, _ := setupAPITest(t, nil)
+	srv := browserSessionServer(t, apiSrv)
+	const password = "Browser-password-1"
+	u := addPasswordUser(t, password)
+	self := srv.URL
+	otherOrigins := [][2]string{
+		{"https://evil.test", "cross-site"}, {siblingOrigin, "same-site"}, {siblingOrigin, ""},
+	}
+	newToken := func() string {
+		token, err := user.StartSession(context.Background(), &u)
+		require.NoError(t, err)
+		return token
+	}
+
+	// A page on a sibling origin cannot sign the visitor in to an account of its choosing through
+	// an alias of the sign-in route, whatever bearer token it adds. The web UI and the CLI can.
+	login := browserRequest{
+		method: http.MethodPost, contentType: jsonContentType, authorization: "Bearer not-a-token",
+		body: fmt.Sprintf(`{"username": %q, "password": %q}`, u.Username, password),
+	}
+	for _, path := range []string{"/api/v1/auth/login:", "/api/v1/auth/login:/"} {
+		r := login
+		r.path = path
+		for _, headers := range otherOrigins {
+			r.origin, r.fetchSite = headers[0], headers[1]
+			resp, body := r.send(t, srv)
+			require.Equal(t, http.StatusForbidden, resp.StatusCode, "%s %v: %s", path, headers, body)
+			require.Empty(t, resp.Cookies(), "%s %v", path, headers)
+		}
+		for _, headers := range [][2]string{{self, sameOrigin}, {"", ""}} {
+			r.origin, r.fetchSite = headers[0], headers[1]
+			resp, body := r.send(t, srv)
+			require.Equal(t, http.StatusOK, resp.StatusCode, "%s %v: %s", path, headers, body)
+			require.NotEmpty(t, sessionCookieOf(t, resp).Value, "%s %v", path, headers)
+		}
+	}
+
+	// Nor can it sign the visitor out through an alias of the sign-out route. The web UI can, and
+	// the cookie goes as it does on /api/v1/auth/logout.
+	for _, path := range []string{"/api/v1/auth/logout:", "/api/v1/auth/logout:/"} {
+		token := newToken()
+		for _, headers := range otherOrigins {
+			resp, body := browserRequest{
+				method: http.MethodPost, path: path, cookie: token, authorization: "Bearer not-a-token",
+				origin: headers[0], fetchSite: headers[1],
+			}.send(t, srv)
+			require.Equal(t, http.StatusForbidden, resp.StatusCode, "%s %v: %s", path, headers, body)
+			require.Empty(t, resp.Cookies(), "%s %v", path, headers)
+		}
+		resp, _ := browserRequest{method: http.MethodGet, path: "/api/v1/me", cookie: token}.send(t, srv)
+		require.Equal(t, http.StatusOK, resp.StatusCode, path)
+
+		resp, body := browserRequest{
+			method: http.MethodPost, path: path, cookie: token, origin: self, fetchSite: sameOrigin,
+		}.send(t, srv)
+		require.Equal(t, http.StatusOK, resp.StatusCode, "%s: %s", path, body)
+		require.Empty(t, sessionCookieOf(t, resp).Value, path)
+		resp, _ = browserRequest{method: http.MethodGet, path: "/api/v1/me", cookie: token}.send(t, srv)
+		require.Equal(t, http.StatusUnauthorized, resp.StatusCode, path)
+	}
+
+	// echo serves the legacy routes only at their own paths. The bearer token gets these requests
+	// past authentication, to the router.
+	for _, path := range []string{"/login/", "/login:", "/logout/", "/logout:"} {
+		resp, body := browserRequest{
+			method: http.MethodPost, path: path + "?cookie=true", contentType: jsonContentType,
+			body: fmt.Sprintf(`{"username": %q, "password": %q}`,
+				u.Username, user.ReplicateClientSideSaltAndHash(password)),
+			authorization: "Bearer " + newToken(), origin: self, fetchSite: sameOrigin,
+		}.send(t, srv)
+		require.Equal(t, http.StatusNotFound, resp.StatusCode, "%s: %s", path, body)
+	}
+}
+
 func TestProxyAuthenticationChecksOrigin(t *testing.T) {
 	apiSrv, _, _ := setupAPITest(t, nil)
 	user.InitService(apiSrv.m.db, &model.ExternalSessions{})

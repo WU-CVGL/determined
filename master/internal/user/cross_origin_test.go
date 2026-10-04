@@ -30,10 +30,13 @@ func TestNeedsSameOriginCheck(t *testing.T) {
 		}
 	}
 
-	// Signing in or out sets or clears the session cookie whatever the Authorization header says.
+	// Signing in or out sets or clears the session cookie whatever the Authorization header says,
+	// under the other paths that the gateway serves these routes at too.
 	for _, path := range []string{
 		"/api/v1/auth/login", "/login?cookie=true", "/api/v1/auth/logout", "/logout",
-		"/auth/session-cookie", "/api/v1/auth/login/", "/logout/",
+		"/auth/session-cookie", "/api/v1/auth/login/", "/logout/", "/api/v1/auth/login:",
+		"/api/v1/auth/login:/", "/api/v1/auth/logout:", "/api/v1/auth/logout:/",
+		"/api/v1/auth/login%3A",
 	} {
 		r := httptest.NewRequest(http.MethodPost, path, nil)
 		r.Header.Set("Authorization", "Bearer tok")
@@ -235,6 +238,7 @@ func TestCrossOriginProtection(t *testing.T) {
 	// send no Origin and pass.
 	for _, path := range []string{
 		"/api/v1/auth/login", "/login", "/api/v1/auth/logout", "/logout", "/auth/session-cookie",
+		"/api/v1/auth/login:", "/api/v1/auth/login:/", "/api/v1/auth/logout:",
 	} {
 		require.Equal(t, http.StatusForbidden, send(http.MethodPost, path, withBearer(crossSite)), path)
 		require.Equal(t, http.StatusForbidden, send(http.MethodPost, path, withBearer(map[string]string{

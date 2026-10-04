@@ -157,6 +157,8 @@ func TestClearSessionCookieOnLogout(t *testing.T) {
 	for _, target := range []string{
 		"http://gpu.example/logout", "http://gpu.example/api/v1/auth/logout",
 		"http://gpu.example/api/v1/auth/logout/", "https://gpu.example/api/v1/auth/logout",
+		// The gateway serves these as /api/v1/auth/logout too.
+		"http://gpu.example/api/v1/auth/logout:", "http://gpu.example/api/v1/auth/logout:/",
 	} {
 		rec := send(http.MethodPost, target)
 		require.Equal(t, http.StatusUnauthorized, rec.Code, target)
@@ -174,6 +176,7 @@ func TestClearSessionCookieOnLogout(t *testing.T) {
 		{http.MethodGet, "http://gpu.example/api/v1/auth/logout"},
 		{http.MethodPost, "http://gpu.example/api/v1/auth/login"},
 		{http.MethodPost, "http://gpu.example/api/v1/users/1/logout"},
+		{http.MethodPost, "http://gpu.example/api/v1/auth/logout:x"},
 	} {
 		require.Empty(t, recordedCookies(send(req[0], req[1])), req)
 	}
