@@ -35,6 +35,30 @@ vi.mock('utils/routes', () => ({ routeToExternalUrl: vi.fn() }));
 
 const SIGNED_OUT = () => new DetError(new Response(null, { status: 401 }));
 
+const USER = { id: 1, isActive: true, isAdmin: false, username: 'u' };
+
+/* The script that removes a session cookie scripts can read, the only cookie the web UI writes. */
+const REMOVE_READABLE_COOKIE = 'auth=; Max-Age=0; path=/';
+
+/* jsdom's cookie jar, which holds the browser's cookies, HttpOnly ones included. */
+interface CookieJar {
+  getCookieStringSync(url: string): string;
+  removeAllCookiesSync(): void;
+  setCookieSync(cookie: string, url: string): unknown;
+}
+const cookieJar = (): CookieJar =>
+  (globalThis as unknown as { jsdom: { cookieJar: CookieJar } }).jsdom.cookieJar;
+
+/* Sets a cookie the way a response from the master does, so that it can be HttpOnly. */
+const setCookieFromMaster = (cookie: string) =>
+  cookieJar().setCookieSync(cookie, window.location.href);
+
+/* The master's /auth/session-cookie: it answers later, storing the token in the HttpOnly cookie. */
+const masterStoresToken = async ({ token }: { token: string }) => {
+  await new Promise((resolve) => setTimeout(resolve));
+  setCookieFromMaster(`auth=${token}; Path=/; HttpOnly; SameSite=Lax`);
+};
+
 const setup = (url: string) => {
   // The browser's address bar, which the token must leave, and the router's own location.
   window.history.replaceState(null, '', url);
@@ -63,8 +87,10 @@ describe('useAuthCheck', () => {
     vi.mocked(routeToExternalUrl).mockReset();
     routeAll.mockReset();
     window.localStorage.clear();
+    cookieJar().removeAllCookiesSync();
 
-    // The web UI must never write a cookie: the session cookie is the master's and HttpOnly.
+    // The web UI must never write a token into a cookie: the session cookie is the master's and
+    // HttpOnly.
     cookieWrites = [];
     const descriptor = Object.getOwnPropertyDescriptor(Document.prototype, 'cookie');
     vi.spyOn(document, 'cookie', 'set').mockImplementation((value: string) => {
@@ -76,8 +102,10 @@ describe('useAuthCheck', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     window.history.replaceState(null, '', '/');
-    // Nothing in the web UI keeps a session token where scripts can read it.
-    expect(cookieWrites).toStrictEqual([]);
+    // Nothing in the web UI keeps a session token where scripts can read it. The only cookie it
+    // writes removes a session cookie that an earlier version left readable.
+    expect(cookieWrites.filter((c) => c !== REMOVE_READABLE_COOKIE)).toStrictEqual([]);
+    expect(document.cookie).not.toMatch(/(^|; )auth=/);
     expect(Object.keys(window.localStorage).filter((k) => /auth|token/i.test(k))).toStrictEqual([]);
     expect(Object.keys(window.sessionStorage).filter((k) => /auth|token/i.test(k))).toStrictEqual(
       [],
@@ -244,6 +272,86 @@ describe('useAuthCheck', () => {
 
     expect(router.state.location.pathname).toBe('/det/workspaces');
     expect(getCurrentUser).toHaveBeenCalledTimes(1);
+  });
+
+  it('replaces a session cookie that scripts can read with the HttpOnly one', async () => {
+    // Earlier versions of the master and the web UI set the session cookie without HttpOnly.
+    setCookieFromMaster('auth=v2.public.legacy; Path=/');
+    vi.mocked(storeSessionToken).mockImplementation(masterStoresToken);
+    vi.mocked(getCurrentUser).mockResolvedValue(USER);
+    const { result } = setup('/det/models');
+    expect(document.cookie).toBe('auth=v2.public.legacy');
+
+    expect(await check(result)).toBe(true);
+    // The master stored the same token in the HttpOnly cookie, which replaced the readable one.
+    expect(vi.mocked(storeSessionToken).mock.calls).toStrictEqual([
+      [{ token: 'v2.public.legacy' }],
+    ]);
+    expect(document.cookie).toBe('');
+    expect(cookieJar().getCookieStringSync(window.location.href)).toBe('auth=v2.public.legacy');
+    expect(cookieWrites).toStrictEqual([]);
+    // The session is checked only once the cookie is HttpOnly.
+    expect(vi.mocked(storeSessionToken).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(getCurrentUser).mock.invocationCallOrder[0],
+    );
+    expect(authStore.isAuthenticated.get()).toBe(true);
+  });
+
+  it('removes a session cookie that scripts can read when the master refuses its token', async () => {
+    setCookieFromMaster('auth=v2.public.ended; Path=/');
+    vi.mocked(storeSessionToken).mockRejectedValue(SIGNED_OUT());
+    vi.mocked(getCurrentUser).mockRejectedValue(SIGNED_OUT());
+    const { result } = setup('/det/models');
+
+    expect(await check(result)).toBe(false);
+    expect(vi.mocked(storeSessionToken).mock.calls).toStrictEqual([[{ token: 'v2.public.ended' }]]);
+    expect(cookieWrites).toStrictEqual([REMOVE_READABLE_COOKIE]);
+    expect(document.cookie).toBe('');
+    expect(cookieJar().getCookieStringSync(window.location.href)).toBe('');
+    expect(vi.mocked(storeSessionToken).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(getCurrentUser).mock.invocationCallOrder[0],
+    );
+    expect(authStore.isAuthenticated.get()).toBe(false);
+  });
+
+  it('leaves other cookies alone and sends nothing when no session cookie is readable', async () => {
+    setCookieFromMaster('auth=v2.public.current; Path=/; HttpOnly');
+    setCookieFromMaster('authority=x; Path=/');
+    setCookieFromMaster('xauth=y; Path=/');
+    vi.mocked(getCurrentUser).mockResolvedValue(USER);
+    const { result } = setup('/det/models');
+
+    expect(await check(result)).toBe(true);
+    expect(storeSessionToken).not.toHaveBeenCalled();
+    expect(cookieWrites).toStrictEqual([]);
+    expect(document.cookie).toBe('authority=x; xauth=y');
+  });
+
+  it('sends the token of a readable session cookie once when checks overlap', async () => {
+    setCookieFromMaster('auth=v2.public.legacy; Path=/');
+    vi.mocked(storeSessionToken).mockImplementation(masterStoresToken);
+    vi.mocked(getCurrentUser).mockResolvedValue(USER);
+    const { result } = setup('/det/models');
+
+    await act(async () => {
+      await Promise.all([result.current.check(), result.current.check()]);
+    });
+    expect(storeSessionToken).toHaveBeenCalledTimes(1);
+    expect(getCurrentUser).toHaveBeenCalledTimes(2);
+    expect(document.cookie).toBe('');
+  });
+
+  it('stores a token from the URL before looking for a readable session cookie', async () => {
+    setInfo({ externalLoginUri: 'https://login.example/', ssoProviders: [] });
+    setCookieFromMaster('auth=v2.public.legacy; Path=/');
+    vi.mocked(storeSessionToken).mockImplementation(masterStoresToken);
+    vi.mocked(getCurrentUser).mockResolvedValue(USER);
+    const { result } = setup('/det/login?jwt=v2.public.tok');
+
+    expect(await check(result)).toBe(true);
+    // The cookie from the URL's token replaced the readable one; the old token is not sent.
+    expect(vi.mocked(storeSessionToken).mock.calls).toStrictEqual([[{ token: 'v2.public.tok' }]]);
+    expect(cookieJar().getCookieStringSync(window.location.href)).toBe('auth=v2.public.tok');
   });
 
   it('keeps what it knew when the master cannot be reached', async () => {

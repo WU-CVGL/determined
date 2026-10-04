@@ -2,8 +2,9 @@ import { StorageManager } from 'utils/storage';
 
 /*
  * The key under which earlier versions of the web UI kept the session token. The token now lives
- * only in the master's HttpOnly session cookie, which scripts cannot read, so a token left behind
- * here would be the only copy that a script on the master's origin could steal.
+ * only in the master's HttpOnly session cookie, which scripts cannot read; a token left behind here
+ * would stay open to any script on the master's origin. Those versions also left the token in a
+ * session cookie that scripts can read, which useAuthCheck replaces with the HttpOnly one.
  */
 export const LEGACY_AUTH_TOKEN_KEY = 'auth-token';
 

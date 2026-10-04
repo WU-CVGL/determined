@@ -6,7 +6,7 @@ import { Auth } from 'types';
 /*
  * The browser's session is the master's HttpOnly session cookie: the master sets it when the user
  * signs in and removes it when they sign out, and the browser sends it with every request to the
- * master. The web UI never sees the token; this store only keeps whether the user is signed in.
+ * master. The web UI never sees its token; this store only keeps whether the user is signed in.
  */
 
 interface AuthState {

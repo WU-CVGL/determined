@@ -20,6 +20,50 @@ export const JWT_PARAM = 'jwt';
  */
 let pendingTokenExchange: Promise<void> | undefined;
 
+/* The name of the master's session cookie. */
+const SESSION_COOKIE_NAME = 'auth';
+
+/*
+ * Earlier versions of the master and the web UI kept the session token in a session cookie that
+ * scripts could read. The master now sets the cookie HttpOnly, so a session cookie that shows in
+ * document.cookie is one of those, and any script on the master's origin can steal its token.
+ */
+const readableSessionToken = (): string | undefined => {
+  const prefix = `${SESSION_COOKIE_NAME}=`;
+  return document.cookie
+    .split(';')
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith(prefix))
+    ?.slice(prefix.length);
+};
+
+/*
+ * The replacement of a session cookie that scripts can read, while it runs. Auth checks that start
+ * meanwhile wait for it instead of sending the token again.
+ */
+let pendingCookieReplacement: Promise<void> | undefined;
+
+/*
+ * Has the master store the token of a session cookie that scripts can read in its HttpOnly cookie,
+ * which has the same name and path and so replaces it. A readable cookie still there afterwards
+ * (its session has ended, or the master refused or could not be reached) is removed, and the user
+ * signs in again. Nothing here writes the token anywhere.
+ */
+const replaceReadableSessionCookie = async (): Promise<void> => {
+  const token = readableSessionToken();
+  if (token === undefined) return;
+  if (token) {
+    try {
+      await storeSessionToken({ token });
+    } catch (e) {
+      if (!isAuthFailure(e)) handleError(e, { silent: true });
+    }
+  }
+  if (readableSessionToken() !== undefined) {
+    document.cookie = `${SESSION_COOKIE_NAME}=; Max-Age=0; path=/`;
+  }
+};
+
 /* Replaces the browser's history entry with its URL without the token, keeping the router's state. */
 const removeTokenFromHistory = (): void => {
   const url = new URL(window.location.href);
@@ -33,7 +77,8 @@ const removeTokenFromHistory = (): void => {
  *
  * The browser's session is the master's HttpOnly session cookie, which the web UI cannot read, so
  * this asks the master who the current user is. The external sign-in page (`externalLoginUri`)
- * hands over a token in the URL instead (`?jwt=`); the master turns it into the cookie.
+ * hands over a token in the URL instead (`?jwt=`); the master turns it into the cookie. A session
+ * cookie that an earlier version left readable by scripts is replaced before the check.
  */
 const useAuthCheck = (): (() => Promise<boolean>) => {
   const info = useObservable(determinedStore.info);
@@ -91,6 +136,11 @@ const useAuthCheck = (): (() => Promise<boolean>) => {
         if (!isAuthFailure(e)) handleError(e, { silent: true });
       }
     }
+    // Only after a token from the URL is stored, so that the two do not race for the cookie.
+    pendingCookieReplacement ??= replaceReadableSessionCookie().finally(() => {
+      pendingCookieReplacement = undefined;
+    });
+    await pendingCookieReplacement;
 
     // check if the user clicked the logout button, which ignores SSO redirection
     const hardLogout = window.location.href.includes('hard_logout=true');
