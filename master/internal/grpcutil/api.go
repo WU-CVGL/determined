@@ -135,11 +135,12 @@ func RegisterHTTPProxy(ctx context.Context, e *echo.Echo, port int, cert *tls.Ce
 func gatewayHandler(mux http.Handler, externalSessions bool) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		request := c.Request()
-		if cookie, err := c.Cookie("det_jwt"); externalSessions && err == nil {
-			request.Header.Set("Authorization", "Bearer "+cookie.Value)
-		}
-		if c.Request().Header.Get("Authorization") == "" {
-			if cookie, err := c.Cookie(user.SessionCookieName); err == nil {
+		// A cookie never replaces an Authorization header that the client sent: the cross-origin
+		// check exempts requests with a bearer token, so a cookie must not authenticate them.
+		if request.Header.Get("Authorization") == "" {
+			if cookie, err := c.Cookie("det_jwt"); externalSessions && err == nil {
+				request.Header.Set("Authorization", "Bearer "+cookie.Value)
+			} else if cookie, err := c.Cookie(user.SessionCookieName); err == nil {
 				request.Header.Set("Authorization", "Bearer "+cookie.Value)
 			}
 		}

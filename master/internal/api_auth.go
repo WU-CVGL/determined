@@ -129,9 +129,9 @@ func processProxyAuthentication(c echo.Context) (done bool, err error) {
 			return true, fmt.Errorf("invalid notebook session token for task (%v)", taskID)
 		}
 	} else {
-		// Without an Authorization header, the browser's session cookie authenticates the
-		// request, so a page on another origin must not be able to send it. The service's own
-		// pages share the master's origin and pass.
+		// Without a bearer token, the browser's session cookie authenticates the request, so a
+		// page on another origin must not be able to send it, nor open a WebSocket with it. The
+		// service's own pages share the master's origin and pass.
 		if user.NeedsSameOriginCheck(c.Request()) {
 			if err := user.CheckSameOrigin(c.Request()); err != nil {
 				return true, err
@@ -206,6 +206,20 @@ func extractNotebookTokenFromRequest(r *http.Request) string {
 	}
 	// If we found no token, then abort the request with an HTTP 401.
 	return ""
+}
+
+// useAuthenticationMiddleware registers the middleware that authenticates requests to e, and the
+// middleware that protects browser sessions, which must run before it:
+//   - Browsers attach the session cookie to requests that other sites start, so requests that may
+//     rely on it must come from the master's own pages (user.CrossOriginProtection).
+//   - Sign-out requests remove the session cookie even when their session has already ended and
+//     authentication fails (user.ClearSessionCookieOnLogout).
+//
+// It expects requests to carry a *detContext.DetContext already.
+func useAuthenticationMiddleware(e *echo.Echo, proxiedRoutes []string) {
+	e.Use(user.CrossOriginProtection)
+	e.Use(user.ClearSessionCookieOnLogout)
+	e.Use(processAuthWithRedirect(proxiedRoutes))
 }
 
 // processAuthWithRedirect is an auth middleware that redirects browser requests

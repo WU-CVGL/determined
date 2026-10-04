@@ -40,13 +40,13 @@ func TestTrustedProxies(t *testing.T) {
 	p := TrustedProxies{"10.0.1.66", "192.168.233.0/24", "fd00::/8"}
 	require.Empty(t, p.Validate())
 	for ip, trusted := range map[string]bool{
-		"10.0.1.66":       true,
-		"10.0.1.67":       false,
-		"192.168.233.8":   true,
-		"192.168.234.8":   false,
+		"10.0.1.66":        true,
+		"10.0.1.67":        false,
+		"192.168.233.8":    true,
+		"192.168.234.8":    false,
 		"::ffff:10.0.1.66": true,
-		"fd00::1":         true,
-		"fe80::1":         false,
+		"fd00::1":          true,
+		"fe80::1":          false,
 	} {
 		require.Equal(t, trusted, p.Contains(net.ParseIP(ip)), ip)
 	}

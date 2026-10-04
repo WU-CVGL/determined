@@ -129,11 +129,59 @@ func TestPostSessionCookie(t *testing.T) {
 
 	rec, err = post(http.Header{"Authorization": {"Bearer tok"}, "Sec-Fetch-Site": {"same-origin"}})
 	require.NoError(t, err)
-	cookies := rec.Result().Cookies()
+	cookies := recordedCookies(rec)
 	require.Len(t, cookies, 1)
 	require.Equal(t, "auth", cookies[0].Name)
 	require.Equal(t, "tok", cookies[0].Value)
 	require.True(t, cookies[0].HttpOnly)
 	require.Equal(t, http.SameSiteLaxMode, cookies[0].SameSite)
 	require.Equal(t, "/", cookies[0].Path)
+}
+
+func TestClearSessionCookieOnLogout(t *testing.T) {
+	e := echo.New()
+	e.Use(ClearSessionCookieOnLogout)
+	// The handlers fail as they do when the session has already ended.
+	unauthenticated := func(c echo.Context) error { return echo.NewHTTPError(http.StatusUnauthorized) }
+	e.POST("/logout", unauthenticated)
+	e.POST("/api/v1/*", unauthenticated)
+	e.GET("/api/v1/*", unauthenticated)
+
+	send := func(method, target string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, target, nil)
+		r.Header.Set("Cookie", "auth=stale")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, r)
+		return rec
+	}
+	for _, target := range []string{
+		"http://gpu.example/logout", "http://gpu.example/api/v1/auth/logout",
+		"http://gpu.example/api/v1/auth/logout/", "https://gpu.example/api/v1/auth/logout",
+	} {
+		rec := send(http.MethodPost, target)
+		require.Equal(t, http.StatusUnauthorized, rec.Code, target)
+		cookies := recordedCookies(rec)
+		require.Len(t, cookies, 1, target)
+		require.Equal(t, "auth", cookies[0].Name)
+		require.Empty(t, cookies[0].Value)
+		require.Equal(t, "/", cookies[0].Path)
+		require.Negative(t, cookies[0].MaxAge)
+		require.True(t, cookies[0].HttpOnly)
+		require.Equal(t, strings.HasPrefix(target, "https:"), cookies[0].Secure, target)
+	}
+	// Other requests leave the cookie alone.
+	for _, req := range [][2]string{
+		{http.MethodGet, "http://gpu.example/api/v1/auth/logout"},
+		{http.MethodPost, "http://gpu.example/api/v1/auth/login"},
+		{http.MethodPost, "http://gpu.example/api/v1/users/1/logout"},
+	} {
+		require.Empty(t, recordedCookies(send(req[0], req[1])), req)
+	}
+}
+
+// recordedCookies returns the cookies that a recorded response sets.
+func recordedCookies(rec *httptest.ResponseRecorder) []*http.Cookie {
+	resp := rec.Result()
+	defer func() { _ = resp.Body.Close() }()
+	return resp.Cookies()
 }

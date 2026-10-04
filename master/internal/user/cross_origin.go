@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/determined-ai/determined/master/internal/config"
 )
@@ -29,17 +30,35 @@ var crossOriginExemptRoutes = map[string]bool{
 	"/oauth2/token":     true,
 }
 
-// NeedsSameOriginCheck reports whether r must pass CheckSameOrigin: it uses a method that can
-// change state and carries no Authorization header, so a browser may have attached the session
-// cookie (or may set one in reply, as a sign-in does) without the page asking for it. Requests
-// with an Authorization header come from the CLI, the SDK, tasks or scripts; browsers only send
-// one from another origin after a CORS preflight that the master refuses unless enable_cors is set.
+// NeedsSameOriginCheck reports whether r must pass CheckSameOrigin: a browser may have attached
+// the session cookie to it (or may store one from the reply, as a sign-in does) without the page
+// asking for it, and it can change state. That is any method but GET, HEAD and OPTIONS, and a
+// WebSocket handshake, which is a GET that opens a connection able to do anything the page could.
+//
+// Requests that carry a bearer token come from the CLI, the SDK, tasks or scripts and are exempt:
+// browsers attach no such header by themselves, and only send one from another origin after a
+// CORS preflight that the master refuses unless enable_cors is set. Other Authorization headers
+// do not exempt a request, since browsers can attach Basic, Digest or Negotiate credentials to a
+// cross-site form post.
 func NeedsSameOriginCheck(r *http.Request) bool {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
-		return false
+		if !IsWebSocketHandshake(r) {
+			return false
+		}
 	}
-	return r.Header.Get(echo.HeaderAuthorization) == ""
+	return !HasBearerToken(r)
+}
+
+// HasBearerToken reports whether r carries a non-empty "Authorization: Bearer" token.
+func HasBearerToken(r *http.Request) bool {
+	token, ok := strings.CutPrefix(r.Header.Get(echo.HeaderAuthorization), "Bearer ")
+	return ok && strings.TrimSpace(token) != ""
+}
+
+// IsWebSocketHandshake reports whether r asks to open a WebSocket.
+func IsWebSocketHandshake(r *http.Request) bool {
+	return strings.EqualFold(r.Header.Get(echo.HeaderUpgrade), "websocket")
 }
 
 // CheckSameOrigin returns ErrCrossOriginRequest when a browser sent r from a page on another
@@ -64,6 +83,7 @@ func CheckSameOrigin(r *http.Request) error {
 		if isTrustedOrigin(origin) {
 			return nil
 		}
+		logCrossOriginRefusal(r)
 		return ErrCrossOriginRequest
 	}
 
@@ -80,7 +100,26 @@ func CheckSameOrigin(r *http.Request) error {
 	if isTrustedOrigin(origin) {
 		return nil
 	}
+	logCrossOriginRefusal(r)
 	return ErrCrossOriginRequest
+}
+
+// logCrossOriginRefusal records what CheckSameOrigin saw when it refused r. A reverse proxy that
+// rewrites the Host header, or drops its port, makes the master refuse its own pages over plain
+// HTTP, where browsers send no Sec-Fetch-Site; these fields show an operator why.
+func logCrossOriginRefusal(r *http.Request) {
+	log.WithFields(log.Fields{
+		"method":             r.Method,
+		"path":               r.URL.Path,
+		"origin":             r.Header.Get(echo.HeaderOrigin),
+		"sec_fetch_site":     r.Header.Get("Sec-Fetch-Site"),
+		"host":               r.Host,
+		"x_forwarded_host":   r.Header.Get("X-Forwarded-Host"),
+		"remote_addr":        r.RemoteAddr,
+		"from_trusted_proxy": FromTrustedProxy(r),
+	}).Warn("refused a cross-origin request that relies on the session cookie; if it came from " +
+		"the master's own pages, make the reverse proxy keep the Host header with its port, or " +
+		"list the origin in security.csrf.trusted_origins")
 }
 
 // CrossOriginProtection is middleware that applies CheckSameOrigin to every request that

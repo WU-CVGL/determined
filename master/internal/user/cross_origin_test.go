@@ -23,7 +23,20 @@ func TestNeedsSameOriginCheck(t *testing.T) {
 		// The CLI, the SDK and tasks authenticate with a header that browsers do not add.
 		r.Header.Set("Authorization", "Bearer tok")
 		require.False(t, NeedsSameOriginCheck(r), method)
+		// Browsers can add other credentials to a cross-site form post by themselves.
+		for _, other := range []string{"Basic dXNlcjpwYXNz", "Negotiate abc", "Bearer ", "Bearer  ", "bearer tok"} {
+			r.Header.Set("Authorization", other)
+			require.True(t, NeedsSameOriginCheck(r), "%s %q", method, other)
+		}
 	}
+
+	// A WebSocket handshake is a GET, but the connection can do anything the page could.
+	ws := httptest.NewRequest(http.MethodGet, "/stream", nil)
+	ws.Header.Set("Upgrade", "WebSocket")
+	ws.Header.Set("Connection", "Upgrade")
+	require.True(t, NeedsSameOriginCheck(ws))
+	ws.Header.Set("Authorization", "Bearer tok")
+	require.False(t, NeedsSameOriginCheck(ws))
 }
 
 func TestCheckSameOrigin(t *testing.T) {
@@ -38,8 +51,11 @@ func TestCheckSameOrigin(t *testing.T) {
 		{"same-origin fetch", "gpu.example", "", map[string]string{
 			"Sec-Fetch-Site": "same-origin", "Origin": "https://gpu.example",
 		}, true},
-		{"browser says same-origin through a proxy that rewrote Host", "localhost:8080", "",
-			map[string]string{"Sec-Fetch-Site": "same-origin", "Origin": "http://localhost:3000"}, true},
+		{
+			"browser says same-origin through a proxy that rewrote Host", "localhost:8080", "",
+			map[string]string{"Sec-Fetch-Site": "same-origin", "Origin": "http://localhost:3000"},
+			true,
+		},
 		{"user-initiated", "gpu.example", "", map[string]string{"Sec-Fetch-Site": "none"}, true},
 		{"sibling subdomain", "gpu.example", "", map[string]string{
 			"Sec-Fetch-Site": "same-site", "Origin": "https://wandb.example",
@@ -53,21 +69,42 @@ func TestCheckSameOrigin(t *testing.T) {
 		{"other site, trusted origin", "gpu.example", "", map[string]string{
 			"Sec-Fetch-Site": "same-site", "Origin": "http://localhost:3000",
 		}, true},
-		{"old browser, same host", "gpu.example", "",
-			map[string]string{"Origin": "https://gpu.example"}, true},
-		{"old browser, host in other case", "gpu.example", "",
-			map[string]string{"Origin": "https://GPU.example"}, true},
-		{"old browser, default port in Host", "gpu.example:443", "",
-			map[string]string{"Origin": "https://gpu.example"}, true},
-		{"old browser, same non-default port", "gpu.example:8080", "",
-			map[string]string{"Origin": "http://gpu.example:8080"}, true},
-		{"old browser, other port", "gpu.example", "",
-			map[string]string{"Origin": "http://gpu.example:8080"}, false},
-		{"old browser, other host", "gpu.example", "",
-			map[string]string{"Origin": "https://evil.test"}, false},
+		{
+			"old browser, same host", "gpu.example", "",
+			map[string]string{"Origin": "https://gpu.example"},
+			true,
+		},
+		{
+			"old browser, host in other case", "gpu.example", "",
+			map[string]string{"Origin": "https://GPU.example"},
+			true,
+		},
+		{
+			"old browser, default port in Host", "gpu.example:443", "",
+			map[string]string{"Origin": "https://gpu.example"},
+			true,
+		},
+		{
+			"old browser, same non-default port", "gpu.example:8080", "",
+			map[string]string{"Origin": "http://gpu.example:8080"},
+			true,
+		},
+		{
+			"old browser, other port", "gpu.example", "",
+			map[string]string{"Origin": "http://gpu.example:8080"},
+			false,
+		},
+		{
+			"old browser, other host", "gpu.example", "",
+			map[string]string{"Origin": "https://evil.test"},
+			false,
+		},
 		{"old browser, opaque origin", "gpu.example", "", map[string]string{"Origin": "null"}, false},
-		{"old browser, trusted origin", "gpu.example", "",
-			map[string]string{"Origin": "http://localhost:3000"}, true},
+		{
+			"old browser, trusted origin", "gpu.example", "",
+			map[string]string{"Origin": "http://localhost:3000"},
+			true,
+		},
 		{"forwarded host from untrusted peer", "10.0.1.6:8080", "192.0.2.1:5000", map[string]string{
 			"Origin": "https://gpu.example", "X-Forwarded-Host": "gpu.example",
 		}, false},
@@ -136,6 +173,31 @@ func TestCrossOriginProtection(t *testing.T) {
 	}
 	require.Equal(t, http.StatusForbidden, send(http.MethodDelete, "/api/v1/users/1", crossSite))
 	require.Equal(t, http.StatusNoContent, send(http.MethodGet, "/api/v1/me", crossSite))
+
+	// WebSocket handshakes are checked although they are GETs.
+	wsHeaders := func(h map[string]string) map[string]string {
+		out := map[string]string{"Upgrade": "websocket", "Connection": "Upgrade"}
+		for k, v := range h {
+			out[k] = v
+		}
+		return out
+	}
+	require.Equal(t, http.StatusForbidden, send(http.MethodGet, "/stream", wsHeaders(crossSite)))
+	require.Equal(t, http.StatusForbidden, send(http.MethodGet, "/stream", wsHeaders(map[string]string{
+		"Sec-Fetch-Site": "same-site", "Origin": "https://notebooks.gpu.example",
+	})))
+	require.Equal(t, http.StatusNoContent, send(http.MethodGet, "/stream", wsHeaders(map[string]string{
+		"Sec-Fetch-Site": "same-origin", "Origin": "http://gpu.example",
+	})))
+	// Agents and other programs send no Origin.
+	require.Equal(t, http.StatusNoContent, send(http.MethodGet, "/agents", wsHeaders(nil)))
+
+	// A cross-site form post that the browser adds Basic credentials to is still refused.
+	withBasic := map[string]string{"Authorization": "Basic dXNlcjpwYXNz"}
+	for k, v := range crossSite {
+		withBasic[k] = v
+	}
+	require.Equal(t, http.StatusForbidden, send(http.MethodPost, "/api/v1/users", withBasic))
 
 	withAuthorization := map[string]string{"Authorization": "Bearer tok"}
 	for k, v := range crossSite {

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/labstack/echo/v4"
+
 	"github.com/determined-ai/determined/master/internal/config"
 )
 
@@ -43,6 +45,27 @@ func ExpiredSessionCookie(secure bool) *http.Cookie {
 		HttpOnly: true,
 		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
+	}
+}
+
+// logoutPaths are the routes that end a browser's session: the gateway's and the legacy one.
+var logoutPaths = map[string]bool{
+	"/api/v1/auth/logout": true,
+	"/logout":             true,
+}
+
+// ClearSessionCookieOnLogout is middleware that removes the session cookie on every sign-out
+// request, before authentication runs. The cookie must go even when its session has already ended
+// (expired, revoked by a password change, or deleted), when the request fails authentication and
+// the logout handlers never run; the web UI cannot remove the HttpOnly cookie itself. It must run
+// after CrossOriginProtection, so that other sites cannot sign a visitor out.
+func ClearSessionCookieOnLogout(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		r := c.Request()
+		if r.Method == http.MethodPost && logoutPaths[strings.TrimSuffix(r.URL.Path, "/")] {
+			c.SetCookie(ExpiredSessionCookie(SessionCookieSecure(r)))
+		}
+		return next(c)
 	}
 }
 

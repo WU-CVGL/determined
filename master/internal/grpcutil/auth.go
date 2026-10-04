@@ -277,15 +277,13 @@ func authZInterceptor() grpc.UnaryServerInterceptor {
 // sessionCookieSecureKey holds whether the session cookie set for a gateway request is Secure.
 type sessionCookieSecureKey struct{}
 
-// userTokenResponse sets the browser's session cookie on sign-in and removes it on sign-out. The
-// web UI relies on both: it cannot read or clear the HttpOnly cookie itself.
+// userTokenResponse sets the browser's session cookie on sign-in. The web UI relies on it, since
+// it cannot write the HttpOnly cookie itself. user.ClearSessionCookieOnLogout removes the cookie on
+// sign-out, whether or not the logout call succeeds.
 func userTokenResponse(ctx context.Context, w http.ResponseWriter, resp proto.Message) error {
-	secure, _ := ctx.Value(sessionCookieSecureKey{}).(bool)
-	switch r := resp.(type) {
-	case *apiv1.LoginResponse:
+	if r, ok := resp.(*apiv1.LoginResponse); ok {
+		secure, _ := ctx.Value(sessionCookieSecureKey{}).(bool)
 		http.SetCookie(w, user.NewSessionCookie(r.Token, secure))
-	case *apiv1.LogoutResponse:
-		http.SetCookie(w, user.ExpiredSessionCookie(secure))
 	}
 	return nil
 }

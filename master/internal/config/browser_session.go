@@ -7,6 +7,12 @@ import (
 	"strings"
 )
 
+// The schemes of origins that browsers send in the Origin header of HTTP requests.
+const (
+	schemeHTTP  = "http"
+	schemeHTTPS = "https"
+)
+
 // Values of SessionCookieConfig.Secure.
 const (
 	// SessionCookieSecureAuto marks the session cookie Secure when the request that sets it
@@ -78,7 +84,7 @@ func NormalizeOrigin(s string) (string, error) {
 	switch {
 	case err != nil:
 		return "", fmt.Errorf("%q is not an origin: %w", s, err)
-	case u.Scheme != "http" && u.Scheme != "https":
+	case u.Scheme != schemeHTTP && u.Scheme != schemeHTTPS:
 		return "", fmt.Errorf("%q is not an origin: the scheme must be http or https", s)
 	case u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "":
 		return "", fmt.Errorf("%q is not an origin: use scheme://host[:port] only", s)

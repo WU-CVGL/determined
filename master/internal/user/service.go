@@ -232,8 +232,7 @@ func (s *Service) ProcessAuthentication(next echo.HandlerFunc) echo.HandlerFunc 
 }
 
 func (s *Service) postLogout(c echo.Context) (interface{}, error) {
-	// Remove the session cookie. The web UI cannot, since it is HttpOnly.
-	c.SetCookie(ExpiredSessionCookie(SessionCookieSecure(c.Request())))
+	// ClearSessionCookieOnLogout has removed the session cookie.
 
 	// Delete the user session information from the database.
 	sess := c.(*detContext.DetContext).MustGetUserSession()
