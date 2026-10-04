@@ -46,6 +46,35 @@ describe('requests to the master', () => {
     expect(headers).not.toHaveProperty('Authorization');
   });
 
+  it('sends the current password with a new password', async () => {
+    await utils.setUserPassword.request({ oldPassword: 'Old-1', password: 'New-1', userId: 3 });
+    const { headers, init, url } = sent();
+    expect(url).toMatch(/\/api\/v1\/users\/3\/password$/);
+    expect(init.method).toBe('POST');
+    // The body is the whole request, not a bare JSON string.
+    expect(JSON.parse(init.body as string)).toStrictEqual({
+      oldPassword: 'Old-1',
+      password: 'New-1',
+    });
+    // The session cookie authenticates the web UI; it sends no token of its own.
+    expect(headers).not.toHaveProperty('Authorization');
+  });
+
+  it('sends the current password with a new username', async () => {
+    await utils.patchUser.request({
+      userId: 3,
+      userParams: { oldPassword: 'Old-1', username: 'new-name' },
+    });
+    const { headers, init, url } = sent();
+    expect(url).toMatch(/\/api\/v1\/users\/3$/);
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body as string)).toStrictEqual({
+      oldPassword: 'Old-1',
+      username: 'new-name',
+    });
+    expect(headers).not.toHaveProperty('Authorization');
+  });
+
   it('asks the master to keep a token from the URL as the session cookie', async () => {
     fetchMock.mockImplementation(() => Promise.resolve(new Response(null, { status: 204 })));
     await utils.storeSessionToken.request({ token: 'v2.public.tok' });

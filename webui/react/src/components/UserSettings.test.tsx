@@ -14,6 +14,7 @@ import userStore from 'stores/users';
 import userSettings from 'stores/userSettings';
 import { DetailedUser } from 'types';
 
+import { CURRENT_PASSWORD_LABEL, OK_BUTTON_LABEL } from './UsernameChangeModal';
 import UserSettings from './UserSettings';
 
 vi.mock('services/api', () => ({
@@ -56,10 +57,10 @@ const CURRENT_USER: DetailedUser = {
   username: USERNAME,
 };
 
-const Container: React.FC = () => {
+const Container: React.FC<{ currentUser: DetailedUser }> = ({ currentUser }) => {
   const loadUsers = useCallback(() => {
-    userStore.updateCurrentUser(CURRENT_USER);
-  }, []);
+    userStore.updateCurrentUser(currentUser);
+  }, [currentUser]);
 
   useEffect(() => {
     authStore.setAuth({ isAuthenticated: true });
@@ -82,12 +83,12 @@ const Container: React.FC = () => {
   );
 };
 
-const setup = () =>
+const setup = (currentUser = CURRENT_USER) =>
   render(
     <UIProvider theme={DefaultTheme.Light}>
       <ThemeProvider>
         <ConfirmationProvider>
-          <Container />
+          <Container currentUser={currentUser} />
         </ConfirmationProvider>
       </ThemeProvider>
     </UIProvider>,
@@ -117,5 +118,27 @@ describe('UserSettings', () => {
     await waitFor(() =>
       expect(screen.getByTestId('value-displayname')).toHaveTextContent(`${DISPLAY_NAME}a`),
     );
+  });
+  it('asks for the current password before renaming yourself', async () => {
+    setup();
+    await user.click(await screen.findByTestId('edit-username'));
+    await user.type(screen.getByPlaceholderText('Add username'), 'a');
+    await user.click(screen.getByTestId('submit-username'));
+
+    // The master needs the current password to rename yourself.
+    await user.type(await screen.findByLabelText(CURRENT_PASSWORD_LABEL), 'Current-1');
+    expect(mockPatchUser).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: OK_BUTTON_LABEL }));
+
+    await waitFor(() =>
+      expect(mockPatchUser).toHaveBeenCalledWith({
+        userId: 1,
+        userParams: { oldPassword: 'Current-1', username: `${USERNAME}a` },
+      }),
+    );
+  });
+  it('does not offer remote users a new username', async () => {
+    setup({ ...CURRENT_USER, remote: true });
+    expect(await screen.findByTestId('edit-username')).toBeDisabled();
   });
 });

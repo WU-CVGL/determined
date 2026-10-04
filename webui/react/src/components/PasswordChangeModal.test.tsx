@@ -9,12 +9,14 @@ import { setUserPassword as mockSetUserPassword } from 'services/api';
 import authStore from 'stores/auth';
 import userStore from 'stores/users';
 import { DetailedUser } from 'types';
+import { DetError } from 'utils/error';
 
 vi.useFakeTimers();
 
 import PasswordChangeModalComponent, {
   API_SUCCESS_MESSAGE,
   CONFIRM_PASSWORD_LABEL,
+  INCORRECT_PASSWORD_MESSAGE,
   OK_BUTTON_LABEL,
   OLD_PASSWORD_LABEL,
 } from './PasswordChangeModal';
@@ -106,5 +108,25 @@ describe('Password Change Modal', () => {
       password: SECOND_PASSWORD_VALUE,
       userId: USER_ID,
     });
+  });
+
+  it('marks the old password incorrect when the master refuses it', async () => {
+    // The form shows errors after timers that the fake ones would hold back.
+    vi.useRealTimers();
+    try {
+      // The master answers 403 Forbidden for a wrong current password.
+      vi.mocked(mockSetUserPassword).mockRejectedValueOnce(
+        new DetError(new Response(null, { status: 403 })),
+      );
+      await setup();
+
+      await user.type(screen.getByLabelText(OLD_PASSWORD_LABEL), 'wrong');
+      await user.type(screen.getByLabelText(CONFIRM_PASSWORD_LABEL), SECOND_PASSWORD_VALUE);
+      await user.click(screen.getByRole('button', { name: OK_BUTTON_LABEL }));
+
+      expect(await screen.findByText(INCORRECT_PASSWORD_MESSAGE)).toBeInTheDocument();
+    } finally {
+      vi.useFakeTimers();
+    }
   });
 } /* { timeout: 10000 } */);

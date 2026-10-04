@@ -23,6 +23,7 @@ import PasswordChangeModalComponent from 'components/PasswordChangeModal';
 import Section from 'components/Section';
 import useUI, { Mode } from 'components/ThemeProvider';
 import { ThemeOptions } from 'components/ThemeToggle';
+import UsernameChangeModalComponent from 'components/UsernameChangeModal';
 import {
   shortcutSettingsConfig,
   shortcutSettingsDefaults,
@@ -50,8 +51,6 @@ import css from './UserSettings.module.scss';
 import UserSettingsModalComponent from './UserSettingsModal';
 
 const API_DISPLAYNAME_SUCCESS_MESSAGE = 'Display name updated.';
-const API_USERNAME_ERROR_MESSAGE = 'Could not update username.';
-const API_USERNAME_SUCCESS_MESSAGE = 'Username updated.';
 
 interface Props {
   show: boolean;
@@ -95,20 +94,21 @@ const UserSettings: React.FC<Props> = ({ show, onClose }: Props) => {
     [currentUser?.id, openToast],
   );
 
+  const UsernameChangeModal = useModal(UsernameChangeModalComponent);
+  const [newUsername, setNewUsername] = useState<string>('');
+  const [editingUsername, setEditingUsername] = useState<boolean>(false);
+
+  // Renaming yourself needs your current password, which UsernameChangeModal asks for.
   const handleSaveUsername = useCallback(
-    async (newValue: string): Promise<void | Error> => {
-      try {
-        await userStore.patchUser(currentUser?.id || 0, {
-          username: newValue as string,
-        });
-        openToast({ severity: 'Confirm', title: API_USERNAME_SUCCESS_MESSAGE });
-      } catch (e) {
-        openToast({ severity: 'Error', title: API_USERNAME_ERROR_MESSAGE });
-        handleError(e, { silent: true, type: ErrorType.Input });
-        return e as Error;
+    (value: string) => {
+      if (value === currentUser?.username) {
+        setEditingUsername(false);
+        return;
       }
+      setNewUsername(value);
+      UsernameChangeModal.open();
     },
-    [currentUser?.id, openToast],
+    [currentUser?.username, UsernameChangeModal],
   );
 
   const [newPassword, setNewPassword] = useState<string>('');
@@ -143,14 +143,24 @@ const UserSettings: React.FC<Props> = ({ show, onClose }: Props) => {
             <Section divider title="Profile">
               <div className={css.section}>
                 <InlineForm<string>
+                  // Remote users sign in through single sign-on, so they have no current password
+                  // to confirm a new username with; an administrator can rename them.
+                  disabled={!!currentUser?.remote}
                   initialValue={currentUser?.username ?? ''}
                   label="Username"
+                  open={editingUsername}
                   required
                   rules={[{ message: 'Please input your username', required: true }]}
                   testId="username"
+                  onCancel={() => setEditingUsername(false)}
+                  onEdit={() => setEditingUsername(true)}
                   onSubmit={handleSaveUsername}>
                   <Input autoFocus maxLength={32} placeholder="Add username" />
                 </InlineForm>
+                <UsernameChangeModal.Component
+                  newUsername={newUsername}
+                  onSubmit={() => setEditingUsername(false)}
+                />
                 <InlineForm<string>
                   initialValue={currentUser?.displayName ?? ''}
                   label="Display Name"
@@ -159,7 +169,7 @@ const UserSettings: React.FC<Props> = ({ show, onClose }: Props) => {
                   <Input autoFocus maxLength={32} placeholder="Add display name" />
                 </InlineForm>
                 {currentUser?.remote && (
-                  <label>Remote user cannot change password from WebUI</label>
+                  <label>Remote user cannot change username or password from WebUI</label>
                 )}
                 {info.userManagementEnabled && !currentUser?.remote && (
                   <>
