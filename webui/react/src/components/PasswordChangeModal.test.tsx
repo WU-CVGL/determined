@@ -6,7 +6,6 @@ import { DefaultTheme, UIProvider } from 'hew/Theme';
 import React, { useCallback, useEffect } from 'react';
 
 import { setUserPassword as mockSetUserPassword } from 'services/api';
-import { V1LoginRequest } from 'services/api-ts-sdk';
 import authStore from 'stores/auth';
 import userStore from 'stores/users';
 import { DetailedUser } from 'types';
@@ -46,13 +45,6 @@ vi.mock('services/api', () => ({
         },
       ],
     }),
-  login: ({ password, username }: V1LoginRequest) => {
-    if (password === FIRST_PASSWORD_VALUE && username === USERNAME) {
-      return Promise.resolve();
-    } else {
-      return Promise.reject();
-    }
-  },
   setUserPassword: vi.fn(),
 }));
 
@@ -108,7 +100,9 @@ describe('Password Change Modal', () => {
     });
 
     // Check that the API method was called with the correct parameters.
+    // The master checks the current password; the modal no longer signs in again to check it.
     expect(mockSetUserPassword).toHaveBeenCalledWith({
+      oldPassword: FIRST_PASSWORD_VALUE,
       password: SECOND_PASSWORD_VALUE,
       userId: USER_ID,
     });

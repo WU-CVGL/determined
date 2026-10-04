@@ -5,10 +5,11 @@ import { useToast } from 'hew/Toast';
 import { Loadable } from 'hew/utils/loadable';
 import React, { useId, useState } from 'react';
 
-import { login, setUserPassword } from 'services/api';
+import { setUserPassword } from 'services/api';
 import userStore from 'stores/users';
-import handleError, { ErrorType } from 'utils/error';
+import handleError, { ErrorType, isDetError } from 'utils/error';
 import { useObservable } from 'utils/observable';
+import { getResponseStatus } from 'utils/service';
 
 const MODAL_HEADER_LABEL = 'Change Password';
 export const OLD_PASSWORD_LABEL = 'Old Password';
@@ -62,11 +63,17 @@ const PasswordChangeModalComponent: React.FC<Props> = ({ newPassword, onSubmit }
 
     try {
       const password = newPassword;
-      await setUserPassword({ password, userId: currentUser?.id ?? 0 });
+      // The master checks the current password. Users without a password leave it blank.
+      const oldPassword: string = form.getFieldValue(OLD_PASSWORD_NAME) ?? '';
+      await setUserPassword({ oldPassword, password, userId: currentUser?.id ?? 0 });
       openToast({ severity: 'Confirm', title: API_SUCCESS_MESSAGE });
       form.resetFields();
       onSubmit?.();
     } catch (e) {
+      const status = isDetError(e) ? getResponseStatus(e.sourceErr) : getResponseStatus(e);
+      if (status === 403) {
+        form.setFields([{ errors: [INCORRECT_PASSWORD_MESSAGE], name: OLD_PASSWORD_NAME }]);
+      }
       openToast({ severity: 'Error', title: API_ERROR_MESSAGE });
       handleError(e, { silent: true, type: ErrorType.Input });
 
@@ -94,18 +101,7 @@ const PasswordChangeModalComponent: React.FC<Props> = ({ newPassword, onSubmit }
       onClose={handleClose}>
       <p>Please confirm your password change</p>
       <Form form={form} id={idPrefix + FORM_ID} onFieldsChange={handleFieldsChange}>
-        <Form.Item
-          label={OLD_PASSWORD_LABEL}
-          name={OLD_PASSWORD_NAME}
-          rules={[
-            {
-              message: INCORRECT_PASSWORD_MESSAGE,
-              validator: async (_rule, value) => {
-                await login({ password: value ?? '', username: currentUser?.username ?? '' });
-              },
-            },
-          ]}
-          validateTrigger={['onSubmit']}>
+        <Form.Item label={OLD_PASSWORD_LABEL} name={OLD_PASSWORD_NAME}>
           <Input.Password />
         </Form.Item>
         <Form.Item
