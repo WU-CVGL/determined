@@ -134,6 +134,32 @@ describe('ShellTerminalSocket', () => {
     }
   });
 
+  it('sends a resize requested while connecting once the socket opens', () => {
+    vi.useFakeTimers();
+    try {
+      const resized = [JSON.stringify({ cols: 132, rows: 43, type: 'resize' })];
+
+      // The resize timer fires before the socket opens.
+      const late = connect();
+      late.socket.resize({ cols: 132, rows: 43 });
+      vi.advanceTimersByTime(RESIZE_DEBOUNCE_MS);
+      expect(late.ws.sent).toHaveLength(0);
+      late.ws.open();
+      expect(late.ws.sent).toEqual(resized);
+      vi.advanceTimersByTime(RESIZE_DEBOUNCE_MS);
+      expect(late.ws.sent).toEqual(resized);
+
+      // The socket opens before the resize timer fires.
+      const early = connect();
+      early.socket.resize({ cols: 132, rows: 43 });
+      early.ws.open();
+      vi.advanceTimersByTime(RESIZE_DEBOUNCE_MS);
+      expect(early.ws.sent).toEqual(resized);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('reports how the session ended', () => {
     const { handlers, ws } = connect();
     ws.open();

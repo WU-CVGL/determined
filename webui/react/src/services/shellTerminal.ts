@@ -108,6 +108,8 @@ export class ShellTerminalSocket {
     this.#ws.binaryType = 'arraybuffer';
     this.#ws.onopen = () => {
       this.#wasOpen = true;
+      // A resize requested while connecting is sent now, unless its timer is still running.
+      if (!this.#resizeTimer) this.#sendPendingSize();
     };
     this.#ws.onmessage = (event: MessageEvent) => this.#onMessage(event);
     this.#ws.onclose = (event: CloseEvent) => this.#onClose(event.code);
@@ -128,16 +130,16 @@ export class ShellTerminalSocket {
     }
   }
 
-  /** Requests a new terminal size; quick successive calls send only the last size. */
+  /**
+   * Requests a new terminal size; quick successive calls send only the last size. A size requested
+   * before the WebSocket opens is sent once it opens.
+   */
   resize(size: ShellTerminalSize): void {
     this.#pendingSize = size;
     if (this.#resizeTimer) return;
     this.#resizeTimer = setTimeout(() => {
       this.#resizeTimer = undefined;
-      const pending = this.#pendingSize;
-      this.#pendingSize = undefined;
-      if (!pending || this.#closed || this.#ws.readyState !== WebSocket.OPEN) return;
-      this.#ws.send(JSON.stringify({ cols: pending.cols, rows: pending.rows, type: 'resize' }));
+      this.#sendPendingSize();
     }, RESIZE_DEBOUNCE_MS);
   }
 
@@ -145,6 +147,14 @@ export class ShellTerminalSocket {
     if (this.#resizeTimer) clearTimeout(this.#resizeTimer);
     this.#resizeTimer = undefined;
     this.#ws.close(CloseCode.Normal);
+  }
+
+  /** Sends the pending size, and keeps it until the WebSocket is open. */
+  #sendPendingSize(): void {
+    const pending = this.#pendingSize;
+    if (!pending || this.#closed || this.#ws.readyState !== WebSocket.OPEN) return;
+    this.#pendingSize = undefined;
+    this.#ws.send(JSON.stringify({ cols: pending.cols, rows: pending.rows, type: 'resize' }));
   }
 
   #onMessage(event: MessageEvent): void {
