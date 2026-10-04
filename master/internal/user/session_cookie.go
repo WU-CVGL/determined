@@ -54,6 +54,20 @@ var logoutPaths = map[string]bool{
 	"/logout":             true,
 }
 
+// signInPaths are the routes whose reply sets the session cookie: the gateway's sign-in, the legacy
+// one (with ?cookie=true), and storing a token from the web UI's URL (postSessionCookie).
+var signInPaths = map[string]bool{
+	"/api/v1/auth/login":   true,
+	"/login":               true,
+	"/auth/session-cookie": true,
+}
+
+// changesSessionCookie reports whether the reply to r sets or clears the session cookie.
+func changesSessionCookie(r *http.Request) bool {
+	path := strings.TrimSuffix(r.URL.Path, "/")
+	return signInPaths[path] || logoutPaths[path]
+}
+
 // ClearSessionCookieOnLogout is middleware that removes the session cookie on every sign-out
 // request, before authentication runs. The cookie must go even when its session has already ended
 // (expired, revoked by a password change, or deleted), when the request fails authentication and

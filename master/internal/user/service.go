@@ -314,9 +314,10 @@ func (s *Service) postLogin(c echo.Context) (interface{}, error) {
 // postSessionCookie stores the token from the request's Authorization header in the browser's
 // session cookie. The web UI calls it when it receives a token in its URL (?jwt=), which it used to
 // write into the cookie itself before the cookie became HttpOnly. The token was checked by
-// ProcessAuthentication. Unlike other requests with an Authorization header, it must come from the
-// master's own pages: when enable_cors lets other origins send such headers, a page elsewhere could
-// otherwise plant its own session in the visitor's browser.
+// ProcessAuthentication. Like signing in, and unlike other requests with an Authorization header,
+// it must come from the master's own pages (CrossOriginProtection checks this too): when
+// enable_cors lets other origins send such headers, a page elsewhere could otherwise plant its own
+// session in the visitor's browser.
 func (s *Service) postSessionCookie(c echo.Context) (interface{}, error) {
 	authRaw := c.Request().Header.Get(echo.HeaderAuthorization)
 	if !strings.HasPrefix(authRaw, "Bearer ") {

@@ -39,7 +39,11 @@ var crossOriginExemptRoutes = map[string]bool{
 // browsers attach no such header by themselves, and only send one from another origin after a
 // CORS preflight that the master refuses unless enable_cors is set. Other Authorization headers
 // do not exempt a request, since browsers can attach Basic, Digest or Negotiate credentials to a
-// cross-site form post.
+// cross-site form post. No header exempts signing in or out either: the reply sets or clears the
+// session cookie whatever the request carries, and browsers keep cookies from replies to a page
+// on a sibling origin, which is same-site. With enable_cors, such a page could sign the visitor in
+// to an account of its choosing, or sign them out. The CLI and the SDK send neither Origin nor
+// Sec-Fetch-Site, so CheckSameOrigin lets them through.
 func NeedsSameOriginCheck(r *http.Request) bool {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
@@ -47,7 +51,7 @@ func NeedsSameOriginCheck(r *http.Request) bool {
 			return false
 		}
 	}
-	return !HasBearerToken(r)
+	return !HasBearerToken(r) || changesSessionCookie(r)
 }
 
 // HasBearerToken reports whether r carries a non-empty "Authorization: Bearer" token.

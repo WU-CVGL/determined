@@ -55,6 +55,10 @@ func browserSessionServer(t *testing.T, apiSrv *apiServer) *httptest.Server {
 // sameOrigin is the Sec-Fetch-Site header of the master's own pages.
 const sameOrigin = "same-origin"
 
+// siblingOrigin is a page on another port of the test server's host. It is on the same site, so
+// browsers keep the cookies that the replies to its requests set or clear.
+const siblingOrigin = "http://127.0.0.1:1"
+
 const jsonContentType = "application/json"
 
 type browserRequest struct {
@@ -121,18 +125,45 @@ func TestBrowserSessionThroughGateway(t *testing.T) {
 	self := srv.URL // The master's own origin.
 	const evil = "https://evil.test"
 
+	loginRequest := browserRequest{
+		method: http.MethodPost, path: "/api/v1/auth/login", contentType: jsonContentType,
+		body: fmt.Sprintf(`{"username": %q, "password": %q}`, u.Username, password),
+	}
 	login := func(origin, fetchSite string) (browserResponse, string) {
-		return browserRequest{
-			method: http.MethodPost, path: "/api/v1/auth/login", contentType: jsonContentType,
-			body:   fmt.Sprintf(`{"username": %q, "password": %q}`, u.Username, password),
-			origin: origin, fetchSite: fetchSite,
-		}.send(t, srv)
+		r := loginRequest
+		r.origin, r.fetchSite = origin, fetchSite
+		return r.send(t, srv)
 	}
 
 	// Another site cannot sign a visitor in to an account of its choosing.
 	resp, _ := login(evil, "cross-site")
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
 	require.Empty(t, resp.Cookies())
+
+	// Not even with a bearer token, which signing in ignores: with enable_cors, other origins can
+	// send one, and the browser keeps the cookie from the reply to a page on the same site, such as
+	// another port of the same host or a sibling subdomain. The CLI sends no Origin and passes.
+	legacyLogin := browserRequest{
+		method: http.MethodPost, path: "/login?cookie=true", contentType: jsonContentType,
+		body: fmt.Sprintf(`{"username": %q, "password": %q}`,
+			u.Username, user.ReplicateClientSideSaltAndHash(password)),
+	}
+	for _, r := range []browserRequest{loginRequest, legacyLogin} {
+		r.authorization = "Bearer not-a-token"
+		for _, headers := range [][2]string{
+			{evil, "cross-site"}, {siblingOrigin, "same-site"}, {siblingOrigin, ""},
+		} {
+			r.origin, r.fetchSite = headers[0], headers[1]
+			resp, body := r.send(t, srv)
+			require.Equal(t, http.StatusForbidden, resp.StatusCode, "%s %v: %s", r.path, headers, body)
+			require.Empty(t, resp.Cookies(), "%s %v", r.path, headers)
+		}
+		for _, headers := range [][2]string{{self, sameOrigin}, {"", ""}} {
+			r.origin, r.fetchSite = headers[0], headers[1]
+			resp, body := r.send(t, srv)
+			require.Equal(t, http.StatusOK, resp.StatusCode, "%s %v: %s", r.path, headers, body)
+		}
+	}
 
 	// The web UI signs in and receives an HttpOnly cookie, which authenticates its requests.
 	resp, body := login(self, sameOrigin)
@@ -167,8 +198,8 @@ func TestBrowserSessionThroughGateway(t *testing.T) {
 	}
 	requireLogin(t, apiSrv, u.Username, password, true)
 
-	// A request with a bearer token is exempt; the browser cannot send one from another site
-	// without a CORS preflight. A cookie does not exempt a request that also carries Basic
+	// Other requests with a bearer token are exempt; the browser cannot send one from another
+	// site without a CORS preflight. A cookie does not exempt a request that also carries Basic
 	// credentials, which browsers can add to a cross-site post themselves.
 	r := changePassword
 	r.origin, r.fetchSite, r.authorization = evil, "cross-site", "Basic dXNlcjpwYXNz"
@@ -177,8 +208,8 @@ func TestBrowserSessionThroughGateway(t *testing.T) {
 	other, err := user.StartSession(context.Background(), &u)
 	require.NoError(t, err)
 	resp, body = browserRequest{
-		method: http.MethodPost, path: "/api/v1/auth/logout", authorization: "Bearer " + other,
-		origin: evil, fetchSite: "cross-site",
+		method: http.MethodPost, path: "/api/v1/users/setting/reset", contentType: jsonContentType,
+		body: "{}", authorization: "Bearer " + other, origin: evil, fetchSite: "cross-site",
 	}.send(t, srv)
 	require.Equal(t, http.StatusOK, resp.StatusCode, body)
 
@@ -282,8 +313,37 @@ func TestBrowserSessionLogoutAndSessionCookie(t *testing.T) {
 	}.send(t, srv)
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
 	require.Empty(t, resp.Cookies())
+
+	// Not even with a bearer token, which would not stop the cookie from going: with enable_cors,
+	// other origins can send one, and the browser takes the expired cookie from the reply to a
+	// page on the same site.
+	for _, path := range []string{"/api/v1/auth/logout", "/logout"} {
+		for _, headers := range [][2]string{
+			{"https://evil.test", "cross-site"}, {siblingOrigin, "same-site"}, {siblingOrigin, ""},
+		} {
+			resp, body = browserRequest{
+				method: http.MethodPost, path: path, cookie: token, authorization: "Bearer not-a-token",
+				origin: headers[0], fetchSite: headers[1],
+			}.send(t, srv)
+			require.Equal(t, http.StatusForbidden, resp.StatusCode, "%s %v: %s", path, headers, body)
+			require.Empty(t, resp.Cookies(), "%s %v", path, headers)
+		}
+	}
 	resp, _ = browserRequest{method: http.MethodGet, path: "/api/v1/me", cookie: token}.send(t, srv)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// The SDK and the CLI sign out with a bearer token and no Origin.
+	for _, path := range []string{"/api/v1/auth/logout", "/logout"} {
+		sdkToken := newToken()
+		resp, body = browserRequest{
+			method: http.MethodPost, path: path, authorization: "Bearer " + sdkToken,
+		}.send(t, srv)
+		require.Equal(t, http.StatusOK, resp.StatusCode, "%s: %s", path, body)
+		resp, _ = browserRequest{
+			method: http.MethodGet, path: "/api/v1/me", authorization: "Bearer " + sdkToken,
+		}.send(t, srv)
+		require.Equal(t, http.StatusUnauthorized, resp.StatusCode, path)
+	}
 
 	// The legacy route signs out too.
 	resp, body = browserRequest{

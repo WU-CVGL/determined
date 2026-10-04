@@ -30,6 +30,17 @@ func TestNeedsSameOriginCheck(t *testing.T) {
 		}
 	}
 
+	// Signing in or out sets or clears the session cookie whatever the Authorization header says.
+	for _, path := range []string{
+		"/api/v1/auth/login", "/login?cookie=true", "/api/v1/auth/logout", "/logout",
+		"/auth/session-cookie", "/api/v1/auth/login/", "/logout/",
+	} {
+		r := httptest.NewRequest(http.MethodPost, path, nil)
+		r.Header.Set("Authorization", "Bearer tok")
+		require.True(t, NeedsSameOriginCheck(r), path)
+		require.False(t, NeedsSameOriginCheck(httptest.NewRequest(http.MethodGet, path, nil)), path)
+	}
+
 	// A WebSocket handshake is a GET, but the connection can do anything the page could.
 	ws := httptest.NewRequest(http.MethodGet, "/stream", nil)
 	ws.Header.Set("Upgrade", "WebSocket")
@@ -209,11 +220,31 @@ func TestCrossOriginProtection(t *testing.T) {
 	}
 	require.Equal(t, http.StatusForbidden, send(http.MethodPost, "/api/v1/users", withBasic))
 
-	withAuthorization := map[string]string{"Authorization": "Bearer tok"}
-	for k, v := range crossSite {
-		withAuthorization[k] = v
+	withBearer := func(h map[string]string) map[string]string {
+		out := map[string]string{"Authorization": "Bearer tok"}
+		for k, v := range h {
+			out[k] = v
+		}
+		return out
 	}
-	require.Equal(t, http.StatusNoContent, send(http.MethodPost, "/api/v1/users", withAuthorization))
+	require.Equal(t, http.StatusNoContent,
+		send(http.MethodPost, "/api/v1/users", withBearer(crossSite)))
+
+	// Except for signing in or out, which sets or clears the session cookie whatever the
+	// Authorization header says: with enable_cors, other origins can send one. The CLI and the SDK
+	// send no Origin and pass.
+	for _, path := range []string{
+		"/api/v1/auth/login", "/login", "/api/v1/auth/logout", "/logout", "/auth/session-cookie",
+	} {
+		require.Equal(t, http.StatusForbidden, send(http.MethodPost, path, withBearer(crossSite)), path)
+		require.Equal(t, http.StatusForbidden, send(http.MethodPost, path, withBearer(map[string]string{
+			"Sec-Fetch-Site": "same-site", "Origin": "https://wandb.gpu.example",
+		})), path)
+		require.Equal(t, http.StatusNoContent, send(http.MethodPost, path, withBearer(map[string]string{
+			"Sec-Fetch-Site": "same-origin", "Origin": "http://gpu.example",
+		})), path)
+		require.Equal(t, http.StatusNoContent, send(http.MethodPost, path, withBearer(nil)), path)
+	}
 
 	// Routes that other sites post to, or that check their own credentials.
 	for _, path := range []string{"/proxy/abc/api/kernels", "/saml/sso", "/oauth2/token", "/scim/v2/Users"} {
