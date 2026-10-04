@@ -215,7 +215,9 @@ def test_user_change_own_password_blank_current_password(mock_getpass: mock.Magi
 
 
 @mock.patch("getpass.getpass")
-def test_user_change_own_password_wrong_current_password(mock_getpass: mock.MagicMock) -> None:
+def test_user_change_own_password_wrong_current_password(
+    mock_getpass: mock.MagicMock, capsys: pytest.CaptureFixture
+) -> None:
     new = "5c3D9e1F-new-password"
     mock_getpass.side_effect = ["wrong", new, new]
     with util.standard_cli_rsps() as rsps:
@@ -232,6 +234,129 @@ def test_user_change_own_password_wrong_current_password(mock_getpass: mock.Magi
         )
         with pytest.raises(SystemExit):
             cli.main(["user", "change-password"])
+    assert "The current password is incorrect" in capsys.readouterr().err
+
+
+@mock.patch("getpass.getpass")
+def test_user_edit_own_username_asks_for_current_password(mock_getpass: mock.MagicMock) -> None:
+    # Renaming yourself needs your current password, like changing it.
+    mock_getpass.side_effect = ["current-password"]
+    with util.standard_cli_rsps() as rsps:
+        userobj = bindings.v1User(active=True, admin=False, username="det-user", id=107)
+        rsps.get(
+            "http://localhost:8080/api/v1/users/det-user/by-username",
+            status=200,
+            json={"user": userobj.to_json()},
+        )
+        rsps.patch(
+            "http://localhost:8080/api/v1/users/107",
+            status=200,
+            match=[
+                matchers.json_params_matcher(
+                    {
+                        "username": "new-name",
+                        "displayName": "New Name",
+                        "oldPassword": api.salt_and_hash("current-password"),
+                        "isHashed": True,
+                    }
+                )
+            ],
+            json={"user": userobj.to_json()},
+        )
+        cli.main(
+            ["user", "edit", "det-user", "--username", "new-name", "--display-name", "New Name"]
+        )
+    prompts = [c.args[0] for c in mock_getpass.call_args_list]
+    assert prompts == ["Current password for user 'det-user': "]
+
+
+@mock.patch("getpass.getpass")
+def test_user_edit_own_username_wrong_current_password(
+    mock_getpass: mock.MagicMock, capsys: pytest.CaptureFixture
+) -> None:
+    mock_getpass.side_effect = ["wrong"]
+    with util.standard_cli_rsps() as rsps:
+        userobj = bindings.v1User(active=True, admin=False, username="det-user", id=108)
+        rsps.get(
+            "http://localhost:8080/api/v1/users/det-user/by-username",
+            status=200,
+            json={"user": userobj.to_json()},
+        )
+        rsps.patch(
+            "http://localhost:8080/api/v1/users/108",
+            status=403,
+            json={"error": {"error": "the current password is incorrect"}},
+        )
+        with pytest.raises(SystemExit):
+            cli.main(["user", "edit", "det-user", "--username", "new-name"])
+    assert "The current password is incorrect" in capsys.readouterr().err
+
+
+@mock.patch("getpass.getpass")
+def test_user_edit_other_username_or_own_display_name_does_not_prompt(
+    mock_getpass: mock.MagicMock,
+) -> None:
+    mock_getpass.side_effect = AssertionError("unexpected password prompt")
+    with util.standard_cli_rsps() as rsps:
+        other = bindings.v1User(active=True, admin=False, username="tgt-user", id=109)
+        rsps.get(
+            "http://localhost:8080/api/v1/users/tgt-user/by-username",
+            status=200,
+            json={"user": other.to_json()},
+        )
+        rsps.patch(
+            "http://localhost:8080/api/v1/users/109",
+            status=200,
+            match=[matchers.json_params_matcher({"username": "new-name"})],
+            json={"user": other.to_json()},
+        )
+        cli.main(["user", "edit", "tgt-user", "--username", "new-name"])
+    with util.standard_cli_rsps() as rsps:
+        me = bindings.v1User(active=True, admin=False, username="det-user", id=110)
+        rsps.get(
+            "http://localhost:8080/api/v1/users/det-user/by-username",
+            status=200,
+            json={"user": me.to_json()},
+        )
+        rsps.patch(
+            "http://localhost:8080/api/v1/users/110",
+            status=200,
+            match=[matchers.json_params_matcher({"displayName": "New Name"})],
+            json={"user": me.to_json()},
+        )
+        cli.main(["user", "edit", "det-user", "--display-name", "New Name"])
+
+
+@mock.patch("getpass.getpass")
+def test_user_rename_self_asks_for_current_password(mock_getpass: mock.MagicMock) -> None:
+    mock_getpass.side_effect = ["current-password"]
+    with util.standard_cli_rsps() as rsps:
+        userobj = bindings.v1User(active=True, admin=False, username="det-user", id=111)
+        rsps.get(
+            "http://localhost:8080/api/v1/users/det-user/by-username",
+            status=200,
+            json={"user": userobj.to_json()},
+        )
+        rsps.patch(
+            "http://localhost:8080/api/v1/users/111",
+            status=200,
+            match=[
+                matchers.json_params_matcher(
+                    {
+                        "username": "new-name",
+                        "oldPassword": api.salt_and_hash("current-password"),
+                        "isHashed": True,
+                    }
+                )
+            ],
+            json={"user": userobj.to_json()},
+        )
+        rsps.get(
+            "http://localhost:8080/api/v1/users/111",
+            status=200,
+            json={"user": userobj.to_json()},
+        )
+        cli.main(["user", "rename", "det-user", "new-name"])
 
 
 @mock.patch("getpass.getpass")

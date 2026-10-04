@@ -101,11 +101,26 @@ def log_out_user(args: argparse.Namespace) -> None:
             token_store.clear_active()
 
 
+def _prompt_current_password(username: str) -> str:
+    return getpass.getpass("Current password for user '{}': ".format(username))
+
+
+CURRENT_PASSWORD_INCORRECT = "The current password is incorrect"
+
+
 def rename(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
     d = client.Determined._from_session(sess)
     user_obj = d.get_user_by_name(args.target_user)
-    user_obj.rename(new_username=args.new_username)
+    # The master requires the current password when users rename themselves.
+    own = args.target_user == d.get_session_username() and args.new_username != args.target_user
+    current_password = _prompt_current_password(args.target_user) if own else None
+    try:
+        user_obj.rename(new_username=args.new_username, current_password=current_password)
+    except api.errors.ForbiddenException as e:
+        if own:
+            raise errors.CliError(CURRENT_PASSWORD_INCORRECT) from e
+        raise
 
 
 def change_password(args: argparse.Namespace) -> None:
@@ -126,7 +141,7 @@ def change_password(args: argparse.Namespace) -> None:
     own_password = username == d.get_session_username()
     current_password = None
     if own_password:
-        current_password = getpass.getpass("Current password for user '{}': ".format(username))
+        current_password = _prompt_current_password(username)
 
     password = getpass.getpass("New password for user '{}': ".format(username))
     check_password = getpass.getpass("Confirm password: ")
@@ -137,9 +152,9 @@ def change_password(args: argparse.Namespace) -> None:
     user_obj = d.get_user_by_name(username)
     try:
         user_obj.change_password(new_password=password, current_password=current_password)
-    except api.errors.ForbiddenException:
+    except api.errors.ForbiddenException as e:
         if own_password:
-            raise errors.CliError("The current password is incorrect")
+            raise errors.CliError(CURRENT_PASSWORD_INCORRECT) from e
         raise
 
     # Changing a password ends the user's sessions. When users change their own password, sign
@@ -214,19 +229,31 @@ def edit(args: argparse.Namespace) -> None:
         patch_user.active = args.activate
         changes.append("Active")
 
+    own_rename = False
     if args.username is not None:
         patch_user.username = args.username
         changes.append("Username")
+        # The master requires the current password when users rename themselves.
+        own_rename = (
+            args.target_user == d.get_session_username() and args.username != args.target_user
+        )
 
     if args.admin is not None:
         patch_user.admin = args.admin
         changes.append("Admin")
 
-    if len(changes) > 0:
-        bindings.patch_PatchUser(sess, body=patch_user, userId=user_obj.user_id)
-        print("Changes made to the following fields: " + ", ".join(changes))
-    else:
+    if len(changes) == 0:
         raise errors.CliError("No field provided. Use 'det user edit -h' for usage.")
+    if own_rename:
+        patch_user.oldPassword = api.salt_and_hash(_prompt_current_password(args.target_user))
+        patch_user.isHashed = True
+    try:
+        bindings.patch_PatchUser(sess, body=patch_user, userId=user_obj.user_id)
+    except api.errors.ForbiddenException as e:
+        if own_rename:
+            raise errors.CliError(CURRENT_PASSWORD_INCORRECT) from e
+        raise
+    print("Changes made to the following fields: " + ", ".join(changes))
 
 
 AGENT_USER_GROUP_ARGS = [
