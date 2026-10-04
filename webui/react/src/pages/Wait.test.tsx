@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { DefaultTheme, UIProvider } from 'hew/Theme';
 import { HelmetProvider } from 'react-helmet-async';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -8,11 +9,19 @@ import { NOTEBOOK_ACCESS_DENIED } from 'utils/wait';
 
 import Wait from './Wait';
 
-const mocks = vi.hoisted(() => ({ getJupyterLab: vi.fn(), getTask: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  getJupyterLab: vi.fn(),
+  getTask: vi.fn(),
+  handleError: vi.fn(),
+}));
 
 vi.mock('services/api', () => ({ getJupyterLab: mocks.getJupyterLab, getTask: mocks.getTask }));
 vi.mock('components/ThemeProvider', () => ({
   default: () => ({ actions: { hideChrome: vi.fn(), showChrome: vi.fn() } }),
+}));
+vi.mock('utils/error', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('utils/error')>()),
+  default: mocks.handleError,
 }));
 vi.mock('routes/utils', () => ({ serverAddress: (path = '') => `http://master${path}` }));
 
@@ -40,6 +49,7 @@ describe('Wait', () => {
     assign.mockReset();
     mocks.getJupyterLab.mockReset();
     mocks.getTask.mockReset();
+    mocks.handleError.mockReset();
     mocks.getTask.mockResolvedValue({
       allocations: [{ isReady: true, state: CommandState.Running }],
     });
@@ -66,6 +76,22 @@ describe('Wait', () => {
     renderWait('jupyter-lab', ADDRESS);
     expect(await screen.findByText(NOTEBOOK_ACCESS_DENIED, {}, { timeout: 3000 })).toBeVisible();
     expect(assign).not.toHaveBeenCalled();
+  });
+
+  it('offers a retry when the notebook address fails to load', async () => {
+    mocks.getJupyterLab
+      .mockRejectedValueOnce(new Error('Service Unavailable'))
+      .mockResolvedValueOnce({ serviceAddress: ADDRESS_WITH_TOKEN });
+    renderWait('jupyter-lab', ADDRESS);
+    const retry = await screen.findByRole('button', { name: 'Try Again' }, { timeout: 3000 });
+    expect(screen.getByText(/its address could not be loaded/)).toBeVisible();
+    expect(mocks.handleError).toHaveBeenCalledTimes(1);
+    expect(assign).not.toHaveBeenCalled();
+
+    await userEvent.click(retry);
+    await waitFor(() => expect(assign).toHaveBeenCalledWith(`http://master${ADDRESS_WITH_TOKEN}`));
+    expect(mocks.getJupyterLab).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('button', { name: 'Try Again' })).not.toBeInTheDocument();
   });
 
   it('opens a TensorBoard without a token', async () => {
