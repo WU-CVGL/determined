@@ -46,11 +46,22 @@ The page will automatically load and display new changes via [Hot Module Replace
 
 ## Developing Against a Remote Cluster
 
-If the remote cluster has `enable_cors` set to any value or allows CORS requests, set
-`SERVER_ADDRESS` to point to the cluster address. If that's not the case use the provided
-`./scripts/proxy.js` script to run a proxy pointing to the target server with
-`./scripts/proxy.js <REMOTE_SERVER_URL>` and then build the webui or the dev server with
-`SERVER_ADDRESS` pointing to this local proxy.
+The WebUI signs in with the master's session cookie, which is HttpOnly and SameSite=Lax, and the
+master refuses requests that rely on it from pages on other origins. The dev server's own proxy
+serves the master's routes from the WebUI's origin, so it works with any master:
+
+```sh
+DET_WEBPACK_PROXY_URL=http://<master>:8080 DET_WEBSOCKET_PROXY_URL=ws://<master>:8080 npm start
+```
+
+If the master sits behind a reverse proxy that routes by host name, set `changeOrigin: true` on the
+proxy entries in `vite.config.mts`.
+
+To set `SERVER_ADDRESS` to a master on another origin instead, either directly or through
+`./scripts/proxy.js <REMOTE_SERVER_URL>`, the master needs `enable_cors`, must list the WebUI's
+origin (for example `http://localhost:3000`) in `security.csrf.trusted_origins`, and must be on
+the same site as the WebUI (for example, both on `localhost`), since browsers do not send the
+session cookie to other sites.
 
 ## Testing
 

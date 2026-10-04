@@ -170,7 +170,6 @@ export interface DetailedUserList extends WithPagination {
 
 export interface Auth {
   isAuthenticated: boolean;
-  token?: string;
 }
 
 // ResourceType key and value must be the same
