@@ -10,7 +10,9 @@
    there, and no longer writes the cookie itself. A browser that signed in before the upgrade still
    holds a cookie that scripts can read; the first time the WebUI checks the session, it replaces
    that cookie with the new one, or removes it and asks the user to sign in again if the master no
-   longer accepts it. Signing out removes the cookie, even when the session has already ended.
+   longer accepts it. Signing out removes the cookie, even when the session has already ended. All
+   tabs of a browser share the cookie, so a tab checks the session again when it becomes visible,
+   and reloads when another tab has signed in as a different user.
 
 -  WebUI: The session cookie is marked ``Secure`` when the request that sets it arrived over HTTPS:
    the master serves TLS itself, or a reverse proxy listed in the new ``security.trusted_proxies``
@@ -40,7 +42,10 @@
    as ``http://determined.example.com:8080``, to the new ``security.csrf.trusted_origins`` setting,
    or the WebUI cannot sign in or change anything. A proxy listed in ``security.trusted_proxies``
    may instead pass the original host in ``X-Forwarded-Host``. Over HTTPS, current browsers report
-   whether a request is same-origin themselves, and the ``Host`` header does not matter.
+   whether a request is same-origin themselves, and the ``Host`` header does not matter for this
+   check. The master's WebSocket endpoints also check the ``Origin`` header themselves, as before:
+   it must name the host in the ``Host`` header, and ``trusted_origins`` and ``X-Forwarded-Host`` do
+   not apply. Forwarding ``Host`` unchanged keeps both checks working.
 
 -  WebUI: A session token in the WebUI's address (``?jwt=``) is now accepted only when the cluster
    has an external sign-in page, which is what sends it. The WebUI removes the token from the
@@ -57,9 +62,11 @@
    single sign-on, have no password to enter and cannot change their own password or username.
    Administrators changing or renaming other users do not need a password, as before.
 
--  API: A new password, however it is set, now also revokes all of the user's access tokens, in
-   addition to ending their sessions as before. Scripts that use an access token of that user need a
-   new one.
+-  API: A new password set through the user API, as the WebUI, the CLI, and the Python SDK do
+   (``SetUserPassword``, ``PatchUser``, and the legacy ``/users`` routes), now also revokes all of
+   the user's access tokens, in addition to ending their sessions as before. Scripts that use an
+   access token of that user need a new one. Passwords that SCIM provisioning sets do not revoke
+   access tokens.
 
 -  Proxy: Pages that tasks serve under ``/proxy/``, such as notebooks, TensorBoards, and ports
    opened with ``proxy_ports``, share the master's origin. The checks above cannot tell them apart

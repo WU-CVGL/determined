@@ -1625,7 +1625,9 @@ and logs a warning with the headers it saw.
 -  ``trusted_origins``: A list of other origins, written as ``scheme://host[:port]``, whose pages
    the master also accepts such requests from. Add the address that users reach the master at when a
    reverse proxy in front of it forwards plain HTTP and changes the ``Host`` header, or drops its
-   port, for example ``http://determined.example.com:8080``. Defaults to an empty list.
+   port, for example ``http://determined.example.com:8080``. Defaults to an empty list. This list
+   does not apply to the master's WebSocket endpoints, which accept an ``Origin`` header only when
+   it names the host in the ``Host`` header, so a reverse proxy should forward ``Host`` unchanged.
 
 ``trusted_proxies``
 ===================
