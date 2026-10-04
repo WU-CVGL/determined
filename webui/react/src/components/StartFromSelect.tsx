@@ -70,10 +70,17 @@ interface Props {
   id?: string;
   /** "Launch Again": the task to start from as soon as the picker mounts. */
   initialTask?: CommandTask;
+  /**
+   * The recent task whose config is being fetched. The modal holds it, so that
+   * it can keep Launch and the full config disabled until onResolve is called
+   * for the picked item.
+   */
+  loadingTaskId?: string;
   /** When the modal is locked to a workspace. */
   lockedWorkspaceId?: number;
   onAutoSelected: () => void;
   onChange?: (value?: string) => void;
+  onLoadingTaskChange: (taskId?: string) => void;
   onResolve: (start: StartFrom) => void;
   type: NtscLaunchType;
   value?: string;
@@ -93,9 +100,11 @@ const StartFromSelect: React.FC<Props> = ({
   defaultTemplate,
   id,
   initialTask,
+  loadingTaskId,
   lockedWorkspaceId,
   onAutoSelected,
   onChange,
+  onLoadingTaskChange,
   onResolve,
   type,
   value,
@@ -105,7 +114,6 @@ const StartFromSelect: React.FC<Props> = ({
   const [templates, setTemplates] = useState<Template[]>();
   const [recentTasks, setRecentTasks] = useState<CommandTask[]>([]);
   const [historyVersion, setHistoryVersion] = useState(0);
-  const [loadingTaskId, setLoadingTaskId] = useState<string>();
   const pendingTaskId = useRef<string>();
 
   const localEntries = useMemo(
@@ -168,7 +176,7 @@ const StartFromSelect: React.FC<Props> = ({
   const resolveTask = useCallback(
     async (task: CommandTask) => {
       pendingTaskId.current = task.id;
-      setLoadingTaskId(task.id);
+      onLoadingTaskChange(task.id);
       try {
         const getConfig = type === CommandType.Shell ? getShellConfig : getJupyterLabConfig;
         const config = await getConfig({ commandId: task.id });
@@ -192,17 +200,17 @@ const StartFromSelect: React.FC<Props> = ({
       } finally {
         if (pendingTaskId.current === task.id) {
           pendingTaskId.current = undefined;
-          setLoadingTaskId(undefined);
+          onLoadingTaskChange(undefined);
         }
       }
     },
-    [onChange, onResolve, type],
+    [onChange, onLoadingTaskChange, onResolve, type],
   );
 
   const resolve = useCallback(
     (next?: string) => {
       pendingTaskId.current = undefined;
-      setLoadingTaskId(undefined);
+      onLoadingTaskChange(undefined);
       if (!next) {
         onResolve({ kind: 'blank' });
       } else if (next.startsWith(TEMPLATE_PREFIX)) {
@@ -223,7 +231,7 @@ const StartFromSelect: React.FC<Props> = ({
         if (task) resolveTask(task);
       }
     },
-    [localEntries, onResolve, resolveTask, taskOptions, templates],
+    [localEntries, onLoadingTaskChange, onResolve, resolveTask, taskOptions, templates],
   );
 
   const handleChange = useCallback(

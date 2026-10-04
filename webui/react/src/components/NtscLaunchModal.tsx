@@ -136,7 +136,8 @@ const CodeEditor = React.lazy(() => import('hew/CodeEditor'));
  * Start from a template: the template name is sent with the simple fields.
  * Start from a config (a recent task or this browser's history): the config
  * is the base and the simple fields are applied on top of it; no template is
- * sent.
+ * sent. A recent task's config is fetched when it is picked; Launch and the
+ * full config stay disabled until it arrives.
  */
 const NtscLaunchModalComponent: React.FC<Props> = ({
   initialTask,
@@ -154,6 +155,13 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   const [redactedEnv, setRedactedEnv] = useState<string[]>([]);
   const [templateDraft, setTemplateDraft] = useState<string>();
   const [autoSelectStartFrom, setAutoSelectStartFrom] = useState(true);
+  // The recent task whose config "Start from" is fetching. Until it arrives,
+  // baseConfig still belongs to the previous pick (or to none), so Launch and
+  // the full config wait for it. "Launch Again" starts fetching right away.
+  const [startFromLoadingTask, setStartFromLoadingTask] = useState<string | undefined>(
+    initialTask?.id,
+  );
+  const startFromLoading = startFromLoadingTask !== undefined;
   const [form] = Form.useForm<LaunchFormValues>();
   const [fullConfigForm] = Form.useForm();
   const { canCreateTemplateWorkspace, canCreateWorkspaceNSC } = usePermissions();
@@ -359,7 +367,9 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       }
       size={showFullConfig ? 'large' : 'small'}
       submit={{
-        disabled: showFullConfig ? fullConfigFormInvalid : !currentWorkspace?.id,
+        disabled: showFullConfig
+          ? fullConfigFormInvalid
+          : !currentWorkspace?.id || startFromLoading,
         form: idPrefix + (showFullConfig ? '-full-' : '-simple-') + BASE_FORM_ID,
         handleError,
         handler: handleSubmit,
@@ -395,10 +405,12 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
           initialTask={initialTask}
           lockedWorkspace={!!workspace}
           setWorkspace={setCurrentWorkspace}
+          startFromLoadingTask={startFromLoadingTask}
           type={type}
           workspaces={workspaces}
           onStartFrom={handleStartFrom}
           onStartFromAutoSelected={handleStartFromAutoSelected}
+          onStartFromLoadingTask={setStartFromLoadingTask}
         />
       )}
       {redactedEnv.length > 0 && (
@@ -410,7 +422,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
         />
       )}
       <Row>
-        <Button onClick={handleSecondary}>
+        <Button disabled={startFromLoading} onClick={handleSecondary}>
           {showFullConfig ? 'Show Simple Config' : 'Show Full Config'}
         </Button>
         {showFullConfig && canSaveTemplate && (
@@ -563,7 +575,9 @@ interface LaunchFormProps {
   lockedWorkspace: boolean;
   onStartFrom: (start: StartFrom) => void;
   onStartFromAutoSelected: () => void;
+  onStartFromLoadingTask: (taskId?: string) => void;
   setWorkspace: (arg0: Workspace | undefined) => void;
+  startFromLoadingTask?: string;
   type: NtscLaunchType;
   workspaces: Workspace[];
 }
@@ -578,7 +592,9 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
   lockedWorkspace,
   onStartFrom,
   onStartFromAutoSelected,
+  onStartFromLoadingTask,
   setWorkspace,
+  startFromLoadingTask,
   type,
   workspaces,
 }: LaunchFormProps) => {
@@ -680,9 +696,11 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
           autoSelect={autoSelectStartFrom}
           defaultTemplate={defaults.template}
           initialTask={initialTask}
+          loadingTaskId={startFromLoadingTask}
           lockedWorkspaceId={lockedWorkspace ? currentWorkspace?.id : undefined}
           type={type}
           onAutoSelected={onStartFromAutoSelected}
+          onLoadingTaskChange={onStartFromLoadingTask}
           onResolve={onStartFrom}
         />
       </Form.Item>

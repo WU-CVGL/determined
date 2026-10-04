@@ -216,9 +216,20 @@ const openStartFrom = async (user: ReturnType<typeof userEvent.setup>) => {
   await user.click(await screen.findByLabelText('Start from'));
 };
 
+const launchButton = () => screen.getByRole('button', { name: 'Launch' });
+
 const launch = async (user: ReturnType<typeof userEvent.setup>) => {
-  await user.click(screen.getByRole('button', { name: 'Launch' }));
+  await user.click(launchButton());
 };
+
+/** A promise that the test resolves by hand. */
+function deferred<T>() {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
 describe('NtscLaunchModal', () => {
   beforeEach(() => {
@@ -381,6 +392,7 @@ describe('NtscLaunchModal', () => {
           }),
         ),
       );
+      expect(launchButton()).toBeEnabled();
       await openStartFrom(user);
       await waitFor(() => expect(screen.queryByText(/^cluster task ·/)).not.toBeInTheDocument());
     });
@@ -464,6 +476,98 @@ describe('NtscLaunchModal', () => {
 
       await launch(user);
       await waitFor(() => expect(onLaunched).toHaveBeenCalledWith(launchedShell));
+    });
+  });
+
+  describe('while a recent task’s config loads', () => {
+    /** Merged configs as the master returns them, each with its own image and resources. */
+    const configA = {
+      description: 'config a',
+      environment: { image: { cuda: 'image-a:1' } },
+      resources: { priority: 42, resource_pool: 'pool-a', slots: 1 },
+    };
+    const configB = {
+      bind_mounts: [{ container_path: '/scratch', host_path: '/mnt/scratch' }],
+      description: 'config b',
+      environment: { image: { cuda: 'image-b:1' } },
+      resources: { priority: 42, resource_pool: 'pool-b', slots: 4 },
+    };
+    const launchedConfigB = {
+      bind_mounts: configB.bind_mounts,
+      description: 'config b',
+      environment: { image: { cuda: 'image-b:1' } },
+      resources: { resource_pool: 'pool-b', slots: 4 },
+    };
+    const taskA = task(CommandType.Shell, { id: 'shell-a', name: 'task a' });
+    const taskB = task(CommandType.Shell, { id: 'shell-b', name: 'task b' });
+
+    const pick = async (user: ReturnType<typeof userEvent.setup>, label: RegExp) => {
+      await openStartFrom(user);
+      await user.click(await screen.findByText(label));
+    };
+
+    it.each([CommandType.Shell, CommandType.JupyterLab])(
+      'keeps Launch and the full config disabled for "Launch Again" (%s) until the config arrives',
+      async (type) => {
+        const getConfig =
+          type === CommandType.Shell ? mocks.getShellConfig : mocks.getJupyterLabConfig;
+        const launchApi = type === CommandType.Shell ? mocks.launchShell : mocks.launchJupyterLab;
+        mocks.launchJupyterLab.mockResolvedValue({
+          command: task(CommandType.JupyterLab),
+          config: {},
+          warnings: [],
+        });
+        const config = deferred<RawJson>();
+        getConfig.mockReturnValue(config.promise);
+        const { user } = await setup({ initialTask: task(type), type });
+
+        await waitFor(() => expect(getConfig).toHaveBeenCalledWith({ commandId: `${type}-old` }));
+        expect(launchButton()).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Show Full Config' })).toBeDisabled();
+
+        config.resolve(configB);
+        await waitFor(() => expect(launchButton()).toBeEnabled());
+        expect(screen.getByRole('button', { name: 'Show Full Config' })).toBeEnabled();
+        await launch(user);
+
+        await waitFor(() => expect(launchApi).toHaveBeenCalled());
+        expect(launchApi).toHaveBeenCalledWith({
+          config: launchedConfigB,
+          workspaceId: WORKSPACE.id,
+        });
+      },
+    );
+
+    it('waits for the second config after switching from a loaded task', async () => {
+      mocks.getShells.mockResolvedValue([taskA, taskB]);
+      const secondConfig = deferred<RawJson>();
+      mocks.getShellConfig.mockImplementation(({ commandId }: { commandId: string }) =>
+        commandId === taskA.id ? Promise.resolve(configA) : secondConfig.promise,
+      );
+      const { onLaunched, user } = await setup();
+
+      await pick(user, /^task a ·/);
+      await waitFor(() =>
+        expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('config a'),
+      );
+      expect(launchButton()).toBeEnabled();
+
+      await pick(user, /^task b ·/);
+      await waitFor(() =>
+        expect(mocks.getShellConfig).toHaveBeenCalledWith({ commandId: taskB.id }),
+      );
+      expect(launchButton()).toBeDisabled();
+
+      secondConfig.resolve(configB);
+      await waitFor(() => expect(launchButton()).toBeEnabled());
+      await launch(user);
+
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell).toHaveBeenCalledTimes(1);
+      expect(mocks.launchShell).toHaveBeenCalledWith({
+        config: launchedConfigB,
+        workspaceId: WORKSPACE.id,
+      });
     });
   });
 
