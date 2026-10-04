@@ -6,6 +6,7 @@ package internal
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,6 +23,7 @@ import (
 
 	detContext "github.com/determined-ai/determined/master/internal/context"
 	"github.com/determined-ai/determined/master/internal/db"
+	"github.com/determined-ai/determined/master/internal/grpcutil"
 	"github.com/determined-ai/determined/master/internal/user"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
@@ -241,6 +243,120 @@ func TestPatchUserRenameSelfRequiresCurrentPassword(t *testing.T) {
 	_, err = api.PatchUser(adminCtx, rename(adminName, nil, false))
 	require.NoError(t, err)
 	requireLogin(t, api, adminName, password, true)
+}
+
+// TestAllocationTokenNeedsCurrentPassword checks that the session token of a task, which its
+// container holds and any code running in it can read, does not let that code change the password
+// or the username of the task's owner without the owner's current password, although it
+// authenticates as the owner.
+func TestAllocationTokenNeedsCurrentPassword(t *testing.T) {
+	api, _, _ := setupAPITest(t, nil)
+	srv := browserSessionServer(t, api)
+	const password = "Old-password-1"
+	u := addPasswordUser(t, password)
+	ctx := context.Background()
+
+	// A running task of u's, and the token that its container authenticates with.
+	task := db.RequireMockTask(t, api.m.db, &u.ID)
+	allocationID := model.AllocationID(fmt.Sprintf("%s.1", task.TaskID))
+	require.NoError(t, db.AddAllocation(ctx, &model.Allocation{
+		AllocationID: allocationID, TaskID: task.TaskID,
+		StartTime: ptrs.Ptr(time.Now().UTC()), State: ptrs.Ptr(model.AllocationStateRunning),
+	}))
+	token, err := db.StartAllocationSession(ctx, allocationID, &u)
+	require.NoError(t, err)
+	taskCtx := metadata.NewIncomingContext(ctx,
+		metadata.Pairs("x-allocation-token", "Bearer "+token))
+	requireTaskToken := func(username string) {
+		t.Helper()
+		curUser, session, err := grpcutil.GetUser(taskCtx)
+		require.NoError(t, err)
+		require.Nil(t, session, "a user session")
+		require.Equal(t, u.ID, curUser.ID)
+		require.Equal(t, username, curUser.Username)
+	}
+	requireTaskToken(u.Username)
+
+	id := int32(u.ID) //nolint:gosec // The IDs of test users are small.
+	newName := uuid.New().String()
+	setPassword := func(old *string) error {
+		_, err := api.SetUserPassword(taskCtx, &apiv1.SetUserPasswordRequest{
+			UserId: id, Password: "New-password-1", OldPassword: old,
+		})
+		return err
+	}
+	patchPassword := func(old *string) error {
+		_, err := api.PatchUser(taskCtx, &apiv1.PatchUserRequest{
+			UserId: id, User: &userv1.PatchUser{
+				Password: ptrs.Ptr("New-password-1"), OldPassword: old,
+			},
+		})
+		return err
+	}
+	rename := func(old *string) error {
+		_, err := api.PatchUser(taskCtx, &apiv1.PatchUserRequest{
+			UserId: id, User: &userv1.PatchUser{Username: ptrs.Ptr(newName), OldPassword: old},
+		})
+		return err
+	}
+	for name, change := range map[string]func(*string) error{
+		"SetUserPassword": setPassword, "PatchUser password": patchPassword, "PatchUser username": rename,
+	} {
+		err := change(nil)
+		require.Equal(t, codes.InvalidArgument, status.Code(err), "%s: %v", name, err)
+		for _, wrong := range []string{"wrong", ""} {
+			err = change(ptrs.Ptr(wrong))
+			require.Equal(t, codes.PermissionDenied, status.Code(err), "%s %q: %v", name, wrong, err)
+		}
+	}
+
+	// The same through the gateway, with the header that the harness sends the token in.
+	send := func(method, path, body string) (int, string) {
+		req, err := http.NewRequestWithContext(ctx, method, srv.URL+path, strings.NewReader(body))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", jsonContentType)
+		req.Header.Set("Grpc-Metadata-x-allocation-token", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, resp.Body.Close()) }()
+		b, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		return resp.StatusCode, string(b)
+	}
+	passwordPath := fmt.Sprintf("/api/v1/users/%d/password", u.ID)
+	userPath := fmt.Sprintf("/api/v1/users/%d", u.ID)
+	for _, req := range []struct{ method, path, change string }{
+		{http.MethodPost, passwordPath, `"password": "New-password-1"`},
+		{http.MethodPatch, userPath, `"password": "New-password-1"`},
+		{http.MethodPatch, userPath, fmt.Sprintf(`"username": %q`, newName)},
+	} {
+		code, body := send(req.method, req.path, "{"+req.change+"}")
+		require.Equal(t, http.StatusBadRequest, code, "%v: %s", req, body)
+		require.Contains(t, body, "enter your current password", req)
+		code, body = send(req.method, req.path, "{"+req.change+`, "old_password": "wrong"}`)
+		require.Equal(t, http.StatusForbidden, code, "%v: %s", req, body)
+	}
+
+	// Nothing changed.
+	requireLogin(t, api, u.Username, password, true)
+	requireLogin(t, api, u.Username, "New-password-1", false)
+	requireLogin(t, api, newName, password, false)
+	stored, err := user.ByID(ctx, u.ID)
+	require.NoError(t, err)
+	require.Equal(t, u.Username, stored.Username)
+	requireTaskToken(u.Username)
+
+	// With the current password, the task can make these changes, as its owner could. A new
+	// password ends the owner's sessions, but not the sessions of their tasks, which keep running.
+	userCtx := sessionContext(t, u)
+	require.NoError(t, setPassword(ptrs.Ptr(password)))
+	requireLogin(t, api, u.Username, "New-password-1", true)
+	_, _, err = grpcutil.GetUser(userCtx)
+	requireCode(t, codes.Unauthenticated, err)
+	requireTaskToken(u.Username)
+	require.NoError(t, rename(ptrs.Ptr("New-password-1")))
+	requireLogin(t, api, newName, "New-password-1", true)
+	requireTaskToken(newName)
 }
 
 // requireProxySignIn checks that the proxied services send a browser whose session cookie holds
