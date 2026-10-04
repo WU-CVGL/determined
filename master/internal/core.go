@@ -1357,6 +1357,10 @@ func (m *Master) Run(ctx context.Context, gRPCLogInitDone chan struct{}) error {
 
 	m.echo.Use(authzAuditLogMiddleware())
 
+	// Browsers attach the session cookie to requests that other sites start, so requests that
+	// rely on it must come from the master's own pages.
+	m.echo.Use(user.CrossOriginProtection)
+
 	var proxiedRoutes []string
 	for _, ps := range m.config.InternalConfig.ProxiedServers {
 		proxiedRoutes = append(proxiedRoutes, ps.PathPrefix)

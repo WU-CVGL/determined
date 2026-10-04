@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net/http"
 	"runtime/debug"
 
 	grpcmiddleware "github.com/grpc-ecosystem/go-grpc-middleware"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/db"
+	"github.com/determined-ai/determined/master/internal/user"
 	"github.com/determined-ai/determined/master/pkg/logger"
 	"github.com/determined-ai/determined/master/pkg/model"
 	proto "github.com/determined-ai/determined/proto/pkg/apiv1"
@@ -122,23 +124,32 @@ func RegisterHTTPProxy(ctx context.Context, e *echo.Echo, port int, cert *tls.Ce
 		return err
 	}
 	extConfig := config.GetMasterConfig().InternalConfig.ExternalSessions
-	handler := func(c echo.Context) error {
+	apiV1 := e.Group("/api/v1")
+	apiV1.Any("/*", gatewayHandler(mux, extConfig.Enabled()), middleware.RemoveTrailingSlash())
+	return nil
+}
+
+// gatewayHandler passes requests to the grpc-gateway mux. Browsers authenticate with cookies,
+// which it copies into the Authorization header that the gateway forwards to the gRPC server.
+// user.CrossOriginProtection has already refused cookie-authenticated requests from other origins.
+func gatewayHandler(mux http.Handler, externalSessions bool) echo.HandlerFunc {
+	return func(c echo.Context) error {
 		request := c.Request()
-		if cookie, err := c.Cookie("det_jwt"); extConfig.Enabled() && err == nil {
+		if cookie, err := c.Cookie("det_jwt"); externalSessions && err == nil {
 			request.Header.Set("Authorization", "Bearer "+cookie.Value)
 		}
 		if c.Request().Header.Get("Authorization") == "" {
-			if cookie, err := c.Cookie("auth"); err == nil {
+			if cookie, err := c.Cookie(user.SessionCookieName); err == nil {
 				request.Header.Set("Authorization", "Bearer "+cookie.Value)
 			}
 		}
 		if _, ok := request.URL.Query()["pretty"]; ok {
 			request.Header.Set("Accept", jsonPretty)
 		}
+		// The response hook that sets the session cookie sees only the request's context.
+		request = request.WithContext(context.WithValue(
+			request.Context(), sessionCookieSecureKey{}, user.SessionCookieSecure(request)))
 		mux.ServeHTTP(c.Response(), request)
 		return nil
 	}
-	apiV1 := e.Group("/api/v1")
-	apiV1.Any("/*", handler, middleware.RemoveTrailingSlash())
-	return nil
 }

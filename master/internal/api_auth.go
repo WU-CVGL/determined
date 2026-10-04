@@ -129,6 +129,14 @@ func processProxyAuthentication(c echo.Context) (done bool, err error) {
 			return true, fmt.Errorf("invalid notebook session token for task (%v)", taskID)
 		}
 	} else {
+		// Without an Authorization header, the browser's session cookie authenticates the
+		// request, so a page on another origin must not be able to send it. The service's own
+		// pages share the master's origin and pass.
+		if user.NeedsSameOriginCheck(c.Request()) {
+			if err := user.CheckSameOrigin(c.Request()); err != nil {
+				return true, err
+			}
+		}
 		usr, _, err = user.GetService().UserAndSessionFromRequest(c.Request())
 	}
 

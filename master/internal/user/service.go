@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/o1egl/paseto"
 
@@ -128,9 +127,10 @@ func GetService() *Service {
 	return userService
 }
 
-// The middleware looks for a token in two places (in this order):
+// The middleware looks for a token in three places (in this order):
 // 1. The HTTP Authorization header.
-// 2. A cookie named "auth".
+// 2. The "det_jwt" cookie, when external sessions are enabled.
+// 3. The session cookie, SessionCookieName.
 func (s *Service) extractToken(r *http.Request) (string, error) {
 	authRaw := r.Header.Get("Authorization")
 	if authRaw != "" {
@@ -142,7 +142,7 @@ func (s *Service) extractToken(r *http.Request) (string, error) {
 		return strings.TrimPrefix(authRaw, "Bearer "), nil
 	} else if cookie, err := r.Cookie("det_jwt"); s.extConfig.Enabled() && err == nil {
 		return cookie.Value, nil
-	} else if cookie, err := r.Cookie("auth"); err == nil {
+	} else if cookie, err := r.Cookie(SessionCookieName); err == nil {
 		return cookie.Value, nil
 	}
 	// If we found no token, then abort the request with an HTTP 401.
@@ -232,12 +232,8 @@ func (s *Service) ProcessAuthentication(next echo.HandlerFunc) echo.HandlerFunc 
 }
 
 func (s *Service) postLogout(c echo.Context) (interface{}, error) {
-	// Delete the cookie if one is set.
-	if cookie, err := c.Cookie("auth"); err == nil {
-		cookie.Value = ""
-		cookie.Expires = time.Unix(0, 0)
-		c.SetCookie(cookie)
-	}
+	// Remove the session cookie. The web UI cannot, since it is HttpOnly.
+	c.SetCookie(ExpiredSessionCookie(SessionCookieSecure(c.Request())))
 
 	// Delete the user session information from the database.
 	sess := c.(*detContext.DetContext).MustGetUserSession()
@@ -307,7 +303,7 @@ func (s *Service) postLogin(c echo.Context) (interface{}, error) {
 	// The caller of this REST endpoint can request that the master set a cookie.
 	// This is used by the WebUI for persistence of sessions.
 	if c.QueryParam("cookie") == "true" {
-		c.SetCookie(NewCookieFromToken(token))
+		c.SetCookie(NewSessionCookie(token, SessionCookieSecure(c.Request())))
 	}
 
 	return response{
@@ -315,14 +311,24 @@ func (s *Service) postLogin(c echo.Context) (interface{}, error) {
 	}, nil
 }
 
-// NewCookieFromToken creates a new cookie from the given token.
-func NewCookieFromToken(token string) *http.Cookie {
-	cookie := new(http.Cookie)
-	cookie.Name = "auth"
-	cookie.Value = token
-	cookie.Path = "/"
-	cookie.Expires = time.Now().Add(SessionDuration)
-	return cookie
+// postSessionCookie stores the token from the request's Authorization header in the browser's
+// session cookie. The web UI calls it when it receives a token in its URL (?jwt=), which it used to
+// write into the cookie itself before the cookie became HttpOnly. The token was checked by
+// ProcessAuthentication. Unlike other requests with an Authorization header, it must come from the
+// master's own pages: when enable_cors lets other origins send such headers, a page elsewhere could
+// otherwise plant its own session in the visitor's browser.
+func (s *Service) postSessionCookie(c echo.Context) (interface{}, error) {
+	authRaw := c.Request().Header.Get(echo.HeaderAuthorization)
+	if !strings.HasPrefix(authRaw, "Bearer ") {
+		return nil, echo.NewHTTPError(http.StatusBadRequest,
+			"send the token to store in an Authorization: Bearer header")
+	}
+	if err := CheckSameOrigin(c.Request()); err != nil {
+		return nil, err
+	}
+	token := strings.TrimPrefix(authRaw, "Bearer ")
+	c.SetCookie(NewSessionCookie(token, SessionCookieSecure(c.Request())))
+	return nil, nil
 }
 
 // getMe returns information about the current authenticated user.
