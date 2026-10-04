@@ -1,5 +1,5 @@
 import contextlib
-from typing import Iterator
+from typing import Iterator, List, Optional, Tuple
 from unittest import mock
 
 import pytest
@@ -13,16 +13,22 @@ from tests.cli import util
 
 
 @contextlib.contextmanager
-def relogin_cli_rsps(new_token: str) -> Iterator[responses.RequestsMock]:
-    """Like util.standard_cli_rsps, but also expects the CLI to store a new token for det-user."""
+def cached_session_rsps(
+    cached_user: str = "det-user", relogin: Optional[Tuple[str, str]] = None
+) -> Iterator[responses.RequestsMock]:
+    """Like util.standard_cli_rsps, with the session's token cached under cached_user.
+
+    With relogin=(username, token), it also expects the CLI to store a new token for username.
+    """
     with contextlib.ExitStack() as es:
         es.enter_context(util.setenv_optional("DET_USER", "det-user"))
         es.enter_context(util.setenv_optional("DET_USER_TOKEN", "det-token"))
         mts = es.enter_context(util.MockTokenStore(strict=False))
-        mts.get_active_user(retval="det-user")
-        mts.get_token("det-user", retval="det-token")
-        mts.set_token("det-user", new_token)
-        mts.set_active("det-user")
+        mts.get_active_user(retval=cached_user)
+        mts.get_token(cached_user, retval="det-token")
+        if relogin is not None:
+            mts.set_token(*relogin)
+            mts.set_active(relogin[0])
         rsps = es.enter_context(
             responses.RequestsMock(
                 registry=registries.OrderedRegistry, assert_all_requests_are_fired=True
@@ -31,6 +37,11 @@ def relogin_cli_rsps(new_token: str) -> Iterator[responses.RequestsMock]:
         util.expect_get_info(rsps)
         rsps.get("http://localhost:8080/api/v1/me", status=200)
         yield rsps
+
+
+def expect_whoami(rsps: responses.RequestsMock, userobj: bindings.v1User) -> None:
+    """Expects the CLI to look up the caller, after the session's token has been checked."""
+    rsps.get("http://localhost:8080/api/v1/me", status=200, json={"user": userobj.to_json()})
 
 
 def test_user_create_password_flag_does_not_prompt() -> None:
@@ -117,7 +128,8 @@ def test_user_create_fails_with_empty_password(mock_getpass: mock.MagicMock) -> 
 def test_user_change_password(mock_getpass: mock.MagicMock) -> None:
     mock_getpass.side_effect = lambda *_: "ce93AA76-2f62-4f29-ab5d-c56a3375e702"
     with util.standard_cli_rsps() as rsps:
-        userobj = bindings.v1User(active=True, admin=False, username="det-user", id=101)
+        expect_whoami(rsps, bindings.v1User(active=True, admin=True, username="det-user", id=100))
+        userobj = bindings.v1User(active=True, admin=False, username="tgt-user", id=101)
         rsps.get(
             "http://localhost:8080/api/v1/users/tgt-user/by-username",
             status=200,
@@ -146,13 +158,9 @@ def test_user_change_password(mock_getpass: mock.MagicMock) -> None:
 def test_user_change_own_password_sends_current_password(mock_getpass: mock.MagicMock) -> None:
     current, new = "9d1Cc0a1-current-password", "7F0e8b2D-new-password"
     mock_getpass.side_effect = [current, new, new]
-    with relogin_cli_rsps("new-token") as rsps:
+    with cached_session_rsps(relogin=("det-user", "new-token")) as rsps:
         userobj = bindings.v1User(active=True, admin=False, username="det-user", id=104)
-        rsps.get(
-            "http://localhost:8080/api/v1/users/det-user/by-username",
-            status=200,
-            json={"user": userobj.to_json()},
-        )
+        expect_whoami(rsps, userobj)
         patchobj = bindings.v1PatchUser(
             isHashed=True,
             password=api.salt_and_hash(new),
@@ -188,8 +196,9 @@ def test_user_change_own_password_blank_current_password(mock_getpass: mock.Magi
     # Users without a password confirm an empty current password.
     new = "2a7B0c4E-new-password"
     mock_getpass.side_effect = ["", new, new]
-    with relogin_cli_rsps("new-token") as rsps:
+    with cached_session_rsps(relogin=("det-user", "new-token")) as rsps:
         userobj = bindings.v1User(active=True, admin=False, username="det-user", id=105)
+        expect_whoami(rsps, userobj)
         rsps.get(
             "http://localhost:8080/api/v1/users/det-user/by-username",
             status=200,
@@ -222,11 +231,7 @@ def test_user_change_own_password_wrong_current_password(
     mock_getpass.side_effect = ["wrong", new, new]
     with util.standard_cli_rsps() as rsps:
         userobj = bindings.v1User(active=True, admin=False, username="det-user", id=106)
-        rsps.get(
-            "http://localhost:8080/api/v1/users/det-user/by-username",
-            status=200,
-            json={"user": userobj.to_json()},
-        )
+        expect_whoami(rsps, userobj)
         rsps.patch(
             "http://localhost:8080/api/v1/users/106",
             status=403,
@@ -248,6 +253,7 @@ def test_user_edit_own_username_asks_for_current_password(mock_getpass: mock.Mag
             status=200,
             json={"user": userobj.to_json()},
         )
+        expect_whoami(rsps, userobj)
         rsps.patch(
             "http://localhost:8080/api/v1/users/107",
             status=200,
@@ -282,6 +288,7 @@ def test_user_edit_own_username_wrong_current_password(
             status=200,
             json={"user": userobj.to_json()},
         )
+        expect_whoami(rsps, userobj)
         rsps.patch(
             "http://localhost:8080/api/v1/users/108",
             status=403,
@@ -304,6 +311,7 @@ def test_user_edit_other_username_or_own_display_name_does_not_prompt(
             status=200,
             json={"user": other.to_json()},
         )
+        expect_whoami(rsps, bindings.v1User(active=True, admin=True, username="det-user", id=110))
         rsps.patch(
             "http://localhost:8080/api/v1/users/109",
             status=200,
@@ -337,6 +345,7 @@ def test_user_rename_self_asks_for_current_password(mock_getpass: mock.MagicMock
             status=200,
             json={"user": userobj.to_json()},
         )
+        expect_whoami(rsps, userobj)
         rsps.patch(
             "http://localhost:8080/api/v1/users/111",
             status=200,
@@ -359,11 +368,130 @@ def test_user_rename_self_asks_for_current_password(mock_getpass: mock.MagicMock
         cli.main(["user", "rename", "det-user", "new-name"])
 
 
+@pytest.mark.parametrize("target", [["bob"], []])
+@mock.patch("getpass.getpass")
+def test_user_change_own_password_after_renaming_yourself(
+    mock_getpass: mock.MagicMock, target: List[str]
+) -> None:
+    # A cached session keeps the username it was cached under: after alice renamed herself bob,
+    # the CLI still has her session as alice, so it must tell users apart by ID.
+    current, new = "4e2Fa9b0-current-password", "6B1d3c8A-new-password"
+    mock_getpass.side_effect = [current, new, new]
+    with cached_session_rsps("alice", relogin=("bob", "new-token")) as rsps:
+        me = bindings.v1User(active=True, admin=False, username="bob", id=112)
+        expect_whoami(rsps, me)
+        if target:
+            rsps.get(
+                "http://localhost:8080/api/v1/users/bob/by-username",
+                status=200,
+                json={"user": me.to_json()},
+            )
+        patchobj = bindings.v1PatchUser(
+            isHashed=True,
+            password=api.salt_and_hash(new),
+            oldPassword=api.salt_and_hash(current),
+        )
+        rsps.patch(
+            "http://localhost:8080/api/v1/users/112",
+            status=200,
+            match=[matchers.json_params_matcher(patchobj.to_json(True))],
+            json={"user": me.to_json()},
+        )
+        rsps.post(
+            "http://localhost:8080/api/v1/auth/login",
+            status=200,
+            match=[
+                matchers.json_params_matcher(
+                    {"username": "bob", "password": api.salt_and_hash(new)}, strict_match=False
+                )
+            ],
+            json={"token": "new-token", "user": me.to_json()},
+        )
+
+        cli.main(["user", "change-password", *target])
+
+    prompts = [c.args[0] for c in mock_getpass.call_args_list]
+    assert prompts[0] == "Current password for user 'bob': "
+
+
+@pytest.mark.parametrize(
+    "args",
+    [["edit", "bob", "--username", "carol"], ["rename", "bob", "carol"]],
+)
+@mock.patch("getpass.getpass")
+def test_user_edit_own_username_after_renaming_yourself(
+    mock_getpass: mock.MagicMock, args: List[str]
+) -> None:
+    # The session was cached as alice, who has since renamed herself bob.
+    mock_getpass.side_effect = ["current-password"]
+    with cached_session_rsps("alice") as rsps:
+        me = bindings.v1User(active=True, admin=False, username="bob", id=113)
+        rsps.get(
+            "http://localhost:8080/api/v1/users/bob/by-username",
+            status=200,
+            json={"user": me.to_json()},
+        )
+        expect_whoami(rsps, me)
+        rsps.patch(
+            "http://localhost:8080/api/v1/users/113",
+            status=200,
+            match=[
+                matchers.json_params_matcher(
+                    {
+                        "username": "carol",
+                        "oldPassword": api.salt_and_hash("current-password"),
+                        "isHashed": True,
+                    }
+                )
+            ],
+            json={"user": me.to_json()},
+        )
+        if args[0] == "rename":
+            rsps.get(
+                "http://localhost:8080/api/v1/users/113",
+                status=200,
+                json={"user": me.to_json()},
+            )
+        cli.main(["user", *args])
+    prompts = [c.args[0] for c in mock_getpass.call_args_list]
+    assert prompts == ["Current password for user 'bob': "]
+
+
+@mock.patch("getpass.getpass")
+def test_user_change_password_of_user_named_like_your_old_name(
+    mock_getpass: mock.MagicMock,
+) -> None:
+    # An administrator who renamed themselves bob changes the password of a new user named alice:
+    # the CLI neither asks for the current password nor signs in as alice afterwards.
+    new = "8d5E2f7A-new-password"
+    mock_getpass.side_effect = [new, new]
+    with cached_session_rsps("alice") as rsps:
+        expect_whoami(rsps, bindings.v1User(active=True, admin=True, username="bob", id=114))
+        other = bindings.v1User(active=True, admin=False, username="alice", id=115)
+        rsps.get(
+            "http://localhost:8080/api/v1/users/alice/by-username",
+            status=200,
+            json={"user": other.to_json()},
+        )
+        patchobj = bindings.v1PatchUser(isHashed=True, password=api.salt_and_hash(new))
+        rsps.patch(
+            "http://localhost:8080/api/v1/users/115",
+            status=200,
+            match=[matchers.json_params_matcher(patchobj.to_json(True))],
+            json={"user": other.to_json()},
+        )
+
+        cli.main(["user", "change-password", "alice"])
+
+    assert mock_getpass.call_count == 2
+
+
 @mock.patch("getpass.getpass")
 def test_user_change_password_blank_fails(mock_getpass: mock.MagicMock) -> None:
     mock_getpass.side_effect = lambda *_: ""
     with util.standard_cli_rsps() as rsps:
-        userobj = bindings.v1User(active=True, admin=False, username="det-user", id=102)
+        expect_whoami(rsps, bindings.v1User(active=True, admin=True, username="det-user", id=100))
+        userobj = bindings.v1User(active=True, admin=False, username="tgt-user", id=102)
         rsps.get(
             "http://localhost:8080/api/v1/users/tgt-user/by-username",
             status=200,
@@ -377,7 +505,8 @@ def test_user_change_password_blank_fails(mock_getpass: mock.MagicMock) -> None:
 def test_user_change_password_weak_fails(mock_getpass: mock.MagicMock) -> None:
     mock_getpass.side_effect = lambda *_: "password"
     with util.standard_cli_rsps() as rsps:
-        userobj = bindings.v1User(active=True, admin=False, username="det-user", id=103)
+        expect_whoami(rsps, bindings.v1User(active=True, admin=True, username="det-user", id=100))
+        userobj = bindings.v1User(active=True, admin=False, username="tgt-user", id=103)
         rsps.get(
             "http://localhost:8080/api/v1/users/tgt-user/by-username",
             status=200,

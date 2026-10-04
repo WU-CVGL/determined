@@ -108,12 +108,18 @@ def _prompt_current_password(username: str) -> str:
 CURRENT_PASSWORD_INCORRECT = "The current password is incorrect"
 
 
+def _is_caller(d: client.Determined, user_obj: client.User) -> bool:
+    # Compare user IDs: a cached session keeps the username it was cached under, which is out of
+    # date once its user has been renamed.
+    return d.whoami().user_id == user_obj.user_id
+
+
 def rename(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
     d = client.Determined._from_session(sess)
     user_obj = d.get_user_by_name(args.target_user)
     # The master requires the current password when users rename themselves.
-    own = args.target_user == d.get_session_username() and args.new_username != args.target_user
+    own = args.new_username != user_obj.username and _is_caller(d, user_obj)
     current_password = _prompt_current_password(args.target_user) if own else None
     try:
         user_obj.rename(new_username=args.new_username, current_password=current_password)
@@ -126,19 +132,15 @@ def rename(args: argparse.Namespace) -> None:
 def change_password(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
     d = client.Determined._from_session(sess)
-    if args.target_user:
-        username = args.target_user
-    elif args.user:
-        username = args.user
-    else:
-        username = d.get_session_username()
+    # Without a target, users change their own password.
+    me = d.whoami()
+    user_obj = d.get_user_by_name(args.target_user) if args.target_user else me
+    username = user_obj.username
+    assert username is not None
 
-    if not username:
-        # The default user should have been set by now by autologin.
-        raise errors.CliError("Please log in as an admin or user to change passwords")
-
-    # The master requires the current password when users change their own password.
-    own_password = username == d.get_session_username()
+    # The master requires the current password when users change their own password. Compare user
+    # IDs, as _is_caller does.
+    own_password = user_obj.user_id == me.user_id
     current_password = None
     if own_password:
         current_password = _prompt_current_password(username)
@@ -149,7 +151,6 @@ def change_password(args: argparse.Namespace) -> None:
     if password != check_password:
         raise errors.CliError("Passwords do not match")
 
-    user_obj = d.get_user_by_name(username)
     try:
         user_obj.change_password(new_password=password, current_password=current_password)
     except api.errors.ForbiddenException as e:
@@ -234,9 +235,7 @@ def edit(args: argparse.Namespace) -> None:
         patch_user.username = args.username
         changes.append("Username")
         # The master requires the current password when users rename themselves.
-        own_rename = (
-            args.target_user == d.get_session_username() and args.username != args.target_user
-        )
+        own_rename = args.username != user_obj.username and _is_caller(d, user_obj)
 
     if args.admin is not None:
         patch_user.admin = args.admin
