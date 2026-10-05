@@ -2130,6 +2130,12 @@ export interface V1Command {
      * @memberof V1Command
      */
     workspaceId: number;
+    /**
+     * The number of slots the command asks for (resources.slots); 0 for a CPU-only command.
+     * @type {number}
+     * @memberof V1Command
+     */
+    slots?: number;
 }
 /**
  * Container for a requested trial and its metrics.
@@ -7173,6 +7179,12 @@ export interface V1Notebook {
      * @memberof V1Notebook
      */
     workspaceId: number;
+    /**
+     * The number of slots the notebook asks for (resources.slots); 0 for a CPU-only notebook.
+     * @type {number}
+     * @memberof V1Notebook
+     */
+    slots?: number;
 }
 /**
  * Arguments to a notify container running.
@@ -11050,6 +11062,12 @@ export interface V1Shell {
      * @memberof V1Shell
      */
     workspaceId: number;
+    /**
+     * The number of slots the shell asks for (resources.slots); 0 for a CPU-only shell.
+     * @type {number}
+     * @memberof V1Shell
+     */
+    slots?: number;
 }
 /**
  * Slot wraps a single device on the agent.
@@ -11691,6 +11709,12 @@ export interface V1Tensorboard {
      * @memberof V1Tensorboard
      */
     workspaceId: number;
+    /**
+     * The number of slots the TensorBoard asks for (resources.slots); 0 for a CPU-only TensorBoard.
+     * @type {number}
+     * @memberof V1Tensorboard
+     */
+    slots?: number;
 }
 /**
  * Response to TestWebhookRequest.
