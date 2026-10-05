@@ -250,9 +250,9 @@ func TestStaticResourcePoolDifferencesBuiltInDefaultPool(t *testing.T) {
 	)
 	require.NoError(t, err)
 	adopted := testSpecRecord(t, "default", `{"pool_name":"default"}`, snapshot)
-	adopted.ClusterName = "agent-cluster"
+	adopted.ClusterName = manager.config.ClusterName
 	adopted.State = db.DynamicResourcePoolReady
-	require.NoError(t, checkStaticPoolCollision(adopted, "agent-cluster", builtIn))
+	require.NoError(t, checkStaticPoolCollision(adopted, adopted.ClusterName, builtIn))
 }
 
 func TestCheckStaticPoolCollision(t *testing.T) {

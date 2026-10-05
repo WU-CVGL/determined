@@ -360,9 +360,6 @@ func staticResourcePoolDifferences(
 }
 
 func resourcePoolJSONFields(cfg config.ResourcePoolConfig) (map[string]json.RawMessage, error) {
-	// Decoding a pool always clears the deprecated max_cpu_containers_per_agent. Only the built-in
-	// default pool, which is never decoded, keeps its -1, which means the same as 0.
-	cfg.MaxCPUContainersPerAgent = 0
 	raw, err := json.Marshal(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling resource pool %q: %w", cfg.PoolName, err)
@@ -371,6 +368,9 @@ func resourcePoolJSONFields(cfg config.ResourcePoolConfig) (map[string]json.RawM
 	if err = json.Unmarshal(raw, &fields); err != nil {
 		return nil, fmt.Errorf("reading resource pool %q: %w", cfg.PoolName, err)
 	}
+	// Decoding a pool always clears the deprecated max_cpu_containers_per_agent. Only the built-in
+	// default pool, which is never decoded, keeps it at -1, which means the same as leaving it out.
+	delete(fields, "max_cpu_containers_per_agent")
 	return fields, nil
 }
 
