@@ -196,7 +196,7 @@ describe('JobQueue', () => {
     expect(menuLabels().at(-1)).toBe('Kill');
   });
 
-  it('leaves out Manage Job and Kill where the user cannot control the task', async () => {
+  it('leaves out Connect via CLI, Manage Job and Kill on another user’s task', async () => {
     permissions.canModify = false;
     mocks.jobs = [{ ...shellJob, userId: OWNER_ID + 1 }];
     vi.mocked(getShells).mockResolvedValue([{ ...runningShell, userId: OWNER_ID + 1 }]);
@@ -204,12 +204,7 @@ describe('JobQueue', () => {
     await waitForShells();
     await openRowMenu(/Shell shell-/);
     await screen.findByText('Copy Task ID');
-    expect(menuLabels()).toEqual([
-      'View Logs',
-      'View Resources',
-      'Copy Task ID',
-      'Connect via CLI',
-    ]);
+    expect(menuLabels()).toEqual(['View Logs', 'View Resources', 'Copy Task ID']);
   });
 
   it('leaves out Manage Job and Kill in the job menu where the user cannot control the job', async () => {

@@ -126,6 +126,7 @@ describe('TaskActionDropdown', () => {
   beforeEach(() => {
     mocks.canCreateWorkspaceNSC = true;
     resources.enabled = false;
+    setCurrentUser(101);
   });
 
   it('hides Kill for another user’s task', async () => {
@@ -146,12 +147,71 @@ describe('TaskActionDropdown', () => {
     expect(mocks.getJupyterLab).toHaveBeenCalledWith({ commandId: 'nb-1' });
   });
 
-  it('refuses to connect to a notebook without its token', async () => {
+  it('refuses to connect to a notebook when the master returns no token', async () => {
+    // An admin is offered Connect on any notebook; the master decides whether to add the token.
+    setCurrentUser(1, true);
     mocks.getJupyterLab.mockResolvedValue({ serviceAddress: '/proxy/nb-1/' });
     await openMenu(102, notebook);
     await userEvent.click(screen.getByText('Connect'));
     expect(await screen.findByText(NOTEBOOK_ACCESS_DENIED)).toBeInTheDocument();
     expect(screen.queryByText('http://localhost/proxy/nb-1/')).not.toBeInTheDocument();
+  });
+
+  describe('Connect', () => {
+    const notebookLabel = 'Connect';
+    const shellLabel = 'Connect via CLI';
+    const exactly = (label: string) => screen.queryByText(label, { exact: true });
+
+    it.each([
+      [CommandType.Shell, shellLabel],
+      [CommandType.JupyterLab, notebookLabel],
+    ])('is offered on the user’s own running %s', async (type, label) => {
+      await openMenu(101, { state: CommandState.Running, type });
+      expect(exactly(label)).toBeInTheDocument();
+    });
+
+    it.each([
+      [CommandType.Shell, shellLabel],
+      [CommandType.JupyterLab, notebookLabel],
+    ])('is not offered on another user’s running %s', async (type, label) => {
+      await openMenu(102, { state: CommandState.Running, type });
+      await screen.findByText('View Logs');
+      expect(exactly(label)).not.toBeInTheDocument();
+    });
+
+    it.each([
+      [CommandType.Shell, shellLabel],
+      [CommandType.JupyterLab, notebookLabel],
+    ])(
+      'is not offered on another user’s running %s in the right-click menu',
+      async (type, label) => {
+        openContextMenu(102, { state: CommandState.Running, type });
+        await screen.findByText('View Logs');
+        expect(exactly(label)).not.toBeInTheDocument();
+      },
+    );
+
+    it.each([
+      [CommandType.Shell, shellLabel],
+      [CommandType.JupyterLab, notebookLabel],
+    ])('is offered to an admin on another user’s running %s', async (type, label) => {
+      setCurrentUser(1, true);
+      await openMenu(102, { state: CommandState.Running, type });
+      expect(exactly(label)).toBeInTheDocument();
+    });
+
+    it('is not offered on a task that is not running', async () => {
+      await openMenu(101, { state: CommandState.Queued, type: CommandType.Shell });
+      await screen.findByText('View Logs');
+      expect(exactly(shellLabel)).not.toBeInTheDocument();
+    });
+
+    it('is not offered before the current user is known', async () => {
+      userStore.reset();
+      await openMenu(101, notebook);
+      await screen.findByText('View Logs');
+      expect(exactly(notebookLabel)).not.toBeInTheDocument();
+    });
   });
 
   describe('Open Terminal', () => {
@@ -309,12 +369,8 @@ describe('TaskActionDropdown', () => {
       setCurrentUser(102);
       await openLaunchAgainMenu({ ...runningShell, userId: 103 }, other);
       await screen.findByText('View Logs');
-      expect(menuLabels()).toEqual([
-        'View Logs',
-        'View Resources',
-        'Copy Task ID',
-        'Connect via CLI',
-      ]);
+      // Another user's shell: no Connect via CLI, Open Terminal, Launch Again or Kill.
+      expect(menuLabels()).toEqual(['View Logs', 'View Resources', 'Copy Task ID']);
     });
 
     it('leaves out View Resources when the master does not offer it', async () => {

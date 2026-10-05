@@ -18,11 +18,11 @@ import { paths, serverAddress } from 'routes/utils';
 import { killTask } from 'services/api';
 import { openShellTerminalTab } from 'services/shellTerminal';
 import userStore from 'stores/users';
-import { TaskAction as Action, CommandState, CommandTask, CommandType, DetailedUser } from 'types';
+import { TaskAction as Action, CommandTask, CommandType, DetailedUser } from 'types';
 import { copyToClipboard } from 'utils/dom';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import { capitalize } from 'utils/string';
-import { canOpenShellTerminal, isTaskKillable } from 'utils/task';
+import { canConnectToTask, canOpenShellTerminal, isTaskKillable } from 'utils/task';
 import { getJupyterLabAddress, NOTEBOOK_ACCESS_DENIED } from 'utils/wait';
 
 interface Props {
@@ -56,11 +56,6 @@ const TaskActionDropdown: React.FC<Props> = ({
   // Listings never include a notebook's Jupyter token, so it is fetched when connecting.
   const [jupyterLabAddress, setJupyterLabAddress] = useState<string>();
 
-  const isConnectable = (task: CommandTask): boolean => {
-    const connectableTaskTypes: CommandType[] = [CommandType.JupyterLab, CommandType.Shell];
-    return connectableTaskTypes.includes(task.type) && task.state === CommandState.Running;
-  };
-
   const confirm = useConfirm();
 
   const taskConnectFields: TaskConnectField[] = useMemo(() => {
@@ -90,7 +85,8 @@ const TaskActionDropdown: React.FC<Props> = ({
     const items: MenuItem[] = [{ key: Action.ViewLogs, label: 'View Logs' }];
     if (resourcesEnabled) items.push({ key: Action.ViewResources, label: 'View Resources' });
     items.push({ key: Action.CopyTaskID, label: 'Copy Task ID' });
-    if (isConnectable(task)) {
+    // Only the owner or an admin gets the notebook's token or the shell's key from the master.
+    if (canConnectToTask(task, currentUser)) {
       items.push({
         key: Action.Connect,
         label: task.type === CommandType.Shell ? 'Connect via CLI' : 'Connect',

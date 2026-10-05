@@ -10,6 +10,7 @@ import {
 
 import {
   canBeOpened,
+  canConnectToTask,
   canKillGenericTask,
   canOpenShellTerminal,
   canPauseGenericTask,
@@ -101,6 +102,29 @@ describe('generic task actions', () => {
 
   it('shortens task IDs', () => {
     expect(shortTaskId('0b7c5e2a-1f2e-4c3d-9a8b-7c6d5e4f3a2b')).toBe('0b7c5e2a');
+  });
+});
+
+describe('canConnectToTask', () => {
+  const owner = { id: 5, isAdmin: false };
+
+  it.each([CommandType.JupyterLab, CommandType.Shell])(
+    'allows the owner and admins to connect to a running %s',
+    (type) => {
+      const task = { state: CommandState.Running, type, userId: 5 };
+      expect(canConnectToTask(task, owner)).toBe(true);
+      expect(canConnectToTask(task, { id: 1, isAdmin: true })).toBe(true);
+      expect(canConnectToTask(task, { id: 6, isAdmin: false })).toBe(false);
+      expect(canConnectToTask(task, undefined)).toBe(false);
+    },
+  );
+
+  it('only offers running JupyterLabs and shells', () => {
+    const shell = { state: CommandState.Running, type: CommandType.Shell, userId: 5 };
+    expect(canConnectToTask({ ...shell, state: CommandState.Queued }, owner)).toBe(false);
+    expect(canConnectToTask({ ...shell, state: CommandState.Terminated }, owner)).toBe(false);
+    expect(canConnectToTask({ ...shell, type: CommandType.Command }, owner)).toBe(false);
+    expect(canConnectToTask({ ...shell, type: CommandType.TensorBoard }, owner)).toBe(false);
   });
 });
 

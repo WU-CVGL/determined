@@ -26,6 +26,22 @@ export const canOpenShellTerminal = (
   return user.isAdmin || user.id === task.userId;
 };
 
+/**
+ * Whether to offer Connect (a JupyterLab's address with its token) or Connect via CLI (a shell's
+ * `det shell open`) for a task: a running JupyterLab or shell of the user's own, or of anyone for
+ * an admin. The master gives a notebook's token and a shell's key only to them.
+ */
+export const canConnectToTask = (
+  task: Pick<Type.CommandTask, 'state' | 'type' | 'userId'>,
+  user?: Pick<Type.DetailedUser, 'id' | 'isAdmin'>,
+): boolean => {
+  const connectable: Type.CommandType[] = [Type.CommandType.JupyterLab, Type.CommandType.Shell];
+  if (!user || !connectable.includes(task.type) || task.state !== CommandState.Running) {
+    return false;
+  }
+  return user.isAdmin || user.id === task.userId;
+};
+
 export const canBeOpened = (task: Type.AnyTask): boolean => {
   if (isExperimentTask(task)) return true;
   if (terminalCommandStates.has(task.state)) return false;
