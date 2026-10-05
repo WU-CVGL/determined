@@ -9,6 +9,7 @@ import {
   Metric,
   MetricType,
   Note,
+  RawJson,
   RecordKey,
   RunState,
   SingleEntityParams,
@@ -317,6 +318,11 @@ export interface LaunchJupyterLabParams {
     };
   };
   preview?: boolean;
+  templateName?: string;
+  workspaceId?: number;
+}
+export interface LaunchShellParams {
+  config?: RawJson;
   templateName?: string;
   workspaceId?: number;
 }
