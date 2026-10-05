@@ -7,6 +7,7 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -82,6 +83,7 @@ func New(
 	if err != nil {
 		return nil, err
 	}
+	resourceManager.warnMissingDefaultPools()
 	if err := resourceManager.markDynamicPoolsReady(
 		context.Background(), dynamicPools, masterDefaults,
 	); err != nil {
@@ -92,6 +94,34 @@ func New(
 		resourceManager.startDynamicPoolWorker(ctx)
 	}
 	return resourceManager, nil
+}
+
+// warnMissingDefaultPools reports default pools that are neither master.yaml pools nor saved
+// dynamic pools in any state. Startup continues: a dynamic pool may still be created with the name.
+func (a *ResourceManager) warnMissingDefaultPools() {
+	var names []string
+	settings := make(map[string][]string)
+	for _, pool := range []struct{ setting, name string }{
+		{"default_compute_resource_pool", a.config.DefaultComputeResourcePool},
+		{"default_aux_resource_pool", a.config.DefaultAuxResourcePool},
+	} {
+		if pool.name == "" {
+			continue
+		}
+		if _, desired := a.registry.desiredConfig(pool.name); desired {
+			continue
+		}
+		if _, seen := settings[pool.name]; !seen {
+			names = append(names, pool.name)
+		}
+		settings[pool.name] = append(settings[pool.name], pool.setting)
+	}
+	for _, name := range names {
+		a.syslog.Warnf(
+			"resource pool %q, set as %s, is neither configured in master.yaml nor saved as a "+
+				"dynamic pool", name, strings.Join(settings[name], " and "),
+		)
+	}
 }
 
 // A ResourceManager manages many resource pools and routing requests for resources to them.
