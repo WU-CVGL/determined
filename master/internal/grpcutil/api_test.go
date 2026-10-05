@@ -1,8 +1,11 @@
 package grpcutil
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 
 	// TODO switch to google.golang.org/protobuf/proto/.
@@ -135,5 +138,83 @@ func TestGatewayExternalSessionCookie(t *testing.T) {
 			"Cookie": {"det_jwt=jwt-token; auth=cookie-token"}, "Authorization": {header},
 		})
 		require.Equal(t, header, resp.Header.Get("X-Seen-Authorization"))
+	}
+}
+
+// TestGatewayLegacySetUserPasswordBody checks the bodies that the gateway decodes for
+// SetUserPassword: the new password alone as a JSON string, which clients built before 0.41.0
+// send, becomes the request message, and every other body passes byte for byte.
+func TestGatewayLegacySetUserPasswordBody(t *testing.T) {
+	mux := newGRPCGatewayMux()
+	seenBody := func(w http.ResponseWriter, req *http.Request, _ map[string]string) {
+		body, err := io.ReadAll(req.Body)
+		require.NoError(t, err)
+		w.Header().Set("X-Seen-Content-Length", strconv.FormatInt(req.ContentLength, 10))
+		_, err = w.Write(body)
+		require.NoError(t, err)
+	}
+	// The pattern of the generated route POST /api/v1/users/{user_id}/<last>.
+	userPattern := func(last string) runtime.Pattern {
+		return runtime.MustPattern(runtime.NewPattern(1,
+			[]int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4},
+			[]string{"api", "v1", "users", "user_id", last}, ""))
+	}
+	mux.Handle(http.MethodPost, userPattern("password"), seenBody)
+	mux.Handle(http.MethodPut, userPattern("password"), seenBody)
+	mux.Handle(http.MethodPost, userPattern("passwords"), seenBody)
+	e := echo.New()
+	e.Any("/api/v1/*", gatewayHandler(mux, false))
+
+	send := func(method, path, body string, contentLength int64) (string, int64) {
+		req := httptest.NewRequest(method, "http://gpu.example"+path, strings.NewReader(body))
+		req.ContentLength = contentLength
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		seen, err := strconv.ParseInt(rec.Header().Get("X-Seen-Content-Length"), 10, 64)
+		require.NoError(t, err)
+		return rec.Body.String(), seen
+	}
+	const path = "/api/v1/users/7/password"
+
+	for _, legacy := range []struct{ body, want string }{
+		{`"New-password-1"`, `{"password":"New-password-1"}`},
+		{" \"a\\\"b\\u00e9 c\"\n", `{"password":"a\"bé c"}`},
+		{`""`, `{"password":""}`},
+	} {
+		// A chunked body has no length; the rewritten one has.
+		for _, length := range []int64{int64(len(legacy.body)), -1} {
+			seen, seenLength := send(http.MethodPost, path, legacy.body, length)
+			require.Equal(t, legacy.want, seen, legacy.body)
+			require.Equal(t, int64(len(legacy.want)), seenLength, legacy.body)
+		}
+	}
+
+	unchanged := []string{
+		`{"password":"New-password-1","old_password":"Old-password-1"}`,
+		` {"password": "New-password-1"} `,
+		``,
+		`null`,
+		`12`,
+		`"unterminated`,
+		`"two" "strings"`,
+		// A JSON string longer than the shim reads is not recognized.
+		`"` + strings.Repeat("x", maxLegacySetUserPasswordBody) + `"`,
+	}
+	for _, body := range unchanged {
+		for _, length := range []int64{int64(len(body)), -1} {
+			seen, seenLength := send(http.MethodPost, path, body, length)
+			require.Equal(t, body, seen)
+			require.Equal(t, length, seenLength)
+		}
+	}
+
+	// Other routes and methods are not touched.
+	for _, r := range []struct{ method, path string }{
+		{http.MethodPut, path},
+		{http.MethodPost, "/api/v1/users/7/passwords"},
+	} {
+		seen, _ := send(r.method, r.path, `"New-password-1"`, int64(len(`"New-password-1"`)))
+		require.Equal(t, `"New-password-1"`, seen, r)
 	}
 }
