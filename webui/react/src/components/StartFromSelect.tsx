@@ -99,6 +99,25 @@ interface Props {
   value?: string;
 }
 
+/** One "Start from" item as the dropdown lists it. */
+interface StartFromItem {
+  disabled?: boolean;
+  label: string;
+  value: string;
+}
+
+interface StartFromGroup {
+  items: StartFromItem[];
+  key: string;
+  label: string;
+}
+
+const renderOption = (item: StartFromItem): React.ReactNode => (
+  <Option disabled={item.disabled} key={item.value} value={item.value}>
+    {item.label}
+  </Option>
+);
+
 const byStartTimeDesc = (a: CommandTask, b: CommandTask): number =>
   Date.parse(b.startTime) - Date.parse(a.startTime);
 
@@ -112,6 +131,11 @@ const byStartTimeDesc = (a: CommandTask, b: CommandTask): number =>
  *   task's own type, only when the task is picked.
  * - Recently launched in this browser: utils/launchHistory, newest first.
  * - Templates.
+ * The current item, whichever group it comes from, is listed alone in a
+ * "Selected" group above them and left out of its own group. The dropdown
+ * scrolls to the selected row when it opens; as the first row it keeps the list
+ * at the top, with the recent tasks and the history right below, even when the
+ * item is a template far down the list.
  */
 const StartFromSelect: React.FC<Props> = ({
   allowedWorkspaceIds,
@@ -272,6 +296,46 @@ const StartFromSelect: React.FC<Props> = ({
     [onChange, resolve],
   );
 
+  const groups = useMemo(
+    (): StartFromGroup[] => [
+      {
+        items: taskOptions.map((task) => ({
+          disabled: !isAllowed(task.workspaceId),
+          label: taskLabel(task),
+          value: startFromTaskValue(task.id),
+        })),
+        key: 'recent',
+        label: 'Recent on cluster',
+      },
+      {
+        items: localEntries.map((entry) => ({
+          disabled: !isAllowed(entry.workspaceId),
+          label: localLabel(entry),
+          value: startFromLocalValue(entry.id),
+        })),
+        key: 'local',
+        label: 'Recently launched in this browser',
+      },
+      {
+        items: (templates ?? []).map((template) => ({
+          label: template.name,
+          value: startFromTemplateValue(template.name),
+        })),
+        key: 'templates',
+        label: 'Templates',
+      },
+    ],
+    [isAllowed, localEntries, taskOptions, templates],
+  );
+
+  const selectedItem = useMemo(
+    () =>
+      !value
+        ? undefined
+        : groups.flatMap((group) => group.items).find((item) => item.value === value),
+    [groups, value],
+  );
+
   const handleClearHistory = useCallback(() => {
     clearAllLaunchHistory(userId);
     setHistoryVersion((version) => version + 1);
@@ -300,7 +364,7 @@ const StartFromSelect: React.FC<Props> = ({
   }, [autoSelect, defaultTemplate, initialTask, onAutoSelected, onChange, templates, value]);
 
   return (
-    <div>
+    <div data-test-component="start-from-select">
       <Select
         allowClear
         id={id}
@@ -308,41 +372,21 @@ const StartFromSelect: React.FC<Props> = ({
         placeholder="Blank: cluster defaults (optional)"
         value={value}
         onChange={handleChange}>
-        {taskOptions.length > 0 && (
-          <OptGroup key="recent" label="Recent on cluster">
-            {taskOptions.map((task) => (
-              <Option
-                disabled={!isAllowed(task.workspaceId)}
-                key={startFromTaskValue(task.id)}
-                value={startFromTaskValue(task.id)}>
-                {taskLabel(task)}
-              </Option>
-            ))}
+        {selectedItem && (
+          <OptGroup key="selected" label="Selected">
+            {renderOption(selectedItem)}
           </OptGroup>
         )}
-        {localEntries.length > 0 && (
-          <OptGroup key="local" label="Recently launched in this browser">
-            {localEntries.map((entry) => (
-              <Option
-                disabled={!isAllowed(entry.workspaceId)}
-                key={startFromLocalValue(entry.id)}
-                value={startFromLocalValue(entry.id)}>
-                {localLabel(entry)}
-              </Option>
-            ))}
-          </OptGroup>
-        )}
-        {(templates ?? []).length > 0 && (
-          <OptGroup key="templates" label="Templates">
-            {(templates ?? []).map((template) => (
-              <Option
-                key={startFromTemplateValue(template.name)}
-                value={startFromTemplateValue(template.name)}>
-                {template.name}
-              </Option>
-            ))}
-          </OptGroup>
-        )}
+        {groups.map((group) => {
+          const items = group.items.filter((item) => item !== selectedItem);
+          return (
+            items.length > 0 && (
+              <OptGroup key={group.key} label={group.label}>
+                {items.map(renderOption)}
+              </OptGroup>
+            )
+          );
+        })}
       </Select>
       {localEntries.length > 0 && (
         <Button size="small" type="text" onClick={handleClearHistory}>

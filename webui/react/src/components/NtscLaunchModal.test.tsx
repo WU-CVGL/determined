@@ -257,6 +257,9 @@ const withLoadedSettings = async (body: () => Promise<void>) => {
     await body();
   } finally {
     stopPolling();
+    // useSettings saves on a timer: let the last save (on launch or cancel)
+    // land before the reset, so that it does not reach the next test's settings.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     // Do not leak loaded settings into the other tests.
     userSettings._forUseSettingsOnly().set(NotLoaded);
   }
@@ -654,6 +657,110 @@ describe('NtscLaunchModal', () => {
         templateName: 'gpu-template',
         workspaceId: WORKSPACE.id,
       });
+    });
+  });
+
+  describe('the selected Start from item', () => {
+    /** The open dropdown's rows (group headers and items), top to bottom. */
+    const startFromRows = () =>
+      Array.from(
+        document.querySelectorAll(
+          '.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item',
+        ),
+        (row) => row.textContent ?? '',
+      );
+
+    it('is listed first, above the recent tasks, when it is the last template of many', async () => {
+      // More templates than the dropdown shows at once (8 rows); the last one was used last.
+      mocks.getTaskTemplates.mockResolvedValue(
+        Array.from({ length: 12 }, (_, index) => ({
+          config: {},
+          name: `template-${index + 1}`,
+          workspaceId: WORKSPACE.id,
+        })),
+      );
+      mocks.getShells.mockResolvedValue([task(CommandType.Shell)]);
+      mocks.getUserSetting.mockResolvedValue(
+        userSettingsResponse({ 'shell-launch': { template: 'template-12' } }),
+      );
+      await withLoadedSettings(async () => {
+        const { onLaunched, user } = await setup();
+        expect(await screen.findByTitle('template-12')).toBeInTheDocument();
+        await openStartFrom(user);
+        await screen.findByText('Recent on cluster');
+
+        const rows = startFromRows();
+        // The selected row comes first, so the list opens at the top.
+        expect(rows.slice(0, 2)).toEqual(['Selected', 'template-12']);
+        expect(rows.indexOf('Recent on cluster')).toBeGreaterThan(1);
+        expect(rows.indexOf('Recent on cluster')).toBeLessThan(rows.indexOf('Templates'));
+        // The Templates group follows from its first template. Only the first
+        // rows of the virtual list render, so template-12's place at the end of
+        // that group is checked by the short-list case below.
+        expect(rows[rows.indexOf('Templates') + 1]).toBe('template-1');
+
+        // The value is unchanged: the launch still names the template.
+        await user.keyboard('{Escape}');
+        await launch(user);
+        await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+        expect(mocks.launchShell).toHaveBeenCalledWith(
+          expect.objectContaining({ templateName: 'template-12' }),
+        );
+      });
+    });
+
+    it('is left out of the Templates group, which lists the other templates', async () => {
+      // Few enough rows that the whole list renders.
+      mocks.getTaskTemplates.mockResolvedValue(
+        ['template-1', 'template-2', 'template-3'].map((name) => ({
+          config: {},
+          name,
+          workspaceId: WORKSPACE.id,
+        })),
+      );
+      mocks.getShells.mockResolvedValue([task(CommandType.Shell)]);
+      mocks.getUserSetting.mockResolvedValue(
+        userSettingsResponse({ 'shell-launch': { template: 'template-2' } }),
+      );
+      await withLoadedSettings(async () => {
+        const { user } = await setup();
+        expect(await screen.findByTitle('template-2')).toBeInTheDocument();
+        await openStartFrom(user);
+        await screen.findByText('Recent on cluster');
+
+        expect(startFromRows()).toEqual([
+          'Selected',
+          'template-2',
+          'Recent on cluster',
+          expect.stringMatching(/^Shell · /),
+          'Templates',
+          'template-1',
+          'template-3',
+        ]);
+      });
+    });
+
+    it('is listed first when it is a recent task, the others stay in their groups', async () => {
+      mocks.getShells.mockResolvedValue([
+        task(CommandType.Shell, { id: 'shell-newer', name: 'newer' }),
+        task(CommandType.Shell, { name: 'older', startTime: '2026-01-01T08:00:00Z' }),
+      ]);
+      const { user } = await setup();
+      await openStartFrom(user);
+      await user.click(await screen.findByText(/^Shell · older ·/));
+      await waitFor(() =>
+        expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('old shell'),
+      );
+
+      await openStartFrom(user);
+      await screen.findByText('Selected');
+      const rows = startFromRows();
+      expect(rows[0]).toBe('Selected');
+      expect(rows[1]).toMatch(/^Shell · older ·/);
+      expect(rows[2]).toBe('Recent on cluster');
+      expect(rows[3]).toMatch(/^Shell · newer ·/);
+      expect(rows.filter((row) => row.startsWith('Shell · older'))).toHaveLength(1);
+      expect(rows.slice(4)).toEqual(['Templates', 'gpu-template']);
     });
   });
 
