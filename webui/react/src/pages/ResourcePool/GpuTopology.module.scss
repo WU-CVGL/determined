@@ -201,7 +201,9 @@
     background: var(--theme-surface-weak, rgb(0 0 0 / 10%));
   }
   &:focus-visible {
-    outline: 2px solid var(--theme-ix-on-active, currentcolor);
+    // Two colours, so the ring shows on every fill: the Running fill is the ix-on-active blue.
+    box-shadow: 0 0 0 1px var(--theme-surface);
+    outline: 2px solid var(--theme-surface-on);
     outline-offset: 1px;
   }
 }
