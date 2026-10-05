@@ -126,9 +126,9 @@ func (r ResourceConfig) Validate() []error {
 	poolNames := make(map[string]bool)
 	var errs []error
 	for _, r := range r.ResourceManagers() {
-		// All non slurm resource managers must have a resource pool.
-		if len(r.ResourcePools) == 0 &&
-			(r.ResourceManager.AgentRM != nil || r.ResourceManager.KubernetesRM != nil) {
+		// Kubernetes resource managers must have a resource pool. The pools of an agent resource
+		// manager may all be dynamic pools, which are saved in the database.
+		if len(r.ResourcePools) == 0 && r.ResourceManager.KubernetesRM != nil {
 			errs = append(errs, fmt.Errorf(
 				"for additional_resource_managers, you must specify at least one resource pool"))
 		}

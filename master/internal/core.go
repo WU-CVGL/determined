@@ -1090,7 +1090,7 @@ func (m *Master) buildRM(
 		clusterName := config.ResourceManager.ClusterName()
 		switch {
 		case config.ResourceManager.AgentRM != nil:
-			agentRM, err := agentrm.New(ctx, db, echo, config, opts, cert)
+			agentRM, err := agentrm.New(ctx, db, echo, config, opts, cert, tcd)
 			if err != nil {
 				return nil, err
 			}
@@ -1135,7 +1135,7 @@ func (m *Master) buildRM(
 			}
 			clusterNames[rmClusterName] = 0
 
-			agentRM, err := agentrm.New(ctx, db, echo, cfg, opts, cert)
+			agentRM, err := agentrm.New(ctx, db, echo, cfg, opts, cert, tcd)
 			if err != nil {
 				return nil, fmt.Errorf("resource manager %s: %w", c.ClusterName(), err)
 			}
