@@ -139,7 +139,7 @@ func setupShellTerminalTest(
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error { return next(&detContext.DetContext{Context: c}) }
 	})
-	e.Use(processAuthWithRedirect(nil))
+	useAuthenticationMiddleware(e, nil)
 	e.GET(shellTerminalRoute, svc.handle)
 	env.srv = httptest.NewServer(e)
 	t.Cleanup(env.srv.Close)
@@ -337,6 +337,16 @@ func TestShellTerminalOrigin(t *testing.T) {
 	} {
 		env.refused(t, &env.owner, env.shellID, http.Header{"Origin": {origin}}, http.StatusForbidden)
 	}
+	// The master's cross-origin protection refuses a session cookie that another site sent, even
+	// with the master's own Origin. The terminal's own check refuses another Origin even with a
+	// bearer token, which that protection lets through.
+	env.refused(t, &env.owner, env.shellID, http.Header{
+		"Origin": {env.origin()}, "Sec-Fetch-Site": {"cross-site"},
+	}, http.StatusForbidden)
+	env.refused(t, &env.owner, env.shellID, http.Header{
+		"Origin":        {"https://evil.example.org"},
+		"Authorization": {"Bearer " + env.token(t, env.owner)},
+	}, http.StatusForbidden)
 	require.Zero(t, env.dials.Load(), "dialed sshd for a cross-origin request")
 
 	ws := env.open(t, &env.owner, env.shellID, "", http.Header{"Origin": {env.origin()}})
