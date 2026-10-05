@@ -12,6 +12,19 @@ export class NtscLaunchModal extends Modal {
     parent: this,
     selector: '[data-test-component="start-from-select"] .ant-select',
   });
+  // The simple form's fields, by their labels.
+  readonly name = new BaseComponent({
+    parent: this,
+    selector: '.ant-form-item:has(label[title="Name"]) input',
+  });
+  readonly pool = new Select({
+    parent: this,
+    selector: '.ant-form-item:has(label[title="Resource Pool"]) .ant-select',
+  });
+  readonly slots = new BaseComponent({
+    parent: this,
+    selector: '.ant-form-item:has(label[title="Slots"]) input',
+  });
   readonly typeSelect = new LaunchTypeSelect({
     parent: this,
     selector: '[data-test-component="launch-type-select"]',

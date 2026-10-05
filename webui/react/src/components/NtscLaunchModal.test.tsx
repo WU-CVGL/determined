@@ -1,9 +1,10 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Button from 'hew/Button';
 import { useModal } from 'hew/Modal';
 import { DefaultTheme, UIProvider } from 'hew/Theme';
 import { Loadable, NotLoaded } from 'hew/utils/loadable';
+import yaml from 'js-yaml';
 import React, { useEffect } from 'react';
 import { BrowserRouter } from 'react-router-dom';
 
@@ -92,14 +93,48 @@ vi.mock('utils/wait', () => ({
   waitPageUrl: () => '',
 }));
 
-vi.mock('hew/CodeEditor', () => ({
-  __esModule: true,
-  default: ({ file }: { file: string | Loadable<string> }) => (
-    <pre data-testid="code-editor">
-      {typeof file === 'string' ? file : Loadable.getOrElse('', file)}
-    </pre>
-  ),
-}));
+/**
+ * An editable stand-in for the CodeMirror editor. Like the real one, it shows `file` (again
+ * whenever `file` changes), keeps what is typed and reports each edit through onChange, which
+ * Form.Item passes to it.
+ */
+vi.mock('hew/CodeEditor', async () => {
+  const { useEffect, useState } = await import('react');
+  const { Loadable } = await import('hew/utils/loadable');
+  const CodeEditorStandIn = ({
+    file,
+    onChange,
+  }: {
+    file: string | Loadable<string>;
+    onChange?: (fileContent: string) => void;
+  }) => {
+    const text = typeof file === 'string' ? file : Loadable.getOrElse('', file);
+    const [value, setValue] = useState(text);
+    useEffect(() => setValue(text), [text]);
+    return (
+      <textarea
+        data-testid="code-editor"
+        value={value}
+        onChange={(e) => {
+          setValue(e.target.value);
+          onChange?.(e.target.value);
+        }}
+      />
+    );
+  };
+  return { __esModule: true, default: CodeEditorStandIn };
+});
+
+/** The text of the last code editor shown: the launch form's, or a template draft's above it. */
+const editorText = (): string =>
+  (screen.getAllByTestId('code-editor').at(-1) as HTMLTextAreaElement).value;
+
+/** Edits the full config's YAML as a user would, through the editor. */
+const editConfig = (edit: (config: RawJson) => RawJson) => {
+  const editor = screen.getByTestId('code-editor');
+  const edited = yaml.dump(edit(yaml.load((editor as HTMLTextAreaElement).value) as RawJson));
+  fireEvent.change(editor, { target: { value: edited } });
+};
 
 const USER_ID = 1;
 
@@ -341,13 +376,11 @@ describe('NtscLaunchModal', () => {
       const { onLaunched, user } = await setup();
       await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
 
-      await waitFor(() =>
-        expect(screen.getByTestId('code-editor')).toHaveTextContent('resource_pool: default'),
-      );
+      await waitFor(() => expect(editorText()).toContain('resource_pool: default'));
       expect(mocks.previewJupyterLab).toHaveBeenCalledWith(
         expect.objectContaining({ preview: true, workspaceId: WORKSPACE.id }),
       );
-      const yamlText = screen.getByTestId('code-editor').textContent ?? '';
+      const yamlText = editorText();
       // A shell ignores them; they are kept for a switch back to JupyterLab.
       expect(yamlText).toContain('idle_timeout: 30m');
       expect(yamlText).toContain('notebook_idle_type: kernels_or_terminals');
@@ -1077,9 +1110,7 @@ describe('NtscLaunchModal', () => {
 
       await selectType(user, 'Shell');
       await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
-      await waitFor(() =>
-        expect(screen.getByTestId('code-editor')).toHaveTextContent('idle_timeout: 8h'),
-      );
+      await waitFor(() => expect(editorText()).toContain('idle_timeout: 8h'));
       expect(mocks.previewJupyterLab).toHaveBeenCalledWith(
         expect.objectContaining({ config: expect.objectContaining({ idle_timeout: '8h' }) }),
       );
@@ -1096,32 +1127,75 @@ describe('NtscLaunchModal', () => {
       expect(mocks.launchShell).not.toHaveBeenCalled();
     });
 
-    it('keeps the full config when the type is switched and lets the master name the task after its type', async () => {
+    /** The edit the full-config tests make: another image and an environment variable. */
+    const editImageAndEnv = (config: RawJson): RawJson => ({
+      ...config,
+      environment: {
+        ...config.environment,
+        environment_variables: ['EDITED=1'],
+        image: { cuda: 'edited:7' },
+      },
+    });
+    const editedEnvironment = { environment_variables: ['EDITED=1'], image: { cuda: 'edited:7' } };
+
+    it('keeps the edited full config when the type is switched and lets the master name the task after its type', async () => {
       const { onLaunched, user } = await setup({ initialType: CommandType.JupyterLab });
       await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
-      await waitFor(() =>
-        expect(screen.getByTestId('code-editor')).toHaveTextContent(
-          'JupyterLab (kindly-quick-heron)',
-        ),
-      );
-      const yamlText = screen.getByTestId('code-editor').textContent;
+      await waitFor(() => expect(editorText()).toContain('JupyterLab (kindly-quick-heron)'));
+      editConfig(editImageAndEnv);
+      const yamlText = editorText();
+      expect(yamlText).toContain('edited:7');
       expect(mocks.previewJupyterLab).toHaveBeenCalledTimes(1);
 
       await selectType(user, 'Shell');
       expect(screen.getByText('Launch Shell')).toBeInTheDocument();
-      // Not previewed again: the YAML stays as it was.
+      // Not previewed again: the YAML stays as the user left it.
       expect(mocks.previewJupyterLab).toHaveBeenCalledTimes(1);
-      expect(screen.getByTestId('code-editor').textContent).toBe(yamlText);
+      expect(editorText()).toBe(yamlText);
       await launch(user);
 
       await waitFor(() => expect(onLaunched).toHaveBeenCalled());
       const { config } = mocks.launchShell.mock.calls[0][0];
       // The JupyterLab preview's name is not used for the shell.
       expect(config).not.toHaveProperty('description');
-      expect(config.environment).toEqual({ image: { cuda: 'default:1' } });
+      expect(config.environment).toEqual(editedEnvironment);
       expect(config.resources).toEqual({ priority: 42, resource_pool: 'default', slots: 1 });
       expect(mocks.launchJupyterLab).not.toHaveBeenCalled();
     });
+
+    it.each([
+      [CommandType.JupyterLab, 'Shell', 'JupyterLab'],
+      [CommandType.Shell, 'JupyterLab', 'Shell'],
+    ] as const)(
+      'launches the edited full config of a %s after a switch to %s and back',
+      async (initialType, other, original) => {
+        const { onLaunched, user } = await setup({ initialType });
+        await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+        await waitFor(() => expect(editorText()).toContain('default:1'));
+        editConfig(editImageAndEnv);
+        const yamlText = editorText();
+
+        await selectType(user, other);
+        expect(editorText()).toBe(yamlText);
+        await selectType(user, original);
+        expect(editorText()).toBe(yamlText);
+        expect(mocks.previewJupyterLab).toHaveBeenCalledTimes(1);
+        await launch(user);
+
+        const launchApi =
+          initialType === CommandType.Shell ? mocks.launchShell : mocks.launchJupyterLab;
+        await waitFor(() => expect(launchApi).toHaveBeenCalledTimes(1));
+        const { config } = launchApi.mock.calls[0][0];
+        expect(config.environment).toEqual(editedEnvironment);
+        expect(config.idle_timeout).toBe('30m');
+        if (initialType === CommandType.Shell) {
+          await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+          expect(mocks.launchJupyterLab).not.toHaveBeenCalled();
+        } else {
+          expect(mocks.launchShell).not.toHaveBeenCalled();
+        }
+      },
+    );
   });
 
   describe('Save as Template', () => {
@@ -1129,13 +1203,13 @@ describe('NtscLaunchModal', () => {
       const { user } = await setup({ initialType: CommandType.JupyterLab });
       await user.type(screen.getByPlaceholderText('Name (optional)'), 'tpl source');
       await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
-      await waitFor(() => expect(screen.getByTestId('code-editor')).toHaveTextContent('custom:2'));
+      await waitFor(() => expect(editorText()).toContain('custom:2'));
 
       await user.click(screen.getByRole('button', { name: 'Save as Template' }));
       expect(await screen.findByText('New Template')).toBeInTheDocument();
       expect(screen.getByText(/Other users can read templates/)).toBeInTheDocument();
-      const editors = screen.getAllByTestId('code-editor');
-      const draft = editors[editors.length - 1].textContent ?? '';
+      expect(screen.getAllByTestId('code-editor')).toHaveLength(2);
+      const draft = editorText();
       expect(draft).toContain('custom:2');
       expect(draft).toContain('resource_pool: default');
       expect(draft).not.toContain('tpl source');
@@ -1170,10 +1244,8 @@ describe('NtscLaunchModal', () => {
         expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('old shell'),
       );
       await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
-      await waitFor(() =>
-        expect(screen.getByTestId('code-editor')).toHaveTextContent('work_dir: null'),
-      );
-      const loadedConfig = screen.getByTestId('code-editor').textContent;
+      await waitFor(() => expect(editorText()).toContain('work_dir: null'));
+      const loadedConfig = editorText();
 
       mocks.previewJupyterLab.mockRejectedValueOnce(new Error('503 Service Unavailable'));
       await user.click(screen.getByRole('button', { name: 'Save as Template' }));
@@ -1188,12 +1260,12 @@ describe('NtscLaunchModal', () => {
       expect(screen.queryByText('New Template')).not.toBeInTheDocument();
       expect(screen.getByText('Launch Shell')).toBeInTheDocument();
       expect(screen.getAllByTestId('code-editor')).toHaveLength(1);
-      expect(screen.getByTestId('code-editor').textContent).toBe(loadedConfig);
+      expect(editorText()).toBe(loadedConfig);
 
       await user.click(screen.getByRole('button', { name: 'Save as Template' }));
       expect(await screen.findByText('New Template')).toBeInTheDocument();
-      const editors = screen.getAllByTestId('code-editor');
-      const draft = editors[editors.length - 1].textContent ?? '';
+      expect(screen.getAllByTestId('code-editor')).toHaveLength(2);
+      const draft = editorText();
       expect(draft).toContain('work_dir: null');
       expect(draft).not.toContain('/cluster/work');
     });

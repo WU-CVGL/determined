@@ -6,7 +6,7 @@ import { safeName } from 'e2e/utils/naming';
 const TEMPLATE_COUNT = 10;
 
 test.describe('Launch form Start from', () => {
-  test('keeps the recent tasks in view when the last of many templates is selected', async ({
+  test('keeps the recent shell in view when the last of many templates is selected', async ({
     apiAuth,
     authedPage,
     newWorkspace,
@@ -20,7 +20,11 @@ test.describe('Launch form Start from', () => {
       (_, index) => `${prefix}-${String(index).padStart(2, '0')}`,
     );
     const lastTemplate = templateNames[templateNames.length - 1];
+    // The recent shell, named so that its own Start from item can be found.
+    const shellName = `${prefix}-shell`;
     let shellId: string | undefined;
+    let shellPool: string | undefined;
+    let shellSlots: number | undefined;
 
     try {
       await test.step('Create the templates, a recent shell and the last-used template', async () => {
@@ -31,10 +35,14 @@ test.describe('Launch form Start from', () => {
           expect(template.ok()).toBeTruthy();
         }
         const shell = await api.post('/api/v1/shells', {
-          data: { config: { resources: { slots: 0 } }, workspaceId },
+          data: { config: { description: shellName, resources: { slots: 0 } }, workspaceId },
         });
         expect(shell.ok()).toBeTruthy();
-        shellId = (await shell.json()).shell.id;
+        const launched = await shell.json();
+        shellId = launched.shell.id;
+        // The master fills in the pool; the form shows what the shell's config has.
+        shellPool = launched.config.resources.resource_pool;
+        shellSlots = launched.config.resources.slots;
         const setting = await api.post('/api/v1/users/setting', {
           data: {
             settings: [
@@ -56,13 +64,23 @@ test.describe('Launch form Start from', () => {
         await expect(launchModal.startFrom.selectionItem.pwLocator).toHaveText(lastTemplate);
       });
 
-      await test.step('Open Start from: the selected template and the recent tasks are in view', async () => {
+      const recentShell = launchModal.startFrom.menuItemStartingWith(`Shell · ${shellName} · `);
+
+      await test.step('Open Start from: the selected template and the recent shell are in view', async () => {
         await launchModal.startFrom.openMenu();
         await expect(launchModal.startFrom.menuItem('Selected').pwLocator).toBeInViewport();
         await expect(launchModal.startFrom.menuItem(lastTemplate).pwLocator).toBeInViewport();
         await expect(
           launchModal.startFrom.menuItem('Recent on cluster').pwLocator,
         ).toBeInViewport();
+        await expect(recentShell.pwLocator).toBeInViewport();
+      });
+
+      await test.step('Pick the recent shell: the form gets its name and resources', async () => {
+        await recentShell.pwLocator.click();
+        await expect(launchModal.name.pwLocator).toHaveValue(shellName);
+        await expect(launchModal.pool.selectionItem.pwLocator).toHaveText(shellPool ?? '');
+        await expect(launchModal.slots.pwLocator).toHaveValue(String(shellSlots));
       });
     } finally {
       if (shellId) await api.post(`/api/v1/shells/${shellId}/kill`);
