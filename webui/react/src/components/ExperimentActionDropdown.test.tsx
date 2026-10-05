@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import UIProvider, { DefaultTheme } from 'hew/Theme';
 import { ConfirmationProvider } from 'hew/useConfirm';
@@ -9,6 +9,7 @@ import {
   archiveExperiment,
   cancelExperiment,
   deleteExperiment,
+  getExpTrials,
   killExperiment,
   patchExperiment,
   pauseExperiment,
@@ -38,6 +39,7 @@ vi.mock('routes/utils', () => ({
   paths: {
     experimentDetails: (id: number) => `/experiments/${id}`,
     experimentResources: (id: number) => `/experiments/${id}/resources`,
+    searchDetails: (id: number) => `/searches/${id}`,
     trialLogs: (trialId: number, experimentId: number) =>
       `/experiments/${experimentId}/trials/${trialId}/logs`,
   },
@@ -63,6 +65,7 @@ vi.mock('services/api', () => ({
   archiveExperiment: vi.fn(),
   cancelExperiment: vi.fn(),
   deleteExperiment: vi.fn(),
+  getExpTrials: vi.fn(),
   getWorkspaces: vi.fn(() => Promise.resolve({ workspaces: [] })),
   killExperiment: vi.fn(),
   patchExperiment: vi.fn(),
@@ -435,47 +438,102 @@ describe('ExperimentActionDropdown View Logs', () => {
   beforeEach(() => {
     allowEverything();
     vi.mocked(handlePath).mockClear();
+    vi.mocked(getExpTrials).mockReset();
   });
 
   const viewLogsPath = async (overrides: Partial<ProjectExperiment>) => {
     setup(undefined, RunState.Running, false, overrides);
     await user.click(screen.getByText(Action.ViewLogs));
+    // View Logs may first fetch the trial, so it navigates once that is done.
+    await waitFor(() => expect(handlePath).toHaveBeenCalled());
     expect(handlePath).toHaveBeenCalledTimes(1);
     return vi.mocked(handlePath).mock.calls[0][1]?.path;
   };
 
-  it('opens the logs tab of a single-trial experiment’s page', async () => {
+  const mockTrial = (id: number) =>
+    vi.mocked(getExpTrials).mockResolvedValue({
+      pagination: { limit: 1, offset: 0, total: 1 },
+      trials: [{ id } as Awaited<ReturnType<typeof getExpTrials>>['trials'][number]],
+    });
+
+  // List rows carry the raw experiment config, as the API sends it.
+  const randomOneTrialConfig = {
+    searcher: { max_trials: 1, metric: 'loss', name: 'random', smaller_is_better: true },
+  } as unknown as ProjectExperiment['config'];
+
+  it('fetches the trial of a single-trial experiment and opens its logs page', async () => {
+    mockTrial(7);
     expect(await viewLogsPath({ numTrials: 1, searcherType: 'single', trialIds: [] })).toBe(
-      `/experiments/${experiment.id}/logs`,
+      `/experiments/${experiment.id}/trials/7/logs`,
     );
+    expect(getExpTrials).toHaveBeenCalledWith({ id: experiment.id, limit: 1 });
   });
 
-  it('opens the logs tab when the config allows a single trial', async () => {
-    // List rows carry the raw experiment config, as the API sends it.
-    const config = {
-      searcher: { max_trials: 1, metric: 'loss', name: 'random', smaller_is_better: true },
-    } as unknown as ProjectExperiment['config'];
-    expect(await viewLogsPath({ config, numTrials: 1, searcherType: 'random', trialIds: [] })).toBe(
-      `/experiments/${experiment.id}/logs`,
-    );
+  it('fetches the trial when the config allows a single trial', async () => {
+    mockTrial(7);
+    expect(
+      await viewLogsPath({
+        config: randomOneTrialConfig,
+        numTrials: 1,
+        searcherType: 'random',
+        trialIds: [],
+      }),
+    ).toBe(`/experiments/${experiment.id}/trials/7/logs`);
   });
+
+  it.each([
+    [true, `/searches/${experiment.id}`],
+    [false, `/experiments/${experiment.id}/logs`],
+  ])(
+    'opens the search page or, without flat runs, the experiment’s Logs tab when the trial cannot be fetched (flat runs %s)',
+    async (flatRuns, path) => {
+      flags.flatRuns = flatRuns;
+      vi.mocked(getExpTrials).mockRejectedValue(new Error('no trials'));
+      expect(
+        await viewLogsPath({
+          config: randomOneTrialConfig,
+          numTrials: 1,
+          searcherType: 'random',
+          trialIds: [],
+        }),
+      ).toBe(path);
+    },
+  );
+
+  it.each([
+    [true, `/searches/${experiment.id}`],
+    [false, `/experiments/${experiment.id}/logs`],
+  ])(
+    'opens the search page or, without flat runs, the experiment’s Logs tab when no trial comes back (flat runs %s)',
+    async (flatRuns, path) => {
+      flags.flatRuns = flatRuns;
+      vi.mocked(getExpTrials).mockResolvedValue({
+        pagination: { limit: 1, offset: 0, total: 0 },
+        trials: [],
+      });
+      expect(await viewLogsPath({ numTrials: 1, searcherType: 'single', trialIds: [] })).toBe(path);
+    },
+  );
 
   it('opens the trial’s logs page when the trial ID is known', async () => {
     expect(await viewLogsPath({ numTrials: 1, searcherType: 'random', trialIds: [42] })).toBe(
       `/experiments/${experiment.id}/trials/42/logs`,
     );
+    expect(getExpTrials).not.toHaveBeenCalled();
   });
 
   it('opens the trials tab of an experiment with several trials', async () => {
     expect(await viewLogsPath({ numTrials: 5, searcherType: 'random', trialIds: [] })).toBe(
       `/experiments/${experiment.id}/trials`,
     );
+    expect(getExpTrials).not.toHaveBeenCalled();
   });
 
   it('opens the trials tab of a search that has started only one trial so far', async () => {
     expect(await viewLogsPath({ numTrials: 1, searcherType: 'adaptive_asha', trialIds: [] })).toBe(
       `/experiments/${experiment.id}/trials`,
     );
+    expect(getExpTrials).not.toHaveBeenCalled();
   });
 
   it('is left out while the experiment has no trial', () => {
