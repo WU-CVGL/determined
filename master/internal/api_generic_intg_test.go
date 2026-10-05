@@ -971,6 +971,7 @@ func TestCreateGenericTaskChecksResolvedPool(t *testing.T) {
 	require.NoError(t, err)
 
 	jobs, tasks := countGenericTasksOwnedBy(adminCtx, t, other.ID)
+	sessions := countUserSessions(adminCtx, t, other.ID)
 	for name, tc := range map[string]struct {
 		req  *apiv1.CreateGenericTaskRequest
 		pool string
@@ -990,6 +991,8 @@ func TestCreateGenericTaskChecksResolvedPool(t *testing.T) {
 		gotJobs, gotTasks := countGenericTasksOwnedBy(adminCtx, t, other.ID)
 		require.Equal(t, jobs, gotJobs, name)
 		require.Equal(t, tasks, gotTasks, name)
+		require.Equal(t, sessions, countUserSessions(adminCtx, t, other.ID),
+			"%s: a refused create must not start a task session", name)
 	}
 
 	_, err = createGenericTaskForAccessTest(otherCtx, t, api,

@@ -2228,6 +2228,7 @@ func TestWorkspaceDefaultPools(t *testing.T) {
 
 	// A failed read refuses the change.
 	readRestrictions := poolaccess.ReadRestrictions
+	t.Cleanup(func() { poolaccess.ReadRestrictions = readRestrictions })
 	poolaccess.ReadRestrictions = func(context.Context, model.UserID, []string) (map[string]bool, error) {
 		return nil, fmt.Errorf("the database went away")
 	}
@@ -2239,6 +2240,10 @@ func TestWorkspaceDefaultPools(t *testing.T) {
 	// A new workspace's default pools are checked for its creator.
 	refused := uuid.NewString()
 	requirePoolDenied(t, post(otherCtx, refused, restricted), other, restricted)
+	_, err = api.PostWorkspace(otherCtx, &apiv1.PostWorkspaceRequest{
+		Name: refused, DefaultAuxPool: restricted,
+	})
+	requirePoolDenied(t, err, other, restricted)
 	exists, err := db.Bun().NewSelect().Table("workspaces").Where("name = ?", refused).Exists(adminCtx)
 	require.NoError(t, err)
 	require.False(t, exists)

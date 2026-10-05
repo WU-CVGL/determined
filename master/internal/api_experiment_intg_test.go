@@ -2785,6 +2785,7 @@ func TestCreateExperimentChecksFinalPool(t *testing.T) {
 	setInvariantExperimentPool(adminCtx, t, badPolicyWorkspace, admin, unavailable)
 
 	experiments := countExperimentsOwnedBy(adminCtx, t, other.ID)
+	sessions := countUserSessions(adminCtx, t, other.ID)
 	for name, req := range map[string]*apiv1.CreateExperimentRequest{
 		"explicit pool": {Config: accessTestExperimentConfig(restricted)},
 		"template":      {Config: accessTestExperimentConfig(""), Template: &template},
@@ -2800,9 +2801,13 @@ func TestCreateExperimentChecksFinalPool(t *testing.T) {
 		_, err := createExperimentForAccessTest(otherCtx, t, api, req)
 		requirePoolDenied(t, err, other, restricted)
 		require.Equal(t, experiments, countExperimentsOwnedBy(adminCtx, t, other.ID), name)
+		require.Equal(t, sessions, countUserSessions(adminCtx, t, other.ID),
+			"%s: a refused create must not start a task session", name)
 	}
 
 	// A policy pool that the workspace cannot use is the caller's error, not Unknown or Internal.
+	adminExperiments := countExperimentsOwnedBy(adminCtx, t, admin.ID)
+	adminSessions := countUserSessions(adminCtx, t, admin.ID)
 	for _, validateOnly := range []bool{false, true} {
 		_, err := createExperimentForAccessTest(adminCtx, t, api, &apiv1.CreateExperimentRequest{
 			Config:       accessTestExperimentConfig(open),
@@ -2811,8 +2816,9 @@ func TestCreateExperimentChecksFinalPool(t *testing.T) {
 		})
 		require.Equal(t, codes.InvalidArgument, status.Code(err), "%v", err)
 		require.ErrorContains(t, err, "is not available to workspace")
+		require.Equal(t, adminExperiments, countExperimentsOwnedBy(adminCtx, t, admin.ID))
+		require.Equal(t, adminSessions, countUserSessions(adminCtx, t, admin.ID))
 	}
-	require.Equal(t, experiments, countExperimentsOwnedBy(adminCtx, t, other.ID))
 
 	// Unmanaged experiments never allocate and are not checked.
 	external := uuid.NewString()
@@ -2997,9 +3003,12 @@ func TestContinueAndActivateCheckPool(t *testing.T) {
 
 	ended := endedExperimentInPool(adminCtx, t, api, owner, pool)
 	before := experimentRecordForAccessTest(adminCtx, t, ended)
+	sessions := countUserSessions(adminCtx, t, owner.ID)
 	_, err = api.ContinueExperiment(ownerCtx, &apiv1.ContinueExperimentRequest{Id: ended})
 	requirePoolDenied(t, err, owner, pool)
 	require.Equal(t, before, experimentRecordForAccessTest(adminCtx, t, ended))
+	require.Equal(t, sessions, countUserSessions(adminCtx, t, owner.ID),
+		"a refused continue must not start a task session")
 
 	// An admin may activate and continue.
 	_, err = api.ActivateExperiment(adminCtx, &apiv1.ActivateExperimentRequest{Id: id})
