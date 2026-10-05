@@ -424,7 +424,8 @@ func TestSlotStates(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, slot.Draining)
 	require.False(t, slot.Enabled)
-	require.Equal(t, 2, state.numSlots())
+	// The drained slot is idle, so it no longer counts, as a disabled slot.
+	require.Equal(t, 1, state.numSlots())
 
 	slots = state.patchAllSlotsState(patchAllSlotsState{
 		enabled: ptrs.Ptr(true),
