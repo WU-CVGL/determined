@@ -238,6 +238,34 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+/** getUserSetting's response for these per-user settings, by storage path. */
+const userSettingsResponse = (byPath: Record<string, Record<string, unknown>>) => ({
+  settings: Object.entries(byPath).flatMap(([storagePath, values]) =>
+    Object.entries(values).map(([key, value]) => ({
+      key,
+      storagePath,
+      value: JSON.stringify(value),
+    })),
+  ),
+});
+
+/** Runs the test body with the user settings loaded, as the app does after login. */
+const withLoadedSettings = async (body: () => Promise<void>) => {
+  const stopPolling = userSettings.startPolling();
+  try {
+    await waitFor(() => expect(Loadable.isLoaded(userSettings.getAll().get())).toBe(true));
+    await body();
+  } finally {
+    stopPolling();
+    // Do not leak loaded settings into the other tests.
+    userSettings._forUseSettingsOnly().set(NotLoaded);
+  }
+};
+
+/** The per-user settings stored under a storage path (last-used form values). */
+const savedSettings = (storagePath: string) =>
+  Loadable.getOrElse(undefined, userSettings.getAll().get())?.get(storagePath);
+
 describe('NtscLaunchModal', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -612,15 +640,10 @@ describe('NtscLaunchModal', () => {
   });
 
   it('restores the last template and slots without applying the template’s resources', async () => {
-    mocks.getUserSetting.mockResolvedValue({
-      settings: [
-        { key: 'template', storagePath: 'shell-launch', value: JSON.stringify('gpu-template') },
-        { key: 'slots', storagePath: 'shell-launch', value: JSON.stringify(2) },
-      ],
-    });
-    const stopPolling = userSettings.startPolling();
-    try {
-      await waitFor(() => expect(Loadable.isLoaded(userSettings.getAll().get())).toBe(true));
+    mocks.getUserSetting.mockResolvedValue(
+      userSettingsResponse({ 'shell-launch': { slots: 2, template: 'gpu-template' } }),
+    );
+    await withLoadedSettings(async () => {
       const { onLaunched, user } = await setup();
       expect(await screen.findByTitle('gpu-template')).toBeInTheDocument();
       await launch(user);
@@ -631,11 +654,98 @@ describe('NtscLaunchModal', () => {
         templateName: 'gpu-template',
         workspaceId: WORKSPACE.id,
       });
-    } finally {
-      stopPolling();
-      // Do not leak loaded settings into the other tests.
-      userSettings._forUseSettingsOnly().set(NotLoaded);
-    }
+    });
+  });
+
+  describe('last-used values per type', () => {
+    const SEEDED = {
+      'jupyter-lab': { name: 'nb-name', slots: 3 },
+      'shell-launch': { name: 'shell-name', slots: 2 },
+    };
+
+    beforeEach(() => {
+      mocks.getUserSetting.mockResolvedValue(userSettingsResponse(SEEDED));
+      mocks.launchJupyterLab.mockResolvedValue({
+        command: task(CommandType.JupyterLab),
+        warnings: [],
+      });
+    });
+
+    it.each([
+      [CommandType.JupyterLab, 'jupyter-lab', 'Shell', 'shell-launch'],
+      [CommandType.Shell, 'shell-launch', 'JupyterLab', 'jupyter-lab'],
+    ] as const)(
+      'opens %s with its own last values and saves them for the type it launches',
+      async (initialType, openedPath, otherType, launchedPath) => {
+        await withLoadedSettings(async () => {
+          const { user } = await setup({ initialType });
+          const name = screen.getByPlaceholderText('Name (optional)');
+          expect(name).toHaveValue(SEEDED[openedPath].name);
+
+          await selectType(user, otherType);
+          await user.clear(name);
+          await user.type(name, 'launched');
+          await launch(user);
+
+          await waitFor(() =>
+            expect(savedSettings(launchedPath)).toEqual({
+              name: 'launched',
+              slots: SEEDED[openedPath].slots,
+              workspaceId: WORKSPACE.id,
+            }),
+          );
+          expect(savedSettings(openedPath)).toEqual(SEEDED[openedPath]);
+        });
+      },
+    );
+
+    it('saves the values back to the preselected type on Cancel after the type was switched', async () => {
+      await withLoadedSettings(async () => {
+        const { user } = await setup({ initialType: CommandType.JupyterLab });
+        const name = screen.getByPlaceholderText('Name (optional)');
+        expect(name).toHaveValue('nb-name');
+
+        await selectType(user, 'Shell');
+        await user.clear(name);
+        await user.type(name, 'draft');
+        await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+        await waitFor(() =>
+          expect(savedSettings('jupyter-lab')).toEqual({
+            name: 'draft',
+            slots: 3,
+            workspaceId: WORKSPACE.id,
+          }),
+        );
+        expect(savedSettings('shell-launch')).toEqual(SEEDED['shell-launch']);
+        expect(mocks.launchShell).not.toHaveBeenCalled();
+        expect(mocks.launchJupyterLab).not.toHaveBeenCalled();
+      });
+    });
+
+    it('preselects the template of the preselected type when templates load after a switch', async () => {
+      mocks.getUserSetting.mockResolvedValue(
+        userSettingsResponse({
+          'jupyter-lab': { ...SEEDED['jupyter-lab'], template: 'nb-template' },
+          'shell-launch': { ...SEEDED['shell-launch'], template: 'shell-template' },
+        }),
+      );
+      const templates = deferred<{ config: RawJson; name: string; workspaceId: number }[]>();
+      mocks.getTaskTemplates.mockReturnValue(templates.promise);
+      await withLoadedSettings(async () => {
+        const { user } = await setup({ initialType: CommandType.JupyterLab });
+        await selectType(user, 'Shell');
+        templates.resolve([
+          { config: {}, name: 'nb-template', workspaceId: WORKSPACE.id },
+          { config: {}, name: 'shell-template', workspaceId: WORKSPACE.id },
+        ]);
+
+        // The name and slots shown are the JupyterLab's, so is the template.
+        expect(await screen.findByTitle('nb-template')).toBeInTheDocument();
+        expect(screen.queryByTitle('shell-template')).not.toBeInTheDocument();
+        expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('nb-name');
+      });
+    });
   });
 
   describe('JupyterLab', () => {

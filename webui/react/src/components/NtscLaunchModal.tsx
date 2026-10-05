@@ -101,8 +101,9 @@ interface TypeCopy {
 /**
  * Per-type text and the per-user settings (last-used form values, kept on the
  * server). JupyterLab keeps its existing 'jupyter-lab' storage path. The form
- * opens with the last values of its preselected type and saves them for the
- * type it launches.
+ * opens with the last values of its preselected type. A launch saves the form's
+ * values for the type it launches; a cancel saves them back to the preselected
+ * type, where they came from, even after the type was switched.
  */
 const TYPE_COPY: Record<NtscLaunchType, TypeCopy> = {
   [CommandType.JupyterLab]: {
@@ -205,15 +206,16 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     TYPE_COPY[CommandType.JupyterLab].settings,
   );
   const shellSettings = useSettings<NtscLaunchOptions>(TYPE_COPY[CommandType.Shell].settings);
-  const defaults = (initialType === CommandType.Shell ? shellSettings : jupyterLabSettings)
-    .settings;
-  const updateDefaults = (type === CommandType.Shell ? shellSettings : jupyterLabSettings)
-    .updateSettings;
+  const settingsFor = (t: NtscLaunchType) =>
+    t === CommandType.Shell ? shellSettings : jupyterLabSettings;
+  const defaults = settingsFor(initialType).settings;
+  const saveLaunchDefaults = settingsFor(type).updateSettings;
+  const saveCancelDefaults = settingsFor(initialType).updateSettings;
 
   const handleModalClose = useCallback(() => {
     const fields: LaunchFormValues = form.getFieldsValue(true);
-    updateDefaults(settingsFromForm(fields));
-  }, [form, updateDefaults]);
+    saveCancelDefaults(settingsFromForm(fields));
+  }, [form, saveCancelDefaults]);
 
   /** The launch or preview options for the simple form's current values. */
   const simpleOptions = useCallback(
@@ -268,7 +270,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
 
   const handleSubmit = useCallback(async () => {
     const fields: LaunchFormValues = form.getFieldsValue(true);
-    updateDefaults(settingsFromForm(fields));
+    saveLaunchDefaults(settingsFromForm(fields));
     if (showFullConfig) {
       const values = await fullConfigForm.validateFields();
       const usableConfig = Loadable.isLoaded(config) ? config.data : '';
@@ -283,7 +285,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       const values = await form.validateFields();
       if (values) await launch(simpleOptions(fields));
     }
-  }, [config, fullConfigForm, form, launch, showFullConfig, simpleOptions, updateDefaults]);
+  }, [config, fullConfigForm, form, launch, saveLaunchDefaults, showFullConfig, simpleOptions]);
 
   const handleConfigChange = useCallback(
     (config: string) => {
