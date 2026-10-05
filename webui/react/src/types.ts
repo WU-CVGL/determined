@@ -232,6 +232,8 @@ export interface ResourceContainer {
 
 export interface Resource {
   container?: ResourceContainer;
+  /** The slot drains: disabled, with its running work allowed to finish. */
+  draining?: boolean;
   enabled: boolean;
   id: string;
   name: string;
@@ -243,6 +245,8 @@ export type SlotsRecord = { [k: string]: V1Slot };
 
 export interface Agent {
   enabled?: boolean;
+  /** What the agent measured with NVML at its last start; unset for agents without GPUs. */
+  gpuTopology?: Api.V1GpuTopology;
   id: string;
   registeredTime: number;
   resourcePools: string[];

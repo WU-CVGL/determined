@@ -5,6 +5,7 @@ import Section from 'components/Section';
 import { Agent, Resource, SlotsRecord } from 'types';
 
 import css from './ClusterTopology.module.scss';
+import GpuTopology, { GpuTopologyLegend } from './GpuTopology';
 
 interface NodeElementProps {
   name: string;
@@ -59,12 +60,17 @@ const NodeElement: React.FC<PropsWithChildren<NodeElementProps>> = ({ name, slot
 };
 
 const Topology: React.FC<PropsWithChildren<Props>> = ({ nodes }) => {
+  // Agents that report a GPU topology get the GPU panel instead of the slot strip.
+  const withGpuTopology = nodes.some((node) => node.gpuTopology);
   return (
     <Section title="Topology">
       <div className={`${css.mainContainer} ${css.nodesContainer}`}>
-        {nodes.map(({ id, resources, slots }) => {
+        {nodes.map((node) => {
+          const { id, resources, slots } = node;
+          if (node.gpuTopology) return <GpuTopology agent={node} key={id} />;
           return <NodeElement key={id} name={id} resources={resources} slots={slots} />;
         })}
+        {withGpuTopology && <GpuTopologyLegend />}
       </div>
     </Section>
   );

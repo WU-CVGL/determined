@@ -1,0 +1,331 @@
+// GPU topology panel of the resource pool page. Tile fill = slot state (the SlotAllocationBar
+// palette, set inline as --gpu-tile-fill), health = a separate LED dot, stripes = no new work.
+
+.agent {
+  display: grid;
+  flex: 1 1 100%;
+  gap: 12px;
+  margin-bottom: 20px;
+  min-width: 0;
+}
+.agentHead {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+
+  h3 {
+    font-size: var(--theme-font-size-large, 15px);
+    font-weight: 600;
+    margin: 0;
+  }
+}
+.counts {
+  color: var(--theme-surface-on-weak);
+  font-size: 12px;
+}
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 13px;
+  gap: 4px 24px;
+  margin: 0;
+
+  div {
+    align-items: baseline;
+    display: flex;
+    gap: 8px;
+    min-width: 0;
+  }
+  dt {
+    color: var(--theme-surface-on-weak);
+    white-space: nowrap;
+  }
+  dd {
+    font-family: var(--theme-font-family-code, monospace);
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+}
+.unknownText {
+  font-size: 13px;
+  margin: 0;
+}
+.numaRow {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+}
+.numa {
+  border: 1px solid var(--theme-surface-border);
+  border-radius: var(--theme-border-radius, 4px);
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px 8px;
+}
+.numa h4,
+.switch h5 {
+  color: var(--theme-surface-on-weak);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  margin: 0;
+  text-transform: uppercase;
+}
+.switches {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+}
+.switch {
+  border: 1px dashed var(--theme-surface-border);
+  border-radius: var(--theme-border-radius, 4px);
+  display: grid;
+  gap: 4px;
+  padding: 4px 6px 6px;
+}
+.tiles {
+  display: grid;
+  gap: 6px;
+}
+.flat {
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+}
+
+// GPU tile
+
+.tile {
+  align-content: start;
+  background-color: var(--gpu-tile-fill, var(--theme-stage-strong));
+  border: 1px solid var(--theme-surface-border);
+  border-radius: var(--theme-border-radius, 4px);
+  color: var(--gpu-tile-on, var(--theme-surface-on));
+  display: grid;
+  gap: 1px;
+  min-height: 64px;
+  min-width: 0;
+  padding: 5px 6px 6px 8px;
+  position: relative;
+}
+.striped {
+  background-image: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--theme-surface-on) 30%, transparent) 0 2px,
+    transparent 2px 7px
+  );
+}
+.tileName {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+  overflow: hidden;
+  padding-right: 40px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bus {
+  font-family: var(--theme-font-family-code, monospace);
+  font-size: 11px;
+  line-height: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.state {
+  font-size: 11px;
+  line-height: 15px;
+}
+.flag {
+  background: var(--theme-surface);
+  border: 1px solid var(--theme-surface-border);
+  border-radius: var(--theme-border-radius-weak, 2px);
+  color: var(--theme-surface-on);
+  font-size: 10.5px;
+  justify-self: start;
+  line-height: 14px;
+  margin-top: 1px;
+  padding: 0 5px;
+}
+
+// Health LED: a 10 px dot with a 2 px surface ring and a 1 px outline, visible on any fill.
+
+.dot {
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 2px var(--theme-surface),
+    0 0 0 3px var(--theme-surface-on-weak);
+  box-sizing: border-box;
+  display: inline-block;
+  flex: none;
+  height: 10px;
+  width: 10px;
+}
+.tile > .dot {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+}
+.ok {
+  background-color: var(--theme-status-success);
+}
+.narrow {
+  background-color: var(--theme-status-warning);
+}
+.error {
+  background-color: var(--theme-status-critical);
+}
+.unknown {
+  background-color: var(--theme-surface);
+  border: 2px solid var(--theme-status-inactive-strong);
+  box-shadow: 0 0 0 1px var(--theme-surface-on-weak);
+}
+.info {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: 22px;
+  top: 2px;
+  width: 24px;
+
+  &:hover,
+  &[aria-expanded='true'] {
+    background: var(--theme-surface-weak, rgb(0 0 0 / 10%));
+  }
+  &:focus-visible {
+    outline: 2px solid var(--theme-ix-on-active, currentcolor);
+    outline-offset: 1px;
+  }
+}
+
+// Tooltip and popover content
+
+.details {
+  font-size: 12.5px;
+  line-height: 1.45;
+  max-width: min(380px, calc(100vw - 24px));
+
+  dl {
+    display: grid;
+    gap: 2px 10px;
+    grid-template-columns: auto 1fr;
+    margin: 0 0 8px;
+  }
+  dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+  p {
+    margin: 6px 0 0;
+  }
+}
+.detailsTitle {
+  align-items: center;
+  display: flex;
+  font-weight: 600;
+  gap: 8px;
+  margin: 0 0 6px;
+}
+
+// Pairwise matrix
+
+.matrix {
+  font-size: 13px;
+  min-width: 0;
+
+  summary {
+    color: var(--theme-ix-on-active, inherit);
+    cursor: pointer;
+    max-width: 100%;
+    width: max-content;
+  }
+  table {
+    border-collapse: collapse;
+    font-family: var(--theme-font-family-code, monospace);
+    font-size: 12px;
+    margin-top: 8px;
+  }
+  caption {
+    caption-side: top;
+    color: var(--theme-surface-on-weak);
+    font-family: var(--theme-font-family, inherit);
+    margin-bottom: 4px;
+    text-align: left;
+    white-space: nowrap;
+  }
+  th,
+  td {
+    border: 1px solid var(--theme-surface-border);
+    padding: 3px 8px;
+    text-align: center;
+    white-space: nowrap;
+  }
+  th {
+    font-weight: 500;
+  }
+  .self {
+    color: var(--theme-surface-on-weak);
+  }
+}
+.matrixNote {
+  color: var(--theme-surface-on-weak);
+  font-size: 12px;
+  margin: 6px 0 0;
+  max-width: 90ch;
+}
+.scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.p2pMark {
+  border-top: 1px dashed var(--theme-surface-border);
+  display: block;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
+  margin-top: 2px;
+}
+
+// Legend
+
+.legend {
+  align-items: center;
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  gap: 6px 22px;
+}
+.legendGroup {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+
+  b {
+    color: var(--theme-surface-on-weak);
+    font-weight: 500;
+  }
+}
+.legendItem {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  white-space: nowrap;
+}
+.swatch {
+  background-color: var(--gpu-tile-fill, var(--theme-stage-strong));
+  border: 1px solid var(--theme-surface-border);
+  border-radius: var(--theme-border-radius-weak, 2px);
+  display: inline-block;
+  height: 12px;
+  width: 18px;
+}

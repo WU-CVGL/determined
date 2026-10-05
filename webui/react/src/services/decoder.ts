@@ -162,6 +162,7 @@ export const jsonToAgents = (agents: Array<Sdk.V1Agent>): types.Agent[] => {
 
       return {
         container: resourceContainer,
+        draining: slot.draining,
         enabled: slot.enabled,
         id: slot.id,
         name: slot.device?.brand,
@@ -172,6 +173,7 @@ export const jsonToAgents = (agents: Array<Sdk.V1Agent>): types.Agent[] => {
 
     return {
       enabled: agent.enabled,
+      gpuTopology: agent.gpuTopology,
       id: agent.id,
       registeredTime: dayjs(agent.registeredTime).unix(),
       resourcePools: agent.resourcePools,
