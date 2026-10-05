@@ -8,8 +8,8 @@
    running on it exited, or after a task that had reserved it was canceled before it started. The
    agent then started the new task on the drained slot. A drained slot now keeps the task that runs
    on it and takes no other. Once it is idle, it no longer counts toward the resource pool's total
-   slots, as for a disabled slot. The scheduler also no longer preempts a lower-priority task on a
-   drained slot to make room for another task, since that task could not use the slot.
+   slots, as for a disabled slot. The priority scheduler's preemption feasibility simulation also no
+   longer counts devices freed from draining slots as allocatable capacity.
 
 -  Agents: Enabling, disabling or draining a single slot now makes the resource pool schedule again
    at once. Previously a task that waited for a slot stayed queued after the slot was enabled, until

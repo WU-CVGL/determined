@@ -341,9 +341,16 @@ func (a *agentState) containerStateChanged(msg aproto.ContainerStateChanged) {
 		}
 	}
 
-	a.containerState[msg.Container.ID] = &msg.Container
+	// containerState holds the containers the pool has not released: allocateFreeDevices,
+	// startContainer and the restore from a snapshot add them, and deallocateContainer and the
+	// Terminated report remove them. A report updates a container held there but does not add one.
+	// The pool releases a container without waiting for it to terminate, so the agent can still
+	// report it, for example Running, after the release. Holding it again would bring its device
+	// back in use when its slot is enabled, and nothing would free the device after that.
 	if msg.Container.State == cproto.Terminated {
 		delete(a.containerState, msg.Container.ID)
+	} else if _, ok := a.containerState[msg.Container.ID]; ok {
+		a.containerState[msg.Container.ID] = &msg.Container
 	}
 
 	if err := a.persist(); err != nil {
@@ -442,7 +449,8 @@ func (a *agentState) updateSlotDeviceView(deviceID device.ID) {
 		// The device comes back in use only while the pool still holds its container. Once the
 		// pool has released it (deallocateContainer) or it terminated, the device is free:
 		// slot.containerID can outlive the release until the agent reports the container
-		// terminated, and nothing would free the device after that.
+		// terminated, and nothing would free the device after that. A report that arrives after
+		// the release does not put the container back in containerState (containerStateChanged).
 		cid := s.containerID
 		if cid != nil {
 			if _, ok := a.containerState[*cid]; !ok {

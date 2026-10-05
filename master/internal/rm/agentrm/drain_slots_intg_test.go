@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/determined-ai/determined/master/internal/config"
@@ -152,6 +153,45 @@ func (h *drainHarness) enableSlot(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// start records the start of the task's container on the agent, as StartTaskContainer does once
+// it has sent the container to the agent.
+func (h *drainHarness) start(
+	t *testing.T, req sproto.AllocateRequest, r *containerResources,
+) cproto.Container {
+	t.Helper()
+	container := cproto.Container{ID: r.containerID, State: cproto.Assigned, Devices: r.devices}
+	h.agent.mu.Lock()
+	err := h.agent.agentState.startContainer(sproto.StartTaskContainer{
+		AllocationID:   req.AllocationID,
+		StartContainer: aproto.StartContainer{Container: container},
+	})
+	h.agent.mu.Unlock()
+	require.NoError(t, err)
+	return container
+}
+
+// report delivers the agent's report that the container is in the given state, through the
+// handler of the agent's websocket messages.
+func (h *drainHarness) report(container cproto.Container, state cproto.State) {
+	container.State = state
+	msg := aproto.ContainerStateChanged{Container: container}
+	if state == cproto.Terminated {
+		msg.ContainerStopped = &aproto.ContainerStopped{}
+	}
+	h.agent.HandleIncomingWebsocketMessage(&aproto.MasterMessage{ContainerStateChanged: &msg})
+}
+
+// heldContainer reports whether the master holds the container on the agent, and its state.
+func (h *drainHarness) heldContainer(id cproto.ID) (cproto.State, bool) {
+	h.agent.mu.Lock()
+	defer h.agent.mu.Unlock()
+	c, ok := h.agent.agentState.containerState[id]
+	if !ok {
+		return "", false
+	}
+	return c.State, true
+}
+
 // awaitAllocated returns the allocation's resources, or nil if none arrive within wait.
 func awaitAllocated(
 	t *testing.T, sub *sproto.ResourcesSubscription, wait time.Duration,
@@ -280,4 +320,63 @@ func TestDrainedSlotStaysUnallocatableWhenItsContainerIsNotRecovered(t *testing.
 	require.NotContains(t, state.containerState, cid)
 	requireOnlyAllocatable(t, state, other)
 	require.Equal(t, 1, state.numSlots())
+}
+
+// The pool can release a task's container before the agent reports it terminated: allocation
+// cleanup kills the container without waiting. A report of a state other than Terminated that the
+// agent sends in between must not make the master hold the released container again. Otherwise a
+// slot that is enabled next comes back in use by that container, and the Terminated report that
+// follows does not free it, so a waiting task never gets the slot.
+func TestLateReportDoesNotRestoreAReleasedContainer(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		drain bool
+	}{
+		{name: "disabled slot", drain: false},
+		{name: "drained slot", drain: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newDrainHarness(t)
+
+			first, firstSub := h.request(t)
+			resources := awaitAllocated(t, firstSub, drainScheduleWait)
+			require.NotNil(t, resources, "the first task was not scheduled")
+			container := h.start(t, first, resources)
+			h.report(container, cproto.Pulling)
+			state, held := h.heldContainer(container.ID)
+			require.True(t, held)
+			require.Equal(t, cproto.Pulling, state, "a report did not update a held container")
+
+			h.disableSlot(t, tc.drain)
+			_, secondSub := h.request(t)
+			require.Nil(t, awaitAllocated(t, secondSub, drainPendingWait),
+				"a task was scheduled on a slot in use")
+
+			// The pool releases the first task's container before the agent reports it terminated.
+			h.release(first)
+			_, held = h.heldContainer(container.ID)
+			require.False(t, held, "the pool's release did not free the container")
+
+			// A report the agent sent before the kill arrives after the release.
+			h.report(container, cproto.Starting)
+			_, held = h.heldContainer(container.ID)
+			assert.False(t, held, "a late report restored the released container")
+
+			h.enableSlot(t)
+			h.report(container, cproto.Terminated)
+
+			second := awaitAllocated(t, secondSub, drainScheduleWait)
+			require.NotNil(t, second,
+				"the pending task was not scheduled after the slot was enabled and the released "+
+					"container terminated")
+			require.Equal(t, resources.devices, second.devices)
+
+			h.agent.mu.Lock()
+			slotContainer := h.agent.agentState.slotStates[resources.devices[0].ID].containerID
+			h.agent.mu.Unlock()
+			require.Nil(t, slotContainer, "the Terminated report did not clear the slot")
+			_, held = h.heldContainer(container.ID)
+			require.False(t, held)
+		})
+	}
 }
