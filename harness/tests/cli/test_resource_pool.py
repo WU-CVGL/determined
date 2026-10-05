@@ -9,6 +9,8 @@ from tests.cli import util
 
 MASTER = "http://localhost:8080"
 DYNAMIC_POOLS_URL = f"{MASTER}/api/v1/resource-pools/dynamic"
+# The master refuses dynamic-pool request bodies that are not labelled as JSON.
+JSON_CONTENT_TYPE = matchers.header_matcher({"Content-Type": "application/json"})
 
 
 def dynamic_pool_response(state: str = "Ready") -> dict:
@@ -40,6 +42,7 @@ def test_create_dynamic_pool_posts_yaml_config_and_reports_failed_state(
             DYNAMIC_POOLS_URL,
             status=201,
             match=[
+                JSON_CONTENT_TYPE,
                 matchers.json_params_matcher(
                     {
                         "cluster_name": "agent-cluster",
@@ -49,7 +52,7 @@ def test_create_dynamic_pool_posts_yaml_config_and_reports_failed_state(
                             "max_aux_containers_per_agent": 100,
                         },
                     }
-                )
+                ),
             ],
             json=response,
         )
@@ -84,7 +87,7 @@ def test_create_dynamic_pool_json_output(
     response = dynamic_pool_response()
 
     with util.standard_cli_rsps() as rsps:
-        rsps.post(DYNAMIC_POOLS_URL, status=201, json=response)
+        rsps.post(DYNAMIC_POOLS_URL, status=201, match=[JSON_CONTENT_TYPE], json=response)
         cli.main(
             [
                 "resource-pool",
@@ -165,6 +168,7 @@ def test_update_dynamic_pool_puts_config_and_reports_failed_state(
             status=200,
             match=[
                 matchers.query_param_matcher({"cluster_name": "agent-cluster"}),
+                JSON_CONTENT_TYPE,
                 matchers.json_params_matcher(
                     {
                         "expected_revision": 3,
@@ -213,6 +217,7 @@ def test_update_dynamic_pool_without_expected_revision_prints_json(
             status=200,
             match=[
                 matchers.query_param_matcher({}),
+                JSON_CONTENT_TYPE,
                 matchers.json_params_matcher({"config": {"pool_name": "online-gpu"}}),
             ],
             json=response,
@@ -247,6 +252,7 @@ def test_adopt_dynamic_pool_posts_master_yaml_entry(
             status=201,
             match=[
                 matchers.query_param_matcher({"cluster_name": "agent-cluster"}),
+                JSON_CONTENT_TYPE,
                 matchers.json_params_matcher(
                     {
                         "config": {
@@ -288,6 +294,7 @@ def test_adopt_dynamic_pool_json_output(
             status=200,
             match=[
                 matchers.query_param_matcher({}),
+                JSON_CONTENT_TYPE,
                 matchers.json_params_matcher({"config": {"pool_name": "static-gpu"}}),
             ],
             json=response,

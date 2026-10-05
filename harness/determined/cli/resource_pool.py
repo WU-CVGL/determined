@@ -8,6 +8,9 @@ from determined.common import util
 from determined.common.api import bindings
 
 DYNAMIC_RESOURCE_POOLS_PATH = "/api/v1/resource-pools/dynamic"
+# The session sends json= bodies without a Content-Type, and the master refuses dynamic-pool
+# request bodies that are not labelled as JSON.
+_JSON_HEADERS = {"Content-Type": "application/json"}
 
 
 def _cluster_params(cluster_name: Optional[str]) -> Dict[str, str]:
@@ -67,7 +70,7 @@ def create_dynamic(args: argparse.Namespace) -> None:
         body["cluster_name"] = args.cluster_name
 
     sess = cli.setup_session(args)
-    resource_pool = sess.post(DYNAMIC_RESOURCE_POOLS_PATH, json=body).json()
+    resource_pool = sess.post(DYNAMIC_RESOURCE_POOLS_PATH, json=body, headers=_JSON_HEADERS).json()
     if args.json:
         render.print_json(resource_pool)
     else:
@@ -100,6 +103,7 @@ def update_dynamic(args: argparse.Namespace) -> None:
         f"{DYNAMIC_RESOURCE_POOLS_PATH}/{pool_name}",
         params=_cluster_params(args.cluster_name),
         json=body,
+        headers=_JSON_HEADERS,
     ).json()
     if args.json:
         render.print_json(resource_pool)
@@ -117,6 +121,7 @@ def adopt_dynamic(args: argparse.Namespace) -> None:
         f"{DYNAMIC_RESOURCE_POOLS_PATH}/{pool_name}/adopt",
         params=_cluster_params(args.cluster_name),
         json={"config": config},
+        headers=_JSON_HEADERS,
     ).json()
     if args.json:
         render.print_json(resource_pool)
