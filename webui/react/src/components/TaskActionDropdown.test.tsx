@@ -12,7 +12,8 @@ import TaskActionDropdown from './TaskActionDropdown';
 
 const mocks = vi.hoisted(() => ({ canCreateWorkspaceNSC: true, getJupyterLab: vi.fn() }));
 
-vi.mock('hooks/useTaskResourcesEnabled', () => ({ default: () => false }));
+const resources = vi.hoisted(() => ({ enabled: false }));
+vi.mock('hooks/useTaskResourcesEnabled', () => ({ default: () => resources.enabled }));
 vi.mock('hooks/usePermissions', () => ({
   default: () => ({
     canCreateWorkspaceNSC: () => mocks.canCreateWorkspaceNSC,
@@ -20,7 +21,11 @@ vi.mock('hooks/usePermissions', () => ({
   }),
 }));
 vi.mock('routes/utils', () => ({
-  paths: { shellTerminal: (id: string) => `/shells/${id}/terminal`, taskLogs: () => '/logs' },
+  paths: {
+    shellTerminal: (id: string) => `/shells/${id}/terminal`,
+    taskLogs: () => '/logs',
+    taskResources: (id: string) => `/tasks/${id}/resources`,
+  },
   serverAddress: () => 'http://localhost',
 }));
 vi.mock('services/api', () => ({ getJupyterLab: mocks.getJupyterLab, killTask: vi.fn() }));
@@ -115,9 +120,12 @@ const runningShell: Partial<CommandTask> = { state: CommandState.Running, type: 
 const setCurrentUser = (id: number, isAdmin = false) =>
   userStore.updateCurrentUser({ id, isActive: true, isAdmin, username: `user-${id}` });
 
+const menuLabels = () => screen.getAllByRole('menuitem').map((item) => item.textContent);
+
 describe('TaskActionDropdown', () => {
   beforeEach(() => {
     mocks.canCreateWorkspaceNSC = true;
+    resources.enabled = false;
   });
 
   it('hides Kill for another user’s task', async () => {
@@ -254,5 +262,105 @@ describe('TaskActionDropdown', () => {
       await screen.findByText('View Logs');
       expect(screen.queryByText('Launch Again')).not.toBeInTheDocument();
     });
+  });
+  describe('order', () => {
+    beforeEach(() => {
+      feature.on = true;
+      resources.enabled = true;
+      setCurrentUser(101);
+    });
+
+    const FULL_SHELL_MENU = [
+      'View Logs',
+      'View Resources',
+      'Copy Task ID',
+      'Connect via CLI',
+      'Open Terminal',
+      'Launch Again',
+      'Kill',
+    ];
+
+    it('lists every action of the owner’s running shell in the fixed order', async () => {
+      await openLaunchAgainMenu(runningShell, owner);
+      await screen.findByText('Launch Again');
+      expect(menuLabels()).toEqual(FULL_SHELL_MENU);
+    });
+
+    it('uses the same order in the right-click menu', async () => {
+      await openLaunchAgainMenu(runningShell, owner, true);
+      await screen.findByText('Launch Again');
+      expect(menuLabels()).toEqual(FULL_SHELL_MENU);
+    });
+
+    it('puts a notebook’s Connect where the shell has Connect via CLI', async () => {
+      await openLaunchAgainMenu({ ...notebook, state: CommandState.Running }, owner);
+      await screen.findByText('Launch Again');
+      expect(menuLabels()).toEqual([
+        'View Logs',
+        'View Resources',
+        'Copy Task ID',
+        'Connect',
+        'Launch Again',
+        'Kill',
+      ]);
+    });
+
+    it('leaves out what does not apply and keeps the order of the rest', async () => {
+      setCurrentUser(102);
+      await openLaunchAgainMenu({ ...runningShell, userId: 103 }, other);
+      await screen.findByText('View Logs');
+      expect(menuLabels()).toEqual([
+        'View Logs',
+        'View Resources',
+        'Copy Task ID',
+        'Connect via CLI',
+      ]);
+    });
+
+    it('leaves out View Resources when the master does not offer it', async () => {
+      resources.enabled = false;
+      await openLaunchAgainMenu(runningShell, owner);
+      await screen.findByText('Launch Again');
+      expect(menuLabels()).toEqual(FULL_SHELL_MENU.filter((label) => label !== 'View Resources'));
+    });
+
+    it('puts Manage Job after Launch Again and before Kill when offered', async () => {
+      const onManageJob = vi.fn();
+      render(
+        <MemoryRouter>
+          <UIProvider theme={DefaultTheme.Light}>
+            <ConfirmationProvider>
+              <TaskActionDropdown
+                curUser={owner}
+                task={{ ...task, ...runningShell }}
+                onLaunchAgain={vi.fn()}
+                onManageJob={onManageJob}
+              />
+            </ConfirmationProvider>
+          </UIProvider>
+        </MemoryRouter>,
+      );
+      await userEvent.click(screen.getByRole('button'));
+      await screen.findByText('Manage Job');
+      expect(menuLabels()).toEqual([
+        'View Logs',
+        'View Resources',
+        'Copy Task ID',
+        'Connect via CLI',
+        'Open Terminal',
+        'Launch Again',
+        'Manage Job',
+        'Kill',
+      ]);
+      await userEvent.click(screen.getByText('Manage Job'));
+      expect(onManageJob).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('shows how to connect from the right-click menu', async () => {
+    setCurrentUser(101);
+    openContextMenu(101, runningShell);
+    await userEvent.click(await screen.findByText('Connect via CLI'));
+    expect(await screen.findByText('det shell open task-1')).toBeInTheDocument();
   });
 });

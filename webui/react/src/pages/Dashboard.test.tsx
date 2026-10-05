@@ -1,9 +1,11 @@
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import UIProvider, { DefaultTheme } from 'hew/Theme';
 import { useEffect } from 'react';
 import { HelmetProvider } from 'react-helmet-async';
 
 import { ThemeProvider } from 'components/ThemeProvider';
+import usePermissions from 'hooks/usePermissions';
 import authStore from 'stores/auth';
 import userStore from 'stores/users';
 import { DetailedUser } from 'types';
@@ -23,12 +25,17 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock('services/api', () => ({
+  // for the launch forms:
+  getAvailableResourcePools: () => Promise.resolve([]),
   getCommands: () => Promise.resolve([]),
   getExperiments: mocks.getExperiments,
   getJupyterLabs: mocks.getJupyterLabs,
   getProjectsByUserActivity: mocks.getProjectsByUserActivity,
   getShells: () => Promise.resolve([]),
+  getTaskTemplates: () => Promise.resolve([]),
   getTensorBoards: () => Promise.resolve([]),
+  getWorkspaces: () => Promise.resolve({ workspaces: [] }),
+  updateUserSetting: () => Promise.resolve(),
 }));
 
 const CURRENT_USER: DetailedUser = { id: 1, isActive: true, isAdmin: false, username: 'bunny' };
@@ -347,6 +354,46 @@ describe('Dashboard', () => {
     await waitFor(() => {
       expect(screen.getByText('JupyterLab (eminently-moving-oryx)')).toBeInTheDocument();
       expect(screen.getByText('mnist_pytorch_dist_random_search')).toBeInTheDocument();
+    });
+  });
+  describe('launch buttons', () => {
+    afterEach(() => {
+      vi.mocked(usePermissions).mockImplementation(
+        () => ({ canCreateNSC: false }) as ReturnType<typeof usePermissions>,
+      );
+    });
+
+    it('offers Launch Shell next to Launch JupyterLab', async () => {
+      setup();
+
+      const jupyterLab = await screen.findByRole('button', { name: 'Launch JupyterLab' });
+      const shell = screen.getByRole('button', { name: 'Launch Shell' });
+      expect(jupyterLab).toBeDisabled();
+      expect(shell).toBeDisabled();
+      const jupyterLabButton = screen.getByTestId('jupyter-lab-button');
+      const shellButton = screen.getByTestId('shell-button');
+      expect(jupyterLabButton.parentElement).toBe(shellButton.parentElement);
+      expect(
+        jupyterLabButton.compareDocumentPosition(shellButton) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
+    it('opens the shell launch form with permission to launch', async () => {
+      vi.mocked(usePermissions).mockImplementation(
+        () =>
+          ({
+            canCreateNSC: true,
+            canCreateTemplateWorkspace: () => false,
+            canCreateWorkspaceNSC: () => true,
+          }) as unknown as ReturnType<typeof usePermissions>,
+      );
+      setup();
+
+      const shell = await screen.findByRole('button', { name: 'Launch Shell' });
+      expect(shell).toBeEnabled();
+      await userEvent.click(shell);
+      expect(await screen.findByText('Start from')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Launch' })).toBeInTheDocument();
     });
   });
 });

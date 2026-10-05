@@ -31,6 +31,8 @@ interface Props {
   onComplete?: (action?: Action) => void;
   /** Offers "Launch Again" on the user's own shells and JupyterLabs when given. */
   onLaunchAgain?: (task: CommandTask) => void;
+  /** Offers "Manage Job" (the job queue's priority, weight and pool) when given. */
+  onManageJob?: () => void;
   onVisibleChange?: (visible: boolean) => void;
   task: CommandTask;
 }
@@ -42,6 +44,7 @@ const TaskActionDropdown: React.FC<Props> = ({
   curUser,
   onComplete,
   onLaunchAgain,
+  onManageJob,
   children,
 }: Props) => {
   const { canCreateWorkspaceNSC, canModifyWorkspaceNSC } = usePermissions();
@@ -81,34 +84,20 @@ const TaskActionDropdown: React.FC<Props> = ({
     }
   }, [task, jupyterLabAddress]);
 
+  // One order everywhere the menu appears: viewing first, then connecting, then launching and
+  // managing, with the destructive Kill last. Items that do not apply are left out.
   const menuItems: MenuItem[] = useMemo(() => {
-    const items: MenuItem[] = [
-      {
-        key: Action.ViewLogs,
-        label: 'View Logs',
-      },
-      {
-        key: Action.CopyTaskID,
-        label: 'Copy Task ID',
-      },
-    ];
-    if (resourcesEnabled) items.unshift({ key: Action.ViewResources, label: 'View Resources' });
-    if (
-      isTaskKillable(
-        task,
-        canModifyWorkspaceNSC({ userId: task.userId, workspace: { id: task.workspaceId } }),
-      )
-    ) {
-      items.push({ key: Action.Kill, label: 'Kill' });
-    }
-    if (terminalEnabled && canOpenShellTerminal(task, currentUser)) {
-      items.push({ key: Action.OpenTerminal, label: 'Open Terminal' });
-    }
+    const items: MenuItem[] = [{ key: Action.ViewLogs, label: 'View Logs' }];
+    if (resourcesEnabled) items.push({ key: Action.ViewResources, label: 'View Resources' });
+    items.push({ key: Action.CopyTaskID, label: 'Copy Task ID' });
     if (isConnectable(task)) {
       items.push({
         key: Action.Connect,
         label: task.type === CommandType.Shell ? 'Connect via CLI' : 'Connect',
       });
+    }
+    if (terminalEnabled && canOpenShellTerminal(task, currentUser)) {
+      items.push({ key: Action.OpenTerminal, label: 'Open Terminal' });
     }
     // A UI rule only: the API lets anyone who can view a task read its config.
     if (
@@ -120,6 +109,15 @@ const TaskActionDropdown: React.FC<Props> = ({
     ) {
       items.push({ key: Action.LaunchAgain, label: 'Launch Again' });
     }
+    if (onManageJob) items.push({ key: Action.ManageJob, label: 'Manage Job' });
+    if (
+      isTaskKillable(
+        task,
+        canModifyWorkspaceNSC({ userId: task.userId, workspace: { id: task.workspaceId } }),
+      )
+    ) {
+      items.push({ key: Action.Kill, label: 'Kill' });
+    }
     return items;
   }, [
     task,
@@ -128,6 +126,7 @@ const TaskActionDropdown: React.FC<Props> = ({
     curUser,
     currentUser,
     onLaunchAgain,
+    onManageJob,
     resourcesEnabled,
     terminalEnabled,
   ]);
@@ -154,6 +153,9 @@ const TaskActionDropdown: React.FC<Props> = ({
           break;
         case Action.LaunchAgain:
           onLaunchAgain?.(task);
+          break;
+        case Action.ManageJob:
+          onManageJob?.();
           break;
         case Action.Kill:
           confirm({
@@ -194,10 +196,17 @@ const TaskActionDropdown: React.FC<Props> = ({
     }
     // TODO show loading indicator when we have a button component that supports it.
   };
+  // The connect modal is rendered for the right-click menu, too, so that Connect works from it.
+  const taskConnectModal = (
+    <TaskConnectModal.Component fields={taskConnectFields} title={`Connect to ${task.name}`} />
+  );
   return children ? (
-    <Dropdown isContextMenu menu={menuItems} onClick={handleDropdown}>
-      {children}
-    </Dropdown>
+    <>
+      <Dropdown isContextMenu menu={menuItems} onClick={handleDropdown}>
+        {children}
+      </Dropdown>
+      {taskConnectModal}
+    </>
   ) : (
     <div className={css.base} title="Open actions menu">
       <Dropdown menu={menuItems} placement="bottomRight" onClick={handleDropdown}>
@@ -206,7 +215,7 @@ const TaskActionDropdown: React.FC<Props> = ({
           type="text"
         />
       </Dropdown>
-      <TaskConnectModal.Component fields={taskConnectFields} title={`Connect to ${task.name}`} />
+      {taskConnectModal}
     </div>
   );
 };

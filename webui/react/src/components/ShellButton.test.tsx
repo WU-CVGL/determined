@@ -19,6 +19,8 @@ vi.mock('services/api', () => ({
   updateUserSetting: () => Promise.resolve(),
 }));
 
+vi.mock('hooks/useTaskResourcesEnabled', () => ({ default: () => true }));
+
 vi.mock('utils/wait', () => ({
   openCommand: () => null,
   openCommandResponse: mocks.openCommandResponse,
@@ -79,12 +81,14 @@ describe('ShellButton', () => {
 
     expect(await screen.findByText('Shell Launched')).toBeInTheDocument();
     expect(screen.getByText('det shell open shell-123')).toBeInTheDocument();
-    expect(
-      screen.getByText(/terminal in the browser is planned for a follow-up/),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Terminal' })).toBeInTheDocument();
     expect(screen.getByText('View Logs').closest('a')).toHaveAttribute(
       'href',
       expect.stringContaining('/shell/shell-123/logs'),
+    );
+    expect(screen.getByText('View Resources').closest('a')).toHaveAttribute(
+      'href',
+      expect.stringContaining('/tasks/shell-123/resources'),
     );
     expect(mocks.launchShell).toHaveBeenCalledWith(
       expect.objectContaining({ workspaceId: WORKSPACE.id }),
