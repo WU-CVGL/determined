@@ -613,7 +613,7 @@ func TestCreateGenericTaskChecksPoolDefaultPriorityAgainstPolicy(t *testing.T) {
 	}
 	create := func(resources string) (model.TaskID, error) {
 		resp, err := api.CreateGenericTask(ctx, &apiv1.CreateGenericTaskRequest{
-			ProjectId: ptrs.Ptr(int32(projectID)),
+			ProjectId: ptrs.Ptr(int32(projectID)), //nolint:gosec // The IDs of test projects are small.
 			Config:    "entrypoint: [\"true\"]\nresources:\n  slots: 0\n" + resources,
 		})
 		if err != nil {
