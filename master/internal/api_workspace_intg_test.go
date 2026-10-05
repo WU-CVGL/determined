@@ -29,6 +29,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/mocks"
+	"github.com/determined-ai/determined/master/internal/poolaccess"
 	"github.com/determined-ai/determined/master/internal/rm"
 	"github.com/determined-ai/determined/master/internal/rm/multirm"
 	"github.com/determined-ai/determined/master/internal/user"
@@ -39,6 +40,7 @@ import (
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 	"github.com/determined-ai/determined/proto/pkg/projectv1"
 	"github.com/determined-ai/determined/proto/pkg/rbacv1"
+	"github.com/determined-ai/determined/proto/pkg/resourcepoolv1"
 	"github.com/determined-ai/determined/proto/pkg/workspacev1"
 )
 
@@ -2142,4 +2144,107 @@ func TestCanChangeWkspNameAndQuota(t *testing.T) {
 		ClusterQuotaPairs: map[string]int32{config.DefaultClusterName: rq},
 	})
 	require.NoError(t, err)
+}
+
+// A workspace's default pools decide the pool of every submission there that omits one: in basic
+// mode only its owner or an admin may change them, and a new default must be a pool the setter
+// may use.
+func TestWorkspaceDefaultPools(t *testing.T) {
+	var pools []*resourcepoolv1.ResourcePool
+	mockRM := MockRM()
+	mockRM.On("GetResourcePools").Return(func() *apiv1.GetResourcePoolsResponse {
+		return &apiv1.GetResourcePoolsResponse{ResourcePools: pools}
+	}, nil)
+	api, admin, adminCtx := setupAPITest(t, nil, mockRM)
+	owner := db.RequireMockUser(t, api.m.db)
+	granted := db.RequireMockUser(t, api.m.db)
+	otherOwner := db.RequireMockUser(t, api.m.db)
+	other := db.RequireMockUser(t, api.m.db)
+	restricted := accessTestPool(t, "restricted", admin, true, owner, granted)
+	public := accessTestPool(t, "public", admin, false)
+	pools = []*resourcepoolv1.ResourcePool{{Name: restricted}, {Name: public}}
+	ownerCtx := ntscUserCtx(t, owner)
+	grantedCtx := ntscUserCtx(t, granted)
+	otherOwnerCtx := ntscUserCtx(t, otherOwner)
+	otherCtx := ntscUserCtx(t, other)
+
+	post := func(ctx context.Context, name, compute string) error {
+		_, err := api.PostWorkspace(ctx, &apiv1.PostWorkspaceRequest{
+			Name: name, DefaultComputePool: compute,
+		})
+		return err
+	}
+	w := uuid.NewString()
+	require.NoError(t, post(ownerCtx, w, ""))
+	w2 := uuid.NewString()
+	require.NoError(t, post(otherOwnerCtx, w2, ""))
+	workspaceID := func(name string) int32 {
+		var id int32
+		require.NoError(t, db.Bun().NewSelect().Table("workspaces").Column("id").
+			Where("name = ?", name).Scan(adminCtx, &id))
+		return id
+	}
+	patch := func(ctx context.Context, name string, compute, aux *string) error {
+		_, err := api.PatchWorkspace(ctx, &apiv1.PatchWorkspaceRequest{
+			Id: workspaceID(name),
+			Workspace: &workspacev1.PatchWorkspace{
+				DefaultComputeResourcePool: compute, DefaultAuxResourcePool: aux,
+			},
+		})
+		return err
+	}
+	requireDefaults := func(name, compute, aux string) {
+		t.Helper()
+		resp, err := api.GetWorkspace(adminCtx, &apiv1.GetWorkspaceRequest{Id: workspaceID(name)})
+		require.NoError(t, err)
+		require.Equal(t, []string{compute, aux},
+			[]string{resp.Workspace.DefaultComputePool, resp.Workspace.DefaultAuxPool})
+	}
+
+	// Only the owner or an admin may change the default pools, even to a public pool.
+	err := patch(grantedCtx, w, &public, nil)
+	require.Equal(t, codes.PermissionDenied, status.Code(err), "%v", err)
+	requireDefaults(w, "", "")
+
+	// The owner with a grant may set a restricted pool; another owner without one may not.
+	require.NoError(t, patch(ownerCtx, w, &restricted, nil))
+	requireDefaults(w, restricted, "")
+	requirePoolDenied(t, patch(otherOwnerCtx, w2, &restricted, nil), otherOwner, restricted)
+	requireDefaults(w2, "", "")
+	require.NoError(t, patch(adminCtx, w2, &restricted, &restricted))
+	requireDefaults(w2, restricted, restricted)
+
+	// Without a grant, the owner can still re-send the current default and unset defaults, but
+	// cannot make the restricted pool a new default.
+	_, err = poolaccess.Revoke(adminCtx, restricted, []model.UserID{owner.ID})
+	require.NoError(t, err)
+	require.NoError(t, patch(ownerCtx, w, &restricted, &public))
+	requireDefaults(w, restricted, public)
+	requirePoolDenied(t, patch(ownerCtx, w, nil, &restricted), owner, restricted)
+	requireDefaults(w, restricted, public)
+	unset := ""
+	require.NoError(t, patch(ownerCtx, w, &unset, &unset))
+	requireDefaults(w, "", "")
+
+	// A failed read refuses the change.
+	readRestrictions := poolaccess.ReadRestrictions
+	poolaccess.ReadRestrictions = func(context.Context, model.UserID, []string) (map[string]bool, error) {
+		return nil, fmt.Errorf("the database went away")
+	}
+	err = patch(ownerCtx, w, &public, nil)
+	poolaccess.ReadRestrictions = readRestrictions
+	require.Equal(t, codes.Unavailable, status.Code(err), "%v", err)
+	requireDefaults(w, "", "")
+
+	// A new workspace's default pools are checked for its creator.
+	refused := uuid.NewString()
+	requirePoolDenied(t, post(otherCtx, refused, restricted), other, restricted)
+	exists, err := db.Bun().NewSelect().Table("workspaces").Where("name = ?", refused).Exists(adminCtx)
+	require.NoError(t, err)
+	require.False(t, exists)
+	for _, ctx := range []context.Context{grantedCtx, adminCtx} {
+		name := uuid.NewString()
+		require.NoError(t, post(ctx, name, restricted))
+		requireDefaults(name, restricted, "")
+	}
 }

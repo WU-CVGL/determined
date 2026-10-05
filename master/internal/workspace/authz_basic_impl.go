@@ -183,10 +183,14 @@ func (a *WorkspaceAuthZBasic) CanViewResourceQuotas(ctx context.Context, curUser
 	return nil
 }
 
-// CanSetWorkspacesDefaultPools returns a nil error.
+// CanSetWorkspacesDefaultPools returns an error if the user is not an admin or not the owner of
+// the workspace. A workspace's default pools decide where the submissions of everyone in it run.
 func (a *WorkspaceAuthZBasic) CanSetWorkspacesDefaultPools(
 	ctx context.Context, curUser model.User, workspace *workspacev1.Workspace,
 ) error {
+	if !curUser.Admin && curUser.ID != model.UserID(workspace.UserId) {
+		return fmt.Errorf("only admins may set other user's workspaces default resource pools")
+	}
 	return nil
 }
 
