@@ -162,7 +162,12 @@ Every endpoint returns pools in this form:
 }
 ```
 
-- `config` is the full effective configuration of the saved spec.
+- `config` is the full effective configuration computed from the saved spec
+  and the master defaults when the spec was last written or the master last
+  started. If that computation fails at a start, the master logs a warning
+  and keeps the previous `config`, which then lags behind the spec. `Ready`
+  means that the pool's runtime is published, not that every task default of
+  the pool resolved at this start.
 - `spec` is the saved spec. It is absent for a pool saved without a spec.
 - `revision` starts at 1 and increases with every change of the spec.
 - `active_revision` is the revision that the running master runs. It is `null`
@@ -347,11 +352,26 @@ the retry and update endpoints are available only while the master is running.
 
 ## Convert master.yaml pools to dynamic pools
 
-This procedure makes every pool of an agent resource manager a dynamic pool. It
-needs one master restart besides the upgrade.
+This procedure moves the pools of an agent resource manager from `master.yaml`
+into the database. It needs one master restart besides the upgrade.
+
+Choose the end state before adopting anything, because the built-in `default`
+pool and a rollback to a master without spec support constrain it:
+
+| End state | `resource_pools` after step 5 | Pool named `default` | Rollback to a master without spec support |
+| --- | --- | --- | --- |
+| 1. Every named pool dynamic, rollback kept | key omitted (adds the built-in `default` pool) | not adopted; stays a `master.yaml` or built-in pool | binary swap |
+| 2. No static pool at all | `[]` | adopted like the others | no longer a binary swap: such a master refuses `resource_pools: []` |
+
+On the first route the built-in `default` pool is a `master.yaml` pool, so the
+cluster is not strictly all dynamic; agents that set no `resource_pool` join
+it. A cluster with its own `default` pool in `master.yaml` takes the second
+route for that pool, or keeps it in `master.yaml`.
 
 1. Save a database dump, `master.yaml`, and the output of
-   `det resource-pool list-dynamic --json`.
+   `det resource-pool list-dynamic --json`. The listing redacts registry
+   credentials, so it serves only to compare configurations later; the dump
+   and the original configuration files are the backup.
 2. Upgrade the master with `master.yaml` unchanged and restart it. The schema
    migration runs, and every pool keeps running the configuration it had.
 3. For each dynamic pool saved without a spec, run
@@ -366,8 +386,9 @@ needs one master restart besides the upgrade.
    `det resource-pool adopt <name> <name>.yaml`, where `<name>.yaml` is the
    pool's `master.yaml` entry copied verbatim. Pools are listed in the order in
    which they were saved, so this keeps their relative order.
-5. Remove the adopted entries from `master.yaml`, and omit the `resource_pools`
-   key when none remain. Keep `default_compute_resource_pool`,
+5. Remove the adopted entries from `master.yaml`. On the first route, omit the
+   `resource_pools` key when none remain; on the second, set
+   `resource_pools: []`. Keep `default_compute_resource_pool`,
    `default_aux_resource_pool`, `scheduler`, and `task_container_defaults`.
    Never remove an entry before its pool is adopted: a master that starts
    without the pool deletes the saved state of its agents and fails the
@@ -381,9 +402,9 @@ needs one master restart besides the upgrade.
    page labels as default pools; that the master log has no "still defined in
    master.yaml" warning; and that agents and running tasks are present in every
    pool.
-8. Optionally, once a rollback is no longer needed, set `resource_pools: []` to
-   drop the built-in `default` pool. Every agent must then set its
-   `resource_pool`.
+8. On the first route, the second can follow once a rollback is no longer
+   needed: set `resource_pools: []` to drop the built-in `default` pool.
+   Every agent must then set its `resource_pool`.
 
 A pool named `default` needs care: when the `resource_pools` key is omitted, the
 master adds a built-in `default` pool. Like a `master.yaml` entry, it serves a
@@ -409,12 +430,25 @@ applies pending updates and ignores later changes to master defaults. Upgrading
 again resumes inheritance and rewrites the effective configurations.
 
 If a rollback is needed after pools were adopted but before their entries were
-removed from `master.yaml`, either remove those entries, or delete the adopted
-pools, which `master.yaml` still serves:
+removed from `master.yaml`, either remove those entries, or delete the saved
+rows of exactly those pools. An `adopt:` idempotency key only shows how a row
+was created, not whether `master.yaml` still serves the pool: a pool adopted
+earlier whose entry is gone exists only in the database, and deleting its row
+loses the pool. Delete rows by name only:
 
-```sql
-DELETE FROM dynamic_resource_pools WHERE idempotency_key LIKE 'adopt:%';
-```
+1. Stop the master and back up the database.
+2. List the pools that `master.yaml` still defines and that the saved rows
+   match, which `det resource-pool list-dynamic` showed as
+   `defined_in_master_yaml` before the stop.
+3. Show the rows to delete and check the count against that list:
+
+   ```sql
+   SELECT cluster_name, pool_name, idempotency_key, revision
+   FROM dynamic_resource_pools
+   WHERE cluster_name = '<cluster>' AND pool_name IN ('<pool-1>', '<pool-2>');
+   ```
+
+4. Delete the same rows with the same `WHERE` clause.
 
 The schema has rollback migrations for release rollback tooling. Rolling back
 the spec migration drops the saved specs and revisions; every pool then runs
