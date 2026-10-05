@@ -1,8 +1,11 @@
+import { gpuTopologyCase } from 'fixtures/gpuTopologyCases';
 import hparams from 'fixtures/hyperparameter-configs.json';
 import experimentResps from 'fixtures/responses/experiment-details/set-a.json';
 import * as ioTypes from 'ioTypes';
 import { DateString } from 'ioTypes';
 import {
+  Devicev1Type,
+  V1Agent,
   V1ExperimentActionResult,
   V1GenericTask,
   V1GenericTaskState,
@@ -241,6 +244,41 @@ describe('Decoder', () => {
         entrypoint: ['python', 'eval.py'],
       });
       expect(() => decoder.mapGenericTaskConfig('[1]')).toThrow();
+    });
+  });
+  describe('jsonToAgents', () => {
+    it('should keep the GPU topology and the slot draining flag', () => {
+      const gpuTopology = gpuTopologyCase('node01 with the exclude list');
+      const agent: V1Agent = {
+        enabled: false,
+        gpuTopology,
+        id: 'node01',
+        registeredTime: '2026-01-01T00:00:00Z' as DateString,
+        resourcePools: ['pool'],
+        slots: {
+          '/agents/node01/slots/0': {
+            device: { brand: 'GPU', id: 0, type: Devicev1Type.CUDA, uuid: 'GPU-a' },
+            draining: true,
+            enabled: false,
+            id: '0',
+          },
+          '/agents/node01/slots/1': {
+            device: { brand: 'GPU', id: 1, type: Devicev1Type.CUDA, uuid: 'GPU-b' },
+            enabled: true,
+            id: '1',
+          },
+        },
+        slotStats: { brandStats: {}, typeStats: {} },
+      };
+      const [decoded] = decoder.jsonToAgents([agent]);
+      expect(decoded.gpuTopology).toStrictEqual(gpuTopology);
+      expect(decoded.resources.map((r) => [r.id, r.enabled, r.draining])).toEqual([
+        ['0', false, true],
+        ['1', true, undefined],
+      ]);
+      expect(decoder.jsonToAgents([{ ...agent, gpuTopology: undefined }])[0].gpuTopology).toBe(
+        undefined,
+      );
     });
   });
 });
