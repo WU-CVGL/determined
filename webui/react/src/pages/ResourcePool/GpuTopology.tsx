@@ -147,7 +147,9 @@ const GpuInfoButton: React.FC<GpuProps> = (props) => {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const pinnedFromKeyboard = useRef(false);
-  const label = `Details for ${gpuName(props.gpu).toLowerCase()} on ${props.agentId}`;
+  const { gpu } = props;
+  const what = gpu.excluded ? `excluded GPU ${gpuLabel(gpu)}` : `slot ${gpu.deviceId}`;
+  const label = `Details for ${what} on ${props.agentId}`;
   const content = <GpuDetails {...props} />;
 
   const onOpenChange = useCallback((open: boolean) => {
@@ -218,6 +220,11 @@ const GpuTile: React.FC<GpuProps> = (props) => {
   const fill = gpu.excluded ? SlotState.Free : slotFillState(resource);
   const off = offLabel(gpu, resource);
   const word = gpuHealthWord(gpu.health);
+  // The fill state, then the stripe label: a draining slot can still run work. An excluded GPU
+  // has the Free fill only for its colour, so its name leaves the fill out.
+  const name = gpu.excluded
+    ? `${gpuName(gpu)}, excluded`
+    : `${gpuName(gpu)}, ${slotStateToLabel[fill]}${off ? `, ${off}` : ''}`;
   const classes = [css.tile];
   if (off) classes.push(css.striped);
   const style = {
@@ -226,7 +233,7 @@ const GpuTile: React.FC<GpuProps> = (props) => {
   } as CSSProperties;
   return (
     <div
-      aria-label={`${gpuName(gpu)}, ${off ?? slotStateToLabel[fill]}`}
+      aria-label={name}
       className={classes.join(' ')}
       data-fill={fill}
       role="group"

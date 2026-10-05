@@ -97,12 +97,39 @@ describe('GpuTopology', () => {
     expect(within(excluded).getByText('excluded')).toBeInTheDocument();
     expect(within(excluded).getByRole('img', { name: 'GPU health: ok' })).toBeInTheDocument();
     expect(
-      within(excluded).getByRole('button', { name: 'Details for excluded gpu 81:00.0 on node01' }),
+      within(excluded).getByRole('button', { name: 'Details for excluded GPU 81:00.0 on node01' }),
     ).toBeInTheDocument();
 
     // NUMA boxes; the excluded GPU sits in its NUMA node.
     const numa1 = screen.getByRole('region', { name: 'NUMA 1' });
     expect(within(numa1).getAllByRole('group')).toHaveLength(4);
+  });
+
+  it('names each tile by its fill state, then its stripe label', () => {
+    const agent = agentOf('node01', gpuTopologyCase('node01 with the exclude list'), {
+      0: { container: { id: 'c0', state: ResourceState.Running } },
+      1: { container: { id: 'c1', state: ResourceState.Pulling }, enabled: false },
+      5: { container: { id: 'c5', state: ResourceState.Running }, enabled: false },
+      6: { container: { id: 'c6', state: ResourceState.Running }, draining: true, enabled: false },
+      7: { draining: true, enabled: false },
+    });
+    setup(<GpuTopology agent={agent} />);
+    const names = screen.getAllByRole('group').map((g) => g.getAttribute('aria-label'));
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'Slot 0, Running',
+        'Slot 1, Pending, disabled',
+        'Slot 2, Free',
+        'Slot 5, Running, disabled',
+        'Slot 6, Running, draining',
+        'Slot 7, Free, draining',
+        // An excluded GPU has the Free fill for its colour only: its name leaves it out.
+        'Excluded GPU 81:00.0, excluded',
+      ]),
+    );
+    expect(
+      within(tile('Slot 6')).getByRole('button', { name: 'Details for slot 6 on node01' }),
+    ).toBeInTheDocument();
   });
 
   it('shows the details on hover and pins them on click', async () => {
@@ -180,6 +207,10 @@ describe('GpuTopology', () => {
     expect(screen.getAllByRole('group')).toHaveLength(8);
     expect(screen.getAllByRole('img', { name: 'GPU health: unknown' })).toHaveLength(8);
     expect(tile(`Excluded GPU ${topo.gpus[7].uuid}`)).toHaveClass('striped');
+    // Without a bus id the button names the excluded GPU by its UUID, as the API spells it.
+    expect(
+      screen.getByRole('button', { name: `Details for excluded GPU ${topo.gpus[7].uuid} on a` }),
+    ).toBeInTheDocument();
     expect(screen.queryByRole('region')).not.toBeInTheDocument();
     expect(screen.queryByText('Pairwise matrix')).not.toBeInTheDocument();
   });
