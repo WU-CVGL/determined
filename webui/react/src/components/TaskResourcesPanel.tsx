@@ -8,7 +8,7 @@ import Spinner from 'hew/Spinner';
 import React, { useEffect, useMemo, useState } from 'react';
 
 import TaskResourceChart from 'components/TaskResourceChart';
-import useTaskResourcesEnabled, { taskResourcesHeaders } from 'hooks/useTaskResourcesEnabled';
+import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
 import { serverAddress } from 'routes/utils';
 import {
   RESOURCE_METRICS,
@@ -94,7 +94,6 @@ const TaskResourcesPanel: React.FC<Props> = ({
     });
     fetch(serverAddress(`/ui/task-resources/${encodeURIComponent(taskId)}?${params}`), {
       credentials: 'include',
-      headers: taskResourcesHeaders(),
       signal: controller.signal,
     })
       .then(async (response) => {

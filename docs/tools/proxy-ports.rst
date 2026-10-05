@@ -63,3 +63,16 @@ password. To use it,
 .. code:: bash
 
    python -m determined.cli.tunnel --listener 8265 $DET_MASTER $TASK_ID:8265
+
+With ``unauthenticated: true``, the master forwards every request to the port without checking who
+sends it or whether they may see the task, so the app must authenticate requests itself. Without
+it, the master requires a Determined login and permission to view the task; this permission is not
+limited to the task's owner.
+
+In both modes, the master removes Determined credentials from a request before forwarding it: its
+session cookies, its token headers, and ``Authorization: Bearer`` headers that hold a Determined
+token. The app never receives them, but it does receive its own cookies and bearer tokens.
+
+Apps opened in a browser through ``/proxy/`` share the master's origin. A page served by a task can
+therefore still send requests to the master as the user who opened it, so open only the apps of
+users you trust.

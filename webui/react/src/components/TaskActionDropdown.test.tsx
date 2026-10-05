@@ -5,6 +5,7 @@ import { ConfirmationProvider } from 'hew/useConfirm';
 import { MemoryRouter } from 'react-router-dom';
 
 import { CommandState, CommandTask, CommandType } from 'types';
+import { NOTEBOOK_ACCESS_DENIED } from 'utils/wait';
 
 import TaskActionDropdown from './TaskActionDropdown';
 
@@ -18,7 +19,8 @@ vi.mock('routes/utils', () => ({
   paths: { taskLogs: () => '/logs' },
   serverAddress: () => 'http://localhost',
 }));
-vi.mock('services/api', () => ({ killTask: vi.fn() }));
+const mocks = vi.hoisted(() => ({ getJupyterLab: vi.fn() }));
+vi.mock('services/api', () => ({ getJupyterLab: mocks.getJupyterLab, killTask: vi.fn() }));
 
 const task: CommandTask = {
   id: 'task-1',
@@ -31,17 +33,23 @@ const task: CommandTask = {
   workspaceId: 10,
 };
 
-const openMenu = async (ownerId: number) => {
+const openMenu = async (ownerId: number, overrides: Partial<CommandTask> = {}) => {
   render(
     <MemoryRouter>
       <UIProvider theme={DefaultTheme.Light}>
         <ConfirmationProvider>
-          <TaskActionDropdown task={{ ...task, userId: ownerId }} />
+          <TaskActionDropdown task={{ ...task, userId: ownerId, ...overrides }} />
         </ConfirmationProvider>
       </UIProvider>
     </MemoryRouter>,
   );
   await userEvent.click(screen.getByRole('button'));
+};
+
+const notebook: Partial<CommandTask> = {
+  id: 'nb-1',
+  serviceAddress: '/proxy/nb-1/',
+  type: CommandType.JupyterLab,
 };
 
 describe('TaskActionDropdown', () => {
@@ -53,5 +61,21 @@ describe('TaskActionDropdown', () => {
   it('shows Kill for the user’s own task', async () => {
     await openMenu(101);
     expect(screen.getByText('Kill')).toBeInTheDocument();
+  });
+
+  it('connects to a notebook with the token that the master returns to its owner', async () => {
+    mocks.getJupyterLab.mockResolvedValue({ serviceAddress: '/proxy/nb-1/?token=tok' });
+    await openMenu(101, notebook);
+    await userEvent.click(screen.getByText('Connect'));
+    expect(await screen.findByText('http://localhost/proxy/nb-1/?token=tok')).toBeInTheDocument();
+    expect(mocks.getJupyterLab).toHaveBeenCalledWith({ commandId: 'nb-1' });
+  });
+
+  it('refuses to connect to a notebook without its token', async () => {
+    mocks.getJupyterLab.mockResolvedValue({ serviceAddress: '/proxy/nb-1/' });
+    await openMenu(102, notebook);
+    await userEvent.click(screen.getByText('Connect'));
+    expect(await screen.findByText(NOTEBOOK_ACCESS_DENIED)).toBeInTheDocument();
+    expect(screen.queryByText('http://localhost/proxy/nb-1/')).not.toBeInTheDocument();
   });
 });

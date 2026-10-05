@@ -101,26 +101,69 @@ def log_out_user(args: argparse.Namespace) -> None:
             token_store.clear_active()
 
 
+def _prompt_current_password(username: str) -> str:
+    return getpass.getpass("Current password for user '{}': ".format(username))
+
+
+CURRENT_PASSWORD_INCORRECT = "The current password is incorrect"
+
+
+def _is_caller(d: client.Determined, user_obj: client.User) -> bool:
+    # Compare user IDs: a cached session keeps the username it was cached under, which is out of
+    # date once its user has been renamed.
+    return d.whoami().user_id == user_obj.user_id
+
+
+def _move_cached_session(args: argparse.Namespace, sess: api.Session, new_username: str) -> None:
+    # Renaming does not end sessions. Cache the session's token under the new name, or commands
+    # that go by the session's username, like listing your own experiments, would use the old one.
+    token_store = authentication.TokenStore(args.master)
+    old_username = sess.username
+    if (
+        # Leave tokens that did not come from the cache, like DET_USER_TOKEN, alone.
+        token_store.get_token(old_username) != sess.token
+        # Do not replace another token cached under the new name.
+        or token_store.get_token(new_username) is not None
+    ):
+        return
+    token_store.set_token(new_username, sess.token)
+    if token_store.get_active_user() == old_username:
+        token_store.set_active(new_username)
+    token_store.drop_user(old_username)
+
+
 def rename(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
     d = client.Determined._from_session(sess)
     user_obj = d.get_user_by_name(args.target_user)
-    user_obj.rename(new_username=args.new_username)
+    # The master requires the current password when users rename themselves.
+    own = args.new_username != user_obj.username and _is_caller(d, user_obj)
+    current_password = _prompt_current_password(args.target_user) if own else None
+    try:
+        user_obj.rename(new_username=args.new_username, current_password=current_password)
+    except api.errors.ForbiddenException as e:
+        if own:
+            raise errors.CliError(CURRENT_PASSWORD_INCORRECT) from e
+        raise
+    if own and user_obj.username:
+        _move_cached_session(args, sess, user_obj.username)
 
 
 def change_password(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
     d = client.Determined._from_session(sess)
-    if args.target_user:
-        username = args.target_user
-    elif args.user:
-        username = args.user
-    else:
-        username = d.get_session_username()
+    # Without a target, users change their own password.
+    me = d.whoami()
+    user_obj = d.get_user_by_name(args.target_user) if args.target_user else me
+    username = user_obj.username
+    assert username is not None
 
-    if not username:
-        # The default user should have been set by now by autologin.
-        raise errors.CliError("Please log in as an admin or user to change passwords")
+    # The master requires the current password when users change their own password. Compare user
+    # IDs, as _is_caller does.
+    own_password = user_obj.user_id == me.user_id
+    current_password = None
+    if own_password:
+        current_password = _prompt_current_password(username)
 
     password = getpass.getpass("New password for user '{}': ".format(username))
     check_password = getpass.getpass("Confirm password: ")
@@ -128,12 +171,16 @@ def change_password(args: argparse.Namespace) -> None:
     if password != check_password:
         raise errors.CliError("Passwords do not match")
 
-    user_obj = d.get_user_by_name(username)
-    user_obj.change_password(new_password=password)
+    try:
+        user_obj.change_password(new_password=password, current_password=current_password)
+    except api.errors.ForbiddenException as e:
+        if own_password:
+            raise errors.CliError(CURRENT_PASSWORD_INCORRECT) from e
+        raise
 
-    # If the target user's password isn't being changed by another user, reauthenticate after
-    # password change so that the user doesn't have to do so manually.
-    if args.target_user is None:
+    # Changing a password ends the user's sessions. When users change their own password, sign
+    # them in again so that they do not have to do so manually.
+    if own_password:
         token_store = authentication.TokenStore(args.master)
         sess = authentication.login(args.master, username, password, cli.cert)
         token_store.set_token(sess.username, sess.token)
@@ -203,19 +250,31 @@ def edit(args: argparse.Namespace) -> None:
         patch_user.active = args.activate
         changes.append("Active")
 
+    own_rename = False
     if args.username is not None:
         patch_user.username = args.username
         changes.append("Username")
+        # The master requires the current password when users rename themselves.
+        own_rename = args.username != user_obj.username and _is_caller(d, user_obj)
 
     if args.admin is not None:
         patch_user.admin = args.admin
         changes.append("Admin")
 
-    if len(changes) > 0:
-        bindings.patch_PatchUser(sess, body=patch_user, userId=user_obj.user_id)
-        print("Changes made to the following fields: " + ", ".join(changes))
-    else:
+    if len(changes) == 0:
         raise errors.CliError("No field provided. Use 'det user edit -h' for usage.")
+    if own_rename:
+        patch_user.oldPassword = api.salt_and_hash(_prompt_current_password(args.target_user))
+        patch_user.isHashed = True
+    try:
+        resp = bindings.patch_PatchUser(sess, body=patch_user, userId=user_obj.user_id)
+    except api.errors.ForbiddenException as e:
+        if own_rename:
+            raise errors.CliError(CURRENT_PASSWORD_INCORRECT) from e
+        raise
+    if own_rename:
+        _move_cached_session(args, sess, resp.user.username)
+    print("Changes made to the following fields: " + ", ".join(changes))
 
 
 AGENT_USER_GROUP_ARGS = [

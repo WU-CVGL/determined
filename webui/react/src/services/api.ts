@@ -30,6 +30,10 @@ export const login = generateDetApi<Api.V1LoginRequest, Api.V1LoginResponse, Ser
 
 export const logout = generateDetApi<EmptyParams, Api.V1LogoutResponse, void>(Config.logout);
 
+export const storeSessionToken = generateDetApi<Service.StoreSessionTokenParams, Response, void>(
+  Config.storeSessionToken,
+);
+
 export const getCurrentUser = generateDetApi<
   EmptyParams,
   Api.V1CurrentUserResponse,

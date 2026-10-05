@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 
-import { globalStorage } from 'globalStorage';
 import { serverAddress } from 'routes/utils';
 import { GrafanaTaskResourcesConfig } from 'utils/grafanaTaskResources';
 
@@ -11,9 +10,6 @@ const useGrafanaTaskResources = (): GrafanaTaskResourcesConfig | undefined => {
     const canceler = new AbortController();
     fetch(serverAddress('/ui/grafana-task-resources'), {
       credentials: 'include',
-      headers: globalStorage.authToken
-        ? { Authorization: `Bearer ${globalStorage.authToken}` }
-        : undefined,
       signal: canceler.signal,
     })
       .then((response) => (response.ok ? response.json() : undefined))

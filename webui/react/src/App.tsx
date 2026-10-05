@@ -17,7 +17,7 @@ import PageMessage from 'components/PageMessage';
 import Router from 'components/Router';
 import useUI, { Mode, ThemeProvider } from 'components/ThemeProvider';
 import VersionChecker from 'components/VersionChecker';
-import useAuthCheck from 'hooks/useAuthCheck';
+import { useSessionCheck } from 'hooks/useAuthCheck';
 import useFeature from 'hooks/useFeature';
 import useKeyTracker from 'hooks/useKeyTracker';
 import usePageVisibility from 'hooks/usePageVisibility';
@@ -58,15 +58,12 @@ const AppView: React.FC = () => {
   const loadableInfo = useObservable(determinedStore.loadableInfo);
   const isServerReachable = useObservable(determinedStore.isServerReachable);
   const { updateTelemetry } = useTelemetry();
-  const checkAuth = useAuthCheck();
   const settings = useObservable(themeSetting);
   const [isSettingsReady, setIsSettingsReady] = useState(false);
   const { ui, actions: uiActions, theme, isDarkMode } = useUI();
   const streamingUpdatesOn = useFeature().isOn('streaming_updates');
 
-  useEffect(() => {
-    if (isServerReachable) checkAuth();
-  }, [checkAuth, isServerReachable]);
+  useSessionCheck(isServerReachable);
 
   useKeyTracker();
   usePageVisibility();

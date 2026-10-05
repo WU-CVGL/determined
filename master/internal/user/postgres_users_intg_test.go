@@ -5,11 +5,13 @@ package user
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
 	"log"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgconn"
@@ -20,6 +22,7 @@ import (
 	"gopkg.in/guregu/null.v3"
 
 	"github.com/determined-ai/determined/master/internal/db"
+	"github.com/determined-ai/determined/master/internal/token"
 	"github.com/determined-ai/determined/master/pkg/etc"
 	"github.com/determined-ai/determined/master/pkg/model"
 )
@@ -313,6 +316,87 @@ func TestByToken(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, user.ID, userID)
 	require.Equal(t, session.ID, sessionID)
+}
+
+func TestByTokenRejectsTokensOfOtherSessionTables(t *testing.T) {
+	admin, err := addTestUser(nil, func(u *model.User) { u.Admin = true })
+	require.NoError(t, err)
+	_, err = StartSession(context.TODO(), admin)
+	require.NoError(t, err)
+	var adminSession model.UserSession
+	require.NoError(t, db.Bun().NewSelect().Model(&adminSession).
+		Where("user_id = ?", admin.ID).Scan(context.TODO()))
+	other, err := addTestUser(nil)
+	require.NoError(t, err)
+
+	// Another user's allocation session can have the same ID as the admin's user session.
+	allocationToken, err := paseto.NewV2().Sign(db.GetTokenKeys().PrivateKey,
+		&model.AllocationSession{ID: adminSession.ID, AllocationID: "task.1", OwnerID: &other.ID},
+		nil)
+	require.NoError(t, err)
+	_, _, err = ByToken(context.TODO(), allocationToken, &model.ExternalSessions{})
+	require.ErrorIs(t, err, db.ErrNotFound)
+
+	// A notebook session token never names a user session either.
+	notebookToken, err := db.GenerateNotebookSessionToken(admin.ID, "task")
+	require.NoError(t, err)
+	_, _, err = ByToken(context.TODO(), notebookToken, &model.ExternalSessions{})
+	require.Error(t, err)
+
+	// The admin's own token still works, inherited claims included.
+	claims := map[string]string{"k": "v"}
+	token, err := StartSession(context.TODO(), admin, WithInheritedClaims(claims))
+	require.NoError(t, err)
+	u, session, err := ByToken(context.TODO(), token, &model.ExternalSessions{})
+	require.NoError(t, err)
+	require.Equal(t, admin.ID, u.ID)
+	require.Equal(t, claims, session.InheritedClaims)
+}
+
+func TestIsMasterSignedToken(t *testing.T) {
+	ctx := context.TODO()
+	user, err := addTestUser(nil)
+	require.NoError(t, err)
+
+	sessionToken, err := StartSession(ctx, user)
+	require.NoError(t, err)
+	accessToken, _, err := token.CreateAccessToken(ctx, user.ID)
+	require.NoError(t, err)
+	// A task session token, as db.StartAllocationSession signs it.
+	allocationToken, err := paseto.NewV2().Sign(db.GetTokenKeys().PrivateKey,
+		&model.AllocationSession{ID: 1, AllocationID: "task.1", OwnerID: &user.ID}, nil)
+	require.NoError(t, err)
+	notebookToken, err := db.GenerateNotebookSessionToken(user.ID, "task")
+	require.NoError(t, err)
+	expiredToken, err := paseto.NewV2().Sign(db.GetTokenKeys().PrivateKey,
+		&model.UserSession{ID: 1, UserID: user.ID, Expiry: time.Now().Add(-time.Hour)}, nil)
+	require.NoError(t, err)
+	_, foreignKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	foreignToken, err := paseto.NewV2().Sign(foreignKey,
+		&model.UserSession{ID: 1, UserID: user.ID, Expiry: time.Now().Add(time.Hour)}, nil)
+	require.NoError(t, err)
+
+	// A session that has ended is still the master's credential.
+	require.NoError(t, DeleteSessionByToken(ctx, sessionToken))
+	for name, tok := range map[string]string{
+		"ended user session": sessionToken,
+		"access token":       accessToken,
+		"allocation session": allocationToken,
+		"notebook session":   notebookToken,
+		"expired session":    expiredToken,
+	} {
+		require.True(t, IsMasterSignedToken(tok), name)
+	}
+
+	for name, tok := range map[string]string{
+		"signed with another key": foreignToken,
+		"tampered":                accessToken[:len(accessToken)-4] + "AAAA",
+		"opaque service key":      "svc-key",
+		"empty":                   "",
+	} {
+		require.False(t, IsMasterSignedToken(tok), name)
+	}
 }
 
 func TestByUsername(t *testing.T) {
