@@ -39,7 +39,9 @@ var readCreatedDynamicResourcePool = func(
 }
 
 // DynamicResourcePool is the durable desired configuration and operation status for a dynamic
-// resource pool. Config is the normalized, effective ResourcePoolConfig JSON.
+// resource pool. Config is the normalized, effective ResourcePoolConfig JSON. Spec, when set, is
+// the administrator's sparse ResourcePoolConfig and the source of truth; Config is then a snapshot
+// of its effective values that earlier masters can still run.
 type DynamicResourcePool struct {
 	ClusterName    string                   `db:"cluster_name" json:"cluster_name"`
 	PoolName       string                   `db:"pool_name" json:"pool_name"`
@@ -47,11 +49,24 @@ type DynamicResourcePool struct {
 	IdempotencyKey string                   `db:"idempotency_key" json:"-"`
 	Config         json.RawMessage          `db:"config" json:"config"`
 	ConfigHash     string                   `db:"config_hash" json:"-"`
+	Spec           *json.RawMessage         `db:"spec" json:"spec,omitempty"`
+	SpecVersion    *int                     `db:"spec_version" json:"spec_version,omitempty"`
+	SpecHash       *string                  `db:"spec_hash" json:"-"`
+	Revision       int64                    `db:"revision" json:"revision"`
 	State          DynamicResourcePoolState `db:"state" json:"state"`
 	Error          *string                  `db:"error" json:"error,omitempty"`
 	CreatedAt      time.Time                `db:"created_at" json:"created_at"`
 	UpdatedAt      time.Time                `db:"updated_at" json:"updated_at"`
 }
+
+// DynamicResourcePoolSnapshot is an effective config written alongside a spec.
+type DynamicResourcePoolSnapshot struct {
+	Config     json.RawMessage
+	ConfigHash string
+}
+
+const dynamicResourcePoolColumns = `cluster_name, pool_name, config_version, idempotency_key, config,
+       config_hash, spec, spec_version, spec_hash, revision, state, error, created_at, updated_at`
 
 // CreateDynamicResourcePool durably inserts a Pending desired config. An exact replay using the
 // same resource-manager-scoped idempotency key returns the original operation. Pool names are
@@ -60,10 +75,15 @@ func (db *PgDB) CreateDynamicResourcePool(
 	ctx context.Context,
 	record DynamicResourcePool,
 ) (stored DynamicResourcePool, created bool, err error) {
+	var spec interface{}
+	if record.Spec != nil {
+		spec = []byte(*record.Spec)
+	}
 	result, err := db.sql.ExecContext(ctx, `
 INSERT INTO dynamic_resource_pools
-    (cluster_name, pool_name, config_version, idempotency_key, config, config_hash, state)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+    (cluster_name, pool_name, config_version, idempotency_key, config, config_hash,
+     spec, spec_version, spec_hash, state)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT DO NOTHING`,
 		record.ClusterName,
 		record.PoolName,
@@ -71,6 +91,9 @@ ON CONFLICT DO NOTHING`,
 		record.IdempotencyKey,
 		[]byte(record.Config),
 		record.ConfigHash,
+		spec,
+		record.SpecVersion,
+		record.SpecHash,
 		DynamicResourcePoolPending,
 	)
 	if err != nil {
@@ -89,9 +112,12 @@ ON CONFLICT DO NOTHING`,
 		ctx, record.ClusterName, record.IdempotencyKey,
 	)
 	if err == nil {
+		// The spec hash is computed only when a spec is written. A row written without a spec, or
+		// whose spec was replaced since, is not a replay of this request.
 		if stored.PoolName == record.PoolName &&
 			stored.ConfigVersion == record.ConfigVersion &&
-			stored.ConfigHash == record.ConfigHash {
+			stored.SpecHash != nil && record.SpecHash != nil &&
+			*stored.SpecHash == *record.SpecHash {
 			return stored, false, nil
 		}
 		return DynamicResourcePool{}, false, fmt.Errorf(
@@ -121,8 +147,7 @@ func (db *PgDB) DynamicResourcePoolByName(
 ) (DynamicResourcePool, error) {
 	var record DynamicResourcePool
 	err := db.sql.GetContext(ctx, &record, `
-SELECT cluster_name, pool_name, config_version, idempotency_key, config, config_hash,
-       state, error, created_at, updated_at
+SELECT `+dynamicResourcePoolColumns+`
 FROM dynamic_resource_pools
 WHERE pool_name = $1`, poolName)
 	if err != nil {
@@ -139,8 +164,7 @@ func (db *PgDB) dynamicResourcePoolByIdempotencyKey(
 ) (DynamicResourcePool, error) {
 	var record DynamicResourcePool
 	err := db.sql.GetContext(ctx, &record, `
-SELECT cluster_name, pool_name, config_version, idempotency_key, config, config_hash,
-       state, error, created_at, updated_at
+SELECT `+dynamicResourcePoolColumns+`
 FROM dynamic_resource_pools
 WHERE cluster_name = $1 AND idempotency_key = $2`, clusterName, idempotencyKey)
 	if err != nil {
@@ -159,8 +183,7 @@ func (db *PgDB) ListDynamicResourcePools(
 ) ([]DynamicResourcePool, error) {
 	records := []DynamicResourcePool{}
 	query := `
-SELECT cluster_name, pool_name, config_version, idempotency_key, config, config_hash,
-       state, error, created_at, updated_at
+SELECT ` + dynamicResourcePoolColumns + `
 FROM dynamic_resource_pools`
 	args := []interface{}{}
 	if clusterName != "" {
@@ -186,13 +209,42 @@ func (db *PgDB) SetDynamicResourcePoolState(
 UPDATE dynamic_resource_pools
 SET state = $2, error = $3, updated_at = NOW()
 WHERE pool_name = $1
-RETURNING cluster_name, pool_name, config_version, idempotency_key, config, config_hash,
-          state, error, created_at, updated_at`, poolName, state, errText)
+RETURNING `+dynamicResourcePoolColumns, poolName, state, errText)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return DynamicResourcePool{}, ErrDynamicResourcePoolNotFound
 		}
 		return DynamicResourcePool{}, fmt.Errorf("updating dynamic resource pool state: %w", err)
+	}
+	return record, nil
+}
+
+// MarkDynamicResourcePoolReady records a successful startup initialization. A non-nil snapshot
+// replaces the stored effective config in the same write.
+func (db *PgDB) MarkDynamicResourcePoolReady(
+	ctx context.Context,
+	poolName string,
+	snapshot *DynamicResourcePoolSnapshot,
+) (DynamicResourcePool, error) {
+	var config interface{}
+	var configHash *string
+	if snapshot != nil {
+		config = []byte(snapshot.Config)
+		configHash = &snapshot.ConfigHash
+	}
+	var record DynamicResourcePool
+	err := db.sql.GetContext(ctx, &record, `
+UPDATE dynamic_resource_pools
+SET state = $2, error = NULL,
+    config = COALESCE($3::jsonb, config), config_hash = COALESCE($4, config_hash),
+    updated_at = NOW()
+WHERE pool_name = $1
+RETURNING `+dynamicResourcePoolColumns, poolName, DynamicResourcePoolReady, config, configHash)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return DynamicResourcePool{}, ErrDynamicResourcePoolNotFound
+		}
+		return DynamicResourcePool{}, fmt.Errorf("marking dynamic resource pool ready: %w", err)
 	}
 	return record, nil
 }
@@ -206,8 +258,7 @@ func (db *PgDB) BeginDynamicResourcePoolRetry(
 UPDATE dynamic_resource_pools
 SET state = $3, error = NULL, updated_at = NOW()
 WHERE cluster_name = $1 AND pool_name = $2 AND state = $4
-RETURNING cluster_name, pool_name, config_version, idempotency_key, config, config_hash,
-          state, error, created_at, updated_at`,
+RETURNING `+dynamicResourcePoolColumns,
 		clusterName, poolName, DynamicResourcePoolPending, DynamicResourcePoolFailed)
 	if err == nil {
 		return record, nil
