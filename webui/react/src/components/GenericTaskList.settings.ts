@@ -6,6 +6,7 @@ import { SettingsConfig } from 'hooks/useSettings';
 import { GenericTaskState, ValueOf } from 'types';
 
 export type GenericTaskColumnName =
+  | 'action'
   | 'endTime'
   | 'id'
   | 'name'
@@ -31,6 +32,7 @@ export const DEFAULT_COLUMNS: GenericTaskColumnName[] = [
 ];
 
 export const DEFAULT_COLUMN_WIDTHS: Record<GenericTaskColumnName, number> = {
+  action: 46,
   endTime: 117,
   id: 100,
   name: 200,
@@ -69,6 +71,7 @@ const config = (workspaceId?: number): SettingsConfig<Settings> => ({
       storageKey: 'columns',
       type: array(
         union([
+          literal('action'),
           literal('endTime'),
           literal('id'),
           literal('name'),

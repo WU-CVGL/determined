@@ -7,6 +7,7 @@ import _ from 'lodash';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import FilterCounter from 'components/FilterCounter';
+import GenericTaskActionDropdown from 'components/GenericTaskActionDropdown';
 import GenericTaskIdLink from 'components/GenericTaskIdLink';
 import settingsConfig, {
   DEFAULT_COLUMN_WIDTHS,
@@ -15,7 +16,11 @@ import settingsConfig, {
 } from 'components/GenericTaskList.settings';
 import GenericTaskStateBadge from 'components/GenericTaskStateBadge';
 import Link from 'components/Link';
-import InteractiveTable, { ColumnDef } from 'components/Table/InteractiveTable';
+import InteractiveTable, {
+  ColumnDef,
+  ContextMenuProps,
+  onRightClickableCell,
+} from 'components/Table/InteractiveTable';
 import {
   checkmarkRenderer,
   defaultRowClassName,
@@ -236,9 +241,32 @@ const GenericTaskList: React.FC<Props> = ({ workspaceId }: Props) => {
         render: (_: unknown, record: GenericTask) => timeRenderer(record.endTime),
         title: 'Ended',
       },
+      {
+        align: 'right',
+        className: 'fullCell',
+        dataIndex: 'action',
+        defaultWidth: DEFAULT_COLUMN_WIDTHS['action'],
+        fixed: 'right',
+        key: 'action',
+        onCell: () => ({ ...onRightClickableCell(), 'data-testid': 'actions' }),
+        render: (_: unknown, record: GenericTask) => (
+          <GenericTaskActionDropdown task={record} onComplete={fetchTasks} />
+        ),
+        title: '',
+      },
     ];
     return cols;
-  }, [stateFilterDropdown, users]);
+  }, [fetchTasks, stateFilterDropdown, users]);
+
+  // The same menu on a right click on the row.
+  const GenericTaskActionDropdownCM = useCallback(
+    ({ record, children }: ContextMenuProps<GenericTask>) => (
+      <GenericTaskActionDropdown task={record} onComplete={fetchTasks}>
+        {children}
+      </GenericTaskActionDropdown>
+    ),
+    [fetchTasks],
+  );
 
   const handleTableChange = useCallback(
     (tablePagination: TablePaginationConfig) => {
@@ -271,6 +299,7 @@ const GenericTaskList: React.FC<Props> = ({ workspaceId }: Props) => {
         <InteractiveTable<GenericTask, Settings>
           columns={columns}
           containerRef={pageRef}
+          ContextMenu={GenericTaskActionDropdownCM}
           dataSource={response?.tasks}
           defaultColumns={stgsConfig.settings.columns.defaultValue}
           loading={response === undefined}
