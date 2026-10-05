@@ -208,6 +208,12 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
     [canModifyExperiment, canModifyWorkspaceNSC],
   );
 
+  // Whether to offer Manage Job, in the job menu and the task menu alike.
+  const canManage = useCallback(
+    (job: FullJob) => canControlJob(job) && canManageJob(job, selectedRp),
+    [canControlJob, selectedRp],
+  );
+
   const dropDownOnTrigger = useCallback(
     (job: Job) => {
       if (!('entityId' in job) || !job.entityId) return {};
@@ -253,7 +259,7 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
         }
       }
 
-      if (canControl && canManageJob(job, selectedRp)) {
+      if (canManage(job)) {
         triggers[JobAction.ManageJob] = () => setManagingJob(job);
       }
 
@@ -268,7 +274,7 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
       });
       return triggers;
     },
-    [selectedRp, fetchJobsTable, resourcesEnabled, canControlJob],
+    [fetchJobsTable, resourcesEnabled, canControlJob, canManage],
   );
 
   const onModalClose = useCallback(() => {
@@ -314,7 +320,6 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
                     ? commandTasks[record.entityId]
                     : undefined;
                   if (task) {
-                    const canManage = canControlJob(record) && canManageJob(record, selectedRp);
                     return (
                       <div>
                         <TaskActionDropdown
@@ -322,7 +327,7 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
                           task={task}
                           onComplete={fetchJobsTable}
                           onLaunchAgain={launchAgain}
-                          onManageJob={canManage ? () => setManagingJob(record) : undefined}
+                          onManageJob={canManage(record) ? () => setManagingJob(record) : undefined}
                         />
                       </div>
                     );
@@ -452,7 +457,7 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
     settings.sortKey,
     settings.sortDesc,
     selectedRp.schedulerType,
-    canControlJob,
+    canManage,
     commandTasks,
     currentUser,
     fetchJobsTable,

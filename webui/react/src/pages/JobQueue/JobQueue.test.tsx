@@ -8,10 +8,11 @@ import { BrowserRouter } from 'react-router-dom';
 
 import { ThemeProvider } from 'components/ThemeProvider';
 import { SettingsProvider } from 'hooks/useSettingsProvider';
-import { getShells } from 'services/api';
+import { getJobQ, getShells } from 'services/api';
 import * as Api from 'services/api-ts-sdk';
 import userStore from 'stores/users';
 import {
+  CommandResponse,
   CommandState,
   CommandTask,
   CommandType,
@@ -62,6 +63,8 @@ const runningShell: CommandTask = {
 };
 
 const mocks = vi.hoisted(() => ({ jobs: [] as unknown[] }));
+const permissions = vi.hoisted(() => ({ canModify: true }));
+const launched = vi.hoisted(() => ({ response: undefined as CommandResponse | undefined }));
 
 vi.mock('services/api', () => ({
   cancelExperiment: vi.fn(),
@@ -79,18 +82,31 @@ vi.mock('services/api', () => ({
 vi.mock('hooks/usePermissions', () => ({
   default: () => ({
     canCreateWorkspaceNSC: () => true,
-    canModifyExperiment: () => true,
-    canModifyWorkspaceNSC: () => true,
+    canModifyExperiment: () => permissions.canModify,
+    canModifyWorkspaceNSC: () => permissions.canModify,
   }),
 }));
 vi.mock('hooks/useTaskResourcesEnabled', () => ({ default: () => true }));
 vi.mock('hooks/useFeature', () => ({ default: () => ({ isOn: () => true }) }));
-// The launch form itself is tested with the Tasks page's buttons.
-vi.mock('components/ShellModal', () => ({
-  default: ({ initialTask }: { initialTask?: CommandTask }) => (
-    <div>Launch form for {initialTask?.id}</div>
-  ),
-}));
+// The launch form itself is tested with the Tasks page's buttons. The stand-in is a modal, so it
+// shows only once Launch Again opens it.
+vi.mock('components/ShellModal', async () => {
+  const { Modal } = await import('hew/Modal');
+  const Button = (await import('hew/Button')).default;
+  return {
+    default: ({
+      initialTask,
+      onLaunched,
+    }: {
+      initialTask?: CommandTask;
+      onLaunched?: (response: CommandResponse) => void;
+    }) => (
+      <Modal title={`Launch form for ${initialTask?.id}`}>
+        <Button onClick={() => launched.response && onLaunched?.(launched.response)}>Launch</Button>
+      </Modal>
+    ),
+  };
+});
 
 const pool = (schedulerType: Api.V1SchedulerType) =>
   ({ name: 'default', schedulerType }) as unknown as ResourcePool;
@@ -139,6 +155,11 @@ describe('JobQueue', () => {
 
   beforeEach(() => {
     mocks.jobs = [shellJob];
+    permissions.canModify = true;
+    launched.response = {
+      command: { ...runningShell, id: 'shell-2', state: CommandState.Queued },
+      warnings: [],
+    };
     vi.mocked(getShells).mockResolvedValue([runningShell]);
   });
 
@@ -170,12 +191,43 @@ describe('JobQueue', () => {
     expect(menuLabels().at(-1)).toBe('Kill');
   });
 
-  it('opens the launch form from Launch Again', async () => {
+  it('leaves out Manage Job and Kill where the user cannot control the task', async () => {
+    permissions.canModify = false;
+    mocks.jobs = [{ ...shellJob, userId: OWNER_ID + 1 }];
+    vi.mocked(getShells).mockResolvedValue([{ ...runningShell, userId: OWNER_ID + 1 }]);
     setup();
     await waitForShells();
     await openRowMenu(/Shell shell-/);
+    await screen.findByText('Copy Task ID');
+    expect(menuLabels()).toEqual([
+      'View Logs',
+      'View Resources',
+      'Copy Task ID',
+      'Connect via CLI',
+    ]);
+  });
+
+  it('leaves out Manage Job and Kill in the job menu where the user cannot control the job', async () => {
+    permissions.canModify = false;
+    mocks.jobs = [experimentJob];
+    setup();
+    await openRowMenu('mnist');
+    await screen.findByText('View Resources');
+    expect(menuLabels()).toEqual(['View Resources']);
+  });
+
+  it('opens the launch form from Launch Again and shows the launch result', async () => {
+    setup();
+    await waitForShells();
+    expect(screen.queryByText('Launch form for shell-1')).not.toBeInTheDocument();
+    await openRowMenu(/Shell shell-/);
     await userEvent.click(await screen.findByText('Launch Again'));
     expect(await screen.findByText('Launch form for shell-1')).toBeInTheDocument();
+    const fetches = vi.mocked(getJobQ).mock.calls.length;
+    await userEvent.click(screen.getByRole('button', { name: 'Launch' }));
+    expect(await screen.findByText('Shell Launched')).toBeInTheDocument();
+    // The list is fetched again, so the new shell shows up.
+    await waitFor(() => expect(vi.mocked(getJobQ).mock.calls.length).toBeGreaterThan(fetches));
   });
 
   it('keeps the job menu, in the same order, for an experiment', async () => {

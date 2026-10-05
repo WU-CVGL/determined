@@ -72,8 +72,10 @@ export const TaskBar: React.FC<Props> = ({
     [confirm],
   );
 
+  // The task action menu's order: View Logs first, the destructive Kill last.
   const menuItems: MenuItem[] = useMemo(
     () => [
+      { key: MenuKey.ViewLogs, label: 'View Logs' },
       {
         disabled: Loadable.match(task, {
           _: () => true,
@@ -83,7 +85,6 @@ export const TaskBar: React.FC<Props> = ({
         key: MenuKey.Kill,
         label: 'Kill',
       },
-      { key: MenuKey.ViewLogs, label: 'View Logs' },
     ],
     [canModifyWorkspaceNSC, task],
   );
