@@ -54,8 +54,8 @@ type Notebook struct {
 	JobId string `protobuf:"bytes,14,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
 	// Workspace ID.
 	WorkspaceId int32 `protobuf:"varint,17,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	// The number of slots the notebook asks for (resources.slots); 0 for a
-	// CPU-only notebook.
+	// The slot count the notebook requests (resources.slots), 0 when it
+	// requests none.
 	Slots int32 `protobuf:"varint,100,opt,name=slots,proto3" json:"slots,omitempty"`
 }
 

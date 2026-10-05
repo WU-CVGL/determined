@@ -89,6 +89,5 @@ describe('Jobs routes', () => {
       '/tasks/:taskId/resources',
     );
     expect(paths.taskList()).toBe('/tasks');
-    expect(paths.genericTaskList()).toBe('/tasks?type=generic-task');
   });
 });

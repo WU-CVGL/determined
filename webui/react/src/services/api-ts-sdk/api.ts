@@ -2131,7 +2131,7 @@ export interface V1Command {
      */
     workspaceId: number;
     /**
-     * The number of slots the command asks for (resources.slots); 0 for a CPU-only command.
+     * The slot count the command requests (resources.slots), 0 when it requests none.
      * @type {number}
      * @memberof V1Command
      */
@@ -7180,7 +7180,7 @@ export interface V1Notebook {
      */
     workspaceId: number;
     /**
-     * The number of slots the notebook asks for (resources.slots); 0 for a CPU-only notebook.
+     * The slot count the notebook requests (resources.slots), 0 when it requests none.
      * @type {number}
      * @memberof V1Notebook
      */
@@ -11063,7 +11063,7 @@ export interface V1Shell {
      */
     workspaceId: number;
     /**
-     * The number of slots the shell asks for (resources.slots); 0 for a CPU-only shell.
+     * The slot count the shell requests (resources.slots), 0 when it requests none.
      * @type {number}
      * @memberof V1Shell
      */
@@ -11710,7 +11710,7 @@ export interface V1Tensorboard {
      */
     workspaceId: number;
     /**
-     * The number of slots the TensorBoard asks for (resources.slots); 0 for a CPU-only TensorBoard.
+     * The slot count the TensorBoard requests (resources.slots), 0 when it requests none.
      * @type {number}
      * @memberof V1Tensorboard
      */

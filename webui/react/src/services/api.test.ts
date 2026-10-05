@@ -85,12 +85,12 @@ describe('generic task services', () => {
     expect(response.pagination.total).toBe(1);
   });
 
-  it('getGenericTasks passes the project, search and GPU filters', async () => {
+  it('getGenericTasks passes the project, search and slots filters', async () => {
     const spy = vi.spyOn(detApi.Tasks, 'getGenericTasks').mockResolvedValue(listResponse([]));
     const signal = new AbortController().signal;
 
     await getGenericTasks(
-      { projectId: 5, search: 'sweep', slotsFilter: V1SlotsFilter.CPUONLY },
+      { projectId: 5, search: 'sweep', slotsFilter: V1SlotsFilter.ZEROSLOTS },
       { signal },
     );
 
@@ -105,7 +105,7 @@ describe('generic task services', () => {
       undefined,
       5,
       'sweep',
-      V1SlotsFilter.CPUONLY,
+      V1SlotsFilter.ZEROSLOTS,
       { signal },
     );
   });
@@ -169,16 +169,16 @@ describe('dashboard list services', () => {
     vi.restoreAllMocks();
   });
 
-  it('getExperiments passes the workspace and GPU filters', async () => {
+  it('getExperiments passes the workspace and slots filters', async () => {
     const spy = vi
       .spyOn(detApi.Experiments, 'getExperiments')
       .mockResolvedValue({ experiments: [], pagination: { total: 0 } });
 
-    await getExperiments({ slotsFilter: V1SlotsFilter.GPU, workspaceId: 7 });
+    await getExperiments({ slotsFilter: V1SlotsFilter.HASSLOTS, workspaceId: 7 });
 
     const args = spy.mock.calls[0];
     // workspaceId and slotsFilter come right before the request options.
-    expect(args.slice(-3, -1)).toStrictEqual([7, V1SlotsFilter.GPU]);
+    expect(args.slice(-3, -1)).toStrictEqual([7, V1SlotsFilter.HASSLOTS]);
   });
 
   it('getExperiments filters by user IDs, as given or as user strings', async () => {

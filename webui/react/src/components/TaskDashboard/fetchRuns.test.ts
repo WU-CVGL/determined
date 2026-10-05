@@ -232,15 +232,15 @@ describe('fetchRunPage', () => {
     it('filters experiments and generic tasks on the master', async () => {
       await fetchRunPage(globalJobs({ slots: SlotsFilter.Gpu }));
 
-      expect(listCall(getGenericTasks)?.slotsFilter).toBe(V1SlotsFilter.GPU);
-      expect(countCall(getGenericTasks)?.slotsFilter).toBe(V1SlotsFilter.GPU);
-      expect(listCall(getExperiments)?.slotsFilter).toBe(V1SlotsFilter.GPU);
-      expect(countCall(getExperiments)?.slotsFilter).toBe(V1SlotsFilter.GPU);
+      expect(listCall(getGenericTasks)?.slotsFilter).toBe(V1SlotsFilter.HASSLOTS);
+      expect(countCall(getGenericTasks)?.slotsFilter).toBe(V1SlotsFilter.HASSLOTS);
+      expect(listCall(getExperiments)?.slotsFilter).toBe(V1SlotsFilter.HASSLOTS);
+      expect(countCall(getExperiments)?.slotsFilter).toBe(V1SlotsFilter.HASSLOTS);
 
       vi.clearAllMocks();
       await fetchRunPage(globalJobs({ slots: SlotsFilter.CpuOnly }));
-      expect(listCall(getGenericTasks)?.slotsFilter).toBe(V1SlotsFilter.CPUONLY);
-      expect(listCall(getExperiments)?.slotsFilter).toBe(V1SlotsFilter.CPUONLY);
+      expect(listCall(getGenericTasks)?.slotsFilter).toBe(V1SlotsFilter.ZEROSLOTS);
+      expect(listCall(getExperiments)?.slotsFilter).toBe(V1SlotsFilter.ZEROSLOTS);
     });
 
     it('sends no filter by default', async () => {
@@ -344,6 +344,17 @@ describe('fetchRunPage', () => {
     expect(page.total).toBe(3 + 7);
     expect(page.activeCounts[RunKind.Experiment]).toBeUndefined();
     expect(page.activeCounts[RunKind.Shell]).toBeUndefined();
+  });
+
+  it('reports no failure of a kind the kind filter leaves out, and leaves it uncounted', async () => {
+    vi.mocked(getShells).mockRejectedValue(new Error('shells are down'));
+
+    const page = await fetchRunPage(globalJobs({ kinds: [RunKind.JupyterLab] }));
+
+    expect(page.errors).toEqual({});
+    expect(page.activeCounts[RunKind.Shell]).toBeUndefined();
+    expect(page.activeCounts[RunKind.JupyterLab]).toBe(1);
+    expect(page.rows.map((row) => row.key)).toEqual(['jupyter-lab:nb-cpu', 'jupyter-lab:nb-ended']);
   });
 
   it('forwards the abort signal to every call', async () => {

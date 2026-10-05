@@ -61,8 +61,8 @@ type Shell struct {
 	JobId string `protobuf:"bytes,15,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
 	// The workspace id.
 	WorkspaceId int32 `protobuf:"varint,18,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	// The number of slots the shell asks for (resources.slots); 0 for a
-	// CPU-only shell.
+	// The slot count the shell requests (resources.slots), 0 when it
+	// requests none.
 	Slots int32 `protobuf:"varint,100,opt,name=slots,proto3" json:"slots,omitempty"`
 }
 

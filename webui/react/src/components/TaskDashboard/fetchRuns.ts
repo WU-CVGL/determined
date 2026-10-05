@@ -50,7 +50,7 @@ export interface RunQuery {
 export interface RunPage {
   /** By kind, the runs in the Active state group that pass the filters other than kind and state. */
   activeCounts: Partial<Record<RunKind, number>>;
-  /** The kinds whose list failed, with the error; they are left out of the rows and the total. */
+  /** The listed kinds whose list failed, with the error; they are left out of the rows and total. */
   errors: Partial<Record<RunKind, unknown>>;
   rows: RunRow[];
   total: number;
@@ -73,7 +73,8 @@ const ACTIVE: StateGroup[] = [StateGroup.Active];
  *   They are fetched for the counts of the kind chips even when the kind filter leaves them out.
  * - The sorted lists are merged and the page's rows cut out; the total is the sum of the three.
  * - For the chips, one light call each counts active experiments and generic tasks.
- * Each list that fails is reported in `errors` and left out.
+ * Each list that fails is left out, and reported in `errors` when the kind filter selects its kind.
+ * A kind it leaves out is listed only for its chip, which then goes without a number.
  */
 export const fetchRunPage = async (query: RunQuery, signal?: AbortSignal): Promise<RunPage> => {
   const { kinds, limit, offset, pageKinds, scope, search, slots, states, userId } = query;
@@ -146,7 +147,7 @@ export const fetchRunPage = async (query: RunQuery, signal?: AbortSignal): Promi
   commandResults.forEach((result, i) => {
     const kind = commandKinds[i];
     if (result.status === 'rejected') {
-      errors[kind] = result.reason;
+      if (kinds.includes(kind)) errors[kind] = result.reason;
       return;
     }
     commandTasks.push(...result.value);

@@ -91,10 +91,10 @@ To stop the SSH server container and free cluster resources, run ``det shell kil
 Terminals in the WebUI
 ======================
 
-You can also open a terminal in a running shell from the WebUI: on the **Tasks** page, click the
-shell's name, or choose **Open Terminal** from its action menu. The terminal opens in a new browser
-tab. Only the user who started the shell and administrators can open terminals in it; when an
-administrator opens one, the shell's task log records it.
+You can also open a terminal in a running shell from the WebUI: on the **Jobs** page or a
+workspace's **Jobs** tab, click the shell's name, or choose **Open Terminal** from its action menu.
+The terminal opens in a new browser tab. Only the user who started the shell and administrators can
+open terminals in it; when an administrator opens one, the shell's task log records it.
 
 The master connects to the shell's SSH server for you, with the shell's own key, so the key never
 reaches the browser. A browser terminal is a new SSH session, like ``det shell open``, and both work

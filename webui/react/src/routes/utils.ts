@@ -119,10 +119,6 @@ export const paths = {
     const path = `/generic-tasks/${encodeURIComponent(taskId)}`;
     return tab ? `${path}/${tab}` : path;
   },
-  /** The tasks-only view with the generic task filter. */
-  genericTaskList: (): string => {
-    return '/tasks?type=generic-task';
-  },
   interactive: (command: CommandTask, maxSlotsExceeded = false): string => {
     const path = [
       'interactive',

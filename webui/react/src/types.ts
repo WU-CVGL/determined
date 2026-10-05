@@ -1057,14 +1057,6 @@ export interface ExperimentTrialFilters {
   states?: string[];
 }
 
-export interface TaskFilters<T extends CommandType | TaskType = TaskType> {
-  limit: number;
-  states?: string[];
-  types?: T[];
-  users?: string[];
-  workspaces?: string[];
-}
-
 export const LogLevel = {
   Critical: 'critical',
   Debug: 'debug',

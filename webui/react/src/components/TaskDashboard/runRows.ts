@@ -175,9 +175,9 @@ export const slotsFilterLabel: Record<SlotsFilter, string> = {
 export const toApiSlotsFilter = (filter?: SlotsFilter): V1SlotsFilter | undefined => {
   switch (filter) {
     case SlotsFilter.Gpu:
-      return V1SlotsFilter.GPU;
+      return V1SlotsFilter.HASSLOTS;
     case SlotsFilter.CpuOnly:
-      return V1SlotsFilter.CPUONLY;
+      return V1SlotsFilter.ZEROSLOTS;
     default:
       return undefined;
   }

@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DefaultTheme, UIProvider } from 'hew/Theme';
 import { ConfirmationProvider } from 'hew/useConfirm';
+import { Loadable } from 'hew/utils/loadable';
 import React, { useEffect } from 'react';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
@@ -45,8 +46,11 @@ vi.setConfig({ testTimeout: 15_000 });
 
 const CURRENT_USER_ID = 3;
 
-/* The state the list API reports for the generic task. */
-const listed = vi.hoisted(() => ({ genericState: 'ACTIVE' }));
+/* The states the list APIs report for the generic task and the experiment. */
+const listed = vi.hoisted(() => ({ experimentState: 'ACTIVE', genericState: 'ACTIVE' }));
+
+/* With a user ID, the user may control only their own notebooks, shells, commands and TensorBoards. */
+const access = vi.hoisted(() => ({ onlyOwnRunsOf: undefined as number | undefined }));
 
 const SHELL: CommandTask = {
   id: 'shell-1',
@@ -142,7 +146,7 @@ vi.mock('services/api', () => ({
   updateUserSetting: () => Promise.resolve(),
 }));
 
-// Every permission granted: the menus' own rules are tested with each menu.
+// Every permission granted, unless a test limits it: the menus' own rules are tested with each menu.
 vi.mock('hooks/usePermissions', () => ({
   default: () =>
     new Proxy(
@@ -151,6 +155,9 @@ vi.mock('hooks/usePermissions', () => ({
         get: (_target, key) => {
           if (key === 'loading') return false;
           if (key === 'canCreateNSC') return true;
+          if (key === 'canModifyWorkspaceNSC' && access.onlyOwnRunsOf !== undefined) {
+            return ({ userId }: { userId?: number }) => userId === access.onlyOwnRunsOf;
+          }
           return () => true;
         },
       },
@@ -161,6 +168,7 @@ vi.mock('components/JupyterLabButton', () => ({
   default: () => <div data-testid="jupyter-lab-button" />,
 }));
 vi.mock('components/ShellButton', () => ({ default: () => <div data-testid="shell-button" /> }));
+vi.mock('hew/Tooltip');
 vi.mock('utils/error', async (importOriginal) => ({
   ...(await importOriginal<typeof import('utils/error')>()),
   default: vi.fn(),
@@ -211,6 +219,12 @@ const lastListCall = <P extends { limit?: number }>(
 
 const row = async (name: string) => (await screen.findByText(name)).closest('tr') as HTMLElement;
 
+/** Waits for the stored settings, which drop an update while they load. */
+const settingsLoaded = () =>
+  waitFor(() => expect(Loadable.isLoaded(userSettings.getAll().get())).toBe(true));
+
+const STALE_EXPERIMENT: BulkExperimentItem = { ...EXPERIMENT, id: 41, name: 'stale-run' };
+
 /** Picks an option of the Select with this test ID. */
 const choose = async (testId: string, label: string) => {
   await user.click(within(screen.getByTestId(testId)).getByRole('combobox'));
@@ -222,6 +236,8 @@ const choose = async (testId: string, label: string) => {
 
 describe('TaskDashboard', () => {
   beforeEach(() => {
+    access.onlyOwnRunsOf = undefined;
+    listed.experimentState = RunState.Running;
     listed.genericState = GenericTaskState.Active;
     vi.mocked(getShells).mockResolvedValue([SHELL]);
     vi.mocked(getJupyterLabs).mockResolvedValue([NOTEBOOK]);
@@ -233,7 +249,7 @@ describe('TaskDashboard', () => {
     );
     vi.mocked(getExperiments).mockImplementation((params) =>
       Promise.resolve({
-        experiments: [EXPERIMENT],
+        experiments: [{ ...EXPERIMENT, state: listed.experimentState as RunState }],
         pagination: { limit: 0, offset: 0, total: params.limit === 1 ? 2 : 1 },
       }),
     );
@@ -363,18 +379,83 @@ describe('TaskDashboard', () => {
 
     await choose('slots', 'GPU');
 
-    await waitFor(() => expect(lastListCall(getGenericTasks)?.slotsFilter).toBe(V1SlotsFilter.GPU));
-    expect(lastListCall(getExperiments)?.slotsFilter).toBe(V1SlotsFilter.GPU);
+    await waitFor(() =>
+      expect(lastListCall(getGenericTasks)?.slotsFilter).toBe(V1SlotsFilter.HASSLOTS),
+    );
+    expect(lastListCall(getExperiments)?.slotsFilter).toBe(V1SlotsFilter.HASSLOTS);
     await waitFor(() => expect(screen.queryByText('cpu-notebook')).not.toBeInTheDocument());
     expect(screen.getByText('gpu-shell')).toBeInTheDocument();
 
     await choose('slots', 'CPU-only');
 
     await waitFor(() =>
-      expect(lastListCall(getGenericTasks)?.slotsFilter).toBe(V1SlotsFilter.CPUONLY),
+      expect(lastListCall(getGenericTasks)?.slotsFilter).toBe(V1SlotsFilter.ZEROSLOTS),
     );
     await waitFor(() => expect(screen.queryByText('gpu-shell')).not.toBeInTheDocument());
     expect(screen.getByText('cpu-notebook')).toBeInTheDocument();
+  });
+
+  it('explains GPU and CPU-only in a tooltip', async () => {
+    setup();
+    expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+
+    await user.hover(screen.getByTestId('slots'));
+
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      'GPU: asks for at least one slot. CPU-only: asks for none.',
+    );
+  });
+
+  it('keeps the filters of the Jobs page and of the tasks-only view apart', async () => {
+    const jobs = setup();
+    expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+    await settingsLoaded();
+    await choose('owner', 'Mine');
+    await waitFor(() => expect(lastListCall(getGenericTasks)?.userIds).toEqual([CURRENT_USER_ID]));
+    jobs.unmount();
+
+    vi.mocked(getGenericTasks).mockClear();
+    const tasks = setup({ tasksOnly: true }, '/tasks');
+    expect(await screen.findByText('eval-sweep')).toBeInTheDocument();
+    expect(lastListCall(getGenericTasks)?.userIds).toBeUndefined();
+    expect(screen.getByTestId('owner')).toHaveTextContent('All users');
+    tasks.unmount();
+
+    // The Jobs page kept its own filter.
+    vi.mocked(getGenericTasks).mockClear();
+    setup();
+    await waitFor(() => expect(lastListCall(getGenericTasks)?.userIds).toEqual([CURRENT_USER_ID]));
+    expect(screen.getByTestId('owner')).toHaveTextContent('Mine');
+  });
+
+  it('drops the reply of a fetch that a newer one replaced, and aborts it', async () => {
+    // Everyone's experiments are held until the list of the user's own (Mine) is shown.
+    const held: { release: () => void; signal?: AbortSignal }[] = [];
+    vi.mocked(getExperiments).mockImplementation((params, options) => {
+      const page = (experiment: BulkExperimentItem) => ({
+        experiments: [experiment],
+        pagination: { limit: 0, offset: 0, total: 1 },
+      });
+      if (params.userIds) return Promise.resolve(page(EXPERIMENT));
+      return new Promise((resolve) =>
+        held.push({ release: () => resolve(page(STALE_EXPERIMENT)), signal: options?.signal }),
+      );
+    });
+    setup();
+    await waitFor(() => expect(held.length).toBeGreaterThan(0));
+    await settingsLoaded();
+
+    await choose('owner', 'Mine');
+
+    expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+    expect(held.every(({ signal }) => signal?.aborted)).toBe(true);
+    await act(async () => {
+      held.forEach(({ release }) => release());
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(screen.queryByText('stale-run')).not.toBeInTheDocument();
+    expect(screen.getByText('bert-finetune')).toBeInTheDocument();
+    expect(screen.queryByText(/Unable to load/)).not.toBeInTheDocument();
   });
 
   it('searches after typing stops', async () => {
@@ -395,6 +476,22 @@ describe('TaskDashboard', () => {
     expect(await screen.findByText(/Unable to load shells/)).toBeInTheDocument();
     expect(screen.getByText('bert-finetune')).toBeInTheDocument();
     expect(screen.queryByText('gpu-shell')).not.toBeInTheDocument();
+  });
+
+  it('shows no alert for a failed list of a kind that the chips leave out', async () => {
+    vi.mocked(getShells).mockRejectedValue(new Error('shells are down'));
+    setup();
+    expect(await screen.findByText(/Unable to load shells/)).toBeInTheDocument();
+    await settingsLoaded();
+
+    await user.click(screen.getByTestId('kind-generic-task'));
+
+    await waitFor(() =>
+      expect(screen.queryByText(/Unable to load shells/)).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText('eval-sweep')).toBeInTheDocument();
+    // Its chip goes without a count.
+    expect(screen.getByTestId('kind-shell')).toHaveTextContent(/^Shell$/);
   });
 
   describe('row menus', () => {
@@ -505,6 +602,32 @@ describe('TaskDashboard', () => {
         expect.objectContaining({ id: 'shell-1', type: 'shell' }),
       );
       expect(handleError).not.toHaveBeenCalled();
+    });
+
+    it('kills only the selected runs that the user may kill', async () => {
+      access.onlyOwnRunsOf = CURRENT_USER_ID;
+      listed.experimentState = RunState.Completed;
+      setup();
+      await settingsLoaded();
+      // Another user's notebook and an experiment that has ended.
+      await selectRow('cpu-notebook');
+      await selectRow('bert-finetune');
+
+      await user.click(screen.getByText('Select an action...'));
+      const options = (await screen.findAllByTitle('Kill')).filter(
+        (option) => !option.closest('.ant-select-dropdown-hidden'),
+      );
+      expect(options[options.length - 1]).toHaveClass('ant-select-item-option-disabled');
+      await user.keyboard('{Escape}');
+
+      // The user's own running shell.
+      await selectRow('gpu-shell');
+      await killSelected();
+
+      await waitFor(() => expect(killTask).toHaveBeenCalledTimes(1));
+      expect(killTask).toHaveBeenCalledWith(expect.objectContaining({ id: 'shell-1' }));
+      expect(killExperiment).not.toHaveBeenCalled();
+      expect(killGenericTask).not.toHaveBeenCalled();
     });
 
     it('reports the failures by kind', async () => {

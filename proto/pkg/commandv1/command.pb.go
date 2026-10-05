@@ -52,8 +52,8 @@ type Command struct {
 	JobId string `protobuf:"bytes,13,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
 	// The workspace id.
 	WorkspaceId int32 `protobuf:"varint,16,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	// The number of slots the command asks for (resources.slots); 0 for a
-	// CPU-only command.
+	// The slot count the command requests (resources.slots), 0 when it
+	// requests none.
 	Slots int32 `protobuf:"varint,100,opt,name=slots,proto3" json:"slots,omitempty"`
 }
 

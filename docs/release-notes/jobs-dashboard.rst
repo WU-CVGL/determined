@@ -8,5 +8,6 @@
 
 -  WebUI: Add Jobs tabs to workspaces and to projects, including Uncategorized.
 
--  API: Filter experiments by workspace, and generic tasks by project, name, and GPU or CPU-only
-   use. Notebooks, shells, commands, and TensorBoards report the slots they request.
+-  API: Filter experiments by workspace and by requested slot count, and generic tasks by project,
+   name or ID, and requested slot count (at least one slot, or none). Notebooks, shells, commands,
+   and TensorBoards report the slots they request.

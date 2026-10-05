@@ -205,8 +205,8 @@ func TestTensorboardManagerLifecycle(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// The lists of notebooks, shells, commands and TensorBoards report the slots each one asks for,
-// which tells a GPU task (one slot or more) from a CPU-only one (no slots).
+// The lists of notebooks, shells, commands and TensorBoards report the slot count each one
+// requests, also when it requests none.
 func TestNTSCListsReportSlots(t *testing.T) {
 	db := setupTest(t)
 
@@ -229,6 +229,7 @@ func TestNTSCListsReportSlots(t *testing.T) {
 		for _, c := range commands.Commands {
 			listed[c.Id] = c.Slots
 		}
+		require.Contains(t, listed, commandID, "command with %d slots", slots)
 		require.Equal(t, int32(slots), listed[commandID], "command with %d slots", slots)
 
 		req := request()
@@ -239,6 +240,7 @@ func TestNTSCListsReportSlots(t *testing.T) {
 		for _, n := range notebooks.Notebooks {
 			listed[n.Id] = n.Slots
 		}
+		require.Contains(t, listed, notebook.stringID(), "notebook with %d slots", slots)
 		require.Equal(t, int32(slots), listed[notebook.stringID()], "notebook with %d slots", slots)
 
 		shellID := launch(model.TaskTypeShell, model.JobTypeShell)
@@ -247,6 +249,7 @@ func TestNTSCListsReportSlots(t *testing.T) {
 		for _, s := range shells.Shells {
 			listed[s.Id] = s.Slots
 		}
+		require.Contains(t, listed, shellID, "shell with %d slots", slots)
 		require.Equal(t, int32(slots), listed[shellID], "shell with %d slots", slots)
 
 		tensorboardID := launch(model.TaskTypeTensorboard, model.JobTypeTensorboard)
@@ -255,6 +258,7 @@ func TestNTSCListsReportSlots(t *testing.T) {
 		for _, tb := range tensorboards.Tensorboards {
 			listed[tb.Id] = tb.Slots
 		}
+		require.Contains(t, listed, tensorboardID, "TensorBoard with %d slots", slots)
 		require.Equal(t, int32(slots), listed[tensorboardID], "TensorBoard with %d slots", slots)
 	}
 }

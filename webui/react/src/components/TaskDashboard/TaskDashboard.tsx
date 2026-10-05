@@ -5,6 +5,7 @@ import Icon, { IconName } from 'hew/Icon';
 import Input from 'hew/Input';
 import { useModal } from 'hew/Modal';
 import Select, { Option, SelectValue } from 'hew/Select';
+import Tooltip from 'hew/Tooltip';
 import { Loadable } from 'hew/utils/loadable';
 import _ from 'lodash';
 import { useObservable } from 'micro-observables';
@@ -131,6 +132,7 @@ const errorMessage = (error: unknown): string | undefined => {
 };
 
 const ANY_SLOTS = 'any';
+const SLOTS_TOOLTIP = 'GPU: asks for at least one slot. CPU-only: asks for none.';
 const PAGE_SIZE_OPTIONS = [10, 20, 50, MAX_PAGE_SIZE];
 const SEARCH_DELAY_MS = 400;
 
@@ -748,16 +750,20 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
               </Option>
             ))}
           </Select>
-          <Select
-            data-testid="slots"
-            searchable={false}
-            value={settings.slots ?? ANY_SLOTS}
-            width={150}
-            onChange={handleSlotsChange}>
-            <Option value={ANY_SLOTS}>GPU and CPU</Option>
-            <Option value={SlotsFilter.Gpu}>{slotsFilterLabel[SlotsFilter.Gpu]}</Option>
-            <Option value={SlotsFilter.CpuOnly}>{slotsFilterLabel[SlotsFilter.CpuOnly]}</Option>
-          </Select>
+          <Tooltip content={SLOTS_TOOLTIP}>
+            <div>
+              <Select
+                data-testid="slots"
+                searchable={false}
+                value={settings.slots ?? ANY_SLOTS}
+                width={150}
+                onChange={handleSlotsChange}>
+                <Option value={ANY_SLOTS}>GPU and CPU</Option>
+                <Option value={SlotsFilter.Gpu}>{slotsFilterLabel[SlotsFilter.Gpu]}</Option>
+                <Option value={SlotsFilter.CpuOnly}>{slotsFilterLabel[SlotsFilter.CpuOnly]}</Option>
+              </Select>
+            </div>
+          </Tooltip>
           <FilterCounter activeFilterCount={filterCount} onReset={resetFilters} />
           {showLaunch && (
             <>
