@@ -5,7 +5,7 @@ import { ConfirmationProvider } from 'hew/useConfirm';
 import { MemoryRouter } from 'react-router-dom';
 
 import { CommandState, CommandTask, CommandType } from 'types';
-import { isDangerMenuItem } from 'utils/tests/menu';
+import { isDangerMenuItem, menuLabels } from 'utils/tests/menu';
 
 import TaskBar from './TaskBar';
 
@@ -51,10 +51,7 @@ describe('TaskBar', () => {
     );
     await userEvent.click(screen.getByTestId('task-action-dropdown-trigger'));
     await screen.findByText('Kill');
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
-      'View Logs',
-      'Kill',
-    ]);
+    expect(menuLabels()).toEqual(['View Logs', 'Kill']);
     expect(isDangerMenuItem('Kill')).toBe(true);
     expect(isDangerMenuItem('View Logs')).toBe(false);
     await userEvent.click(screen.getByText('View Logs'));

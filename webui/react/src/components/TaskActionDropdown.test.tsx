@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 
 import userStore from 'stores/users';
 import { CommandState, CommandTask, CommandType, DetailedUser } from 'types';
-import { isDangerMenuItem } from 'utils/tests/menu';
+import { isDangerMenuItem, menuLabels } from 'utils/tests/menu';
 import { NOTEBOOK_ACCESS_DENIED } from 'utils/wait';
 
 import TaskActionDropdown from './TaskActionDropdown';
@@ -120,8 +120,6 @@ const runningShell: Partial<CommandTask> = { state: CommandState.Running, type: 
 
 const setCurrentUser = (id: number, isAdmin = false) =>
   userStore.updateCurrentUser({ id, isActive: true, isAdmin, username: `user-${id}` });
-
-const menuLabels = () => screen.getAllByRole('menuitem').map((item) => item.textContent);
 
 describe('TaskActionDropdown', () => {
   beforeEach(() => {

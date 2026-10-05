@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import UIProvider, { DefaultTheme } from 'hew/Theme';
 import { ConfirmationProvider } from 'hew/useConfirm';
 
+import type { ValidFeature } from 'hooks/useFeature';
 import { handlePath } from 'routes/utils';
 import {
   archiveExperiment,
@@ -43,7 +44,20 @@ vi.mock('routes/utils', () => ({
   serverAddress: () => 'http://localhost',
 }));
 
-vi.mock('hooks/useTaskResourcesEnabled', () => ({ default: () => true }));
+const resources = vi.hoisted(() => ({ enabled: true }));
+vi.mock('hooks/useTaskResourcesEnabled', () => ({ default: () => resources.enabled }));
+
+const flags = vi.hoisted(() => ({ flatRuns: true }));
+vi.mock('hooks/useFeature', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('hooks/useFeature')>();
+  return {
+    ...actual,
+    default: () => ({
+      isOn: (feature: ValidFeature) =>
+        feature === 'flat_runs' ? flags.flatRuns : actual.FEATURES[feature].defaultValue,
+    }),
+  };
+});
 
 vi.mock('services/api', () => ({
   archiveExperiment: vi.fn(),
@@ -121,6 +135,11 @@ const setup = (
 const allowEverything = () => {
   Object.values(mocks).forEach((mock) => mock.mockImplementation(() => true));
 };
+
+beforeEach(() => {
+  resources.enabled = true;
+  flags.flatRuns = true;
+});
 
 describe('ExperimentActionDropdown', () => {
   beforeEach(() => {
@@ -263,12 +282,30 @@ describe('ExperimentActionDropdown', () => {
     expect(Action.Cancel).toBe('Stop');
     await user.click(screen.getByText(Action.Cancel));
     const stop = await screen.findByRole('button', { name: 'Stop' });
-    expect(screen.getByText(/can't be resumed/)).toBeInTheDocument();
+    expect(screen.getByText('Confirm Search Stop')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        `Stop search ${experiment.id}? Its runs are asked to save a checkpoint and exit.`,
+      ),
+    ).toBeInTheDocument();
     expect(stop).not.toHaveClass('ant-btn-dangerous');
     expect(vi.mocked(cancelExperiment)).not.toBeCalled();
     await user.click(stop);
     expect(vi.mocked(cancelExperiment)).toBeCalledWith({ experimentId: experiment.id });
     expect(onComplete).toBeCalledWith(Action.Cancel, experiment.id);
+  });
+
+  it('names experiments and trials in the Stop confirmation without flat runs', async () => {
+    flags.flatRuns = false;
+    mocks.canModifyExperiment.mockImplementation(() => true);
+    setup(undefined, RunState.Running);
+    await user.click(screen.getByText(Action.Cancel));
+    expect(await screen.findByText('Confirm Experiment Stop')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        `Stop experiment ${experiment.id}? Its trials are asked to save a checkpoint and exit.`,
+      ),
+    ).toBeInTheDocument();
   });
 
   it('does not stop the experiment when the Stop confirmation is cancelled', async () => {
@@ -413,6 +450,16 @@ describe('ExperimentActionDropdown View Logs', () => {
     );
   });
 
+  it('opens the logs tab when the config allows a single trial', async () => {
+    // List rows carry the raw experiment config, as the API sends it.
+    const config = {
+      searcher: { max_trials: 1, metric: 'loss', name: 'random', smaller_is_better: true },
+    } as unknown as ProjectExperiment['config'];
+    expect(await viewLogsPath({ config, numTrials: 1, searcherType: 'random', trialIds: [] })).toBe(
+      `/experiments/${experiment.id}/logs`,
+    );
+  });
+
   it('opens the trial’s logs page when the trial ID is known', async () => {
     expect(await viewLogsPath({ numTrials: 1, searcherType: 'random', trialIds: [42] })).toBe(
       `/experiments/${experiment.id}/trials/42/logs`,
@@ -435,6 +482,23 @@ describe('ExperimentActionDropdown View Logs', () => {
     setup(undefined, RunState.Running, false, { numTrials: 0 });
     expect(screen.queryByText(Action.ViewLogs)).not.toBeInTheDocument();
     expect(screen.getByText(Action.CopyExperimentID)).toBeInTheDocument();
+  });
+});
+
+describe('ExperimentActionDropdown View Resources', () => {
+  beforeEach(allowEverything);
+
+  it('is offered when task resources are enabled', () => {
+    resources.enabled = true;
+    setup();
+    expect(screen.getByText(Action.ViewResources)).toBeInTheDocument();
+  });
+
+  it('is left out when task resources are not enabled', () => {
+    resources.enabled = false;
+    setup();
+    expect(screen.queryByText(Action.ViewResources)).not.toBeInTheDocument();
+    expect(screen.getByText(Action.OpenTensorBoard)).toBeInTheDocument();
   });
 });
 

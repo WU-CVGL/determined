@@ -43,7 +43,7 @@ import {
   ValueOf,
 } from 'types';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
-import { getActionsForExperiment } from 'utils/experiment';
+import { getActionsForExperiment, isSingleTrialExperiment } from 'utils/experiment';
 import { capitalize } from 'utils/string';
 import { openCommandResponse } from 'utils/wait';
 
@@ -90,24 +90,22 @@ const manageActions = [
 const dangerActions: Action[] = [Action.Kill, Action.Delete];
 
 /**
- * Where View Logs leads. The experiment lists' rows have numTrials (a count from the database)
- * and searcherType, but not trialIds: the list endpoints leave trial IDs out for speed, so trialIds
- * is empty there, and only an experiment fetched on its own has them.
+ * Where View Logs leads. Experiment list rows have numTrials and the config, but no trial IDs (the
+ * list routes leave them out for speed); only an experiment fetched on its own has trialIds.
  * - One trial with a known ID: that trial's logs page.
- * - One trial of a single-searcher experiment: the Logs tab of the experiment page, which shows
- *   the logs of that trial.
- * - Otherwise: the Trials tab of the experiment page, to choose a trial. (A grid or random
- *   experiment with max_trials 1 also gets the single-trial page, where the Trials tab falls back
- *   to Overview; the rows do not have the config that would tell.)
+ * - A single-trial experiment (by its config, as the experiment page decides; by the searcher type
+ *   if the row has no config): the Logs tab of its page, which shows that trial's logs.
+ * - Otherwise: the Trials tab of the experiment page, to choose a trial.
  * An experiment without trials has no logs yet, so View Logs is left out (see experimentCheckers).
  */
 const experimentLogsPath = (experiment: ProjectExperiment): string => {
-  if (experiment.numTrials === 1) {
-    const trialId = experiment.trialIds?.[0];
-    if (trialId !== undefined) return paths.trialLogs(trialId, experiment.id);
-    if (experiment.searcherType === ExperimentSearcherName.Single) {
-      return `${paths.experimentDetails(experiment.id)}/logs`;
-    }
+  const trialId = experiment.numTrials === 1 ? experiment.trialIds?.[0] : undefined;
+  if (trialId !== undefined) return paths.trialLogs(trialId, experiment.id);
+  if (
+    isSingleTrialExperiment(experiment) ||
+    experiment.searcherType === ExperimentSearcherName.Single
+  ) {
+    return `${paths.experimentDetails(experiment.id)}/logs`;
   }
   return `${paths.experimentDetails(experiment.id)}/trials`;
 };
@@ -144,6 +142,7 @@ const ExperimentActionDropdown: React.FC<Props> = ({
   const taskResourcesEnabled = useTaskResourcesEnabled();
 
   const entityName = f_flat_runs ? 'search' : 'experiment';
+  const trialsName = f_flat_runs ? 'runs' : 'trials';
 
   // this is required when experiment does not contain `config`.
   // since we removed config. See #8765 on GitHub
@@ -253,7 +252,7 @@ const ExperimentActionDropdown: React.FC<Props> = ({
           case Action.Cancel:
             // Not red: Stop ends the trials gracefully, unlike Kill.
             confirm({
-              content: `Stop ${entityName} ${experiment.id}? Its trials are asked to save a checkpoint and exit; a stopped ${entityName} can't be resumed.`,
+              content: `Stop ${entityName} ${experiment.id}? Its ${trialsName} are asked to save a checkpoint and exit.`,
               okText: 'Stop',
               onConfirm: async () => {
                 await cancelExperiment({ experimentId: experiment.id });
@@ -374,6 +373,7 @@ const ExperimentActionDropdown: React.FC<Props> = ({
     },
     [
       entityName,
+      trialsName,
       link,
       onLink,
       logsPath,
@@ -391,18 +391,6 @@ const ExperimentActionDropdown: React.FC<Props> = ({
       onVisibleChange,
     ],
   );
-
-  if (dropdownMenu.length === 0) {
-    return (
-      (children as JSX.Element) ?? (
-        <div className={css.base} title="No actions available">
-          <Button disabled type="text">
-            <Icon name="overflow-vertical" title="Disabled action menu" />
-          </Button>
-        </div>
-      )
-    );
-  }
 
   const shared = (
     <>

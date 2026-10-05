@@ -21,7 +21,7 @@ import {
   JobType,
   ResourcePool,
 } from 'types';
-import { isDangerMenuItem } from 'utils/tests/menu';
+import { isDangerMenuItem, menuLabels } from 'utils/tests/menu';
 
 import JobQueue from './JobQueue';
 
@@ -151,8 +151,6 @@ const waitForShells = async () => {
     await vi.mocked(getShells).mock.results[0].value;
   });
 };
-
-const menuLabels = () => screen.getAllByRole('menuitem').map((item) => item.textContent);
 
 describe('JobQueue', () => {
   beforeAll(() => {
