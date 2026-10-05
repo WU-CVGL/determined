@@ -1,5 +1,6 @@
+import Button from 'hew/Button';
 import Spinner from 'hew/Spinner';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 
 import Badge, { BadgeType } from 'components/Badge';
@@ -33,16 +34,23 @@ const Wait: React.FC = () => {
   const { taskType } = useParams<Params>();
   const [waitStatus, setWaitStatus] = useState<WaitStatus>();
   const [accessDenied, setAccessDenied] = useState(false);
+  const [addressFailed, setAddressFailed] = useState(false);
   const serviceAddr = searchParams.get('serviceAddr');
+  const taskId = serviceAddr ? (serviceAddr.match(/[0-f-]+/) || ' ')[0] : undefined;
 
   const capitalizedTaskType = capitalize(taskType ?? '');
-  const isLoading = !accessDenied && (!waitStatus || !terminalCommandStates.has(waitStatus.state));
+  const isLoading =
+    !accessDenied &&
+    !addressFailed &&
+    (!waitStatus || !terminalCommandStates.has(waitStatus.state));
 
   let message = `Waiting for ${capitalizedTaskType} ...`;
   if (!serviceAddr) {
     message = 'Missing required parameters.';
   } else if (accessDenied) {
     message = NOTEBOOK_ACCESS_DENIED;
+  } else if (addressFailed) {
+    message = `${capitalizedTaskType} is ready, but its address could not be loaded.`;
   } else if (waitStatus && terminalCommandStates.has(waitStatus.state)) {
     message = `${capitalizedTaskType} has been terminated.`;
   } else if (
@@ -67,9 +75,34 @@ const Wait: React.FC = () => {
     });
   };
 
+  const openService = useCallback(async () => {
+    if (!serviceAddr || !taskId) return;
+    let address: string | undefined = serviceAddr;
+    // Listings never include a notebook's Jupyter token; only its owner and administrators
+    // can read it, and JupyterLab does not open without it.
+    if (taskType === CommandType.JupyterLab && !hasJupyterToken(serviceAddr)) {
+      try {
+        address = await getJupyterLabAddress(taskId);
+      } catch (e) {
+        handleError(e as Error, {
+          publicMessage: 'Failed to load the notebook address.',
+          silent: false,
+          type: ErrorType.Server,
+        });
+        setAddressFailed(true);
+        return;
+      }
+    }
+    setAddressFailed(false);
+    if (address) {
+      window.location.assign(serverAddress(address));
+    } else {
+      setAccessDenied(true);
+    }
+  }, [serviceAddr, taskId, taskType]);
+
   useEffect(() => {
-    if (!serviceAddr) return;
-    const taskId = (serviceAddr.match(/[0-f-]+/) || ' ')[0];
+    if (!serviceAddr || !taskId) return;
     const ival = setInterval(async () => {
       try {
         const response = await getTask({ taskId });
@@ -84,17 +117,7 @@ const Wait: React.FC = () => {
           clearInterval(ival);
         } else if (lastRun.isReady) {
           clearInterval(ival);
-          let address: string | undefined = serviceAddr;
-          // Listings never include a notebook's Jupyter token; only its owner and administrators
-          // can read it, and JupyterLab does not open without it.
-          if (taskType === CommandType.JupyterLab && !hasJupyterToken(serviceAddr)) {
-            address = await getJupyterLabAddress(taskId);
-          }
-          if (address) {
-            window.location.assign(serverAddress(address));
-          } else {
-            setAccessDenied(true);
-          }
+          await openService();
         }
         // TODO: use task.endTime to determine if the task is terminated.
         setWaitStatus(lastRun);
@@ -102,7 +125,8 @@ const Wait: React.FC = () => {
         handleTaskError(e as Error);
       }
     }, 1000);
-  }, [serviceAddr, taskType]);
+    return () => clearInterval(ival);
+  }, [openService, serviceAddr, taskId]);
 
   return (
     <PageMessage title={capitalizedTaskType}>
@@ -113,6 +137,7 @@ const Wait: React.FC = () => {
             <Badge state={waitStatus?.state} type={BadgeType.State} />
           </div>
         )}
+        {addressFailed && <Button onClick={openService}>Try Again</Button>}
         <Spinner spinning={isLoading} />
       </div>
     </PageMessage>
