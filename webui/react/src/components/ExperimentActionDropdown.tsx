@@ -90,6 +90,8 @@ const manageActions = [
 ];
 const dangerActions: Action[] = [Action.Kill, Action.Delete];
 
+type LogsTarget = { fetchTrial: true } | { fetchTrial: false; path: string };
+
 /**
  * Where View Logs leads. Experiment list rows have numTrials and the config, but no trial IDs (the
  * list routes leave them out for speed); only an experiment fetched on its own has trialIds.
@@ -100,8 +102,6 @@ const dangerActions: Action[] = [Action.Kill, Action.Delete];
  * - Otherwise: the Trials tab of the experiment page, to choose a trial.
  * An experiment without trials has no logs yet, so View Logs is left out (see experimentCheckers).
  */
-type LogsTarget = { fetchTrial: true } | { fetchTrial: false; path: string };
-
 const experimentLogsTarget = (experiment: ProjectExperiment): LogsTarget => {
   const trialId = experiment.numTrials === 1 ? experiment.trialIds?.[0] : undefined;
   if (trialId !== undefined) {
