@@ -14,14 +14,25 @@ def _cluster_params(cluster_name: Optional[str]) -> Dict[str, str]:
     return {"cluster_name": cluster_name} if cluster_name else {}
 
 
+def _active_revision(resource_pool: Mapping[str, Any]) -> str:
+    """Describe what the running master serves for a dynamic resource pool."""
+    if resource_pool.get("defined_in_master_yaml"):
+        return "master.yaml"
+    active_revision = resource_pool.get("active_revision")
+    return "-" if active_revision is None else str(active_revision)
+
+
 def _render_dynamic_pools(resource_pools: Sequence[Mapping[str, Any]]) -> None:
     render.tabulate_or_csv(
-        headers=["Name", "Cluster", "State", "Error"],
+        headers=["Name", "Cluster", "State", "Revision", "Active", "Pending restart", "Error"],
         values=[
             [
                 pool.get("pool_name", ""),
                 pool.get("cluster_name", ""),
                 pool.get("state", ""),
+                pool.get("revision", ""),
+                _active_revision(pool),
+                bool(pool.get("pending_restart", False)),
                 pool.get("error") or "",
             ]
             for pool in resource_pools
@@ -75,6 +86,26 @@ def list_dynamic(args: argparse.Namespace) -> None:
         render.print_json(response)
     else:
         _render_dynamic_pools(resource_pools)
+
+
+def update_dynamic(args: argparse.Namespace) -> None:
+    config = _load_dynamic_pool_config(args.config)
+    body: Dict[str, Any] = {"config": config}
+    if args.expected_revision is not None:
+        body["expected_revision"] = args.expected_revision
+
+    sess = cli.setup_session(args)
+    pool_name = parse.quote(args.pool_name, safe="")
+    resource_pool = sess.put(
+        f"{DYNAMIC_RESOURCE_POOLS_PATH}/{pool_name}",
+        params=_cluster_params(args.cluster_name),
+        json=body,
+    ).json()
+    if args.json:
+        render.print_json(resource_pool)
+    else:
+        _render_dynamic_pools([resource_pool])
+    _fail_for_failed_pool(resource_pool)
 
 
 def retry_dynamic(args: argparse.Namespace) -> None:
@@ -193,6 +224,30 @@ args_description = [
                     cli.Arg(
                         "--cluster-name",
                         help="filter by resource manager cluster",
+                    ),
+                    cli.Arg("--json", action="store_true", help="print as JSON"),
+                ],
+            ),
+            cli.Cmd(
+                "update",
+                update_dynamic,
+                "replace the configuration of a dynamic resource pool; a Ready pool runs the "
+                "new configuration from the next master restart",
+                [
+                    cli.Arg("pool_name", help="name of the dynamic resource pool"),
+                    cli.Arg(
+                        "config",
+                        type=argparse.FileType("r"),
+                        help="path to the complete YAML or JSON resource pool configuration",
+                    ),
+                    cli.Arg(
+                        "--expected-revision",
+                        type=int,
+                        help="refuse the update unless the saved configuration has this revision",
+                    ),
+                    cli.Arg(
+                        "--cluster-name",
+                        help="target agent resource manager cluster",
                     ),
                     cli.Arg("--json", action="store_true", help="print as JSON"),
                 ],
