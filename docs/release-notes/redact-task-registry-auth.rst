@@ -7,10 +7,11 @@
    administrators, under every authorization mode. This applies to ``GET /api/v1/notebooks/{id}``,
    ``GET /api/v1/tensorboards/{id}``, ``GET /api/v1/shells/{id}``, ``GET /api/v1/commands/{id}``,
    and ``GET /api/v1/tasks/{id}/config``, and so to ``det notebook config``, ``det tensorboard
-   config``, ``det shell config``, ``det cmd config``, and the WebUI. Before this change, any user
-   who could see a task could read the container registry username and password of the user who
-   started it. Other users now get the configuration without ``registry_auth``. The rest of the
-   configuration, and the configuration that the task runs with, are unchanged.
+   config``, ``det shell config``, ``det cmd config``, ``det task config``, and the WebUI. Before
+   this change, any user who could see a task could read the container registry username and
+   password of the user who started it. Other users now get the configuration without
+   ``registry_auth``. The rest of the configuration, and the configuration that the task runs with,
+   are unchanged.
 
 -  API: **Important:** The same rule applies to the configuration of an experiment in ``GET
    /api/v1/experiments/{id}`` (both ``config`` and ``original_config``), ``GET
