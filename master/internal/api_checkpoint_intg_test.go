@@ -428,7 +428,14 @@ func TestGetCheckpointNaNInfinityValues(t *testing.T) {
 			if testVars.metric == "NaN" {
 				require.True(t, math.IsNaN(*resp.Checkpoint.Training.SearcherMetric))
 			} else {
-				require.InEpsilon(t, testVars.metricValue, *resp.Checkpoint.Training.SearcherMetric, 0.01)
+				// Not InEpsilon: the relative error of two infinities is NaN, which testify 1.10
+				// reports as a failure and 1.9 passed whatever the value.
+				sign := 1
+				if testVars.metricValue < 0 {
+					sign = -1
+				}
+				require.True(t, math.IsInf(*resp.Checkpoint.Training.SearcherMetric, sign),
+					"searcher metric %v", *resp.Checkpoint.Training.SearcherMetric)
 			}
 		})
 	}
