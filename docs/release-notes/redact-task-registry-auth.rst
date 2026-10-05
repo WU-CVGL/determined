@@ -17,6 +17,17 @@
    /api/v1/experiments``, and ``POST /api/v1/experiments-search``, and so to ``det experiment
    config`` and the WebUI. Only the experiment's owner and administrators see its ``registry_auth``.
 
+-  API: **Important:** The experiment configuration that a checkpoint or model version carries in
+   ``training.experiment_config`` now has ``environment.registry_auth`` set to ``null`` for every
+   user, including the experiment's owner and administrators. This applies to ``GET
+   /api/v1/checkpoints/{uuid}``, ``GET /api/v1/experiments/{id}/checkpoints``, ``GET
+   /api/v1/trials/{id}/checkpoints``, the model version endpoints under ``/api/v1/models``, and
+   ``GET /experiments/{id}/preview_gc``, and so to the SDK's
+   ``Checkpoint.training.experiment_config`` and the WebUI. Before this change, any user who could
+   see a checkpoint could read the container registry username and password of the experiment's
+   owner. Nothing is launched from this copy of the configuration; the owner and administrators
+   still get ``registry_auth`` from the experiment's own configuration.
+
 -  Generic Tasks: A generic task forked by a user who is neither the original task's owner nor an
    administrator, for example with ``det task fork``, no longer takes the ``registry_auth`` of the
    original task. It uses the ``registry_auth`` in its own configuration or in the task container

@@ -5,8 +5,10 @@ package internal
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/docker/docker/api/types/registry"
 	"github.com/google/uuid"
@@ -16,16 +18,21 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
+	"github.com/determined-ai/determined/master/internal/checkpoints"
 	"github.com/determined-ai/determined/master/internal/command"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/mocks"
 	"github.com/determined-ai/determined/master/pkg/model"
+	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/master/pkg/schemas"
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
+	"github.com/determined-ai/determined/proto/pkg/checkpointv1"
 	"github.com/determined-ai/determined/proto/pkg/commonv1"
+	"github.com/determined-ai/determined/proto/pkg/modelv1"
 )
 
 const (
@@ -304,15 +311,13 @@ func TestGenericTaskConfigRegistryAuthOnlyForOwnerOrAdmin(t *testing.T) {
 	}, logged[0].Data)
 }
 
-func TestExperimentConfigRegistryAuthOnlyForOwnerOrAdmin(t *testing.T) {
-	api, admin, adminCtx := setupAPITest(t, nil)
-	require.True(t, admin.Admin)
-	alice := db.RequireMockUser(t, api.m.db)
-	bob := db.RequireMockUser(t, api.m.db)
-	_, projectID := createProjectAndWorkspace(adminCtx, t, api)
-
-	image := testRegistryServer + "/alice/train:1"
-	name := "alice-registry-auth"
+// createTestExpWithRegistryAuth creates an experiment of owner whose config sets registry_auth and
+// returns it with its name and image.
+func createTestExpWithRegistryAuth(
+	t *testing.T, api *apiServer, owner model.User, projectID int,
+) (exp *model.Experiment, name, image string) {
+	image = testRegistryServer + "/alice/train:1"
+	name = "alice-registry-auth"
 	conf := expconf.ExperimentConfig{ //nolint:exhaustruct
 		RawName: expconf.Name{RawString: &name},
 		RawEnvironment: &expconf.EnvironmentConfigV0{ //nolint:exhaustruct
@@ -322,8 +327,19 @@ func TestExperimentConfigRegistryAuthOnlyForOwnerOrAdmin(t *testing.T) {
 			RawRegistryAuth: testRegistryAuth(),
 		},
 	}
-	exp := createTestExpWithActiveConfig(t, api, alice, projectID,
+	exp = createTestExpWithActiveConfig(t, api, owner, projectID,
 		schemas.WithDefaults(schemas.Merge(minExpConfig, conf)))
+	return exp, name, image
+}
+
+func TestExperimentConfigRegistryAuthOnlyForOwnerOrAdmin(t *testing.T) {
+	api, admin, adminCtx := setupAPITest(t, nil)
+	require.True(t, admin.Admin)
+	alice := db.RequireMockUser(t, api.m.db)
+	bob := db.RequireMockUser(t, api.m.db)
+	_, projectID := createProjectAndWorkspace(adminCtx, t, api)
+
+	exp, name, image := createTestExpWithRegistryAuth(t, api, alice, projectID)
 	// What the owner submitted, as YAML.
 	originalConfig := "name: " + name + "\n" +
 		"environment:\n" +
@@ -373,4 +389,132 @@ func TestExperimentConfigRegistryAuthOnlyForOwnerOrAdmin(t *testing.T) {
 		requireConfigRegistryAuth(t, search.Experiments[0].Experiment.Config, //nolint:staticcheck
 			reader.seesAuth)
 	}
+}
+
+// The experiment config that checkpoints and model versions carry in training.experiment_config
+// comes from checkpoints_view, which sets registry_auth to null for every reader, the owner and
+// admins included: nothing is launched from it, and the owner reads the experiment's own config.
+func TestCheckpointExperimentConfigHasNoRegistryAuth(t *testing.T) {
+	api, admin, adminCtx := setupAPITest(t, nil)
+	require.True(t, admin.Admin)
+	alice := db.RequireMockUser(t, api.m.db)
+	bob := db.RequireMockUser(t, api.m.db)
+	_, projectID := createProjectAndWorkspace(adminCtx, t, api)
+	exp, _, image := createTestExpWithRegistryAuth(t, api, alice, projectID)
+
+	// A trial of the experiment and a checkpoint it reported.
+	requestID := model.NewRequestID(rand.Reader)
+	task := &model.Task{
+		TaskType:   model.TaskTypeTrial,
+		LogVersion: model.TaskLogVersion1,
+		StartTime:  time.Now(),
+		TaskID:     trialTaskID(exp.ID, requestID),
+	}
+	require.NoError(t, db.AddTask(adminCtx, task))
+	trial := &model.Trial{
+		StartTime:    time.Now(),
+		RequestID:    &requestID,
+		State:        model.PausedState,
+		ExperimentID: exp.ID,
+	}
+	require.NoError(t, db.AddTrial(adminCtx, trial, task.TaskID))
+	allocationID := model.AllocationID(string(task.TaskID) + "-1")
+	require.NoError(t, db.AddAllocation(adminCtx, &model.Allocation{
+		AllocationID: allocationID,
+		TaskID:       task.TaskID,
+		Slots:        1,
+		ResourcePool: "default",
+		StartTime:    ptrs.Ptr(time.Now().UTC().Truncate(time.Millisecond)),
+	}))
+	ckpt := db.MockModelCheckpoint(uuid.New(), &model.Allocation{
+		AllocationID: allocationID, TaskID: task.TaskID,
+	})
+	require.NoError(t, db.AddCheckpointMetadata(adminCtx, &ckpt, trial.ID))
+	ckptUUID := ckpt.UUID.String()
+
+	modelName := uuid.New().String()
+	_, err := api.PostModel(adminCtx, &apiv1.PostModelRequest{Name: modelName})
+	require.NoError(t, err)
+	posted, err := api.PostModelVersion(adminCtx, &apiv1.PostModelVersionRequest{
+		ModelName: modelName, CheckpointUuid: ckptUUID,
+	})
+	require.NoError(t, err)
+	requireCheckpointsWithoutRegistryAuth(t, "PostModelVersion", posted.ModelVersion.Checkpoint)
+	patched, err := api.PatchModelVersion(adminCtx, &apiv1.PatchModelVersionRequest{
+		ModelName:       modelName,
+		ModelVersionNum: posted.ModelVersion.Version,
+		ModelVersion:    &modelv1.PatchModelVersion{Comment: wrapperspb.String("comment")},
+	})
+	require.NoError(t, err)
+	requireCheckpointsWithoutRegistryAuth(t, "PatchModelVersion", patched.ModelVersion.Checkpoint)
+
+	// The experiment-level preview of checkpoint GC (GET /experiments/{id}/preview_gc) returns
+	// these rows as they are.
+	rows, err := checkpoints.CheckpointByUUIDs(adminCtx, []uuid.UUID{ckpt.UUID})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	rowConfig, err := json.Marshal(rows[0].ExperimentConfig)
+	require.NoError(t, err)
+	require.Contains(t, string(rowConfig), image, "the rest of the config is kept")
+	require.Contains(t, string(rowConfig), `"registry_auth":null`)
+	require.NotContains(t, string(rowConfig), testRegistryPassword)
+	require.NotContains(t, string(rowConfig), testRegistryUsername)
+
+	for _, reader := range registryAuthReaders(alice, bob, admin) {
+		ctx := ntscUserCtx(t, reader.user)
+
+		got, err := api.GetCheckpoint(ctx, &apiv1.GetCheckpointRequest{CheckpointUuid: ckptUUID})
+		require.NoError(t, err, reader.name)
+		requireCheckpointsWithoutRegistryAuth(t, reader.name, got.Checkpoint)
+
+		byExp, err := api.GetExperimentCheckpoints(ctx,
+			&apiv1.GetExperimentCheckpointsRequest{Id: int32(exp.ID)})
+		require.NoError(t, err, reader.name)
+		requireCheckpointsWithoutRegistryAuth(t, reader.name, byExp.Checkpoints...)
+
+		byTrial, err := api.GetTrialCheckpoints(ctx,
+			&apiv1.GetTrialCheckpointsRequest{Id: int32(trial.ID)})
+		require.NoError(t, err, reader.name)
+		requireCheckpointsWithoutRegistryAuth(t, reader.name, byTrial.Checkpoints...)
+
+		version, err := api.GetModelVersion(ctx, &apiv1.GetModelVersionRequest{
+			ModelName: modelName, ModelVersionNum: posted.ModelVersion.Version,
+		})
+		require.NoError(t, err, reader.name)
+		requireCheckpointsWithoutRegistryAuth(t, reader.name, version.ModelVersion.Checkpoint)
+
+		versions, err := api.GetModelVersions(ctx,
+			&apiv1.GetModelVersionsRequest{ModelName: modelName})
+		require.NoError(t, err, reader.name)
+		require.Len(t, versions.ModelVersions, 1, reader.name)
+		requireCheckpointsWithoutRegistryAuth(t, reader.name, versions.ModelVersions[0].Checkpoint)
+
+		// The experiment's own config still follows the owner-or-admin rule.
+		e, err := api.GetExperiment(ctx,
+			&apiv1.GetExperimentRequest{ExperimentId: int32(exp.ID)})
+		require.NoError(t, err, reader.name)
+		requireConfigRegistryAuth(t, e.Config, reader.seesAuth)
+	}
+}
+
+// requireCheckpointsWithoutRegistryAuth checks that each checkpoint carries its experiment's
+// config with registry_auth set to null and the rest of the environment kept.
+func requireCheckpointsWithoutRegistryAuth(
+	t *testing.T, reader string, ckpts ...*checkpointv1.Checkpoint,
+) {
+	t.Helper()
+	require.Len(t, ckpts, 1, reader)
+	require.NotNil(t, ckpts[0].Training, reader)
+	config := ckpts[0].Training.ExperimentConfig
+	require.NotNil(t, config, reader)
+	env := config.Fields["environment"].GetStructValue()
+	require.NotNil(t, env, reader)
+	auth, ok := env.Fields["registry_auth"]
+	require.True(t, ok, reader)
+	require.IsType(t, &structpb.Value_NullValue{}, auth.GetKind(), reader)
+	require.Contains(t, env.Fields, "image", reader)
+	raw, err := protojson.Marshal(config)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), testRegistryPassword, reader)
+	require.NotContains(t, string(raw), testRegistryUsername, reader)
 }
