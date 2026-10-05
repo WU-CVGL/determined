@@ -231,8 +231,11 @@ func TestEnableDisabledSlotWhileItsTaskRuns(t *testing.T) {
 }
 
 // The priority scheduler simulates preemption on copies of the agent states. Preempting a task on
-// a draining slot frees nothing that a pending task can use, so it must not be chosen, and the
-// simulation must leave the real agent state alone.
+// a draining slot frees nothing that a pending task can use, so on a one-slot agent, where that
+// task is the only candidate, nothing is preempted. The simulation must also leave the real agent
+// state alone. With more candidates, trySchedulingTaskViaPreemption still preempts every candidate
+// it removed before the one that made the request fit, so a task on a draining slot can be
+// preempted together with that one (unchanged, not covered here).
 func TestPrioritySchedulerDoesNotPreemptForADrainingSlot(t *testing.T) {
 	for _, tc := range []struct {
 		name        string

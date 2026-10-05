@@ -347,6 +347,9 @@ func (a *agentState) containerStateChanged(msg aproto.ContainerStateChanged) {
 	// The pool releases a container without waiting for it to terminate, so the agent can still
 	// report it, for example Running, after the release. Holding it again would bring its device
 	// back in use when its slot is enabled, and nothing would free the device after that.
+	// One exception remains: a StartTaskContainer buffered while the agent was disconnected is
+	// replayed on reconnect through startContainer, which adds its container again even if the pool
+	// released it in the meantime. That container then stays here until its Terminated report.
 	if msg.Container.State == cproto.Terminated {
 		delete(a.containerState, msg.Container.ID)
 	} else if _, ok := a.containerState[msg.Container.ID]; ok {
@@ -450,7 +453,8 @@ func (a *agentState) updateSlotDeviceView(deviceID device.ID) {
 		// pool has released it (deallocateContainer) or it terminated, the device is free:
 		// slot.containerID can outlive the release until the agent reports the container
 		// terminated, and nothing would free the device after that. A report that arrives after
-		// the release does not put the container back in containerState (containerStateChanged).
+		// the release does not put the container back in containerState (containerStateChanged,
+		// which also notes the one path that still does).
 		cid := s.containerID
 		if cid != nil {
 			if _, ok := a.containerState[*cid]; !ok {
