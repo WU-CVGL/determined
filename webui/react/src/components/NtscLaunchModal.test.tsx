@@ -152,8 +152,8 @@ const previewFor = (params: { config?: RawJson; templateName?: string }) => {
     description: config.description ?? 'JupyterLab (kindly-quick-heron)',
     entrypoint: null,
     environment: { image: { cuda: custom ? 'custom:2' : 'default:1' } },
-    idle_timeout: '30m',
-    notebook_idle_type: 'kernels_or_terminals',
+    idle_timeout: config.idle_timeout ?? '30m',
+    notebook_idle_type: config.notebook_idle_type ?? 'kernels_or_terminals',
     resources: {
       priority: 42,
       resource_pool: resources.resource_pool ?? 'default',
@@ -337,7 +337,7 @@ describe('NtscLaunchModal', () => {
       expect(screen.getByText('Launch Shell')).toBeInTheDocument();
     });
 
-    it('previews the full config through the JupyterLab preview without notebook-only keys', async () => {
+    it('previews the full config through the JupyterLab preview and keeps its notebook settings', async () => {
       const { onLaunched, user } = await setup();
       await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
 
@@ -348,15 +348,17 @@ describe('NtscLaunchModal', () => {
         expect.objectContaining({ preview: true, workspaceId: WORKSPACE.id }),
       );
       const yamlText = screen.getByTestId('code-editor').textContent ?? '';
-      expect(yamlText).not.toContain('idle_timeout');
-      expect(yamlText).not.toContain('notebook_idle_type');
+      // A shell ignores them; they are kept for a switch back to JupyterLab.
+      expect(yamlText).toContain('idle_timeout: 30m');
+      expect(yamlText).toContain('notebook_idle_type: kernels_or_terminals');
+      // The master names the shell, not after the JupyterLab preview.
       expect(yamlText).not.toContain('JupyterLab (');
-      expect(yamlText).not.toContain('entrypoint');
 
       await launch(user);
       await waitFor(() => expect(onLaunched).toHaveBeenCalled());
       const { config } = mocks.launchShell.mock.calls[0][0];
-      expect(config).not.toHaveProperty('idle_timeout');
+      expect(config).not.toHaveProperty('description');
+      expect(config.idle_timeout).toBe('30m');
       expect(config.resources).toEqual({ priority: 42, resource_pool: 'default', slots: 1 });
     });
 
@@ -1063,6 +1065,35 @@ describe('NtscLaunchModal', () => {
       expect(
         screen.queryByRole('button', { name: 'Clear browser history' }),
       ).not.toBeInTheDocument();
+    });
+
+    it('keeps a JupyterLab’s idle_timeout through Shell and its full config back to JupyterLab', async () => {
+      mocks.getJupyterLabs.mockResolvedValue([task(CommandType.JupyterLab, { name: 'nb' })]);
+      mocks.getJupyterLabConfig.mockResolvedValue({ ...clusterNotebookConfig, idle_timeout: '8h' });
+      const { user } = await setup({ initialType: CommandType.JupyterLab });
+      await openStartFrom(user);
+      await user.click(await screen.findByText(/^JupyterLab · nb ·/));
+      await waitFor(() => expect(launchButton()).toBeEnabled());
+
+      await selectType(user, 'Shell');
+      await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+      await waitFor(() =>
+        expect(screen.getByTestId('code-editor')).toHaveTextContent('idle_timeout: 8h'),
+      );
+      expect(mocks.previewJupyterLab).toHaveBeenCalledWith(
+        expect.objectContaining({ config: expect.objectContaining({ idle_timeout: '8h' }) }),
+      );
+
+      await selectType(user, 'JupyterLab');
+      expect(screen.getByText('Launch JupyterLab')).toBeInTheDocument();
+      await launch(user);
+
+      await waitFor(() => expect(mocks.launchJupyterLab).toHaveBeenCalledTimes(1));
+      const { config } = mocks.launchJupyterLab.mock.calls[0][0];
+      expect(config.idle_timeout).toBe('8h');
+      expect(config.notebook_idle_type).toBe('kernels_or_terminals');
+      expect(config.environment).toEqual({ image: { cuda: 'default:1' } });
+      expect(mocks.launchShell).not.toHaveBeenCalled();
     });
 
     it('keeps the full config when the type is switched and lets the master name the task after its type', async () => {

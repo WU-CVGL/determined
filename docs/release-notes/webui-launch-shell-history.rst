@@ -43,5 +43,6 @@
    read templates, so review the config before saving it.
 
 -  WebUI: The full config of a new shell is previewed through the JupyterLab preview, because the
-   shell launch API has no preview. The JupyterLab-only settings ``idle_timeout`` and
-   ``notebook_idle_type`` are removed from it.
+   shell launch API has no preview. The JupyterLab settings ``idle_timeout`` and
+   ``notebook_idle_type`` stay in it: a shell ignores them, and switching the form back to
+   JupyterLab launches with them.

@@ -426,7 +426,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
           lockedWorkspace={!!workspace}
           note={
             type === CommandType.Shell
-              ? 'Shells have no preview of their own: this config is previewed like a JupyterLab, with the JupyterLab-only settings (idle_timeout, notebook_idle_type) removed. A shell ignores them if they are set. The master checks it again at launch.'
+              ? 'Shells have no preview of their own: this config is previewed like a JupyterLab. A shell ignores the JupyterLab settings idle_timeout and notebook_idle_type, which are kept for a switch back to JupyterLab. The master checks the config again at launch.'
               : undefined
           }
           setWorkspace={setCurrentWorkspace}

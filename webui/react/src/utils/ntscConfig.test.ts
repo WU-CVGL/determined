@@ -14,7 +14,6 @@ import {
   stableStringify,
   templateFromConfig,
   templateResources,
-  toShellConfig,
 } from './ntscConfig';
 
 const mergedShellConfig = {
@@ -88,27 +87,6 @@ describe('ntscConfig', () => {
     });
   });
 
-  describe('toShellConfig', () => {
-    it('removes the notebook-only keys of a JupyterLab preview', () => {
-      const out = toShellConfig({
-        description: 'JupyterLab (kindly-quick-heron)',
-        entrypoint: null,
-        environment: { image: { cpu: 'img' } },
-        idle_timeout: '30m',
-        notebook_idle_type: 'kernels_or_terminals',
-        resources: { resource_pool: 'default', slots: 1 },
-      });
-      expect(out).toEqual({
-        environment: { image: { cpu: 'img' } },
-        resources: { resource_pool: 'default', slots: 1 },
-      });
-    });
-
-    it('keeps a description from the form or a template', () => {
-      expect(toShellConfig({ description: 'debug box' }).description).toBe('debug box');
-    });
-  });
-
   describe('configForLaunchType', () => {
     it('drops the name the master generated for the other type', () => {
       const notebook = { description: 'JupyterLab (kindly-quick-heron)', idle_timeout: '30m' };
@@ -118,6 +96,11 @@ describe('ntscConfig', () => {
       ).toEqual({});
       // The input is not changed.
       expect(notebook.description).toBe('JupyterLab (kindly-quick-heron)');
+    });
+
+    it('keeps the notebook settings for a shell, which ignores them', () => {
+      const notebook = { idle_timeout: '8h', notebook_idle_type: 'activity' };
+      expect(configForLaunchType(notebook, CommandType.Shell)).toEqual(notebook);
     });
 
     it('keeps the name of the same type and any name given by the user', () => {
