@@ -1,10 +1,14 @@
 package grpcutil
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"regexp"
 	"runtime/debug"
 
 	grpcmiddleware "github.com/grpc-ecosystem/go-grpc-middleware"
@@ -147,10 +151,48 @@ func gatewayHandler(mux http.Handler, externalSessions bool) echo.HandlerFunc {
 		if _, ok := request.URL.Query()["pretty"]; ok {
 			request.Header.Set("Accept", jsonPretty)
 		}
+		if request.Method == http.MethodPost && setUserPasswordPath.MatchString(request.URL.Path) {
+			wrapLegacySetUserPasswordBody(request)
+		}
 		// The response hook that sets the session cookie sees only the request's context.
 		request = request.WithContext(context.WithValue(
 			request.Context(), sessionCookieSecureKey{}, user.SessionCookieSecure(request)))
 		mux.ServeHTTP(c.Response(), request)
 		return nil
 	}
+}
+
+// setUserPasswordPath is the gateway route of SetUserPassword.
+var setUserPasswordPath = regexp.MustCompile(`^/api/v1/users/[^/]+/password/?$`)
+
+// maxLegacySetUserPasswordBody bounds how much of a SetUserPassword body is read to recognize the
+// format of clients built before 0.41.0. A longer body is not such a password.
+const maxLegacySetUserPasswordBody = 64 << 10
+
+// wrapLegacySetUserPasswordBody turns the body that clients built before 0.41.0 send to
+// SetUserPassword, the new password alone as a JSON string, into the request message that the
+// route takes since it also carries old_password: "pw" becomes {"password": "pw"}. The gateway
+// would refuse the string with a JSON decoding error. SetUserPassword then accepts the message
+// from an administrator who changes another user's password, and asks users who change their own
+// for their current password, which those clients do not send. Other bodies, and bodies that
+// fail to read, reach the gateway unchanged.
+func wrapLegacySetUserPasswordBody(r *http.Request) {
+	if r.Body == nil {
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxLegacySetUserPasswordBody+1))
+	if err != nil || len(body) > maxLegacySetUserPasswordBody {
+		r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), r.Body))
+		return
+	}
+	trimmed := bytes.TrimSpace(body)
+	var password string
+	if len(trimmed) > 0 && trimmed[0] == '"' && json.Unmarshal(trimmed, &password) == nil {
+		if wrapped, err := json.Marshal(map[string]string{"password": password}); err == nil {
+			r.Body = io.NopCloser(bytes.NewReader(wrapped))
+			r.ContentLength = int64(len(wrapped))
+			return
+		}
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
 }
