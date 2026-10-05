@@ -44,9 +44,10 @@ class TaskKillModal extends Modal {
 }
 
 /**
- * Represents the TaskList in src/components/TaskList.tsx
+ * Represents the TaskDashboard in src/components/TaskDashboard/TaskDashboard.tsx: the Jobs page,
+ * the tasks-only view at /tasks, and the Jobs tabs of workspaces and projects.
  */
-export class TaskList extends BaseReactFragment {
+export class TaskDashboard extends BaseReactFragment {
   readonly jupyterLabButton = new BaseComponent({
     parent: this,
     selector: '[data-testid="jupyter-lab-button"]',
@@ -58,6 +59,8 @@ export class TaskList extends BaseReactFragment {
     parent: this,
     selector: '[data-testid="shell-button"]',
   });
+  readonly kindChip = (kind: string): BaseComponent =>
+    new BaseComponent({ parent: this, selector: `[data-testid="kind-${kind}"]` });
   readonly table = new InteractiveTable({
     parent: this,
     tableArgs: {

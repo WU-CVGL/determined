@@ -1,11 +1,22 @@
 import { DateString } from 'ioTypes';
-import { V1GenericTask, V1GenericTaskState, V1GetGenericTasksResponse } from 'services/api-ts-sdk';
+import {
+  Taskv1State,
+  V1GenericTask,
+  V1GenericTaskState,
+  V1GetGenericTasksResponse,
+  V1SlotsFilter,
+} from 'services/api-ts-sdk';
 import { GenericTaskState } from 'types';
 
 import {
+  getCommands,
+  getExperiments,
   getGenericTask,
   getGenericTaskConfig,
   getGenericTasks,
+  getJupyterLabs,
+  getShells,
+  getTensorBoards,
   killGenericTask,
   pauseGenericTask,
   unpauseGenericTask,
@@ -74,6 +85,31 @@ describe('generic task services', () => {
     expect(response.pagination.total).toBe(1);
   });
 
+  it('getGenericTasks passes the project, search and GPU filters', async () => {
+    const spy = vi.spyOn(detApi.Tasks, 'getGenericTasks').mockResolvedValue(listResponse([]));
+    const signal = new AbortController().signal;
+
+    await getGenericTasks(
+      { projectId: 5, search: 'sweep', slotsFilter: V1SlotsFilter.CPUONLY },
+      { signal },
+    );
+
+    expect(spy).toHaveBeenCalledWith(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      5,
+      'sweep',
+      V1SlotsFilter.CPUONLY,
+      { signal },
+    );
+  });
+
   it('killGenericTask sends killFromRoot', async () => {
     const spy = vi.spyOn(detApi.Tasks, 'killGenericTask').mockResolvedValue({});
     await killGenericTask({ taskId: 't' });
@@ -125,5 +161,95 @@ describe('generic task services', () => {
       vi.spyOn(detApi.Tasks, 'getGenericTasks').mockResolvedValue(listResponse([]));
       expect(await getGenericTask('x')).toBeUndefined();
     });
+  });
+});
+
+describe('dashboard list services', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('getExperiments passes the workspace and GPU filters', async () => {
+    const spy = vi
+      .spyOn(detApi.Experiments, 'getExperiments')
+      .mockResolvedValue({ experiments: [], pagination: { total: 0 } });
+
+    await getExperiments({ slotsFilter: V1SlotsFilter.GPU, workspaceId: 7 });
+
+    const args = spy.mock.calls[0];
+    // workspaceId and slotsFilter come right before the request options.
+    expect(args.slice(-3, -1)).toStrictEqual([7, V1SlotsFilter.GPU]);
+  });
+
+  it('getExperiments filters by user IDs, as given or as user strings', async () => {
+    const spy = vi
+      .spyOn(detApi.Experiments, 'getExperiments')
+      .mockResolvedValue({ experiments: [], pagination: { total: 0 } });
+
+    await getExperiments({ userIds: [3] });
+    await getExperiments({ users: ['4'] });
+    await getExperiments({});
+
+    // userIds is the SDK's 11th argument.
+    expect(spy.mock.calls.map((args) => args[10])).toStrictEqual([[3], [4], undefined]);
+  });
+
+  it('getExperiments sends neither filter when they are unset', async () => {
+    const spy = vi
+      .spyOn(detApi.Experiments, 'getExperiments')
+      .mockResolvedValue({ experiments: [], pagination: { total: 0 } });
+
+    await getExperiments({});
+
+    expect(spy.mock.calls[0].slice(-3, -1)).toStrictEqual([undefined, undefined]);
+  });
+
+  const SDK_TASK = {
+    description: 'task',
+    id: 't1',
+    jobId: 'j1',
+    resourcePool: 'default',
+    slots: 2,
+    startTime: '2026-01-01T00:00:00Z' as DateString,
+    state: Taskv1State.RUNNING,
+    username: 'alice',
+    workspaceId: 1,
+  };
+
+  /* A task list wrapper passes the request's abort signal on and decodes the slots. */
+  const expectSignalAndSlots = async (
+    list: typeof getCommands,
+    spy: { mock: { calls: unknown[][] } },
+  ) => {
+    const signal = new AbortController().signal;
+    const tasks = await list({ workspaceId: 1 }, { signal });
+    expect(spy.mock.calls[0].at(-1)).toStrictEqual({ signal });
+    expect(tasks[0].slots).toBe(2);
+  };
+
+  it('getCommands forwards the abort signal and reads the slots', async () => {
+    const spy = vi.spyOn(detApi.Commands, 'getCommands').mockResolvedValue({
+      commands: [SDK_TASK],
+    });
+    await expectSignalAndSlots(getCommands, spy);
+  });
+
+  it('getJupyterLabs forwards the abort signal and reads the slots', async () => {
+    const spy = vi.spyOn(detApi.Notebooks, 'getNotebooks').mockResolvedValue({
+      notebooks: [SDK_TASK],
+    });
+    await expectSignalAndSlots(getJupyterLabs, spy);
+  });
+
+  it('getShells forwards the abort signal and reads the slots', async () => {
+    const spy = vi.spyOn(detApi.Shells, 'getShells').mockResolvedValue({ shells: [SDK_TASK] });
+    await expectSignalAndSlots(getShells, spy);
+  });
+
+  it('getTensorBoards forwards the abort signal and reads the slots', async () => {
+    const spy = vi.spyOn(detApi.TensorBoards, 'getTensorboards').mockResolvedValue({
+      tensorboards: [SDK_TASK],
+    });
+    await expectSignalAndSlots(getTensorBoards, spy);
   });
 });
