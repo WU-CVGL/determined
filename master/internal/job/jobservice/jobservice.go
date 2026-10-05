@@ -10,6 +10,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/exp/slices"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/determined-ai/determined/master/internal/rm"
 	"github.com/determined-ai/determined/master/internal/rm/rmerrors"
@@ -211,26 +213,40 @@ func (s *Service) applyUpdate(update *jobv1.QueueControl) error {
 	return nil
 }
 
-// UpdateJobQueue sends queue control updates to specific jobs.
+// UpdateJobQueue sends queue control updates to specific jobs. The error of an update keeps its
+// gRPC status, such as InvalidArgument for a priority or weight that the job refuses; the errors of
+// several updates keep a status only if they all have it.
 func (s *Service) UpdateJobQueue(updates []*jobv1.QueueControl) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	errs := make([]string, 0)
+	errs := make([]error, 0)
 
 	for _, update := range updates {
 		if err := s.applyUpdate(update); err != nil {
-			errs = append(errs, err.Error())
+			errs = append(errs, err)
 		}
 	}
 
-	if len(errs) == 1 {
-		return fmt.Errorf(errs[0])
-	} else if len(errs) > 1 {
-		return fmt.Errorf("encountered the following errors: %s", strings.Join(errs, ", "))
+	switch len(errs) {
+	case 0:
+		return nil
+	case 1:
+		return errs[0]
 	}
-
-	return nil
+	code := status.Code(errs[0])
+	msgs := make([]string, 0, len(errs))
+	for _, err := range errs {
+		if status.Code(err) != code {
+			code = codes.Unknown
+		}
+		msgs = append(msgs, status.Convert(err).Message())
+	}
+	msg := fmt.Sprintf("encountered the following errors: %s", strings.Join(msgs, ", "))
+	if code == codes.Unknown {
+		return errors.New(msg)
+	}
+	return status.Error(code, msg)
 }
 
 // updateJobQInfo updates the job with the RMJobInfo.

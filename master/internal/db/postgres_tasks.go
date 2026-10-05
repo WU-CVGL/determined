@@ -104,24 +104,41 @@ func CompleteTask(ctx context.Context, tID model.TaskID, endTime time.Time) erro
 	return nil
 }
 
-// CompleteGenericTask persists the completion of a task of type GENERIC.
-func CompleteGenericTask(tID model.TaskID, endTime time.Time) error {
-	err := CompleteTask(context.Background(), tID, endTime)
-	if err != nil {
-		return err
+// EndGenericTaskAllocation persists the end of a GENERIC task's allocation. The update that writes
+// the task's state also decides it, from the state the task is in then, so that a kill that ends the
+// task meanwhile is not overwritten: a failed allocation ends the task in ERROR, a task stopping for
+// a pause becomes PAUSED, one stopping for a kill CANCELED and any other COMPLETED. A task that has
+// already ended, e.g. one that a kill canceled while its allocation was exiting, is left as it is.
+// It reports whether the task is PAUSED afterwards.
+func EndGenericTaskAllocation(
+	ctx context.Context, tID model.TaskID, endTime time.Time, failed bool,
+) (paused bool, err error) {
+	var state model.TaskState
+	err = Bun().NewUpdate().Table("tasks").
+		Set(`task_state = (CASE
+			WHEN ? THEN ?::task_state
+			WHEN task_state IN (?) THEN ?::task_state
+			WHEN task_state = ? THEN ?::task_state
+			ELSE ?::task_state END)`,
+			failed, model.TaskStateError,
+			bun.In([]model.TaskState{model.TaskStateStoppingPaused, model.TaskStatePaused}),
+			model.TaskStatePaused,
+			model.TaskStateStoppingCanceled, model.TaskStateCanceled,
+			model.TaskStateCompleted).
+		Set("end_time = ?", endTime).
+		Where("task_id = ?", tID).
+		Where("task_state NOT IN (?)", bun.In([]model.TaskState{
+			model.TaskStateCanceled, model.TaskStateCompleted, model.TaskStateError,
+		})).
+		Returning("task_state").
+		Scan(ctx, &state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
 	}
-	_, err = Bun().
-		NewRaw(`UPDATE tasks
-				SET task_state = (
-	    		CASE WHEN task_state = ? THEN ?::task_state
-	    		ELSE ?::task_state END)
-				WHERE task_id = ?
-	    `, model.TaskStateStoppingCanceled, model.TaskStateCanceled, model.TaskStateCompleted, tID).
-		Exec(context.Background())
 	if err != nil {
-		return errors.Wrap(err, "completing task")
+		return false, errors.Wrap(err, "ending generic task allocation")
 	}
-	return nil
+	return state == model.TaskStatePaused, nil
 }
 
 // KillGenericTask persists the termination of a task of type GENERIC.
@@ -137,48 +154,6 @@ func KillGenericTask(tID model.TaskID, endTime time.Time) error {
 		Exec(context.Background())
 	if err != nil {
 		return errors.Wrap(err, "killing task")
-	}
-	return nil
-}
-
-// SetPausedState sets given task to a PAUSED state.
-func SetPausedState(taskID model.TaskID, endTime time.Time) error {
-	_, err := Bun().NewUpdate().
-		Table("tasks").
-		Set("task_state = ?", model.TaskStatePaused).
-		Set("end_time = ?", endTime).
-		Where("task_id = ?", taskID).
-		Exec(context.Background())
-	if err != nil {
-		return errors.Wrap(err, "pausing task")
-	}
-	return nil
-}
-
-// IsPaused returns true if given task is in paused/pausing state.
-func IsPaused(ctx context.Context, tID model.TaskID) (bool, error) {
-	count, err := Bun().NewSelect().Table("tasks").
-		Where("task_id = ?", tID).
-		WhereGroup(" AND ", func(q *bun.SelectQuery) *bun.SelectQuery {
-			return q.Where("task_state = ?", model.TaskStateStoppingPaused).
-				WhereOr("task_state = ?", model.TaskStatePaused)
-		}).Count(context.Background())
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
-// SetErrorState sets given task to a ERROR state.
-func SetErrorState(taskID model.TaskID, endTime time.Time) error {
-	_, err := Bun().NewUpdate().
-		Table("tasks").
-		Set("task_state = ?", model.TaskStateError).
-		Set("end_time = ?", endTime).
-		Where("task_id = ?", taskID).
-		Exec(context.Background())
-	if err != nil {
-		return errors.Wrap(err, "setting error task state")
 	}
 	return nil
 }

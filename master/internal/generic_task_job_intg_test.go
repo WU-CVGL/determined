@@ -5,19 +5,25 @@ package internal
 
 import (
 	"context"
+	"fmt"
 	"math"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"github.com/uptrace/bun"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/configpolicy"
 	"github.com/determined-ai/determined/master/internal/db"
+	"github.com/determined-ai/determined/master/internal/mocks"
 	"github.com/determined-ai/determined/master/internal/rm"
 	"github.com/determined-ai/determined/master/internal/rm/tasklist"
 	"github.com/determined-ai/determined/master/internal/sproto"
@@ -438,6 +444,98 @@ func TestKillPausedGenericTaskEndsItsSchedulingRegistration(t *testing.T) {
 	requireStopped(t, stopped)
 }
 
+// taskUpdateInterceptor runs a function before the first UPDATE that names a task, to put another
+// request between a read of the task and that write. bun cannot remove a query hook, so one
+// interceptor is added once and does nothing while it is not armed.
+type taskUpdateInterceptor struct {
+	armed atomic.Pointer[taskUpdateInterception]
+}
+
+type taskUpdateInterception struct {
+	taskID model.TaskID
+	fired  atomic.Bool
+	run    func()
+}
+
+func (h *taskUpdateInterceptor) BeforeQuery(ctx context.Context, e *bun.QueryEvent) context.Context {
+	i := h.armed.Load()
+	if i == nil || !strings.HasPrefix(strings.TrimSpace(e.Query), "UPDATE") ||
+		!strings.Contains(e.Query, i.taskID.String()) {
+		return ctx
+	}
+	// The function's own queries come through here too.
+	if i.fired.CompareAndSwap(false, true) {
+		i.run()
+	}
+	return ctx
+}
+
+func (*taskUpdateInterceptor) AfterQuery(context.Context, *bun.QueryEvent) {}
+
+var (
+	addTaskUpdateInterceptor sync.Once
+	theTaskUpdateInterceptor = &taskUpdateInterceptor{}
+)
+
+// beforeTaskUpdate runs run before the next UPDATE that names the task, and reports whether it ran.
+func beforeTaskUpdate(t *testing.T, taskID model.TaskID, run func()) (ran func() bool) {
+	addTaskUpdateInterceptor.Do(func() { db.Bun().AddQueryHook(theTaskUpdateInterceptor) })
+	i := &taskUpdateInterception{taskID: taskID, run: run}
+	theTaskUpdateInterceptor.armed.Store(i)
+	t.Cleanup(func() { theTaskUpdateInterceptor.armed.Store(nil) })
+	return i.fired.Load
+}
+
+// A kill that arrives while a pause's exit hook runs ends the task as canceled. The allocation
+// service removes the allocation before it calls the hook, so the kill finds no allocation and
+// cancels the task itself, after the hook started for a task that was stopping for the pause and
+// before the hook writes the task's end. The hook must not mark the canceled task PAUSED, which
+// would let it be unpaused, nor keep its scheduling registration as if it were paused.
+func TestKillDuringPauseExitHookCancelsTheTask(t *testing.T) {
+	for name, kill := range map[string]func(*testing.T, *apiServer, context.Context, model.TaskID){
+		"kill request": func(t *testing.T, api *apiServer, ctx context.Context, taskID model.TaskID) {
+			_, err := api.KillGenericTask(ctx, &apiv1.KillGenericTaskRequest{TaskId: taskID.String()})
+			require.NoError(t, err)
+		},
+		// The kill has canceled the task but not yet ended its job, which is up to the hook then.
+		"kill's state change": func(t *testing.T, _ *apiServer, ctx context.Context, taskID model.TaskID) {
+			_, err := cancelGenericTaskResumeMembers(ctx, []model.Task{{TaskID: taskID}})
+			require.NoError(t, err)
+			require.NoError(t, finishGenericTaskKillWithoutAllocation(ctx, taskID))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			api, owner, ctx := setupAPITest(t, nil)
+			taskID, jobID, j := addGenericTaskJobForTest(ctx, t, api, owner, "pausing")
+			service := &lifecycleAllocationService{running: map[model.AllocationID]bool{}}
+			oldService := task.DefaultService
+			task.DefaultService = service
+			t.Cleanup(func() { task.DefaultService = oldService })
+
+			// A pause stopped the task's allocation, which has ended and left the allocation service.
+			_, err := db.Bun().NewUpdate().Table("tasks").Set("task_state = ?", model.TaskStateStoppingPaused).
+				Where("task_id = ?", taskID).Exec(ctx)
+			require.NoError(t, err)
+			_, err = db.Bun().NewUpdate().Table("allocations").Set("end_time = ?", time.Now().UTC()).
+				Where("allocation_id = ?", j.allocationID).Exec(ctx)
+			require.NoError(t, err)
+			stopped := watchJobStopped(jobID)
+
+			killed := beforeTaskUpdate(t, taskID, func() { kill(t, api, ctx, taskID) })
+			onExit := getGenericTaskOnAllocationExit(ctx, taskID, j.allocationID, jobID, logger.Context{})
+			onExit(&task.AllocationExited{})
+			require.True(t, killed(), "the kill did not run before the hook's write")
+
+			got, err := db.TaskByID(ctx, taskID)
+			require.NoError(t, err)
+			require.Equal(t, model.TaskStateCanceled, *got.State)
+			requireStopped(t, stopped)
+			_, err = api.UnpauseGenericTask(ctx, &apiv1.UnpauseGenericTaskRequest{TaskId: taskID.String()})
+			require.Equal(t, codes.FailedPrecondition, status.Code(err), "%v", err)
+		})
+	}
+}
+
 func TestCreateGenericTaskRefusesInvalidSchedulingParameters(t *testing.T) {
 	api, _, ctx := setupAPITest(t, nil)
 	service := &captureAllocationService{}
@@ -475,6 +573,73 @@ func TestCreateGenericTaskRefusesInvalidSchedulingParameters(t *testing.T) {
 	require.Equal(t, codes.InvalidArgument, status.Code(create(beyond)))
 	require.Empty(t, service.reqs, "no task may be started by a refused create")
 	require.NoError(t, create(within))
+}
+
+// poolDefaultPriorityRM is a resource manager whose pools have a priority scheduler with a default
+// priority.
+type poolDefaultPriorityRM struct {
+	*mocks.ResourceManager
+	defaultPriority int
+}
+
+func (m poolDefaultPriorityRM) ResourcePoolSchedulerConfig(string) (*config.SchedulerConfig, bool) {
+	return &config.SchedulerConfig{
+		Priority: &config.PrioritySchedulerConfig{DefaultPriority: &m.defaultPriority},
+	}, true
+}
+
+// A task created without a priority gets the pool's default priority, which the workspace's task
+// config policy limits as it limits a priority set in the config.
+func TestCreateGenericTaskChecksPoolDefaultPriorityAgainstPolicy(t *testing.T) {
+	api, _, ctx := setupAPITest(t, nil)
+	api.m.rm = poolDefaultPriorityRM{ResourceManager: api.m.rm.(*mocks.ResourceManager), defaultPriority: 50}
+	smallerHigher, err := api.m.rm.SmallerValueIsHigherPriority()
+	require.NoError(t, err)
+	require.True(t, smallerHigher, "the limits below assume that a smaller value is a higher priority")
+	service := &captureAllocationService{}
+	oldService := task.DefaultService
+	task.DefaultService = service
+	t.Cleanup(func() { task.DefaultService = oldService })
+
+	workspaceID, _ := db.RequireMockWorkspaceID(t, db.SingleDB(), "")
+	projectID, _ := db.RequireMockProjectID(t, db.SingleDB(), workspaceID, false)
+	admin, err := user.ByUsername(ctx, "admin")
+	require.NoError(t, err)
+	setLimit := func(limit int) {
+		require.NoError(t, configpolicy.SetTaskConfigPolicies(ctx, &model.TaskConfigPolicies{
+			WorkspaceID: &workspaceID, WorkloadType: model.NTSCType, LastUpdatedBy: admin.ID,
+			Constraints: ptrs.Ptr(fmt.Sprintf(`{"priority_limit": %d}`, limit)),
+		}))
+	}
+	create := func(resources string) (model.TaskID, error) {
+		resp, err := api.CreateGenericTask(ctx, &apiv1.CreateGenericTaskRequest{
+			ProjectId: ptrs.Ptr(int32(projectID)), //nolint:gosec // The IDs of test projects are small.
+			Config:    "entrypoint: [\"true\"]\nresources:\n  slots: 0\n" + resources,
+		})
+		if err != nil {
+			return "", err
+		}
+		return model.TaskID(resp.TaskId), nil
+	}
+
+	// The pool's default of 50 is a higher priority than the limit of 80 allows, whether the
+	// config sets it or leaves the priority out.
+	setLimit(80)
+	_, err = create("  priority: 50\n")
+	require.Equal(t, codes.InvalidArgument, status.Code(err), "%v", err)
+	_, err = create("")
+	require.Equal(t, codes.InvalidArgument, status.Code(err), "%v", err)
+	require.Empty(t, service.reqs, "no task may be started by a refused create")
+	_, err = create("  priority: 80\n")
+	require.NoError(t, err)
+
+	// Within the limit, the task runs with the pool's default priority.
+	setLimit(30)
+	taskID, err := create("")
+	require.NoError(t, err)
+	_, spec, err := getGenericTaskSpec(ctx, taskID)
+	require.NoError(t, err)
+	require.Equal(t, 50, *spec.GenericTaskConfig.Resources.RawPriority)
 }
 
 func TestGetGenericTasksRefusesANegativeLimit(t *testing.T) {

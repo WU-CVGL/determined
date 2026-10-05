@@ -176,13 +176,14 @@ func (j *genericTaskJob) ToV1Job() (*jobv1.Job, error) {
 }
 
 // SetJobPriority implements jobservice.Job: it validates the priority against the workspace's task
-// config policy, applies it in the resource manager and persists it.
+// config policy, applies it in the resource manager and persists it. A priority outside 1..99 or
+// beyond the policy's limit is refused as an invalid argument, as at creation.
 func (j *genericTaskJob) SetJobPriority(priority int) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
 	if priority < 1 || priority > 99 {
-		return fmt.Errorf("priority must be between 1 and 99")
+		return status.Error(codes.InvalidArgument, "priority must be between 1 and 99")
 	}
 	if smallerHigher, err := j.rm.SmallerValueIsHigherPriority(); err == nil {
 		ok, err := configpolicy.PriorityUpdateAllowed(j.spec.WorkspaceID, model.NTSCType, priority, smallerHigher)
@@ -190,7 +191,7 @@ func (j *genericTaskJob) SetJobPriority(priority int) error {
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("priority exceeds task config policy's priority_limit")
+			return status.Error(codes.InvalidArgument, "priority exceeds task config policy's priority_limit")
 		}
 	}
 
