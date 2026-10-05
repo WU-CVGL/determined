@@ -107,10 +107,12 @@ func (a *apiServer) GetNotebook(
 			resp.Notebook.ServiceAddress, token)
 		logCredentialRead(*curUser, "notebook token", req.NotebookId, resp.Notebook.UserId)
 	}
+	redactTaskConfig(*curUser, resp.Notebook.UserId, req.NotebookId, resp.Config)
 	return resp, nil
 }
 
-// getNotebook returns a notebook, without its Jupyter token, if the current user may see it.
+// getNotebook returns a notebook, without its Jupyter token but with its full config, if the
+// current user may see it.
 func (a *apiServer) getNotebook(
 	ctx context.Context, notebookID string,
 ) (*apiv1.GetNotebookResponse, *model.User, error) {

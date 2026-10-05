@@ -110,10 +110,12 @@ func (a *apiServer) GetShell(
 		}
 		logCredentialRead(*curUser, "shell private key", req.ShellId, resp.Shell.UserId)
 	}
+	redactTaskConfig(*curUser, resp.Shell.UserId, req.ShellId, resp.Config)
 	return resp, nil
 }
 
-// getShell returns a shell, without its private key, if the current user may see it.
+// getShell returns a shell, without its private key but with its full config, if the current user
+// may see it.
 func (a *apiServer) getShell(
 	ctx context.Context, shellID string,
 ) (*apiv1.GetShellResponse, *model.User, error) {

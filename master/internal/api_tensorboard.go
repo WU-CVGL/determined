@@ -112,23 +112,37 @@ func (a *apiServer) GetTensorboards(
 func (a *apiServer) GetTensorboard(
 	ctx context.Context, req *apiv1.GetTensorboardRequest,
 ) (*apiv1.GetTensorboardResponse, error) {
+	resp, curUser, err := a.getTensorboard(ctx, req.TensorboardId)
+	if err != nil {
+		return nil, err
+	}
+	redactTaskConfig(*curUser, resp.Tensorboard.UserId, req.TensorboardId, resp.Config)
+	return resp, nil
+}
+
+// getTensorboard returns a TensorBoard, with its full config, if the current user may see it.
+func (a *apiServer) getTensorboard(
+	ctx context.Context, tensorboardID string,
+) (*apiv1.GetTensorboardResponse, *model.User, error) {
 	curUser, _, err := grpcutil.GetUser(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	resp, err := command.DefaultCmdService.GetTensorboard(req)
+	resp, err := command.DefaultCmdService.GetTensorboard(
+		&apiv1.GetTensorboardRequest{TensorboardId: tensorboardID})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	ctx = audit.SupplyEntityID(ctx, req.TensorboardId)
+	ctx = audit.SupplyEntityID(ctx, tensorboardID)
 	if err := command.AuthZProvider.Get().CanGetTensorboard(
 		ctx, *curUser, model.AccessScopeID(resp.Tensorboard.WorkspaceId),
 		resp.Tensorboard.ExperimentIds, resp.Tensorboard.TrialIds); err != nil {
-		return nil, authz.SubIfUnauthorized(err, api.NotFoundErrs("tensorboard", req.TensorboardId, true))
+		return nil, nil, authz.SubIfUnauthorized(err,
+			api.NotFoundErrs("tensorboard", tensorboardID, true))
 	}
-	return resp, nil
+	return resp, curUser, nil
 }
 
 func (a *apiServer) KillTensorboard(
@@ -140,8 +154,7 @@ func (a *apiServer) KillTensorboard(
 		}
 	}()
 
-	getResponse, err := a.GetTensorboard(ctx,
-		&apiv1.GetTensorboardRequest{TensorboardId: req.TensorboardId})
+	getResponse, _, err := a.getTensorboard(ctx, req.TensorboardId)
 	if err != nil {
 		return nil, err
 	}
@@ -179,8 +192,7 @@ func (a *apiServer) SetTensorboardPriority(
 		}
 	}()
 
-	getResponse, err := a.GetTensorboard(ctx,
-		&apiv1.GetTensorboardRequest{TensorboardId: req.TensorboardId})
+	getResponse, _, err := a.getTensorboard(ctx, req.TensorboardId)
 	if err != nil {
 		return nil, err
 	}
