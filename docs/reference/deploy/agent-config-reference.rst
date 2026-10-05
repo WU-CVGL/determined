@@ -62,6 +62,40 @@ The GPUs that should be exposed as slots by the agent. A comma-separated list of
 specified by a 0-based index, UUID, PCI bus ID, or board serial number. The 0-based index of NVIDIA
 GPUs or AMD GPUs can be obtained via the ``nvidia-smi`` or ``rocm-smi`` commands.
 
+.. _agent-exclude-gpus:
+
+******************
+ ``exclude_gpus``
+******************
+
+NVIDIA GPUs that the agent reports but never offers as slots, for example a faulty GPU. A
+comma-separated list of GPU UUIDs, never indices (``nvidia-smi -L`` prints the UUIDs). Set it with
+the ``exclude_gpus`` key of the agent configuration file or with the ``--exclude-gpus`` flag. There
+is no environment variable. Start the agent container with all GPUs: the agent must see an excluded
+GPU to report it.
+
+-  An excluded GPU is not a slot: the master never schedules it and no task container gets it. The
+   other GPUs keep their ``nvidia-smi`` index as slot ID, so the slot IDs can have gaps, as with
+   ``visible_gpus``.
+
+-  An entry that matches no detected NVIDIA GPU stops the agent with an error that names the entry,
+   so that a typo never hands the GPU to tasks. If ``nvidia-smi`` fails, no GPU is detected and
+   every entry fails this way.
+
+-  With ``slot_type: auto``, excluded GPUs count as found NVIDIA GPUs: an agent whose GPUs are all
+   excluded has no slots, and does not fall back to ROCm or CPU slots.
+
+-  Excluded GPUs appear in the agent's :ref:`GPU topology <agent-gpu-topology>`, labelled as
+   excluded, with the same measurements as the slots.
+
+-  Changing the list changes the agent's slots. Drain the agent first: the master stops an agent
+   whose slots changed when it reconnects.
+
+-  Agents without this option refuse to start with ``exclude_gpus`` in their configuration file or
+   with ``--exclude-gpus``. Before rolling an agent back to such a version, remove the option and
+   hide the GPU from the agent container instead, for example with ``docker run --gpus
+   '"device=<UUIDs of the other GPUs>"'``.
+
 ***************
  ``slot_type``
 ***************
@@ -183,3 +217,120 @@ Defaults to ``false``.
 If set then specifies the path to a shared directory of previously downloaded Determined environment
 images. If not defined, then Determined environments will be downloaded automatically. For more
 information on setting up an image cache see :ref:`singularity-image-cache`. Defaults to undefined.
+
+.. _agent-gpu-topology:
+
+*************************
+ GPU topology and health
+*************************
+
+When it starts, an agent measures its NVIDIA GPUs with NVML and reports the result to the master.
+This is not an option: every agent with NVIDIA GPUs does it, and no configuration turns it on or
+off. The master keeps the report in memory and serves it in the agent API (``gpu_topology``), in
+``det agent list`` (the GPU Topology and GPU Health columns), in ``det agent describe AGENT_ID``,
+and on the resource pool page of the WebUI. Users without permission to view sensitive agent
+information see no topology.
+
+NVML
+====
+
+The agent loads ``libnvidia-ml.so.1`` at runtime; the agent image does not bundle it. The NVIDIA
+Container Toolkit mounts it into the agent container with the ``utility`` driver capability, which
+containers started with ``--gpus`` get by default. An agent built without cgo, or for an operating
+system other than Linux, has no NVML support and reports the topology as unknown.
+
+What the agent measures
+=======================
+
+The agent measures once, at start, for every slot and every :ref:`excluded <agent-exclude-gpus>`
+GPU, and for nothing else. A restart measures again, for example after a driver change.
+
+-  For each GPU: its PCI bus ID, its NUMA node (read from sysfs), the current and maximum PCIe link
+   width and generation, and the NVML calls that failed.
+
+-  For each pair of GPUs: the closest common ancestor (``INTERNAL``, ``PIX``, ``PXB``, ``PHB``,
+   ``NODE`` or ``SYS``, as in ``nvidia-smi topo -m``), the number of active NVLinks between them,
+   and the P2P ``READ`` and ``WRITE`` statuses in both directions.
+
+-  The driver version and the time of the measurement, by the agent's clock.
+
+A pair's P2P is usable only when ``READ`` and ``WRITE`` are ``OK`` in both directions, the condition
+under which NCCL uses P2P between two GPUs. It is not usable when any of the four statuses is a
+known status other than ``OK``, and unknown otherwise. NVLinks do not count without usable P2P.
+
+NVML results appear as their symbolic name and number, for example ``ERROR_GPU_IS_LOST (15)``.
+
+The topology is unknown, with the reason shown, when NVML cannot be loaded or initialized (for
+example ``NVML init: ERROR_LIBRARY_NOT_FOUND (12)``), when the measurement does not finish within 60
+seconds, for MIG instances, for an agent built without NVML support, for agents of earlier versions,
+and for a few seconds after the master restarts, until each agent reconnects. The slots and excluded
+GPUs are still listed, without measurements.
+
+Health
+======
+
+Each GPU gets one state, shown as a dot in the WebUI and as a word in the CLI. The first matching
+row wins.
+
+.. list-table::
+   :header-rows: 1
+
+   -  -  State
+      -  Condition
+      -  Dot
+      -  CLI
+
+   -  -  error
+      -  An NVML call for the GPU failed at agent start.
+      -  red
+      -  ``error``
+
+   -  -  link below max
+      -  At agent start, the current PCIe link width was below the maximum.
+      -  amber
+      -  ``narrow``
+
+   -  -  ok
+      -  The topology is known, and at agent start the link width was at its maximum.
+      -  green
+      -  ``ok``
+
+   -  -  unknown
+      -  Anything else, for example an unknown topology or an unknown link width.
+      -  hollow gray
+      -  ``unknown``
+
+The link generation never changes the state. Green means that there was no NVML error and the link
+width was at its maximum at agent start; it does not mean that the GPU is verified to be healthy.
+
+The link width and generation are observations at agent start, not confirmed faults. A GPU can
+reduce its link generation and width while it is idle, and a link can train to a different width
+after a reboot. A lower link width lowers the bandwidth cap of the GPU's link; the actual collective
+throughput depends on the workload.
+
+The details of each GPU (``det agent describe`` and the WebUI's details) list four facts separately:
+the link at agent start, the NVML errors at agent start, recent critical XIDs (``not collected``),
+and the time of the measurement.
+
+Coverage
+========
+
+The measurement is a snapshot of the agent's start. A GPU that is lost, or a link that retrains,
+while the agent runs shows only at its next start. A GPU that ``nvidia-smi`` no longer lists at
+agent start is not measured: the agent registers fewer slots, or falls back to CPU slots with
+``slot_type: auto``, and an agent that reconnects with fewer slots is stopped by the master. Use the
+cluster's GPU monitoring for these cases.
+
+``determined-agent gpu-topology``
+=================================
+
+The ``gpu-topology`` subcommand of the agent binary initializes NVML, runs the agent's device
+detection, exclude list and measurement, and prints the result as JSON, with the raw P2P statuses
+and the derived P2P state of each pair. It accepts ``--visible-gpus``, ``--slot-type`` and
+``--exclude-gpus``. It exits with 0 also when NVML is missing; ``nvml_init`` then shows the reason.
+An ``--exclude-gpus`` entry that matches no GPU appears as ``exclude_error`` instead of stopping the
+command. For example, to check what an agent image would report on a host:
+
+.. code:: bash
+
+   docker run --rm --gpus all --entrypoint /usr/bin/determined-agent <agent image> gpu-topology
