@@ -124,6 +124,17 @@ func checkTaskRunsAs(actor, owner *model.User) error {
 	return nil
 }
 
+// deleteTaskSessionToken deletes a session that getTaskSessionToken made for a task that did not
+// start. With external sessions the token is the request's own, so it is left alone.
+func deleteTaskSessionToken(token string) {
+	if config.GetMasterConfig().InternalConfig.ExternalSessions.Enabled() {
+		return
+	}
+	if err := user.DeleteSessionByToken(context.Background(), token); err != nil {
+		logrus.WithError(err).Error("deleting the session of a task that did not start")
+	}
+}
+
 func getTaskSessionToken(ctx context.Context, userModel *model.User) (string, error) {
 	var token string
 	var err error

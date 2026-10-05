@@ -246,6 +246,17 @@ func TestContinueExperimentKeepsOwnerIdentity(t *testing.T) {
 		require.Equal(t, "echo changed", active.Entrypoint().RawEntrypoint)
 	})
 
+	t.Run("a continue that fails leaves the owner no new session", func(t *testing.T) {
+		// Not ended, so the continue fails after the session for its tasks is made.
+		expID := createTestExpWithProjectID(t, api, owner.User, 1).ID
+		before := sessionCount(t, owner)
+		_, err := api.ContinueExperiment(admin.ctx, &apiv1.ContinueExperimentRequest{
+			Id: int32(expID),
+		})
+		require.ErrorContains(t, err, "non terminal state")
+		require.Equal(t, before, sessionCount(t, owner))
+	})
+
 	t.Run("with external sessions, another user's experiment is not continued", func(t *testing.T) {
 		ext := &config.GetMasterConfig().InternalConfig.ExternalSessions
 		loginURI := ext.LoginURI

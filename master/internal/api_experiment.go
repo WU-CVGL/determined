@@ -1585,6 +1585,13 @@ func (a *apiServer) ContinueExperiment(
 	if err != nil {
 		return nil, fmt.Errorf("parsing continue experiment request: %w", err)
 	}
+	// Until the experiment starts, nothing else holds the session made for its tasks.
+	started := false
+	defer func() {
+		if !started {
+			deleteTaskSessionToken(taskSpec.UserSessionToken)
+		}
+	}()
 	dbExp.ID = int(req.Id)
 	dbExp.JobID = origExperiment.JobID // Revive job.
 
@@ -1687,6 +1694,7 @@ func (a *apiServer) ContinueExperiment(
 	if err = e.Start(); err != nil {
 		return nil, errors.Wrapf(err, "failed to start experiment %d", e.ID)
 	}
+	started = true
 
 	_, err = a.ActivateExperiment(ctx, &apiv1.ActivateExperimentRequest{Id: int32(e.ID)})
 	if err != nil {
