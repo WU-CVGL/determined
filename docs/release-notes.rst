@@ -148,15 +148,15 @@ Version 0.41.0
    launch response without storing it.
 
 -  WebUI: Start a shell or JupyterLab from an earlier config with **Start from**: your own tasks
-   that the master still knows (running, or ended within about 24 hours and before the last master
+   that the master still knows (running, or ended within about 24 hours and since the last master
    restart), up to 20 configs per task type launched from this browser, or a template, which also
    fills in its resource pool and slots. The browser keeps its configs in local storage without the
    entrypoint, registry credentials, or environment variables whose names look like credentials.
 
--  WebUI: **Launch Again** on your own shell and JupyterLab rows, and on every row for
-   administrators, opens the launch form filled from that task's config. **Save as Template** in the
-   full-config mode starts a template that keeps only the settings that differ from the cluster
-   defaults; other users can read templates.
+-  WebUI: **Launch Again** on your own shell and JupyterLab rows, and on every shell and JupyterLab
+   row for administrators, opens the launch form filled from that task's config. **Save as
+   Template** in the full-config mode starts a template that keeps only the settings that differ
+   from the cluster defaults; other users can read templates.
 
 -  WebUI: The Tasks page and each workspace's Tasks tab have a **Generic Tasks** tab that lists
    generic tasks with their owner, state, slots, resource pool, pausability, parent, and times,
