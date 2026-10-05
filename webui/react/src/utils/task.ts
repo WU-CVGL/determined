@@ -12,6 +12,20 @@ import { CommandState, RunState, State } from 'types';
 
 import { runStateSortValues } from './experiment';
 
+/**
+ * Whether to offer a browser terminal for a task: a running shell of the user's own, or any
+ * running shell for an admin. The master enforces the same rule.
+ */
+export const canOpenShellTerminal = (
+  task: Pick<Type.CommandTask, 'state' | 'type' | 'userId'>,
+  user?: Pick<Type.DetailedUser, 'id' | 'isAdmin'>,
+): boolean => {
+  if (!user || task.type !== Type.CommandType.Shell || task.state !== CommandState.Running) {
+    return false;
+  }
+  return user.isAdmin || user.id === task.userId;
+};
+
 export const canBeOpened = (task: Type.AnyTask): boolean => {
   if (isExperimentTask(task)) return true;
   if (terminalCommandStates.has(task.state)) return false;

@@ -59,6 +59,10 @@ export default defineConfig(({ mode }) => ({
       },
       output: {
         manualChunks: (id) => {
+          // The terminal library loads only with the shell terminal page.
+          if (id.includes('node_modules/@xterm/')) {
+            return 'xterm';
+          }
           if (id.includes('node_modules')) {
             return 'vendor';
           }
@@ -144,6 +148,12 @@ export default defineConfig(({ mode }) => ({
         target: websocketProxyUrl,
         ws: true,
       },
+      // Shell terminals. Keep the Host header (no changeOrigin): the master checks that the
+      // Origin header matches it.
+      '/ws': {
+        target: websocketProxyUrl,
+        ws: true,
+      },
     },
     strictPort: true,
   },
@@ -163,6 +173,12 @@ export default defineConfig(({ mode }) => ({
       '/ui': { target: webpackProxyUrl },
       '/proxy': { target: webpackProxyUrl },
       '/stream': {
+        target: websocketProxyUrl,
+        ws: true,
+      },
+      // Shell terminals. Keep the Host header (no changeOrigin): the master checks that the
+      // Origin header matches it.
+      '/ws': {
         target: websocketProxyUrl,
         ws: true,
       },

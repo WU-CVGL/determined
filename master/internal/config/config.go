@@ -157,6 +157,7 @@ func DefaultConfig() *Config {
 			CacheDir: "/var/cache/determined",
 		},
 		FeatureSwitches: []string{},
+		ShellTerminal:   DefaultShellTerminalConfig(),
 		ResourceConfig:  *DefaultResourceConfig(),
 		Observability: ObservabilityConfig{
 			EnablePrometheus: true,
@@ -196,6 +197,7 @@ type Config struct {
 	Webhooks              WebhooksConfig                    `json:"webhooks"`
 	FeatureSwitches       []string                          `json:"feature_switches"`
 	ReservedPorts         []int                             `json:"reserved_ports"`
+	ShellTerminal         ShellTerminalConfig               `json:"shell_terminal"`
 	ResourceConfig
 
 	// Internal contains "hidden" useful debugging configurations.

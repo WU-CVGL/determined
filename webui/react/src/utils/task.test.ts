@@ -11,6 +11,7 @@ import {
 import {
   canBeOpened,
   canKillGenericTask,
+  canOpenShellTerminal,
   canPauseGenericTask,
   canUnpauseGenericTask,
   isExperimentTask,
@@ -100,5 +101,23 @@ describe('generic task actions', () => {
 
   it('shortens task IDs', () => {
     expect(shortTaskId('0b7c5e2a-1f2e-4c3d-9a8b-7c6d5e4f3a2b')).toBe('0b7c5e2a');
+  });
+});
+
+describe('canOpenShellTerminal', () => {
+  const shell = { state: CommandState.Running, type: CommandType.Shell, userId: 5 };
+  const owner = { id: 5, isAdmin: false };
+
+  it('allows the owner and admins to open running shells', () => {
+    expect(canOpenShellTerminal(shell, owner)).toBe(true);
+    expect(canOpenShellTerminal(shell, { id: 1, isAdmin: true })).toBe(true);
+    expect(canOpenShellTerminal(shell, { id: 6, isAdmin: false })).toBe(false);
+    expect(canOpenShellTerminal(shell, undefined)).toBe(false);
+  });
+
+  it('only offers running shells', () => {
+    expect(canOpenShellTerminal({ ...shell, state: CommandState.Queued }, owner)).toBe(false);
+    expect(canOpenShellTerminal({ ...shell, state: CommandState.Terminated }, owner)).toBe(false);
+    expect(canOpenShellTerminal({ ...shell, type: CommandType.JupyterLab }, owner)).toBe(false);
   });
 });

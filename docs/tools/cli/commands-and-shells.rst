@@ -86,6 +86,35 @@ and forwards a port from the local machine to the container:
 
 To stop the SSH server container and free cluster resources, run ``det shell kill <UUID>``.
 
+.. _shell-web-terminal:
+
+Terminals in the WebUI
+======================
+
+You can also open a terminal in a running shell from the WebUI: on the **Tasks** page, click the
+shell's name, or choose **Open Terminal** from its action menu. The terminal opens in a new browser
+tab. Only the user who started the shell and administrators can open terminals in it; when an
+administrator opens one, the shell's task log records it.
+
+The master connects to the shell's SSH server for you, with the shell's own key, so the key never
+reaches the browser. A browser terminal is a new SSH session, like ``det shell open``, and both work
+at the same time:
+
+-  Closing the tab, reloading it or losing the connection ends the session and stops the programs
+   running in it. The terminal asks before you leave a connected session, but not when its tab
+   reloads because another tab of the browser signed in as a different user. To keep long jobs
+   running, start them in ``tmux`` (``tmux new -A -s main`` attaches to the same session again) or
+   with ``nohup``.
+
+-  **Reconnect** starts a new session in the same shell.
+
+-  A terminal closes after an hour without input or output, after 24 hours, when you sign out, and
+   when your login session expires. Each user can have up to eight terminals open. The cluster
+   administrator can change these limits; see :ref:`shell_terminal <master-config-shell-terminal>`.
+
+-  Links in the terminal's output open in a new tab only after you confirm the address, and only
+   for ``http`` and ``https`` links.
+
 .. _shell-file-locations:
 
 File Locations

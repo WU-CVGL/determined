@@ -54,6 +54,10 @@ X11DisplayOffset 10
 PrintMotd no
 PrintLastLog yes
 TCPKeepAlive yes
+# Probe idle clients every 30 seconds. The traffic keeps idle sessions alive through proxies with
+# short read timeouts, such as nginx's default of 60 seconds, and sshd drops a client that misses
+# three probes (ClientAliveCountMax defaults to 3).
+ClientAliveInterval 30
 #UseLogin no
 
 #MaxStartups 10:30:60

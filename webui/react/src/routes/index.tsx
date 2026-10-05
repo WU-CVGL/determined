@@ -17,6 +17,7 @@ const ProjectDetails = React.lazy(() => import('pages/ProjectDetails'));
 const Reload = React.lazy(() => import('pages/Reload'));
 const ResourcepoolDetail = React.lazy(() => import('pages/ResourcePool/ResourcepoolDetail'));
 const SearchDetails = React.lazy(() => import('pages/SearchDetails'));
+const ShellTerminal = React.lazy(() => import('pages/ShellTerminal'));
 import SignIn from 'pages/SignIn'; // no React.lazy to avoid e2e ci error
 import SignOut from 'pages/SignOut';
 const TaskListPage = React.lazy(() => import('pages/TaskListPage'));
@@ -56,6 +57,7 @@ const routeComponentMap: Record<string, React.ReactNode> = {
   reload: <Reload />,
   resourcepool: <ResourcepoolDetail />,
   searchDetails: <SearchDetails />,
+  shellTerminal: <ShellTerminal />,
   signIn: <SignIn />,
   signOut: <SignOut />,
   taskList: <TaskListPage />,

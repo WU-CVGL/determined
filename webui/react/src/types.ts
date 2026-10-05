@@ -1003,6 +1003,7 @@ export const TaskAction = {
   CopyTaskID: 'Copy Task ID',
   Kill: 'Kill',
   LaunchAgain: 'Launch Again',
+  OpenTerminal: 'Open Terminal',
   ViewLogs: 'View Logs',
   ViewResources: 'View Resources',
 } as const;

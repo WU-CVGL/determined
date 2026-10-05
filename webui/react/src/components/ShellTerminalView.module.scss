@@ -1,0 +1,13 @@
+.base {
+  height: 100%;
+  overflow: hidden;
+  padding: 4px 0 0 6px;
+  width: 100%;
+
+  &.dark {
+    background-color: #1e1e1e;
+  }
+  &.light {
+    background-color: #fff;
+  }
+}

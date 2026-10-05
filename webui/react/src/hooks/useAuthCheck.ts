@@ -152,9 +152,15 @@ const useAuthCheck = (): (() => Promise<boolean>) => {
       const user = await getCurrentUser({});
       // Every tab shares the session cookie. If another tab has signed in as someone else since
       // this one loaded its user, this tab's requests now run as them while the page still shows
-      // the user it loaded (with their filters and permissions), so reload it.
+      // the user it loaded (with their filters and permissions), so reload it. The page is no
+      // longer signed in as that user before it reloads, so that nothing on it (a connected
+      // terminal asks before leaving) keeps it from reloading.
       const loadedUser = Loadable.getOrElse(undefined, userStore.currentUser.get());
-      if (loadedUser && loadedUser.id !== user.id) reloadPage();
+      if (loadedUser && loadedUser.id !== user.id) {
+        authStore.reset();
+        reloadPage();
+        return false;
+      }
       authStore.setAuth({ isAuthenticated: true });
       authStore.setAuthChecked();
       return true;

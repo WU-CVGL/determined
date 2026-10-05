@@ -168,6 +168,9 @@ export const paths = {
   searchDetails: (searchId: number | string): string => {
     return `/searches/${searchId}`;
   },
+  shellTerminal: (shellId: string): string => {
+    return `/shells/${encodeURIComponent(shellId)}/terminal`;
+  },
   submitProductFeedback: (branding: BrandingType): string => {
     return branding === BrandingType.Determined
       ? 'https://airtable.com/shr87rnMuHhiDTpLo'
