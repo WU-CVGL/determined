@@ -78,6 +78,29 @@ func (db *PgDB) CreateDynamicResourcePool(
 	ctx context.Context,
 	record DynamicResourcePool,
 ) (stored DynamicResourcePool, created bool, err error) {
+	return db.insertDynamicResourcePool(ctx, record, DynamicResourcePoolPending)
+}
+
+// InsertAdoptedDynamicResourcePool durably saves a pool that master.yaml configures as a Ready
+// dynamic pool. The running master keeps serving the pool from master.yaml, so there is nothing
+// to initialize. A replay with the same idempotency key and spec returns the saved record.
+func (db *PgDB) InsertAdoptedDynamicResourcePool(
+	ctx context.Context,
+	record DynamicResourcePool,
+) (stored DynamicResourcePool, created bool, err error) {
+	if record.Spec == nil || record.SpecVersion == nil || record.SpecHash == nil {
+		return DynamicResourcePool{}, false, fmt.Errorf(
+			"inserting adopted dynamic resource pool: spec is incomplete",
+		)
+	}
+	return db.insertDynamicResourcePool(ctx, record, DynamicResourcePoolReady)
+}
+
+func (db *PgDB) insertDynamicResourcePool(
+	ctx context.Context,
+	record DynamicResourcePool,
+	state DynamicResourcePoolState,
+) (stored DynamicResourcePool, created bool, err error) {
 	var spec interface{}
 	if record.Spec != nil {
 		spec = []byte(*record.Spec)
@@ -97,7 +120,7 @@ ON CONFLICT DO NOTHING`,
 		spec,
 		record.SpecVersion,
 		record.SpecHash,
-		DynamicResourcePoolPending,
+		state,
 	)
 	if err != nil {
 		return DynamicResourcePool{}, false, fmt.Errorf("inserting dynamic resource pool: %w", err)

@@ -62,12 +62,19 @@ type updateDynamicResourcePoolRequest struct {
 	Config           json.RawMessage `json:"config"`
 }
 
+// adoptDynamicResourcePoolRequest saves a master.yaml pool as a dynamic pool. Config is the pool's
+// master.yaml entry, copied verbatim.
+type adoptDynamicResourcePoolRequest struct {
+	Config json.RawMessage `json:"config"`
+}
+
 // The top-level fields that each request body may hold.
 var (
 	createDynamicPoolRequestFields = map[string]bool{
 		"cluster_name": true, "idempotency_key": true, "config": true,
 	}
 	updateDynamicPoolRequestFields = map[string]bool{"expected_revision": true, "config": true}
+	adoptDynamicPoolRequestFields  = map[string]bool{"config": true}
 )
 
 // dynamicResourcePoolView is a dynamic pool record as the API returns it.
@@ -90,6 +97,7 @@ func (m *Master) registerDynamicResourcePoolRoutes() {
 	group.POST("", m.createDynamicResourcePool, m.dynamicPoolAuth(true))
 	group.GET("", m.listDynamicResourcePools, m.dynamicPoolAuth(false))
 	group.PUT("/:name", m.updateDynamicResourcePool, m.dynamicPoolAuth(true))
+	group.POST("/:name/adopt", m.adoptDynamicResourcePool, m.dynamicPoolAuth(true))
 	group.POST("/:name/retry", m.retryDynamicResourcePool, m.dynamicPoolAuth(true))
 }
 
@@ -222,6 +230,37 @@ func (m *Master) updateDynamicResourcePool(c echo.Context) error {
 	return c.JSON(http.StatusOK, m.dynamicResourcePoolView(record))
 }
 
+func (m *Master) adoptDynamicResourcePool(c echo.Context) error {
+	var request adoptDynamicResourcePoolRequest
+	if err := decodeStrictBoundedJSON(c, &request, adoptDynamicPoolRequestFields); err != nil {
+		return err
+	}
+	resourceManager, clusterName, err := m.selectDynamicAgentRM(c.QueryParam("cluster_name"))
+	if err != nil {
+		return err
+	}
+	poolName := c.Param("name")
+	// Startup compares a saved spec with the pool as master.yaml configures it, so adopt compares
+	// with the same config.
+	static, ok := m.staticResourcePool(clusterName, poolName)
+	if !ok {
+		return echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf(
+			"%q is not configured in master.yaml for resource manager %q", poolName, clusterName,
+		))
+	}
+	record, created, err := resourceManager.AdoptStaticResourcePool(
+		c.Request().Context(), static, request.Config, m.config.TaskContainerDefaults,
+	)
+	if err != nil {
+		return dynamicPoolHTTPError(err)
+	}
+	statusCode := http.StatusOK
+	if created {
+		statusCode = http.StatusCreated
+	}
+	return c.JSON(statusCode, m.dynamicResourcePoolView(record))
+}
+
 func (m *Master) retryDynamicResourcePool(c echo.Context) error {
 	if err := requireEmptyBody(c); err != nil {
 		return err
@@ -313,6 +352,22 @@ func (m *Master) selectDynamicAgentRM(
 		)
 	}
 	return selected, clusterName, nil
+}
+
+func (m *Master) staticResourcePool(
+	clusterName, poolName string,
+) (config.ResourcePoolConfig, bool) {
+	for _, rmConfig := range m.config.ResourceManagers() {
+		if rmConfig.ResourceManager.ClusterName() != clusterName {
+			continue
+		}
+		for _, pool := range rmConfig.ResourcePools {
+			if pool.PoolName == poolName {
+				return pool, true
+			}
+		}
+	}
+	return config.ResourcePoolConfig{}, false
 }
 
 func (m *Master) staticResourcePoolCluster(poolName string) (string, bool) {

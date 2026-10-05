@@ -391,3 +391,53 @@ func TestUpdateDynamicResourcePoolSpecConditional(t *testing.T) {
 	_, err = database.UpdateDynamicResourcePoolSpec(ctx, converted, incomplete)
 	require.ErrorContains(t, err, "spec is incomplete")
 }
+
+func TestInsertAdoptedDynamicResourcePool(t *testing.T) {
+	database, cleanup := MustResolveNewPostgresDatabase(t)
+	defer cleanup()
+	MustMigrateTestPostgres(t, database, "file://../../static/migrations", "up")
+	ctx := context.Background()
+
+	desired := withTestDynamicPoolSpec(DynamicResourcePool{
+		ClusterName: "agents-a", PoolName: "adopted", ConfigVersion: 1,
+		IdempotencyKey: "adopt:adopted",
+		Config:         json.RawMessage(`{"pool_name":"adopted"}`),
+		ConfigHash:     "snapshot-a",
+	}, "spec-a")
+	adopted, created, err := database.InsertAdoptedDynamicResourcePool(ctx, desired)
+	require.NoError(t, err)
+	require.True(t, created)
+	require.Equal(t, DynamicResourcePoolReady, adopted.State)
+	require.EqualValues(t, 1, adopted.Revision)
+	require.Equal(t, "adopt:adopted", adopted.IdempotencyKey)
+	require.Equal(t, "spec-a", *adopted.SpecHash)
+
+	replayed, created, err := database.InsertAdoptedDynamicResourcePool(ctx, desired)
+	require.NoError(t, err)
+	require.False(t, created)
+	require.Equal(t, adopted, replayed)
+
+	differentSpec := withTestDynamicPoolSpec(desired, "spec-b")
+	_, _, err = database.InsertAdoptedDynamicResourcePool(ctx, differentSpec)
+	require.ErrorIs(t, err, ErrDynamicResourcePoolConflict)
+
+	// The same name saved under another key is a different pool.
+	otherKey := desired
+	otherKey.IdempotencyKey = "adopt:other"
+	_, _, err = database.InsertAdoptedDynamicResourcePool(ctx, otherKey)
+	require.ErrorIs(t, err, ErrDynamicResourcePoolConflict)
+	require.ErrorContains(t, err, `resource pool name "adopted" already exists`)
+
+	// An adopted pool always has a spec.
+	legacy := desired
+	legacy.PoolName, legacy.IdempotencyKey = "legacy", "adopt:legacy"
+	legacy.Spec, legacy.SpecVersion, legacy.SpecHash = nil, nil, nil
+	_, _, err = database.InsertAdoptedDynamicResourcePool(ctx, legacy)
+	require.ErrorContains(t, err, "spec is incomplete")
+	_, err = database.DynamicResourcePoolByName(ctx, "legacy")
+	require.ErrorIs(t, err, ErrDynamicResourcePoolNotFound)
+
+	stored, err := database.DynamicResourcePoolByName(ctx, "adopted")
+	require.NoError(t, err)
+	require.Equal(t, adopted, stored)
+}

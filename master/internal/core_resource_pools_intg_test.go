@@ -22,12 +22,17 @@ import (
 	"github.com/determined-ai/determined/master/pkg/model"
 )
 
-func TestUpdateDynamicResourcePoolRoute(t *testing.T) {
-	pgDB, cleanup := db.MustResolveNewPostgresDatabase(t)
-	defer cleanup()
-	db.MustMigrateTestPostgres(t, pgDB, "file://../static/migrations", "up")
-	ctx := context.Background()
+// dynamicPoolRouteTest serves the dynamic pool routes of a master with one agent resource manager
+// to an administrator.
+type dynamicPoolRouteTest struct {
+	t               *testing.T
+	echo            *echo.Echo
+	resourceManager *agentrm.ResourceManager
+}
 
+func newDynamicPoolRouteTest(
+	t *testing.T, pgDB *db.PgDB, rmConfig *config.ResourceManagerWithPoolsConfig,
+) dynamicPoolRouteTest {
 	originalUser := dynamicPoolRequestUser
 	originalAuthorize := authorizeDynamicPoolRequest
 	t.Cleanup(func() {
@@ -41,20 +46,9 @@ func TestUpdateDynamicResourcePoolRoute(t *testing.T) {
 		return nil, nil
 	}
 
-	rmConfig := &config.ResourceManagerWithPoolsConfig{
-		ResourceManager: &config.ResourceManagerConfig{AgentRM: &config.AgentResourceManagerConfig{
-			ClusterName:                "agent-cluster",
-			DefaultComputeResourcePool: "default",
-			DefaultAuxResourcePool:     "default",
-			Scheduler:                  config.DefaultSchedulerConfig(),
-		}},
-		ResourcePools: []config.ResourcePoolConfig{{
-			PoolName: "default", MaxAuxContainersPerAgent: 100,
-		}},
-	}
 	masterDefaults := *model.DefaultTaskContainerDefaults()
 	resourceManager, err := agentrm.New(
-		ctx, pgDB, echo.New(), rmConfig, nil, nil, &masterDefaults,
+		context.Background(), pgDB, echo.New(), rmConfig, nil, nil, &masterDefaults,
 	)
 	require.NoError(t, err)
 	t.Cleanup(resourceManager.StopDynamicPoolWorker)
@@ -78,23 +72,54 @@ func TestUpdateDynamicResourcePoolRoute(t *testing.T) {
 		allRms: map[string]rm.ResourceManager{"agent-cluster": resourceManager},
 	}
 	m.registerDynamicResourcePoolRoutes()
+	return dynamicPoolRouteTest{t: t, echo: e, resourceManager: resourceManager}
+}
 
-	send := func(method, path, body string) (int, map[string]interface{}) {
-		request := httptest.NewRequest(method, path, strings.NewReader(body))
-		request.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-		recorder := httptest.NewRecorder()
-		e.ServeHTTP(recorder, request)
-		var response map[string]interface{}
-		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response), recorder.Body.String())
-		return recorder.Code, response
+func (r dynamicPoolRouteTest) send(method, path, body string) (int, map[string]interface{}) {
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	request.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	recorder := httptest.NewRecorder()
+	r.echo.ServeHTTP(recorder, request)
+	var response map[string]interface{}
+	require.NoError(r.t, json.Unmarshal(recorder.Body.Bytes(), &response), recorder.Body.String())
+	return recorder.Code, response
+}
+
+func (r dynamicPoolRouteTest) requireError(code int, message string, method, path, body string) {
+	r.t.Helper()
+	gotCode, response := r.send(method, path, body)
+	require.Equal(r.t, code, gotCode, response)
+	require.Contains(r.t, response["message"], message)
+}
+
+// testDynamicPoolRouteRMConfig returns an agent RM whose master.yaml pools are default and pools.
+func testDynamicPoolRouteRMConfig(
+	pools ...config.ResourcePoolConfig,
+) *config.ResourceManagerWithPoolsConfig {
+	return &config.ResourceManagerWithPoolsConfig{
+		ResourceManager: &config.ResourceManagerConfig{AgentRM: &config.AgentResourceManagerConfig{
+			ClusterName:                "agent-cluster",
+			DefaultComputeResourcePool: "default",
+			DefaultAuxResourcePool:     "default",
+			Scheduler:                  config.DefaultSchedulerConfig(),
+		}},
+		ResourcePools: append([]config.ResourcePoolConfig{{
+			PoolName: "default", MaxAuxContainersPerAgent: 100,
+		}}, pools...),
 	}
-	const path = "/api/v1/resource-pools/dynamic"
-	requireError := func(code int, message string, method, path, body string) {
-		t.Helper()
-		gotCode, response := send(method, path, body)
-		require.Equal(t, code, gotCode, response)
-		require.Contains(t, response["message"], message)
-	}
+}
+
+const dynamicPoolsPath = "/api/v1/resource-pools/dynamic"
+
+func TestUpdateDynamicResourcePoolRoute(t *testing.T) {
+	pgDB, cleanup := db.MustResolveNewPostgresDatabase(t)
+	defer cleanup()
+	db.MustMigrateTestPostgres(t, pgDB, "file://../static/migrations", "up")
+	ctx := context.Background()
+
+	routes := newDynamicPoolRouteTest(t, pgDB, testDynamicPoolRouteRMConfig())
+	resourceManager, send, requireError := routes.resourceManager, routes.send, routes.requireError
+	const path = dynamicPoolsPath
 
 	code, created := send(http.MethodPost, path,
 		`{"idempotency_key":"online-operation","config":{"pool_name":"online"}}`)
@@ -154,7 +179,7 @@ func TestUpdateDynamicResourcePoolRoute(t *testing.T) {
 
 	// A saved pool that master.yaml still defines is served from master.yaml until its entry is
 	// removed, so updating it is refused.
-	_, _, err = pgDB.CreateDynamicResourcePool(ctx, db.DynamicResourcePool{
+	_, _, err := pgDB.CreateDynamicResourcePool(ctx, db.DynamicResourcePool{
 		ClusterName: "agent-cluster", PoolName: "default", ConfigVersion: 1,
 		IdempotencyKey: "default-operation",
 		Config:         json.RawMessage(`{"pool_name":"default"}`),
@@ -164,4 +189,68 @@ func TestUpdateDynamicResourcePoolRoute(t *testing.T) {
 	requireError(http.StatusConflict,
 		`pool "default" is still defined in master.yaml; remove it and restart before updating`,
 		http.MethodPut, path+"/default", `{"config":{"pool_name":"default"}}`)
+}
+
+func TestAdoptDynamicResourcePoolRoute(t *testing.T) {
+	pgDB, cleanup := db.MustResolveNewPostgresDatabase(t)
+	defer cleanup()
+	db.MustMigrateTestPostgres(t, pgDB, "file://../static/migrations", "up")
+
+	var static config.ResourcePoolConfig
+	require.NoError(t, json.Unmarshal(
+		[]byte(`{"pool_name":"static-gpu","agent_reconnect_wait":"10m"}`), &static,
+	))
+	routes := newDynamicPoolRouteTest(t, pgDB, testDynamicPoolRouteRMConfig(static))
+	send, requireError := routes.send, routes.requireError
+	const path = dynamicPoolsPath
+
+	code, adopted := send(http.MethodPost, path+"/static-gpu/adopt?cluster_name=agent-cluster",
+		`{"config":{"pool_name":"static-gpu","agent_reconnect_wait":"10m"}}`)
+	require.Equal(t, http.StatusCreated, code, adopted)
+	require.Equal(t, "Ready", adopted["state"])
+	require.EqualValues(t, 1, adopted["revision"])
+	require.Nil(t, adopted["active_revision"])
+	require.Equal(t, true, adopted["defined_in_master_yaml"])
+	require.Equal(t, true, adopted["pending_restart"])
+	require.Equal(t, map[string]interface{}{
+		"pool_name": "static-gpu", "agent_reconnect_wait": "10m",
+	}, adopted["spec"])
+	require.Equal(t, "10m0s", adopted["config"].(map[string]interface{})["agent_reconnect_wait"])
+
+	code, replayed := send(http.MethodPost, path+"/static-gpu/adopt",
+		`{"config":{"agent_reconnect_wait":"10m","pool_name":"static-gpu"}}`)
+	require.Equal(t, http.StatusOK, code, replayed)
+	require.Equal(t, adopted, replayed)
+	code, listed := send(http.MethodGet, path, "")
+	require.Equal(t, http.StatusOK, code, listed)
+	require.Equal(t, []interface{}{adopted}, listed["resource_pools"])
+
+	requireError(http.StatusBadRequest, "copy the master.yaml entry verbatim, including "+
+		"agent_reconnect_wait", http.MethodPost, path+"/static-gpu/adopt",
+		`{"config":{"pool_name":"static-gpu"}}`)
+	requireError(http.StatusConflict, "idempotency key already names a different desired config",
+		http.MethodPost, path+"/static-gpu/adopt",
+		`{"config":{"pool_name":"static-gpu","agent_reconnect_wait":"600s"}}`)
+	requireError(http.StatusBadRequest, `unknown field "idempotency_key"`, http.MethodPost,
+		path+"/static-gpu/adopt", `{"idempotency_key":"x","config":{"pool_name":"static-gpu"}}`)
+	requireError(http.StatusNotFound,
+		`"missing" is not configured in master.yaml for resource manager "agent-cluster"`,
+		http.MethodPost, path+"/missing/adopt", `{"config":{"pool_name":"missing"}}`)
+	requireError(http.StatusNotFound, `resource manager "other-cluster" not found`,
+		http.MethodPost, path+"/static-gpu/adopt?cluster_name=other-cluster",
+		`{"config":{"pool_name":"static-gpu","agent_reconnect_wait":"10m"}}`)
+	requireError(http.StatusConflict,
+		`pool "static-gpu" is still defined in master.yaml; remove it and restart before updating`,
+		http.MethodPut, path+"/static-gpu",
+		`{"config":{"pool_name":"static-gpu","agent_reconnect_wait":"10m"}}`)
+
+	// A pool that was created as a dynamic pool has no master.yaml entry to adopt.
+	code, created := send(http.MethodPost, path,
+		`{"idempotency_key":"online-operation","config":{"pool_name":"online"}}`)
+	require.Equal(t, http.StatusCreated, code, created)
+	requireError(http.StatusNotFound, `"online" is not configured in master.yaml`,
+		http.MethodPost, path+"/online/adopt", `{"config":{"pool_name":"online"}}`)
+	requireError(http.StatusBadRequest, `prefix "adopt:" is reserved for adopted pools`,
+		http.MethodPost, path,
+		`{"idempotency_key":"adopt:created","config":{"pool_name":"created"}}`)
 }

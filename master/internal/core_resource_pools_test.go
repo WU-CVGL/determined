@@ -68,6 +68,24 @@ func TestValidateDynamicPoolRequestJSON(t *testing.T) {
 			[]byte(body), updateDynamicPoolRequestFields,
 		), body)
 	}
+
+	// An adopt names its pool in the path and sends only the pool's master.yaml entry.
+	require.NoError(t, validateDynamicPoolRequestJSON(
+		[]byte(`{"config":{"pool_name":"p","agent_reconnect_wait":"10m"}}`),
+		adoptDynamicPoolRequestFields,
+	))
+	for _, body := range []string{
+		`{"cluster_name":"c","config":{"pool_name":"p"}}`,
+		`{"idempotency_key":"x","config":{"pool_name":"p"}}`,
+		`{"expected_revision":1,"config":{"pool_name":"p"}}`,
+		`{}`,
+		`{"config":{"pool_name":"p","provider":{"type":"gcp"}}}`,
+		`{"config":{"pool_name":"p","scheduler":{"unknown":true}}}`,
+	} {
+		require.Error(t, validateDynamicPoolRequestJSON(
+			[]byte(body), adoptDynamicPoolRequestFields,
+		), body)
+	}
 }
 
 func TestDynamicPoolHTTPError(t *testing.T) {
@@ -291,6 +309,7 @@ func TestDynamicPoolRoutesRequirePermissions(t *testing.T) {
 		{http.MethodPost, "/api/v1/resource-pools/dynamic", true},
 		{http.MethodPut, "/api/v1/resource-pools/dynamic/online", true},
 		{http.MethodPost, "/api/v1/resource-pools/dynamic/online/retry", true},
+		{http.MethodPost, "/api/v1/resource-pools/dynamic/online/adopt", true},
 	} {
 		updates = nil
 		recorder := httptest.NewRecorder()

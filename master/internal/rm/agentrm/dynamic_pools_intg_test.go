@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/sirupsen/logrus"
 	logrustest "github.com/sirupsen/logrus/hooks/test"
@@ -21,7 +22,13 @@ import (
 	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/rm"
+	"github.com/determined-ai/determined/master/internal/sproto"
+	"github.com/determined-ai/determined/master/internal/task/taskmodel"
+	"github.com/determined-ai/determined/master/pkg/aproto"
+	"github.com/determined-ai/determined/master/pkg/cproto"
+	"github.com/determined-ai/determined/master/pkg/device"
 	"github.com/determined-ai/determined/master/pkg/model"
+	"github.com/determined-ai/determined/master/pkg/ptrs"
 )
 
 func testDynamicPoolRMConfig(defaultPriority int) *config.ResourceManagerWithPoolsConfig {
@@ -654,6 +661,8 @@ func TestDynamicPoolStartupRejectsStaticCollision(t *testing.T) {
 		}},
 	)
 	require.ErrorContains(t, err, "conflicts with static pool")
+	require.ErrorContains(t, err, "it was saved without a spec; if the pool was adopted, its "+
+		"master.yaml entry must equal the saved spec or be removed")
 }
 
 func poolSummaryDescription(t *testing.T, manager *ResourceManager, poolName string) string {
@@ -940,4 +949,259 @@ WHERE pool_name = ?`, other.PoolName).Exec(ctx)
 	raced, err := database.DynamicResourcePoolByName(ctx, "raced")
 	require.NoError(t, err)
 	require.Equal(t, db.DynamicResourcePoolPending, raced.State)
+}
+
+// adoptedPoolEntry is a master.yaml pool entry; adopting it saves the same entry as the spec.
+const adoptedPoolEntry = `{"pool_name":"adopted","description":"gpu","agent_reconnect_wait":"10m"}`
+
+// testAdoptRMConfig returns an RM configuration whose master.yaml pools are default and the given
+// entries.
+func testAdoptRMConfig(t *testing.T, entries ...string) *config.ResourceManagerWithPoolsConfig {
+	rmConfig := testDynamicPoolRMConfig(42)
+	for _, entry := range entries {
+		rmConfig.ResourcePools = append(rmConfig.ResourcePools, staticPoolConfig(t, entry))
+	}
+	return rmConfig
+}
+
+func TestAdoptStaticPool(t *testing.T) {
+	database, cleanup := db.MustResolveNewPostgresDatabase(t)
+	defer cleanup()
+	db.MustMigrateTestPostgres(t, database, "file://../../../static/migrations", "up")
+	ctx := context.Background()
+
+	originalCreate := createDynamicPoolRuntime
+	t.Cleanup(func() { createDynamicPoolRuntime = originalCreate })
+	var initialized []string
+	createDynamicPoolRuntime = func(
+		manager *ResourceManager, cfg config.ResourcePoolConfig,
+	) (*resourcePool, error) {
+		initialized = append(initialized, cfg.PoolName)
+		return originalCreate(manager, cfg)
+	}
+	masterDefaults := *model.DefaultTaskContainerDefaults()
+	rmConfig := testAdoptRMConfig(t, adoptedPoolEntry)
+	manager, err := New(ctx, database, echo.New(), rmConfig, nil, nil, &masterDefaults)
+	require.NoError(t, err)
+	defer manager.stop()
+	// The worker is driven by hand below so that every scan is complete when it is checked.
+	manager.StopDynamicPoolWorker()
+	static := rmConfig.ResourcePools[1]
+	runtimeBefore, ok := manager.registry.readyPool("adopted")
+	require.True(t, ok)
+
+	adopted, created, err := manager.AdoptStaticResourcePool(
+		ctx, static, json.RawMessage(adoptedPoolEntry), masterDefaults,
+	)
+	require.NoError(t, err)
+	require.True(t, created)
+	require.Equal(t, db.DynamicResourcePoolReady, adopted.State)
+	require.Equal(t, "adopt:adopted", adopted.IdempotencyKey)
+	require.Equal(t, "agent-cluster", adopted.ClusterName)
+	require.EqualValues(t, 1, adopted.Revision)
+	require.JSONEq(t, adoptedPoolEntry, string(*adopted.Spec))
+	// Its snapshot is readable by a master without spec support.
+	snapshotRecord := adopted
+	snapshotRecord.Spec = nil
+	snapshot, _, err := decodeStoredDynamicResourcePool(snapshotRecord)
+	require.NoError(t, err)
+	require.Equal(t, model.Duration(10*time.Minute), snapshot.AgentReconnectWait)
+
+	// The running master keeps serving the pool from master.yaml, and the worker leaves it alone.
+	manager.advancePendingDynamicPools(ctx)
+	require.Empty(t, initialized)
+	runtimeAfter, ok := manager.registry.readyPool("adopted")
+	require.True(t, ok)
+	require.Same(t, runtimeBefore, runtimeAfter)
+	revision, published, _ := manager.registry.activeRevision("adopted")
+	require.True(t, published)
+	require.Zero(t, revision)
+	_, active := manager.ActiveDynamicResourcePoolRevision("adopted")
+	require.False(t, active)
+	stored, err := database.DynamicResourcePoolByName(ctx, "adopted")
+	require.NoError(t, err)
+	require.Equal(t, adopted, stored)
+
+	// A replay of the same spec returns the saved record.
+	replayed, created, err := manager.AdoptStaticResourcePool(ctx, static, json.RawMessage(
+		`{ "agent_reconnect_wait": "10m", "pool_name": "adopted", "description": "gpu" }`,
+	), masterDefaults)
+	require.NoError(t, err)
+	require.False(t, created)
+	require.Equal(t, adopted, replayed)
+	// A different spec that decodes to the same entry is not a replay.
+	_, _, err = manager.AdoptStaticResourcePool(ctx, static, json.RawMessage(
+		`{"pool_name":"adopted","description":"gpu","agent_reconnect_wait":"600s"}`,
+	), masterDefaults)
+	require.ErrorIs(t, err, db.ErrDynamicResourcePoolConflict)
+
+	// A spec that differs from the running master.yaml entry is rejected.
+	_, _, err = manager.AdoptStaticResourcePool(ctx, static, json.RawMessage(
+		`{"pool_name":"adopted","description":"gpu"}`,
+	), masterDefaults)
+	require.ErrorIs(t, err, ErrInvalidDynamicResourcePool)
+	require.ErrorContains(t, err, "including agent_reconnect_wait")
+
+	// Creates cannot take an adopt key.
+	_, _, err = manager.CreateDynamicResourcePool(
+		ctx, "adopt:created", json.RawMessage(`{"pool_name":"created"}`), masterDefaults,
+	)
+	require.ErrorIs(t, err, ErrInvalidDynamicResourcePool)
+	_, err = database.DynamicResourcePoolByName(ctx, "created")
+	require.ErrorIs(t, err, db.ErrDynamicResourcePoolNotFound)
+	stored, err = database.DynamicResourcePoolByName(ctx, "adopted")
+	require.NoError(t, err)
+	require.Equal(t, adopted, stored)
+}
+
+func TestStartupAdoptedRowWithMatchingYAMLEntry(t *testing.T) {
+	database, cleanup := db.MustResolveNewPostgresDatabase(t)
+	defer cleanup()
+	db.MustMigrateTestPostgres(t, database, "file://../../../static/migrations", "up")
+	ctx := context.Background()
+
+	masterDefaults := *model.DefaultTaskContainerDefaults()
+	rmConfig := testAdoptRMConfig(t, adoptedPoolEntry)
+	first, err := New(ctx, database, echo.New(), rmConfig, nil, nil, &masterDefaults)
+	require.NoError(t, err)
+	defer first.stop()
+	adopted, _, err := first.AdoptStaticResourcePool(
+		ctx, rmConfig.ResourcePools[1], json.RawMessage(adoptedPoolEntry), masterDefaults,
+	)
+	require.NoError(t, err)
+	first.stop()
+
+	// While master.yaml holds the saved spec, master.yaml serves the pool and a warning asks for
+	// the entry to be removed.
+	logs := logrustest.NewGlobal()
+	t.Cleanup(logs.Reset)
+	require.NoError(t, ValidatePersistedDynamicPoolConfigs(
+		ctx, database, []*config.ResourceManagerWithPoolsConfig{rmConfig},
+	))
+	warned := false
+	for _, entry := range logs.AllEntries() {
+		if entry.Level == logrus.WarnLevel && entry.Message == `resource pool "adopted" is saved `+
+			`as a dynamic pool and still defined in master.yaml; remove it from master.yaml` {
+			warned = true
+		}
+	}
+	require.True(t, warned, "a pool that master.yaml still defines must be reported")
+
+	// The startup refresh would rewrite the snapshot of a registered spec row for these defaults.
+	changedMasterDefaults := masterDefaults
+	changedMasterDefaults.ShmSizeBytes = 16 << 30
+	restarted, err := New(ctx, database, echo.New(), rmConfig, nil, nil, &changedMasterDefaults)
+	require.NoError(t, err)
+	defer restarted.stop()
+	revision, published, _ := restarted.registry.activeRevision("adopted")
+	require.True(t, published)
+	require.Zero(t, revision, "the pool must be served from master.yaml")
+	stored, err := database.DynamicResourcePoolByName(ctx, "adopted")
+	require.NoError(t, err)
+	require.Equal(t, adopted, stored, "the saved record must not be refreshed or marked")
+	restarted.stop()
+
+	// An edited master.yaml entry no longer equals the saved spec, so startup fails closed.
+	edited := testAdoptRMConfig(t,
+		`{"pool_name":"adopted","description":"edited","agent_reconnect_wait":"10m"}`)
+	err = ValidatePersistedDynamicPoolConfigs(
+		ctx, database, []*config.ResourceManagerWithPoolsConfig{edited},
+	)
+	require.ErrorContains(t, err, `dynamic resource pool "adopted" conflicts with static pool`)
+	require.ErrorContains(t, err, "its saved spec differs in description; if the pool was "+
+		"adopted, its master.yaml entry must equal the saved spec or be removed")
+	_, err = New(ctx, database, echo.New(), edited, nil, nil, &masterDefaults)
+	require.ErrorContains(t, err, "must equal the saved spec or be removed")
+}
+
+func TestStartupRestoresAgentStateForAdoptedPoolRemovedFromYAML(t *testing.T) {
+	database, cleanup := db.MustResolveNewPostgresDatabase(t)
+	defer cleanup()
+	db.MustMigrateTestPostgres(t, database, "file://../../../static/migrations", "up")
+	ctx := context.Background()
+
+	masterDefaults := *model.DefaultTaskContainerDefaults()
+	const removedPoolEntry = `{"pool_name":"removed","agent_reconnect_wait":"10m"}`
+	rmConfig := testAdoptRMConfig(t, adoptedPoolEntry, removedPoolEntry)
+	first, err := New(ctx, database, echo.New(), rmConfig, nil, nil, &masterDefaults)
+	require.NoError(t, err)
+	defer first.stop()
+	_, _, err = first.AdoptStaticResourcePool(
+		ctx, rmConfig.ResourcePools[1], json.RawMessage(adoptedPoolEntry), masterDefaults,
+	)
+	require.NoError(t, err)
+	first.stop()
+
+	// An agent of each pool was connected when the master stopped. The agent of the adopted pool
+	// runs a container of an allocation in that pool.
+	taskID := model.TaskID(uuid.NewString())
+	require.NoError(t, db.AddTask(ctx, &model.Task{
+		TaskID: taskID, TaskType: model.TaskTypeCommand, StartTime: time.Now(),
+		LogVersion: model.CurrentTaskLogVersion,
+	}))
+	allocationID := model.AllocationID(uuid.NewString())
+	require.NoError(t, db.AddAllocation(ctx, &model.Allocation{
+		AllocationID: allocationID, TaskID: taskID, Slots: 1, ResourcePool: "adopted",
+		StartTime: ptrs.Ptr(time.Now()), State: ptrs.Ptr(model.AllocationStateRunning),
+	}))
+	containerID := cproto.ID(uuid.NewString())
+	gpu := device.Device{ID: 0, Brand: "nvidia", UUID: uuid.NewString(), Type: device.CUDA}
+	_, err = db.Bun().NewInsert().Model(&taskmodel.ResourcesWithState{
+		ResourceID: sproto.ResourcesID(containerID), AllocationID: allocationID,
+	}).Exec(ctx)
+	require.NoError(t, err)
+	_, err = db.Bun().NewInsert().Model(&containerSnapshot{
+		ResourceID: sproto.ResourcesID(containerID), AgentID: "adopted-agent", ID: containerID,
+		State: cproto.Running, Devices: []device.Device{gpu},
+	}).Exec(ctx)
+	require.NoError(t, err)
+	for _, snapshot := range []agentSnapshot{
+		{
+			AgentID: "adopted-agent", UUID: uuid.NewString(), ResourcePoolName: "adopted",
+			UserEnabled: true, Containers: []cproto.ID{containerID},
+			Slots: []slotData{{Device: gpu, UserEnabled: true, ContainerID: &containerID}},
+		},
+		{
+			AgentID: "removed-agent", UUID: uuid.NewString(), ResourcePoolName: "removed",
+			UserEnabled: true,
+			Slots: []slotData{{Device: device.Device{
+				ID: 0, Brand: "nvidia", UUID: uuid.NewString(), Type: device.CUDA,
+			}, UserEnabled: true}},
+		},
+	} {
+		_, err = db.Bun().NewInsert().Model(&snapshot).Exec(ctx)
+		require.NoError(t, err)
+	}
+
+	// Both entries are removed from master.yaml. Only the adopted pool is saved.
+	restarted, err := New(
+		ctx, database, echo.New(), testDynamicPoolRMConfig(42), nil, nil, &masterDefaults,
+	)
+	require.NoError(t, err)
+	defer restarted.stop()
+	revision, active := restarted.ActiveDynamicResourcePoolRevision("adopted")
+	require.True(t, active)
+	require.EqualValues(t, 1, revision)
+
+	agents := restarted.agentService.list("adopted")
+	require.Contains(t, agents, aproto.ID("adopted-agent"))
+	restored := agents["adopted-agent"]
+	require.Contains(t, restored.containerState, containerID)
+	require.Equal(t, &containerID, restored.slotStates[gpu.ID].containerID)
+	exists, err := db.Bun().NewSelect().Model((*agentSnapshot)(nil)).
+		Where("agent_id = ?", "adopted-agent").Exists(ctx)
+	require.NoError(t, err)
+	require.True(t, exists, "the adopted pool's agent state must be kept")
+	exists, err = db.Bun().NewSelect().Model((*containerSnapshot)(nil)).
+		Where("container_id = ?", containerID).Exists(ctx)
+	require.NoError(t, err)
+	require.True(t, exists, "the adopted pool's container state must be kept")
+
+	// The agent of the pool that was removed without being adopted is dropped with its state.
+	_, ok := restarted.agentService.get("removed-agent")
+	require.False(t, ok)
+	exists, err = db.Bun().NewSelect().Model((*agentSnapshot)(nil)).
+		Where("agent_id = ?", "removed-agent").Exists(ctx)
+	require.NoError(t, err)
+	require.False(t, exists)
 }

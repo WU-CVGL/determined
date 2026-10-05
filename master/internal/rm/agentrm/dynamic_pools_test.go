@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -128,8 +129,136 @@ func TestUpdateDynamicResourcePoolRejectsInvalidSpecBeforeReading(t *testing.T) 
 
 func TestValidateDynamicPoolIdempotencyKey(t *testing.T) {
 	require.NoError(t, validateDynamicPoolIdempotencyKey("operation-123"))
-	for _, key := range []string{"", " \t", strings.Repeat("x", 513)} {
+	require.NoError(t, validateDynamicPoolIdempotencyKey("readopt:pool"))
+	for _, key := range []string{"", " \t", strings.Repeat("x", 513), "adopt:pool"} {
 		require.ErrorIs(t, validateDynamicPoolIdempotencyKey(key), ErrInvalidDynamicResourcePool)
+	}
+	require.ErrorContains(t, validateDynamicPoolIdempotencyKey("adopt:pool"),
+		`prefix "adopt:" is reserved for adopted pools`)
+}
+
+// staticPoolConfig decodes a resource pool the way the master decodes a master.yaml entry.
+func staticPoolConfig(t *testing.T, entry string) config.ResourcePoolConfig {
+	var cfg config.ResourcePoolConfig
+	require.NoError(t, json.Unmarshal([]byte(entry), &cfg))
+	return cfg
+}
+
+func TestAdoptStaticResourcePoolRejectsBeforeWriting(t *testing.T) {
+	// The resource manager has no database: every rejection happens before the record is written.
+	manager := testDynamicPoolRM()
+	static := staticPoolConfig(t,
+		`{"pool_name":"static","description":"gpu","agent_reconnect_wait":"10m"}`)
+	withProvider := static
+	withProvider.Provider = &provconfig.Config{}
+	for _, test := range []struct {
+		static  config.ResourcePoolConfig
+		spec    string
+		message string
+	}{
+		{withProvider, `{"pool_name":"static"}`, "pools with a provider cannot be adopted"},
+		{
+			static,
+			`{"pool_name":"other","description":"gpu","agent_reconnect_wait":"10m"}`,
+			`config.pool_name "other" differs from "static"`,
+		},
+		{
+			static,
+			`{"pool_name":"static","description":"gpu"}`,
+			`differs from the master.yaml entry of "static" in agent_reconnect_wait; ` +
+				"copy the master.yaml entry verbatim, including agent_reconnect_wait",
+		},
+		{
+			static,
+			`{"pool_name":"static","agent_reconnect_wait":"10m","max_aux_containers_per_agent":7}`,
+			"in description, max_aux_containers_per_agent;",
+		},
+		{
+			static,
+			`{"pool_name":"static","agent_reconnect_wait":"10m","description":"gpu",` +
+				`"scheduler":{"type":"priority"}}`,
+			"in scheduler;",
+		},
+		{static, `{"pool_name":"static","unknown":true}`, "unknown field"},
+		{static, `{"pool_name":"static","provider":{"type":"aws"}}`, "provider"},
+	} {
+		_, _, err := manager.AdoptStaticResourcePool(
+			context.Background(), test.static, json.RawMessage(test.spec),
+			*model.DefaultTaskContainerDefaults(),
+		)
+		require.ErrorIs(t, err, ErrInvalidDynamicResourcePool, test.spec)
+		require.ErrorContains(t, err, test.message, test.spec)
+	}
+}
+
+func TestStaticResourcePoolDifferences(t *testing.T) {
+	static := staticPoolConfig(t, `{"pool_name":"static","agent_reconnect_wait":"10m",
+		"task_container_defaults":{"shm_size_bytes":17179869184}}`)
+	// Keys that master.yaml leaves out decode to the same defaults as keys a spec spells out.
+	for _, spec := range []string{
+		`{"pool_name":"static","agent_reconnect_wait":"10m",
+			"task_container_defaults":{"shm_size_bytes":17179869184}}`,
+		`{"task_container_defaults":{"shm_size_bytes":17179869184,"network_mode":"bridge"},
+			"max_aux_containers_per_agent":100,"agent_reconnect_wait":"600s","pool_name":"static"}`,
+	} {
+		differences, err := staticResourcePoolDifferences(staticPoolConfig(t, spec), static)
+		require.NoError(t, err)
+		require.Empty(t, differences, spec)
+	}
+	differences, err := staticResourcePoolDifferences(staticPoolConfig(t,
+		`{"pool_name":"static","task_container_defaults":{"shm_size_bytes":1}}`), static)
+	require.NoError(t, err)
+	require.Equal(t, []string{"agent_reconnect_wait", "task_container_defaults"}, differences)
+}
+
+func TestCheckStaticPoolCollision(t *testing.T) {
+	manager := testDynamicPoolRM()
+	static := staticPoolConfig(t,
+		`{"pool_name":"static","description":"gpu","agent_reconnect_wait":"10m"}`)
+	snapshot, err := manager.NormalizeDynamicResourcePoolConfig(
+		static, *model.DefaultTaskContainerDefaults(),
+	)
+	require.NoError(t, err)
+	adopted := testSpecRecord(t, "static",
+		`{"agent_reconnect_wait":"10m","description":"gpu","pool_name":"static"}`, snapshot)
+	adopted.ClusterName = "agent-cluster"
+
+	// The master.yaml entry serves an adopted pool while the entry equals the saved spec.
+	require.NoError(t, checkStaticPoolCollision(adopted, "agent-cluster", static))
+
+	const hint = "if the pool was adopted, its master.yaml entry must equal the saved spec or " +
+		"be removed"
+	edited := static
+	edited.Description = "edited"
+	legacy := adopted
+	legacy.Spec, legacy.SpecVersion, legacy.SpecHash = nil, nil, nil
+	unsupported := adopted
+	specVersion := 2
+	unsupported.SpecVersion = &specVersion
+	for _, test := range []struct {
+		name    string
+		record  db.DynamicResourcePool
+		cluster string
+		static  config.ResourcePoolConfig
+		reason  string
+	}{
+		{"edited entry", adopted, "agent-cluster", edited, "its saved spec differs in description"},
+		{
+			"other resource manager", adopted, "other-cluster", static,
+			`it is saved for resource manager "agent-cluster"`,
+		},
+		{"saved without a spec", legacy, "agent-cluster", static, "it was saved without a spec"},
+		{"unsupported spec", unsupported, "agent-cluster", static, "unsupported spec version 2"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := checkStaticPoolCollision(test.record, test.cluster, test.static)
+			require.ErrorContains(t, err, fmt.Sprintf(
+				`dynamic resource pool "static" conflicts with static pool in resource manager %q`,
+				test.cluster,
+			))
+			require.ErrorContains(t, err, test.reason)
+			require.ErrorContains(t, err, hint)
+		})
 	}
 }
 

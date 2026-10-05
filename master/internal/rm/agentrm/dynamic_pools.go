@@ -11,8 +11,11 @@ import (
 	"io"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
+
+	"github.com/sirupsen/logrus"
 
 	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/db"
@@ -28,6 +31,10 @@ const dynamicPoolPersistenceTimeout = 10 * time.Second
 const dynamicPoolScanInterval = time.Second
 
 var dynamicPoolNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+
+// adoptedDynamicPoolKeyPrefix starts the idempotency key of every adopted pool. Creates cannot use
+// it, so a create is never taken for a replay of an adopt.
+const adoptedDynamicPoolKeyPrefix = "adopt:"
 
 var setDynamicResourcePoolState = func(
 	database *db.PgDB,
@@ -267,7 +274,101 @@ func validateDynamicPoolIdempotencyKey(idempotencyKey string) error {
 			"%w: idempotency_key must be at most 512 bytes", ErrInvalidDynamicResourcePool,
 		)
 	}
+	if strings.HasPrefix(idempotencyKey, adoptedDynamicPoolKeyPrefix) {
+		return fmt.Errorf(
+			"%w: idempotency_key prefix %q is reserved for adopted pools",
+			ErrInvalidDynamicResourcePool, adoptedDynamicPoolKeyPrefix,
+		)
+	}
 	return nil
+}
+
+// AdoptStaticResourcePool saves a master.yaml pool of this resource manager as a dynamic pool, so
+// that the pool keeps running once its master.yaml entry is removed. The spec must decode to
+// exactly the master.yaml entry. Nothing changes in the running master, which keeps serving the
+// pool from master.yaml, and neither does a restart while the entry is still there.
+func (a *ResourceManager) AdoptStaticResourcePool(
+	ctx context.Context,
+	static config.ResourcePoolConfig,
+	rawSpec json.RawMessage,
+	masterDefaults model.TaskContainerDefaultsConfig,
+) (record db.DynamicResourcePool, created bool, err error) {
+	if static.Provider != nil {
+		return record, false, fmt.Errorf(
+			"%w: resource pool %q has a provider; pools with a provider cannot be adopted",
+			ErrInvalidDynamicResourcePool, static.PoolName,
+		)
+	}
+	prepared, err := parseDynamicPoolSpec(rawSpec)
+	if err != nil {
+		return record, false, err
+	}
+	if prepared.config.PoolName != static.PoolName {
+		return record, false, fmt.Errorf(
+			"%w: config.pool_name %q differs from %q",
+			ErrInvalidDynamicResourcePool, prepared.config.PoolName, static.PoolName,
+		)
+	}
+	differences, err := staticResourcePoolDifferences(prepared.config, static)
+	if err != nil {
+		return record, false, fmt.Errorf("%w: %v", ErrInvalidDynamicResourcePool, err)
+	}
+	if len(differences) > 0 {
+		return record, false, fmt.Errorf(
+			"%w: config differs from the master.yaml entry of %q in %s; copy the master.yaml "+
+				"entry verbatim, including agent_reconnect_wait",
+			ErrInvalidDynamicResourcePool, static.PoolName, strings.Join(differences, ", "),
+		)
+	}
+	prepared, err = a.resolveDynamicPoolSpec(prepared, masterDefaults)
+	if err != nil {
+		return record, false, err
+	}
+	// The record is Ready and the master.yaml runtime is published, so the worker leaves it alone.
+	return a.db.InsertAdoptedDynamicResourcePool(ctx, prepared.record(
+		a.config.ClusterName, adoptedDynamicPoolKeyPrefix+static.PoolName,
+	))
+}
+
+// staticResourcePoolDifferences returns the top-level keys in which a decoded spec differs from a
+// master.yaml pool. Both are compared as the JSON of their decoded configs, so defaults that
+// either one leaves out compare equal.
+func staticResourcePoolDifferences(
+	spec config.ResourcePoolConfig, static config.ResourcePoolConfig,
+) ([]string, error) {
+	specFields, err := resourcePoolJSONFields(spec)
+	if err != nil {
+		return nil, err
+	}
+	staticFields, err := resourcePoolJSONFields(static)
+	if err != nil {
+		return nil, err
+	}
+	var differences []string
+	for key, value := range specFields {
+		if staticValue, ok := staticFields[key]; !ok || !bytes.Equal(value, staticValue) {
+			differences = append(differences, key)
+		}
+	}
+	for key := range staticFields {
+		if _, ok := specFields[key]; !ok {
+			differences = append(differences, key)
+		}
+	}
+	sort.Strings(differences)
+	return differences, nil
+}
+
+func resourcePoolJSONFields(cfg config.ResourcePoolConfig) (map[string]json.RawMessage, error) {
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling resource pool %q: %w", cfg.PoolName, err)
+	}
+	var fields map[string]json.RawMessage
+	if err = json.Unmarshal(raw, &fields); err != nil {
+		return nil, fmt.Errorf("reading resource pool %q: %w", cfg.PoolName, err)
+	}
+	return fields, nil
 }
 
 // UpdateDynamicResourcePool replaces the spec of a durable dynamic pool. The change is durable
@@ -563,13 +664,17 @@ func ValidatePersistedDynamicPoolConfigs(
 	if err != nil {
 		return err
 	}
-	staticNames := make(map[string]string)
+	type staticPool struct {
+		clusterName string
+		config      config.ResourcePoolConfig
+	}
+	staticPools := make(map[string]staticPool)
 	agentClusters := make(map[string]bool)
 	for _, rmConfig := range rmConfigs {
 		clusterName := rmConfig.ResourceManager.ClusterName()
 		agentClusters[clusterName] = rmConfig.ResourceManager.AgentRM != nil
 		for _, pool := range rmConfig.ResourcePools {
-			staticNames[pool.PoolName] = clusterName
+			staticPools[pool.PoolName] = staticPool{clusterName: clusterName, config: pool}
 		}
 	}
 	for _, record := range records {
@@ -586,11 +691,15 @@ func ValidatePersistedDynamicPoolConfigs(
 				record.PoolName, record.ClusterName,
 			)
 		}
-		if staticCluster, ok := staticNames[record.PoolName]; ok {
-			return fmt.Errorf(
-				"dynamic resource pool %q conflicts with static pool in resource manager %q",
-				record.PoolName, staticCluster,
+		if static, ok := staticPools[record.PoolName]; ok {
+			if err = checkStaticPoolCollision(record, static.clusterName, static.config); err != nil {
+				return err
+			}
+			logrus.WithField("component", "agentrm").Warnf(
+				"resource pool %q is saved as a dynamic pool and still defined in master.yaml; "+
+					"remove it from master.yaml", record.PoolName,
 			)
+			continue
 		}
 		if _, _, err = decodeStoredDynamicResourcePool(record); err != nil {
 			return fmt.Errorf("dynamic resource pool %q: %w", record.PoolName, err)
@@ -617,16 +726,19 @@ func loadDynamicPoolConfigs(
 	if err != nil {
 		return nil, err
 	}
-	staticNames := make(map[string]bool, len(static))
+	staticPools := make(map[string]config.ResourcePoolConfig, len(static))
 	for _, cfg := range static {
-		staticNames[cfg.PoolName] = true
+		staticPools[cfg.PoolName] = cfg
 	}
 	pools := make([]storedDynamicPool, 0, len(records))
 	for _, record := range records {
-		if staticNames[record.PoolName] {
-			return nil, fmt.Errorf(
-				"dynamic resource pool %q conflicts with static resource pool", record.PoolName,
-			)
+		if staticCfg, ok := staticPools[record.PoolName]; ok {
+			// master.yaml serves an adopted pool until its entry is removed: the record is not
+			// registered, its snapshot is not refreshed and its state is not written.
+			if err = checkStaticPoolCollision(record, clusterName, staticCfg); err != nil {
+				return nil, err
+			}
+			continue
 		}
 		cfg, inherit, err := decodeStoredDynamicResourcePool(record)
 		if err != nil {
@@ -635,6 +747,42 @@ func loadDynamicPoolConfigs(
 		pools = append(pools, storedDynamicPool{record: record, config: cfg, inherit: inherit})
 	}
 	return pools, nil
+}
+
+// checkStaticPoolCollision decides at startup about a durable record whose name master.yaml also
+// configures. It accepts only an adopted pool that the master.yaml entry still serves: a record of
+// the same resource manager with a spec that decodes to exactly the master.yaml entry. Every other
+// collision, including every record without a spec, fails startup closed.
+func checkStaticPoolCollision(
+	record db.DynamicResourcePool, staticCluster string, static config.ResourcePoolConfig,
+) error {
+	var reason string
+	switch {
+	case record.ClusterName != staticCluster:
+		reason = fmt.Sprintf("it is saved for resource manager %q", record.ClusterName)
+	case record.Spec == nil:
+		reason = "it was saved without a spec"
+	default:
+		cfg, _, err := decodeStoredDynamicResourcePool(record)
+		if err != nil {
+			reason = err.Error()
+			break
+		}
+		differences, err := staticResourcePoolDifferences(cfg, static)
+		switch {
+		case err != nil:
+			reason = err.Error()
+		case len(differences) == 0:
+			return nil
+		default:
+			reason = "its saved spec differs in " + strings.Join(differences, ", ")
+		}
+	}
+	return fmt.Errorf(
+		"dynamic resource pool %q conflicts with static pool in resource manager %q: %s; "+
+			"if the pool was adopted, its master.yaml entry must equal the saved spec or be removed",
+		record.PoolName, staticCluster, reason,
+	)
 }
 
 // markDynamicPoolsReady records successful startup initialization of persisted pools. The
