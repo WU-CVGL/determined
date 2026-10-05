@@ -111,12 +111,13 @@ func TestLaunchTensorboardInheritsImageOnlyFromOwnExperiment(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	cases := []struct {
+	type launchCase struct {
 		name     string
 		launcher model.User
 		req      *apiv1.LaunchTensorboardRequest
 		want     tensorboardImageCreds
-	}{
+	}
+	cases := []launchCase{
 		{
 			"owner inherits from their experiment", alice,
 			&apiv1.LaunchTensorboardRequest{ExperimentIds: []int32{int32(aliceExp.ID)}},
@@ -128,42 +129,11 @@ func TestLaunchTensorboardInheritsImageOnlyFromOwnExperiment(t *testing.T) {
 			experimentImageCreds("alice"),
 		},
 		{
-			"another user inherits nothing", bob,
-			&apiv1.LaunchTensorboardRequest{ExperimentIds: []int32{int32(aliceExp.ID)}},
-			notInherited,
-		},
-		{
-			"an admin inherits nothing", admin,
-			&apiv1.LaunchTensorboardRequest{ExperimentIds: []int32{int32(aliceExp.ID)}},
-			notInherited,
-		},
-		{
-			"another user inherits nothing from a trial", bob,
-			&apiv1.LaunchTensorboardRequest{TrialIds: []int32{aliceTrialID}},
-			notInherited,
-		},
-		{
-			"another user's newest experiment is not inherited", bob,
-			&apiv1.LaunchTensorboardRequest{
-				ExperimentIds: []int32{int32(aliceExp.ID), int32(bobOlderExp.ID)},
-			},
-			notInherited,
-		},
-		{
 			"the launcher's own newest experiment is inherited", bob,
 			&apiv1.LaunchTensorboardRequest{
 				ExperimentIds: []int32{int32(bobNewerExp.ID)}, TrialIds: []int32{aliceTrialID},
 			},
 			experimentImageCreds("bob-newer"),
-		},
-		{
-			"another user's custom image is kept, without the experiment's credentials", bob,
-			&apiv1.LaunchTensorboardRequest{
-				ExperimentIds: []int32{int32(aliceExp.ID)}, Config: customConfig,
-			},
-			tensorboardImageCreds{
-				image: model.RuntimeItem{CPU: customImage, CUDA: customImage, ROCM: customImage},
-			},
 		},
 		{
 			"the owner's custom image is kept, with the experiment's registry_auth", alice,
@@ -175,6 +145,42 @@ func TestLaunchTensorboardInheritsImageOnlyFromOwnExperiment(t *testing.T) {
 				auth:  experimentImageCreds("alice").auth,
 			},
 		},
+	}
+	// Each case where the launcher does not own the experiment runs for an ordinary user and for an
+	// admin: administrators get no exception on any path.
+	nonOwners := []struct {
+		name string
+		user model.User
+	}{{"another user", bob}, {"an admin", admin}}
+	for _, n := range nonOwners {
+		cases = append(cases,
+			launchCase{
+				n.name + " inherits nothing", n.user,
+				&apiv1.LaunchTensorboardRequest{ExperimentIds: []int32{int32(aliceExp.ID)}},
+				notInherited,
+			},
+			launchCase{
+				n.name + " inherits nothing from a trial", n.user,
+				&apiv1.LaunchTensorboardRequest{TrialIds: []int32{aliceTrialID}},
+				notInherited,
+			},
+			launchCase{
+				n.name + " inherits nothing when the newest experiment shown is Alice's", n.user,
+				&apiv1.LaunchTensorboardRequest{
+					ExperimentIds: []int32{int32(aliceExp.ID), int32(bobOlderExp.ID)},
+				},
+				notInherited,
+			},
+			launchCase{
+				n.name + " keeps a custom image, without the experiment's credentials", n.user,
+				&apiv1.LaunchTensorboardRequest{
+					ExperimentIds: []int32{int32(aliceExp.ID)}, Config: customConfig,
+				},
+				tensorboardImageCreds{
+					image: model.RuntimeItem{CPU: customImage, CUDA: customImage, ROCM: customImage},
+				},
+			},
+		)
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -7,8 +7,8 @@
    experiment. A TensorBoard runs as the user who starts it, with that user's session token and
    agent user and group. Before this change, a TensorBoard on another user's experiment ran that
    experiment's image, so the experiment's owner could choose code that ran as anyone who opened a
-   TensorBoard on the experiment, including an administrator, and that could act through the API
-   as them.
+   TensorBoard on the experiment, including an administrator, and that could act through the API as
+   them.
 
 -  TensorBoard: A TensorBoard on another user's experiment, administrators included, now uses the
    image from its own configuration or template, or the default task image
