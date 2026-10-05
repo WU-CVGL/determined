@@ -360,6 +360,9 @@ func staticResourcePoolDifferences(
 }
 
 func resourcePoolJSONFields(cfg config.ResourcePoolConfig) (map[string]json.RawMessage, error) {
+	// Decoding a pool always clears the deprecated max_cpu_containers_per_agent. Only the built-in
+	// default pool, which is never decoded, keeps its -1, which means the same as 0.
+	cfg.MaxCPUContainersPerAgent = 0
 	raw, err := json.Marshal(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling resource pool %q: %w", cfg.PoolName, err)
@@ -750,9 +753,10 @@ func loadDynamicPoolConfigs(
 }
 
 // checkStaticPoolCollision decides at startup about a durable record whose name master.yaml also
-// configures. It accepts only an adopted pool that the master.yaml entry still serves: a record of
-// the same resource manager with a spec that decodes to exactly the master.yaml entry. Every other
-// collision, including every record without a spec, fails startup closed.
+// configures. It accepts only an adopted pool that the master.yaml entry still serves: a Ready
+// record of the same resource manager with a spec that decodes to exactly the master.yaml entry.
+// The worker would initialize a record in any other state although master.yaml serves the name.
+// Every other collision, including every record without a spec, fails startup closed.
 func checkStaticPoolCollision(
 	record db.DynamicResourcePool, staticCluster string, static config.ResourcePoolConfig,
 ) error {
@@ -762,6 +766,8 @@ func checkStaticPoolCollision(
 		reason = fmt.Sprintf("it is saved for resource manager %q", record.ClusterName)
 	case record.Spec == nil:
 		reason = "it was saved without a spec"
+	case record.State != db.DynamicResourcePoolReady:
+		reason = fmt.Sprintf("it is %s, not Ready", record.State)
 	default:
 		cfg, _, err := decodeStoredDynamicResourcePool(record)
 		if err != nil {

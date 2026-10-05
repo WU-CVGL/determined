@@ -211,6 +211,50 @@ func TestStaticResourcePoolDifferences(t *testing.T) {
 	require.Equal(t, []string{"agent_reconnect_wait", "task_container_defaults"}, differences)
 }
 
+// builtInDefaultPool returns the pool that the master adds when master.yaml leaves out the
+// resource_pools key. Unlike a master.yaml entry, it is never decoded.
+func builtInDefaultPool(t *testing.T) config.ResourcePoolConfig {
+	resources := config.ResourceConfig{RootManagerInternal: &config.ResourceManagerConfig{
+		AgentRM: &config.AgentResourceManagerConfig{},
+	}}
+	require.NoError(t, resources.ResolveResource())
+	pools := resources.ResourceManagers()[0].ResourcePools
+	require.Len(t, pools, 1)
+	require.Equal(t, "default", pools[0].PoolName)
+	return pools[0]
+}
+
+func TestStaticResourcePoolDifferencesBuiltInDefaultPool(t *testing.T) {
+	builtIn := builtInDefaultPool(t)
+	// The deprecated max_cpu_containers_per_agent is cleared when an entry is decoded, so it never
+	// tells the built-in pool apart from a spec with the same settings.
+	for _, spec := range []string{
+		`{"pool_name":"default"}`,
+		`{"pool_name":"default","max_cpu_containers_per_agent":-1}`,
+		`{"pool_name":"default","max_aux_containers_per_agent":100,"agent_reconnect_wait":"150s"}`,
+	} {
+		differences, err := staticResourcePoolDifferences(staticPoolConfig(t, spec), builtIn)
+		require.NoError(t, err)
+		require.Empty(t, differences, spec)
+	}
+	differences, err := staticResourcePoolDifferences(staticPoolConfig(t,
+		`{"pool_name":"default","max_cpu_containers_per_agent":7}`), builtIn)
+	require.NoError(t, err)
+	require.Equal(t, []string{"max_aux_containers_per_agent"}, differences)
+
+	// The built-in pool serves a saved default pool with only built-in settings.
+	manager := testDynamicPoolRM()
+	spec := staticPoolConfig(t, `{"pool_name":"default"}`)
+	snapshot, err := manager.NormalizeDynamicResourcePoolConfig(
+		spec, *model.DefaultTaskContainerDefaults(),
+	)
+	require.NoError(t, err)
+	adopted := testSpecRecord(t, "default", `{"pool_name":"default"}`, snapshot)
+	adopted.ClusterName = "agent-cluster"
+	adopted.State = db.DynamicResourcePoolReady
+	require.NoError(t, checkStaticPoolCollision(adopted, "agent-cluster", builtIn))
+}
+
 func TestCheckStaticPoolCollision(t *testing.T) {
 	manager := testDynamicPoolRM()
 	static := staticPoolConfig(t,
@@ -222,6 +266,7 @@ func TestCheckStaticPoolCollision(t *testing.T) {
 	adopted := testSpecRecord(t, "static",
 		`{"agent_reconnect_wait":"10m","description":"gpu","pool_name":"static"}`, snapshot)
 	adopted.ClusterName = "agent-cluster"
+	adopted.State = db.DynamicResourcePoolReady
 
 	// The master.yaml entry serves an adopted pool while the entry equals the saved spec.
 	require.NoError(t, checkStaticPoolCollision(adopted, "agent-cluster", static))
@@ -235,6 +280,11 @@ func TestCheckStaticPoolCollision(t *testing.T) {
 	unsupported := adopted
 	specVersion := 2
 	unsupported.SpecVersion = &specVersion
+	// The worker would initialize a pool that is not Ready, although master.yaml serves the name.
+	pending := adopted
+	pending.State = db.DynamicResourcePoolPending
+	failed := adopted
+	failed.State = db.DynamicResourcePoolFailed
 	for _, test := range []struct {
 		name    string
 		record  db.DynamicResourcePool
@@ -249,6 +299,8 @@ func TestCheckStaticPoolCollision(t *testing.T) {
 		},
 		{"saved without a spec", legacy, "agent-cluster", static, "it was saved without a spec"},
 		{"unsupported spec", unsupported, "agent-cluster", static, "unsupported spec version 2"},
+		{"pending", pending, "agent-cluster", static, "it is Pending, not Ready"},
+		{"failed", failed, "agent-cluster", static, "it is Failed, not Ready"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			err := checkStaticPoolCollision(test.record, test.cluster, test.static)

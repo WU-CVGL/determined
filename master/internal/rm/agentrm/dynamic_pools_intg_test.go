@@ -1114,6 +1114,98 @@ func TestStartupAdoptedRowWithMatchingYAMLEntry(t *testing.T) {
 	require.ErrorContains(t, err, "must equal the saved spec or be removed")
 }
 
+func TestStartupRejectsUnreadyRowWithMatchingYAMLEntry(t *testing.T) {
+	database, cleanup := db.MustResolveNewPostgresDatabase(t)
+	defer cleanup()
+	db.MustMigrateTestPostgres(t, database, "file://../../../static/migrations", "up")
+	ctx := context.Background()
+
+	// The master stops before its worker initializes a created pool.
+	masterDefaults := *model.DefaultTaskContainerDefaults()
+	first, err := New(
+		ctx, database, echo.New(), testDynamicPoolRMConfig(42), nil, nil, &masterDefaults,
+	)
+	require.NoError(t, err)
+	defer first.stop()
+	first.StopDynamicPoolWorker()
+	insertSpecDynamicPool(t, first, "adopted-operation", adoptedPoolEntry, masterDefaults)
+	first.stop()
+
+	// master.yaml then configures the same pool. The worker would initialize the saved pool
+	// although master.yaml serves the name, so startup fails closed.
+	rmConfig := testAdoptRMConfig(t, adoptedPoolEntry)
+	failure := "previous runtime initialization failed"
+	for _, state := range []db.DynamicResourcePoolState{
+		db.DynamicResourcePoolPending, db.DynamicResourcePoolFailed,
+	} {
+		if state == db.DynamicResourcePoolFailed {
+			_, err = database.SetDynamicResourcePoolState(ctx, "adopted", state, &failure)
+			require.NoError(t, err)
+		}
+		reason := fmt.Sprintf("it is %s, not Ready", state)
+		err = ValidatePersistedDynamicPoolConfigs(
+			ctx, database, []*config.ResourceManagerWithPoolsConfig{rmConfig},
+		)
+		require.ErrorContains(t, err, `dynamic resource pool "adopted" conflicts with static pool`)
+		require.ErrorContains(t, err, reason)
+		_, err = New(ctx, database, echo.New(), rmConfig, nil, nil, &masterDefaults)
+		require.ErrorContains(t, err, reason)
+		stored, readErr := database.DynamicResourcePoolByName(ctx, "adopted")
+		require.NoError(t, readErr)
+		require.Equal(t, state, stored.State)
+	}
+}
+
+func TestAdoptBuiltInDefaultPool(t *testing.T) {
+	database, cleanup := db.MustResolveNewPostgresDatabase(t)
+	defer cleanup()
+	db.MustMigrateTestPostgres(t, database, "file://../../../static/migrations", "up")
+	ctx := context.Background()
+
+	// master.yaml leaves out the resource_pools key, so the master adds the built-in default pool.
+	resources := config.ResourceConfig{RootManagerInternal: &config.ResourceManagerConfig{
+		AgentRM: &config.AgentResourceManagerConfig{
+			ClusterName: "agent-cluster", DefaultComputeResourcePool: "default",
+			DefaultAuxResourcePool: "default", Scheduler: config.DefaultSchedulerConfig(),
+		},
+	}}
+	require.NoError(t, resources.ResolveResource())
+	rmConfig := resources.ResourceManagers()[0]
+	masterDefaults := *model.DefaultTaskContainerDefaults()
+	first, err := New(ctx, database, echo.New(), rmConfig, nil, nil, &masterDefaults)
+	require.NoError(t, err)
+	defer first.stop()
+	adopted, created, err := first.AdoptStaticResourcePool(
+		ctx, rmConfig.ResourcePools[0], json.RawMessage(`{"pool_name":"default"}`), masterDefaults,
+	)
+	require.NoError(t, err)
+	require.True(t, created)
+	require.JSONEq(t, `{"pool_name":"default"}`, string(*adopted.Spec))
+	first.stop()
+
+	// The built-in pool serves the saved pool while the key is left out.
+	require.NoError(t, ValidatePersistedDynamicPoolConfigs(
+		ctx, database, []*config.ResourceManagerWithPoolsConfig{rmConfig},
+	))
+	restarted, err := New(ctx, database, echo.New(), rmConfig, nil, nil, &masterDefaults)
+	require.NoError(t, err)
+	defer restarted.stop()
+	revision, published, _ := restarted.registry.activeRevision("default")
+	require.True(t, published)
+	require.Zero(t, revision, "the pool must be served from the built-in configuration")
+	restarted.stop()
+
+	// With resource_pools: [] the saved pool runs.
+	withoutPools := *rmConfig
+	withoutPools.ResourcePools = []config.ResourcePoolConfig{}
+	dynamic, err := New(ctx, database, echo.New(), &withoutPools, nil, nil, &masterDefaults)
+	require.NoError(t, err)
+	defer dynamic.stop()
+	revision, active := dynamic.ActiveDynamicResourcePoolRevision("default")
+	require.True(t, active)
+	require.EqualValues(t, 1, revision)
+}
+
 func TestStartupRestoresAgentStateForAdoptedPoolRemovedFromYAML(t *testing.T) {
 	database, cleanup := db.MustResolveNewPostgresDatabase(t)
 	defer cleanup()
