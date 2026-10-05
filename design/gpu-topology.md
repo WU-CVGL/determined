@@ -40,7 +40,7 @@ Status: design for review. The implementation lands as separate PRs (section 11)
 - I1 Scheduling is unchanged. `findFits` (master/internal/rm/agentrm/fitting.go:72-94), `candidateList.Less` (fitting.go:46-66), priority.go and fair_share.go are not edited. The flag is read only after the fit is chosen: in `allocateResources` and in the agent's reservation.
 - I2 With the flag off, or fewer than 2 slots, the reservation runs today's code.
 - I3 An opted-in reservation succeeds exactly when today's reservation would. Both take n devices from the same eligible set (P1) under the same agent lock. Slot counts, and so every other fit, stay as with the flag off.
-- I4 Unknown topology means today's device choice from the same eligible set.
+- I4 Unknown topology means today's device choice from the same eligible set. So does a report without rankable information, where every pair among the free GPUs is unknown (tier 3 of S1). Partial information is used: its unknown pairs rank at tier 3 (S2).
 
 ### 1.4 Not done
 - no DB persistence of topology or health, and no migration;
@@ -58,20 +58,21 @@ Status: design for review. The implementation lands as separate PRs (section 11)
 ### 2.1 Hook and lifetime
 - In agent/internal/agent.go, right after `detect.Detect` (115-120), call `detect.DetectGPUTopology(devices, excluded)`. It never returns an error and never fails agent start.
 - Put the result into `AgentStarted` (160-165). Pass it through `reconnectFlow` (call at 208, signature at 307, send at 352-357). A reconnect re-sends the value from process start. Every process start measures again (R1).
-- **N5 Timeout.** Collection runs in a goroutine. The agent waits at most 60 s, then sends `UnknownReason: "NVML collection did not finish within 60s"` and starts normally. The goroutine stays blocked, because a cgo call cannot be cancelled. Detection's own `nvidia-smi` calls have no timeout (agent/internal/detect/nvidia.go:33, :71), so N5 only keeps the new code from adding a hang.
+- **N5 Timeout.** Collection runs in a goroutine on its own copy of the inventory (N6). The agent waits at most 60 s, then sends the inventory with `UnknownReason: "NVML collection did not finish within 60s"` and starts normally. The goroutine stays blocked, because a cgo call cannot be cancelled, and its copy is discarded. Detection's own `nvidia-smi` calls have no timeout (agent/internal/detect/nvidia.go:33, :71), so N5 only keeps the new code from adding a hang.
 
 ### 2.2 Files and NVML calls
-- `detect/topology.go` (no build tag): `DetectGPUTopology(devices, excluded []device.Device) *aproto.GPUTopology`. No CUDA device gives nil. Any "MIG-" UUID gives `UnknownReason: "MIG instances: GPU topology not collected"`. Otherwise it collects exactly the detected slot UUIDs plus the excluded UUIDs, never another GPU. This respects `visible_gpus` and a docker device list.
-- `detect/topology_nvml.go` (`//go:build linux && cgo`) imports `github.com/NVIDIA/go-nvml/pkg/nvml`: `collect(lib nvml.Interface, uuids, excludedUUIDs []string, numa func(bdf string) *int, now func() time.Time) *aproto.GPUTopology`.
-- `detect/topology_nvml_stub.go` (`//go:build !linux || !cgo`) returns `UnknownReason: "agent built without NVML support (needs linux and cgo)"`. The guard is required: with CGO_ENABLED=0 an unguarded go-nvml import does not compile (D21).
+- `detect/topology.go` (no build tag): `DetectGPUTopology(devices, excluded []device.Device) *aproto.GPUTopology`. It returns nil only when there is neither a CUDA device nor an excluded GPU.
+- **N6 Inventory first.** Before any NVML call it builds `GPUs` from detection: one entry per CUDA slot, then one per excluded GPU, each with `UUID` and `Excluded` set. Every return path keeps this inventory: NVML init failure, the N5 timeout, the stub build and MIG ("MIG-" UUIDs, `UnknownReason: "MIG instances: GPU topology not collected"`) send it with `UnknownReason` and no telemetry. A collection fills each entry's telemetry fields only as far as its calls succeed (N1). Collection never adds or drops an entry, so it queries exactly the detected slot UUIDs and the excluded UUIDs, never another GPU. This respects `visible_gpus` and a docker device list.
+- `detect/topology_nvml.go` (`//go:build linux && cgo`) imports `github.com/NVIDIA/go-nvml/pkg/nvml`: `collect(lib nvml.Interface, inventory []aproto.GPUInfo, numa func(bdf string) *int, now func() time.Time) *aproto.GPUTopology`.
+- `detect/topology_nvml_stub.go` (`//go:build !linux || !cgo`) returns the inventory with `UnknownReason: "agent built without NVML support (needs linux and cgo)"`. The guard is required: with CGO_ENABLED=0 an unguarded go-nvml import does not compile (D21).
 - NVML inside the agent container: every agent DeviceRequest has the `utility` capability, so the NVIDIA container toolkit injects libnvidia-ml.so.1. The image does not bundle it.
 
 Steps:
-1. `lib.Init()`. If it fails, return `UnknownReason: "NVML init: " + nvmlReturnString(ret)`, for example `NVML init: ERROR_LIBRARY_NOT_FOUND (12)`, which go-nvml returns when dlopen fails (init.go:20-24). All GPUs are then unknown, not in error: a missing library is a deployment problem. Otherwise `defer lib.Shutdown()`, and set `CollectedAt = now()` and `DriverVersion` (best effort).
+1. `lib.Init()`. If it fails, return the inventory with `UnknownReason: "NVML init: " + nvmlReturnString(ret)`, for example `NVML init: ERROR_LIBRARY_NOT_FOUND (12)`, which go-nvml returns when dlopen fails (init.go:20-24). All GPUs are then unknown, not in error: a missing library is a deployment problem. Otherwise `defer lib.Shutdown()`, and set `CollectedAt = now()` and `DriverVersion` (best effort).
 2. Per UUID, the health calls: `DeviceGetHandleByUUID`, `GetPciInfo`, `GetCurrPcieLinkWidth`, `GetMaxPcieLinkWidth`, `GetCurrPcieLinkGeneration`, `GetMaxPcieLinkGeneration`. **N1, the return-code rule:**
    - SUCCESS: use the value;
    - ERROR_NOT_SUPPORTED: leave the field unknown (zero), with no error;
-   - anything else: leave the field unknown and append `"<call>: " + nvmlReturnString(ret)` to the GPU's `NVMLError`, for example `GetCurrPcieLinkWidth: ERROR_GPU_IS_LOST (15)`. A failed handle lookup records the GPU with only its UUID and the error.
+   - anything else: leave the field unknown and append `"<call>: " + nvmlReturnString(ret)` to the GPU's `NVMLError`, for example `GetCurrPcieLinkWidth: ERROR_GPU_IS_LOST (15)`. A failed handle lookup leaves the entry with only its inventory fields and the error.
 
    Details:
    - The bus id from `GetPciInfo` is NUL-trimmed and normalised to the sysfs form ("00000000:A1:00.0" becomes "0000:a1:00.0").
@@ -111,7 +112,8 @@ Today a faulty GPU is hidden by starting the agent container with `docker run --
 - **X1 Option.** The config key `exclude_gpus` in the agent YAML, or the flag `--exclude-gpus`: a comma-separated list of GPU UUIDs, never indices. There is no environment variable (X3 says why). `registerString` binds `DET_<FLAG>` automatically (agent/cmd/determined-agent/init.go:35-40), so the option is registered with a variant that binds only the flag and the config key. The flag sits next to `visible-gpus` (init.go:103) and the field next to `VisibleGPUs` (agent/internal/options/options.go:58). The agent container is started with all GPUs.
 - **X2 Detection, fail closed.** `detect.Detect` (detect.go:19) moves every CUDA device whose UUID is listed into a separate `excluded` list, with a helper the subcommand shares. The others keep their nvidia-smi index as device ID (nvidia.go:97-107), as with `visible_gpus`, so node01's slots become host indices 0-3 and 5-7. Gaps are safe: task containers get their GPUs by UUID (agent/internal/containers/spec.go:85-97), and the harness reads `DET_SLOT_IDS` (harness/determined/_info.py:278) and uses only their number. An entry that matches no detected CUDA GPU stops agent start with an error that names it, so a typo never hands the faulty GPU to tasks.
   - Excluded GPUs are not in `AgentStarted.Devices`, so the master never schedules them and no task container can request one.
-  - Excluded GPUs get the same NVML calls (section 2.2) and are marked `Excluded`. The owner confirmed that querying the faulty card is fine while no workload runs on it.
+  - With slot type `auto` (the default), excluded GPUs count as found CUDA GPUs: an agent whose GPUs are all excluded has no slots and does not fall back to ROCm or CPU slots (detect.go:78-100).
+  - Excluded GPUs are in the inventory with `Excluded` (N6), even when NVML fails, and get the same NVML calls (section 2.2). The owner confirmed that querying the faulty card is fine while no workload runs on it.
   - Detection now also sees the excluded card. Its `nvidia-smi` call has no timeout (nvidia.go:71), so a hang there blocks agent start. An `nvidia-smi` error returns no devices (nvidia.go:74-79); the entry then matches nothing, and fail-closed stops the whole agent, so node01 would lose all 7 good slots. Phase 1 runs this detection on node01. The fallback is the docker device list.
   - Changing the list changes the agent's devices. Drain first: the master stops an agent whose devices changed on reconnect (master/internal/rm/agentrm/agent_state.go:261-292).
 - **X3 Older agent images.**
@@ -146,7 +148,7 @@ The master API layer computes the state once per GPU (section 5.2). The first ma
 ### 3.2 Link width is an observation
 - Width and generation are read once at agent start and carry `collected_at`. They are an observation, not a confirmed fault. NVIDIA documents that the current link generation and width "may be reduced when the GPU is not in use" (`nvidia-smi --help-query-gpu`, fields `pcie.link.gen.current` and `pcie.link.width.current`). The cluster also saw a width change between boots (docs/05:240, :374).
 - So amber means "link width below max at agent start". The UI text says: "A lower link width lowers this link's bandwidth cap. Actual collective throughput depends on the workload."
-- v1 ranking does not use width (section 6.3). Phase 0 run f compares idle and under-load readings (section 12).
+- v1 ranking does not use width (section 6.3). Phase 0 run f compares idle and under-load readings before the width PR (section 10).
 
 ### 3.3 Coverage, and why the agent sends no runtime health
 - ERROR covers GPUs that `nvidia-smi` still lists but NVML cannot query. It rarely fires. When `nvidia-smi` fails, detection returns no devices (nvidia.go:74-79), and with slot type `auto` the agent falls back to CPU (detect.go:78-100). A GPU lost before start therefore usually never reaches collection: the agent registers fewer slots, and on a reconnect the device check stops it (agent_state.go:274-275). The cluster's DCGM `gpu-missing` alert covers that case.
@@ -178,13 +180,13 @@ Compatibility:
 New master/internal/rm/agentrm/gpu_topology.go holds an immutable `gpuTopology` built from the wire value and `AgentStarted.Devices`:
 - It maps UUIDs to device IDs for CUDA devices only, and stores per-GPU info and per-pair values by device ID.
 - It drops links whose UUIDs are not slots, normalises a reversed A/B (swapping the two directions with it), and treats a missing pair as unknown.
-- It keeps excluded GPUs (marked `Excluded`, UUID not a slot) and their links in a display-only part keyed by UUID. They never reach `selectDevices`. A GPU marked excluded whose UUID is a slot is treated as a slot and logged at Warn.
+- It keeps excluded GPUs (marked `Excluded`, UUID not a slot) and their links in a display-only part keyed by UUID, also when the report is unknown (N6). They never reach `selectDevices`. A GPU marked excluded whose UUID is a slot is treated as a slot and logged at Warn.
 - Its unknown reason is the wire's `UnknownReason`, "agent <version> does not report GPU topology" (wire nil with CUDA devices), or "not reported since the master started".
 - Topology stays out of `device.Device`, which is a map key (agent_state.go:49) and is compared on reconnect.
 
-agent_state.go gets the field `gpuTopology *gpuTopology` and `setGPUTopology(...)`, which replaces the pointer and never mutates it. `deepCopy` (199-214) copies the pointer; without that, every scheduler copy has no topology. It is not in `snapshot()`, so there is no DB change.
+agent_state.go gets the field `gpuTopology *gpuTopology` and `setGPUTopology(...)`, which replaces the pointer and never mutates it. `deepCopy` (199-214) leaves it out: its copies feed only the scheduler's fit (`agents.list` and `refreshAgentStateCacheFor`, through `agent.State`, agent.go:195-204), which uses counts. Selection (S3) and `summarize` (section 5.2) read the live state under `a.mu`. It is not in `snapshot()`, so there is no DB change.
 
-There is one set site: master/internal/rm/agentrm/agent.go `HandleIncomingWebsocketMessage`, after the `if a.started { ...match checks } else { a.agentStarted(...) }` block (614-643) and before `a.started = true` (645). It covers a fresh registration, a reconnect, and an agent restart with the same devices, which refreshes P2P, width and errors (R1). After a master restart the snapshot restore (agent.go:147-163) leaves the topology nil until the agent's AgentStarted arrives, a few seconds, and the agent counts as unknown meanwhile. A device mismatch keeps today's shutdown path.
+There is one set site: master/internal/rm/agentrm/agent.go `HandleIncomingWebsocketMessage`, after the `if a.started { ...match checks } else { a.agentStarted(...) }` block (614-643) and before `a.started = true` (645). It covers a fresh registration, a reconnect, and an agent restart with the same devices, which refreshes P2P, width and errors (R1). After a master restart the snapshot restore (agent.go:147-163) leaves the topology nil until the agent's AgentStarted arrives, a few seconds; meanwhile the agent counts as unknown and its excluded GPUs are not shown. A device mismatch keeps today's shutdown path.
 
 ---
 
@@ -229,20 +231,27 @@ enum GpuP2p { GPU_P2P_UNSPECIFIED = 0; GPU_P2P_USABLE = 1; GPU_P2P_NOT_USABLE = 
 enum GpuHealth { GPU_HEALTH_UNSPECIFIED = 0; GPU_HEALTH_OK = 1; GPU_HEALTH_LINK_BELOW_MAX = 2; GPU_HEALTH_ERROR = 3; }
 ```
 - Links between slots have device_a < device_b. A link with an excluded end has -1 for that end and is ordered by uuid_a < uuid_b. Clients join slots by device_id and excluded GPUs by UUID.
-- `Agent` gets `GpuTopology gpu_topology = 12;`, the next free tag (the message uses 1-11, with 5 reserved; agent.proto:39-67). It is unset for agents without CUDA slots and stays out of `devicev1.Device`.
+- `Agent` gets `GpuTopology gpu_topology = 12;`, the next free tag (the message uses 1-11, with 5 reserved; agent.proto:39-67). It is unset only for agents with neither CUDA slots nor excluded GPUs, so an agent whose GPUs are all excluded still has it. It stays out of `devicev1.Device`.
 - Regenerate with `make -C proto build` (protoc >= 24 and the versions pinned in proto/get-deps.sh), then `make -C bindings` (bindings.py and api.ts).
 
 ### 5.2 Assembly and API
 - `model.AgentSummary` (master/pkg/model/agent.go:15-25) gets `GPUTopology *agentv1.GpuTopology \`json:"gpu_topology,omitempty"\``, and `ToProto` (76-99) copies it.
-- `summarize` (master agentrm/agent.go:745-768) fills it under `a.mu` from a new `agentState.gpuTopologyProto()`. There is one entry per CUDA slot, with device_id and uuid from `slotStates`, so the shape is the same when the topology is unknown. Excluded GPUs follow. It is nil for agents without CUDA slots.
+- `summarize` (master agentrm/agent.go:745-768) fills it under `a.mu` from a new `agentState.gpuTopologyProto()`. There is one entry per CUDA slot, with device_id and uuid from `slotStates`, so the shape is the same when the topology is unknown. Excluded GPUs follow, from the inventory (N6), also when the topology is unknown. It is nil only for agents with neither CUDA slots nor excluded GPUs.
 - master/internal/api_agents.go: `GetAgents` (46-56) drops `gpu_topology` when `exclude_slots` is set. Otherwise it, and `GetAgent` (62-85), call `classifyGPUHealth` (H1) for every GPU. One function means the CLI and the WebUI never disagree.
 - RBAC: `authz.ObfuscateAgent` (master/internal/authz/obfuscate.go:69) sets `gpu_topology` to nil.
 
 ### 5.3 CLI (harness/determined/cli/agent.py)
 `det agent list` (`list_agents`, 23-63) gets two columns after "Slots", also in `--json` as `gpu_topology` and `gpu_health`:
-- **GPU Topology:** the NUMA group sizes of the slots, the distinct levels from best to worst, and the P2P state of the pairs of slots (excluded GPUs do not count): `p2p` when every pair is USABLE; `no-p2p(<status>)` when any pair is NOT_USABLE, even if others are USABLE or unknown; otherwise `p2p?` (some pair unknown).
-  - `<status>` is the first known non-OK status of the NOT_USABLE pair with the lowest slot ids, in the order A->B READ, A->B WRITE, B->A READ, B->A WRITE, where A is the lower slot id. The P2P matrix of `det agent describe` shows the rest.
-- **GPU Health:** `ok` when every GPU is OK and none is excluded. Otherwise the non-OK GPUs by slot id, grouped as `error`, `narrow`, `unknown`. Narrow GPUs show `x<cur> of x<max> at start`. Excluded GPUs come last as `excluded: <bus id>`, with their state in parentheses when it is not ok.
+- **GPU Topology:** the NUMA group sizes of the slots, the distinct levels from best to worst, and the P2P state of the pairs of slots (excluded GPUs do not count):
+  - `p2p` when every pair is USABLE;
+  - `no-p2p(<status>)` when no pair is USABLE and at least one is NOT_USABLE. `<status>` is the first known non-OK status of the NOT_USABLE pair with the lowest slot ids, in the order A->B READ, A->B WRITE, B->A READ, B->A WRITE, where A is the lower slot id;
+  - `p2p?` when every pair is unknown;
+  - otherwise usable pairs over all pairs, for example `p2p 12/28`;
+  - ` (<k> unknown)` follows when some but not all pairs are unknown, for example `p2p 12/28 (3 unknown)`;
+  - no P2P part with one slot, and `no slots` for an agent whose GPUs are all excluded.
+
+  The P2P matrix of `det agent describe` shows each pair.
+- **GPU Health:** `ok` when every GPU is OK and none is excluded. Otherwise the non-OK GPUs by slot id, grouped as `error`, `narrow`, `unknown`. Narrow GPUs show `x<cur> of x<max> at start`. Excluded GPUs come last as `excluded: <bus id>` (the UUID when the bus id is unknown), with their state in parentheses when it is not ok.
 
 | Agent | GPU Topology | GPU Health |
 |---|---|---|
@@ -250,6 +259,7 @@ enum GpuHealth { GPU_HEALTH_UNSPECIFIED = 0; GPU_HEALTH_OK = 1; GPU_HEALTH_LINK_
 | node01 today | `4+3 NODE/SYS p2p` | `narrow: 3,4 (x8 of x16 at start)` |
 | node01 with the exclude list | `4+3 NODE/SYS p2p` | `narrow: 3,5 (x8 of x16 at start); excluded: 81:00.0` |
 | g292 today | `8 PIX/NODE no-p2p(GPU_NOT_SUPPORTED)` | `ok` |
+| P2P usable inside each socket only | `4+4 NODE/SYS p2p 12/28` | `ok` |
 | topology unknown | `unknown: <reason>` | `unknown` |
 | CPU agent, or an older master | blank | blank |
 
@@ -272,7 +282,7 @@ Bus ids let operators map node01's slots to host indices.
 - **Health dot:** a 10 px LED dot in the tile's top-right corner. OK uses `--theme-status-success`, LINK_BELOW_MAX `--theme-status-warning`, ERROR `--theme-status-critical`, each with a 2 px `--theme-surface` ring. UNKNOWN is hollow: `--theme-surface` fill with a 2 px `--theme-status-inactive-strong` border. Every dot has a 1 px `--theme-surface-on-weak` outline, so it stays visible on any fill and in dark mode (tokens in utils/colors.ts), and the `aria-label` "GPU health: <state>".
 - **Info button** (hew `Icon name="info"`): hover or focus shows a hew `Tooltip`; a click pins the same content in a hew `Dropdown` popover (the pattern of components/MultiSortMenu.tsx:285-296). Content: slot, state, UUID, bus id, NUMA, then the four facts of H1. For amber it adds the text of section 3.2 and a link to the agent docs (section 7.1).
 - **Layout:** the summary line (the CLI strings); NUMA boxes that contain switch groups (connected PIX/PXB components) that contain tiles; a collapsible pairwise matrix (level text, non-usable P2P marked, unknown "?") that scrolls horizontally on narrow screens; and a text legend ("● ok ● link below max at start ● error ○ unknown; striped = disabled, draining or excluded"), so colour is never the only signal.
-- **Unknown topology:** the text "GPU topology unknown: <reason>", tiles from the slots, hollow dots, no grouping and no matrix.
+- **Unknown topology:** the text "GPU topology unknown: <reason>", tiles from the inventory (N6): the slot tiles by `device_id` and the excluded tiles, all with hollow dots, no grouping and no matrix.
 - Pure helpers live in utils/gpuTopology.ts and share fixtures with the CLI tests.
 
 ---
@@ -280,10 +290,14 @@ Bus ids let operators map node01's slots to host indices.
 ## 6. GPU set selection (PR B)
 
 ### 6.1 Prerequisite: the draining-slot fixes (small separate PRs, merged first)
-- **P1 A draining slot can be allocated again after its task exits.** A slot drained through the REST API stays in `a.Devices`: `updateSlotDeviceView` removes only disabled slots that are not draining (agent_state.go:418-422). When the slot's container exits, the device is free again, counts in `numEmptySlots()` (agent_state.go:99-106), and `allocateFreeDevices` (158-186) can pick it. The master then sends `StartContainer` (agent.go:224) before `startContainer` notices the disabled slot, and that check only logs (agent_state.go:345-346).
+- **P1 A draining slot can be allocated again.** A slot drained through the REST API stays in `a.Devices`: `updateSlotDeviceView` removes only disabled slots that are not draining (agent_state.go:418-422). Once no container holds the device, it counts in `numEmptySlots()` (agent_state.go:99-106) and `allocateFreeDevices` (158-186) can pick it. The master then sends `StartContainer` (agent.go:224) before `startContainer` notices the disabled slot, and that check only logs (agent_state.go:345-346).
+- **P1 contract: one allocatable set.** A device is allocatable exactly when its slot is enabled and not draining and no container holds it. The scheduler's counts and the free entries of `a.Devices` both describe this set. The fix PR tests that none of these makes a draining slot allocatable; today each does:
+  1. draining an idle slot (free at once);
+  2. draining a running slot whose task then exits (`deallocateContainer`, agent_state.go:189-196, frees it);
+  3. draining a reserved slot whose container has not started, then cancelling the reservation (`deallocateContainer` from `resourcesReleased`, resource_pool.go:260 and :274, or from the rollback in `allocateResources`, :409).
 - **P2 Slot state changes do not notify the scheduler.** `PatchSlotState` (agent.go:547-559) never calls `notifyListeners`, unlike agent enable and disable (agent.go:511, :543). So enabling or disabling a slot does not set `rp.reschedule` (resource_pool.go:556-559).
-- **What PR B relies on.** After the P1 fix, the free entries of `a.Devices` (nil container) are exactly the eligible slots. The scheduler's counts and the set selection then use the same set. The fix PR chooses the mechanism, for example removing a drained slot's device once its container exits, as a plain disable does at once.
-- PR B selects only from this eligible set. It has no fallback to a path that may pick a draining slot.
+- **What PR B relies on.** After the P1 fix, the free entries of `a.Devices` (nil container) are exactly the eligible slots, so the scheduler's counts and the set selection use the same set. The fix PR chooses the mechanism, for example removing a drained slot's device once no container holds it, as a plain disable does at once.
+- PR B selects only from this eligible set. It adds no draining special case and has no fallback to a path that may pick a draining slot.
 
 ### 6.2 Per-task flag
 `resources.prefer_gpu_topology`: boolean or null, schema default null, read as false unless it is exactly true (D1). Off by default (decided).
@@ -310,7 +324,7 @@ A tuple compared lexicographically; smaller is better. v1 does not use link widt
 
 ### 6.4 S2: set key and selection
 - `setKey`: the C(n,2) pair keys of a set, sorted worst first. Sets compare lexicographically: worst pair, then second worst, and so on. Exact ties go to the smallest sorted list of device IDs.
-- `selectDevices(free []device.Device, g *gpuTopology, n int) ([]device.Device, setKey)` returns nil, meaning today's choice, when n < 2, g is nil or unknown, or len(free) < n.
+- `selectDevices(free []device.Device, g *gpuTopology, n int) ([]device.Device, setKey)` returns nil, meaning today's choice (I4), when n < 2, g is nil or unknown, len(free) < n, or every pair among `free` is unknown (tier 3), so the report has no rankable information there. If any pair is known, or a GPU had an NVML error (tier 4), it selects, and the unknown pairs rank at tier 3.
 - Otherwise it enumerates every subset of size n in ID order and keeps only a strictly better key, so the ID tie-break falls out of the order. Brute force is enough: C(8,4) = 70 subsets on this cluster. Above 20000 subsets, which needs more than 16 free GPUs, it returns nil and logs at Debug.
 
 ### 6.5 S3: reservation under the agent lock
@@ -348,7 +362,7 @@ All slots free, with slot IDs as deployed (node01's slots 0-6 are host GPUs 0,1,
 ### 6.8 Task-log line (D18)
 After `rmevents.Publish(req.AllocationID, ...)` (resource_pool.go:469), for an opted-in request with 2 or more slots, publish a `sproto.ContainerLog`. The allocation subscribed before `pool.Allocate` (agent_resource_manager.go:171), and master/internal/task/allocation.go:263-264 turns it into a task log. The same text goes to `rp.syslog` at Info.
 - set chosen: `GPU topology preference: agent <id>, slots 4,5,6,7; worst pair NODE, P2P usable`
-- unknown: `GPU topology preference: topology of agent <id> unknown (<reason>); slots chosen as usual`
+- unknown: `GPU topology preference: topology of agent <id> unknown (<reason>); slots chosen as usual`, with the reason "every pair of free GPUs unknown" for the last case of S2
 - multi-agent: `GPU topology preference has no effect: the task uses whole agents`
 
 ---
@@ -403,8 +417,8 @@ Agents: a new agent works with an older master, which ignores the field. An olde
 ## 11. Implementation order
 1. **P1 and P2** (section 6.1), each a small PR with its own tests (D17).
 2. **PR A, collection and display:** aproto wire; agent collection (N1-N5); the exclude list (X1-X3); the subcommand; build and release; master state and reconnect; proto, bindings and assembly; health (H1); CLI; WebUI; agent docs and release note. Phase 1 runs on its candidate image before merge.
-3. **PR B, in-agent set selection,** after P1 and P2: the config field and carrier; S1-S3; the task-log line; config docs and release note. Phase 0 runs before merge.
-4. **Later, each its own PR:** the XID lookup (section 9); width-aware ranking (section 10); choosing the agent by topology, a scheduler change (section 6.6).
+3. **PR B, in-agent set selection,** after P1 and P2: the config field and carrier; S1-S3; the task-log line; config docs and release note. Phase 0 runs a, d and e come before merge, and Phase 2 checks its real allocations.
+4. **Later, each its own PR:** the XID lookup (section 9); width-aware ranking (section 10), gated by Phase 0 runs b, c and f; choosing the agent by topology, a scheduler change (section 6.6).
 
 Files:
 - **PR A:** agent/internal/agent.go; agent/internal/options/options.go and its test; agent/cmd/determined-agent/init.go, root.go, gpu_topology.go and its test; agent/internal/detect/detect.go, nvidia.go, topology.go, topology_nvml.go, topology_nvml_stub.go and their tests; agent/Makefile; go.mod, go.sum; .github/workflows/fork-release.yml; tools/fork/check.sh, smoke.sh; master/pkg/aproto/gpu_topology.go, master_message.go and tests; master/internal/rm/agentrm/gpu_topology.go, agent_state.go, agent.go and tests; master/internal/api_agents.go, authz/obfuscate.go and tests; master/pkg/model/agent.go and test; proto/src/determined/agent/v1/agent.proto, proto/pkg/agentv1/agent.pb.go; harness/determined/common/api/bindings.py, harness/determined/cli/agent.py, harness/tests/cli/test_agent.py; webui/react/src/services/api-ts-sdk/api.ts, types.ts, services/decoder.ts, utils/gpuTopology.ts, pages/ResourcePool/GpuTopology.tsx, GpuTopology.module.scss, ClusterTopology.tsx and tests; docs/reference/deploy/agent-config-reference.rst; a release note.
@@ -415,6 +429,8 @@ Files:
 ## 12. Validation plan
 
 **Phase 0: benchmarks, needing no code.** Per node in a maintenance window: drain with `det agent disable --drain` and re-enable afterwards. Run cluster-setup scripts/gpu-p2p/tests/run_host.sh with `STAGES=nccl`, 1 GiB busbw, 3 runs, median, and `NCCL_VARIANTS="p2p-sys"` unless noted. Post the tables in the PR.
+- Runs a, d and e gate PR B: they check the topology and P2P ranking it uses (S1).
+- Runs b, c and f gate the width PR (section 10), not PR B.
 
 | Run | Node | Sets or check | Purpose |
 |---|---|---|---|
@@ -450,26 +466,33 @@ Each test names the rule it covers.
 - TestP2PUsability (N3, table) and TestMapTopologyLevelAndP2PStatus (table, including both spellings of value 1, P2P_STATUS_UNKNOWN and out-of-range values).
 - TestCollectNode07Like: 8 GPUs with NODE/SYS levels, x8 of x16 on GPU 1, gen 1 of 4, NUMA from an injected reader. Expect 28 links with UUIDA < UUIDB, normalised bus ids, and CollectedAt and DriverVersion set.
 - TestCollectOnlyDetectedUUIDs and TestCollectExcludedGPUs (X2): handles are requested only for detected and excluded UUIDs; only excluded GPUs carry `Excluded`; an NVML error on an excluded GPU sets only its own.
-- TestCollectLibraryNotFound, TestCollectHandleLookupFails, TestCollectTimeout (N5).
+- TestCollectLibraryNotFound, TestCollectHandleLookupFails, TestCollectTimeout (N5): each keeps the inventory (N6).
 - TestCollectNVLinkCount and TestCollectNVLinkProbeNoError (N2): RTX 3090-like answers give no error, NVLinks 0, and no call above link 4.
 - TestNVMLReturnFormatting and TestCollectErrorsIgnoreNVMLProse (N4). `Return.String()` cannot be switched to prose in a unit test, so Phase 1 covers it.
-- TestDetectGPUTopologyNoCUDA, TestDetectGPUTopologyMIG; the stub test, run with CGO_ENABLED=0.
-- TestDetectExcludeGPUs (X2): 8 GPUs and one excluded UUID give IDs 0-3 and 5-7 plus one excluded device; an unknown entry gives an error that names it; an empty list gives today's result.
+- TestDetectGPUTopologyNoCUDA (nil only without CUDA devices and excluded GPUs), TestDetectGPUTopologyMIG; the stub test, run with CGO_ENABLED=0.
+- TestDetectExcludeGPUs (X2): 8 GPUs and one excluded UUID give IDs 0-3 and 5-7 plus one excluded device; an unknown entry gives an error that names it; an empty list gives today's result; all GPUs excluded with slot type `auto` gives no slots, not CPU slots.
 - options_test.go (X1): the config key and the flag set the option; `DET_EXCLUDE_GPUS` does not.
 - TestGPUTopologySubcommandInitsFirst and TestGPUTopologySubcommandExcludeGPUs (section 2.5).
 
 **PR A, master and clients**
 - TestAgentStartedWireCompat: a nil GPUTopology marshals byte-identical to a golden copy of today's message, and older-agent JSON gives nil.
-- TestNewGPUTopologyMapsUUIDsToDeviceIDs (reversed A/B swaps the directions), TestGPUTopologyKeepsExcludedForDisplay, TestDeepCopyKeepsGPUTopology, TestAgentStartedRefreshesGPUTopology (section 4.2).
+- TestNewGPUTopologyMapsUUIDsToDeviceIDs (reversed A/B swaps the directions), TestGPUTopologyKeepsExcludedForDisplay (also when unknown), TestAgentStartedRefreshesGPUTopology (section 4.2).
 - TestClassifyGPUHealth (H1, table): the generation never changes the state; an excluded GPU never changes a slot's state. TestGetAgentExcludedGPUs. The model and obfuscate tests.
-- harness/tests/cli/test_agent.py: the rows of the table in section 5.3; a mixed agent (one pair with READ OK and WRITE NOT_SUPPORTED in one direction, one pair unknown, the rest USABLE) gives `no-p2p(NOT_SUPPORTED)`; and `describe`.
+- harness/tests/cli/test_agent.py: the rows of the table in section 5.3; a mixed agent (one pair with READ OK and WRITE NOT_SUPPORTED in one direction, one pair unknown, the rest USABLE) gives `p2p 26/28 (1 unknown)`; and `describe`.
 - WebUI vitest: utils/gpuTopology.test.ts (summaries, grouping, the state-to-palette map) and GpuTopology.test.tsx (dots and aria labels, stripes, the excluded tile, the popover with the four facts and the text of section 3.2, unknown topology, the legend).
 - The release assertions (section 8), and the smoke run on the CPU agent.
+
+**PR A, inventory without telemetry (N6).** The agent (`DetectGPUTopology`), the master (`gpuTopologyProto`), the CLI and the WebUI each run these cases:
+
+| Case | Agent sends | Shown |
+|---|---|---|
+| 8 GPUs detected, 1 excluded; NVML init fails, collection times out, or stub build | `UnknownReason` and 8 entries: 7 slot UUIDs and 1 `Excluded` UUID, no telemetry | 7 slot tiles and 1 excluded tile, all UNKNOWN; CLI `unknown: <reason>` and `unknown; excluded: <UUID> (unknown)` |
+| 8 GPUs detected, all excluded, slot type `auto` | no slots; 8 `Excluded` entries, with telemetry where NVML works | `gpu_topology` set; 8 excluded tiles; CLI `no slots` and `excluded: <8 bus ids>` |
 
 **PR B**
 - TestPairKeyOrder (S1): NVLink(4) < NVLink(2) < usable PIX < ... < usable SYS < not usable in one NUMA node (PIX equals NODE) < not usable SYS < unknown < NVML error. A pair with NVLinks that is not USABLE is not tier 0. Width never changes a key.
 - TestSelectDevicesClusterCases: fixtures transcribed from each node's host output reproduce section 6.7.
-- TestSelectDevicesLeximax, TestSelectDevicesGates, TestSelectDevicesCap, BenchmarkSelectDevices8Choose4 (S2).
+- TestSelectDevicesLeximax, TestSelectDevicesGates (I4: every free pair unknown returns nil; one known pair selects), TestSelectDevicesCap, BenchmarkSelectDevices8Choose4 (S2).
 - TestAllocateSelectedDevices: reserves exactly the given set in ID order; a busy, absent or duplicated device gives an error and changes nothing.
 - TestAllocateFreeDevicesPreferTopology (S3, I3, I4): over random agent states, including drained slots after P1, the opted-in and the default reservation succeed or fail together; unknown topology runs today's path; a multi-agent fit passes `preferTopology=false`.
 - TestFindFitsIgnoresFlag (I1, I2): `findFits` returns the same fits with the flag on and off.
@@ -503,8 +526,8 @@ Decided by the owner: the flag is off by default; P2P comes only from the agent'
 | D3 | Pairs without P2P | open; recommended: below usable pairs, by NUMA class only, switch locality neutral; run d | 6.3 |
 | D4 | Choosing the agent | decided: not in v1; the agent is today's choice | 6.6 |
 | D5 | Multi-agent tasks | open; recommended: unchanged | 6.5 |
-| D6 | GPUs with an NVML error in opted-in sets | open; recommended: rank last, never exclude | 6.3 |
-| D7 | Unknown topology | open; recommended: today's device choice | I4 |
+| D6 | GPUs with an NVML error in opted-in sets | open; recommended: rank last, never exclude. The third review supports it | 6.3 |
+| D7 | Unknown topology | open; recommended: today's device choice, also when every pair is unknown | I4 |
 | D8 | Definition of "error" | decided for v1: an NVML health call failed at agent start; XIDs later | 3.1, 9 |
 | D9 | XID lookup | decided: a later separate PR | 9 |
 | D10 | XID window and codes | open; recommended: 24 h, excluding 13, 31, 43, 45 | 9 |
@@ -518,7 +541,7 @@ Decided by the owner: the flag is off by default; P2P comes only from the agent'
 | D18 | Task-log line | open; recommended: yes | 6.8 |
 | D19 | Diagnostic subcommand | open; recommended: yes | 2.5 |
 | D20 | Device choice without the flag | open; recommended: unchanged | 1.4 |
-| D21 | Non-amd64 and non-Linux agents | open; recommended: the stub | 2.2 |
+| D21 | Agents built without `linux && cgo` | open; recommended: the stub (CGO_ENABLED=0, non-Linux, or a cross build, where Go disables cgo by default). A linux/arm64 build with cgo uses NVML. The fork releases only linux/amd64, with cgo | 2.2, 8 |
 | D22 | PR shape | decided: P1 and P2, then PR A, then PR B, then the later PRs | 11 |
 | D23 | Follow-ups in cluster-setup | open; recommended: document the flag and the exclude list (with X3's rollback step), and check that the launch tooling passes the flag through | |
 | D24 | Excluded GPUs | decided; option, safety and compatibility in X1-X3 | 2.6 |
@@ -529,3 +552,4 @@ The other quirks of D17: `allocateFreeDevices` leaves `containerState[cid]` behi
 
 ## History
 Revisions 1-4 and their reviews are in the "Revisions" section of this file at commit 55ddc4619: review findings C1-C8 shaped revision 2, verification findings V1-V5 revision 3, and revision 4 added D24. After a review of revision 4, v1 dropped choosing the agent by topology and width-aware ranking, moved the XID lookup to a later PR, requires P2P READ and WRITE, treats link width as an observation, and corrected the exclude list's compatibility (X3).
+After the third review, excluded GPUs stay visible without telemetry (N6), the P2P summary counts usable pairs, Phase 0's width runs gate only the width PR, and P1's contract and I4 are stated exactly.
