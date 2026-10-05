@@ -2399,6 +2399,7 @@ class v1Command(Printable):
     container: "typing.Optional[v1Container]" = None
     displayName: "typing.Optional[str]" = None
     exitStatus: "typing.Optional[str]" = None
+    slots: "typing.Optional[int]" = None
     userId: "typing.Optional[int]" = None
 
     def __init__(
@@ -2415,6 +2416,7 @@ class v1Command(Printable):
         container: "typing.Union[v1Container, None, Unset]" = _unset,
         displayName: "typing.Union[str, None, Unset]" = _unset,
         exitStatus: "typing.Union[str, None, Unset]" = _unset,
+        slots: "typing.Union[int, None, Unset]" = _unset,
         userId: "typing.Union[int, None, Unset]" = _unset,
     ):
         self.description = description
@@ -2431,6 +2433,8 @@ class v1Command(Printable):
             self.displayName = displayName
         if not isinstance(exitStatus, Unset):
             self.exitStatus = exitStatus
+        if not isinstance(slots, Unset):
+            self.slots = slots
         if not isinstance(userId, Unset):
             self.userId = userId
 
@@ -2452,6 +2456,8 @@ class v1Command(Printable):
             kwargs["displayName"] = obj["displayName"]
         if "exitStatus" in obj:
             kwargs["exitStatus"] = obj["exitStatus"]
+        if "slots" in obj:
+            kwargs["slots"] = obj["slots"]
         if "userId" in obj:
             kwargs["userId"] = obj["userId"]
         return cls(**kwargs)
@@ -2473,6 +2479,8 @@ class v1Command(Printable):
             out["displayName"] = self.displayName
         if not omit_unset or "exitStatus" in vars(self):
             out["exitStatus"] = self.exitStatus
+        if not omit_unset or "slots" in vars(self):
+            out["slots"] = self.slots
         if not omit_unset or "userId" in vars(self):
             out["userId"] = self.userId
         return out
@@ -9537,6 +9545,7 @@ class v1Notebook(Printable):
     displayName: "typing.Optional[str]" = None
     exitStatus: "typing.Optional[str]" = None
     serviceAddress: "typing.Optional[str]" = None
+    slots: "typing.Optional[int]" = None
     userId: "typing.Optional[int]" = None
 
     def __init__(
@@ -9554,6 +9563,7 @@ class v1Notebook(Printable):
         displayName: "typing.Union[str, None, Unset]" = _unset,
         exitStatus: "typing.Union[str, None, Unset]" = _unset,
         serviceAddress: "typing.Union[str, None, Unset]" = _unset,
+        slots: "typing.Union[int, None, Unset]" = _unset,
         userId: "typing.Union[int, None, Unset]" = _unset,
     ):
         self.description = description
@@ -9572,6 +9582,8 @@ class v1Notebook(Printable):
             self.exitStatus = exitStatus
         if not isinstance(serviceAddress, Unset):
             self.serviceAddress = serviceAddress
+        if not isinstance(slots, Unset):
+            self.slots = slots
         if not isinstance(userId, Unset):
             self.userId = userId
 
@@ -9595,6 +9607,8 @@ class v1Notebook(Printable):
             kwargs["exitStatus"] = obj["exitStatus"]
         if "serviceAddress" in obj:
             kwargs["serviceAddress"] = obj["serviceAddress"]
+        if "slots" in obj:
+            kwargs["slots"] = obj["slots"]
         if "userId" in obj:
             kwargs["userId"] = obj["userId"]
         return cls(**kwargs)
@@ -9618,6 +9632,8 @@ class v1Notebook(Printable):
             out["exitStatus"] = self.exitStatus
         if not omit_unset or "serviceAddress" in vars(self):
             out["serviceAddress"] = self.serviceAddress
+        if not omit_unset or "slots" in vars(self):
+            out["slots"] = self.slots
         if not omit_unset or "userId" in vars(self):
             out["userId"] = self.userId
         return out
@@ -15025,6 +15041,7 @@ class v1Shell(Printable):
     exitStatus: "typing.Optional[str]" = None
     privateKey: "typing.Optional[str]" = None
     publicKey: "typing.Optional[str]" = None
+    slots: "typing.Optional[int]" = None
     userId: "typing.Optional[int]" = None
 
     def __init__(
@@ -15045,6 +15062,7 @@ class v1Shell(Printable):
         exitStatus: "typing.Union[str, None, Unset]" = _unset,
         privateKey: "typing.Union[str, None, Unset]" = _unset,
         publicKey: "typing.Union[str, None, Unset]" = _unset,
+        slots: "typing.Union[int, None, Unset]" = _unset,
         userId: "typing.Union[int, None, Unset]" = _unset,
     ):
         self.description = description
@@ -15069,6 +15087,8 @@ class v1Shell(Printable):
             self.privateKey = privateKey
         if not isinstance(publicKey, Unset):
             self.publicKey = publicKey
+        if not isinstance(slots, Unset):
+            self.slots = slots
         if not isinstance(userId, Unset):
             self.userId = userId
 
@@ -15098,6 +15118,8 @@ class v1Shell(Printable):
             kwargs["privateKey"] = obj["privateKey"]
         if "publicKey" in obj:
             kwargs["publicKey"] = obj["publicKey"]
+        if "slots" in obj:
+            kwargs["slots"] = obj["slots"]
         if "userId" in obj:
             kwargs["userId"] = obj["userId"]
         return cls(**kwargs)
@@ -15127,6 +15149,8 @@ class v1Shell(Printable):
             out["privateKey"] = self.privateKey
         if not omit_unset or "publicKey" in vars(self):
             out["publicKey"] = self.publicKey
+        if not omit_unset or "slots" in vars(self):
+            out["slots"] = self.slots
         if not omit_unset or "userId" in vars(self):
             out["userId"] = self.userId
         return out
@@ -15844,6 +15868,7 @@ class v1Tensorboard(Printable):
     exitStatus: "typing.Optional[str]" = None
     experimentIds: "typing.Optional[typing.Sequence[int]]" = None
     serviceAddress: "typing.Optional[str]" = None
+    slots: "typing.Optional[int]" = None
     trialIds: "typing.Optional[typing.Sequence[int]]" = None
     userId: "typing.Optional[int]" = None
 
@@ -15863,6 +15888,7 @@ class v1Tensorboard(Printable):
         exitStatus: "typing.Union[str, None, Unset]" = _unset,
         experimentIds: "typing.Union[typing.Sequence[int], None, Unset]" = _unset,
         serviceAddress: "typing.Union[str, None, Unset]" = _unset,
+        slots: "typing.Union[int, None, Unset]" = _unset,
         trialIds: "typing.Union[typing.Sequence[int], None, Unset]" = _unset,
         userId: "typing.Union[int, None, Unset]" = _unset,
     ):
@@ -15884,6 +15910,8 @@ class v1Tensorboard(Printable):
             self.experimentIds = experimentIds
         if not isinstance(serviceAddress, Unset):
             self.serviceAddress = serviceAddress
+        if not isinstance(slots, Unset):
+            self.slots = slots
         if not isinstance(trialIds, Unset):
             self.trialIds = trialIds
         if not isinstance(userId, Unset):
@@ -15911,6 +15939,8 @@ class v1Tensorboard(Printable):
             kwargs["experimentIds"] = obj["experimentIds"]
         if "serviceAddress" in obj:
             kwargs["serviceAddress"] = obj["serviceAddress"]
+        if "slots" in obj:
+            kwargs["slots"] = obj["slots"]
         if "trialIds" in obj:
             kwargs["trialIds"] = obj["trialIds"]
         if "userId" in obj:
@@ -15938,6 +15968,8 @@ class v1Tensorboard(Printable):
             out["experimentIds"] = self.experimentIds
         if not omit_unset or "serviceAddress" in vars(self):
             out["serviceAddress"] = self.serviceAddress
+        if not omit_unset or "slots" in vars(self):
+            out["slots"] = self.slots
         if not omit_unset or "trialIds" in vars(self):
             out["trialIds"] = self.trialIds
         if not omit_unset or "userId" in vars(self):

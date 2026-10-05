@@ -2130,6 +2130,12 @@ export interface V1Command {
      * @memberof V1Command
      */
     workspaceId: number;
+    /**
+     * The slot count the command requests (resources.slots), 0 when it requests none.
+     * @type {number}
+     * @memberof V1Command
+     */
+    slots?: number;
 }
 /**
  * Container for a requested trial and its metrics.
@@ -7173,6 +7179,12 @@ export interface V1Notebook {
      * @memberof V1Notebook
      */
     workspaceId: number;
+    /**
+     * The slot count the notebook requests (resources.slots), 0 when it requests none.
+     * @type {number}
+     * @memberof V1Notebook
+     */
+    slots?: number;
 }
 /**
  * Arguments to a notify container running.
@@ -11050,6 +11062,12 @@ export interface V1Shell {
      * @memberof V1Shell
      */
     workspaceId: number;
+    /**
+     * The slot count the shell requests (resources.slots), 0 when it requests none.
+     * @type {number}
+     * @memberof V1Shell
+     */
+    slots?: number;
 }
 /**
  * Slot wraps a single device on the agent.
@@ -11691,6 +11709,12 @@ export interface V1Tensorboard {
      * @memberof V1Tensorboard
      */
     workspaceId: number;
+    /**
+     * The slot count the TensorBoard requests (resources.slots), 0 when it requests none.
+     * @type {number}
+     * @memberof V1Tensorboard
+     */
+    slots?: number;
 }
 /**
  * Response to TestWebhookRequest.
