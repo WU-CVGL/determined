@@ -81,6 +81,10 @@ type AgentStarted struct {
 	Devices              []device.Device
 	ContainersReattached []ContainerReattachAck
 	ResourcePoolName     string
+	// GPUTopology is what the agent measured at process start; a reconnect sends it again. It is
+	// nil from agents without CUDA devices or excluded GPUs, and from agents older than the field,
+	// which a master reads as unknown. An older master ignores the field.
+	GPUTopology *GPUTopology `json:",omitempty"`
 }
 
 // ContainerStateChanged notifies the master that the agent transitioned the container state.

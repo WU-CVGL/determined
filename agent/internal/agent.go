@@ -112,13 +112,17 @@ func (a *Agent) run(ctx context.Context) error {
 	}
 
 	a.log.Trace("detecting devices")
-	devices, _, err := detect.Detect(
+	devices, excluded, err := detect.Detect(
 		a.opts.SlotType, a.opts.AgentID, a.opts.VisibleGPUs,
 		detect.ParseExcludeGPUs(a.opts.ExcludeGPUs), a.opts.ArtificialSlots,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to detect devices: %w", err)
 	}
+
+	// Measured once per process start; a reconnect sends the same value. Never fails.
+	a.log.Trace("collecting GPU topology")
+	gpuTopology := detect.DetectGPUTopology(devices, excluded)
 
 	a.log.Tracef("setting up %s runtime", a.opts.ContainerRuntime)
 	if a.opts.ContainerRuntime != options.DockerContainerRuntime {
@@ -163,6 +167,7 @@ func (a *Agent) run(ctx context.Context) error {
 		Devices:              devices,
 		ContainersReattached: reattached,
 		ResourcePoolName:     a.opts.ResourcePool,
+		GPUTopology:          gpuTopology,
 	}}:
 	case <-ctx.Done():
 		return ctx.Err()
@@ -206,7 +211,7 @@ func (a *Agent) run(ctx context.Context) error {
 				a.log.Trace("socket disconnected")
 			}
 
-			newSocket, newMopts, err := a.reconnectFlow(ctx, manager, devices, outbox)
+			newSocket, newMopts, err := a.reconnectFlow(ctx, manager, devices, gpuTopology, outbox)
 			if err != nil {
 				return err
 			}
@@ -309,6 +314,7 @@ func (a *Agent) reconnectFlow(
 	ctx context.Context,
 	manager *containers.Manager,
 	devices []device.Device,
+	gpuTopology *aproto.GPUTopology,
 	outbox chan *aproto.MasterMessage,
 ) (
 	*MasterWebsocket,
@@ -355,6 +361,7 @@ func (a *Agent) reconnectFlow(
 		Devices:              devices,
 		ContainersReattached: reattached,
 		ResourcePoolName:     a.opts.ResourcePool,
+		GPUTopology:          gpuTopology,
 	}}:
 	case <-ctx.Done():
 		return nil, nil, ctx.Err()
