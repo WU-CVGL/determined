@@ -101,7 +101,13 @@ func (f *fakeNode) lib() *mock.Interface {
 			},
 			GetNvLinkRemotePciInfoFunc: func(link int) (nvml.PciInfo, nvml.Return) {
 				require.NotNil(f.t, g.nvlink, "remote PCI info of a GPU without NVLink")
-				_, _, remote, r := g.nvlink(link)
+				state, _, remote, r := g.nvlink(link)
+				// N2 queries the remote end only of an enabled link. Non-fatal: the collector may
+				// run on its own goroutine.
+				if state != nvml.FEATURE_ENABLED {
+					f.t.Errorf("remote PCI info of GPU %s link %d, which is not FEATURE_ENABLED",
+						g.uuid, link)
+				}
 				return pciInfo(remote), r
 			},
 			GetTopologyCommonAncestorFunc: func(other nvml.Device) (nvml.GpuTopologyLevel, nvml.Return) {
@@ -530,7 +536,7 @@ func TestCollectHandleLookupFails(t *testing.T) {
 func TestCollectNVLinkCount(t *testing.T) {
 	gpus := eightGPUs()[:3]
 	// GPUs 0 and 1 share two NVLinks (links 0 and 1); link 2 of each goes to a bus that is not
-	// ours (an NVSwitch, say); GPU 2 has none.
+	// ours (an NVSwitch, say); link 3 is disabled; GPU 2 has none.
 	bridge := func(peer string) func(int) (nvml.EnableState, nvml.Return, string, nvml.Return) {
 		return func(link int) (nvml.EnableState, nvml.Return, string, nvml.Return) {
 			switch link {
@@ -539,7 +545,8 @@ func TestCollectNVLinkCount(t *testing.T) {
 			case 2:
 				return nvml.FEATURE_ENABLED, nvml.SUCCESS, "00000000:FF:00.0", nvml.SUCCESS
 			case 3:
-				return nvml.FEATURE_DISABLED, nvml.SUCCESS, "", nvml.SUCCESS
+				// A disabled link whose remote end is the peer: counting it would give 3.
+				return nvml.FEATURE_DISABLED, nvml.SUCCESS, peer, nvml.SUCCESS
 			default:
 				return nvml.FEATURE_DISABLED, nvml.ERROR_INVALID_ARGUMENT, "", nvml.SUCCESS
 			}
