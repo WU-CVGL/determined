@@ -112,6 +112,18 @@ func fillContextDir(
 	return configWorkDir, contextDirectoryBytes, nil
 }
 
+// checkTaskRunsAs checks that actor may start a task that runs as owner. getTaskSessionToken
+// returns the token on actor's own request when external sessions are enabled, whatever user it is
+// given, so a task can run as another user only without them.
+func checkTaskRunsAs(actor, owner *model.User) error {
+	if actor.ID != owner.ID && config.GetMasterConfig().InternalConfig.ExternalSessions.Enabled() {
+		return status.Errorf(codes.FailedPrecondition,
+			"user %q cannot start a task that runs as user %q: with external sessions, "+
+				"a task can run only as the user who starts it", actor.Username, owner.Username)
+	}
+	return nil
+}
+
 func getTaskSessionToken(ctx context.Context, userModel *model.User) (string, error) {
 	var token string
 	var err error

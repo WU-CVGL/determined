@@ -1441,7 +1441,7 @@ var errContinueHPSearchCompleted = status.Error(codes.FailedPrecondition,
 func (a *apiServer) ContinueExperiment(
 	ctx context.Context, req *apiv1.ContinueExperimentRequest,
 ) (*apiv1.ContinueExperimentResponse, error) {
-	user, _, err := grpcutil.GetUser(ctx)
+	actor, _, err := grpcutil.GetUser(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get the user: %s", err)
 	}
@@ -1451,6 +1451,23 @@ func (a *apiServer) ContinueExperiment(
 	if err != nil {
 		return nil, err
 	}
+
+	// The continued experiment keeps its owner: an administrator, or under RBAC another user who
+	// may edit it, continues the owner's code, and its tasks run as the owner, not as them.
+	if origExperiment.OwnerID == nil {
+		return nil, status.Errorf(codes.Internal, "experiment %d has no owner", req.Id)
+	}
+	ownerFull, err := user.ByID(ctx, *origExperiment.OwnerID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal,
+			"loading the owner of experiment %d: %s", req.Id, err)
+	}
+	if !ownerFull.Active {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"experiment %d belongs to user %q, who is deactivated; its tasks run as its owner, "+
+				"so reactivate the user to continue it", req.Id, ownerFull.Username)
+	}
+	owner := ownerFull.ToUser()
 
 	trialsResp, err := a.GetExperimentTrials(ctx, &apiv1.GetExperimentTrialsRequest{
 		ExperimentId: req.Id,
@@ -1466,7 +1483,7 @@ func (a *apiServer) ContinueExperiment(
 	dbExp, modelDef, activeConfig, _, taskSpec, err := a.m.parseCreateExperiment(ctx,
 		&apiv1.CreateExperimentRequest{
 			Config: string(configBytes),
-		}, user,
+		}, actor, &owner,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("parsing continue experiment request: %w", err)
@@ -1579,7 +1596,7 @@ func (a *apiServer) ContinueExperiment(
 		return nil, status.Errorf(codes.Internal, "failed to activate experiment: %s", err)
 	}
 
-	protoExp, err := a.getExperiment(ctx, *user, int(req.Id))
+	protoExp, err := a.getExperiment(ctx, *actor, int(req.Id))
 	if err != nil {
 		return nil, err
 	}
@@ -1620,7 +1637,7 @@ func (a *apiServer) CreateExperiment(
 	}
 
 	dbExp, modelDef, activeConfig, p, taskSpec, err := a.m.parseCreateExperiment(ctx,
-		req, user,
+		req, user, user,
 	)
 	if err != nil {
 		return nil, err
@@ -1753,7 +1770,7 @@ func (a *apiServer) PutExperiment(
 	}
 
 	dbExp, modelDef, activeConfig, p, _, err := a.m.parseCreateExperiment(ctx,
-		req.CreateExperimentRequest, user,
+		req.CreateExperimentRequest, user, user,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse exp config: %w", err)
