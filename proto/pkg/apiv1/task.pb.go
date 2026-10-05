@@ -2118,7 +2118,8 @@ type GetGenericTasksRequest struct {
 	// Limit tasks to those whose name or task ID contains this text, ignoring
 	// case.
 	Search string `protobuf:"bytes,10,opt,name=search,proto3" json:"search,omitempty"`
-	// Limit tasks to those that ask for slots (GPU) or for none (CPU only).
+	// Limit tasks by the slot count they request (resources.slots): at least
+	// one slot, or none.
 	SlotsFilter SlotsFilter `protobuf:"varint,11,opt,name=slots_filter,json=slotsFilter,proto3,enum=determined.api.v1.SlotsFilter" json:"slots_filter,omitempty"`
 }
 
