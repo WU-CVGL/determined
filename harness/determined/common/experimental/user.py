@@ -64,7 +64,7 @@ class User:
     def rename(self, new_username: str, current_password: Optional[str] = None) -> None:
         """Changes this user's username.
 
-        Arg:
+        Args:
             new_username: username to set.
             current_password: this user's current password. The master requires it when users
                 rename themselves (an empty string for users without a password), and ignores it
@@ -95,7 +95,7 @@ class User:
     def change_password(self, new_password: str, current_password: Optional[str] = None) -> None:
         """Changes this user's password.
 
-        Arg:
+        Args:
             new_password: password to set.
             current_password: this user's current password. The master requires it when users
                 change their own password (an empty string for users without a password), and
