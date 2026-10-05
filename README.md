@@ -103,14 +103,14 @@ python -m pip install 'git+https://github.com/WU-CVGL/determined.git@main#subdir
 Pin the release and its package version:
 
 ```bash
-VERSION=0.40.1 python -m pip install 'git+https://github.com/WU-CVGL/determined.git@0.40.1#subdirectory=harness'
+VERSION=0.41.0 python -m pip install 'git+https://github.com/WU-CVGL/determined.git@0.41.0#subdirectory=harness'
 ```
 
 This installs the CLI and SDK only. To run this fork's master and agent, use matching
 images and the [fork distribution guide](docs/maintenance/distribution.md).
-`det deploy` uses this fork's images under `ghcr.io/wu-cvgl` by default (CLI 0.40.1 still
-defaults to upstream `determinedai`: pass `--image-repo-prefix ghcr.io/wu-cvgl`); installing
-the fork CLI alone does not upgrade a cluster.
+`det deploy` uses this fork's images under `ghcr.io/wu-cvgl` by default (CLI 0.40.1 and
+earlier default to upstream `determinedai`: pass `--image-repo-prefix ghcr.io/wu-cvgl`);
+installing the fork CLI alone does not upgrade a cluster.
 
 # Examples
 Get familiar with Determined by exploring the 30+ examples in the [examples folder](https://github.com/determined-ai/determined/tree/main/examples) and the [determined-examples repo](https://github.com/determined-ai/determined-examples).

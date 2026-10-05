@@ -6,7 +6,7 @@ on:  # yamllint disable-line rule:truthy
       release_tag:
         description: Numeric version (the existing Git tag for a final release)
         required: true
-        default: '0.40.1'
+        default: '0.41.0'
         type: string
       candidate:
         description: Publish the current open PR head as an isolated candidate
