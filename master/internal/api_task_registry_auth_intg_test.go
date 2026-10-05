@@ -391,6 +391,51 @@ func TestExperimentConfigRegistryAuthOnlyForOwnerOrAdmin(t *testing.T) {
 	}
 }
 
+// Another user can read an experiment whose original config only the master's lenient YAML parser
+// reads, with and without registry credentials.
+func TestExperimentOriginalConfigRedactedLikeTheMasterParsesIt(t *testing.T) {
+	api, _, adminCtx := setupAPITest(t, nil)
+	alice := db.RequireMockUser(t, api.m.db)
+	bob := db.RequireMockUser(t, api.m.db)
+	_, projectID := createProjectAndWorkspace(adminCtx, t, api)
+	bobCtx := ntscUserCtx(t, bob)
+
+	setOriginalConfig := func(exp *model.Experiment, original string) {
+		_, err := db.Bun().NewUpdate().Table("experiments").
+			Set("original_config = ?", original).
+			Where("id = ?", exp.ID).
+			Exec(adminCtx)
+		require.NoError(t, err)
+	}
+
+	// No credentials: the original config is returned as it is.
+	plain := createTestExpWithProjectID(t, api, alice, projectID)
+	const duplicateKey = "name: plain\ndescription: x\ndescription: y\n"
+	setOriginalConfig(plain, duplicateKey)
+	got, err := api.GetExperiment(bobCtx,
+		&apiv1.GetExperimentRequest{ExperimentId: int32(plain.ID)})
+	require.NoError(t, err)
+	require.Equal(t, duplicateKey, got.Experiment.OriginalConfig)
+
+	// Credentials and integer mapping keys: the credentials are removed.
+	withAuth, name, image := createTestExpWithRegistryAuth(t, api, alice, projectID)
+	setOriginalConfig(withAuth, "name: "+name+"\n"+
+		"data:\n  label_map:\n    0: cat\n    1: dog\n"+
+		"environment:\n"+
+		"  image: "+image+"\n"+
+		"  registry_auth:\n"+
+		"    username: "+testRegistryUsername+"\n"+
+		"    password: "+testRegistryPassword+"\n")
+	got, err = api.GetExperiment(bobCtx,
+		&apiv1.GetExperimentRequest{ExperimentId: int32(withAuth.ID)})
+	require.NoError(t, err)
+	original := &structpb.Struct{}
+	require.NoError(t, protojson.Unmarshal([]byte(got.Experiment.OriginalConfig), original))
+	requireConfigRegistryAuth(t, original, false)
+	require.Equal(t, "cat", original.Fields["data"].GetStructValue().
+		Fields["label_map"].GetStructValue().Fields["0"].GetStringValue())
+}
+
 // The experiment config that checkpoints and model versions carry in training.experiment_config
 // comes from checkpoints_view, which sets registry_auth to null for every reader, the owner and
 // admins included: nothing is launched from it, and the owner reads the experiment's own config.

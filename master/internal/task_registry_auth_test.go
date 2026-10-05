@@ -71,7 +71,7 @@ func TestRedactTaskConfig(t *testing.T) {
 }
 
 func TestRemoveRegistryAuthText(t *testing.T) {
-	const redacted = `{"environment":{"image":"i"},"name":"n"}`
+	const redacted = `{"environment":{"image":"i"},"name":"exp"}`
 	for _, c := range []struct {
 		name, in, want string
 	}{
@@ -87,21 +87,44 @@ func TestRemoveRegistryAuthText(t *testing.T) {
 			in:   "environment:\n  image: i\n",
 			want: "environment:\n  image: i\n",
 		},
-		{name: "YAML without environment is unchanged", in: "name: n\n", want: "name: n\n"},
+		{name: "YAML without environment is unchanged", in: "name: exp\n", want: "name: exp\n"},
 		{
 			name: "JSON",
-			in:   `{"name": "n", "environment": {"image": "i", "registry_auth": {"password": "p"}}}`,
+			in:   `{"name": "exp", "environment": {"image": "i", "registry_auth": {"password": "p"}}}`,
 			want: redacted,
 		},
 		{
 			name: "YAML",
-			in:   "name: n\nenvironment:\n  image: i\n  registry_auth:\n    password: p\n",
+			in:   "name: exp\nenvironment:\n  image: i\n  registry_auth:\n    password: p\n",
 			want: redacted,
 		},
 		{
 			name: "null",
 			in:   `{"environment": {"registry_auth": null}}`,
 			want: `{"environment":{}}`,
+		},
+		// The master accepts YAML through schemas.JSONFromYaml (ghodss/yaml on yaml.v2), and these
+		// configs must parse the same way here.
+		{
+			name: "YAML with a duplicate key and without credentials is unchanged",
+			in:   "name: exp\ndescription: x\ndescription: y\n",
+			want: "name: exp\ndescription: x\ndescription: y\n",
+		},
+		{
+			name: "YAML with a duplicate key, the last one wins",
+			in:   "name: x\nname: exp\nenvironment:\n  image: i\n  registry_auth:\n    password: p\n",
+			want: redacted,
+		},
+		{
+			name: "YAML with integer mapping keys",
+			in: "name: exp\ndata:\n  label_map:\n    0: cat\n    1: dog\n" +
+				"environment:\n  image: i\n  registry_auth:\n    password: p\n",
+			want: `{"data":{"label_map":{"0":"cat","1":"dog"}},"environment":{"image":"i"},"name":"exp"}`,
+		},
+		{
+			name: "YAML 1.1 booleans",
+			in:   "name: exp\ndebug: yes\nenvironment:\n  image: i\n  registry_auth:\n    password: p\n",
+			want: `{"debug":true,"environment":{"image":"i"},"name":"exp"}`,
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -140,7 +163,7 @@ func TestRedactTaskConfigText(t *testing.T) {
 }
 
 func TestRedactExperimentRegistryAuth(t *testing.T) {
-	const original = "name: n\nenvironment:\n  registry_auth:\n    password: p\n"
+	const original = "name: exp\nenvironment:\n  registry_auth:\n    password: p\n"
 	newExp := func() *experimentv1.Experiment {
 		return &experimentv1.Experiment{
 			Id: 3, UserId: 7, Config: configWithRegistryAuth(t), OriginalConfig: original,
@@ -157,7 +180,7 @@ func TestRedactExperimentRegistryAuth(t *testing.T) {
 	exp := newExp()
 	require.NoError(t, redactExperimentRegistryAuth(model.User{ID: 8}, exp))
 	require.False(t, hasRegistryAuth(exp.Config)) //nolint:staticcheck
-	require.Equal(t, `{"environment":{},"name":"n"}`, exp.OriginalConfig)
+	require.Equal(t, `{"environment":{},"name":"exp"}`, exp.OriginalConfig)
 
 	// An experiment without an original config, as in the experiment lists.
 	exp = newExp()
@@ -165,4 +188,26 @@ func TestRedactExperimentRegistryAuth(t *testing.T) {
 	require.NoError(t, redactExperimentRegistryAuth(model.User{ID: 8}, exp))
 	require.False(t, hasRegistryAuth(exp.Config)) //nolint:staticcheck
 	require.Empty(t, exp.OriginalConfig)
+
+	// Without credentials in its config, an experiment's original config is returned as it is,
+	// without being parsed.
+	for _, want := range []string{
+		"name: exp\ndescription: x\ndescription: y\n",
+		"environment: [unterminated",
+	} {
+		exp = newExp()
+		removeRegistryAuth(exp.Config) //nolint:staticcheck
+		exp.OriginalConfig = want
+		require.NoError(t, redactExperimentRegistryAuth(model.User{ID: 8}, exp))
+		require.Equal(t, want, exp.OriginalConfig)
+	}
+
+	// With credentials, integer mapping keys elsewhere in the original config do not stop them
+	// from being removed.
+	exp = newExp()
+	exp.OriginalConfig = "name: exp\ndata:\n  splits:\n    0: train\n" +
+		"environment:\n  registry_auth:\n    password: p\n"
+	require.NoError(t, redactExperimentRegistryAuth(model.User{ID: 8}, exp))
+	require.Equal(t, `{"data":{"splits":{"0":"train"}},"environment":{},"name":"exp"}`,
+		exp.OriginalConfig)
 }

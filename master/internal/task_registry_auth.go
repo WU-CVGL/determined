@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"google.golang.org/protobuf/types/known/structpb"
-	"gopkg.in/yaml.v3"
 
 	"github.com/determined-ai/determined/master/pkg/model"
+	"github.com/determined-ai/determined/master/pkg/schemas"
 	"github.com/determined-ai/determined/proto/pkg/experimentv1"
 )
 
@@ -58,12 +58,18 @@ func redactTaskConfig(user model.User, ownerID int32, taskID string, config *str
 }
 
 // parseTextConfig parses a JSON or YAML config and returns it with its environment section, if it
-// has one.
+// has one. YAML is read as the master read it when it accepted the config (schemas.JSONFromYaml),
+// so that every stored config parses and means the same: the last of duplicate keys wins, mapping
+// keys become strings, and YAML 1.1 booleans such as "yes" are booleans.
 func parseTextConfig(config string) (map[string]interface{}, map[string]interface{}, error) {
 	var parsed map[string]interface{}
 	if err := json.Unmarshal([]byte(config), &parsed); err != nil {
+		converted, err := schemas.JSONFromYaml([]byte(config))
+		if err != nil {
+			return nil, nil, fmt.Errorf("parsing config: %w", err)
+		}
 		parsed = nil
-		if err := yaml.Unmarshal([]byte(config), &parsed); err != nil {
+		if err := json.Unmarshal(converted, &parsed); err != nil {
 			return nil, nil, fmt.Errorf("parsing config: %w", err)
 		}
 	}
@@ -118,7 +124,13 @@ func redactExperimentRegistryAuth(user model.User, exp *experimentv1.Experiment)
 	if canReadTaskCredential(user, exp.UserId) {
 		return nil
 	}
-	removeRegistryAuth(exp.Config) //nolint:staticcheck
+	hadAuth := hasRegistryAuth(exp.Config) //nolint:staticcheck
+	removeRegistryAuth(exp.Config)         //nolint:staticcheck
+	if !hadAuth {
+		// The config is the original config merged with defaults, so an original config that set
+		// registry_auth would have put it there too. Leave the original config as it is.
+		return nil
+	}
 	out, err := removeRegistryAuthText(exp.OriginalConfig)
 	if err != nil {
 		return fmt.Errorf(
