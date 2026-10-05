@@ -322,8 +322,10 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     }
     const parsedConfig = parsed as RawJson;
     // The cluster defaults for the same workspace, pool and slots, so that the
-    // template only keeps what differs from them.
-    let defaultsConfig: RawJson | undefined;
+    // template only keeps what differs from them. Without them a null that
+    // clears a default cannot be told from an unset setting, so no template is
+    // started and the config stays here to try again.
+    let defaultsConfig: RawJson;
     try {
       const resources = templateResources(parsedConfig);
       defaultsConfig = await preview({
@@ -331,12 +333,16 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
         slots: resources.slots,
         workspaceId: currentWorkspace?.id,
       });
-    } catch {
-      defaultsConfig = undefined;
+    } catch (e) {
+      handleError(e, {
+        level: ErrorLevel.Error,
+        publicSubject: 'Unable to load the cluster defaults. Try Save as Template again.',
+        silent: false,
+        type: ErrorType.Server,
+      });
+      return;
     }
-    const header = defaultsConfig
-      ? '# Only the settings that differ from the cluster defaults are kept.\n'
-      : '';
+    const header = '# Only the settings that differ from the cluster defaults are kept.\n';
     setTemplateDraft(header + yaml.dump(templateFromConfig(parsedConfig, defaultsConfig)));
     openTemplateCreate();
   }, [config, currentWorkspace?.id, openTemplateCreate, preview]);

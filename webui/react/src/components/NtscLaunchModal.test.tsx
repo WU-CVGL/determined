@@ -683,6 +683,47 @@ describe('NtscLaunchModal', () => {
       expect(mocks.updateTaskTemplate).not.toHaveBeenCalled();
     });
 
+    it('opens no template when the cluster defaults fail to load, and keeps a null work_dir on retry', async () => {
+      // A task launched with work_dir: null, which clears the cluster default.
+      mocks.getShellConfig.mockResolvedValue({ ...clusterShellConfig, work_dir: null });
+      mocks.previewJupyterLab.mockImplementation(async (params: { config?: RawJson }) => ({
+        ...(await previewFor(params)),
+        work_dir:
+          params.config && 'work_dir' in params.config ? params.config.work_dir : '/cluster/work',
+      }));
+      const { user } = await setup({ initialTask: task(CommandType.Shell) });
+      await waitFor(() =>
+        expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('old shell'),
+      );
+      await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+      await waitFor(() =>
+        expect(screen.getByTestId('code-editor')).toHaveTextContent('work_dir: null'),
+      );
+      const loadedConfig = screen.getByTestId('code-editor').textContent;
+
+      mocks.previewJupyterLab.mockRejectedValueOnce(new Error('503 Service Unavailable'));
+      await user.click(screen.getByRole('button', { name: 'Save as Template' }));
+      await waitFor(() =>
+        expect(mocks.makeToast).toHaveBeenCalledWith(
+          expect.objectContaining({
+            severity: 'Error',
+            title: 'Unable to load the cluster defaults. Try Save as Template again.',
+          }),
+        ),
+      );
+      expect(screen.queryByText('New Template')).not.toBeInTheDocument();
+      expect(screen.getByText('Launch Shell')).toBeInTheDocument();
+      expect(screen.getAllByTestId('code-editor')).toHaveLength(1);
+      expect(screen.getByTestId('code-editor').textContent).toBe(loadedConfig);
+
+      await user.click(screen.getByRole('button', { name: 'Save as Template' }));
+      expect(await screen.findByText('New Template')).toBeInTheDocument();
+      const editors = screen.getAllByTestId('code-editor');
+      const draft = editors[editors.length - 1].textContent ?? '';
+      expect(draft).toContain('work_dir: null');
+      expect(draft).not.toContain('/cluster/work');
+    });
+
     it('is hidden without permission to create templates', async () => {
       mocks.canCreateTemplateWorkspace = false;
       const { user } = await setup();

@@ -106,8 +106,8 @@ describe('ntscConfig', () => {
   });
 
   describe('templateFromConfig', () => {
-    it('drops description, nulls and secrets from a full snapshot', () => {
-      const out = templateFromConfig(mergedShellConfig);
+    it('drops description, secrets and the nulls that clear no default', () => {
+      const out = templateFromConfig(mergedShellConfig, {});
       expect(out).not.toHaveProperty('description');
       expect(out).not.toHaveProperty('entrypoint');
       expect(out).not.toHaveProperty('idle_timeout');

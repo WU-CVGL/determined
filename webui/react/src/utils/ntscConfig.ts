@@ -134,30 +134,27 @@ export const minimalDiff = (config: RawJson, defaults: RawJson): RawJson => {
  * should not name every task launched from it). A null in a template clears
  * the cluster default, like a null in a launch config does.
  *
- * When the cluster defaults for the same workspace, pool and slots are known,
- * only the settings that differ from them are kept (see minimalDiff), so the
- * template keeps following later changes to the defaults. A null that clears
- * a default is one of those settings. Without the defaults, every null is
- * dropped, since there is no telling an unset setting from a cleared one.
+ * Only the settings that differ from `defaults`, the cluster defaults for the
+ * same workspace, pool and slots, are kept (see minimalDiff), so the template
+ * keeps following later changes to the defaults. A null that clears a default
+ * is one of those settings. The defaults are required: without them there is
+ * no telling an unset setting from a cleared one.
  *
  * The resource pool and slots are always kept: the master ignores template
  * resources for notebooks and shells, and the launch form copies them into its
  * fields when the template is picked.
  */
-export const templateFromConfig = (config: RawJson, defaults?: RawJson): RawJson => {
+export const templateFromConfig = (config: RawJson, defaults: RawJson): RawJson => {
   const clean = sanitizeConfig(config);
   delete clean.description;
-  const full = dropNulls(clean);
-  if (!defaults) return full;
-
   const cleanDefaults = sanitizeConfig(defaults);
   delete cleanDefaults.description;
   const out = minimalDiff(clean, cleanDefaults);
-  const resources = asObject(full.resources);
+  const resources = asObject(clean.resources);
   if (resources) {
     const kept: RawJson = {};
-    if (resources.resource_pool !== undefined) kept.resource_pool = resources.resource_pool;
-    if (resources.slots !== undefined) kept.slots = resources.slots;
+    if (!isNil(resources.resource_pool)) kept.resource_pool = resources.resource_pool;
+    if (!isNil(resources.slots)) kept.slots = resources.slots;
     if (Object.keys(kept).length !== 0) out.resources = { ...asObject(out.resources), ...kept };
   }
   return out;
