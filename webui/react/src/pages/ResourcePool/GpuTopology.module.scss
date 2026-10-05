@@ -210,6 +210,10 @@
 
 // Tooltip and popover content
 
+.dialog:focus {
+  // The pinned popover takes focus from the keyboard; its links show their own focus rings.
+  outline: none;
+}
 .details {
   font-size: 12.5px;
   line-height: 1.45;

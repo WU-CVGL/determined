@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DefaultTheme, UIProvider } from 'hew/Theme';
 
@@ -127,12 +127,33 @@ describe('GpuTopology', () => {
     await userEvent.click(button);
     const dialog = await screen.findByRole('dialog', { name: 'Details for slot 3 on node01' });
     expect(button).toHaveAttribute('aria-expanded', 'true');
+    // A pointer pin leaves focus where the click put it.
+    expect(button).toHaveFocus();
     expect(dialog).toHaveTextContent(GPU_NARROW_LINK_TEXT);
     const docs = within(dialog).getByRole('link', { name: 'GPU topology and health' });
     expect(docs.getAttribute('href')).toContain(GPU_TOPOLOGY_DOCS_PATH);
 
     await userEvent.click(button);
     expect(button).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('moves focus into the details pinned from the keyboard and back on Escape', async () => {
+    const agent = agentOf('node01', gpuTopologyCase('node01 with the exclude list'));
+    setup(<GpuTopology agent={agent} />);
+    const button = within(tile('Slot 3')).getByRole('button');
+    act(() => button.focus());
+
+    // The popover is portalled to the end of the page: Tab must reach its docs link next.
+    await userEvent.keyboard('{Enter}');
+    const dialog = await screen.findByRole('dialog', { name: 'Details for slot 3 on node01' });
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    await waitFor(() => expect(dialog).toHaveFocus());
+    await userEvent.tab();
+    expect(within(dialog).getByRole('link', { name: 'GPU topology and health' })).toHaveFocus();
+
+    await userEvent.keyboard('{Escape}');
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    expect(button).toHaveFocus();
   });
 
   it('explains an excluded GPU', async () => {

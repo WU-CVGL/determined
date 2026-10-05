@@ -2,7 +2,7 @@ import dayjs from 'dayjs';
 import Dropdown from 'hew/Dropdown';
 import Icon from 'hew/Icon';
 import Tooltip from 'hew/Tooltip';
-import React, { CSSProperties, useCallback, useMemo, useState } from 'react';
+import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import Link from 'components/Link';
 import { slotStateToLabel } from 'constants/states';
@@ -137,29 +137,74 @@ export const GpuDetails: React.FC<GpuProps> = ({ agentId, gpu, resource, topo })
   );
 };
 
-/** Hover or focus shows the details in a tooltip; a click pins them in a popover. */
+/**
+ * Hover or focus shows the details in a tooltip; a click pins them in a popover. The popover is
+ * portalled to the end of the page, so a pin from the keyboard moves focus into it, and closing it
+ * with focus inside gives focus back to the button.
+ */
 const GpuInfoButton: React.FC<GpuProps> = (props) => {
   const [pinned, setPinned] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const pinnedFromKeyboard = useRef(false);
   const label = `Details for ${gpuName(props.gpu).toLowerCase()} on ${props.agentId}`;
   const content = <GpuDetails {...props} />;
-  const onKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') setPinned(false);
+
+  const onOpenChange = useCallback((open: boolean) => {
+    if (!open && dialogRef.current?.contains(document.activeElement)) buttonRef.current?.focus();
+    setPinned(open);
   }, []);
+  const onKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Escape') onOpenChange(false);
+    },
+    [onOpenChange],
+  );
+  // Enter and Space click a button with detail 0; a pointer click has detail 1 or more.
+  const onClick = useCallback((e: React.MouseEvent) => {
+    pinnedFromKeyboard.current = e.detail === 0;
+  }, []);
+
+  useEffect(() => {
+    if (!pinned || !pinnedFromKeyboard.current) return;
+    pinnedFromKeyboard.current = false;
+    // The popover may still be hidden for a frame or two while it appears.
+    let frame = 0;
+    let tries = 0;
+    const focusDialog = () => {
+      const dialog = dialogRef.current;
+      dialog?.focus();
+      if (document.activeElement !== dialog && tries++ < 10) {
+        frame = requestAnimationFrame(focusDialog);
+      }
+    };
+    focusDialog();
+    return () => cancelAnimationFrame(frame);
+  }, [pinned]);
+
   return (
     <Dropdown
       content={
-        <div aria-label={label} role="dialog" onKeyDown={onKeyDown}>
+        <div
+          aria-label={label}
+          className={css.dialog}
+          ref={dialogRef}
+          role="dialog"
+          tabIndex={-1}
+          onKeyDown={onKeyDown}>
           {content}
         </div>
       }
       open={pinned}
-      onOpenChange={setPinned}>
+      onOpenChange={onOpenChange}>
       <Tooltip content={content} open={pinned ? false : undefined} trigger={['hover', 'focus']}>
         <button
           aria-expanded={pinned}
           aria-label={label}
           className={css.info}
+          ref={buttonRef}
           type="button"
+          onClick={onClick}
           onKeyDown={onKeyDown}>
           <Icon decorative name="info" size="small" />
         </button>
