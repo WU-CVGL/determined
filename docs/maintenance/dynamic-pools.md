@@ -89,10 +89,14 @@ master configuration; list requires authorization to read master
 configuration. With basic authorization, these permissions are restricted to
 administrators.
 
-Every request body is limited to 1 MiB and rejects unknown fields, also inside
-`config`. `config.provider` is rejected even when it is otherwise valid master
-configuration. `cluster_name` may be omitted when exactly one agent resource
-manager is configured.
+Every request body is limited to 1 MiB and rejects unknown fields. Inside
+`config`, unknown fields are rejected at its top level, in `scheduler`, and in
+`task_container_defaults` and its `registry_auth` and `kubernetes` objects.
+Keys nested deeper, for example in a bind mount, are not checked: an unknown
+one is saved in the spec and has no effect, so check the returned `config`,
+which shows what the pool runs. `config.provider` is rejected even when it is
+otherwise valid master configuration. `cluster_name` may be omitted when
+exactly one agent resource manager is configured.
 
 ### Create
 
@@ -210,26 +214,26 @@ itself. The response's `config` is the effective configuration of the new spec
 and serves as a preview of what the pool will run.
 
 An update is saved at once, but the running master keeps the runtime pool it
-has. What happens depends on the saved pool:
+has. What happens depends on the saved pool. The rows are checked from the top,
+and the first one that applies decides:
 
 | Saved pool | Result |
 | --- | --- |
+| Configured in `master.yaml`, saved as a dynamic pool | `409`, even for the same spec; remove the entry from `master.yaml` and restart first. |
+| Configured in `master.yaml`, not saved | `404`; adopt the pool first. |
+| No dynamic pool, or one of another resource manager | `404`. |
 | Same spec as the request | `200`; nothing is written and `revision` is unchanged, even when `expected_revision` is stale. |
-| `Ready` | `200`; `revision` increases and `pending_restart` becomes `true`. The pool runs the new spec from the next master start. |
-| `Failed` | `200`; `revision` increases, the pool becomes `Pending`, and the worker initializes the new spec right away. |
 | `Pending`, or `Ready` but not yet published | `409`; retry when the pool is `Ready` or `Failed`. |
 | `expected_revision` differs from `revision` | `409`, naming the current revision. |
 | Changed by another request since it was read | `409`; read the pool again and retry. |
-| No dynamic pool, or one of another resource manager | `404`. |
-| Configured in `master.yaml`, saved as a dynamic pool | `409`; remove the entry from `master.yaml` and restart first. |
-| Configured in `master.yaml`, not saved | `404`; adopt the pool first. |
+| `Ready` | `200`; `revision` increases and `pending_restart` becomes `true`. The pool runs the new spec from the next master start. |
+| `Failed` | `200`; `revision` increases, the pool becomes `Pending`, and the worker initializes the new spec right away. |
 
-`expected_revision` is optional. Until the next master start,
-`det resource-pool list` and the regular resource-pool API keep showing the
-values that the pool runs. A master start applies every pending update at
-once, so check `pending_restart` before restarting. An update to a pool saved
-without a spec gives it a spec, and it inherits master defaults from the next
-start.
+`expected_revision` is optional. Until the next master start, the regular
+resource-pool API and the WebUI keep showing the values that the pool runs. A
+master start applies every pending update at once, so check `pending_restart`
+before restarting. An update to a pool saved without a spec gives it a spec, and
+it inherits master defaults from the next start.
 
 ### Adopt a master.yaml pool
 
@@ -254,7 +258,9 @@ exactly the configuration that the running master reads from `master.yaml`,
 including keys that only repeat a default; otherwise the request returns `400`
 and names the top-level keys that differ. A name that the selected resource
 manager does not configure in `master.yaml` returns `404`, and a pool with a
-`provider` returns `400`.
+`provider` returns `400`. The built-in `default` pool, which the master adds
+when the `resource_pools` key is omitted, is adopted with the spec
+`{"pool_name": "default"}`.
 
 The pool is saved as `Ready` with revision 1 and the idempotency key
 `adopt:<name>`. Nothing changes in the running master, which keeps serving the
@@ -263,15 +269,17 @@ saved pool. A spec that decodes to the same configuration but is written
 differently, or a name that a dynamic pool already has, returns `409`.
 
 At startup, a saved pool whose name `master.yaml` also configures is accepted
-only when it is saved for the same resource manager, has a spec, and its spec
-decodes to exactly the `master.yaml` entry. Then `master.yaml` serves the pool:
-the saved pool is not loaded, its effective configuration is not rewritten,
-and the master logs the warning `resource pool "<name>" is saved as a dynamic
-pool and still defined in master.yaml; remove it from master.yaml`. Every other
-collision stops startup, including any collision with a pool saved without a
-spec; the error adds that the `master.yaml` entry of an adopted pool must equal
-the saved spec or be removed. Edit the spec with an update only after the entry
-is removed and the master has restarted.
+only when it is `Ready`, is saved for the same resource manager, has a spec, and
+its spec decodes to exactly the `master.yaml` entry. Then `master.yaml` serves
+the pool: the saved pool is not loaded, its effective configuration is not
+rewritten, and the master logs the warning `resource pool "<name>" is saved as a
+dynamic pool and still defined in master.yaml; remove it from master.yaml`. An
+adopted pool is saved `Ready` and stays `Ready` while `master.yaml` serves it.
+Every other collision stops startup, including any collision with a pool saved
+without a spec or with a `Pending` or `Failed` pool; the error adds that the
+`master.yaml` entry of an adopted pool must equal the saved spec or be removed.
+Edit the spec with an update only after the entry is removed and the master has
+restarted.
 
 Once the entry is removed, the next master start loads the pool from the
 database before it restores agents and publishes it before it restores tasks.
@@ -364,18 +372,23 @@ needs one master restart besides the upgrade.
    pool's `agent_reconnect_wait`.
 7. Verify that `det resource-pool list-dynamic` shows every pool `Ready`, with
    `Active` equal to `Revision` and no pending restart; that
-   `det resource-pool list` marks the expected default compute and auxiliary
-   pools; that the master log has neither the "still defined in master.yaml"
-   warning nor a default-pool warning; and that agents and running tasks are
-   present in every pool.
+   `det dev curl /api/v1/resource-pools` reports `defaultComputePool` and
+   `defaultAuxPool` as `true` for the expected pools, which the WebUI cluster
+   page labels as default pools; that the master log has neither the "still
+   defined in master.yaml" warning nor a default-pool warning; and that agents
+   and running tasks are present in every pool.
 8. Optionally, once a rollback is no longer needed, set `resource_pools: []` to
    drop the built-in `default` pool. Every agent must then set its
    `resource_pool`.
 
-A pool named `default` needs care: when the `resource_pools` key is omitted,
-the master adds a built-in `default` pool, which collides with a saved pool of
-that name. Leave a pool named `default` in `master.yaml`, or use
-`resource_pools: []` if a rollback is not needed.
+A pool named `default` needs care: when the `resource_pools` key is omitted, the
+master adds a built-in `default` pool. Like a `master.yaml` entry, it serves a
+saved `default` pool whose spec has only built-in settings, such as the adopted
+built-in pool, with the "still defined in master.yaml" warning, and it stops
+startup for any other saved pool of that name. Only `resource_pools: []` lets
+the saved pool run, and a master without spec support refuses that setting.
+Leave a pool named `default` in `master.yaml` until a rollback is no longer
+needed.
 
 ## Rollback
 

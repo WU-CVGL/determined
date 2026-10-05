@@ -56,3 +56,9 @@
    key adds, shares a name with a dynamic pool, and ``master.yaml`` does not set ``resource_pools:
    []``. It runs every dynamic pool from its saved effective configuration, including updates that
    were waiting for a restart.
+
+**Bug Fixes**
+
+-  CLI: ``det resource-pool create`` sends ``Content-Type: application/json``, which the master
+   requires for dynamic pool requests. A CLI without this fix, such as the one of 0.40.1, gets ``415
+   Unsupported Media Type`` for every create.
