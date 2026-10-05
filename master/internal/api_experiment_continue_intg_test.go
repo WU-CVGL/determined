@@ -338,19 +338,29 @@ func TestContinueExperimentOnlyOwnerChangesCode(t *testing.T) {
 	refused := []struct{ name, field, override string }{
 		{"entrypoint", "entrypoint", "entrypoint: echo changed"},
 		{"image", "environment", "environment: {image: other/image:1}"},
-		{"new environment variable", "environment",
-			"environment: {environment_variables: [LD_PRELOAD=/tmp/x.so]}"},
+		{
+			"new environment variable", "environment",
+			"environment: {environment_variables: [LD_PRELOAD=/tmp/x.so]}",
+		},
 		{"environment variable value", "environment", "environment: {environment_variables: [A=2]}"},
-		{"pod spec", "environment",
-			"environment: {pod_spec: {spec: {initContainers: [{name: x, image: other/image:1}]}}}"},
+		{
+			"pod spec", "environment",
+			"environment: {pod_spec: {spec: {initContainers: [{name: x, image: other/image:1}]}}}",
+		},
 		{"bind mount", "bind_mounts", "bind_mounts: [{host_path: /home/other, container_path: /x}]"},
-		{"checkpoint storage", "checkpoint_storage",
-			"checkpoint_storage: {type: shared_fs, host_path: /home/other}"},
-		{"warm start checkpoint", "searcher.source_checkpoint_uuid",
+		{
+			"checkpoint storage", "checkpoint_storage",
+			"checkpoint_storage: {type: shared_fs, host_path: /home/other}",
+		},
+		{
+			"warm start checkpoint", "searcher.source_checkpoint_uuid",
 			"searcher: {name: single, metric: loss, max_length: {batches: 10}, " +
-				"source_checkpoint_uuid: 7e0bad9e-8c1b-4f4e-9d2a-3a0f1f6b0c01}"},
-		{"warm start trial", "searcher.source_trial_id",
-			"searcher: {name: single, metric: loss, max_length: {batches: 10}, source_trial_id: 1}"},
+				"source_checkpoint_uuid: 7e0bad9e-8c1b-4f4e-9d2a-3a0f1f6b0c01}",
+		},
+		{
+			"warm start trial", "searcher.source_trial_id",
+			"searcher: {name: single, metric: loss, max_length: {batches: 10}, source_trial_id: 1}",
+		},
 	}
 	for _, c := range refused {
 		t.Run("refused: "+c.name, func(t *testing.T) {

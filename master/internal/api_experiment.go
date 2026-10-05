@@ -1361,10 +1361,16 @@ func (a *apiServer) createUnmanagedExperimentTx(
 	}, nil
 }
 
-// parseAndMergeContinueConfig merges a continue's override config into the experiment's active
-// config. It also returns the code fields (see continueCodeChanges) that the override changes.
+// continueConfig is a continue's override config merged into the experiment's active config.
+type continueConfig struct {
+	config   []byte
+	isSingle bool
+	// codeChanges are the fields that continueCodeChanges reports the override to change.
+	codeChanges []string
+}
+
 func (a *apiServer) parseAndMergeContinueConfig(expID int, overrideConfig string) (
-	[]byte, bool, []string, error,
+	*continueConfig, error,
 ) {
 	if overrideConfig == "" {
 		overrideConfig = "{}" //nolint: goconst
@@ -1372,49 +1378,49 @@ func (a *apiServer) parseAndMergeContinueConfig(expID int, overrideConfig string
 
 	activeConfig, err := a.m.db.ActiveExperimentConfig(expID)
 	if err != nil {
-		return nil, false, nil, fmt.Errorf("loading active config for experiment %d: %w", expID, err)
+		return nil, fmt.Errorf("loading active config for experiment %d: %w", expID, err)
 	}
 	name := activeConfig.Searcher().AsLegacy().Name
 	isSingle := name == "single"                           //nolint: goconst
 	if !isSingle && (name != "grid" && name != "random") { //nolint: goconst
-		return nil, false, nil, status.Errorf(codes.InvalidArgument,
+		return nil, status.Errorf(codes.InvalidArgument,
 			fmt.Sprintf("Unsupported searcher type provided: '%s'", name))
 	}
 	if !isSingle && strings.TrimSpace(overrideConfig) != "{}" { //nolint: goconst
-		return nil, false, nil, status.Errorf(codes.InvalidArgument,
+		return nil, status.Errorf(codes.InvalidArgument,
 			fmt.Sprintf("override config is provided and experiment is not single searcher, got '%s' instead", name))
 	}
 
 	providedConfig, err := expconf.ParseAnyExperimentConfigYAML([]byte(overrideConfig))
 	if err != nil {
-		return nil, false, nil, status.Errorf(codes.InvalidArgument,
+		return nil, status.Errorf(codes.InvalidArgument,
 			fmt.Errorf("parsing override config: %w", err).Error())
 	}
 
 	if providedConfig.RawProject != nil {
-		return nil, false, nil, status.Errorf(codes.InvalidArgument, "'project' in override config "+
+		return nil, status.Errorf(codes.InvalidArgument, "'project' in override config "+
 			"cannot be specified, use `det experiment move` first if you want to change the project")
 	}
 	if providedConfig.RawWorkspace != nil {
-		return nil, false, nil, status.Errorf(codes.InvalidArgument, "'workspace' in override config "+
+		return nil, status.Errorf(codes.InvalidArgument, "'workspace' in override config "+
 			"cannot be specified, use `det experiment move` first if you want to change the workspace")
 	}
 	mergedConfig := schemas.Merge(providedConfig, activeConfig)
 	if overrideName := mergedConfig.Searcher().AsLegacy().Name; isSingle && overrideName != "single" {
-		return nil, false, nil, status.Errorf(codes.InvalidArgument,
+		return nil, status.Errorf(codes.InvalidArgument,
 			fmt.Sprintf("override config must have single searcher type got '%s' instead", overrideName))
 	}
 	// Compared before the invariant configs are merged in: they are the cluster's, not the override's.
 	codeChanges, err := continueCodeChanges(activeConfig, mergedConfig)
 	if err != nil {
-		return nil, false, nil, fmt.Errorf("comparing the override config: %w", err)
+		return nil, fmt.Errorf("comparing the override config: %w", err)
 	}
 
 	// Merge the config with the optionally specified invariant config specified by task config
 	// policies.
 	w, err := getWorkspaceByConfig(activeConfig)
 	if err != nil {
-		return nil, false, nil, status.Errorf(codes.Internal,
+		return nil, status.Errorf(codes.Internal,
 			fmt.Sprintf("failed to get workspace %s", activeConfig.Workspace()))
 	}
 
@@ -1422,17 +1428,17 @@ func (a *apiServer) parseAndMergeContinueConfig(expID int, overrideConfig string
 		context.TODO(),
 		w.ID, mergedConfig)
 	if err != nil {
-		return nil, false, nil,
+		return nil,
 			fmt.Errorf("failed to merge invariant experiment configs: %w", err)
 	}
 	mergedConfig = *configWithInvariantDefaults
 
 	bytes, err := mergedConfig.Value()
 	if err != nil {
-		return nil, false, nil, fmt.Errorf("getting value of merged config: %w", err)
+		return nil, fmt.Errorf("getting value of merged config: %w", err)
 	}
 
-	return bytes.([]byte), isSingle, codeChanges, nil
+	return &continueConfig{config: bytes.([]byte), isSingle: isSingle, codeChanges: codeChanges}, nil
 }
 
 // continueCodeChanges returns the config fields that choose the code a continued experiment's
@@ -1462,8 +1468,10 @@ func continueCodeChanges(active, merged expconf.ExperimentConfig) ([]string, err
 		active, merged any
 	}{
 		{"entrypoint", active.RawEntrypoint, merged.RawEntrypoint},
-		{"environment", effectiveEnvironment(active.RawEnvironment),
-			effectiveEnvironment(merged.RawEnvironment)},
+		{
+			"environment",
+			effectiveEnvironment(active.RawEnvironment), effectiveEnvironment(merged.RawEnvironment),
+		},
 		{"bind_mounts", active.RawBindMounts, merged.RawBindMounts},
 		{"checkpoint_storage", storage(active), storage(merged)},
 		{"searcher.source_trial_id", activeSearcher.RawSourceTrialID, mergedSearcher.RawSourceTrialID},
@@ -1563,23 +1571,22 @@ func (a *apiServer) ContinueExperiment(
 	if err != nil {
 		return nil, fmt.Errorf("getting experiment trials: %w", err)
 	}
-	configBytes, isSingle, codeChanges, err := a.parseAndMergeContinueConfig(
-		int(req.Id), req.OverrideConfig)
+	merged, err := a.parseAndMergeContinueConfig(int(req.Id), req.OverrideConfig)
 	if err != nil {
 		return nil, err
 	}
 	// The trials run as the owner, so a continuer who changed what they run would run their own
 	// code with the owner's token and uid/gid.
-	if actor.ID != owner.ID && len(codeChanges) > 0 {
+	if actor.ID != owner.ID && len(merged.codeChanges) > 0 {
 		return nil, status.Errorf(codes.PermissionDenied,
 			"experiment %d runs as its owner %q, so only they may change %s when continuing it; "+
 				"to run a changed copy as yourself, fork the experiment",
-			req.Id, owner.Username, strings.Join(codeChanges, ", "))
+			req.Id, owner.Username, strings.Join(merged.codeChanges, ", "))
 	}
 
 	dbExp, modelDef, activeConfig, _, taskSpec, err := a.m.parseCreateExperiment(ctx,
 		&apiv1.CreateExperimentRequest{
-			Config: string(configBytes),
+			Config: string(merged.config),
 		}, actor, &owner,
 	)
 	if err != nil {
@@ -1613,7 +1620,7 @@ func (a *apiServer) ContinueExperiment(
 				"experiment in non terminal state '%s', try again later", expState))
 		}
 
-		if expState == model.CompletedState && !isSingle {
+		if expState == model.CompletedState && !merged.isSingle {
 			hasIncompleteTrials := false
 			for _, trial := range trialsResp.Trials {
 				if trial.State != trialv1.State_STATE_COMPLETED {
@@ -1624,7 +1631,7 @@ func (a *apiServer) ContinueExperiment(
 			if !hasIncompleteTrials {
 				return errContinueHPSearchCompleted
 			}
-		} else if isSingle && len(trialsResp.Trials) > 0 {
+		} else if merged.isSingle && len(trialsResp.Trials) > 0 {
 			if _, err := tx.NewUpdate().Table("runs"). // TODO(nick-runs) call runs package.
 									Set("state = ?", model.PausedState).
 									Where("id = ?", trialsResp.Trials[0].Id).
