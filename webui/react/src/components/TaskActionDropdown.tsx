@@ -29,12 +29,22 @@ interface Props {
   children?: React.ReactNode;
   curUser?: DetailedUser;
   onComplete?: (action?: Action) => void;
+  /** Offers "Launch Again" on the user's own shells and JupyterLabs when given. */
+  onLaunchAgain?: (task: CommandTask) => void;
   onVisibleChange?: (visible: boolean) => void;
   task: CommandTask;
 }
 
-const TaskActionDropdown: React.FC<Props> = ({ task, onComplete, children }: Props) => {
-  const { canModifyWorkspaceNSC } = usePermissions();
+const relaunchableTaskTypes: CommandType[] = [CommandType.JupyterLab, CommandType.Shell];
+
+const TaskActionDropdown: React.FC<Props> = ({
+  task,
+  curUser,
+  onComplete,
+  onLaunchAgain,
+  children,
+}: Props) => {
+  const { canCreateWorkspaceNSC, canModifyWorkspaceNSC } = usePermissions();
   const resourcesEnabled = useTaskResourcesEnabled();
   const terminalEnabled = useFeature().isOn('shell_terminal');
   const currentUser = Loadable.getOrElse(undefined, useObservable(userStore.currentUser));
@@ -100,8 +110,27 @@ const TaskActionDropdown: React.FC<Props> = ({ task, onComplete, children }: Pro
         label: task.type === CommandType.Shell ? 'Connect via CLI' : 'Connect',
       });
     }
+    // A UI rule only: the API lets anyone who can view a task read its config.
+    if (
+      onLaunchAgain &&
+      relaunchableTaskTypes.includes(task.type) &&
+      !!curUser &&
+      (curUser.id === task.userId || curUser.isAdmin) &&
+      canCreateWorkspaceNSC({ workspace: { id: task.workspaceId } })
+    ) {
+      items.push({ key: Action.LaunchAgain, label: 'Launch Again' });
+    }
     return items;
-  }, [task, canModifyWorkspaceNSC, resourcesEnabled, terminalEnabled, currentUser]);
+  }, [
+    task,
+    canCreateWorkspaceNSC,
+    canModifyWorkspaceNSC,
+    curUser,
+    currentUser,
+    onLaunchAgain,
+    resourcesEnabled,
+    terminalEnabled,
+  ]);
 
   const navigate = useNavigate();
 
@@ -122,6 +151,9 @@ const TaskActionDropdown: React.FC<Props> = ({ task, onComplete, children }: Pro
         case Action.OpenTerminal:
           openShellTerminalTab(task.id);
           onComplete?.(key);
+          break;
+        case Action.LaunchAgain:
+          onLaunchAgain?.(task);
           break;
         case Action.Kill:
           confirm({

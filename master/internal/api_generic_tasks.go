@@ -132,14 +132,6 @@ func (a *apiServer) getGenericTaskLaunchParameters(
 	}
 	workDirInDefaults := taskConfig.WorkDir
 
-	// Check the user's scheduling parameters before any default is applied, as updates through the
-	// job queue are checked, including the workspace's task config policy for NTSC workloads.
-	if err := validateGenericTaskScheduling(
-		ctx, genericTaskSpec.WorkspaceID, taskConfig.Resources, resources.Slots, a.m.rm,
-	); err != nil {
-		return nil, nil, nil, err
-	}
-
 	// Copy discovered (default) resource pool name and slot count.
 
 	fillTaskConfig(resources.Slots, taskSpec, &taskConfig.Environment)
@@ -151,6 +143,16 @@ func (a *apiServer) getGenericTaskLaunchParameters(
 	if taskConfig.Resources.Priority() == nil {
 		prio := rm.DefaultPriorityForPool(a.m.rm, poolName.String())
 		taskConfig.Resources.RawPriority = &prio
+	}
+
+	// Check the scheduling parameters the task runs with, as updates through the job queue are
+	// checked, including the workspace's task config policy for NTSC workloads. As for commands,
+	// this is after the defaults are applied, so a task without a priority cannot get around the
+	// policy's priority limit with the pool's default priority.
+	if err := validateGenericTaskScheduling(
+		ctx, genericTaskSpec.WorkspaceID, taskConfig.Resources, resources.Slots, a.m.rm,
+	); err != nil {
+		return nil, nil, nil, err
 	}
 
 	var contextDirectoryBytes []byte

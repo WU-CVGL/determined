@@ -108,7 +108,8 @@ func (s *lifecycleAllocationService) Signal(
 	if err != nil {
 		return err
 	}
-	return db.SetPausedState(id.ToTaskID(), now)
+	_, err = db.EndGenericTaskAllocation(context.Background(), id.ToTaskID(), now, false)
+	return err
 }
 
 func (s *lifecycleAllocationService) StartAllocation(

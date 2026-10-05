@@ -103,8 +103,8 @@ complete, and resume or discard work that was interrupted. :doc:`Task continuity
 </maintenance/task-continuity>` describes how an unpause of a task tree is made safe across master restarts.
 
 A task is ``COMPLETED`` when its entrypoint exits with code 0 and ``ERROR`` otherwise, also when its
-agent is lost; generic tasks are not restarted automatically. A killed task, running or paused, ends
-as ``CANCELED``.
+agent is lost; generic tasks are not restarted automatically. A killed task, whether running, paused
+or being paused, ends as ``CANCELED``.
 
 ***********
  Job queue

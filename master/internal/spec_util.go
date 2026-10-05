@@ -149,27 +149,14 @@ func getGenericTaskOnAllocationExit(
 				syslog.WithError(err).Error("finishing canceled task resume")
 			}
 		}()
-		if ae.Err != nil {
-			err := db.SetErrorState(taskID, time.Now().UTC())
-			if err != nil {
-				syslog.WithError(err).Error("setting task to error state")
-			}
-			return
-		}
-		isPaused, err := db.IsPaused(ctx, taskID)
+		// The task's state is read and written in one update: a kill that finds no allocation, as
+		// the allocation service removed it before calling this, ends the task itself, and this must
+		// neither overwrite that with a pause nor keep the job registered as if the task were paused.
+		var err error
+		paused, err = db.EndGenericTaskAllocation(
+			context.WithoutCancel(ctx), taskID, time.Now().UTC(), ae.Err != nil)
 		if err != nil {
-			syslog.WithError(err).Error("checking if a task is paused")
-		}
-		if isPaused {
-			paused = true
-			err = db.SetPausedState(taskID, time.Now().UTC())
-			if err != nil {
-				syslog.WithError(err).Error("setting task to paused state")
-			}
-			return
-		}
-		if err := db.CompleteGenericTask(taskID, time.Now().UTC()); err != nil {
-			syslog.WithError(err).Error("marking generic task complete")
+			syslog.WithError(err).Error("persisting the end of the task's allocation")
 		}
 	}
 }
