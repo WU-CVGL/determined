@@ -92,7 +92,7 @@ func TestProxyLifecycle(t *testing.T) {
 	}
 
 	// First init the new Proxy
-	InitProxy(proxyAuth)
+	InitProxy(proxyAuth, nil)
 	// And check that the Proxy struct is set up correctly
 	require.NotNil(t, DefaultProxy.HTTPAuth)
 	require.Equal(t, map[string]*Service{}, DefaultProxy.services)
@@ -146,7 +146,7 @@ func TestNewProxyHandler(t *testing.T) {
 	db.MustMigrateTestPostgres(t, pgDB, "file://../../static/migrations")
 	require.NoError(t, etc.SetRootPath("../../static/srv"))
 	// First init the new Proxy
-	InitProxy(proxyAuth)
+	InitProxy(proxyAuth, nil)
 	// And check that the Proxy struct is set up correctly
 	require.NotNil(t, DefaultProxy.HTTPAuth)
 	require.Equal(t, map[string]*Service{}, DefaultProxy.services)

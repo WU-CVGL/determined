@@ -125,8 +125,10 @@ func Update(
 				Where("id = ?", updated.ID).Exec(ctx); err != nil {
 				return fmt.Errorf("error setting active status of %q: %s", updated.Username, err)
 			}
-			// Revoke all access tokens of a user when it is deactivated.
-			if !updated.Active {
+			// Revoke all access tokens of a user when it is deactivated. Only when this update
+			// sets the active column: callers leave the other fields of updated at their zero
+			// values, so a display name change would otherwise revoke them too.
+			if slices.Contains(toUpdate, "active") && !updated.Active {
 				err := revokeUserAccessTokens(ctx, tx, updated.ID)
 				if err != nil {
 					return fmt.Errorf("error revoking active access token of %q: %s", updated.Username, err)
@@ -134,12 +136,18 @@ func Update(
 			}
 		}
 
+		// A new password ends every way into the account that the old one opened: the user's
+		// sessions, and the access tokens, which a stolen session may have created. It is what users
+		// do to take their account back.
 		if slices.Contains(toUpdate, "password_hash") {
 			if _, err := tx.NewDelete().
 				Table("user_sessions").
 				Where("user_id = ?", updated.ID).
 				Where("token_type = ?", model.TokenTypeUserSession).Exec(ctx); err != nil {
 				return fmt.Errorf("error deleting user sessions: %s", err)
+			}
+			if err := revokeUserAccessTokens(ctx, tx, updated.ID); err != nil {
+				return fmt.Errorf("error revoking access tokens of %q: %s", updated.Username, err)
 			}
 		}
 
@@ -156,13 +164,15 @@ func Update(
 	})
 }
 
-// Revoke all access tokens of a user when it is deactivated.
+// revokeUserAccessTokens revokes all access tokens of a user, when it is deactivated or its
+// password changes.
 func revokeUserAccessTokens(ctx context.Context, tx bun.Tx, userID model.UserID) error {
 	_, err := tx.NewUpdate().
 		Table("user_sessions").
 		Set("revoked_at = ?", time.Now().UTC()).
 		Where("user_id = ?", userID).
 		Where("token_type = ?", model.TokenTypeAccessToken).
+		Where("revoked_at IS NULL"). // Keep the time of earlier revocations.
 		Exec(ctx)
 	return err
 }
@@ -394,6 +404,19 @@ func ByID(ctx context.Context, userID model.UserID) (*model.FullUser, error) {
 	return &fu, nil
 }
 
+// IsMasterSignedToken reports whether the master signed the token: user sessions, access tokens,
+// task sessions and notebook tokens all are. It only checks the signature, not whether the session
+// is still valid, so it also recognizes expired and revoked tokens. Use it to identify the master's
+// credentials, never to authenticate.
+func IsMasterSignedToken(token string) bool {
+	keys := db.GetTokenKeys()
+	if keys == nil {
+		return false
+	}
+	// With no payload to decode, Verify checks only the signature.
+	return paseto.NewV2().Verify(token, keys.PublicKey, nil, nil) == nil
+}
+
 // ByToken returns a user session given an authentication token. If a session belonging to a remote (SSO) user
 // is found but has expired, ErrRemoteUserTokenExpired will be returned.
 func ByToken(ctx context.Context, token string, ext *model.ExternalSessions) (
@@ -412,10 +435,14 @@ func ByToken(ctx context.Context, token string, ext *model.ExternalSessions) (
 
 	// Keep fields that only the token carries, such as InheritedClaims.
 	session := claims
-	if err := db.Bun().NewSelect().
+	switch err := db.Bun().NewSelect().
 		Model(&session).
 		Where("id = ?", claims.ID).
-		Scan(ctx); err != nil {
+		Scan(ctx); {
+	case errors.Is(err, sql.ErrNoRows):
+		// The session has ended: signed out, or removed by a password change.
+		return nil, nil, db.ErrNotFound
+	case err != nil:
 		return nil, nil, err
 	}
 	// The master signs allocation and notebook session tokens with the same key, and their IDs

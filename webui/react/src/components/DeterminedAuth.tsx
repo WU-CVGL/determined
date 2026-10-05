@@ -8,7 +8,6 @@ import Link from 'components/Link';
 import useUI from 'components/ThemeProvider';
 import { paths } from 'routes/utils';
 import { login } from 'services/api';
-import { updateDetApi } from 'services/apiConfig';
 import { isLoginFailure } from 'services/utils';
 import authStore from 'stores/auth';
 import determinedStore from 'stores/determinedInfo';
@@ -51,15 +50,16 @@ const DeterminedAuth: React.FC<Props> = ({ canceler }: Props) => {
       setCanSubmit(false);
       setIsSubmitted(true);
       try {
-        const { token, user } = await login(
+        // The master answers with the HttpOnly session cookie, which authenticates every later
+        // request; the token in the response body is for other clients.
+        const { user } = await login(
           {
             password: creds.password || '',
             username: creds.username || '',
           },
           { signal: canceler.signal },
         );
-        updateDetApi({ apiKey: `Bearer ${token}` });
-        authStore.setAuth({ isAuthenticated: true, token });
+        authStore.setAuth({ isAuthenticated: true });
         user.isPasswordWeak = isPasswordWeak(creds.password || '');
         userStore.updateCurrentUser(user);
         if (user.isPasswordWeak) {

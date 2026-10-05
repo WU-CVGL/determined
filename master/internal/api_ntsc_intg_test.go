@@ -6,10 +6,15 @@ package internal
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hashicorp/go-cleanhttp"
+	"github.com/labstack/echo/v4"
 	"github.com/sirupsen/logrus"
 	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/mock"
@@ -601,7 +606,7 @@ func TestPostAllocationProxyAddressOwnerOrAdmin(t *testing.T) {
 	// Everyone can see every task, as under basic authz.
 	authz.On("CanGetNSC", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	if proxy.DefaultProxy == nil {
-		proxy.InitProxy(processProxyAuthentication)
+		proxy.InitProxy(processProxyAuthentication, user.IsMasterSignedToken)
 	}
 
 	owner, allocationID, serviceID := launchOwnedCommand(t, api)
@@ -670,6 +675,105 @@ func TestPostAllocationProxyAddressOwnerOrAdmin(t *testing.T) {
 		require.Equal(t, codes.FailedPrecondition, status.Code(post(ctx, "10.0.0.1")), name)
 		requireUnchanged()
 	}
+}
+
+// TestProxyKeepsMasterCredentialsFromServices runs the master's proxy authentication and credential
+// filtering together, with real tokens, against a service that records what reaches it.
+func TestProxyKeepsMasterCredentialsFromServices(t *testing.T) {
+	api, authz, _, _ := setupNTSCAuthzTest(t)
+	authz.On("CanGetNSC", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	user.InitService(api.m.db, &model.ExternalSessions{})
+	if proxy.DefaultProxy == nil {
+		proxy.InitProxy(processProxyAuthentication, user.IsMasterSignedToken)
+	}
+
+	ctx := context.TODO()
+	owner, allocationID, taskID := launchOwnedCommand(t, api)
+	sessionToken, err := user.StartSession(ctx, &owner)
+	require.NoError(t, err)
+	revokedToken, err := user.StartSession(ctx, &owner)
+	require.NoError(t, err)
+	require.NoError(t, user.DeleteSessionByToken(ctx, revokedToken))
+	allocationToken, err := db.StartAllocationSession(ctx, allocationID, &owner)
+	require.NoError(t, err)
+
+	reached := make(chan http.Header, 1)
+	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached <- r.Header.Clone()
+	}))
+	defer service.Close()
+	serviceURL, err := url.Parse(service.URL)
+	require.NoError(t, err)
+	protected, public := taskID, taskID+":open"
+	proxy.DefaultProxy.Register(protected, serviceURL, false, false)
+	proxy.DefaultProxy.Register(public, serviceURL, false, true)
+	defer proxy.DefaultProxy.Unregister(protected)
+	defer proxy.DefaultProxy.Unregister(public)
+
+	e := echo.New()
+	e.Any("/proxy/:service/*", proxy.DefaultProxy.NewProxyHandler("service"))
+	master := httptest.NewServer(e)
+	defer master.Close()
+	client := cleanhttp.DefaultClient()
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	send := func(serviceID string, header http.Header) (int, http.Header) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			master.URL+"/proxy/"+serviceID+"/", nil)
+		require.NoError(t, err)
+		req.Header = header
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		select {
+		case got := <-reached:
+			return resp.StatusCode, got
+		default:
+			return resp.StatusCode, nil
+		}
+	}
+	requireNoMasterCredentials := func(got http.Header) {
+		require.Empty(t, got.Values("Authorization"))
+		require.Empty(t, got.Values("Grpc-Metadata-X-Allocation-Token"))
+		require.Equal(t, []string{"app=1"}, got.Values("Cookie"))
+	}
+
+	// A protected service needs a valid master session, and never sees it.
+	code, got := send(protected, http.Header{
+		"Authorization":                    {"Bearer " + sessionToken},
+		"Grpc-Metadata-X-Allocation-Token": {"Bearer " + allocationToken},
+		"Cookie":                           {"auth=" + sessionToken + "; app=1"},
+	})
+	require.Equal(t, http.StatusOK, code)
+	requireNoMasterCredentials(got)
+	for name, header := range map[string]http.Header{
+		"revoked session": {"Authorization": {"Bearer " + revokedToken}},
+		"service's key":   {"Authorization": {"Bearer app-key"}},
+		"no credentials":  {},
+	} {
+		code, got = send(protected, header)
+		require.NotEqual(t, http.StatusOK, code, name)
+		require.Nil(t, got, name)
+	}
+
+	// A public service gets no master credential either, valid or not, but keeps its own.
+	code, got = send(public, http.Header{
+		"Authorization":                    {"Bearer " + revokedToken},
+		"Grpc-Metadata-X-Allocation-Token": {"Bearer " + allocationToken},
+		"Cookie":                           {"auth=" + sessionToken + "; app=1"},
+	})
+	require.Equal(t, http.StatusOK, code)
+	requireNoMasterCredentials(got)
+	code, got = send(public, http.Header{
+		"Authorization": {"Bearer " + allocationToken},
+		"Cookie":        {"app=1"},
+	})
+	require.Equal(t, http.StatusOK, code)
+	requireNoMasterCredentials(got)
+	code, got = send(public, http.Header{"Authorization": {"Bearer app-key"}})
+	require.Equal(t, http.StatusOK, code)
+	require.Equal(t, []string{"Bearer app-key"}, got.Values("Authorization"))
 }
 
 func TestAuthZCanSetNSCsPriority(t *testing.T) {

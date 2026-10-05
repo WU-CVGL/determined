@@ -5,7 +5,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import useAuthCheck from 'hooks/useAuthCheck';
 import { paths, routeAll } from 'routes/utils';
 import { logout } from 'services/api';
-import { updateDetApi } from 'services/apiConfig';
 import authStore from 'stores/auth';
 import determinedStore from 'stores/determinedInfo';
 import permissionStore from 'stores/permissions';
@@ -33,18 +32,25 @@ const SignOut: React.FC = () => {
       workspaceStore.reset();
       userSettings.reset();
       try {
+        // The master ends the session and removes the HttpOnly session cookie, which the web UI
+        // cannot do itself. It removes the cookie even when the session has already ended.
         await logout({});
       } catch (e) {
+        // An authentication failure means the session had already ended. Any other failure may
+        // have left the session and its cookie in place, which only the master can remove.
         if (!isAuthFailure(e)) {
           handleError(e, {
             isUserTriggered: false,
             level: ErrorLevel.Warn,
-            silent: true,
+            publicMessage:
+              'The master did not confirm the end of your session, so this browser may still be ' +
+              'signed in. Sign out again once the master is reachable.',
+            publicSubject: 'Sign-out incomplete',
+            silent: false,
             type: ErrorType.Server,
           });
         }
       }
-      updateDetApi({ apiKey: undefined });
       authStore.reset();
 
       if (info.externalLogoutUri) {

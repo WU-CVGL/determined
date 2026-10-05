@@ -1,5 +1,13 @@
 import { StorageManager } from 'utils/storage';
 
+/*
+ * The key under which earlier versions of the web UI kept the session token. The token now lives
+ * only in the master's HttpOnly session cookie, which scripts cannot read; a token left behind here
+ * would stay open to any script on the master's origin. Those versions also left the token in a
+ * session cookie that scripts can read, which useAuthCheck replaces with the HttpOnly one.
+ */
+export const LEGACY_AUTH_TOKEN_KEY = 'auth-token';
+
 class GlobalStorage {
   private keys: Record<string, string>;
   private storage: StorageManager;
@@ -7,14 +15,9 @@ class GlobalStorage {
   constructor(storage: StorageManager) {
     this.storage = storage;
     this.keys = {
-      authToken: 'auth-token',
       landingRedirect: 'landing-redirect',
       serverAddress: 'server-address',
     };
-  }
-
-  get authToken() {
-    return this.storage.get<string>(this.keys.authToken) || '';
   }
 
   get serverAddress() {
@@ -25,10 +28,6 @@ class GlobalStorage {
     return this.storage.get<string>(this.keys.landingRedirect) || '';
   }
 
-  set authToken(token: string) {
-    this.storage.set(this.keys.authToken, token);
-  }
-
   set serverAddress(address: string) {
     this.storage.set(this.keys.serverAddress, address);
   }
@@ -37,16 +36,21 @@ class GlobalStorage {
     this.storage.set(this.keys.landingRedirect, address);
   }
 
-  removeAuthToken() {
-    this.storage.remove(this.keys.authToken);
-  }
-
   removeServerAddress() {
     this.storage.remove(this.keys.serverAddress);
   }
 
   removeLandingRedirect() {
     this.storage.remove(this.keys.landingRedirect);
+  }
+
+  /** Removes the session token that earlier versions of the web UI stored. */
+  removeLegacyAuthToken() {
+    try {
+      this.storage.remove(LEGACY_AUTH_TOKEN_KEY);
+    } catch {
+      // Storage may be unavailable, for example in a private window.
+    }
   }
 }
 
@@ -57,3 +61,6 @@ export const globalStorage = new GlobalStorage(
 export const sessionStorage = new GlobalStorage(
   new StorageManager({ basePath: 'session', store: window.sessionStorage }),
 );
+
+globalStorage.removeLegacyAuthToken();
+sessionStorage.removeLegacyAuthToken();

@@ -121,6 +121,20 @@ const routes: RouteConfig[] = [
     title: 'Experiment',
   },
   {
+    icon: 'tasks',
+    id: 'genericTaskDetails',
+    needAuth: true,
+    path: '/generic-tasks/:taskId/:tab',
+    title: 'Generic Task',
+  },
+  {
+    icon: 'tasks',
+    id: 'genericTaskDetails',
+    needAuth: true,
+    path: '/generic-tasks/:taskId',
+    title: 'Generic Task',
+  },
+  {
     icon: 'logs',
     id: 'taskLogs',
     needAuth: true,
@@ -133,6 +147,13 @@ const routes: RouteConfig[] = [
     needAuth: true,
     path: '/tasks/:taskId/resources',
     title: 'Task Resources',
+  },
+  {
+    icon: 'tasks',
+    id: 'taskList',
+    needAuth: true,
+    path: '/tasks/:tab',
+    title: 'Tasks',
   },
   {
     icon: 'tasks',

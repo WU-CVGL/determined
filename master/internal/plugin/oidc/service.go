@@ -176,7 +176,7 @@ func (s *Service) callback(c echo.Context) error {
 		return err
 	}
 
-	c.SetCookie(user.NewCookieFromToken(token))
+	c.SetCookie(user.NewSessionCookie(token, user.SessionCookieSecure(c.Request())))
 	redirectPath := defaultRedirectPath
 	switch relayState := c.QueryParam("relayState"); relayState {
 	case deprecatedCliRelayState:

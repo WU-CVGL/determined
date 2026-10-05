@@ -169,12 +169,18 @@ def test_change_password() -> None:
 
 @pytest.mark.e2e_cpu
 def test_change_own_password() -> None:
-    # Create a user without a password.
     sess, old_password = api_utils.create_test_user()
 
     d = client.Determined._from_session(sess)
     userobj = d.get_user_by_name(sess.username)
-    userobj.change_password("newPass123!")
+
+    # Users must confirm their current password to change their own.
+    with pytest.raises(errors.APIException):
+        userobj.change_password("newPass123!")
+    with pytest.raises(errors.ForbiddenException):
+        userobj.change_password("newPass123!", current_password="wrongPass123!")
+
+    userobj.change_password("newPass123!", current_password=old_password)
 
     with pytest.raises(errors.UnauthenticatedException):
         api_utils.make_session(sess.username, old_password)

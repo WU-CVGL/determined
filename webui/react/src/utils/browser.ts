@@ -63,18 +63,6 @@ const generateLogStringBuffer = (count: number, avgLength: number): string => {
   return stringBuffer;
 };
 
-export const getCookie = (name: string): string | null => {
-  const regex = new RegExp(`(?:(?:^|.*;\\s*)${name}\\s*\\=\\s*([^;]*).*$)|^.*$`);
-  const value = document.cookie.replace(regex, '$1');
-  return value ? value : null;
-};
-
-export const setCookie = (name: string, value: string): void => {
-  const date = new Date();
-  date.setTime(date.getTime() + 7 * 24 * 60 * 60 * 1000);
-  document.cookie = name + '=' + value + '; expires=' + date.toUTCString() + '; path=/';
-};
-
 /*
  * The method of cache busting here is to send a query string as most
  * modern browsers treat different URLs as different files, causing a
@@ -90,6 +78,9 @@ export const refreshPage = (): void => {
 
   routeToExternalUrl(url.toString());
 };
+
+/* Loads the page again, dropping everything the web UI holds in memory. */
+export const reloadPage = (): void => window.location.reload();
 
 export const simulateLogsDownload = (numCharacters: number): number => {
   const start = Date.now();

@@ -1,24 +1,23 @@
+import { Loadable } from 'hew/utils/loadable';
 import { useEffect, useState } from 'react';
 
-import { globalStorage } from 'globalStorage';
 import { serverAddress } from 'routes/utils';
-
-export const taskResourcesHeaders = (): HeadersInit =>
-  globalStorage.authToken ? { Authorization: `Bearer ${globalStorage.authToken}` } : {};
+import userStore from 'stores/users';
 
 // Row menus mount together. Share their in-flight capability request without
 // retaining an authorization-dependent result across later mounts or sign-ins.
+// The session cookie authenticates the request, so the signed-in user tells sessions apart.
 const pendingCapabilities = new Map<string, Promise<boolean>>();
 const loadCapability = (): Promise<boolean> => {
   const url = serverAddress('/ui/task-resources');
-  const key = JSON.stringify([url, globalStorage.authToken]);
+  const userId = Loadable.getOrElse(undefined, userStore.currentUser.get())?.id;
+  const key = JSON.stringify([url, userId]);
   const pending = pendingCapabilities.get(key);
   if (pending) return pending;
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 10000);
   const request = fetch(url, {
     credentials: 'include',
-    headers: taskResourcesHeaders(),
     signal: controller.signal,
   })
     .then(async (response) => (response.ok ? (await response.json()).enabled === true : false))

@@ -322,3 +322,137 @@ func TestAuthzGetUserImage(t *testing.T) {
 	_, err = svc.getUserImage(ctx)
 	require.Equal(t, db.ErrNotFound.Error(), err.Error())
 }
+
+func TestPatchUserOwnPasswordNeedsCurrentPassword(t *testing.T) {
+	svc, closeDB, authzUser, ctx := setup(t)
+	defer closeDB()
+
+	hashedOld := ReplicateClientSideSaltAndHash("Old-password-1")
+	u := model.User{Username: uuid.New().String(), Active: true}
+	require.NoError(t, u.UpdatePasswordHash(hashedOld))
+	id, err := Add(stdContext.TODO(), &u, nil)
+	require.NoError(t, err)
+	u.ID = id
+	dc := ctx.(*context.DetContext)
+	dc.SetUser(u)
+	defer dc.SetUser(model.User{})
+
+	hashedNew := ReplicateClientSideSaltAndHash("New-password-1")
+	cases := []struct {
+		body string
+		code int
+	}{
+		{fmt.Sprintf(`{"password":%q}`, hashedNew), http.StatusBadRequest},
+		{fmt.Sprintf(`{"password":%q,"old_password":"wrong"}`, hashedNew), http.StatusForbidden},
+		{fmt.Sprintf(`{"password":%q,"old_password":%q}`, hashedNew, hashedOld), 0},
+	}
+	for _, tc := range cases {
+		ctx.SetParamNames("username")
+		ctx.SetParamValues(u.Username)
+		ctx.SetRequest(httptest.NewRequest(http.MethodPatch, "/", strings.NewReader(tc.body)))
+		authzUser.On("CanSetUsersPassword", mock.Anything, u, mock.Anything).Return(nil).Once()
+
+		_, err := svc.patchUser(ctx)
+		if tc.code == 0 {
+			require.NoError(t, err)
+			continue
+		}
+		var httpErr *echo.HTTPError
+		require.ErrorAs(t, err, &httpErr)
+		require.Equal(t, tc.code, httpErr.Code)
+	}
+
+	updated, err := ByUsername(stdContext.TODO(), u.Username)
+	require.NoError(t, err)
+	require.True(t, updated.ValidatePassword(hashedNew))
+}
+
+// legacyPatch calls a legacy PATCH /users/:username route handler as curUser.
+func legacyPatch(
+	ctx echo.Context, curUser model.User, username, body string,
+	handler func(echo.Context) (interface{}, error),
+) error {
+	dc := ctx.(*context.DetContext)
+	dc.SetUser(curUser)
+	defer dc.SetUser(model.User{})
+	ctx.SetParamNames("username")
+	ctx.SetParamValues(username)
+	ctx.SetRequest(httptest.NewRequest(http.MethodPatch, "/", strings.NewReader(body)))
+	_, err := handler(ctx)
+	return err
+}
+
+func requireHTTPCode(t *testing.T, code int, err error) {
+	t.Helper()
+	var httpErr *echo.HTTPError
+	require.ErrorAs(t, err, &httpErr)
+	require.Equal(t, code, httpErr.Code, httpErr.Error())
+}
+
+func TestLegacyPatchUserAdminChangesOtherPassword(t *testing.T) {
+	svc, closeDB, authzUser, ctx := setup(t)
+	defer closeDB()
+
+	hashedOld := ReplicateClientSideSaltAndHash("Old-password-1")
+	u := model.User{Username: uuid.New().String(), Active: true}
+	require.NoError(t, u.UpdatePasswordHash(hashedOld))
+	id, err := Add(stdContext.TODO(), &u, nil)
+	require.NoError(t, err)
+	u.ID = id
+	admin := model.User{ID: id + 100000, Username: "admin-" + uuid.New().String(), Admin: true}
+
+	// An administrator changes another user's password without that user's current password.
+	hashedNew := ReplicateClientSideSaltAndHash("New-password-1")
+	authzUser.On("CanSetUsersPassword", mock.Anything, admin, mock.Anything).Return(nil).Once()
+	require.NoError(t, legacyPatch(ctx, admin, u.Username,
+		fmt.Sprintf(`{"password":%q}`, hashedNew), svc.patchUser))
+	updated, err := ByUsername(stdContext.TODO(), u.Username)
+	require.NoError(t, err)
+	require.True(t, updated.ValidatePassword(hashedNew))
+}
+
+func TestLegacyPatchUsernameSelfNeedsCurrentPassword(t *testing.T) {
+	svc, closeDB, authzUser, ctx := setup(t)
+	defer closeDB()
+
+	hashed := ReplicateClientSideSaltAndHash("Password-1")
+	u := model.User{Username: uuid.New().String(), Active: true}
+	require.NoError(t, u.UpdatePasswordHash(hashed))
+	id, err := Add(stdContext.TODO(), &u, nil)
+	require.NoError(t, err)
+	u.ID = id
+
+	newName := uuid.New().String()
+	cases := []struct {
+		body string
+		code int
+	}{
+		{fmt.Sprintf(`{"username":%q}`, newName), http.StatusBadRequest},
+		{fmt.Sprintf(`{"username":%q,"old_password":"wrong"}`, newName), http.StatusForbidden},
+		// Like the legacy routes' passwords, the current password is salted and hashed.
+		{fmt.Sprintf(`{"username":%q,"old_password":"Password-1"}`, newName), http.StatusForbidden},
+	}
+	for _, tc := range cases {
+		authzUser.On("CanSetUsersUsername", mock.Anything, u, mock.Anything).Return(nil).Once()
+		requireHTTPCode(t, tc.code, legacyPatch(ctx, u, u.Username, tc.body, svc.patchUsername))
+		_, err = ByUsername(stdContext.TODO(), u.Username)
+		require.NoError(t, err, "the user was renamed")
+	}
+
+	authzUser.On("CanSetUsersUsername", mock.Anything, u, mock.Anything).Return(nil).Once()
+	require.NoError(t, legacyPatch(ctx, u, u.Username,
+		fmt.Sprintf(`{"username":%q,"old_password":%q}`, newName, hashed), svc.patchUsername))
+	renamed, err := ByUsername(stdContext.TODO(), newName)
+	require.NoError(t, err)
+	require.Equal(t, u.ID, renamed.ID)
+
+	// An administrator renames another user without a current password.
+	admin := model.User{ID: id + 100000, Username: "admin-" + uuid.New().String(), Admin: true}
+	adminName := uuid.New().String()
+	authzUser.On("CanSetUsersUsername", mock.Anything, admin, mock.Anything).Return(nil).Once()
+	require.NoError(t, legacyPatch(ctx, admin, newName,
+		fmt.Sprintf(`{"username":%q}`, adminName), svc.patchUsername))
+	renamed, err = ByUsername(stdContext.TODO(), adminName)
+	require.NoError(t, err)
+	require.Equal(t, u.ID, renamed.ID)
+}

@@ -41,10 +41,12 @@
    Tasks make these calls with their own task session and continue to work.
 
 -  Proxy: Requests that the master forwards through ``/proxy/`` to notebooks, TensorBoards, shells,
-   commands, and other task services no longer carry the visitor's Determined session cookies
-   (``auth`` and ``det_jwt``). These services run code chosen by the task's owner and could
-   otherwise act as any user who opened them. For services that require Determined
-   authentication, an ``Authorization: Bearer`` header is removed too, because it can only hold a
-   Determined token. The service's own cookies and JupyterLab's ``Authorization: token`` header are
-   forwarded as before. Services that allow unauthenticated access still receive any
-   ``Authorization`` header that the client sends.
+   commands, and other task services no longer carry the visitor's Determined credentials, whether
+   or not the service requires Determined authentication. These services run code chosen by the
+   task's owner and could otherwise act as any user who opened them. The master removes its session
+   cookies (``auth`` and ``det_jwt``), the ``Grpc-Metadata-X-Allocation-Token``,
+   ``Grpc-Metadata-X-User-Token`` and ``Grpc-Metadata-Grpcgateway-Authorization`` headers, and any
+   ``Authorization: Bearer`` header that holds a Determined token, including an expired or revoked
+   one. Services that allow unauthenticated access still receive other bearer tokens, such as their
+   own API keys. The service's own cookies and JupyterLab's ``Authorization: token`` header are
+   forwarded as before.
