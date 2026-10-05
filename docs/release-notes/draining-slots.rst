@@ -17,3 +17,7 @@
 
 -  Agents: Enabling a drained slot ends its drain. Previously ``det slot list`` showed such a slot
    as both enabled and draining.
+
+-  Agents: A slot that is disabled while its task runs, and enabled again after the task's
+   resources were released but before the agent reported the task's container stopped, now comes
+   back free. Previously it stayed counted as used until the agent reconnected.
