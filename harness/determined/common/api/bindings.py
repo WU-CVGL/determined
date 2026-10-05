@@ -1137,6 +1137,7 @@ class v1Agent(Printable):
     containers: "typing.Optional[typing.Dict[str, v1Container]]" = None
     draining: "typing.Optional[bool]" = None
     enabled: "typing.Optional[bool]" = None
+    gpuTopology: "typing.Optional[v1GpuTopology]" = None
     registeredTime: "typing.Optional[str]" = None
     resourcePools: "typing.Optional[typing.Sequence[str]]" = None
     slots: "typing.Optional[typing.Dict[str, v1Slot]]" = None
@@ -1151,6 +1152,7 @@ class v1Agent(Printable):
         containers: "typing.Union[typing.Dict[str, v1Container], None, Unset]" = _unset,
         draining: "typing.Union[bool, None, Unset]" = _unset,
         enabled: "typing.Union[bool, None, Unset]" = _unset,
+        gpuTopology: "typing.Union[v1GpuTopology, None, Unset]" = _unset,
         registeredTime: "typing.Union[str, None, Unset]" = _unset,
         resourcePools: "typing.Union[typing.Sequence[str], None, Unset]" = _unset,
         slots: "typing.Union[typing.Dict[str, v1Slot], None, Unset]" = _unset,
@@ -1166,6 +1168,8 @@ class v1Agent(Printable):
             self.draining = draining
         if not isinstance(enabled, Unset):
             self.enabled = enabled
+        if not isinstance(gpuTopology, Unset):
+            self.gpuTopology = gpuTopology
         if not isinstance(registeredTime, Unset):
             self.registeredTime = registeredTime
         if not isinstance(resourcePools, Unset):
@@ -1189,6 +1193,8 @@ class v1Agent(Printable):
             kwargs["draining"] = obj["draining"]
         if "enabled" in obj:
             kwargs["enabled"] = obj["enabled"]
+        if "gpuTopology" in obj:
+            kwargs["gpuTopology"] = v1GpuTopology.from_json(obj["gpuTopology"]) if obj["gpuTopology"] is not None else None
         if "registeredTime" in obj:
             kwargs["registeredTime"] = obj["registeredTime"]
         if "resourcePools" in obj:
@@ -1212,6 +1218,8 @@ class v1Agent(Printable):
             out["draining"] = self.draining
         if not omit_unset or "enabled" in vars(self):
             out["enabled"] = self.enabled
+        if not omit_unset or "gpuTopology" in vars(self):
+            out["gpuTopology"] = None if self.gpuTopology is None else self.gpuTopology.to_json(omit_unset)
         if not omit_unset or "registeredTime" in vars(self):
             out["registeredTime"] = self.registeredTime
         if not omit_unset or "resourcePools" in vars(self):
@@ -7363,6 +7371,254 @@ class v1GetWorkspacesWithDefaultNamespaceBindingsResponse(Printable):
         }
         if not omit_unset or "workspaceIds" in vars(self):
             out["workspaceIds"] = self.workspaceIds
+        return out
+
+class v1GpuHealth(DetEnum):
+    """GpuHealth is a GPU's health from what the agent measured at its last start.
+    - GPU_HEALTH_UNSPECIFIED: Unknown: no report, NVML did not run, or the link width is unknown.
+    - GPU_HEALTH_OK: No NVML error, and the link width was at its maximum at agent start.
+    - GPU_HEALTH_LINK_BELOW_MAX: The link width was below its maximum at agent start.
+    - GPU_HEALTH_ERROR: An NVML health call failed at agent start.
+    """
+    UNSPECIFIED = "GPU_HEALTH_UNSPECIFIED"
+    OK = "GPU_HEALTH_OK"
+    LINK_BELOW_MAX = "GPU_HEALTH_LINK_BELOW_MAX"
+    ERROR = "GPU_HEALTH_ERROR"
+
+class v1GpuInfo(Printable):
+    """GpuInfo describes one GPU of an agent: a slot, or a GPU left out by the
+    agent's exclude list.
+    """
+
+    def __init__(
+        self,
+        *,
+        deviceId: int,
+        excluded: bool,
+        health: "v1GpuHealth",
+        numaNode: int,
+        nvmlError: str,
+        pciBusId: str,
+        pcieLinkGen: int,
+        pcieLinkGenMax: int,
+        pcieLinkWidth: int,
+        pcieLinkWidthMax: int,
+        uuid: str,
+    ):
+        self.deviceId = deviceId
+        self.excluded = excluded
+        self.health = health
+        self.numaNode = numaNode
+        self.nvmlError = nvmlError
+        self.pciBusId = pciBusId
+        self.pcieLinkGen = pcieLinkGen
+        self.pcieLinkGenMax = pcieLinkGenMax
+        self.pcieLinkWidth = pcieLinkWidth
+        self.pcieLinkWidthMax = pcieLinkWidthMax
+        self.uuid = uuid
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1GpuInfo":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "deviceId": obj["deviceId"],
+            "excluded": obj["excluded"],
+            "health": v1GpuHealth(obj["health"]),
+            "numaNode": obj["numaNode"],
+            "nvmlError": obj["nvmlError"],
+            "pciBusId": obj["pciBusId"],
+            "pcieLinkGen": obj["pcieLinkGen"],
+            "pcieLinkGenMax": obj["pcieLinkGenMax"],
+            "pcieLinkWidth": obj["pcieLinkWidth"],
+            "pcieLinkWidthMax": obj["pcieLinkWidthMax"],
+            "uuid": obj["uuid"],
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "deviceId": self.deviceId,
+            "excluded": self.excluded,
+            "health": self.health.value,
+            "numaNode": self.numaNode,
+            "nvmlError": self.nvmlError,
+            "pciBusId": self.pciBusId,
+            "pcieLinkGen": self.pcieLinkGen,
+            "pcieLinkGenMax": self.pcieLinkGenMax,
+            "pcieLinkWidth": self.pcieLinkWidth,
+            "pcieLinkWidthMax": self.pcieLinkWidthMax,
+            "uuid": self.uuid,
+        }
+        return out
+
+class v1GpuLink(Printable):
+    """GpuLink describes one pair of GPUs of an agent."""
+
+    def __init__(
+        self,
+        *,
+        deviceA: int,
+        deviceB: int,
+        level: "v1GpuLinkLevel",
+        nvlinks: int,
+        p2p: "v1GpuP2p",
+        p2pAToB: "v1GpuP2pCaps",
+        p2pBToA: "v1GpuP2pCaps",
+        uuidA: str,
+        uuidB: str,
+    ):
+        self.deviceA = deviceA
+        self.deviceB = deviceB
+        self.level = level
+        self.nvlinks = nvlinks
+        self.p2p = p2p
+        self.p2pAToB = p2pAToB
+        self.p2pBToA = p2pBToA
+        self.uuidA = uuidA
+        self.uuidB = uuidB
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1GpuLink":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "deviceA": obj["deviceA"],
+            "deviceB": obj["deviceB"],
+            "level": v1GpuLinkLevel(obj["level"]),
+            "nvlinks": obj["nvlinks"],
+            "p2p": v1GpuP2p(obj["p2p"]),
+            "p2pAToB": v1GpuP2pCaps.from_json(obj["p2pAToB"]),
+            "p2pBToA": v1GpuP2pCaps.from_json(obj["p2pBToA"]),
+            "uuidA": obj["uuidA"],
+            "uuidB": obj["uuidB"],
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "deviceA": self.deviceA,
+            "deviceB": self.deviceB,
+            "level": self.level.value,
+            "nvlinks": self.nvlinks,
+            "p2p": self.p2p.value,
+            "p2pAToB": self.p2pAToB.to_json(omit_unset),
+            "p2pBToA": self.p2pBToA.to_json(omit_unset),
+            "uuidA": self.uuidA,
+            "uuidB": self.uuidB,
+        }
+        return out
+
+class v1GpuLinkLevel(DetEnum):
+    """GpuLinkLevel is the closest common ancestor of two GPUs, as NVML reports it.
+    - GPU_LINK_LEVEL_UNSPECIFIED: Unknown.
+    - GPU_LINK_LEVEL_INTERNAL: The same board.
+    - GPU_LINK_LEVEL_PIX: A single PCIe switch.
+    - GPU_LINK_LEVEL_PXB: Multiple PCIe switches, without the host bridge.
+    - GPU_LINK_LEVEL_PHB: A PCIe host bridge.
+    - GPU_LINK_LEVEL_NODE: The same NUMA node, across host bridges.
+    - GPU_LINK_LEVEL_SYS: Across NUMA nodes.
+    """
+    UNSPECIFIED = "GPU_LINK_LEVEL_UNSPECIFIED"
+    INTERNAL = "GPU_LINK_LEVEL_INTERNAL"
+    PIX = "GPU_LINK_LEVEL_PIX"
+    PXB = "GPU_LINK_LEVEL_PXB"
+    PHB = "GPU_LINK_LEVEL_PHB"
+    NODE = "GPU_LINK_LEVEL_NODE"
+    SYS = "GPU_LINK_LEVEL_SYS"
+
+class v1GpuP2p(DetEnum):
+    """GpuP2p is the P2P state of a pair, derived from its four raw statuses.
+    - GPU_P2P_UNSPECIFIED: Unknown: no status is a known non-OK one, and at least one is unknown.
+    - GPU_P2P_USABLE: READ and WRITE are OK in both directions.
+    - GPU_P2P_NOT_USABLE: At least one status is a known status other than OK.
+    """
+    UNSPECIFIED = "GPU_P2P_UNSPECIFIED"
+    USABLE = "GPU_P2P_USABLE"
+    NOT_USABLE = "GPU_P2P_NOT_USABLE"
+
+class v1GpuP2pCaps(Printable):
+    """GpuP2pCaps holds the raw NVML P2P statuses of one direction of a pair."""
+
+    def __init__(
+        self,
+        *,
+        read: "v1GpuP2pStatus",
+        write: "v1GpuP2pStatus",
+    ):
+        self.read = read
+        self.write = write
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1GpuP2pCaps":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "read": v1GpuP2pStatus(obj["read"]),
+            "write": v1GpuP2pStatus(obj["write"]),
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "read": self.read.value,
+            "write": self.write.value,
+        }
+        return out
+
+class v1GpuP2pStatus(DetEnum):
+    """GpuP2pStatus is one raw NVML P2P status.
+    - GPU_P2P_STATUS_UNSPECIFIED: Unknown: the query failed or NVML did not know.
+    - GPU_P2P_STATUS_OK: P2P is supported.
+    - GPU_P2P_STATUS_CHIPSET_NOT_SUPPORTED: The chipset does not support P2P.
+    - GPU_P2P_STATUS_GPU_NOT_SUPPORTED: The GPU does not support P2P.
+    - GPU_P2P_STATUS_TOPOLOGY_NOT_SUPPORTED: The topology does not support P2P.
+    - GPU_P2P_STATUS_DISABLED_BY_REGKEY: P2P is disabled by a registry key.
+    - GPU_P2P_STATUS_NOT_SUPPORTED: P2P is not supported.
+    """
+    UNSPECIFIED = "GPU_P2P_STATUS_UNSPECIFIED"
+    OK = "GPU_P2P_STATUS_OK"
+    CHIPSET_NOT_SUPPORTED = "GPU_P2P_STATUS_CHIPSET_NOT_SUPPORTED"
+    GPU_NOT_SUPPORTED = "GPU_P2P_STATUS_GPU_NOT_SUPPORTED"
+    TOPOLOGY_NOT_SUPPORTED = "GPU_P2P_STATUS_TOPOLOGY_NOT_SUPPORTED"
+    DISABLED_BY_REGKEY = "GPU_P2P_STATUS_DISABLED_BY_REGKEY"
+    NOT_SUPPORTED = "GPU_P2P_STATUS_NOT_SUPPORTED"
+
+class v1GpuTopology(Printable):
+    """GpuTopology is what an agent measured with NVML when it started."""
+    collectedAt: "typing.Optional[str]" = None
+
+    def __init__(
+        self,
+        *,
+        driverVersion: str,
+        gpus: "typing.Sequence[v1GpuInfo]",
+        links: "typing.Sequence[v1GpuLink]",
+        unknownReason: str,
+        collectedAt: "typing.Union[str, None, Unset]" = _unset,
+    ):
+        self.driverVersion = driverVersion
+        self.gpus = gpus
+        self.links = links
+        self.unknownReason = unknownReason
+        if not isinstance(collectedAt, Unset):
+            self.collectedAt = collectedAt
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1GpuTopology":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "driverVersion": obj["driverVersion"],
+            "gpus": [v1GpuInfo.from_json(x) for x in obj["gpus"]],
+            "links": [v1GpuLink.from_json(x) for x in obj["links"]],
+            "unknownReason": obj["unknownReason"],
+        }
+        if "collectedAt" in obj:
+            kwargs["collectedAt"] = obj["collectedAt"]
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "driverVersion": self.driverVersion,
+            "gpus": [x.to_json(omit_unset) for x in self.gpus],
+            "links": [x.to_json(omit_unset) for x in self.links],
+            "unknownReason": self.unknownReason,
+        }
+        if not omit_unset or "collectedAt" in vars(self):
+            out["collectedAt"] = self.collectedAt
         return out
 
 class v1Group(Printable):
