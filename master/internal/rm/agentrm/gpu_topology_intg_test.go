@@ -117,6 +117,22 @@ func TestAgentStartedRefreshesGPUTopology(t *testing.T) {
 	require.Len(t, topo.excluded, 1)
 	g.a.mu.Unlock()
 
+	// The API sees it: Summarize fills gpu_topology from the agent state (section 5.2). It takes
+	// a.mu itself.
+	api := g.a.Summarize().GPUTopology
+	require.NotNil(t, api)
+	require.Empty(t, api.UnknownReason)
+	require.NotNil(t, api.CollectedAt)
+	require.Len(t, api.Gpus, 3)
+	require.Equal(t, int32(0), api.Gpus[0].DeviceId)
+	require.Equal(t, "GPU-a", api.Gpus[0].Uuid)
+	require.Equal(t, int32(8), api.Gpus[0].PcieLinkWidth)
+	require.Equal(t, int32(1), api.Gpus[1].DeviceId)
+	require.Equal(t, "GPU-b", api.Gpus[1].Uuid)
+	require.Equal(t, int32(-1), api.Gpus[2].DeviceId)
+	require.Equal(t, "GPU-x", api.Gpus[2].Uuid)
+	require.True(t, api.Gpus[2].Excluded)
+
 	// A reconnect with the same devices refreshes it.
 	require.NoError(t, first.UnderlyingConn().Close())
 	g.waitFor("the disconnect", func(a *agent) bool { return a.awaitingReconnect })
@@ -127,6 +143,7 @@ func TestAgentStartedRefreshesGPUTopology(t *testing.T) {
 	require.Equal(t, 8, topo.gpus[0].PCIeLinkWidth, "the old value is never mutated")
 	require.False(t, g.a.stopped)
 	g.a.mu.Unlock()
+	require.Equal(t, int32(16), g.a.Summarize().GPUTopology.Gpus[0].PcieLinkWidth)
 
 	// An older agent image, reconnecting with the same devices, sends no topology.
 	require.NoError(t, second.UnderlyingConn().Close())
@@ -137,6 +154,12 @@ func TestAgentStartedRefreshesGPUTopology(t *testing.T) {
 		return !a.awaitingReconnect && a.agentState.gpuTopology != nil &&
 			a.agentState.gpuTopology.unknownReason != ""
 	})
+	api = g.a.Summarize().GPUTopology
+	require.NotNil(t, api)
+	require.Equal(t, "agent 0.41.0 does not report GPU topology", api.UnknownReason)
+	require.Len(t, api.Gpus, 2, "the two slots, with no telemetry")
+	require.Equal(t, int32(0), api.Gpus[0].PcieLinkWidth)
+
 	g.a.mu.Lock()
 	defer g.a.mu.Unlock()
 	require.Equal(t, "agent 0.41.0 does not report GPU topology", g.a.agentState.gpuTopology.unknownReason)

@@ -143,6 +143,29 @@ func TestAgentStateGPUTopologyStaysOutOfCopies(t *testing.T) {
 	require.Nil(t, state.deepCopy().gpuTopology)
 }
 
+// The API reads the topology through summarize (section 5.2).
+func TestSummarizeReportsGPUTopology(t *testing.T) {
+	devices := cudaSlots("GPU-a", "GPU-b")
+	a := &agent{id: "agent", agentState: stateWithSlots(devices)}
+	a.agentState.setGPUTopology(newGPUTopology(&aproto.GPUTopology{
+		GPUs: []aproto.GPUInfo{
+			{UUID: "GPU-a", PCIeLinkWidth: 8, PCIeLinkWidthMax: 16},
+			{UUID: "GPU-b"},
+			{UUID: "GPU-x", Excluded: true},
+		},
+	}, devices, "0.42.0", testGPULog))
+
+	topo := a.summarize().GPUTopology
+	require.NotNil(t, topo)
+	require.Len(t, topo.Gpus, 3)
+	require.Equal(t, int32(8), topo.Gpus[0].PcieLinkWidth)
+	require.Equal(t, int32(-1), topo.Gpus[2].DeviceId)
+	require.True(t, topo.Gpus[2].Excluded)
+
+	// Before the AgentStarted, no agent state and so no topology.
+	require.Nil(t, (&agent{id: "agent"}).summarize().GPUTopology)
+}
+
 // stateWithSlots returns an agent state with the given devices as slots, as agentStarted builds it.
 func stateWithSlots(devices []device.Device) *agentState {
 	state := newAgentState("agent", 0)
