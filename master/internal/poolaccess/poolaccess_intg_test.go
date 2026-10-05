@@ -237,6 +237,16 @@ func TestCanUseResourcePool(t *testing.T) {
 		require.Equal(t, 2, reads)
 	})
 
+	t.Run("a failed query names the pool and the database error", func(t *testing.T) {
+		canceled, cancel := context.WithCancel(ctx)
+		cancel()
+		err := CanUseResourcePool(canceled, u1, public)
+		require.Equal(t, codes.Unavailable, status.Code(err))
+		require.Equal(t, fmt.Sprintf(
+			"could not check access to resource pool %q: %s; try again", public, context.Canceled),
+			status.Convert(err).Message())
+	})
+
 	t.Run("usable pools", func(t *testing.T) {
 		pools := []string{public, adminsOnly, granted, dormantGrant, madePublic}
 		usable, err := UsablePools(ctx, u1, pools)

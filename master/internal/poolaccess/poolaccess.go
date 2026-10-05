@@ -108,8 +108,8 @@ func isAdmin(ctx context.Context, user model.User) (bool, error) {
 }
 
 // restrictionsFor returns the restricted pools among pools, each mapped to whether userID has a
-// grant on it. A pool that is absent from the map is public. A query error is returned as an
-// error, never as an empty map.
+// grant on it. A pool that is absent from the map is public. A query error is returned as it is,
+// never as an empty map; the callers' Unavailable errors already name the operation.
 func restrictionsFor(
 	ctx context.Context, userID model.UserID, pools []string,
 ) (map[string]bool, error) {
@@ -126,7 +126,7 @@ SELECT r.pool_name, (g.user_id IS NOT NULL) AS granted
 FROM resource_pool_restrictions r
 LEFT JOIN resource_pool_grants g ON g.pool_name = r.pool_name AND g.user_id = ?
 WHERE r.pool_name IN (?)`, userID, bun.In(pools)).Scan(ctx, &rows); err != nil {
-		return nil, fmt.Errorf("reading resource pool restrictions: %w", err)
+		return nil, err
 	}
 	for _, row := range rows {
 		restricted[row.PoolName] = row.Granted
