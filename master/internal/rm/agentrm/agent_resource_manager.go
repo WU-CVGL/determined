@@ -34,7 +34,8 @@ import (
 )
 
 // New returns a new ResourceManager, which manages communicating with
-// and scheduling on Determined agents.
+// and scheduling on Determined agents. masterDefaults are the master's task container defaults;
+// when nil, the stored effective configs of dynamic pools are not refreshed.
 func New(
 	ctx context.Context,
 	db *db.PgDB,
@@ -42,11 +43,12 @@ func New(
 	rmConfig *config.ResourceManagerWithPoolsConfig,
 	opts *aproto.MasterSetAgentOptions,
 	cert *tls.Certificate,
+	masterDefaults *model.TaskContainerDefaultsConfig,
 ) (*ResourceManager, error) {
-	var dynamicConfigs []config.ResourcePoolConfig
+	var dynamicPools []storedDynamicPool
 	var err error
 	if db != nil {
-		dynamicConfigs, err = loadDynamicPoolConfigs(
+		dynamicPools, err = loadDynamicPoolConfigs(
 			db, rmConfig.ResourceManager.ClusterName(), rmConfig.ResourcePools,
 		)
 		if err != nil {
@@ -58,8 +60,10 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("creating resource pool registry: %w", err)
 	}
-	for _, dynamicConfig := range dynamicConfigs {
-		if err := registry.addDynamicDesired(dynamicConfig); err != nil {
+	for _, pool := range dynamicPools {
+		if err := registry.addStoredDynamicDesired(
+			pool.config, pool.inherit, pool.record.Revision,
+		); err != nil {
 			return nil, fmt.Errorf("registering dynamic resource pool: %w", err)
 		}
 	}
@@ -78,7 +82,9 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-	if err := markDynamicPoolsReady(context.Background(), db, dynamicConfigs); err != nil {
+	if err := resourceManager.markDynamicPoolsReady(
+		context.Background(), dynamicPools, masterDefaults,
+	); err != nil {
 		resourceManager.stop()
 		return nil, fmt.Errorf("marking dynamic resource pools ready: %w", err)
 	}

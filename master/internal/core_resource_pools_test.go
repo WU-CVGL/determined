@@ -65,6 +65,68 @@ func TestPrintableDynamicResourcePoolRedactsRegistryCredentials(t *testing.T) {
 	require.JSONEq(t, `{"redacted":true}`, string(printed.Config))
 }
 
+func TestPrintableDynamicResourcePoolRedactsSpec(t *testing.T) {
+	spec := json.RawMessage(`{"pool_name":"online","task_container_defaults":{"registry_auth":{
+        "username":"user","password":"password-secret","auth":"auth-secret",
+        "identitytoken":"identity-secret","registrytoken":"registry-secret","email":""}},
+        "max_aux_containers_per_agent":100}`)
+	printed := printableDynamicResourcePool(db.DynamicResourcePool{
+		Config: json.RawMessage(`{"pool_name":"online"}`), Spec: &spec,
+	})
+	// Only the keys that the spec holds are shown, and the stored spec is not modified.
+	require.JSONEq(t, `{"pool_name":"online","task_container_defaults":{"registry_auth":{
+        "username":"user","password":"********","auth":"********",
+        "identitytoken":"********","registrytoken":"********","email":""}},
+        "max_aux_containers_per_agent":100}`, string(*printed.Spec))
+	require.Contains(t, string(spec), "password-secret")
+
+	invalid := json.RawMessage(`[`)
+	printed = printableDynamicResourcePool(db.DynamicResourcePool{
+		Config: json.RawMessage(`{"pool_name":"online"}`), Spec: &invalid,
+	})
+	require.JSONEq(t, `{"redacted":true}`, string(*printed.Spec))
+	printed = printableDynamicResourcePool(db.DynamicResourcePool{
+		Config: json.RawMessage(`{"pool_name":"online"}`),
+	})
+	require.Nil(t, printed.Spec)
+}
+
+func TestDynamicResourcePoolViewPendingRestart(t *testing.T) {
+	record := db.DynamicResourcePool{Config: json.RawMessage(`{"pool_name":"online"}`), Revision: 2}
+	previous, current := int64(1), int64(2)
+	for _, test := range []struct {
+		name                string
+		activeRevision      *int64
+		definedInMasterYAML bool
+		pendingRestart      bool
+	}{
+		{name: "not published"},
+		{name: "runs the saved revision", activeRevision: &current},
+		{name: "runs an earlier revision", activeRevision: &previous, pendingRestart: true},
+		{name: "served from master.yaml", definedInMasterYAML: true, pendingRestart: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			view := newDynamicResourcePoolView(
+				record, test.activeRevision, test.definedInMasterYAML,
+			)
+			require.Equal(t, test.pendingRestart, view.PendingRestart)
+			require.Equal(t, test.definedInMasterYAML, view.DefinedInMasterYAML)
+			require.Equal(t, test.activeRevision, view.ActiveRevision)
+		})
+	}
+
+	raw, err := json.Marshal(newDynamicResourcePoolView(record, nil, false))
+	require.NoError(t, err)
+	var fields map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(raw, &fields))
+	require.JSONEq(t, `null`, string(fields["active_revision"]))
+	require.JSONEq(t, `2`, string(fields["revision"]))
+	require.JSONEq(t, `false`, string(fields["pending_restart"]))
+	require.JSONEq(t, `false`, string(fields["defined_in_master_yaml"]))
+	require.NotContains(t, fields, "spec")
+	require.NotContains(t, fields, "spec_hash")
+}
+
 func TestDynamicPoolRouteExplicitlyAuthenticates(t *testing.T) {
 	original := dynamicPoolRequestUser
 	t.Cleanup(func() { dynamicPoolRequestUser = original })

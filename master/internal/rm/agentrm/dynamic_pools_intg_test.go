@@ -4,13 +4,17 @@ package agentrm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/sirupsen/logrus"
+	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/require"
 
 	"github.com/determined-ai/determined/master/internal/config"
@@ -19,38 +23,101 @@ import (
 	"github.com/determined-ai/determined/master/pkg/model"
 )
 
-func TestDynamicPoolPersistenceRestart(t *testing.T) {
-	database, cleanup := db.MustResolveNewPostgresDatabase(t)
-	defer cleanup()
-	db.MustMigrateTestPostgres(t, database, "file://../../../static/migrations", "up")
-
-	rmConfig := &config.ResourceManagerWithPoolsConfig{
+func testDynamicPoolRMConfig(defaultPriority int) *config.ResourceManagerWithPoolsConfig {
+	scheduler := config.DefaultSchedulerConfig()
+	*scheduler.Priority.DefaultPriority = defaultPriority
+	return &config.ResourceManagerWithPoolsConfig{
 		ResourceManager: &config.ResourceManagerConfig{AgentRM: &config.AgentResourceManagerConfig{
 			ClusterName:                "agent-cluster",
 			DefaultComputeResourcePool: "default",
 			DefaultAuxResourcePool:     "default",
-			Scheduler:                  config.DefaultSchedulerConfig(),
+			Scheduler:                  scheduler,
 		}},
 		ResourcePools: []config.ResourcePoolConfig{{
 			PoolName:                 "default",
 			MaxAuxContainersPerAgent: 100,
 		}},
 	}
-	first, err := New(context.Background(), database, echo.New(), rmConfig, nil, nil)
+}
+
+// insertLegacyDynamicPool writes a record the way masters without spec support create one: the
+// effective config resolved against masterDefaults and no spec.
+func insertLegacyDynamicPool(
+	t *testing.T,
+	database *db.PgDB,
+	poolName string,
+	masterDefaults model.TaskContainerDefaultsConfig,
+) db.DynamicResourcePool {
+	normalized, err := testDynamicPoolRM().NormalizeDynamicResourcePoolConfig(
+		config.ResourcePoolConfig{PoolName: poolName, MaxAuxContainersPerAgent: 100},
+		masterDefaults,
+	)
+	require.NoError(t, err)
+	raw, hash, err := marshalDynamicResourcePoolConfig(normalized)
+	require.NoError(t, err)
+	record, created, err := database.CreateDynamicResourcePool(
+		context.Background(), db.DynamicResourcePool{
+			ClusterName: "agent-cluster", PoolName: poolName,
+			ConfigVersion: dynamicResourcePoolConfigVersion, IdempotencyKey: poolName + "-operation",
+			Config: raw, ConfigHash: hash,
+		},
+	)
+	require.NoError(t, err)
+	require.True(t, created)
+	return record
+}
+
+// insertSpecDynamicPool writes the record that a create through the resource manager writes,
+// without waking its worker.
+func insertSpecDynamicPool(
+	t *testing.T,
+	manager *ResourceManager,
+	idempotencyKey string,
+	spec string,
+	masterDefaults model.TaskContainerDefaultsConfig,
+) db.DynamicResourcePool {
+	prepared, err := manager.prepareDynamicPoolSpec(json.RawMessage(spec), masterDefaults)
+	require.NoError(t, err)
+	record, created, err := manager.db.CreateDynamicResourcePool(
+		context.Background(), prepared.record(manager.config.ClusterName, idempotencyKey),
+	)
+	require.NoError(t, err)
+	require.True(t, created)
+	return record
+}
+
+func waitForDynamicPoolReady(
+	t *testing.T, database *db.PgDB, manager *ResourceManager, poolName string,
+) {
+	require.Eventually(t, func() bool {
+		stored, readErr := database.DynamicResourcePoolByName(context.Background(), poolName)
+		return readErr == nil && stored.State == db.DynamicResourcePoolReady &&
+			manager.IsDynamicResourcePoolReady(poolName)
+	}, 10*time.Second, 20*time.Millisecond)
+}
+
+func TestDynamicPoolPersistenceRestart(t *testing.T) {
+	database, cleanup := db.MustResolveNewPostgresDatabase(t)
+	defer cleanup()
+	db.MustMigrateTestPostgres(t, database, "file://../../../static/migrations", "up")
+
+	masterDefaults := *model.DefaultTaskContainerDefaults()
+	masterDefaults.ForcePullImage = true
+	insertLegacyDynamicPool(t, database, "legacy-frozen", masterDefaults)
+
+	first, err := New(
+		context.Background(), database, echo.New(), testDynamicPoolRMConfig(42), nil, nil,
+		&masterDefaults,
+	)
 	require.NoError(t, err)
 	defer first.stop()
 	staticBefore, ok := first.registry.readyPool("default")
 	require.True(t, ok)
 
-	masterDefaults := *model.DefaultTaskContainerDefaults()
-	masterDefaults.ForcePullImage = true
 	record, created, err := first.CreateDynamicResourcePool(
 		context.Background(),
 		"restart-operation",
-		config.ResourcePoolConfig{
-			PoolName:                 "online-restart",
-			MaxAuxContainersPerAgent: 100,
-		},
+		json.RawMessage(`{"pool_name":"online-restart","max_aux_containers_per_agent":100}`),
 		masterDefaults,
 	)
 	require.NoError(t, err)
@@ -58,25 +125,24 @@ func TestDynamicPoolPersistenceRestart(t *testing.T) {
 	require.Contains(t, []db.DynamicResourcePoolState{
 		db.DynamicResourcePoolPending, db.DynamicResourcePoolReady,
 	}, record.State)
-	require.Eventually(t, func() bool {
-		stored, readErr := database.DynamicResourcePoolByName(context.Background(), record.PoolName)
-		return readErr == nil && stored.State == db.DynamicResourcePoolReady &&
-			first.IsDynamicResourcePoolReady(record.PoolName)
-	}, 10*time.Second, 20*time.Millisecond)
+	require.JSONEq(t, `{"max_aux_containers_per_agent":100,"pool_name":"online-restart"}`,
+		string(*record.Spec))
+	waitForDynamicPoolReady(t, database, first, record.PoolName)
 	staticAfter, ok := first.registry.readyPool("default")
 	require.True(t, ok)
 	require.Same(t, staticBefore, staticAfter, "online create must preserve existing runtime pools")
+	activeRevision, active := first.ActiveDynamicResourcePoolRevision(record.PoolName)
+	require.True(t, active)
+	require.EqualValues(t, 1, activeRevision)
 
-	changedMasterDefaults := *model.DefaultTaskContainerDefaults()
-	changedMasterDefaults.ForcePullImage = false
-	effective, err := first.TaskContainerDefaults(
-		rm.ResourcePoolName(record.PoolName), changedMasterDefaults,
-	)
-	require.NoError(t, err)
-	require.True(t, effective.ForcePullImage, "dynamic defaults must remain frozen")
-
+	// The master is restarted with different task container defaults and RM scheduler.
 	first.stop()
-	restarted, err := New(context.Background(), database, echo.New(), rmConfig, nil, nil)
+	changedMasterDefaults := *model.DefaultTaskContainerDefaults()
+	changedMasterDefaults.ShmSizeBytes = 16 << 30
+	restarted, err := New(
+		context.Background(), database, echo.New(), testDynamicPoolRMConfig(7), nil, nil,
+		&changedMasterDefaults,
+	)
 	require.NoError(t, err)
 	defer restarted.stop()
 	require.True(t, restarted.IsDynamicResourcePoolReady(record.PoolName))
@@ -84,11 +150,144 @@ func TestDynamicPoolPersistenceRestart(t *testing.T) {
 		rm.ResourcePoolName(record.PoolName), changedMasterDefaults,
 	)
 	require.NoError(t, err)
-	require.True(t, restartedDefaults.ForcePullImage,
-		"persisted effective defaults must survive restart and changed YAML")
+	require.Equal(t, changedMasterDefaults, restartedDefaults,
+		"a created pool must inherit master defaults like a master.yaml pool")
+	scheduler, ok := restarted.ResourcePoolSchedulerConfig(record.PoolName)
+	require.True(t, ok)
+	require.Equal(t, 7, *scheduler.Priority.DefaultPriority)
 	restored, err := database.DynamicResourcePoolByName(context.Background(), record.PoolName)
 	require.NoError(t, err)
 	require.Equal(t, db.DynamicResourcePoolReady, restored.State)
+
+	// A record written without a spec keeps running its frozen effective config.
+	require.True(t, restarted.IsDynamicResourcePoolReady("legacy-frozen"))
+	legacyDefaults, err := restarted.TaskContainerDefaults(
+		rm.ResourcePoolName("legacy-frozen"), changedMasterDefaults,
+	)
+	require.NoError(t, err)
+	require.True(t, legacyDefaults.ForcePullImage, "legacy dynamic defaults must remain frozen")
+	require.EqualValues(t, 4<<30, legacyDefaults.ShmSizeBytes)
+	legacyScheduler, ok := restarted.ResourcePoolSchedulerConfig("legacy-frozen")
+	require.True(t, ok)
+	require.Equal(t, 42, *legacyScheduler.Priority.DefaultPriority)
+	legacy, err := database.DynamicResourcePoolByName(context.Background(), "legacy-frozen")
+	require.NoError(t, err)
+	require.Nil(t, legacy.Spec)
+}
+
+func TestDynamicPoolStartupRefreshesSnapshot(t *testing.T) {
+	database, cleanup := db.MustResolveNewPostgresDatabase(t)
+	defer cleanup()
+	db.MustMigrateTestPostgres(t, database, "file://../../../static/migrations", "up")
+	ctx := context.Background()
+
+	masterDefaults := *model.DefaultTaskContainerDefaults()
+	masterDefaults.ForcePullImage = true
+	legacyBefore := insertLegacyDynamicPool(t, database, "legacy", masterDefaults)
+	first, err := New(
+		ctx, database, echo.New(), testDynamicPoolRMConfig(42), nil, nil, &masterDefaults,
+	)
+	require.NoError(t, err)
+	defer first.stop()
+	first.StopDynamicPoolWorker()
+	insertSpecDynamicPool(t, first, "refresh-operation", `{"pool_name":"refreshed"}`, masterDefaults)
+	first.stop()
+	specBefore, err := database.DynamicResourcePoolByName(ctx, "refreshed")
+	require.NoError(t, err)
+
+	startWith := func(masterDefaults *model.TaskContainerDefaultsConfig) {
+		manager, err := New(
+			ctx, database, echo.New(), testDynamicPoolRMConfig(42), nil, nil, masterDefaults,
+		)
+		require.NoError(t, err)
+		manager.stop()
+	}
+
+	// Without master defaults nothing is resolved, so no snapshot is written.
+	startWith(nil)
+	unchanged, err := database.DynamicResourcePoolByName(ctx, "refreshed")
+	require.NoError(t, err)
+	require.Equal(t, db.DynamicResourcePoolReady, unchanged.State)
+	require.Equal(t, specBefore.ConfigHash, unchanged.ConfigHash)
+
+	changedMasterDefaults := *model.DefaultTaskContainerDefaults()
+	changedMasterDefaults.ShmSizeBytes = 16 << 30
+	startWith(&changedMasterDefaults)
+	refreshed, err := database.DynamicResourcePoolByName(ctx, "refreshed")
+	require.NoError(t, err)
+	require.NotEqual(t, specBefore.ConfigHash, refreshed.ConfigHash)
+	require.JSONEq(t, string(*specBefore.Spec), string(*refreshed.Spec))
+	require.Equal(t, *specBefore.SpecHash, *refreshed.SpecHash)
+	require.Equal(t, specBefore.Revision, refreshed.Revision)
+	snapshotRecord := refreshed
+	snapshotRecord.Spec = nil
+	snapshot, inherit, err := decodeStoredDynamicResourcePool(snapshotRecord)
+	require.NoError(t, err)
+	require.False(t, inherit)
+	require.False(t, snapshot.TaskContainerDefaults.ForcePullImage)
+	require.EqualValues(t, 16<<30, snapshot.TaskContainerDefaults.ShmSizeBytes)
+	legacyAfter, err := database.DynamicResourcePoolByName(ctx, "legacy")
+	require.NoError(t, err)
+	require.Equal(t, legacyBefore.ConfigHash, legacyAfter.ConfigHash)
+	require.JSONEq(t, string(legacyBefore.Config), string(legacyAfter.Config))
+
+	// Defaults that no longer resolve keep the stored snapshot; the pool still starts.
+	logs := logrustest.NewGlobal()
+	t.Cleanup(logs.Reset)
+	invalidMasterDefaults := changedMasterDefaults
+	invalidMasterDefaults.ShmSizeBytes = -1
+	startWith(&invalidMasterDefaults)
+	kept, err := database.DynamicResourcePoolByName(ctx, "refreshed")
+	require.NoError(t, err)
+	require.Equal(t, refreshed.ConfigHash, kept.ConfigHash)
+	warned := false
+	for _, entry := range logs.AllEntries() {
+		if entry.Level == logrus.WarnLevel && strings.Contains(entry.Message, `"refreshed"`) {
+			warned = true
+		}
+	}
+	require.True(t, warned, "an unresolvable snapshot must be reported")
+}
+
+func TestCreatedSnapshotReadableByLegacyMaster(t *testing.T) {
+	database, cleanup := db.MustResolveNewPostgresDatabase(t)
+	defer cleanup()
+	db.MustMigrateTestPostgres(t, database, "file://../../../static/migrations", "up")
+	ctx := context.Background()
+
+	masterDefaults := *model.DefaultTaskContainerDefaults()
+	masterDefaults.ShmSizeBytes = 16 << 30
+	manager, err := New(
+		ctx, database, echo.New(), testDynamicPoolRMConfig(42), nil, nil, &masterDefaults,
+	)
+	require.NoError(t, err)
+	defer manager.stop()
+	spec := json.RawMessage(`{"pool_name":"rollback","description":"d",
+		"agent_reconnect_wait":"10m","task_container_defaults":{"add_capabilities":["CAP_X"]}}`)
+	created, _, err := manager.CreateDynamicResourcePool(ctx, "rollback-operation", spec, masterDefaults)
+	require.NoError(t, err)
+
+	// Read the row with the column list of a master without spec support.
+	legacy := db.DynamicResourcePool{}
+	err = db.Bun().QueryRowContext(ctx, `
+SELECT cluster_name, pool_name, config_version, idempotency_key, config, config_hash, state
+FROM dynamic_resource_pools
+WHERE pool_name = ?`, created.PoolName).Scan(
+		&legacy.ClusterName, &legacy.PoolName, &legacy.ConfigVersion, &legacy.IdempotencyKey,
+		&legacy.Config, &legacy.ConfigHash, &legacy.State,
+	)
+	require.NoError(t, err)
+	require.Equal(t, 1, legacy.ConfigVersion)
+	decoded, inherit, err := decodeStoredDynamicResourcePool(legacy)
+	require.NoError(t, err)
+	require.False(t, inherit)
+
+	specConfig, err := decodeDynamicPoolSpec(*created.Spec)
+	require.NoError(t, err)
+	normalized, err := manager.NormalizeDynamicResourcePoolConfig(specConfig, masterDefaults)
+	require.NoError(t, err)
+	require.Equal(t, normalized, decoded)
+	require.Equal(t, model.Duration(10*time.Minute), decoded.AgentReconnectWait)
 }
 
 func TestDynamicPoolPendingWorkerRecoversReplayWithoutRestart(t *testing.T) {
@@ -104,7 +303,7 @@ func TestDynamicPoolPendingWorkerRecoversReplayWithoutRestart(t *testing.T) {
 			PoolName: "default", MaxAuxContainersPerAgent: 100,
 		}},
 	}
-	manager, err := New(context.Background(), database, echo.New(), rmConfig, nil, nil)
+	manager, err := New(context.Background(), database, echo.New(), rmConfig, nil, nil, nil)
 	require.NoError(t, err)
 	defer manager.stop()
 	staticPool, ok := manager.registry.readyPool("default")
@@ -128,20 +327,9 @@ func TestDynamicPoolPendingWorkerRecoversReplayWithoutRestart(t *testing.T) {
 	}
 
 	cfg := config.ResourcePoolConfig{PoolName: "recover-pending", MaxAuxContainersPerAgent: 100}
-	normalized, err := manager.NormalizeDynamicResourcePoolConfig(
-		cfg, *model.DefaultTaskContainerDefaults(),
-	)
-	require.NoError(t, err)
-	raw, hash, err := marshalDynamicResourcePoolConfig(normalized)
-	require.NoError(t, err)
+	spec := json.RawMessage(`{"pool_name":"recover-pending","max_aux_containers_per_agent":100}`)
 	// This is the durable state left by an insert whose following read failed or was canceled.
-	_, created, err := database.CreateDynamicResourcePool(context.Background(), db.DynamicResourcePool{
-		ClusterName: "agent-cluster", PoolName: cfg.PoolName,
-		ConfigVersion: dynamicResourcePoolConfigVersion, IdempotencyKey: "recover-key",
-		Config: raw, ConfigHash: hash,
-	})
-	require.NoError(t, err)
-	require.True(t, created)
+	insertSpecDynamicPool(t, manager, "recover-key", string(spec), *model.DefaultTaskContainerDefaults())
 	require.Eventually(t, func() bool {
 		select {
 		case <-started:
@@ -158,7 +346,7 @@ func TestDynamicPoolPendingWorkerRecoversReplayWithoutRestart(t *testing.T) {
 		go func() {
 			defer group.Done()
 			replayed, wasCreated, replayErr := manager.CreateDynamicResourcePool(
-				context.Background(), "recover-key", cfg, *model.DefaultTaskContainerDefaults(),
+				context.Background(), "recover-key", spec, *model.DefaultTaskContainerDefaults(),
 			)
 			if replayErr != nil || wasCreated || replayed.PoolName != cfg.PoolName {
 				t.Errorf("replay: record=%+v created=%v err=%v", replayed, wasCreated, replayErr)
@@ -175,7 +363,7 @@ func TestDynamicPoolPendingWorkerRecoversReplayWithoutRestart(t *testing.T) {
 	runtime, ok := manager.registry.readyPool(cfg.PoolName)
 	require.True(t, ok)
 	_, _, err = manager.CreateDynamicResourcePool(
-		context.Background(), "recover-key", cfg, *model.DefaultTaskContainerDefaults(),
+		context.Background(), "recover-key", spec, *model.DefaultTaskContainerDefaults(),
 	)
 	require.NoError(t, err)
 	afterReplay, ok := manager.registry.readyPool(cfg.PoolName)
@@ -200,7 +388,7 @@ func TestDynamicPoolReadyWorkerRecoversCommittedWriteError(t *testing.T) {
 			PoolName: "default", MaxAuxContainersPerAgent: 100,
 		}},
 	}
-	manager, err := New(context.Background(), database, echo.New(), rmConfig, nil, nil)
+	manager, err := New(context.Background(), database, echo.New(), rmConfig, nil, nil, nil)
 	require.NoError(t, err)
 	defer manager.stop()
 	manager.StopDynamicPoolWorker()
@@ -273,7 +461,7 @@ func TestDynamicPoolReadyWorkerRecoversCommittedWriteError(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.True(t, wasCreated)
-	_, err = manager.initializeDynamicResourcePool(context.Background(), record, normalized)
+	_, err = manager.initializeDynamicResourcePool(context.Background(), record, normalized, false)
 	require.ErrorIs(t, err, ErrDynamicResourcePoolPersistence)
 	first := <-created
 	require.EqualValues(t, 1, stopped.Load(), "the unpublishable prepared runtime must stop")
@@ -346,7 +534,7 @@ func TestDynamicPoolRetryWorkerStopsWithMasterContext(t *testing.T) {
 			PoolName: "default", MaxAuxContainersPerAgent: 100,
 		}},
 	}
-	manager, err := New(masterCtx, database, echo.New(), rmConfig, nil, nil)
+	manager, err := New(masterCtx, database, echo.New(), rmConfig, nil, nil, nil)
 	require.NoError(t, err)
 	defer manager.stop()
 	// Keep the initial scanner out of the setup window while arranging a durable failure.
@@ -413,6 +601,24 @@ func TestDynamicPoolStartupRejectsUnsupportedVersion(t *testing.T) {
 		}},
 	)
 	require.ErrorContains(t, err, "unsupported config version 999")
+
+	_, err = database.MarkDynamicResourcePoolReady(context.Background(), "future-version", nil)
+	require.NoError(t, err)
+	_, err = db.Bun().NewRaw(`
+UPDATE dynamic_resource_pools
+SET config_version = 1, spec = '{"pool_name":"future-version"}', spec_version = 2,
+    spec_hash = 'future-spec-hash'
+WHERE pool_name = 'future-version'`).Exec(context.Background())
+	require.NoError(t, err)
+	err = ValidatePersistedDynamicPoolConfigs(
+		context.Background(), database, []*config.ResourceManagerWithPoolsConfig{{
+			ResourceManager: &config.ResourceManagerConfig{AgentRM: &config.AgentResourceManagerConfig{
+				ClusterName: "agent-cluster",
+			}},
+			ResourcePools: []config.ResourcePoolConfig{{PoolName: "default"}},
+		}},
+	)
+	require.ErrorContains(t, err, "unsupported spec version 2")
 }
 
 func TestDynamicPoolStartupRejectsStaticCollision(t *testing.T) {

@@ -22,6 +22,8 @@ import (
 
 const dynamicResourcePoolConfigVersion = 1
 
+const dynamicResourcePoolSpecVersion = 1
+
 const dynamicPoolPersistenceTimeout = 10 * time.Second
 const dynamicPoolScanInterval = time.Second
 
@@ -56,9 +58,10 @@ var (
 	ErrDynamicResourcePoolPersistence = errors.New("persisting dynamic resource pool state")
 )
 
-// NormalizeDynamicResourcePoolConfig validates a user-supplied config and freezes defaults that
-// would otherwise change after a master YAML edit. Provider-backed pools are intentionally outside
-// the first milestone.
+// NormalizeDynamicResourcePoolConfig validates a user-supplied config and resolves its effective
+// scheduler and task container defaults against the master configuration. The result is the
+// snapshot stored next to a spec, in the shape that masters without spec support run. Provider-
+// backed pools are intentionally outside the first milestone.
 func (a *ResourceManager) NormalizeDynamicResourcePoolConfig(
 	cfg config.ResourcePoolConfig,
 	masterDefaults model.TaskContainerDefaultsConfig,
@@ -124,53 +127,111 @@ func (a *ResourceManager) NormalizeDynamicResourcePoolConfig(
 	return cfg, nil
 }
 
-// CreateDynamicResourcePool persists a normalized desired config. The RM-owned worker initializes
-// Pending records and reconciles Ready records missing a runtime after ambiguous state writes.
+// CreateDynamicResourcePool persists an administrator's spec with a snapshot of its effective
+// config. The RM-owned worker initializes Pending records and reconciles Ready records missing a
+// runtime after ambiguous state writes.
 func (a *ResourceManager) CreateDynamicResourcePool(
 	ctx context.Context,
 	idempotencyKey string,
-	cfg config.ResourcePoolConfig,
+	rawSpec json.RawMessage,
 	masterDefaults model.TaskContainerDefaultsConfig,
 ) (record db.DynamicResourcePool, created bool, err error) {
 	if err = validateDynamicPoolIdempotencyKey(idempotencyKey); err != nil {
 		return record, false, err
 	}
 
-	cfg, err = a.NormalizeDynamicResourcePoolConfig(cfg, masterDefaults)
+	spec, err := a.prepareDynamicPoolSpec(rawSpec, masterDefaults)
 	if err != nil {
 		return record, false, err
 	}
-	configJSON, configHash, err := marshalDynamicResourcePoolConfig(cfg)
-	if err != nil {
-		return record, false, err
-	}
+	poolName := spec.config.PoolName
 
 	// A desired name without a durable dynamic record is a static pool in this RM.
-	if _, ok := a.registry.desiredConfig(cfg.PoolName); ok {
-		if _, getErr := a.db.DynamicResourcePoolByName(ctx, cfg.PoolName); errors.Is(
+	if _, ok := a.registry.desiredConfig(poolName); ok {
+		if _, getErr := a.db.DynamicResourcePoolByName(ctx, poolName); errors.Is(
 			getErr, db.ErrDynamicResourcePoolNotFound,
 		) {
 			return record, false, fmt.Errorf(
-				"%w: %q", ErrStaticResourcePoolConflict, cfg.PoolName,
+				"%w: %q", ErrStaticResourcePoolConflict, poolName,
 			)
 		} else if getErr != nil {
 			return record, false, getErr
 		}
 	}
 
-	record, created, err = a.db.CreateDynamicResourcePool(ctx, db.DynamicResourcePool{
-		ClusterName:    a.config.ClusterName,
-		PoolName:       cfg.PoolName,
-		ConfigVersion:  dynamicResourcePoolConfigVersion,
-		IdempotencyKey: idempotencyKey,
-		Config:         configJSON,
-		ConfigHash:     configHash,
-	})
+	record, created, err = a.db.CreateDynamicResourcePool(
+		ctx, spec.record(a.config.ClusterName, idempotencyKey),
+	)
 	if err == nil && (record.State == db.DynamicResourcePoolPending ||
 		record.State == db.DynamicResourcePoolReady && !a.IsDynamicResourcePoolReady(record.PoolName)) {
 		a.wakeDynamicPoolWorker()
 	}
 	return record, created, err
+}
+
+// preparedDynamicPoolSpec is a validated spec with the effective snapshot written next to it.
+type preparedDynamicPoolSpec struct {
+	config   config.ResourcePoolConfig
+	spec     json.RawMessage
+	specHash string
+	snapshot db.DynamicResourcePoolSnapshot
+}
+
+// record returns the durable record that saves the spec with its snapshot.
+func (p preparedDynamicPoolSpec) record(clusterName, idempotencyKey string) db.DynamicResourcePool {
+	spec := p.spec
+	specHash := p.specHash
+	specVersion := dynamicResourcePoolSpecVersion
+	return db.DynamicResourcePool{
+		ClusterName:    clusterName,
+		PoolName:       p.config.PoolName,
+		ConfigVersion:  dynamicResourcePoolConfigVersion,
+		IdempotencyKey: idempotencyKey,
+		Config:         p.snapshot.Config,
+		ConfigHash:     p.snapshot.ConfigHash,
+		Spec:           &spec,
+		SpecVersion:    &specVersion,
+		SpecHash:       &specHash,
+	}
+}
+
+// prepareDynamicPoolSpec canonicalizes and validates a spec as it is validated at load, then
+// resolves its effective snapshot. Every error is an ErrInvalidDynamicResourcePool.
+func (a *ResourceManager) prepareDynamicPoolSpec(
+	rawSpec json.RawMessage,
+	masterDefaults model.TaskContainerDefaultsConfig,
+) (preparedDynamicPoolSpec, error) {
+	spec, specHash, err := canonicalDynamicPoolSpec(rawSpec)
+	if err != nil {
+		return preparedDynamicPoolSpec{}, fmt.Errorf("%w: %v", ErrInvalidDynamicResourcePool, err)
+	}
+	cfg, err := decodeDynamicPoolSpec(spec)
+	if err != nil {
+		return preparedDynamicPoolSpec{}, fmt.Errorf("%w: %v", ErrInvalidDynamicResourcePool, err)
+	}
+	snapshot, err := a.dynamicPoolSnapshot(cfg, masterDefaults)
+	if err != nil {
+		return preparedDynamicPoolSpec{}, err
+	}
+	return preparedDynamicPoolSpec{
+		config: cfg, spec: spec, specHash: specHash, snapshot: snapshot,
+	}, nil
+}
+
+// dynamicPoolSnapshot returns the effective config of a decoded spec.
+func (a *ResourceManager) dynamicPoolSnapshot(
+	cfg config.ResourcePoolConfig,
+	masterDefaults model.TaskContainerDefaultsConfig,
+) (db.DynamicResourcePoolSnapshot, error) {
+	normalized, err := a.NormalizeDynamicResourcePoolConfig(cfg, masterDefaults)
+	if err != nil {
+		return db.DynamicResourcePoolSnapshot{}, err
+	}
+	raw, hash, err := marshalDynamicResourcePoolConfig(normalized)
+	if err != nil {
+		return db.DynamicResourcePoolSnapshot{}, err
+	}
+	return db.DynamicResourcePoolSnapshot{Config: raw, ConfigHash: hash}, nil
 }
 
 func validateDynamicPoolIdempotencyKey(idempotencyKey string) error {
@@ -246,7 +307,7 @@ func (a *ResourceManager) advancePendingDynamicPools(ctx context.Context) {
 			(record.State != db.DynamicResourcePoolReady || a.IsDynamicResourcePoolReady(record.PoolName)) {
 			continue
 		}
-		cfg, decodeErr := decodeStoredDynamicResourcePool(record)
+		cfg, inherit, decodeErr := decodeStoredDynamicResourcePool(record)
 		if decodeErr != nil {
 			if record.State == db.DynamicResourcePoolPending {
 				_, err = a.failDynamicResourcePool(ctx, record, decodeErr.Error())
@@ -254,7 +315,7 @@ func (a *ResourceManager) advancePendingDynamicPools(ctx context.Context) {
 				err = decodeErr
 			}
 		} else {
-			_, err = a.initializeDynamicResourcePool(ctx, record, cfg)
+			_, err = a.initializeDynamicResourcePool(ctx, record, cfg, inherit)
 		}
 		if err != nil && ctx.Err() == nil {
 			a.syslog.WithError(err).WithField("pool", record.PoolName).
@@ -267,27 +328,31 @@ func (a *ResourceManager) initializeDynamicResourcePool(
 	ctx context.Context,
 	record db.DynamicResourcePool,
 	cfg config.ResourcePoolConfig,
+	inherit bool,
 ) (db.DynamicResourcePool, error) {
-	if existing, ok := a.registry.desiredConfig(cfg.PoolName); ok {
-		_, existingHash, err := marshalDynamicResourcePoolConfig(existing)
-		if err != nil || existingHash != record.ConfigHash {
-			if err == nil {
-				err = fmt.Errorf("desired runtime config differs from durable config")
-			}
+	var err error
+	switch revision, published, exists := a.registry.activeRevision(cfg.PoolName); {
+	case published:
+		if revision != record.Revision {
+			err = fmt.Errorf("desired runtime config differs from durable config")
 			if record.State == db.DynamicResourcePoolReady {
 				return record, err
 			}
 			return a.failDynamicResourcePool(ctx, record, err.Error())
 		}
-		if _, ready := a.registry.readyPool(cfg.PoolName); ready {
-			if record.State == db.DynamicResourcePoolReady {
-				return record, nil
-			}
-			return setDynamicResourcePoolState(
-				a.db, ctx, cfg.PoolName, db.DynamicResourcePoolReady, nil,
-			)
+		if record.State == db.DynamicResourcePoolReady {
+			return record, nil
 		}
-	} else if err := a.registry.addDynamicDesired(cfg); err != nil {
+		return setDynamicResourcePoolState(
+			a.db, ctx, cfg.PoolName, db.DynamicResourcePoolReady, nil,
+		)
+	case exists:
+		// An update of a Failed pool may have changed its durable spec since the entry was added.
+		err = a.registry.replaceUnready(cfg, !inherit, record.Revision)
+	default:
+		err = a.registry.addStoredDynamicDesired(cfg, inherit, record.Revision)
+	}
+	if err != nil {
 		if record.State == db.DynamicResourcePoolReady {
 			return record, err
 		}
@@ -302,7 +367,7 @@ func (a *ResourceManager) initializeDynamicResourcePool(
 		return a.failDynamicResourcePool(ctx, record, err.Error())
 	}
 	// Ready may have committed even though its original write returned an error. Rebuild its
-	// runtime from the frozen config without changing durable state; transient failures retry.
+	// runtime from the saved config without changing durable state; transient failures retry.
 	if record.State == db.DynamicResourcePoolReady {
 		if err = a.registry.publishReady(cfg.PoolName, pool); err != nil {
 			stopPreparedDynamicResourcePool(pool)
@@ -357,6 +422,16 @@ func (a *ResourceManager) IsDynamicResourcePoolReady(poolName string) bool {
 	return ready
 }
 
+// ActiveDynamicResourcePoolRevision returns the durable revision that a dynamic pool's published
+// runtime runs. It reports false for an unpublished pool and for a pool served from master.yaml.
+func (a *ResourceManager) ActiveDynamicResourcePoolRevision(poolName string) (int64, bool) {
+	revision, published, _ := a.registry.activeRevision(poolName)
+	if !published || revision == 0 {
+		return 0, false
+	}
+	return revision, true
+}
+
 func dynamicPoolPersistenceContext(requestCtx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(requestCtx), dynamicPoolPersistenceTimeout)
 }
@@ -401,11 +476,18 @@ func ValidatePersistedDynamicPoolConfigs(
 				record.PoolName, staticCluster,
 			)
 		}
-		if _, err = decodeStoredDynamicResourcePool(record); err != nil {
+		if _, _, err = decodeStoredDynamicResourcePool(record); err != nil {
 			return fmt.Errorf("dynamic resource pool %q: %w", record.PoolName, err)
 		}
 	}
 	return nil
+}
+
+// storedDynamicPool is a durable record with the config that its runtime pool is built from.
+type storedDynamicPool struct {
+	record  db.DynamicResourcePool
+	config  config.ResourcePoolConfig
+	inherit bool
 }
 
 // loadDynamicPoolConfigs returns durable desired configs for one agent RM. The global startup
@@ -414,7 +496,7 @@ func loadDynamicPoolConfigs(
 	database *db.PgDB,
 	clusterName string,
 	static []config.ResourcePoolConfig,
-) ([]config.ResourcePoolConfig, error) {
+) ([]storedDynamicPool, error) {
 	records, err := database.ListDynamicResourcePools(context.Background(), clusterName)
 	if err != nil {
 		return nil, err
@@ -423,31 +505,37 @@ func loadDynamicPoolConfigs(
 	for _, cfg := range static {
 		staticNames[cfg.PoolName] = true
 	}
-	configs := make([]config.ResourcePoolConfig, 0, len(records))
+	pools := make([]storedDynamicPool, 0, len(records))
 	for _, record := range records {
 		if staticNames[record.PoolName] {
 			return nil, fmt.Errorf(
 				"dynamic resource pool %q conflicts with static resource pool", record.PoolName,
 			)
 		}
-		cfg, err := decodeStoredDynamicResourcePool(record)
+		cfg, inherit, err := decodeStoredDynamicResourcePool(record)
 		if err != nil {
 			return nil, fmt.Errorf("dynamic resource pool %q: %w", record.PoolName, err)
 		}
-		configs = append(configs, cfg)
+		pools = append(pools, storedDynamicPool{record: record, config: cfg, inherit: inherit})
 	}
-	return configs, nil
+	return pools, nil
 }
 
-// markDynamicPoolsReady records successful startup initialization of persisted pools.
-func markDynamicPoolsReady(
+// markDynamicPoolsReady records successful startup initialization of persisted pools. The
+// snapshot of a pool that inherits is rewritten when master configuration changed its effective
+// values, so that a master without spec support would run what this master runs.
+func (a *ResourceManager) markDynamicPoolsReady(
 	ctx context.Context,
-	database *db.PgDB,
-	configs []config.ResourcePoolConfig,
+	pools []storedDynamicPool,
+	masterDefaults *model.TaskContainerDefaultsConfig,
 ) error {
-	for _, cfg := range configs {
-		if _, err := database.SetDynamicResourcePoolState(
-			ctx, cfg.PoolName, db.DynamicResourcePoolReady, nil,
+	for _, pool := range pools {
+		var snapshot *db.DynamicResourcePoolSnapshot
+		if pool.inherit && masterDefaults != nil {
+			snapshot = a.refreshedDynamicPoolSnapshot(pool, *masterDefaults)
+		}
+		if _, err := a.db.MarkDynamicResourcePoolReady(
+			ctx, pool.record.PoolName, snapshot,
 		); err != nil {
 			return err
 		}
@@ -455,7 +543,66 @@ func markDynamicPoolsReady(
 	return nil
 }
 
+// refreshedDynamicPoolSnapshot returns a pool's effective config when it differs from the stored
+// snapshot. A config that no longer resolves keeps the stored snapshot; the pool itself still runs.
+func (a *ResourceManager) refreshedDynamicPoolSnapshot(
+	pool storedDynamicPool,
+	masterDefaults model.TaskContainerDefaultsConfig,
+) *db.DynamicResourcePoolSnapshot {
+	snapshot, err := a.dynamicPoolSnapshot(pool.config, masterDefaults)
+	if err != nil {
+		a.syslog.WithError(err).WithField("pool", pool.record.PoolName).Warnf(
+			"resource pool %q: keeping its stored effective config", pool.record.PoolName,
+		)
+		return nil
+	}
+	if snapshot.ConfigHash == pool.record.ConfigHash {
+		return nil
+	}
+	return &snapshot
+}
+
+// decodeStoredDynamicResourcePool returns the config that a durable record runs and whether it
+// inherits master defaults. A record without a spec runs its frozen effective config.
 func decodeStoredDynamicResourcePool(
+	record db.DynamicResourcePool,
+) (cfg config.ResourcePoolConfig, inherit bool, err error) {
+	if record.Spec == nil {
+		cfg, err = decodeEffectiveDynamicResourcePool(record)
+		return cfg, false, err
+	}
+	if record.ConfigVersion != dynamicResourcePoolConfigVersion {
+		return config.ResourcePoolConfig{}, false, fmt.Errorf(
+			"unsupported config version %d", record.ConfigVersion,
+		)
+	}
+	specVersion := 0
+	if record.SpecVersion != nil {
+		specVersion = *record.SpecVersion
+	}
+	if specVersion != dynamicResourcePoolSpecVersion {
+		return config.ResourcePoolConfig{}, false, fmt.Errorf(
+			"unsupported spec version %d", specVersion,
+		)
+	}
+	// The spec hash is not checked: PostgreSQL may rewrite number literals and duplicate keys in
+	// stored JSONB, so the hash is only compared with other hashes computed at write time.
+	cfg, err = decodeDynamicPoolSpec(*record.Spec)
+	if err != nil {
+		return config.ResourcePoolConfig{}, false, err
+	}
+	if cfg.PoolName != record.PoolName {
+		return config.ResourcePoolConfig{}, false, fmt.Errorf(
+			"stored pool name %q does not match record name %q", cfg.PoolName, record.PoolName,
+		)
+	}
+	return cfg, true, nil
+}
+
+// decodeEffectiveDynamicResourcePool decodes the frozen effective config of a record without a
+// spec. Masters without spec support decode every record this way, so the snapshot stored next to
+// a spec must keep passing it.
+func decodeEffectiveDynamicResourcePool(
 	record db.DynamicResourcePool,
 ) (config.ResourcePoolConfig, error) {
 	if record.ConfigVersion != dynamicResourcePoolConfigVersion {
@@ -500,6 +647,69 @@ func decodeStoredDynamicResourcePool(
 	}
 	if hash != record.ConfigHash {
 		return config.ResourcePoolConfig{}, fmt.Errorf("effective config hash mismatch")
+	}
+	return cfg, nil
+}
+
+// canonicalDynamicPoolSpec returns the bytes and hash stored for an administrator's spec. Keys are
+// sorted, insignificant whitespace is removed and top-level null values are dropped, so a null
+// scheduler, provider or task_container_defaults means the same as leaving it out. Nested nulls
+// and number literals are kept as written.
+func canonicalDynamicPoolSpec(raw json.RawMessage) (json.RawMessage, string, error) {
+	if err := ValidateDynamicResourcePoolConfigJSON(raw); err != nil {
+		return nil, "", err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var spec map[string]interface{}
+	if err := decoder.Decode(&spec); err != nil {
+		return nil, "", fmt.Errorf("config must be a JSON object: %w", err)
+	}
+	if err := ensureJSONEOF(decoder); err != nil {
+		return nil, "", err
+	}
+	if spec == nil {
+		return nil, "", fmt.Errorf("config must be a JSON object")
+	}
+	for key, value := range spec {
+		if value == nil {
+			delete(spec, key)
+		}
+	}
+	canonical, err := json.Marshal(spec)
+	if err != nil {
+		return nil, "", fmt.Errorf("marshaling dynamic pool spec: %w", err)
+	}
+	hash := sha256.Sum256(canonical)
+	return canonical, hex.EncodeToString(hash[:]), nil
+}
+
+// decodeDynamicPoolSpec decodes and validates a spec the way a master.yaml pool is read at
+// startup. An absent scheduler or task_container_defaults stays nil and resolves against the
+// master configuration at use.
+func decodeDynamicPoolSpec(spec json.RawMessage) (config.ResourcePoolConfig, error) {
+	if err := ValidateDynamicResourcePoolConfigJSON(spec); err != nil {
+		return config.ResourcePoolConfig{}, fmt.Errorf("validating spec schema: %w", err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(spec))
+	decoder.DisallowUnknownFields()
+	var cfg config.ResourcePoolConfig
+	if err := decoder.Decode(&cfg); err != nil {
+		return config.ResourcePoolConfig{}, fmt.Errorf("decoding spec: %w", err)
+	}
+	if err := ensureJSONEOF(decoder); err != nil {
+		return config.ResourcePoolConfig{}, err
+	}
+	if cfg.Provider != nil {
+		return config.ResourcePoolConfig{}, fmt.Errorf("provider configuration is unsupported")
+	}
+	if err := check.Validate(&cfg); err != nil {
+		return config.ResourcePoolConfig{}, fmt.Errorf("validating spec: %w", err)
+	}
+	if cfg.Scheduler != nil {
+		if _, err := MakeScheduler(cfg.Scheduler); err != nil {
+			return config.ResourcePoolConfig{}, fmt.Errorf("validating scheduler: %w", err)
+		}
 	}
 	return cfg, nil
 }

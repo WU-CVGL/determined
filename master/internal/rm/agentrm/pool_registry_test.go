@@ -91,6 +91,61 @@ func TestPoolRegistrySnapshotsAreOrderedAndIsolated(t *testing.T) {
 	require.NotEqual(t, "changed", registry.readyEntries()[0].config.Description)
 }
 
+func TestPoolRegistryReplaceUnready(t *testing.T) {
+	registry, err := newPoolRegistry([]config.ResourcePoolConfig{{PoolName: "static"}})
+	require.NoError(t, err)
+	require.NoError(t, registry.addStoredDynamicDesired(
+		config.ResourcePoolConfig{PoolName: "dynamic", Description: "first"}, false, 1,
+	))
+	require.NoError(t, registry.addStoredDynamicDesired(
+		config.ResourcePoolConfig{PoolName: "last", Description: "last"}, true, 1,
+	))
+
+	revision, published, exists := registry.activeRevision("dynamic")
+	require.Zero(t, revision)
+	require.False(t, published)
+	require.True(t, exists)
+	_, _, exists = registry.activeRevision("missing")
+	require.False(t, exists)
+
+	require.NoError(t, registry.replaceUnready(
+		config.ResourcePoolConfig{PoolName: "dynamic", Description: "second"}, false, 2,
+	))
+	configs := registry.desiredConfigs()
+	require.Equal(t, []string{"static", "dynamic", "last"}, []string{
+		configs[0].PoolName, configs[1].PoolName, configs[2].PoolName,
+	})
+	require.Equal(t, "second", configs[1].Description)
+	registry.mu.RLock()
+	entry := registry.entries["dynamic"]
+	registry.mu.RUnlock()
+	require.False(t, entry.taskDefaultsEffective)
+	require.EqualValues(t, 2, entry.revision)
+
+	dynamicConfig := config.ResourcePoolConfig{PoolName: "dynamic"}
+	require.NoError(t, registry.publishReady("dynamic", &resourcePool{config: &dynamicConfig}))
+	revision, published, exists = registry.activeRevision("dynamic")
+	require.EqualValues(t, 2, revision)
+	require.True(t, published)
+	require.True(t, exists)
+	require.ErrorContains(t, registry.replaceUnready(
+		config.ResourcePoolConfig{PoolName: "dynamic", Description: "third"}, false, 3,
+	), "already ready")
+	cfg, ok := registry.readyConfig("dynamic")
+	require.True(t, ok)
+	require.Equal(t, "second", cfg.Description)
+	require.ErrorContains(t, registry.replaceUnready(
+		config.ResourcePoolConfig{PoolName: "missing"}, false, 1,
+	), "undesired")
+
+	staticConfig := config.ResourcePoolConfig{PoolName: "static"}
+	require.NoError(t, registry.publishReady("static", &resourcePool{config: &staticConfig}))
+	revision, published, exists = registry.activeRevision("static")
+	require.Zero(t, revision)
+	require.True(t, published)
+	require.True(t, exists)
+}
+
 func TestPoolRegistryConcurrentLookupAndPublication(t *testing.T) {
 	registry, err := newPoolRegistry([]config.ResourcePoolConfig{{PoolName: poolRegistryTestPoolName}})
 	require.NoError(t, err)
@@ -204,7 +259,7 @@ func TestTaskContainerDefaultsKeepsDynamicEffectiveValues(t *testing.T) {
 	}
 	registryState, err := newPoolRegistry([]config.ResourcePoolConfig{staticConfig})
 	require.NoError(t, err)
-	require.NoError(t, registryState.addDynamicDesired(dynamicConfig))
+	require.NoError(t, registryState.addStoredDynamicDesired(dynamicConfig, false, 1))
 	require.NoError(t, registryState.publishReady(
 		"static", &resourcePool{config: &staticConfig},
 	))
