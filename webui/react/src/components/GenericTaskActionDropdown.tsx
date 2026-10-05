@@ -38,7 +38,8 @@ interface Props {
  * first, then Copy Task ID, Pause or Unpause, and the destructive Kill last, in red. Pause, Unpause
  * and Kill are offered as the task's page offers them, to the task's owner or an admin, and ask the
  * same confirmations (useGenericTaskActions). Kill kills the task and its descendants, as the
- * page's Kill does.
+ * page's Kill does. In the generic task list, the two menus of a row share the task's running
+ * action and failed unpause (GenericTaskActionStateContext).
  */
 const GenericTaskActionDropdown: React.FC<Props> = ({ children, onComplete, task }: Props) => {
   const { canModifyWorkspaceNSC } = usePermissions();

@@ -8,7 +8,8 @@ import GenericTaskActions from 'pages/GenericTaskDetails/GenericTaskActions';
 import { killGenericTask, pauseGenericTask, unpauseGenericTask } from 'services/api';
 import { GenericTask, GenericTaskState } from 'types';
 import { copyToClipboard } from 'utils/dom';
-import { isDangerMenuItem, menuLabels } from 'utils/tests/menu';
+import handleError from 'utils/error';
+import { isDangerMenuItem, isDisabledMenuItem, menuLabels } from 'utils/tests/menu';
 
 import GenericTaskActionDropdown from './GenericTaskActionDropdown';
 
@@ -32,6 +33,10 @@ vi.mock('hooks/useTaskResourcesEnabled', () => ({ default: () => mocks.resources
 vi.mock('utils/dom', async (importOriginal) => ({
   ...(await importOriginal<typeof import('utils/dom')>()),
   copyToClipboard: vi.fn(() => Promise.resolve()),
+}));
+vi.mock('utils/error', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('utils/error')>()),
+  default: vi.fn(),
 }));
 vi.mock('react-router-dom', async (importOriginal) => ({
   ...(await importOriginal<typeof import('react-router-dom')>()),
@@ -245,6 +250,58 @@ describe('GenericTaskActionDropdown', () => {
       await userEvent.click(screen.getByText('Kill'));
       await userEvent.click((await confirmation('Kill')).ok);
       await waitFor(() => expect(killGenericTask).toHaveBeenCalledTimes(1));
+    });
+
+    it('offers a retry with the retry confirmation after an unpause failed', async () => {
+      vi.mocked(unpauseGenericTask).mockRejectedValueOnce(new Error('resume failed'));
+      await openMenu({ state: GenericTaskState.Paused });
+      await userEvent.click(screen.getByText('Unpause'));
+      await userEvent.click((await confirmation('Unpause')).ok);
+      await waitFor(() => expect(handleError).toHaveBeenCalled());
+      // The confirmation stays open after a failure; close it.
+      await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+      await userEvent.click(screen.getByRole('button'));
+      await waitFor(() =>
+        expect(menuLabels()).toEqual([
+          'View Logs',
+          'View Resources',
+          'Copy Task ID',
+          'Retry Unpause',
+          'Kill',
+        ]),
+      );
+      await userEvent.click(screen.getByText('Retry Unpause'));
+      const dialog = await confirmation('Retry Unpause');
+      expect(dialog.title).toBe('Retry unpause of eval-sweep');
+      expect(dialog.text).toBe(
+        'Retry the unpause of this task? The master resumes the members of its tree that the ' +
+          'failed unpause did not start, or refuses if there is nothing left to resume.',
+      );
+      await userEvent.click(dialog.ok);
+      await waitFor(() => expect(unpauseGenericTask).toHaveBeenCalledTimes(2));
+      expect(vi.mocked(unpauseGenericTask).mock.calls[1][0]).toStrictEqual({ taskId: 'task-1' });
+    });
+
+    it('disables Pause and Kill while an action on the task runs', async () => {
+      let finishKill = () => {};
+      vi.mocked(killGenericTask).mockImplementationOnce(
+        () => new Promise<void>((resolve) => (finishKill = resolve)),
+      );
+      await openMenu({}, true);
+      await userEvent.click(screen.getByText('Kill'));
+      await userEvent.click((await confirmation('Kill')).ok);
+      await waitFor(() => expect(killGenericTask).toHaveBeenCalled());
+
+      fireEvent.contextMenu(screen.getByText('task row'));
+      await waitFor(() => expect(isDisabledMenuItem('Kill')).toBe(true));
+      expect(isDisabledMenuItem('Pause')).toBe(true);
+      expect(isDisabledMenuItem('Copy Task ID')).toBe(false);
+
+      finishKill();
+      await waitFor(() => expect(isDisabledMenuItem('Kill')).toBe(false));
+      expect(isDisabledMenuItem('Pause')).toBe(false);
     });
   });
 
