@@ -287,13 +287,23 @@ describe('useAuthCheck', () => {
   });
 
   it('reloads the page when another tab signed in as someone else', async () => {
+    authStore.setAuth({ isAuthenticated: true });
+    authStore.setAuthChecked();
     userStore.updateCurrentUser(USER);
     vi.mocked(getCurrentUser).mockResolvedValue({ ...USER, id: 2, username: 'other' });
+    const signedInAtReload: boolean[] = [];
+    vi.mocked(reloadPage).mockImplementation(() => {
+      signedInAtReload.push(authStore.isAuthenticated.get());
+    });
     const { result } = setup('/det/models');
 
-    expect(await check(result)).toBe(true);
+    expect(await check(result)).toBe(false);
     // This tab's requests now run as the other user, so it must not keep showing the one it loaded.
     expect(reloadPage).toHaveBeenCalledTimes(1);
+    // It is no longer signed in when it reloads, so that nothing on it keeps it from reloading.
+    expect(signedInAtReload).toStrictEqual([false]);
+    expect(authStore.isAuthenticated.get()).toBe(false);
+    expect(authStore.isChecked.get()).toBe(false);
   });
 
   it('does not reload the page while the same user is signed in', async () => {
@@ -331,7 +341,10 @@ describe('useAuthCheck', () => {
 
     await setTabHidden(false);
     await waitFor(() => expect(reloadPage).toHaveBeenCalledTimes(1));
+    // Signing the page out before the reload does not start another check.
+    await act(() => Promise.resolve());
     expect(getCurrentUser).toHaveBeenCalledTimes(2);
+    expect(reloadPage).toHaveBeenCalledTimes(1);
   });
 
   it('replaces a session cookie that scripts can read with the HttpOnly one', async () => {

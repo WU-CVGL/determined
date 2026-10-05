@@ -21,6 +21,7 @@ import {
   ShellTerminalSocket,
   shellTerminalUrl,
 } from 'services/shellTerminal';
+import authStore from 'stores/auth';
 import userStore from 'stores/users';
 import { CommandState, CommandTask, CommandType } from 'types';
 import { copyToClipboard } from 'utils/dom';
@@ -155,10 +156,13 @@ const ShellTerminal: React.FC = () => {
     };
   }, [session, shellId, onClose]);
 
-  // Closing the tab hangs up the login shell, so ask first.
+  // Closing the tab hangs up the login shell, so ask first. Not when the page is no longer signed
+  // in: it reloads because another tab signed in as someone else (useAuthCheck), and must not stay
+  // with this user's state while its requests run as the other user.
   useEffect(() => {
     if (connection !== 'connected') return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!authStore.isAuthenticated.get()) return;
       e.preventDefault();
       e.returnValue = '';
       return '';

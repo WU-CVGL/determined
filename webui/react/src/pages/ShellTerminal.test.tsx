@@ -2,14 +2,18 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DefaultTheme, UIProvider } from 'hew/Theme';
 import { ConfirmationProvider } from 'hew/useConfirm';
-import { forwardRef, useImperativeHandle } from 'react';
+import React, { forwardRef, useImperativeHandle } from 'react';
 import { HelmetProvider } from 'react-helmet-async';
 import { BrowserRouter } from 'react-router-dom';
 
 import { ThemeProvider } from 'components/ThemeProvider';
-import { getShells, getTask } from 'services/api';
+import { useSessionCheck } from 'hooks/useAuthCheck';
+import { getCurrentUser, getShells, getTask } from 'services/api';
 import { ShellTerminalClose, ShellTerminalHandlers } from 'services/shellTerminal';
+import authStore from 'stores/auth';
+import userStore from 'stores/users';
 import { CommandState, CommandType } from 'types';
+import { reloadPage } from 'utils/browser';
 
 import ShellTerminal from './ShellTerminal';
 
@@ -23,9 +27,16 @@ vi.mock('react-router-dom', async (importOriginal) => ({
 // No getShell: the page must not fetch the endpoint that returns the shell's private key. Vitest
 // throws if a module uses an export that the mock does not define.
 vi.mock('services/api', () => ({
+  getCurrentUser: vi.fn(),
   getShells: vi.fn(),
   getTask: vi.fn(),
   killTask: vi.fn(),
+  storeSessionToken: vi.fn(),
+}));
+
+vi.mock('utils/browser', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('utils/browser')>()),
+  reloadPage: vi.fn(),
 }));
 
 vi.mock('routes/utils', async (importOriginal) => ({
@@ -106,13 +117,22 @@ const taskWith = (
   taskId: SHELL_ID,
 });
 
-const setup = () =>
+const OWNER = { id: 7, isActive: true, isAdmin: false, username: 'owner' };
+
+/* App's session check, which runs next to every page. */
+const SessionCheck = () => {
+  useSessionCheck(true);
+  return null;
+};
+
+const setup = (beside?: React.ReactNode) =>
   render(
     <BrowserRouter>
       <UIProvider theme={DefaultTheme.Light}>
         <ThemeProvider>
           <HelmetProvider>
             <ConfirmationProvider>
+              {beside}
               <ShellTerminal />
             </ConfirmationProvider>
           </HelmetProvider>
@@ -131,12 +151,40 @@ const closeSession = (close: Partial<ShellTerminalClose>) =>
     }),
   );
 
+/* Shows the tab again, which checks the session, and waits for the check to end. */
+const showTab = async () => {
+  const checks = vi.mocked(getCurrentUser).mock.calls.length;
+  vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+  document.dispatchEvent(new Event('visibilitychange'));
+  await waitFor(() => expect(getCurrentUser).toHaveBeenCalledTimes(checks + 1));
+  await act(() => new Promise((resolve) => setTimeout(resolve)));
+};
+
+/* Opens a connected terminal next to App's session check, signed in as the shell's owner. */
+const connectWithSessionCheck = async () => {
+  userStore.updateCurrentUser(OWNER);
+  vi.mocked(getCurrentUser).mockResolvedValue(OWNER);
+  vi.mocked(getTask).mockResolvedValue(taskWith(true));
+  setup(<SessionCheck />);
+  await waitFor(() => expect(sockets).toHaveLength(1));
+  act(() => sockets[0].handlers.onReady?.());
+  expect(screen.getByTestId('shell-terminal-status')).toHaveTextContent('Connected');
+  await waitFor(() => expect(getCurrentUser).toHaveBeenCalledTimes(1));
+};
+
 describe('ShellTerminal', () => {
   beforeEach(() => {
     sockets.length = 0;
     view.props = undefined;
     vi.mocked(getShells).mockResolvedValue([shell]);
+    userStore.reset();
+    // The page's route needs a signed-in user.
+    authStore.reset();
+    authStore.setAuth({ isAuthenticated: true });
+    authStore.setAuthChecked();
   });
+
+  afterEach(() => vi.restoreAllMocks());
 
   it('connects only once the shell is ready', async () => {
     vi.mocked(getTask).mockResolvedValue(taskWith(false));
@@ -227,5 +275,35 @@ describe('ShellTerminal', () => {
       '<img src=x onerror="alert(1)">user@box: ~',
     );
     expect(document.querySelector('img')).toBeNull();
+  });
+
+  it('still asks before leaving while the same user is signed in', async () => {
+    await connectWithSessionCheck();
+
+    await showTab();
+    expect(reloadPage).not.toHaveBeenCalled();
+    const leave = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(leave);
+    expect(leave.defaultPrevented).toBe(true);
+  });
+
+  it('reloads without asking when another tab signed in as someone else', async () => {
+    await connectWithSessionCheck();
+    // The browser asks the page before it reloads.
+    const leaving: Event[] = [];
+    vi.mocked(reloadPage).mockImplementation(() => {
+      const leave = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(leave);
+      leaving.push(leave);
+    });
+
+    // Another tab signed out and signed in as someone else: the shared session cookie is theirs.
+    vi.mocked(getCurrentUser).mockResolvedValue({ ...OWNER, id: 8, username: 'other' });
+    await showTab();
+    // Staying would keep this user's page while its requests run as the other user.
+    expect(reloadPage).toHaveBeenCalledTimes(1);
+    expect(leaving).toHaveLength(1);
+    expect(leaving[0].defaultPrevented).toBe(false);
+    expect(authStore.isAuthenticated.get()).toBe(false);
   });
 });

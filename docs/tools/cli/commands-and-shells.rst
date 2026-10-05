@@ -101,7 +101,8 @@ reaches the browser. A browser terminal is a new SSH session, like ``det shell o
 at the same time:
 
 -  Closing the tab, reloading it or losing the connection ends the session and stops the programs
-   running in it. The terminal asks before you leave a connected session. To keep long jobs
+   running in it. The terminal asks before you leave a connected session, but not when its tab
+   reloads because another tab of the browser signed in as a different user. To keep long jobs
    running, start them in ``tmux`` (``tmux new -A -s main`` attaches to the same session again) or
    with ``nohup``.
 
