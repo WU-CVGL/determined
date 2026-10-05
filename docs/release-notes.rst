@@ -17,288 +17,81 @@ Version 0.41.0
 
 **Breaking Changes**
 
--  CLI, Python SDK: Users who change their own password or username must enter their current
-   password. ``det user change-password``, ``det user edit --username``, ``det user rename``,
-   ``User.change_password``, and ``User.rename`` from 0.40.1 and earlier fail for these changes;
-   upgrade the CLI and the SDK, which ask for the current password, or use the WebUI. Administrators
-   changing or renaming other users are not affected.
+-  Accounts: Users who change their own password or username must enter their current password.
+   Upgrade the CLI and the SDK, which ask for it.
 
--  API: ``POST /api/v1/users/{user_id}/password`` takes the whole request as its body,
-   ``{"password": "...", "old_password": "..."}``. Clients that send a bare JSON string get ``400
-   Bad Request``.
+-  API: ``POST /api/v1/users/{user_id}/password`` takes ``{"password": "...", "old_password":
+   "..."}`` instead of a bare JSON string.
 
--  WebUI: In **Admin > Users**, administrators editing their own user cannot set its password there.
-   They use **Change Password** in the user settings, which asks for the current password.
+-  Reverse proxies: Forward the browser's ``Host`` header unchanged, including the port, or list the
+   WebUI's address in ``security.csrf.trusted_origins``.
 
--  Reverse proxies: Forward the browser's ``Host`` header unchanged, including the port; in nginx,
-   ``proxy_set_header Host $http_host;``, since ``$host`` drops the port. Over plain HTTP, the WebUI
-   cannot sign in or change anything otherwise, unless the address users open is listed in
-   ``security.csrf.trusted_origins`` or a proxy listed in ``security.trusted_proxies`` passes the
-   original host in ``X-Forwarded-Host``. WebSocket connections, such as browser terminals, always
-   need the forwarded ``Host``. See the same-origin check under Security Fixes.
+-  Generic tasks: Only generic tasks created with ``--pausable`` can be paused.
 
--  Generic tasks: A generic task can be paused only if it was created with ``--pausable``
-   (``no_pause: false`` in the API), because unpausing runs its entrypoint again from the start. The
-   CLI accepts and ignores ``--no_pause``. ``det task fork`` also accepts ``--pausable``.
-
--  Resource pools: A dynamic pool with a saved spec follows the master's ``scheduler`` and
-   ``task_container_defaults`` in ``master.yaml`` from the next master start. Set a value in the
-   pool's configuration to keep it fixed. As in ``master.yaml``, a pool-level
-   ``task_container_defaults`` block resets ``shm_size_bytes``, ``network_mode``, and
-   ``preemption_timeout`` to their built-in values unless it repeats them.
-
--  Resource pools: Replaying a dynamic pool create with the same idempotency key returns ``409
-   Conflict`` once the pool has been updated, and for a pool that a master without spec support
-   created. Automation that retries creates treats this conflict as "already exists" and checks
-   ``det resource-pool list-dynamic``.
-
--  Resource pools: A master without spec support, such as 0.40.1, starts with the same database only
-   when no ``master.yaml`` pool, including the ``default`` pool that an omitted ``resource_pools``
-   key adds, shares a name with a dynamic pool, and ``master.yaml`` does not set ``resource_pools:
-   []``. It runs every dynamic pool from its saved effective configuration.
-
-**Security Fixes**
-
--  API: **Important:** The master accepts a task's session token only as a task token and a user's
-   login token only as a login token. A token of one kind could authenticate as an unrelated session
-   with the same internal ID, which could belong to another user, including an administrator.
-
--  Shell, Notebook: **Important:** Only the user who started a shell or notebook, and
-   administrators, receive its SSH private key or Jupyter token, under every authorization mode;
-   listings never include them. Any signed-in user could read them and act as the task's owner
-   inside the task. ``det shell open``, ``det shell show-ssh-command``, and ``det notebook open``
-   stop with an error for other users, and the WebUI tells them that only the owner or an
-   administrator can open the notebook. The master logs each time an administrator reads the key or
-   token of another user's task.
-
--  WebUI: **Important:** The master keeps a browser's session in an ``auth`` cookie that is
-   ``HttpOnly`` and ``SameSite=Lax`` for password sign-in, single sign-on, and ``POST
-   /login?cookie=true``, and the WebUI keeps no token in local storage. A browser signed in with an
-   earlier version gets the new cookie at its first session check, or signs in again.
-
--  WebUI: The session cookie is ``Secure`` when the request that sets it arrived over HTTPS,
-   directly or through a reverse proxy listed in ``security.trusted_proxies`` that sets
-   ``X-Forwarded-Proto``. List only proxies that overwrite that header themselves, not addresses
-   that pass connections through unchanged. ``security.session_cookie.secure`` (``auto``,
-   ``always``, ``never``) overrides the choice. Browsers keep one ``auth`` cookie per host name,
-   whatever the port: after a ``Secure`` cookie from the HTTPS address, signing in over plain HTTP
-   at the same host name fails until that cookie expires or the user signs out over HTTPS.
-
--  API: **Important:** Requests that rely on the session cookie and can change something, which is
-   every method but ``GET``, ``HEAD``, and ``OPTIONS`` plus WebSocket connections, must come from
-   the master's own pages. The master accepts them when the browser reports them as same-origin, or
-   when the ``Origin`` header names the host and port of the ``Host`` header; other requests get
-   ``403 Forbidden`` and a logged warning. Requests with an ``Authorization: Bearer`` header, as the
-   CLI, the SDK, tasks, and scripts send, pass, except signing in and out, and so do requests
-   without an ``Origin`` header.
-
--  API: **Important:** Users who change their own password or username send their current password
-   (``old_password`` in ``SetUserPassword``, ``PatchUser``, and the legacy ``PATCH
-   /users/{username}`` routes), so that a session token alone, such as the one every task carries
-   for its owner, cannot lock users out. A missing password gets ``400 Bad Request``, a wrong one
-   ``403 Forbidden``. Remote users, who sign in through single sign-on, cannot change their own
-   password or username.
-
--  API: A new password set through the user API also revokes all of the user's access tokens;
-   scripts that use one need a new token. Passwords set by SCIM provisioning do not revoke them.
-
--  WebUI: A session token in the WebUI's address (``?jwt=``) is accepted only when the cluster has
-   an external sign-in page. The WebUI removes it from the address and the browser history, and the
-   master checks it before storing it in the session cookie.
-
--  API: Only a task's own containers, its owner, or an administrator can make the calls through
-   which a task reports to the master under ``/api/v1/allocations/{id}/``, under every authorization
-   mode: proxy address, readiness and waiting, all-gather and rendezvous, accelerator data, daemon
-   resources, container start, and preemption acknowledgements and requests. Any user who could see
-   a task could otherwise mark it ready, redirect its proxied services, or have the master stop it.
-   The proxy address must be an IP address, and the master refuses it for tasks without resources,
-   ended tasks, and agent resource pools.
-
--  Proxy: Requests that the master forwards through ``/proxy/`` to task services carry none of the
-   visitor's Determined credentials: the master removes its ``auth`` and ``det_jwt`` cookies, the
-   ``Grpc-Metadata-X-Allocation-Token``, ``Grpc-Metadata-X-User-Token``, and
-   ``Grpc-Metadata-Grpcgateway-Authorization`` headers, and any ``Authorization: Bearer`` header
-   that holds a Determined token. The service's own cookies, other bearer tokens, and JupyterLab's
-   ``Authorization: token`` header pass through.
-
--  Proxy: Pages that tasks serve under ``/proxy/``, such as notebooks, TensorBoards, and
-   ``proxy_ports``, share the master's origin, so their scripts can send requests with the session
-   of any user who opens them. Open task services only from users you trust, especially as an
-   administrator. The master does not ask administrators for their password again before actions
-   that grant more access.
+-  Resource pools: Dynamic pools with a saved spec follow the master's ``scheduler`` and
+   ``task_container_defaults`` from the next master start.
 
 **New Features**
 
--  WebUI: Open a terminal in a running shell from the browser: click the shell's name on the
-   **Tasks** page or choose **Open Terminal** from its action menu. The master connects to the
-   shell's SSH server with the shell's own key, which never reaches the browser, and relays the
-   terminal over a WebSocket. Only the user who started the shell and administrators can open its
-   terminals. Each terminal is a separate SSH session that ends when its tab closes.
+-  WebUI: Open a terminal in a running shell from the browser.
 
--  Master: The ``shell_terminal`` section of the master configuration sets whether administrators
-   can open terminals in other users' shells, the terminal limits per user and in total, the idle
-   timeout, the maximum session length, how often open terminals are checked against the user's
-   session and permissions, and the reverse proxies whose ``X-Real-IP`` header the audit log trusts.
-   The master logs every terminal that opens and closes. Add ``-shell_terminal`` to
-   ``feature_switches`` to turn terminals off.
+-  WebUI: Launch shells, start a shell or JupyterLab from an earlier config or a template, and
+   launch a task again from its row.
 
--  WebUI: Launch shells from the browser with **Launch Shell**, next to **Launch JupyterLab**. The
-   launch form has a full-config YAML mode and, after the shell starts, shows the ``det shell open
-   <id>`` command and links to the shell's logs. The WebUI discards the shell's SSH key from the
-   launch response without storing it.
+-  WebUI: List generic tasks in a Generic Tasks tab, with detail pages and pause, unpause, and kill
+   actions.
 
--  WebUI: Start a shell or JupyterLab from an earlier config with **Start from**: your own tasks
-   that the master still knows (running, or ended within about 24 hours and since the last master
-   restart), up to 20 configs per task type launched from this browser, or a template, which also
-   fills in its resource pool and slots. The browser keeps its configs in local storage without the
-   entrypoint, registry credentials, or environment variables whose names look like credentials.
+-  CLI: List generic tasks with ``det task list-generic``, and name them with the ``name`` and
+   ``description`` config keys.
 
--  WebUI: **Launch Again** on your own shell and JupyterLab rows, and on every shell and JupyterLab
-   row for administrators, opens the launch form filled from that task's config. **Save as
-   Template** in the full-config mode starts a template that keeps only the settings that differ
-   from the cluster defaults; other users can read templates.
+-  Generic tasks: Expose ``environment.proxy_ports`` through the master.
 
--  WebUI: The Tasks page and each workspace's Tasks tab have a **Generic Tasks** tab that lists
-   generic tasks with their owner, state, slots, resource pool, pausability, parent, and times,
-   filtered by user and state. Each generic task has a detail page with its allocations, config,
-   logs, parent, child, and forked tasks, and pause, unpause, kill, and kill-tree actions; after an
-   unpause fails, the page offers to retry it.
-
--  Generic tasks: ``det task list-generic`` and ``GET /api/v1/generic-tasks`` list generic tasks
-   with their owner, name, state, and parent, filtered by owner (``--user``, ``--all``), workspace,
-   state, or parent.
-
--  Generic tasks: The config accepts optional ``name`` and ``description`` keys. The job queue and
-   ``det task list`` show the name, or ``Generic Task <task ID>`` without one. Masters without this
-   feature refuse configs with these keys.
-
--  Generic tasks: Ports listed in ``environment.proxy_ports`` are exposed and proxied through the
-   master, as for commands, also after an unpause or a master restart.
-
--  Generic tasks: ``det task --help`` lists the ``create``, ``config``, ``fork``, ``kill``,
-   ``pause``, and ``unpause`` commands with help texts, and a guide describes generic tasks.
-
--  Resource pools: ``det resource-pool update`` and ``PUT /api/v1/resource-pools/dynamic/{name}``
-   replace the whole configuration of a dynamic pool. A ``Ready`` pool runs it from the next master
-   start; a ``Failed`` pool becomes ``Pending`` and is initialized with it at once. The optional
-   ``expected_revision`` refuses an update when the pool has changed in the meantime. Pools cannot
-   be renamed or deleted.
-
--  Resource pools: ``det resource-pool adopt`` and ``POST
-   /api/v1/resource-pools/dynamic/{name}/adopt`` save a pool that ``master.yaml`` configures, given
-   its entry copied verbatim, as a dynamic pool that keeps running with its agents, tasks, and
-   workspace bindings once the entry is removed from ``master.yaml``. While the entry stays, the
-   master serves the pool from it, logs a warning at startup, and refuses to start if the entry
-   differs from the saved configuration.
-
--  Resource pools: An agent resource manager accepts ``resource_pools: []``, so that all of its
-   pools can be dynamic. ``default_compute_resource_pool`` and ``default_aux_resource_pool`` may
-   name dynamic pools, and the master refuses to start when they name a pool that exists neither in
-   ``master.yaml`` nor as a dynamic pool.
+-  Resource pools: Update dynamic pools and adopt ``master.yaml`` pools as dynamic pools, so that
+   every pool can be dynamic.
 
 **Improvements**
 
--  Resource pools: A dynamic pool saves the configuration that the administrator wrote and resolves
-   it like a ``master.yaml`` pool: without its own ``scheduler`` or ``task_container_defaults``, it
-   uses the master's, including changes at the next master start. The effective configuration is
-   saved next to it and shown as ``config``. Pools created by a master without spec support, such as
-   0.40.1, keep their saved effective configuration until they are updated.
+-  Generic tasks: Schedule generic tasks as job queue entries whose priority and weight persist
+   across pause and master restarts.
 
--  Resource pools: Dynamic pool responses include the saved ``spec``, its ``revision``, the
-   ``active_revision`` that the running master runs, ``defined_in_master_yaml``, and
-   ``pending_restart``. ``det resource-pool list-dynamic`` shows the revisions and pending restarts.
-
--  Generic tasks: A running generic task is a regular entry of the job queue. Priority and weight
-   changes, from the WebUI or with ``det job update``, apply in the resource manager and persist
-   across pause, unpause, and master restarts. Moving a generic task to another resource pool fails
-   with "not supported", as for commands.
-
--  Generic tasks: Pausing a generic task gives it ``preemption_timeout`` seconds to exit after the
-   preemption signal before its container is killed, on every run. The default timeout is 0.
-
--  WebUI: The job queue shows generic tasks under their name with a task icon, links them to their
-   detail page, and offers **View Logs** and **Kill** in their action menu.
-
--  API: The generic task endpoints appear under ``Tasks`` in the REST API reference, and in the
-   TypeScript bindings under ``TasksApi`` instead of ``InternalApi``.
-
--  Shells: The SSH server in shells probes idle clients every 30 seconds (``ClientAliveInterval
-   30``), so idle ``det shell open`` sessions stay connected through proxies with short read
-   timeouts, and clients that stopped answering are dropped.
+-  Shells: Keep idle ``det shell open`` sessions connected through proxies.
 
 **Bug Fixes**
 
--  Agents: An agent that reconnects with a different number of devices or another resource pool
-   stays registered. The timer of its stopped earlier registration removed it from the master, which
-   left it connected but missing from ``det agent list``.
+-  Agents: Keep an agent registered when it reconnects with a different device count or resource
+   pool.
 
--  Deploy: ``det deploy`` uses this fork's images, ``ghcr.io/wu-cvgl/determined-master`` and
-   ``ghcr.io/wu-cvgl/determined-agent``, by default. The upstream ``determinedai`` images do not
-   exist for the fork's versions, so ``master-up`` and ``agent-up`` failed with ``manifest unknown``
-   without ``--image-repo-prefix``. Pass ``--image-repo-prefix determinedai`` for images built from
-   source.
+-  Deploy: Use this fork's images by default in ``det deploy``.
 
--  CLI: ``det resource-pool create`` sends ``Content-Type: application/json``, which the master
-   requires for dynamic pool requests. The 0.40.1 CLI gets ``415 Unsupported Media Type`` for every
-   create.
+-  CLI: Fix ``det resource-pool create``, which failed with ``415 Unsupported Media Type``.
 
--  API: ``CreateExperiment`` reports an experiment config that cannot be parsed, is incomplete, sets
-   ``resources.slots``, names a removed searcher, or has no entrypoint for a managed experiment as
-   ``InvalidArgument`` (HTTP 400) instead of an internal error (HTTP 500).
+-  API: Return client errors instead of HTTP 500 for invalid experiment and generic task requests
+   and for ended sessions.
 
--  Experiments: An experiment that fails to restore after a master restart does not leave its user
-   session behind.
+-  Generic tasks: Fix pausing, killing, and scheduling of generic task trees.
 
--  API: ``GetTask`` returns each allocation's ``slots``, ``exit_reason``, and ``status_code``
-   instead of 0 slots and no exit reason or status code.
+-  WebUI: Offer to retry when a notebook's address fails to load.
 
--  Tasks: Access checks and task log webhooks of a generic task use the task's workspace instead of
-   workspace 0.
+**Security Fixes**
 
--  Tasks: An allocation that fails with missing resources or an unknown failure type, or exits
-   without a reason, reports an error exit instead of crashing its handler with status code -1. An
-   allocation that fails to restore after a master restart reports the restore failure; with the
-   agent resource manager, this failure is transient and does not count against a trial's
-   ``max_restarts``.
+-  API: Accept a task's session token only as a task token and a login token only as a login token.
 
--  Generic tasks: A config with an unknown key, negative slots, or a config that cannot be merged
-   with the forked task's config gets ``400 Bad Request``. A refused kill, pause, or unpause gets
-   ``404`` for a missing or non-generic task, ``400`` for a state that does not allow it, and
-   ``409`` while another operation on the tree is in progress, instead of HTTP 500.
+-  Shell, Notebook: Give a shell's SSH key and a notebook's token only to its owner and
+   administrators.
 
--  Generic tasks: A scheduler with preemption enabled does not preempt generic tasks, which ended as
-   completed or errored instead of paused.
+-  WebUI: Keep the session in an ``HttpOnly``, ``SameSite=Lax`` cookie instead of local storage, and
+   refuse cross-site requests that rely on it.
 
--  Generic tasks: Creating a generic task with ``--parent`` requires permission to control the
-   parent task (its owner or an administrator), so that other users cannot attach children that
-   block the owner from pausing or killing the tree.
+-  API: Allow only a task, its owner, and administrators to make the task's reporting calls under
+   ``/api/v1/allocations/{id}/``.
 
--  Generic tasks: The scheduler starts a generic task's allocation with the task's saved priority
-   and weight, also after an unpause or a master restart. A priority outside 1 to 99, a weight that
-   is not a positive finite number, or a priority beyond the task config policy's limit for NTSC
-   workloads, including a resource pool's default priority, is refused with ``400 Bad Request``.
+-  Proxy: Remove Determined credentials from requests forwarded to task services.
 
--  Generic tasks: An unpaused task keeps its scheduling group when an unpause is retried or the
-   cleanup of a pause finishes late, and a finished task leaves the job service and the scheduler's
-   priority callbacks.
+-  Accounts: Revoke a user's access tokens when their password changes.
 
--  Generic tasks: Killing a paused generic task, or a tree whose root is paused, cancels it and
-   kills the rest of the tree, also while a pause is finishing.
-
--  API: A token whose session has ended, an access token revoked by a new password, and an expired
-   single sign-on session get ``401 Unauthorized`` on the legacy routes and a redirect to the
-   sign-in page under ``/proxy/``, instead of HTTP 500.
-
--  API: Editing a user, and the user updates of single sign-on, keep the user's access tokens; only
-   deactivating the user or setting a new password revokes them.
-
--  WebUI: When the address of a ready notebook fails to load, the wait page stops waiting and offers
-   **Try Again**.
-
-See :ref:`generic tasks <generic-tasks>`, :ref:`browser terminals <shell-web-terminal>`, the
-:ref:`shell_terminal <master-config-shell-terminal>` settings, :doc:`dynamic resource pools
-<maintenance/dynamic-pools>`, and :doc:`upgrade with running tasks <maintenance/hot-upgrade>` for
-setup and usage.
+See :ref:`generic tasks <generic-tasks>`, :ref:`browser terminals <shell-web-terminal>`,
+:doc:`dynamic resource pools <maintenance/dynamic-pools>`, and :doc:`upgrade with running tasks
+<maintenance/hot-upgrade>` for setup and usage.
 
 **************
  Version 0.40
