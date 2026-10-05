@@ -18,7 +18,7 @@ import { paths, serverAddress } from 'routes/utils';
 import { killTask } from 'services/api';
 import { openShellTerminalTab } from 'services/shellTerminal';
 import userStore from 'stores/users';
-import { TaskAction as Action, CommandTask, CommandType, DetailedUser } from 'types';
+import { TaskAction as Action, CommandTask, CommandType } from 'types';
 import { copyToClipboard } from 'utils/dom';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import { capitalize } from 'utils/string';
@@ -27,7 +27,6 @@ import { getJupyterLabAddress, NOTEBOOK_ACCESS_DENIED } from 'utils/wait';
 
 interface Props {
   children?: React.ReactNode;
-  curUser?: DetailedUser;
   onComplete?: (action?: Action) => void;
   /** Offers "Launch Again" on the user's own shells and JupyterLabs when given. */
   onLaunchAgain?: (task: CommandTask) => void;
@@ -41,7 +40,6 @@ const relaunchableTaskTypes: CommandType[] = [CommandType.JupyterLab, CommandTyp
 
 const TaskActionDropdown: React.FC<Props> = ({
   task,
-  curUser,
   onComplete,
   onLaunchAgain,
   onManageJob,
@@ -50,6 +48,7 @@ const TaskActionDropdown: React.FC<Props> = ({
   const { canCreateWorkspaceNSC, canModifyWorkspaceNSC } = usePermissions();
   const resourcesEnabled = useTaskResourcesEnabled();
   const terminalEnabled = useFeature().isOn('shell_terminal');
+  // The signed-in user, for every rule of the menu that depends on who is asking.
   const currentUser = Loadable.getOrElse(undefined, useObservable(userStore.currentUser));
   const { openToast } = useToast();
   const TaskConnectModal = useModal(TaskConnectModalComponent);
@@ -99,8 +98,8 @@ const TaskActionDropdown: React.FC<Props> = ({
     if (
       onLaunchAgain &&
       relaunchableTaskTypes.includes(task.type) &&
-      !!curUser &&
-      (curUser.id === task.userId || curUser.isAdmin) &&
+      !!currentUser &&
+      (currentUser.id === task.userId || currentUser.isAdmin) &&
       canCreateWorkspaceNSC({ workspace: { id: task.workspaceId } })
     ) {
       items.push({ key: Action.LaunchAgain, label: 'Launch Again' });
@@ -119,7 +118,6 @@ const TaskActionDropdown: React.FC<Props> = ({
     task,
     canCreateWorkspaceNSC,
     canModifyWorkspaceNSC,
-    curUser,
     currentUser,
     onLaunchAgain,
     onManageJob,

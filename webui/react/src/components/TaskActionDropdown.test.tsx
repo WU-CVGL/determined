@@ -61,14 +61,15 @@ const openMenu = async (ownerId: number, overrides: Partial<CommandTask> = {}) =
   await userEvent.click(screen.getByRole('button'));
 };
 
+/** Opens the menu with Launch Again handled, for the given signed-in user. */
 const openLaunchAgainMenu = async (
   taskOverrides: Partial<CommandTask>,
-  curUser: DetailedUser,
+  signedIn: DetailedUser,
   contextMenu = false,
 ) => {
+  userStore.updateCurrentUser(signedIn);
   const onLaunchAgain = vi.fn();
   const props = {
-    curUser,
     onLaunchAgain,
     task: { ...task, ...taskOverrides },
   };
@@ -291,6 +292,40 @@ describe('TaskActionDropdown', () => {
       expect(screen.queryByText('Launch Again')).not.toBeInTheDocument();
     });
 
+    it('follows the signed-in user, as Connect and Open Terminal do', async () => {
+      // Another user's running shell: none of the owner's actions, which all ask who is signed in.
+      await openLaunchAgainMenu(runningShell, other);
+      await screen.findByText('View Logs');
+      ['Connect via CLI', 'Open Terminal', 'Launch Again'].forEach((label) =>
+        expect(menuLabels()).not.toContain(label),
+      );
+    });
+
+    it('offers the owner’s actions together to an admin signed in', async () => {
+      feature.on = true;
+      await openLaunchAgainMenu({ ...runningShell, userId: 102 }, admin);
+      await screen.findByText('Launch Again');
+      ['Connect via CLI', 'Open Terminal', 'Launch Again'].forEach((label) =>
+        expect(menuLabels()).toContain(label),
+      );
+    });
+
+    it('is not offered before the signed-in user is known', async () => {
+      userStore.reset();
+      render(
+        <MemoryRouter>
+          <UIProvider theme={DefaultTheme.Light}>
+            <ConfirmationProvider>
+              <TaskActionDropdown task={{ ...task, ...runningShell }} onLaunchAgain={vi.fn()} />
+            </ConfirmationProvider>
+          </UIProvider>
+        </MemoryRouter>,
+      );
+      await userEvent.click(screen.getByRole('button'));
+      await screen.findByText('View Logs');
+      expect(screen.queryByText('Launch Again')).not.toBeInTheDocument();
+    });
+
     it.each([CommandType.Command, CommandType.TensorBoard])(
       'is not offered on a %s',
       async (type) => {
@@ -312,7 +347,7 @@ describe('TaskActionDropdown', () => {
         <MemoryRouter>
           <UIProvider theme={DefaultTheme.Light}>
             <ConfirmationProvider>
-              <TaskActionDropdown curUser={owner} task={{ ...task, type: CommandType.Shell }} />
+              <TaskActionDropdown task={{ ...task, type: CommandType.Shell }} />
             </ConfirmationProvider>
           </UIProvider>
         </MemoryRouter>,
@@ -398,7 +433,6 @@ describe('TaskActionDropdown', () => {
           <UIProvider theme={DefaultTheme.Light}>
             <ConfirmationProvider>
               <TaskActionDropdown
-                curUser={owner}
                 task={{ ...task, ...runningShell }}
                 onLaunchAgain={vi.fn()}
                 onManageJob={onManageJob}

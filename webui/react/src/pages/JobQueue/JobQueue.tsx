@@ -86,7 +86,6 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
   const resourcesEnabled = useTaskResourcesEnabled();
   const { canModifyExperiment, canModifyWorkspaceNSC } = usePermissions();
   const users = Loadable.getOrElse([], useObservable(userStore.getUsers()));
-  const currentUser = Loadable.getOrElse(undefined, useObservable(userStore.currentUser));
   const [managingJob, setManagingJob] = useState<Job>();
   const [jobs, setJobs] = useState<Job[]>([]);
   // The shells, JupyterLabs, commands and TensorBoards among the jobs on the page, by task ID.
@@ -353,7 +352,6 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
                     return (
                       <div>
                         <TaskActionDropdown
-                          curUser={currentUser}
                           task={task}
                           onComplete={fetchJobsTable}
                           onLaunchAgain={launchAgain}
@@ -490,7 +488,6 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
     selectedRp.schedulerType,
     canManage,
     commandTasks,
-    currentUser,
     fetchJobsTable,
     launchAgain,
   ]);

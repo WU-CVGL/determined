@@ -87,7 +87,6 @@ interface Props {
 const filterKeys: Array<keyof Settings> = ['search', 'state', 'type', 'user', 'workspace'];
 
 const TaskList: React.FC<Props> = ({ workspace }: Props) => {
-  const currentUser = Loadable.getOrElse(undefined, useObservable(userStore.currentUser));
   const users = Loadable.getOrElse([], useObservable(userStore.getUsers()));
   const workspaces = Loadable.getOrElse([], useObservable(workspaceStore.workspaces));
   const [tasks, setTasks] = useState<CommandTask[] | undefined>(undefined);
@@ -390,7 +389,6 @@ const TaskList: React.FC<Props> = ({ workspace }: Props) => {
 
     const actionRenderer: TaskRenderer = (_, record) => (
       <TaskActionDropdown
-        curUser={currentUser}
         task={record}
         onComplete={handleActionComplete}
         onLaunchAgain={handleLaunchAgain}
@@ -526,7 +524,6 @@ const TaskList: React.FC<Props> = ({ workspace }: Props) => {
 
     return cols;
   }, [
-    currentUser,
     entityCopyMap,
     handleActionComplete,
     handleLaunchAgain,
@@ -626,7 +623,6 @@ const TaskList: React.FC<Props> = ({ workspace }: Props) => {
       record: CommandTask;
     }) => (
       <TaskActionDropdown
-        curUser={currentUser}
         task={record}
         onComplete={handleActionComplete}
         onLaunchAgain={handleLaunchAgain}
@@ -634,7 +630,7 @@ const TaskList: React.FC<Props> = ({ workspace }: Props) => {
         {children}
       </TaskActionDropdown>
     ),
-    [currentUser, handleActionComplete, handleLaunchAgain],
+    [handleActionComplete, handleLaunchAgain],
   );
 
   return (
