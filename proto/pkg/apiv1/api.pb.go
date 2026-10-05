@@ -4595,7 +4595,7 @@ type DeterminedClient interface {
 	// List all workspaces bound to a specific resource pool
 	ListWorkspacesBoundToRP(ctx context.Context, in *ListWorkspacesBoundToRPRequest, opts ...grpc.CallOption) (*ListWorkspacesBoundToRPResponse, error)
 	// Get a list of generic tasks, optionally filtered by owner, workspace,
-	// project, state, parent, name or slot use.
+	// project, state, parent, name or slot count.
 	GetGenericTasks(ctx context.Context, in *GetGenericTasksRequest, opts ...grpc.CallOption) (*GetGenericTasksResponse, error)
 	// Get the config of a generic task.
 	GetGenericTaskConfig(ctx context.Context, in *GetGenericTaskConfigRequest, opts ...grpc.CallOption) (*GetGenericTaskConfigResponse, error)
@@ -7875,7 +7875,7 @@ type DeterminedServer interface {
 	// List all workspaces bound to a specific resource pool
 	ListWorkspacesBoundToRP(context.Context, *ListWorkspacesBoundToRPRequest) (*ListWorkspacesBoundToRPResponse, error)
 	// Get a list of generic tasks, optionally filtered by owner, workspace,
-	// project, state, parent, name or slot use.
+	// project, state, parent, name or slot count.
 	GetGenericTasks(context.Context, *GetGenericTasksRequest) (*GetGenericTasksResponse, error)
 	// Get the config of a generic task.
 	GetGenericTaskConfig(context.Context, *GetGenericTaskConfigRequest) (*GetGenericTaskConfigResponse, error)

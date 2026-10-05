@@ -941,9 +941,9 @@ func TestGetGenericTasksFiltersByProjectSearchAndSlots(t *testing.T) {
 	otherWorkspaceID, otherProjectID := createProjectAndWorkspace(ctx, t, api)
 
 	name := "Sweep-ALPHA-" + uuid.NewString()
-	gpu := addGenericTaskInProjectForTest(ctx, t, owner, workspaceID, projectID, name, ptrs.Ptr(2))
-	cpu := addGenericTaskInProjectForTest(ctx, t, owner, workspaceID, projectID, "", ptrs.Ptr(0))
-	noSlots := addGenericTaskInProjectForTest(ctx, t, owner, workspaceID, projectID, "", nil)
+	twoSlots := addGenericTaskInProjectForTest(ctx, t, owner, workspaceID, projectID, name, ptrs.Ptr(2))
+	zeroSlots := addGenericTaskInProjectForTest(ctx, t, owner, workspaceID, projectID, "", ptrs.Ptr(0))
+	unsetSlots := addGenericTaskInProjectForTest(ctx, t, owner, workspaceID, projectID, "", nil)
 	elsewhere := addGenericTaskInProjectForTest(
 		ctx, t, owner, otherWorkspaceID, otherProjectID, "", ptrs.Ptr(1))
 
@@ -971,18 +971,19 @@ func TestGetGenericTasksFiltersByProjectSearchAndSlots(t *testing.T) {
 	require.NoError(t, db.Bun().NewSelect().Table("command_state").
 		ColumnExpr("(generic_task_spec->>'ProjectID')::int").
 		ColumnExpr("generic_task_spec->'GenericTaskConfig'->'resources'->>'slots'").
-		Where("task_id = ?", gpu).Scan(ctx, &storedProject, &storedSlots))
+		Where("task_id = ?", twoSlots).Scan(ctx, &storedProject, &storedSlots))
 	require.Equal(t, projectID, storedProject)
 	require.Equal(t, "2", *storedSlots)
 	var hasSlots bool
 	require.NoError(t, db.Bun().NewSelect().Table("command_state").
 		ColumnExpr("jsonb_exists(generic_task_spec->'GenericTaskConfig'->'resources', 'slots')").
-		Where("task_id = ?", noSlots).Scan(ctx, &hasSlots))
+		Where("task_id = ?", unsetSlots).Scan(ctx, &hasSlots))
 	require.False(t, hasSlots)
 
 	// Project.
 	pid := int32(projectID)
-	require.ElementsMatch(t, ids(gpu, cpu, noSlots), list(&apiv1.GetGenericTasksRequest{ProjectId: pid}))
+	require.ElementsMatch(t, ids(twoSlots, zeroSlots, unsetSlots),
+		list(&apiv1.GetGenericTasksRequest{ProjectId: pid}))
 	require.Equal(t, ids(elsewhere),
 		list(&apiv1.GetGenericTasksRequest{ProjectId: int32(otherProjectID)}))
 	require.Empty(t, list(&apiv1.GetGenericTasksRequest{
@@ -992,36 +993,37 @@ func TestGetGenericTasksFiltersByProjectSearchAndSlots(t *testing.T) {
 	require.Equal(t, apiPkg.NotFoundErrs("project", strconv.Itoa(1<<30), true).Error(), err.Error())
 
 	// Search: the shown name, or the task ID, ignoring case.
-	require.Equal(t, ids(gpu), list(&apiv1.GetGenericTasksRequest{Search: strings.ToLower(name)}))
-	require.ElementsMatch(t, ids(cpu, noSlots), list(&apiv1.GetGenericTasksRequest{
+	require.Equal(t, ids(twoSlots), list(&apiv1.GetGenericTasksRequest{Search: strings.ToLower(name)}))
+	require.ElementsMatch(t, ids(zeroSlots, unsetSlots), list(&apiv1.GetGenericTasksRequest{
 		ProjectId: pid, Search: "generic task",
 	}))
 	// A named task's ID is not in its name, so only the task ID can match.
-	require.NotContains(t, name, gpu.String()[9:23])
-	require.Equal(t, ids(gpu), list(&apiv1.GetGenericTasksRequest{
-		Search: strings.ToUpper(gpu.String()[9:23]),
+	require.NotContains(t, name, twoSlots.String()[9:23])
+	require.Equal(t, ids(twoSlots), list(&apiv1.GetGenericTasksRequest{
+		Search: strings.ToUpper(twoSlots.String()[9:23]),
 	}))
 	// A task without a name is shown as "Generic Task <id>", so its ID matches either way.
-	require.Equal(t, ids(cpu), list(&apiv1.GetGenericTasksRequest{
-		Search: strings.ToUpper(cpu.String()[9:23]),
+	require.Equal(t, ids(zeroSlots), list(&apiv1.GetGenericTasksRequest{
+		Search: strings.ToUpper(zeroSlots.String()[9:23]),
 	}))
 	require.Empty(t, list(&apiv1.GetGenericTasksRequest{Search: "no such task " + uuid.NewString()}))
 
-	// Slots. A spec without a slot count counts as 0 slots, which is what its slots field reads.
-	require.Equal(t, ids(gpu), list(&apiv1.GetGenericTasksRequest{
-		ProjectId: pid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_GPU,
+	// Slot count: HAS_SLOTS is above 0, ZERO_SLOTS is 0. A spec without a slot count counts as
+	// 0 slots, which is what its slots field reads.
+	require.Equal(t, ids(twoSlots), list(&apiv1.GetGenericTasksRequest{
+		ProjectId: pid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_HAS_SLOTS,
 	}))
-	require.ElementsMatch(t, ids(cpu, noSlots), list(&apiv1.GetGenericTasksRequest{
-		ProjectId: pid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_CPU_ONLY,
+	require.ElementsMatch(t, ids(zeroSlots, unsetSlots), list(&apiv1.GetGenericTasksRequest{
+		ProjectId: pid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_ZERO_SLOTS,
 	}))
-	resp, err := api.GetGenericTasks(ctx, &apiv1.GetGenericTasksRequest{TaskIds: ids(noSlots)})
+	resp, err := api.GetGenericTasks(ctx, &apiv1.GetGenericTasksRequest{TaskIds: ids(unsetSlots)})
 	require.NoError(t, err)
 	require.Len(t, resp.Tasks, 1)
 	require.Equal(t, int32(0), resp.Tasks[0].Slots)
 
 	// Paging counts only the matching tasks.
 	resp, err = api.GetGenericTasks(ctx, &apiv1.GetGenericTasksRequest{
-		ProjectId: pid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_CPU_ONLY, Limit: 1,
+		ProjectId: pid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_ZERO_SLOTS, Limit: 1,
 	})
 	require.NoError(t, err)
 	require.Len(t, resp.Tasks, 1)

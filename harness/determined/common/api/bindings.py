@@ -15242,18 +15242,20 @@ class v1SlotStats(Printable):
         return out
 
 class v1SlotsFilter(DetEnum):
-    """Filter workloads by whether they ask for slots. A slot is a GPU, or a CPU on
-    an agent configured with slot_type cpu.
+    """Filter workloads by the slot count they request: experiments by
+    resources.slots_per_trial (1 when the config leaves it out, its default),
+    generic tasks by the resources.slots stored with the task (0 when the stored
+    config has none, as the task's slots field reports it). The filter counts
+    slots of any type. A slot is a GPU only in a resource pool whose slot type
+    is cuda or rocm; in a pool whose slot type is cpu, a slot is a CPU, so a
+    workload with slots does not necessarily use a GPU.
     - SLOTS_FILTER_UNSPECIFIED: No filter.
-    - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a
-    resources.slots_per_trial above 0, other tasks with a resources.slots
-    above 0.
-    - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or
-    resources.slots of 0).
+    - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.
+    - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
     """
     UNSPECIFIED = "SLOTS_FILTER_UNSPECIFIED"
-    GPU = "SLOTS_FILTER_GPU"
-    CPU_ONLY = "SLOTS_FILTER_CPU_ONLY"
+    HAS_SLOTS = "SLOTS_FILTER_HAS_SLOTS"
+    ZERO_SLOTS = "SLOTS_FILTER_ZERO_SLOTS"
 
 class v1StartTrialRequest(Printable):
     """Start a trial."""
@@ -19592,15 +19594,12 @@ denote number of experiments to skip from the end before returning results.
     - projectId: Limit experiments to those within a specified project, or 0 for all
 projects.
     - showTrialData: whether to surface trial specific data from the best trial.
-    - slotsFilter: Limit experiments to those that ask for slots (GPU) or for none (CPU
-only), by resources.slots_per_trial.
+    - slotsFilter: Limit experiments by the slot count each trial requests
+(resources.slots_per_trial, 1 when unset): at least one slot, or none.
 
  - SLOTS_FILTER_UNSPECIFIED: No filter.
- - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a
-resources.slots_per_trial above 0, other tasks with a resources.slots
-above 0.
- - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or
-resources.slots of 0).
+ - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.
+ - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
     - sortBy: Sort experiments by the given field.
 
  - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.
@@ -19729,7 +19728,7 @@ def get_GetGenericTasks(
     workspaceId: "typing.Optional[int]" = None,
 ) -> "v1GetGenericTasksResponse":
     """Get a list of generic tasks, optionally filtered by owner, workspace,
-    project, state, parent, name or slot use.
+    project, state, parent, name or slot count.
 
     - limit: Limit the number of tasks. A value of 0 denotes no limit.
     - offset: Skip this many tasks before returning results.
@@ -19737,14 +19736,12 @@ def get_GetGenericTasks(
     - projectId: Limit tasks to this project; 0 for all projects.
     - search: Limit tasks to those whose name or task ID contains this text, ignoring
 case.
-    - slotsFilter: Limit tasks to those that ask for slots (GPU) or for none (CPU only).
+    - slotsFilter: Limit tasks by the slot count they request (resources.slots): at least
+one slot, or none.
 
  - SLOTS_FILTER_UNSPECIFIED: No filter.
- - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a
-resources.slots_per_trial above 0, other tasks with a resources.slots
-above 0.
- - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or
-resources.slots of 0).
+ - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.
+ - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
     - states: Limit tasks to these states.
 
  - GENERIC_TASK_STATE_UNSPECIFIED: The task state unknown

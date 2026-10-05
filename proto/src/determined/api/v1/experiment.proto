@@ -129,8 +129,8 @@ message GetExperimentsRequest {
   // Limit experiments to those in projects of this workspace, or 0 for all
   // workspaces.
   int32 workspace_id = 100;
-  // Limit experiments to those that ask for slots (GPU) or for none (CPU
-  // only), by resources.slots_per_trial.
+  // Limit experiments by the slot count each trial requests
+  // (resources.slots_per_trial, 1 when unset): at least one slot, or none.
   SlotsFilter slots_filter = 101;
 }
 // Response to GetExperimentsRequest.

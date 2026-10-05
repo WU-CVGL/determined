@@ -11107,14 +11107,14 @@ export interface V1Slot {
     draining?: boolean;
 }
 /**
- * Filter workloads by whether they ask for slots. A slot is a GPU, or a CPU on an agent configured with slot_type cpu.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a resources.slots_per_trial above 0, other tasks with a resources.slots above 0.  - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or resources.slots of 0).
+ * Filter workloads by the slot count they request: experiments by resources.slots_per_trial (1 when the config leaves it out, its default), generic tasks by the resources.slots stored with the task (0 when the stored config has none, as the task's slots field reports it). The filter counts slots of any type. A slot is a GPU only in a resource pool whose slot type is cuda or rocm; in a pool whose slot type is cpu, a slot is a CPU, so a workload with slots does not necessarily use a GPU.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.  - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
  * @export
  * @enum {string}
  */
 export const V1SlotsFilter = {
     UNSPECIFIED: 'SLOTS_FILTER_UNSPECIFIED',
-    GPU: 'SLOTS_FILTER_GPU',
-    CPUONLY: 'SLOTS_FILTER_CPU_ONLY',
+    HASSLOTS: 'SLOTS_FILTER_HAS_SLOTS',
+    ZEROSLOTS: 'SLOTS_FILTER_ZERO_SLOTS',
 } as const
 export type V1SlotsFilter = ValueOf<typeof V1SlotsFilter>
 /**
@@ -16801,7 +16801,7 @@ export const ExperimentsApiFetchParamCreator = function (configuration?: Configu
          * @param {Array<number>} [experimentIdFilterNotIn] Not in a set.
          * @param {boolean} [showTrialData] whether to surface trial specific data from the best trial.
          * @param {number} [workspaceId] Limit experiments to those in projects of this workspace, or 0 for all workspaces.
-         * @param {V1SlotsFilter} [slotsFilter] Limit experiments to those that ask for slots (GPU) or for none (CPU only), by resources.slots_per_trial.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a resources.slots_per_trial above 0, other tasks with a resources.slots above 0.  - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or resources.slots of 0).
+         * @param {V1SlotsFilter} [slotsFilter] Limit experiments by the slot count each trial requests (resources.slots_per_trial, 1 when unset): at least one slot, or none.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.  - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -18315,7 +18315,7 @@ export const ExperimentsApiFp = function (configuration?: Configuration) {
          * @param {Array<number>} [experimentIdFilterNotIn] Not in a set.
          * @param {boolean} [showTrialData] whether to surface trial specific data from the best trial.
          * @param {number} [workspaceId] Limit experiments to those in projects of this workspace, or 0 for all workspaces.
-         * @param {V1SlotsFilter} [slotsFilter] Limit experiments to those that ask for slots (GPU) or for none (CPU only), by resources.slots_per_trial.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a resources.slots_per_trial above 0, other tasks with a resources.slots above 0.  - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or resources.slots of 0).
+         * @param {V1SlotsFilter} [slotsFilter] Limit experiments by the slot count each trial requests (resources.slots_per_trial, 1 when unset): at least one slot, or none.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.  - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -19027,7 +19027,7 @@ export const ExperimentsApiFactory = function (configuration?: Configuration, fe
          * @param {Array<number>} [experimentIdFilterNotIn] Not in a set.
          * @param {boolean} [showTrialData] whether to surface trial specific data from the best trial.
          * @param {number} [workspaceId] Limit experiments to those in projects of this workspace, or 0 for all workspaces.
-         * @param {V1SlotsFilter} [slotsFilter] Limit experiments to those that ask for slots (GPU) or for none (CPU only), by resources.slots_per_trial.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a resources.slots_per_trial above 0, other tasks with a resources.slots above 0.  - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or resources.slots of 0).
+         * @param {V1SlotsFilter} [slotsFilter] Limit experiments by the slot count each trial requests (resources.slots_per_trial, 1 when unset): at least one slot, or none.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.  - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -19543,7 +19543,7 @@ export class ExperimentsApi extends BaseAPI {
      * @param {Array<number>} [experimentIdFilterNotIn] Not in a set.
      * @param {boolean} [showTrialData] whether to surface trial specific data from the best trial.
      * @param {number} [workspaceId] Limit experiments to those in projects of this workspace, or 0 for all workspaces.
-     * @param {V1SlotsFilter} [slotsFilter] Limit experiments to those that ask for slots (GPU) or for none (CPU only), by resources.slots_per_trial.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a resources.slots_per_trial above 0, other tasks with a resources.slots above 0.  - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or resources.slots of 0).
+     * @param {V1SlotsFilter} [slotsFilter] Limit experiments by the slot count each trial requests (resources.slots_per_trial, 1 when unset): at least one slot, or none.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.  - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      * @memberof ExperimentsApi
@@ -31335,7 +31335,7 @@ export const TasksApiFetchParamCreator = function (configuration?: Configuration
         },
         /**
          * 
-         * @summary Get a list of generic tasks, optionally filtered by owner, workspace, project, state, parent, name or slot use.
+         * @summary Get a list of generic tasks, optionally filtered by owner, workspace, project, state, parent, name or slot count.
          * @param {number} [offset] Skip this many tasks before returning results.
          * @param {number} [limit] Limit the number of tasks. A value of 0 denotes no limit.
          * @param {Array<string>} [users] Limit tasks to those owned by users with these usernames.
@@ -31346,7 +31346,7 @@ export const TasksApiFetchParamCreator = function (configuration?: Configuration
          * @param {Array<string>} [taskIds] Limit tasks to these task IDs.
          * @param {number} [projectId] Limit tasks to this project; 0 for all projects.
          * @param {string} [search] Limit tasks to those whose name or task ID contains this text, ignoring case.
-         * @param {V1SlotsFilter} [slotsFilter] Limit tasks to those that ask for slots (GPU) or for none (CPU only).   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a resources.slots_per_trial above 0, other tasks with a resources.slots above 0.  - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or resources.slots of 0).
+         * @param {V1SlotsFilter} [slotsFilter] Limit tasks by the slot count they request (resources.slots): at least one slot, or none.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.  - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -31948,7 +31948,7 @@ export const TasksApiFp = function (configuration?: Configuration) {
         },
         /**
          * 
-         * @summary Get a list of generic tasks, optionally filtered by owner, workspace, project, state, parent, name or slot use.
+         * @summary Get a list of generic tasks, optionally filtered by owner, workspace, project, state, parent, name or slot count.
          * @param {number} [offset] Skip this many tasks before returning results.
          * @param {number} [limit] Limit the number of tasks. A value of 0 denotes no limit.
          * @param {Array<string>} [users] Limit tasks to those owned by users with these usernames.
@@ -31959,7 +31959,7 @@ export const TasksApiFp = function (configuration?: Configuration) {
          * @param {Array<string>} [taskIds] Limit tasks to these task IDs.
          * @param {number} [projectId] Limit tasks to this project; 0 for all projects.
          * @param {string} [search] Limit tasks to those whose name or task ID contains this text, ignoring case.
-         * @param {V1SlotsFilter} [slotsFilter] Limit tasks to those that ask for slots (GPU) or for none (CPU only).   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a resources.slots_per_trial above 0, other tasks with a resources.slots above 0.  - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or resources.slots of 0).
+         * @param {V1SlotsFilter} [slotsFilter] Limit tasks by the slot count they request (resources.slots): at least one slot, or none.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.  - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -32223,7 +32223,7 @@ export const TasksApiFactory = function (configuration?: Configuration, fetch?: 
         },
         /**
          * 
-         * @summary Get a list of generic tasks, optionally filtered by owner, workspace, project, state, parent, name or slot use.
+         * @summary Get a list of generic tasks, optionally filtered by owner, workspace, project, state, parent, name or slot count.
          * @param {number} [offset] Skip this many tasks before returning results.
          * @param {number} [limit] Limit the number of tasks. A value of 0 denotes no limit.
          * @param {Array<string>} [users] Limit tasks to those owned by users with these usernames.
@@ -32234,7 +32234,7 @@ export const TasksApiFactory = function (configuration?: Configuration, fetch?: 
          * @param {Array<string>} [taskIds] Limit tasks to these task IDs.
          * @param {number} [projectId] Limit tasks to this project; 0 for all projects.
          * @param {string} [search] Limit tasks to those whose name or task ID contains this text, ignoring case.
-         * @param {V1SlotsFilter} [slotsFilter] Limit tasks to those that ask for slots (GPU) or for none (CPU only).   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a resources.slots_per_trial above 0, other tasks with a resources.slots above 0.  - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or resources.slots of 0).
+         * @param {V1SlotsFilter} [slotsFilter] Limit tasks by the slot count they request (resources.slots): at least one slot, or none.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.  - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -32406,7 +32406,7 @@ export class TasksApi extends BaseAPI {
     
     /**
      * 
-     * @summary Get a list of generic tasks, optionally filtered by owner, workspace, project, state, parent, name or slot use.
+     * @summary Get a list of generic tasks, optionally filtered by owner, workspace, project, state, parent, name or slot count.
      * @param {number} [offset] Skip this many tasks before returning results.
      * @param {number} [limit] Limit the number of tasks. A value of 0 denotes no limit.
      * @param {Array<string>} [users] Limit tasks to those owned by users with these usernames.
@@ -32417,7 +32417,7 @@ export class TasksApi extends BaseAPI {
      * @param {Array<string>} [taskIds] Limit tasks to these task IDs.
      * @param {number} [projectId] Limit tasks to this project; 0 for all projects.
      * @param {string} [search] Limit tasks to those whose name or task ID contains this text, ignoring case.
-     * @param {V1SlotsFilter} [slotsFilter] Limit tasks to those that ask for slots (GPU) or for none (CPU only).   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a resources.slots_per_trial above 0, other tasks with a resources.slots above 0.  - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or resources.slots of 0).
+     * @param {V1SlotsFilter} [slotsFilter] Limit tasks by the slot count they request (resources.slots): at least one slot, or none.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.  - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      * @memberof TasksApi

@@ -3,16 +3,18 @@ syntax = "proto3";
 package determined.api.v1;
 option go_package = "github.com/determined-ai/determined/proto/pkg/apiv1";
 
-// Filter workloads by whether they ask for slots. A slot is a GPU, or a CPU on
-// an agent configured with slot_type cpu.
+// Filter workloads by the slot count they request: experiments by
+// resources.slots_per_trial (1 when the config leaves it out, its default),
+// generic tasks by the resources.slots stored with the task (0 when the stored
+// config has none, as the task's slots field reports it). The filter counts
+// slots of any type. A slot is a GPU only in a resource pool whose slot type
+// is cuda or rocm; in a pool whose slot type is cpu, a slot is a CPU, so a
+// workload with slots does not necessarily use a GPU.
 enum SlotsFilter {
   // No filter.
   SLOTS_FILTER_UNSPECIFIED = 0;
-  // Workloads that ask for at least one slot: experiments with a
-  // resources.slots_per_trial above 0, other tasks with a resources.slots
-  // above 0.
-  SLOTS_FILTER_GPU = 1;
-  // Workloads that ask for no slots (resources.slots_per_trial or
-  // resources.slots of 0).
-  SLOTS_FILTER_CPU_ONLY = 2;
+  // Workloads that request at least one slot.
+  SLOTS_FILTER_HAS_SLOTS = 1;
+  // Workloads that request no slots: a slot count of 0.
+  SLOTS_FILTER_ZERO_SLOTS = 2;
 }

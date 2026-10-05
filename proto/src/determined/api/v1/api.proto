@@ -2631,7 +2631,7 @@ service Determined {
   }
 
   // Get a list of generic tasks, optionally filtered by owner, workspace,
-  // project, state, parent, name or slot use.
+  // project, state, parent, name or slot count.
   rpc GetGenericTasks(GetGenericTasksRequest)
       returns (GetGenericTasksResponse) {
     option (google.api.http) = {

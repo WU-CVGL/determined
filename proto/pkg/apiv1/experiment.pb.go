@@ -428,8 +428,8 @@ type GetExperimentsRequest struct {
 	// Limit experiments to those in projects of this workspace, or 0 for all
 	// workspaces.
 	WorkspaceId int32 `protobuf:"varint,100,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	// Limit experiments to those that ask for slots (GPU) or for none (CPU
-	// only), by resources.slots_per_trial.
+	// Limit experiments by the slot count each trial requests
+	// (resources.slots_per_trial, 1 when unset): at least one slot, or none.
 	SlotsFilter SlotsFilter `protobuf:"varint,101,opt,name=slots_filter,json=slotsFilter,proto3,enum=determined.api.v1.SlotsFilter" json:"slots_filter,omitempty"`
 }
 
