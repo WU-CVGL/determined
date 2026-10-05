@@ -91,11 +91,13 @@ type GPULink struct {
 // GPUTopology is what the agent measured at process start. When UnknownReason is set, GPUs is
 // the inventory from device detection (UUID and Excluded only) and Links is empty.
 type GPUTopology struct {
-	UnknownReason string    `json:"unknown_reason,omitempty"`
-	CollectedAt   time.Time `json:"collected_at,omitempty"`
-	DriverVersion string    `json:"driver_version,omitempty"`
-	GPUs          []GPUInfo `json:"gpus,omitempty"`
-	Links         []GPULink `json:"links,omitempty"`
+	UnknownReason string `json:"unknown_reason,omitempty"`
+	// CollectedAt is nil when unknown. It is a pointer because encoding/json never omits a struct
+	// value such as a zero time.Time.
+	CollectedAt   *time.Time `json:"collected_at,omitempty"`
+	DriverVersion string     `json:"driver_version,omitempty"`
+	GPUs          []GPUInfo  `json:"gpus,omitempty"`
+	Links         []GPULink  `json:"links,omitempty"`
 }
 
 // GPUP2PUsability is the P2P state of a pair of GPUs derived from its four raw statuses.

@@ -73,6 +73,7 @@ func TestGPUTopologySubcommandInitsFirst(t *testing.T) {
 	require.NotContains(t, decoded, "exclude_error")
 	topo := decoded["topology"].(map[string]any)
 	require.Equal(t, "NVML init: ERROR_LIBRARY_NOT_FOUND (12)", topo["unknown_reason"])
+	require.NotContains(t, topo, "collected_at", "an unknown collection time is left out")
 
 	// SUCCESS adds the driver version.
 	calls = nil

@@ -77,7 +77,9 @@ func newGPUTopology(
 		return g
 	}
 	g.unknownReason = wire.UnknownReason
-	g.collectedAt = wire.CollectedAt
+	if wire.CollectedAt != nil {
+		g.collectedAt = *wire.CollectedAt
+	}
 	g.driverVersion = wire.DriverVersion
 
 	excluded := map[string]bool{}

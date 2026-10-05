@@ -66,7 +66,8 @@ func collect(
 	}
 	defer shutdownNVML(lib)
 
-	topo.CollectedAt = now()
+	collectedAt := now()
+	topo.CollectedAt = &collectedAt
 	if v, ret := lib.SystemGetDriverVersion(); ret == nvml.SUCCESS {
 		topo.DriverVersion = v
 	}

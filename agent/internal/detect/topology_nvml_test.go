@@ -229,7 +229,8 @@ func TestCollectNode07Like(t *testing.T) {
 	topo := collectFake(f, inventoryOf(gpus))
 
 	require.Empty(t, topo.UnknownReason)
-	require.Equal(t, fixedNow, topo.CollectedAt)
+	require.NotNil(t, topo.CollectedAt)
+	require.Equal(t, fixedNow, *topo.CollectedAt)
 	require.Equal(t, "610.57.04", topo.DriverVersion)
 	require.Len(t, topo.GPUs, 8)
 	for i, g := range topo.GPUs {
@@ -510,7 +511,7 @@ func TestCollectLibraryNotFound(t *testing.T) {
 	require.Equal(t, "NVML init: ERROR_LIBRARY_NOT_FOUND (12)", topo.UnknownReason)
 	require.Equal(t, inventoryOf(gpus, 7), topo.GPUs, "the inventory, with no telemetry")
 	require.Empty(t, topo.Links)
-	require.True(t, topo.CollectedAt.IsZero())
+	require.Nil(t, topo.CollectedAt)
 	require.Empty(t, f.handleRequests)
 	require.Zero(t, f.shutdowns)
 }

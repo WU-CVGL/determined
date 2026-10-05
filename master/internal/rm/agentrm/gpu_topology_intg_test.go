@@ -88,8 +88,9 @@ func TestAgentStartedRefreshesGPUTopology(t *testing.T) {
 	started := func(version string, width int) *aproto.AgentStarted {
 		msg := &aproto.AgentStarted{Version: version, Devices: devices, ResourcePoolName: "default"}
 		if width > 0 {
+			collected := time.Now()
 			msg.GPUTopology = &aproto.GPUTopology{
-				CollectedAt: time.Now(),
+				CollectedAt: &collected,
 				GPUs: []aproto.GPUInfo{
 					{UUID: "GPU-a", PCIeLinkWidth: width, PCIeLinkWidthMax: 16},
 					{UUID: "GPU-b", PCIeLinkWidth: 16, PCIeLinkWidthMax: 16},

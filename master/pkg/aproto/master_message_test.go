@@ -50,10 +50,11 @@ func TestAgentStartedWireCompat(t *testing.T) {
 	// An older master decodes a new agent's message with plain json.Unmarshal and ignores the
 	// field.
 	zero := 0
+	collected := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 	withTopology, err := json.Marshal(MasterMessage{AgentStarted: &AgentStarted{
 		Version: "0.42.0", Devices: devices, ResourcePoolName: "default",
 		GPUTopology: &GPUTopology{
-			CollectedAt:   time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC),
+			CollectedAt:   &collected,
 			DriverVersion: "610.57.04",
 			GPUs:          []GPUInfo{{UUID: "GPU-a", PCIBusID: "0000:41:00.0", NUMANode: &zero}},
 		},
@@ -67,6 +68,7 @@ func TestAgentStartedWireCompat(t *testing.T) {
 	var newMaster MasterMessage
 	require.NoError(t, json.Unmarshal(withTopology, &newMaster))
 	require.Equal(t, "610.57.04", newMaster.AgentStarted.GPUTopology.DriverVersion)
+	require.True(t, collected.Equal(*newMaster.AgentStarted.GPUTopology.CollectedAt))
 	require.Equal(t, 0, *newMaster.AgentStarted.GPUTopology.GPUs[0].NUMANode)
 }
 
@@ -84,8 +86,9 @@ func TestGPUTopologyWireJSON(t *testing.T) {
 		}},
 	})
 	require.NoError(t, err)
+	// An unknown collection time is left out, as every unknown field is.
+	require.NotContains(t, string(bs), "collected_at")
 	require.JSONEq(t, `{
-		"collected_at": "0001-01-01T00:00:00Z",
 		"driver_version": "610.57.04",
 		"gpus": [
 			{"uuid": "GPU-a", "numa_node": 2, "pcie_link_width": 8, "pcie_link_width_max": 16},

@@ -35,7 +35,7 @@ func TestNewGPUTopologyMapsUUIDsToDeviceIDs(t *testing.T) {
 	zero := 0
 	collected := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 	wire := &aproto.GPUTopology{
-		CollectedAt:   collected,
+		CollectedAt:   &collected,
 		DriverVersion: "610.57.04",
 		GPUs: []aproto.GPUInfo{
 			{UUID: "GPU-z", PCIBusID: "0000:41:00.0", NUMANode: &zero, PCIeLinkWidth: 8, PCIeLinkWidthMax: 16},
@@ -233,7 +233,7 @@ func TestGPUTopologyProtoOrderAndLinks(t *testing.T) {
 	one := 1
 	collected := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 	wire := &aproto.GPUTopology{
-		CollectedAt:   collected,
+		CollectedAt:   &collected,
 		DriverVersion: "610.57.04",
 		GPUs: []aproto.GPUInfo{
 			{UUID: "GPU-z", PCIBusID: "0000:41:00.0", NUMANode: &one, PCIeLinkWidth: 8, PCIeLinkWidthMax: 16},

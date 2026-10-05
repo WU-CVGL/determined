@@ -166,7 +166,7 @@ New master/pkg/aproto/gpu_topology.go, shared by agent and master. The zero valu
 - `GPUP2PCaps{Read, Write GPUP2PStatus}`: one direction.
 - `GPUInfo{UUID; PCIBusID; NUMANode *int; PCIeLinkWidth, PCIeLinkWidthMax, PCIeLinkGen, PCIeLinkGenMax int; NVMLError string; Excluded bool}`.
 - `GPULink{UUIDA, UUIDB string (UUIDA < UUIDB); Level; NVLinks int; P2PAToB, P2PBToA GPUP2PCaps}`.
-- `GPUTopology{UnknownReason; CollectedAt time.Time; DriverVersion; GPUs []GPUInfo; Links []GPULink}`.
+- `GPUTopology{UnknownReason; CollectedAt *time.Time; DriverVersion; GPUs []GPUInfo; Links []GPULink}`. CollectedAt is a pointer because `encoding/json` never omits a struct value such as a zero `time.Time`.
 - `P2PUsability(GPULink) GPUP2PUsability` (USABLE, NOT_USABLE, "" unknown): the N3 rule.
 - `AgentStarted` (master_message.go:79-84) gets `GPUTopology *GPUTopology \`json:",omitempty"\``.
 

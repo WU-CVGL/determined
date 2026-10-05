@@ -29,7 +29,7 @@ func TestDetectGPUTopologyStub(t *testing.T) {
 		{UUID: "GPU-4", Excluded: true},
 	}, topo.GPUs)
 	require.Empty(t, topo.Links)
-	require.True(t, topo.CollectedAt.IsZero())
+	require.Nil(t, topo.CollectedAt)
 
 	require.Nil(t, DetectGPUTopology(nil, nil))
 	require.Equal(t, NVMLInitStatus{Name: "NOT_BUILT", Code: -1}, ProbeNVMLInit())
