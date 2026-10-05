@@ -9,8 +9,8 @@ import { createOmitableRenderer, relativeTimeRenderer } from 'components/Table/T
 import { paths } from 'routes/utils';
 import { getJupyterLabs, getTensorBoards } from 'services/api';
 import { CommandTask, FullJob, Job, JobType } from 'types';
-import { genericJobLabel, jobTypeIconName, jobTypeLabel } from 'utils/job';
-import { floatToPercent, truncate } from 'utils/string';
+import { genericJobLabel, jobTypeIconName, jobTypeLabel, taskJobLabel } from 'utils/job';
+import { floatToPercent } from 'utils/string';
 import { openCommand } from 'utils/wait';
 
 import css from './JobQueue.module.scss';
@@ -114,11 +114,7 @@ export const columns: (f_flat_runs: boolean) => ColumnDef<Job>[] = (f_flat_runs)
           label = <div>{genericJobLabel(record.name, record.entityId)}</div>;
           break;
         default:
-          label = (
-            <span>
-              {jobTypeLabel(record.type)} {truncate(record.entityId, 6, '')}
-            </span>
-          );
+          label = <span>{taskJobLabel(record.type, record.name, record.entityId)}</span>;
           break;
       }
       return linkToEntityPage(record, label);

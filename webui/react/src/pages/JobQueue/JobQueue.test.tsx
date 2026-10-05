@@ -170,10 +170,17 @@ describe('JobQueue', () => {
 
   afterEach(() => vi.clearAllMocks());
 
+  it('names a task job by its name and short task ID', async () => {
+    setup();
+    await waitForShells();
+    expect(await screen.findByText('Shell (lively-calm-fox) (shell)')).toBeInTheDocument();
+    expect(screen.queryByText('Shell shell')).not.toBeInTheDocument();
+  });
+
   it('gives an active shell the full task menu, in the Tasks page order', async () => {
     setup();
     await waitForShells();
-    await openRowMenu(/Shell shell-/);
+    await openRowMenu('Shell (lively-calm-fox) (shell)');
     await screen.findByText('Copy Task ID');
     expect(menuLabels()).toEqual([
       'View Logs',
@@ -190,7 +197,7 @@ describe('JobQueue', () => {
   it('leaves out Manage Job where the scheduler cannot manage the task', async () => {
     setup(Api.V1SchedulerType.KUBERNETES);
     await waitForShells();
-    await openRowMenu(/Shell shell-/);
+    await openRowMenu('Shell (lively-calm-fox) (shell)');
     await screen.findByText('Copy Task ID');
     expect(menuLabels()).not.toContain('Manage Job');
     expect(menuLabels().at(-1)).toBe('Kill');
@@ -202,7 +209,7 @@ describe('JobQueue', () => {
     vi.mocked(getShells).mockResolvedValue([{ ...runningShell, userId: OWNER_ID + 1 }]);
     setup();
     await waitForShells();
-    await openRowMenu(/Shell shell-/);
+    await openRowMenu('Shell (lively-calm-fox) (shell)');
     await screen.findByText('Copy Task ID');
     expect(menuLabels()).toEqual(['View Logs', 'View Resources', 'Copy Task ID']);
   });
@@ -220,7 +227,7 @@ describe('JobQueue', () => {
     setup();
     await waitForShells();
     expect(screen.queryByText(/^Launch form for/)).not.toBeInTheDocument();
-    await openRowMenu(/Shell shell-/);
+    await openRowMenu('Shell (lively-calm-fox) (shell)');
     await userEvent.click(await screen.findByText('Launch Again'));
     // The form opens with the task's type selected.
     expect(await screen.findByText('Launch form for shell-1 (shell)')).toBeInTheDocument();
