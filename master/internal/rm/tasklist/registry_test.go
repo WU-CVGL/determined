@@ -76,3 +76,55 @@ func TestRegistry(t *testing.T) {
 	assert.Assert(t, ok)
 	assert.Equal(t, val, "value2")
 }
+
+func TestRegistryUpsertDoesNotNotifyDelete(t *testing.T) {
+	registry := NewRegistry[string, string]()
+	registry.Upsert("key", "first")
+	val, ok := registry.Load("key")
+	assert.Assert(t, ok)
+	assert.Equal(t, val, "first")
+
+	deleted := make(chan bool)
+	registry.OnDelete("key", func() { close(deleted) })
+	registry.Upsert("key", "second")
+	val, _ = registry.Load("key")
+	assert.Equal(t, val, "second")
+	select {
+	case <-deleted:
+		t.Fatal("replacing a value notified a delete")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	assert.NilError(t, registry.Delete("key"))
+	select {
+	case <-deleted:
+	case <-time.After(time.Second):
+		t.Fatal("delete did not notify")
+	}
+}
+
+func TestRegistryDeleteIf(t *testing.T) {
+	type agent struct{ name string }
+	oldAgent, newAgent := &agent{"old"}, &agent{"new"}
+	registry := NewRegistry[string, *agent]()
+
+	// A stale holder must not remove a newer value registered under the same key.
+	assert.Assert(t, registry.Add("node", newAgent))
+	assert.Assert(t, !DeleteIf(registry, "node", oldAgent))
+	val, ok := registry.Load("node")
+	assert.Assert(t, ok)
+	assert.Equal(t, val, newAgent)
+
+	deleted := make(chan bool)
+	registry.OnDelete("node", func() { close(deleted) })
+	assert.Assert(t, DeleteIf(registry, "node", newAgent))
+	_, ok = registry.Load("node")
+	assert.Assert(t, !ok)
+	select {
+	case <-deleted:
+	case <-time.After(time.Second):
+		t.Fatal("OnDelete callback not called after DeleteIf")
+	}
+
+	assert.Assert(t, !DeleteIf(registry, "node", newAgent))
+}

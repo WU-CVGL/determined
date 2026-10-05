@@ -51,6 +51,10 @@ message PatchUser {
   // Bool denoting whether the user should be able to login with or change a
   // password.
   optional bool remote = 8;
+  // The user's current password, pre-salted and hashed if is_hashed is set.
+  // Required when users change their own password or username; ignored
+  // otherwise. Users without a password send an empty string.
+  optional string old_password = 9;
 }
 
 // AgentUserGroup represents a username and primary group for a user on an

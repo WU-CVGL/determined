@@ -92,28 +92,51 @@ func (a *apiServer) GetNotebooks(
 func (a *apiServer) GetNotebook(
 	ctx context.Context, req *apiv1.GetNotebookRequest,
 ) (*apiv1.GetNotebookResponse, error) {
-	curUser, _, err := grpcutil.GetUser(ctx)
+	resp, curUser, err := a.getNotebook(ctx, req.NotebookId)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := command.DefaultCmdService.GetNotebook(req)
-	if err != nil {
-		return nil, err
-	}
-
-	ctx = audit.SupplyEntityID(ctx, req.NotebookId)
-	if err := command.AuthZProvider.Get().CanGetNSC(
-		ctx, *curUser, model.AccessScopeID(resp.Notebook.WorkspaceId),
-	); err != nil {
-		return nil, authz.SubIfUnauthorized(err,
-			api.NotFoundErrs("notebook", req.NotebookId, true))
+	// Jupyter accepts the token as a login, which runs code as the notebook's user.
+	if canReadTaskCredential(*curUser, resp.Notebook.UserId) {
+		token, err := command.DefaultCmdService.GetNotebookToken(req.NotebookId)
+		if err != nil {
+			return nil, err
+		}
+		resp.Notebook.ServiceAddress = command.NotebookServiceAddress(
+			resp.Notebook.ServiceAddress, token)
+		logCredentialRead(*curUser, "notebook token", req.NotebookId, resp.Notebook.UserId)
 	}
 	return resp, nil
 }
 
+// getNotebook returns a notebook, without its Jupyter token, if the current user may see it.
+func (a *apiServer) getNotebook(
+	ctx context.Context, notebookID string,
+) (*apiv1.GetNotebookResponse, *model.User, error) {
+	curUser, _, err := grpcutil.GetUser(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	resp, err := command.DefaultCmdService.GetNotebook(
+		&apiv1.GetNotebookRequest{NotebookId: notebookID})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ctx = audit.SupplyEntityID(ctx, notebookID)
+	if err := command.AuthZProvider.Get().CanGetNSC(
+		ctx, *curUser, model.AccessScopeID(resp.Notebook.WorkspaceId),
+	); err != nil {
+		return nil, nil, authz.SubIfUnauthorized(err,
+			api.NotFoundErrs("notebook", notebookID, true))
+	}
+	return resp, curUser, nil
+}
+
 func (a *apiServer) validateToKillNotebook(ctx context.Context, notebookID string) error {
-	targetNotebook, err := a.GetNotebook(ctx, &apiv1.GetNotebookRequest{NotebookId: notebookID})
+	targetNotebook, _, err := a.getNotebook(ctx, notebookID)
 	if err != nil {
 		return err
 	}
@@ -163,7 +186,7 @@ func (a *apiServer) KillNotebook(
 func (a *apiServer) SetNotebookPriority(
 	ctx context.Context, req *apiv1.SetNotebookPriorityRequest,
 ) (resp *apiv1.SetNotebookPriorityResponse, err error) {
-	targetNotebook, err := a.GetNotebook(ctx, &apiv1.GetNotebookRequest{NotebookId: req.NotebookId})
+	targetNotebook, _, err := a.getNotebook(ctx, req.NotebookId)
 	if err != nil {
 		return nil, err
 	}
@@ -373,8 +396,13 @@ func (a *apiServer) LaunchNotebook(
 		return nil, err
 	}
 
+	// The caller owns the new notebook and needs the token to open it.
+	notebook := genericCmd.ToV1Notebook()
+	notebook.ServiceAddress = command.NotebookServiceAddress(
+		notebook.ServiceAddress, genericCmd.NotebookToken())
+
 	return &apiv1.LaunchNotebookResponse{
-		Notebook: genericCmd.ToV1Notebook(),
+		Notebook: notebook,
 		Config:   protoutils.ToStruct(launchReq.Spec.Config),
 		Warnings: pkgCommand.LaunchWarningToProto(launchWarnings),
 	}, nil

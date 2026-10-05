@@ -4,7 +4,7 @@ import Icon from 'hew/Icon';
 import { useModal } from 'hew/Modal';
 import { useToast } from 'hew/Toast';
 import useConfirm from 'hew/useConfirm';
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import css from 'components/ActionDropdown/ActionDropdown.module.scss';
@@ -18,6 +18,7 @@ import { copyToClipboard } from 'utils/dom';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import { capitalize } from 'utils/string';
 import { isTaskKillable } from 'utils/task';
+import { getJupyterLabAddress, NOTEBOOK_ACCESS_DENIED } from 'utils/wait';
 
 interface Props {
   children?: React.ReactNode;
@@ -42,6 +43,8 @@ const TaskActionDropdown: React.FC<Props> = ({
   const resourcesEnabled = useTaskResourcesEnabled();
   const { openToast } = useToast();
   const TaskConnectModal = useModal(TaskConnectModalComponent);
+  // Listings never include a notebook's Jupyter token, so it is fetched when connecting.
+  const [jupyterLabAddress, setJupyterLabAddress] = useState<string>();
 
   const isConnectable = (task: CommandTask): boolean => {
     const connectableTaskTypes: CommandType[] = [CommandType.JupyterLab, CommandType.Shell];
@@ -56,7 +59,7 @@ const TaskActionDropdown: React.FC<Props> = ({
         return [
           {
             label: 'Connect to notebook in VSCode using the remote Jupyter server address:',
-            value: `${serverAddress()}${task.serviceAddress}`,
+            value: `${serverAddress()}${jupyterLabAddress ?? task.serviceAddress}`,
           },
         ];
       case CommandType.Shell:
@@ -69,7 +72,7 @@ const TaskActionDropdown: React.FC<Props> = ({
       default:
         return [];
     }
-  }, [task]);
+  }, [task, jupyterLabAddress]);
 
   const menuItems: MenuItem[] = useMemo(() => {
     const items: MenuItem[] = [
@@ -120,6 +123,14 @@ const TaskActionDropdown: React.FC<Props> = ({
     try {
       switch (key) {
         case Action.Connect:
+          if (task.type === CommandType.JupyterLab) {
+            const address = await getJupyterLabAddress(task.id);
+            if (!address) {
+              openToast({ severity: 'Error', title: NOTEBOOK_ACCESS_DENIED });
+              break;
+            }
+            setJupyterLabAddress(address);
+          }
           TaskConnectModal.open();
           break;
         case Action.LaunchAgain:

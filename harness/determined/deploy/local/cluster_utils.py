@@ -356,8 +356,10 @@ def master_up(
                         d = determined.Determined._from_session(sess)
                         user = d.get_user_by_name("determined")
                         user.change_password(new_password)
+                        # The session belongs to admin, and users must confirm their current
+                        # password to change their own.
                         user = d.get_user_by_name("admin")
-                        user.change_password(new_password)
+                        user.change_password(new_password, current_password=generated_user_password)
 
                 except Exception:
                     # User could exit, or might be unable to pass validation,

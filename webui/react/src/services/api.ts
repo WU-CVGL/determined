@@ -30,6 +30,10 @@ export const login = generateDetApi<Api.V1LoginRequest, Api.V1LoginResponse, Ser
 
 export const logout = generateDetApi<EmptyParams, Api.V1LogoutResponse, void>(Config.logout);
 
+export const storeSessionToken = generateDetApi<Service.StoreSessionTokenParams, Response, void>(
+  Config.storeSessionToken,
+);
+
 export const getCurrentUser = generateDetApi<
   EmptyParams,
   Api.V1CurrentUserResponse,
@@ -506,6 +510,45 @@ export const getActiveTasks = generateDetApi<
   Api.V1GetActiveTasksCountResponse,
   Type.TaskCounts
 >(Config.getActiveTasks);
+
+export const getGenericTasks = generateDetApi<
+  Service.GetGenericTasksParams,
+  Api.V1GetGenericTasksResponse,
+  Type.GenericTaskPagination
+>(Config.getGenericTasks);
+
+/* Gets one generic task with its owner, name and resources, which only the list has. */
+export const getGenericTask = async (
+  taskId: string,
+  options?: Type.FetchOptions,
+): Promise<Type.GenericTask | undefined> => {
+  const { tasks } = await getGenericTasks({ taskIds: [taskId] }, options);
+  return tasks.find((t) => t.taskId === taskId);
+};
+
+export const getGenericTaskConfig = generateDetApi<
+  Service.GetTaskParams,
+  Api.V1GetGenericTaskConfigResponse,
+  RawJson
+>(Config.getGenericTaskConfig);
+
+export const killGenericTask = generateDetApi<
+  Service.KillGenericTaskParams,
+  Api.V1KillGenericTaskResponse,
+  void
+>(Config.killGenericTask);
+
+export const pauseGenericTask = generateDetApi<
+  Service.GetTaskParams,
+  Api.V1PauseGenericTaskResponse,
+  void
+>(Config.pauseGenericTask);
+
+export const unpauseGenericTask = generateDetApi<
+  Service.GetTaskParams,
+  Api.V1UnpauseGenericTaskResponse,
+  void
+>(Config.unpauseGenericTask);
 
 export const getTaskAcceleratorData = generateDetApi<
   Service.GetTaskParams,

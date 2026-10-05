@@ -348,18 +348,17 @@ func (c *Command) ToV1Command() *commandv1.Command {
 }
 
 // ToV1Notebook takes a *Command from the command service registry & returns a *notebookv1.Notebook.
+// Its service address never includes the notebook's Jupyter token; see NotebookToken.
 func (c *Command) ToV1Notebook() *notebookv1.Notebook {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	allo := c.refreshAllocationState()
-	notebookToken := c.Base.ExtraEnvVars[model.NotebookSessionEnvVar]
-	notebookAddress := fmt.Sprintf("%s?token=%s", c.serviceAddress(), notebookToken)
 	return &notebookv1.Notebook{
 		Id:             c.stringID(),
 		State:          enrichState(allo.State),
 		Description:    c.Config.Description,
 		Container:      allo.SingleContainer().ToProto(),
-		ServiceAddress: notebookAddress,
+		ServiceAddress: c.serviceAddress(),
 		StartTime:      protoutils.ToTimestamp(c.registeredTime),
 		Username:       c.Base.Owner.Username,
 		UserId:         int32(c.Base.Owner.ID),
@@ -371,7 +370,23 @@ func (c *Command) ToV1Notebook() *notebookv1.Notebook {
 	}
 }
 
+// NotebookToken returns the token that the notebook's Jupyter server accepts as a login. It runs
+// code as the notebook's user, so callers may hand it only to the notebook's owner or an admin.
+func (c *Command) NotebookToken() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.Base.ExtraEnvVars[model.NotebookSessionEnvVar]
+}
+
+// NotebookServiceAddress returns the address that opens a notebook in JupyterLab: its proxied
+// service address with the Jupyter token.
+func NotebookServiceAddress(serviceAddress, token string) string {
+	return fmt.Sprintf("%s?token=%s", serviceAddress, token)
+}
+
 // ToV1Shell takes a *Command from the command service registry & returns a *shellv1.Shell.
+// The shell's private key is never included; see ShellPrivateKey.
 func (c *Command) ToV1Shell() *shellv1.Shell {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -383,7 +398,6 @@ func (c *Command) ToV1Shell() *shellv1.Shell {
 		Description:    c.Config.Description,
 		StartTime:      protoutils.ToTimestamp(c.registeredTime),
 		Container:      allo.SingleContainer().ToProto(),
-		PrivateKey:     *c.Metadata.PrivateKey,
 		PublicKey:      *c.Metadata.PublicKey,
 		Username:       c.Base.Owner.Username,
 		UserId:         int32(c.Base.Owner.ID),
@@ -395,6 +409,18 @@ func (c *Command) ToV1Shell() *shellv1.Shell {
 		JobId:          c.jobID.String(),
 		WorkspaceId:    int32(c.GenericCommandSpec.Metadata.WorkspaceID),
 	}
+}
+
+// ShellPrivateKey returns the shell's SSH private key. The key logs in to the shell's sshd as the
+// shell's user, so callers may hand it only to the shell's owner or an admin.
+func (c *Command) ShellPrivateKey() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.Metadata.PrivateKey == nil {
+		return ""
+	}
+	return *c.Metadata.PrivateKey
 }
 
 // ToV1Tensorboard takes a *Command from the command service registry & returns a *tensorboardv1.Tensorboard.

@@ -61,8 +61,19 @@ class User:
         resp = bindings.get_GetUser(session=self._session, userId=self.user_id).user
         self._hydrate(resp)
 
-    def rename(self, new_username: str) -> None:
+    def rename(self, new_username: str, current_password: Optional[str] = None) -> None:
+        """Changes this user's username.
+
+        Arg:
+            new_username: username to set.
+            current_password: this user's current password. The master requires it when users
+                rename themselves (an empty string for users without a password), and ignores it
+                when an administrator renames another user.
+        """
         patch_user = bindings.v1PatchUser(username=new_username)
+        if current_password is not None:
+            patch_user.oldPassword = api.salt_and_hash(current_password)
+            patch_user.isHashed = True
         bindings.patch_PatchUser(self._session, body=patch_user, userId=self.user_id)
         self.reload()
 
@@ -81,11 +92,14 @@ class User:
         bindings.patch_PatchUser(self._session, body=patch_user, userId=self.user_id)
         self.reload()
 
-    def change_password(self, new_password: str) -> None:
+    def change_password(self, new_password: str, current_password: Optional[str] = None) -> None:
         """Changes this user's password.
 
         Arg:
             new_password: password to set.
+            current_password: this user's current password. The master requires it when users
+                change their own password (an empty string for users without a password), and
+                ignores it when an administrator changes another user's password.
 
         Raises:
             ValueError: an error describing why the password does not meet complexity requirements.
@@ -93,6 +107,8 @@ class User:
         authentication.check_password_complexity(new_password)
         new_password = api.salt_and_hash(new_password)
         patch_user = bindings.v1PatchUser(password=new_password, isHashed=True)
+        if current_password is not None:
+            patch_user.oldPassword = api.salt_and_hash(current_password)
         bindings.patch_PatchUser(self._session, body=patch_user, userId=self.user_id)
 
     def link_with_agent(

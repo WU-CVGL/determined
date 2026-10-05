@@ -38,15 +38,32 @@ func TestStartAllocation(t *testing.T) {
 }
 
 func TestRestoreFailed(t *testing.T) {
-	closeDB, _, id, q, exitFuture := requireStarted(t)
-	defer closeDB()
-	defer requireKilled(t, id, exitFuture)
+	// The agent resource manager reports a failed restore as a RestoreError, which is a transient
+	// system error; the Kubernetes resource manager reports it as ResourcesMissing, which is not.
+	for _, tc := range []struct {
+		name        string
+		failureType sproto.FailureType
+		transient   bool
+	}{
+		{"restore error", sproto.RestoreError, true},
+		{"resources missing", sproto.ResourcesMissing, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			closeDB, _, id, q, exitFuture := requireStarted(t)
+			defer closeDB()
+			defer requireKilled(t, id, exitFuture)
 
-	q.Put(&sproto.ResourcesFailedError{
-		FailureType: sproto.RestoreError,
-		ErrMsg:      "things weren't there",
-	})
-	requireTerminated(t, id, exitFuture)
+			failure := sproto.ResourcesFailedError{
+				FailureType: tc.failureType,
+				ErrMsg:      "things weren't there",
+			}
+			q.Put(&failure)
+			exit := requireTerminated(t, id, exitFuture)
+			// The allocation reports the failure itself, not a handler crash.
+			require.Equal(t, failure, exit.Err)
+			require.Equal(t, tc.transient, sproto.IsTransientSystemError(exit.Err))
+		})
+	}
 }
 
 func TestInvalidResourcesRequest(t *testing.T) {
@@ -123,27 +140,58 @@ func TestSetWaiting(t *testing.T) {
 }
 
 func TestSetProxyAddress(t *testing.T) {
-	proxy.InitProxy(nil)
-	closeDB, _, id, _, exitFuture := requireStarted(t, func(ar *sproto.AllocateRequest) {
-		ar.ProxyPorts = append(ar.ProxyPorts, &sproto.ProxyPortConfig{
-			ServiceID: "someid",
-			Port:      25,
+	cases := []struct {
+		name          string
+		resourcesType *sproto.ResourcesType // nil: not allocated yet.
+		wantErr       error
+	}{
+		{"kubernetes", ptrs.Ptr(sproto.ResourcesTypeK8sJob), nil},
+		{"slurm", ptrs.Ptr(sproto.ResourcesTypeSlurmJob), nil},
+		{
+			"agent", ptrs.Ptr(sproto.ResourcesTypeDockerContainer),
+			BehaviorUnsupportedError{Behavior: "setting a proxy address"},
+		},
+		{"not allocated", nil, AllocationUnfulfilledError{Action: "setting a proxy address"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			serviceID := uuid.NewString()
+			closeDB, _, id, q, exitFuture := requireStarted(t, func(ar *sproto.AllocateRequest) {
+				ar.ProxyPorts = append(ar.ProxyPorts, &sproto.ProxyPortConfig{
+					ServiceID: serviceID,
+					Port:      25,
+				})
+			})
+			defer closeDB()
+			defer requireKilled(t, id, exitFuture)
+			if proxy.DefaultProxy == nil {
+				proxy.InitProxy(nil, nil) // Needs the database.
+			}
+			state := model.AllocationStatePending
+			if tc.resourcesType != nil {
+				requireAssignedManyOfType(t, id, q, 1, *tc.resourcesType)
+				state = model.AllocationStateAssigned
+			}
+
+			addr := "10.1.2.3"
+			err := DefaultService.SetProxyAddress(context.TODO(), id, addr)
+			_, dbState := requireState(t, id, state)
+			svc := proxy.DefaultProxy.GetService(serviceID)
+			if tc.wantErr != nil {
+				require.Equal(t, tc.wantErr, err)
+				require.Nil(t, dbState.ProxyAddress)
+				require.Nil(t, svc)
+				return
+			}
+
+			require.NoError(t, err)
+			require.NotNil(t, dbState.ProxyAddress)
+			require.Equal(t, addr, *dbState.ProxyAddress)
+			require.NotNil(t, svc)
+			require.Equal(t, addr+":25", svc.URL.Host)
+			require.False(t, svc.ProxyTCP)
 		})
-	})
-	defer closeDB()
-	defer requireKilled(t, id, exitFuture)
-
-	addr := "localhost"
-	err := DefaultService.SetProxyAddress(context.TODO(), id, addr)
-	require.NoError(t, err)
-
-	_, dbState := requireState(t, id, model.AllocationStatePending)
-	require.NotNil(t, dbState.ProxyAddress)
-	require.Equal(t, addr, *dbState.ProxyAddress)
-
-	svc := proxy.DefaultProxy.GetService("someid")
-	require.NotNil(t, svc)
-	require.False(t, svc.ProxyTCP)
+	}
 }
 
 func TestServiceRendezvous(t *testing.T) {
@@ -394,6 +442,40 @@ func TestPreemption(t *testing.T) {
 			requireTerminated(t, id, exitFuture)
 		})
 	}
+}
+
+// A graceful-stop allocation that the scheduler may not preempt, such as a generic task, still gets
+// the preemption signal when it is terminated, e.g. by a pause.
+func TestGracefulStopWithoutPreemptible(t *testing.T) {
+	closeDB, _, id, q, exitFuture := requireStarted(t, func(ar *sproto.AllocateRequest) {
+		ar.Preemption.Preemptible = false
+		ar.Preemption.GracefulStop = true
+	})
+	defer closeDB()
+	defer requireKilled(t, id, exitFuture)
+
+	rID, _ := requireAssigned(t, id, q)
+	q.Put(&sproto.ResourcesStateChanged{
+		ResourcesID:      rID,
+		ResourcesState:   sproto.Running,
+		ResourcesStarted: &sproto.ResourcesStarted{},
+	})
+	requireState(t, id, model.AllocationStateRunning)
+	require.NoError(t, DefaultService.SetReady(context.Background(), id))
+
+	require.NoError(t, DefaultService.Signal(id, TerminateAllocation, "user requested pause"))
+	preempted, err := DefaultService.WatchPreemption(context.Background(), id)
+	require.NoError(t, err)
+	require.True(t, preempted)
+	require.NoError(t, DefaultService.AckPreemption(context.Background(), id))
+
+	q.Put(&sproto.ResourcesStateChanged{
+		ResourcesID:      rID,
+		ResourcesState:   sproto.Terminated,
+		ResourcesStopped: &sproto.ResourcesStopped{},
+	})
+	exit := requireTerminated(t, id, exitFuture)
+	require.NoError(t, exit.Err)
 }
 
 func TestSignalBeforeLaunch(t *testing.T) {
@@ -652,6 +734,16 @@ func requireAssignedMany(
 	q *queue.Queue[sproto.ResourcesEvent],
 	numResources int,
 ) map[sproto.ResourcesID]*mocks.Resources {
+	return requireAssignedManyOfType(t, id, q, numResources, sproto.ResourcesTypeDockerContainer)
+}
+
+func requireAssignedManyOfType(
+	t *testing.T,
+	id model.AllocationID,
+	q *queue.Queue[sproto.ResourcesEvent],
+	numResources int,
+	resourcesType sproto.ResourcesType,
+) map[sproto.ResourcesID]*mocks.Resources {
 	resources := map[sproto.ResourcesID]*mocks.Resources{}
 	assigned := map[sproto.ResourcesID]sproto.Resources{}
 	for i := 0; i < numResources; i++ {
@@ -662,7 +754,7 @@ func requireAssignedMany(
 		r.On("Summary").Return(sproto.ResourcesSummary{
 			AllocationID:  id,
 			ResourcesID:   rID,
-			ResourcesType: sproto.ResourcesTypeDockerContainer,
+			ResourcesType: resourcesType,
 			AgentDevices:  map[aproto.ID][]device.Device{stubAgentName: nil},
 		})
 		r.On("Kill", mock.Anything).Return().Run(func(_ mock.Arguments) {

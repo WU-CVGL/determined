@@ -203,7 +203,7 @@ func (s *Service) consumeAssertion(c echo.Context) error {
 		return err
 	}
 
-	c.SetCookie(user.NewCookieFromToken(token))
+	c.SetCookie(user.NewSessionCookie(token, user.SessionCookieSecure(c.Request())))
 	redirectPath := defaultRedirectPath
 	switch relayState := c.FormValue("RelayState"); relayState {
 	case deprecatedCliRelayState:

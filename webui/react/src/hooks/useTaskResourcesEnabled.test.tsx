@@ -1,14 +1,22 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 
-import { globalStorage } from 'globalStorage';
+import userStore from 'stores/users';
+import { DetailedUser } from 'types';
 
 import useTaskResourcesEnabled from './useTaskResourcesEnabled';
 
 vi.mock('routes/utils', () => ({ serverAddress: (path: string) => `http://master${path}` }));
 
+const user = (id: number): DetailedUser => ({
+  id,
+  isActive: true,
+  isAdmin: false,
+  username: `u${id}`,
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
-  globalStorage.removeAuthToken();
+  userStore.reset();
 });
 
 it('shares concurrent row requests while allowing one row to unmount independently', async () => {
@@ -45,7 +53,7 @@ it('retries capability detection on later mounts after a failed request', async 
   expect(fetchMock).toHaveBeenCalledTimes(2);
 });
 
-it('does not share requests across different authentication sessions', async () => {
+it('does not share requests across different signed-in users', async () => {
   const resolvers: ((value: unknown) => void)[] = [];
   const fetchMock = vi.fn(
     () =>
@@ -54,9 +62,9 @@ it('does not share requests across different authentication sessions', async () 
       }),
   );
   vi.stubGlobal('fetch', fetchMock);
-  globalStorage.authToken = 'test-session-one';
+  userStore.updateCurrentUser(user(1));
   const first = renderHook(useTaskResourcesEnabled);
-  globalStorage.authToken = 'test-session-two';
+  userStore.updateCurrentUser(user(2));
   const second = renderHook(useTaskResourcesEnabled);
   expect(fetchMock).toHaveBeenCalledTimes(2);
   await act(async () => {
