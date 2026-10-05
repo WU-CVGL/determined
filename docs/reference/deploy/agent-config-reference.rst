@@ -263,8 +263,10 @@ NVML results appear as their symbolic name and number, for example ``ERROR_GPU_I
 The topology is unknown, with the reason shown, when NVML cannot be loaded or initialized (for
 example ``NVML init: ERROR_LIBRARY_NOT_FOUND (12)``), when the measurement does not finish within 60
 seconds, for MIG instances, for an agent built without NVML support, for agents of earlier versions,
-and for a few seconds after the master restarts, until each agent reconnects. The slots and excluded
-GPUs are still listed, without measurements.
+and for a few seconds after the master restarts, until each agent reconnects. The slots are still
+listed, without measurements. So are excluded GPUs, except after a master restart: the master does
+not keep the agent's report, so its excluded GPUs appear when the agent reconnects, and until then
+an agent whose GPUs are all excluded shows no GPU topology.
 
 Health
 ======
