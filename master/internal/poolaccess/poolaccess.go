@@ -134,11 +134,13 @@ WHERE r.pool_name IN (?)`, userID, bun.In(pools)).Scan(ctx, &rows); err != nil {
 	return restricted, nil
 }
 
-// RestrictionRecord is a restricted pool.
+// RestrictionRecord is a restricted pool. RestrictedBy and RestrictedByUsername are nil once the
+// user who restricted it is deleted.
 type RestrictionRecord struct {
-	PoolName     string        `bun:"pool_name"`
-	RestrictedBy *model.UserID `bun:"restricted_by"`
-	RestrictedAt time.Time     `bun:"restricted_at"`
+	PoolName             string        `bun:"pool_name"`
+	RestrictedBy         *model.UserID `bun:"restricted_by"`
+	RestrictedByUsername *string       `bun:"restricted_by_username"`
+	RestrictedAt         time.Time     `bun:"restricted_at"`
 }
 
 // GrantRecord is a user's grant on a pool, with the user's current username, active and admin
@@ -212,8 +214,9 @@ RETURNING user_id`, pool, bun.In(userIDs)).Scan(ctx, &removed); err != nil {
 func List(ctx context.Context) ([]RestrictionRecord, []GrantRecord, error) {
 	restrictions := []RestrictionRecord{}
 	if err := db.Bun().NewRaw(`
-SELECT pool_name, restricted_by, restricted_at FROM resource_pool_restrictions
-ORDER BY pool_name`).Scan(ctx, &restrictions); err != nil {
+SELECT r.pool_name, r.restricted_by, u.username AS restricted_by_username, r.restricted_at
+FROM resource_pool_restrictions r LEFT JOIN users u ON u.id = r.restricted_by
+ORDER BY r.pool_name`).Scan(ctx, &restrictions); err != nil {
 		return nil, nil, fmt.Errorf("listing resource pool restrictions: %w", err)
 	}
 	grants := []GrantRecord{}

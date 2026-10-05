@@ -107,6 +107,7 @@ func TestPoolAccessStore(t *testing.T) {
 	}
 	require.Len(t, found, 1)
 	require.Equal(t, admin.ID, *found[0].RestrictedBy)
+	require.Equal(t, admin.Username, *found[0].RestrictedByUsername)
 	require.False(t, found[0].RestrictedAt.IsZero())
 	var foundGrants []GrantRecord
 	for _, g := range grants {

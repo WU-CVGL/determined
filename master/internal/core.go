@@ -1416,6 +1416,7 @@ func (m *Master) Run(ctx context.Context, gRPCLogInitDone chan struct{}) error {
 		}
 	}()
 	m.registerDynamicResourcePoolRoutes()
+	m.registerResourcePoolAccessRoutes()
 
 	jobservice.SetDefaultService(m.rm)
 
