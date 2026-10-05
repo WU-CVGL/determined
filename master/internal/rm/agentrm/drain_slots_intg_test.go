@@ -260,3 +260,24 @@ func TestEnablingASlotSchedulesPendingWork(t *testing.T) {
 		})
 	}
 }
+
+// When an agent reconnects, its slots can be drained (a slot patch, or the agent's own drain
+// applied again) before the master clears the containers the agent did not reattach. A drained
+// slot whose container is cleared there must not become free.
+func TestDrainedSlotStaysUnallocatableWhenItsContainerIsNotRecovered(t *testing.T) {
+	state, _ := newSlotsAgentState(t, 2)
+	state.resourcePoolName = "drain-pool"
+	t.Cleanup(func() { require.NoError(t, state.delete()) })
+
+	cid, used, other := runOnOneSlot(t, state)
+	drainSlot(t, state, used)
+	requireOnlyAllocatable(t, state, other)
+	require.Equal(t, 2, state.numSlots())
+
+	require.NoError(t, state.clearUnlessRecovered(map[cproto.ID]aproto.ContainerReattachAck{}))
+
+	require.Nil(t, state.slotStates[used].containerID)
+	require.NotContains(t, state.containerState, cid)
+	requireOnlyAllocatable(t, state, other)
+	require.Equal(t, 1, state.numSlots())
+}

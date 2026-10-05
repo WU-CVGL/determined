@@ -161,6 +161,75 @@ func TestEnableDrainedSlotMakesItAllocatable(t *testing.T) {
 	require.Equal(t, 2, state.numSlots())
 }
 
+// runOnOneSlot starts a task on one slot of a two-slot agent: the pool reserves a slot, and the
+// agent starts the container. It returns the container, the slot in use and the other slot.
+func runOnOneSlot(t *testing.T, state *agentState) (cproto.ID, device.ID, device.ID) {
+	t.Helper()
+	cid := cproto.NewID()
+	got, err := state.allocateFreeDevices(1, cid)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	used := got[0].ID
+	state.slotStates[used].containerID = &cid
+	state.containerAllocation[cid] = model.AllocationID("drain-" + string(cid))
+	return cid, used, 1 - used
+}
+
+// When the pool releases a task's container before the agent reports it terminated, and the slot
+// is enabled in between, the slot must come back free: the pool will not release that container
+// again.
+func TestEnableSlotAfterItsContainerIsReleasedBeforeItTerminates(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		drain bool
+	}{
+		{name: "disabled slot", drain: false},
+		{name: "drained slot", drain: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state, _ := newSlotsAgentState(t, 2)
+			cid, used, _ := runOnOneSlot(t, state)
+
+			_, err := state.patchSlotState(patchSlotState{
+				id: used, enabled: ptrs.Ptr(false), drain: ptrs.Ptr(tc.drain),
+			})
+			require.NoError(t, err)
+
+			// The pool releases the container; the agent has not reported it terminated yet.
+			state.deallocateContainer(cid)
+			require.Equal(t, &cid, state.slotStates[used].containerID)
+
+			_, err = state.patchSlotState(patchSlotState{id: used, enabled: ptrs.Ptr(true)})
+			require.NoError(t, err)
+
+			// The agent reports the container terminated.
+			state.slotStates[used].containerID = nil
+
+			requireOnlyAllocatable(t, state, 0, 1)
+			require.Equal(t, 2, state.numSlots())
+		})
+	}
+}
+
+// Enabling a disabled slot while its task still runs keeps the slot in use, and the pool's
+// release of the task's container frees it.
+func TestEnableDisabledSlotWhileItsTaskRuns(t *testing.T) {
+	state, devices := newSlotsAgentState(t, 2)
+	cid, used, other := runOnOneSlot(t, state)
+
+	_, err := state.patchSlotState(patchSlotState{id: used, enabled: ptrs.Ptr(false)})
+	require.NoError(t, err)
+	requireOnlyAllocatable(t, state, other)
+
+	_, err = state.patchSlotState(patchSlotState{id: used, enabled: ptrs.Ptr(true)})
+	require.NoError(t, err)
+	require.Equal(t, &cid, state.Devices[devices[used]])
+	requireOnlyAllocatable(t, state, other)
+
+	state.deallocateContainer(cid)
+	requireOnlyAllocatable(t, state, 0, 1)
+}
+
 // The priority scheduler simulates preemption on copies of the agent states. Preempting a task on
 // a draining slot frees nothing that a pending task can use, so it must not be chosen, and the
 // simulation must leave the real agent state alone.

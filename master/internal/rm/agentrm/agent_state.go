@@ -439,7 +439,17 @@ func (a *agentState) updateSlotDeviceView(deviceID device.ID) {
 	if s.enabled.allocatable() && !s.enabled.deviceAdded {
 		s.enabled.deviceAdded = true
 
-		a.addDevice(s.device, s.containerID)
+		// The device comes back in use only while the pool still holds its container. Once the
+		// pool has released it (deallocateContainer) or it terminated, the device is free:
+		// slot.containerID can outlive the release until the agent reports the container
+		// terminated, and nothing would free the device after that.
+		cid := s.containerID
+		if cid != nil {
+			if _, ok := a.containerState[*cid]; !ok {
+				cid = nil
+			}
+		}
+		a.addDevice(s.device, cid)
 	} else if !s.enabled.allocatable() {
 		if s.enabled.deviceAdded && (!s.enabled.draining || a.Devices[s.device] == nil) {
 			s.enabled.deviceAdded = false
