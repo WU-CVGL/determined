@@ -30,7 +30,7 @@ const resource = (container?: Resource['container']): Resource => ({
 describe('gpuTopology', () => {
   describe('summaries match the CLI (shared fixture)', () => {
     it('has the cases of the design tables', () => {
-      expect(GPU_TOPOLOGY_CASES.length).toBeGreaterThanOrEqual(13);
+      expect(GPU_TOPOLOGY_CASES.length).toBeGreaterThanOrEqual(15);
     });
 
     it.each(GPU_TOPOLOGY_CASES.map((c) => [c.name, c]))('%s', (_, c) => {
@@ -39,8 +39,14 @@ describe('gpuTopology', () => {
       expect(gpuHealthSummary(topo)).toBe((c as GpuTopologyCase).health);
     });
 
-    it('keeps the P2P status order when links are reversed and reordered', () => {
-      const topo = gpuTopologyCase('no-p2p:');
+    it.each([
+      ['no-p2p:', '3 PHB no-p2p(TOPOLOGY_NOT_SUPPORTED) (1 unknown)'],
+      // Each of the four positions of the lowest NOT_USABLE pair holds a different status, so
+      // another status order, or a reversed pair read without swapping, names another status.
+      ['no-p2p order:', '3 PHB no-p2p(TOPOLOGY_NOT_SUPPORTED)'],
+    ])('keeps the P2P status order when links are reversed and reordered: %s', (name, summary) => {
+      const topo = gpuTopologyCase(name);
+      expect(gpuTopologySummary(topo)).toBe(summary);
       topo.links = topo.links.reverse().map((l) => ({
         ...l,
         deviceA: l.deviceB,
@@ -50,7 +56,7 @@ describe('gpuTopology', () => {
         uuidA: l.uuidB,
         uuidB: l.uuidA,
       }));
-      expect(gpuTopologySummary(topo)).toBe('3 PHB no-p2p(TOPOLOGY_NOT_SUPPORTED) (1 unknown)');
+      expect(gpuTopologySummary(topo)).toBe(summary);
     });
   });
 

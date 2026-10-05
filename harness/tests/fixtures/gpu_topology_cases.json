@@ -410,6 +410,26 @@
       }
     },
     {
+      "name": "no-p2p order: A->B READ, A->B WRITE, B->A READ, B->A WRITE; each position a different status",
+      "topology": "3 PHB no-p2p(TOPOLOGY_NOT_SUPPORTED)",
+      "health": "ok",
+      "gpuTopology": {
+        "unknownReason": "",
+        "collectedAt": "2026-10-05T08:00:00Z",
+        "driverVersion": "610.57.04",
+        "gpus": [
+          {"deviceId": 0, "uuid": "GPU-13000000-0000-0000-0000-000000000000", "pciBusId": "0000:01:00.0", "numaNode": 0, "pcieLinkWidth": 16, "pcieLinkWidthMax": 16, "pcieLinkGen": 4, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_OK", "excluded": false},
+          {"deviceId": 1, "uuid": "GPU-13000000-0000-0000-0000-000000000001", "pciBusId": "0000:25:00.0", "numaNode": 0, "pcieLinkWidth": 16, "pcieLinkWidthMax": 16, "pcieLinkGen": 4, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_OK", "excluded": false},
+          {"deviceId": 2, "uuid": "GPU-13000000-0000-0000-0000-000000000002", "pciBusId": "0000:41:00.0", "numaNode": 0, "pcieLinkWidth": 16, "pcieLinkWidthMax": 16, "pcieLinkGen": 4, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_OK", "excluded": false}
+        ],
+        "links": [
+          {"deviceA": 0, "deviceB": 1, "uuidA": "GPU-13000000-0000-0000-0000-000000000000", "uuidB": "GPU-13000000-0000-0000-0000-000000000001", "level": "GPU_LINK_LEVEL_PHB", "nvlinks": 0, "p2pAToB": {"read": "GPU_P2P_STATUS_TOPOLOGY_NOT_SUPPORTED", "write": "GPU_P2P_STATUS_NOT_SUPPORTED"}, "p2pBToA": {"read": "GPU_P2P_STATUS_CHIPSET_NOT_SUPPORTED", "write": "GPU_P2P_STATUS_OK"}, "p2p": "GPU_P2P_NOT_USABLE"},
+          {"deviceA": 0, "deviceB": 2, "uuidA": "GPU-13000000-0000-0000-0000-000000000000", "uuidB": "GPU-13000000-0000-0000-0000-000000000002", "level": "GPU_LINK_LEVEL_PHB", "nvlinks": 0, "p2pAToB": {"read": "GPU_P2P_STATUS_DISABLED_BY_REGKEY", "write": "GPU_P2P_STATUS_DISABLED_BY_REGKEY"}, "p2pBToA": {"read": "GPU_P2P_STATUS_DISABLED_BY_REGKEY", "write": "GPU_P2P_STATUS_DISABLED_BY_REGKEY"}, "p2p": "GPU_P2P_NOT_USABLE"},
+          {"deviceA": 1, "deviceB": 2, "uuidA": "GPU-13000000-0000-0000-0000-000000000001", "uuidB": "GPU-13000000-0000-0000-0000-000000000002", "level": "GPU_LINK_LEVEL_PHB", "nvlinks": 0, "p2pAToB": {"read": "GPU_P2P_STATUS_GPU_NOT_SUPPORTED", "write": "GPU_P2P_STATUS_GPU_NOT_SUPPORTED"}, "p2pBToA": {"read": "GPU_P2P_STATUS_GPU_NOT_SUPPORTED", "write": "GPU_P2P_STATUS_GPU_NOT_SUPPORTED"}, "p2p": "GPU_P2P_NOT_USABLE"}
+        ]
+      }
+    },
+    {
       "name": "every pair unknown; error, two narrow widths and unknown width",
       "topology": "5 PXB p2p?",
       "health": "error: 0; narrow: 1,4 (x8 of x16 at start), 2 (x4 of x16 at start); unknown: 3",

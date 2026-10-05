@@ -82,17 +82,27 @@ def test_gpu_summaries_match_shared_fixture(case: Dict[str, Any]) -> None:
     assert agent.gpu_health_summary(topo) == case["health"]
 
 
-def test_gpu_summaries_ignore_link_order_and_direction() -> None:
+@pytest.mark.parametrize(
+    "name_prefix,expected",
+    [
+        ("no-p2p:", "3 PHB no-p2p(TOPOLOGY_NOT_SUPPORTED) (1 unknown)"),
+        # Each of the four positions of the lowest NOT_USABLE pair holds a different status, so
+        # another status order, or a reversed pair read without swapping, names another status.
+        ("no-p2p order:", "3 PHB no-p2p(TOPOLOGY_NOT_SUPPORTED)"),
+    ],
+)
+def test_gpu_summaries_ignore_link_order_and_direction(name_prefix: str, expected: str) -> None:
     """A reversed pair keeps its P2P status order: A is always the lower slot id."""
-    raw = topology_case("no-p2p:")
+    raw = topology_case(name_prefix)
     assert raw is not None
+    assert agent.gpu_topology_summary(bindings.v1GpuTopology.from_json(raw)) == expected
     for link in raw["links"]:
         link["deviceA"], link["deviceB"] = link["deviceB"], link["deviceA"]
         link["uuidA"], link["uuidB"] = link["uuidB"], link["uuidA"]
         link["p2pAToB"], link["p2pBToA"] = link["p2pBToA"], link["p2pAToB"]
     raw["links"].reverse()
     topo = bindings.v1GpuTopology.from_json(raw)
-    assert agent.gpu_topology_summary(topo) == "3 PHB no-p2p(TOPOLOGY_NOT_SUPPORTED) (1 unknown)"
+    assert agent.gpu_topology_summary(topo) == expected
 
 
 def test_list_agents_gpu_columns(capsys: pytest.CaptureFixture) -> None:
