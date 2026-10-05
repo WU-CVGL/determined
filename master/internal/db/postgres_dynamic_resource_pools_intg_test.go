@@ -299,3 +299,95 @@ func TestCreateReplayComparesSpecHash(t *testing.T) {
 	_, err = database.MarkDynamicResourcePoolReady(ctx, "missing", nil)
 	require.ErrorIs(t, err, ErrDynamicResourcePoolNotFound)
 }
+
+func TestUpdateDynamicResourcePoolSpecConditional(t *testing.T) {
+	database, cleanup := MustResolveNewPostgresDatabase(t)
+	defer cleanup()
+	MustMigrateTestPostgres(t, database, "file://../../static/migrations", "up")
+	ctx := context.Background()
+
+	original, created, err := database.CreateDynamicResourcePool(ctx, withTestDynamicPoolSpec(
+		DynamicResourcePool{
+			ClusterName: "agents-a", PoolName: "updated", ConfigVersion: 1,
+			IdempotencyKey: "updated-operation",
+			Config:         json.RawMessage(`{"pool_name":"updated"}`),
+			ConfigHash:     "snapshot-a",
+		}, "spec-a"))
+	require.NoError(t, err)
+	require.True(t, created)
+	failure := "initialization failed"
+	failed, err := database.SetDynamicResourcePoolState(
+		ctx, original.PoolName, DynamicResourcePoolFailed, &failure,
+	)
+	require.NoError(t, err)
+
+	spec := json.RawMessage(`{"description":"after","pool_name":"updated"}`)
+	specVersion := 1
+	specHash := "updated-spec-hash"
+	desired := DynamicResourcePool{
+		ConfigVersion: 1,
+		Config:        json.RawMessage(`{"pool_name":"updated","description":"after"}`),
+		ConfigHash:    "snapshot-b",
+		Spec:          &spec,
+		SpecVersion:   &specVersion,
+		SpecHash:      &specHash,
+	}
+
+	// A write based on a stale read changes nothing.
+	staleRevision := failed
+	staleRevision.Revision++
+	staleState := failed
+	staleState.State = DynamicResourcePoolPending
+	otherCluster := failed
+	otherCluster.ClusterName = "agents-b"
+	for _, stale := range []DynamicResourcePool{staleRevision, staleState, otherCluster} {
+		_, err = database.UpdateDynamicResourcePoolSpec(ctx, stale, desired)
+		require.ErrorIs(t, err, ErrDynamicResourcePoolChanged)
+		unchanged, err := database.DynamicResourcePoolByName(ctx, original.PoolName)
+		require.NoError(t, err)
+		require.Equal(t, failed, unchanged)
+	}
+
+	// A Failed record becomes Pending and its error is cleared.
+	pending, err := database.UpdateDynamicResourcePoolSpec(ctx, failed, desired)
+	require.NoError(t, err)
+	require.Equal(t, DynamicResourcePoolPending, pending.State)
+	require.Nil(t, pending.Error)
+	require.EqualValues(t, 2, pending.Revision)
+	require.JSONEq(t, string(spec), string(*pending.Spec))
+	require.Equal(t, specHash, *pending.SpecHash)
+	require.Equal(t, "snapshot-b", pending.ConfigHash)
+	require.JSONEq(t, string(desired.Config), string(pending.Config))
+	require.Equal(t, original.IdempotencyKey, pending.IdempotencyKey)
+	require.Equal(t, original.CreatedAt, pending.CreatedAt)
+	require.True(t, pending.UpdatedAt.After(failed.UpdatedAt))
+	_, err = database.UpdateDynamicResourcePoolSpec(ctx, failed, desired)
+	require.ErrorIs(t, err, ErrDynamicResourcePoolChanged)
+
+	// A Ready record stays Ready, and a record written without a spec gains one.
+	_, _, err = database.CreateDynamicResourcePool(ctx, DynamicResourcePool{
+		ClusterName: "agents-a", PoolName: "legacy", ConfigVersion: 1,
+		IdempotencyKey: "legacy-operation",
+		Config:         json.RawMessage(`{"pool_name":"legacy"}`),
+		ConfigHash:     "legacy-snapshot",
+	})
+	require.NoError(t, err)
+	legacy, err := database.MarkDynamicResourcePoolReady(ctx, "legacy", nil)
+	require.NoError(t, err)
+	require.Nil(t, legacy.Spec)
+	converted, err := database.UpdateDynamicResourcePoolSpec(ctx, legacy, desired)
+	require.NoError(t, err)
+	require.Equal(t, DynamicResourcePoolReady, converted.State)
+	require.EqualValues(t, 2, converted.Revision)
+	require.NotNil(t, converted.Spec)
+	require.Equal(t, 1, *converted.SpecVersion)
+	converted, err = database.UpdateDynamicResourcePoolSpec(ctx, converted, desired)
+	require.NoError(t, err)
+	require.Equal(t, DynamicResourcePoolReady, converted.State)
+	require.EqualValues(t, 3, converted.Revision)
+
+	incomplete := desired
+	incomplete.SpecHash = nil
+	_, err = database.UpdateDynamicResourcePoolSpec(ctx, converted, incomplete)
+	require.ErrorContains(t, err, "spec is incomplete")
+}

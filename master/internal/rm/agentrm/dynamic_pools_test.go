@@ -89,6 +89,43 @@ func TestNormalizeDynamicResourcePoolConfigRejectsUnsupported(t *testing.T) {
 	require.Contains(t, err.Error(), "round robin")
 }
 
+func TestUpdateDynamicResourcePoolRejectsInvalidSpecBeforeReading(t *testing.T) {
+	// The resource manager has no database: every rejection happens before the record is read.
+	manager := testDynamicPoolRM()
+	for _, test := range []struct{ spec, message string }{
+		{`{"pool_name":"renamed"}`, "renaming is not supported"},
+		{`{"pool_name":"online","unknown":true}`, "unknown field"},
+		{`{"pool_name":"online","provider":{"type":"aws"}}`, "provider"},
+		{`{"pool_name":"online","task_container_defaults":{"shm_size_bytes":-1}}`, "shm_size_bytes"},
+		{
+			`{"pool_name":"online","task_container_defaults":{"registry_auth":{"password":"********"}}}`,
+			"registry_auth.password is the redacted placeholder",
+		},
+		{
+			`{"pool_name":"online","task_container_defaults":{"registry_auth":{"auth":"********"}}}`,
+			"registry_auth.auth is the redacted placeholder",
+		},
+		{
+			`{"pool_name":"online","task_container_defaults":` +
+				`{"registry_auth":{"identitytoken":"********"}}}`,
+			"registry_auth.identitytoken is the redacted placeholder",
+		},
+		{
+			`{"pool_name":"online","task_container_defaults":` +
+				`{"registry_auth":{"registrytoken":"********"}}}`,
+			"registry_auth.registrytoken is the redacted placeholder",
+		},
+	} {
+		expectedRevision := int64(1)
+		_, err := manager.UpdateDynamicResourcePool(
+			context.Background(), "online", &expectedRevision, json.RawMessage(test.spec),
+			*model.DefaultTaskContainerDefaults(),
+		)
+		require.ErrorIs(t, err, ErrInvalidDynamicResourcePool, test.spec)
+		require.ErrorContains(t, err, test.message, test.spec)
+	}
+}
+
 func TestValidateDynamicPoolIdempotencyKey(t *testing.T) {
 	require.NoError(t, validateDynamicPoolIdempotencyKey("operation-123"))
 	for _, key := range []string{"", " \t", strings.Repeat("x", 513)} {

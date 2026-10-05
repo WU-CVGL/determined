@@ -29,6 +29,9 @@ var (
 	ErrDynamicResourcePoolNotFound = errors.New("dynamic resource pool not found")
 	// ErrDynamicResourcePoolNotFailed indicates that a retry targeted a non-failed operation.
 	ErrDynamicResourcePoolNotFailed = errors.New("dynamic resource pool is not failed")
+	// ErrDynamicResourcePoolChanged indicates that a conditional write found the record changed
+	// since it was read.
+	ErrDynamicResourcePoolChanged = errors.New("dynamic resource pool changed")
 )
 
 // Kept as a package variable so integration tests can fail the read after a committed insert.
@@ -245,6 +248,41 @@ RETURNING `+dynamicResourcePoolColumns, poolName, DynamicResourcePoolReady, conf
 			return DynamicResourcePool{}, ErrDynamicResourcePoolNotFound
 		}
 		return DynamicResourcePool{}, fmt.Errorf("marking dynamic resource pool ready: %w", err)
+	}
+	return record, nil
+}
+
+// UpdateDynamicResourcePoolSpec replaces a record's spec and snapshot with those of desired and
+// increments its revision, but only while the record keeps the revision and state that read holds.
+// A Failed record becomes Pending with its error cleared; any other state is kept.
+func (db *PgDB) UpdateDynamicResourcePoolSpec(
+	ctx context.Context, read DynamicResourcePool, desired DynamicResourcePool,
+) (DynamicResourcePool, error) {
+	if desired.Spec == nil || desired.SpecVersion == nil || desired.SpecHash == nil {
+		return DynamicResourcePool{}, fmt.Errorf("updating dynamic resource pool: spec is incomplete")
+	}
+	var record DynamicResourcePool
+	err := db.sql.GetContext(ctx, &record, `
+UPDATE dynamic_resource_pools
+SET spec = $5, spec_version = $6, spec_hash = $7, config_version = $8, config = $9,
+    config_hash = $10, revision = revision + 1,
+    state = CASE WHEN state = $11 THEN $12 ELSE state END,
+    error = CASE WHEN state = $11 THEN NULL ELSE error END,
+    updated_at = NOW()
+WHERE cluster_name = $1 AND pool_name = $2 AND revision = $3 AND state = $4
+RETURNING `+dynamicResourcePoolColumns,
+		read.ClusterName, read.PoolName, read.Revision, read.State,
+		[]byte(*desired.Spec), *desired.SpecVersion, *desired.SpecHash,
+		desired.ConfigVersion, []byte(desired.Config), desired.ConfigHash,
+		DynamicResourcePoolFailed, DynamicResourcePoolPending,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DynamicResourcePool{}, fmt.Errorf(
+			"%w concurrently; read it again and retry", ErrDynamicResourcePoolChanged,
+		)
+	}
+	if err != nil {
+		return DynamicResourcePool{}, fmt.Errorf("updating dynamic resource pool spec: %w", err)
 	}
 	return record, nil
 }

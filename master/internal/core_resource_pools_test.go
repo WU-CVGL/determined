@@ -2,6 +2,8 @@ package internal
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/cluster"
 	detContext "github.com/determined-ai/determined/master/internal/context"
 	"github.com/determined-ai/determined/master/internal/db"
+	"github.com/determined-ai/determined/master/internal/rm/agentrm"
 	"github.com/determined-ai/determined/master/pkg/model"
 )
 
@@ -26,7 +29,7 @@ func TestValidateDynamicPoolRequestJSON(t *testing.T) {
                 "registry_auth":{"username":"u","password":"p"}}
         }
     }`)
-	require.NoError(t, validateDynamicPoolRequestJSON(valid))
+	require.NoError(t, validateDynamicPoolRequestJSON(valid, createDynamicPoolRequestFields))
 
 	tests := []string{
 		`{"unknown":true,"idempotency_key":"x","config":{"pool_name":"p"}}`,
@@ -35,10 +38,58 @@ func TestValidateDynamicPoolRequestJSON(t *testing.T) {
 		`{"idempotency_key":"x","config":{"pool_name":"p","task_container_defaults":{"unknown":true}}}`,
 		`{"idempotency_key":"x","config":{"pool_name":"p","task_container_defaults":{"registry_auth":{"unknown":true}}}}`,
 		`{"idempotency_key":"x","config":{"pool_name":"p","provider":{"type":"aws"}}}`,
+		`{"idempotency_key":"x","expected_revision":1,"config":{"pool_name":"p"}}`,
+		`{"idempotency_key":"x"}`,
 	}
 	for _, body := range tests {
-		require.Error(t, validateDynamicPoolRequestJSON([]byte(body)), body)
+		require.Error(t, validateDynamicPoolRequestJSON(
+			[]byte(body), createDynamicPoolRequestFields,
+		), body)
 	}
+
+	// An update names its pool in the path and may only add the revision it was based on.
+	for _, body := range []string{
+		`{"config":{"pool_name":"p"}}`,
+		`{"expected_revision":3,"config":{"pool_name":"p"}}`,
+		`{"expected_revision":null,"config":{"pool_name":"p","task_container_defaults":{"shm_size_bytes":1}}}`,
+	} {
+		require.NoError(t, validateDynamicPoolRequestJSON(
+			[]byte(body), updateDynamicPoolRequestFields,
+		), body)
+	}
+	for _, body := range []string{
+		`{"cluster_name":"c","config":{"pool_name":"p"}}`,
+		`{"idempotency_key":"x","config":{"pool_name":"p"}}`,
+		`{"expected_revision":3}`,
+		`{"config":{"pool_name":"p","unknown":true}}`,
+		`{"config":{"pool_name":"p","task_container_defaults":{"registry_auth":{"unknown":true}}}}`,
+	} {
+		require.Error(t, validateDynamicPoolRequestJSON(
+			[]byte(body), updateDynamicPoolRequestFields,
+		), body)
+	}
+}
+
+func TestDynamicPoolHTTPError(t *testing.T) {
+	for _, test := range []struct {
+		err  error
+		code int
+	}{
+		{fmt.Errorf("%w: renaming is not supported", agentrm.ErrInvalidDynamicResourcePool), 400},
+		{fmt.Errorf("%w: %q", agentrm.ErrStaticResourcePoolConflict, "p"), 409},
+		{fmt.Errorf("%w; retry", agentrm.ErrDynamicResourcePoolInitializing), 409},
+		{fmt.Errorf("%w: name", db.ErrDynamicResourcePoolConflict), 409},
+		{db.ErrDynamicResourcePoolNotFailed, 409},
+		{fmt.Errorf("%w: expected revision 1", db.ErrDynamicResourcePoolChanged), 409},
+		{db.ErrDynamicResourcePoolNotFound, 404},
+	} {
+		var httpErr *echo.HTTPError
+		require.ErrorAs(t, dynamicPoolHTTPError(test.err), &httpErr, test.err.Error())
+		require.Equal(t, test.code, httpErr.Code, test.err.Error())
+		require.Equal(t, test.err.Error(), httpErr.Message)
+	}
+	other := errors.New("database unavailable")
+	require.Same(t, other, dynamicPoolHTTPError(other))
 }
 
 func TestPrintableDynamicResourcePoolRedactsRegistryCredentials(t *testing.T) {
@@ -203,5 +254,48 @@ func TestDynamicPoolRouteAuthorization(t *testing.T) {
 			require.ErrorAs(t, err, &httpErr)
 			require.Equal(t, test.wantCode, httpErr.Code)
 		})
+	}
+}
+
+func TestDynamicPoolRoutesRequirePermissions(t *testing.T) {
+	originalUser := dynamicPoolRequestUser
+	originalAuthorize := authorizeDynamicPoolRequest
+	t.Cleanup(func() {
+		dynamicPoolRequestUser = originalUser
+		authorizeDynamicPoolRequest = originalAuthorize
+	})
+	dynamicPoolRequestUser = func(*http.Request) (*model.User, *model.UserSession, error) {
+		return &model.User{Active: true}, &model.UserSession{}, nil
+	}
+	var updates []bool
+	authorizeDynamicPoolRequest = func(
+		_ *http.Request, _ *model.User, update bool,
+	) (error, error) {
+		updates = append(updates, update)
+		return errors.New("permission denied"), nil
+	}
+
+	e := echo.New()
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			return next(&detContext.DetContext{Context: c})
+		}
+	})
+	(&Master{echo: e}).registerDynamicResourcePoolRoutes()
+	for _, test := range []struct {
+		method string
+		path   string
+		update bool
+	}{
+		{http.MethodGet, "/api/v1/resource-pools/dynamic", false},
+		{http.MethodPost, "/api/v1/resource-pools/dynamic", true},
+		{http.MethodPut, "/api/v1/resource-pools/dynamic/online", true},
+		{http.MethodPost, "/api/v1/resource-pools/dynamic/online/retry", true},
+	} {
+		updates = nil
+		recorder := httptest.NewRecorder()
+		e.ServeHTTP(recorder, httptest.NewRequest(test.method, test.path, nil))
+		require.Equal(t, http.StatusForbidden, recorder.Code, test.method+" "+test.path)
+		require.Equal(t, []bool{test.update}, updates, test.method+" "+test.path)
 	}
 }

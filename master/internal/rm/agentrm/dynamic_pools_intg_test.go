@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -653,4 +654,290 @@ func TestDynamicPoolStartupRejectsStaticCollision(t *testing.T) {
 		}},
 	)
 	require.ErrorContains(t, err, "conflicts with static pool")
+}
+
+func poolSummaryDescription(t *testing.T, manager *ResourceManager, poolName string) string {
+	pools, err := manager.GetResourcePools()
+	require.NoError(t, err)
+	for _, pool := range pools.ResourcePools {
+		if pool.Name == poolName {
+			return pool.Description
+		}
+	}
+	require.Failf(t, "resource pool is not listed", "%q", poolName)
+	return ""
+}
+
+func TestDynamicPoolUpdateAppliesAtRestart(t *testing.T) {
+	database, cleanup := db.MustResolveNewPostgresDatabase(t)
+	defer cleanup()
+	db.MustMigrateTestPostgres(t, database, "file://../../../static/migrations", "up")
+	ctx := context.Background()
+
+	masterDefaults := *model.DefaultTaskContainerDefaults()
+	masterDefaults.ForcePullImage = true
+	insertLegacyDynamicPool(t, database, "legacy", masterDefaults)
+	first, err := New(
+		ctx, database, echo.New(), testDynamicPoolRMConfig(42), nil, nil, &masterDefaults,
+	)
+	require.NoError(t, err)
+	defer first.stop()
+	created, _, err := first.CreateDynamicResourcePool(ctx, "updated-operation",
+		json.RawMessage(`{"pool_name":"updated","description":"before"}`), masterDefaults)
+	require.NoError(t, err)
+	waitForDynamicPoolReady(t, database, first, "updated")
+	runtimeBefore, ok := first.registry.readyPool("updated")
+	require.True(t, ok)
+
+	updated, err := first.UpdateDynamicResourcePool(ctx, "updated", &created.Revision,
+		json.RawMessage(`{"pool_name":"updated","description":"after","agent_reconnect_wait":"10m"}`),
+		masterDefaults)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, updated.Revision)
+	require.Equal(t, db.DynamicResourcePoolReady, updated.State)
+	require.JSONEq(t, `{"agent_reconnect_wait":"10m","description":"after","pool_name":"updated"}`,
+		string(*updated.Spec))
+	require.Equal(t, created.IdempotencyKey, updated.IdempotencyKey)
+	// The returned config is the new effective snapshot, in the shape that a master without spec
+	// support runs.
+	snapshotRecord := updated
+	snapshotRecord.Spec = nil
+	snapshot, _, err := decodeStoredDynamicResourcePool(snapshotRecord)
+	require.NoError(t, err)
+	require.Equal(t, "after", snapshot.Description)
+	require.Equal(t, model.Duration(10*time.Minute), snapshot.AgentReconnectWait)
+	require.True(t, snapshot.TaskContainerDefaults.ForcePullImage)
+	require.Equal(t, 42, *snapshot.Scheduler.Priority.DefaultPriority)
+
+	// The running master keeps the runtime pool it has until it restarts.
+	runtimeAfter, ok := first.registry.readyPool("updated")
+	require.True(t, ok)
+	require.Same(t, runtimeBefore, runtimeAfter)
+	require.Equal(t, "before", poolSummaryDescription(t, first, "updated"))
+	activeRevision, active := first.ActiveDynamicResourcePoolRevision("updated")
+	require.True(t, active)
+	require.EqualValues(t, 1, activeRevision)
+
+	// A record saved without a spec gains one and inherits master defaults from the next restart.
+	converted, err := first.UpdateDynamicResourcePool(ctx, "legacy", nil,
+		json.RawMessage(`{"pool_name":"legacy","max_aux_containers_per_agent":100}`), masterDefaults)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, converted.Revision)
+	require.Equal(t, db.DynamicResourcePoolReady, converted.State)
+	require.NotNil(t, converted.Spec)
+	require.Equal(t, dynamicResourcePoolSpecVersion, *converted.SpecVersion)
+	changedMasterDefaults := *model.DefaultTaskContainerDefaults()
+	changedMasterDefaults.ShmSizeBytes = 16 << 30
+	frozenDefaults, err := first.TaskContainerDefaults(
+		rm.ResourcePoolName("legacy"), changedMasterDefaults,
+	)
+	require.NoError(t, err)
+	require.True(t, frozenDefaults.ForcePullImage)
+	legacyRevision, active := first.ActiveDynamicResourcePoolRevision("legacy")
+	require.True(t, active)
+	require.EqualValues(t, 1, legacyRevision)
+
+	first.stop()
+	restarted, err := New(
+		ctx, database, echo.New(), testDynamicPoolRMConfig(7), nil, nil, &changedMasterDefaults,
+	)
+	require.NoError(t, err)
+	defer restarted.stop()
+	require.Equal(t, "after", poolSummaryDescription(t, restarted, "updated"))
+	running, ok := restarted.registry.readyConfig("updated")
+	require.True(t, ok)
+	require.Equal(t, model.Duration(10*time.Minute), running.AgentReconnectWait)
+	activeRevision, active = restarted.ActiveDynamicResourcePoolRevision("updated")
+	require.True(t, active)
+	require.EqualValues(t, 2, activeRevision)
+
+	inherited, err := restarted.TaskContainerDefaults(
+		rm.ResourcePoolName("legacy"), changedMasterDefaults,
+	)
+	require.NoError(t, err)
+	require.Equal(t, changedMasterDefaults, inherited)
+	scheduler, ok := restarted.ResourcePoolSchedulerConfig("legacy")
+	require.True(t, ok)
+	require.Equal(t, 7, *scheduler.Priority.DefaultPriority)
+	legacyRevision, active = restarted.ActiveDynamicResourcePoolRevision("legacy")
+	require.True(t, active)
+	require.EqualValues(t, 2, legacyRevision)
+	// Startup rewrote the snapshot of the converted pool for the changed master defaults.
+	refreshed, err := database.DynamicResourcePoolByName(ctx, "legacy")
+	require.NoError(t, err)
+	require.NotEqual(t, converted.ConfigHash, refreshed.ConfigHash)
+	require.EqualValues(t, 2, refreshed.Revision)
+}
+
+func TestDynamicPoolUpdateStateRules(t *testing.T) {
+	database, cleanup := db.MustResolveNewPostgresDatabase(t)
+	defer cleanup()
+	db.MustMigrateTestPostgres(t, database, "file://../../../static/migrations", "up")
+	ctx := context.Background()
+
+	// Hooks are installed before the worker starts so that it reads them after they are written.
+	originalCreate := createDynamicPoolRuntime
+	t.Cleanup(func() { createDynamicPoolRuntime = originalCreate })
+	var failNextRuntime atomic.Bool
+	createDynamicPoolRuntime = func(
+		manager *ResourceManager, cfg config.ResourcePoolConfig,
+	) (*resourcePool, error) {
+		if cfg.PoolName == "failed" && failNextRuntime.CompareAndSwap(true, false) {
+			return nil, errors.New("injected runtime initialization failure")
+		}
+		return originalCreate(manager, cfg)
+	}
+	masterDefaults := *model.DefaultTaskContainerDefaults()
+	manager, err := New(
+		ctx, database, echo.New(), testDynamicPoolRMConfig(42), nil, nil, &masterDefaults,
+	)
+	require.NoError(t, err)
+	defer manager.stop()
+	manager.StopDynamicPoolWorker()
+	update := func(
+		poolName string, spec string, expectedRevision *int64,
+	) (db.DynamicResourcePool, error) {
+		return manager.UpdateDynamicResourcePool(
+			ctx, poolName, expectedRevision, json.RawMessage(spec), masterDefaults,
+		)
+	}
+	changed := `{"pool_name":"busy","description":"changed"}`
+
+	// A Pending pool is still being initialized.
+	pending := insertSpecDynamicPool(t, manager, "busy-operation", `{"pool_name":"busy"}`,
+		masterDefaults)
+	_, err = update("busy", changed, nil)
+	require.ErrorIs(t, err, ErrDynamicResourcePoolInitializing)
+	// The saved spec is answered without a write in any state, even for a stale revision.
+	staleRevision := pending.Revision + 1
+	same, err := update("busy", `{ "description": null, "pool_name": "busy" }`, &staleRevision)
+	require.NoError(t, err)
+	require.Equal(t, pending, same)
+	stored, err := database.DynamicResourcePoolByName(ctx, "busy")
+	require.NoError(t, err)
+	require.Equal(t, pending, stored)
+
+	// A durable Ready written before its runtime is published is still initializing.
+	_, err = database.MarkDynamicResourcePoolReady(ctx, "busy", nil)
+	require.NoError(t, err)
+	_, err = update("busy", changed, nil)
+	require.ErrorIs(t, err, ErrDynamicResourcePoolInitializing)
+
+	// A missing pool and a pool of another resource manager are not found.
+	_, err = update("missing", `{"pool_name":"missing"}`, nil)
+	require.ErrorIs(t, err, db.ErrDynamicResourcePoolNotFound)
+	other := insertSpecDynamicPool(t, manager, "other-operation", `{"pool_name":"other"}`,
+		masterDefaults)
+	_, err = db.Bun().NewRaw(`UPDATE dynamic_resource_pools SET cluster_name = 'other-cluster'
+WHERE pool_name = ?`, other.PoolName).Exec(ctx)
+	require.NoError(t, err)
+	_, err = update("other", `{"pool_name":"other","description":"changed"}`, nil)
+	require.ErrorIs(t, err, db.ErrDynamicResourcePoolNotFound)
+	_, err = db.Bun().NewRaw(`DELETE FROM dynamic_resource_pools WHERE pool_name = ?`,
+		other.PoolName).Exec(ctx)
+	require.NoError(t, err)
+
+	// Once the worker publishes the pool, an update must name the current revision if it names one.
+	manager.startDynamicPoolWorker(ctx)
+	waitForDynamicPoolReady(t, database, manager, "busy")
+	ready, err := database.DynamicResourcePoolByName(ctx, "busy")
+	require.NoError(t, err)
+	_, err = update("busy", changed, &staleRevision)
+	require.ErrorIs(t, err, db.ErrDynamicResourcePoolChanged)
+	require.ErrorContains(t, err, "current revision is 1")
+	same, err = update("busy", `{"pool_name":"busy"}`, &staleRevision)
+	require.NoError(t, err)
+	require.Equal(t, ready, same)
+	updated, err := update("busy", changed, &ready.Revision)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, updated.Revision)
+	require.Equal(t, db.DynamicResourcePoolReady, updated.State)
+	require.True(t, updated.UpdatedAt.After(ready.UpdatedAt))
+
+	// Of two updates based on the same revision, exactly one is saved.
+	var group sync.WaitGroup
+	start := make(chan struct{})
+	results := make([]error, 2)
+	for i := range results {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			<-start
+			_, results[i] = update(
+				"busy", fmt.Sprintf(`{"pool_name":"busy","description":"writer %d"}`, i),
+				&updated.Revision,
+			)
+		}()
+	}
+	close(start)
+	group.Wait()
+	saved := 0
+	for _, result := range results {
+		if result == nil {
+			saved++
+		} else {
+			require.ErrorIs(t, result, db.ErrDynamicResourcePoolChanged)
+		}
+	}
+	require.Equal(t, 1, saved)
+	stored, err = database.DynamicResourcePoolByName(ctx, "busy")
+	require.NoError(t, err)
+	require.EqualValues(t, 3, stored.Revision)
+
+	// An update makes a Failed pool Pending, and the worker initializes the new spec in place of
+	// the registry entry that failed.
+	failNextRuntime.Store(true)
+	insertSpecDynamicPool(t, manager, "failed-operation", `{"pool_name":"failed"}`, masterDefaults)
+	manager.wakeDynamicPoolWorker()
+	var failed db.DynamicResourcePool
+	require.Eventually(t, func() bool {
+		failed, err = database.DynamicResourcePoolByName(ctx, "failed")
+		return err == nil && failed.State == db.DynamicResourcePoolFailed
+	}, 10*time.Second, 20*time.Millisecond)
+	_, desired := manager.registry.desiredConfig("failed")
+	require.True(t, desired)
+	recovered, err := update("failed", `{"pool_name":"failed","description":"fixed"}`,
+		&failed.Revision)
+	require.NoError(t, err)
+	require.Equal(t, db.DynamicResourcePoolPending, recovered.State)
+	require.Nil(t, recovered.Error)
+	require.EqualValues(t, 2, recovered.Revision)
+	waitForDynamicPoolReady(t, database, manager, "failed")
+	require.Equal(t, "fixed", poolSummaryDescription(t, manager, "failed"))
+	activeRevision, active := manager.ActiveDynamicResourcePoolRevision("failed")
+	require.True(t, active)
+	require.EqualValues(t, 2, activeRevision)
+
+	// A retry and an update of the same Failed pool race; exactly one of them succeeds.
+	manager.StopDynamicPoolWorker()
+	insertSpecDynamicPool(t, manager, "raced-operation", `{"pool_name":"raced"}`, masterDefaults)
+	failure := "previous runtime initialization failed"
+	_, err = database.SetDynamicResourcePoolState(
+		ctx, "raced", db.DynamicResourcePoolFailed, &failure,
+	)
+	require.NoError(t, err)
+	start = make(chan struct{})
+	group.Add(2)
+	go func() {
+		defer group.Done()
+		<-start
+		_, results[0] = manager.RetryDynamicResourcePool(ctx, "raced")
+	}()
+	go func() {
+		defer group.Done()
+		<-start
+		_, results[1] = update("raced", `{"pool_name":"raced","description":"raced"}`, nil)
+	}()
+	close(start)
+	group.Wait()
+	saved = 0
+	for _, result := range results {
+		if result == nil {
+			saved++
+		}
+	}
+	require.Equal(t, 1, saved, "retry: %v, update: %v", results[0], results[1])
+	raced, err := database.DynamicResourcePoolByName(ctx, "raced")
+	require.NoError(t, err)
+	require.Equal(t, db.DynamicResourcePoolPending, raced.State)
 }

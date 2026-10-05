@@ -56,7 +56,14 @@ var (
 	ErrStaticResourcePoolConflict = errors.New("resource pool name conflicts with static configuration")
 	// ErrDynamicResourcePoolPersistence indicates a post-insert durable state write failed.
 	ErrDynamicResourcePoolPersistence = errors.New("persisting dynamic resource pool state")
+	// ErrDynamicResourcePoolInitializing indicates that a change targeted a pool that the
+	// dynamic-pool worker has not finished initializing.
+	ErrDynamicResourcePoolInitializing = errors.New("dynamic resource pool is initializing")
 )
+
+// RedactedDynamicPoolCredential replaces registry credentials in API responses. A spec that
+// carries it was copied from a response and would save the placeholder as the credential.
+const RedactedDynamicPoolCredential = "********"
 
 // NormalizeDynamicResourcePoolConfig validates a user-supplied config and resolves its effective
 // scheduler and task container defaults against the master configuration. The result is the
@@ -201,6 +208,16 @@ func (a *ResourceManager) prepareDynamicPoolSpec(
 	rawSpec json.RawMessage,
 	masterDefaults model.TaskContainerDefaultsConfig,
 ) (preparedDynamicPoolSpec, error) {
+	prepared, err := parseDynamicPoolSpec(rawSpec)
+	if err != nil {
+		return preparedDynamicPoolSpec{}, err
+	}
+	return a.resolveDynamicPoolSpec(prepared, masterDefaults)
+}
+
+// parseDynamicPoolSpec canonicalizes and validates a spec as it is validated at load. The result
+// has no snapshot yet.
+func parseDynamicPoolSpec(rawSpec json.RawMessage) (preparedDynamicPoolSpec, error) {
 	spec, specHash, err := canonicalDynamicPoolSpec(rawSpec)
 	if err != nil {
 		return preparedDynamicPoolSpec{}, fmt.Errorf("%w: %v", ErrInvalidDynamicResourcePool, err)
@@ -209,13 +226,20 @@ func (a *ResourceManager) prepareDynamicPoolSpec(
 	if err != nil {
 		return preparedDynamicPoolSpec{}, fmt.Errorf("%w: %v", ErrInvalidDynamicResourcePool, err)
 	}
-	snapshot, err := a.dynamicPoolSnapshot(cfg, masterDefaults)
+	return preparedDynamicPoolSpec{config: cfg, spec: spec, specHash: specHash}, nil
+}
+
+// resolveDynamicPoolSpec adds the effective snapshot to a parsed spec.
+func (a *ResourceManager) resolveDynamicPoolSpec(
+	prepared preparedDynamicPoolSpec,
+	masterDefaults model.TaskContainerDefaultsConfig,
+) (preparedDynamicPoolSpec, error) {
+	snapshot, err := a.dynamicPoolSnapshot(prepared.config, masterDefaults)
 	if err != nil {
 		return preparedDynamicPoolSpec{}, err
 	}
-	return preparedDynamicPoolSpec{
-		config: cfg, spec: spec, specHash: specHash, snapshot: snapshot,
-	}, nil
+	prepared.snapshot = snapshot
+	return prepared, nil
 }
 
 // dynamicPoolSnapshot returns the effective config of a decoded spec.
@@ -242,6 +266,98 @@ func validateDynamicPoolIdempotencyKey(idempotencyKey string) error {
 		return fmt.Errorf(
 			"%w: idempotency_key must be at most 512 bytes", ErrInvalidDynamicResourcePool,
 		)
+	}
+	return nil
+}
+
+// UpdateDynamicResourcePool replaces the spec of a durable dynamic pool. The change is durable
+// immediately but the running master keeps the runtime pool it has: a Ready pool runs the new spec
+// from the next master restart, like an edited master.yaml pool. A Failed pool becomes Pending
+// and the worker initializes the new spec. An update to the spec that is already saved writes
+// nothing. A non-nil expectedRevision must match the saved revision.
+func (a *ResourceManager) UpdateDynamicResourcePool(
+	ctx context.Context,
+	poolName string,
+	expectedRevision *int64,
+	rawSpec json.RawMessage,
+	masterDefaults model.TaskContainerDefaultsConfig,
+) (db.DynamicResourcePool, error) {
+	prepared, err := parseDynamicPoolSpec(rawSpec)
+	if err != nil {
+		return db.DynamicResourcePool{}, err
+	}
+	if prepared.config.PoolName != poolName {
+		return db.DynamicResourcePool{}, fmt.Errorf(
+			"%w: renaming is not supported: config.pool_name %q differs from %q",
+			ErrInvalidDynamicResourcePool, prepared.config.PoolName, poolName,
+		)
+	}
+	if err = rejectRedactedDynamicPoolCredentials(prepared.config); err != nil {
+		return db.DynamicResourcePool{}, err
+	}
+	prepared, err = a.resolveDynamicPoolSpec(prepared, masterDefaults)
+	if err != nil {
+		return db.DynamicResourcePool{}, err
+	}
+
+	record, err := a.db.DynamicResourcePoolByName(ctx, poolName)
+	if err != nil {
+		return db.DynamicResourcePool{}, err
+	}
+	if record.ClusterName != a.config.ClusterName {
+		return db.DynamicResourcePool{}, db.ErrDynamicResourcePoolNotFound
+	}
+	if record.Spec != nil && record.SpecVersion != nil && record.SpecHash != nil &&
+		*record.SpecVersion == dynamicResourcePoolSpecVersion &&
+		*record.SpecHash == prepared.specHash {
+		return record, nil
+	}
+	// Publication is one-way, so a pool seen published here stays published until the write. A
+	// retry that changes a Failed pool concurrently makes the conditional write fail.
+	if record.State == db.DynamicResourcePoolPending ||
+		record.State == db.DynamicResourcePoolReady && !a.IsDynamicResourcePoolReady(poolName) {
+		return db.DynamicResourcePool{}, fmt.Errorf(
+			"%w; retry when it is Ready or Failed", ErrDynamicResourcePoolInitializing,
+		)
+	}
+	if expectedRevision != nil && *expectedRevision != record.Revision {
+		return db.DynamicResourcePool{}, fmt.Errorf(
+			"%w: expected revision %d, current revision is %d",
+			db.ErrDynamicResourcePoolChanged, *expectedRevision, record.Revision,
+		)
+	}
+	updated, err := a.db.UpdateDynamicResourcePoolSpec(
+		ctx, record, prepared.record(record.ClusterName, record.IdempotencyKey),
+	)
+	if err != nil {
+		return db.DynamicResourcePool{}, err
+	}
+	if updated.State == db.DynamicResourcePoolPending {
+		a.wakeDynamicPoolWorker()
+	}
+	return updated, nil
+}
+
+// rejectRedactedDynamicPoolCredentials refuses a spec that carries the placeholder that API
+// responses show in place of registry credentials.
+func rejectRedactedDynamicPoolCredentials(cfg config.ResourcePoolConfig) error {
+	if cfg.TaskContainerDefaults == nil || cfg.TaskContainerDefaults.RegistryAuth == nil {
+		return nil
+	}
+	auth := cfg.TaskContainerDefaults.RegistryAuth
+	for _, credential := range []struct{ field, value string }{
+		{"password", auth.Password},
+		{"auth", auth.Auth},
+		{"identitytoken", auth.IdentityToken},
+		{"registrytoken", auth.RegistryToken},
+	} {
+		if credential.value == RedactedDynamicPoolCredential {
+			return fmt.Errorf(
+				"%w: config.task_container_defaults.registry_auth.%s is the redacted placeholder %q; "+
+					"send the credential itself",
+				ErrInvalidDynamicResourcePool, credential.field, RedactedDynamicPoolCredential,
+			)
+		}
 	}
 	return nil
 }
