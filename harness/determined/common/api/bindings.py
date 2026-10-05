@@ -15217,6 +15217,20 @@ class v1SlotStats(Printable):
         }
         return out
 
+class v1SlotsFilter(DetEnum):
+    """Filter workloads by whether they ask for slots. A slot is a GPU, or a CPU on
+    an agent configured with slot_type cpu.
+    - SLOTS_FILTER_UNSPECIFIED: No filter.
+    - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a
+    resources.slots_per_trial above 0, other tasks with a resources.slots
+    above 0.
+    - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or
+    resources.slots of 0).
+    """
+    UNSPECIFIED = "SLOTS_FILTER_UNSPECIFIED"
+    GPU = "SLOTS_FILTER_GPU"
+    CPU_ONLY = "SLOTS_FILTER_CPU_ONLY"
+
 class v1StartTrialRequest(Printable):
     """Start a trial."""
     resume: "typing.Optional[bool]" = None
@@ -19513,10 +19527,12 @@ def get_GetExperiments(
     orderBy: "typing.Optional[v1OrderBy]" = None,
     projectId: "typing.Optional[int]" = None,
     showTrialData: "typing.Optional[bool]" = None,
+    slotsFilter: "typing.Optional[v1SlotsFilter]" = None,
     sortBy: "typing.Optional[v1GetExperimentsRequestSortBy]" = None,
     states: "typing.Optional[typing.Sequence[experimentv1State]]" = None,
     userIds: "typing.Optional[typing.Sequence[int]]" = None,
     users: "typing.Optional[typing.Sequence[str]]" = None,
+    workspaceId: "typing.Optional[int]" = None,
 ) -> "v1GetExperimentsResponse":
     """Get a list of experiments.
 
@@ -19544,6 +19560,15 @@ denote number of experiments to skip from the end before returning results.
     - projectId: Limit experiments to those within a specified project, or 0 for all
 projects.
     - showTrialData: whether to surface trial specific data from the best trial.
+    - slotsFilter: Limit experiments to those that ask for slots (GPU) or for none (CPU
+only), by resources.slots_per_trial.
+
+ - SLOTS_FILTER_UNSPECIFIED: No filter.
+ - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a
+resources.slots_per_trial above 0, other tasks with a resources.slots
+above 0.
+ - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or
+resources.slots of 0).
     - sortBy: Sort experiments by the given field.
 
  - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.
@@ -19590,6 +19615,8 @@ Running is a substate of the Active state.
 userIds.
     - users: Limit experiments to those that are owned by users with the specified
 usernames.
+    - workspaceId: Limit experiments to those in projects of this workspace, or 0 for all
+workspaces.
     """
     _params = {
         "archived": str(archived).lower() if archived is not None else None,
@@ -19607,10 +19634,12 @@ usernames.
         "orderBy": orderBy.value if orderBy is not None else None,
         "projectId": projectId,
         "showTrialData": str(showTrialData).lower() if showTrialData is not None else None,
+        "slotsFilter": slotsFilter.value if slotsFilter is not None else None,
         "sortBy": sortBy.value if sortBy is not None else None,
         "states": [x.value for x in states] if states is not None else None,
         "userIds": userIds,
         "users": users,
+        "workspaceId": workspaceId,
     }
     _resp = session._do_request(
         method="GET",
@@ -19658,18 +19687,32 @@ def get_GetGenericTasks(
     limit: "typing.Optional[int]" = None,
     offset: "typing.Optional[int]" = None,
     parentId: "typing.Optional[str]" = None,
+    projectId: "typing.Optional[int]" = None,
+    search: "typing.Optional[str]" = None,
+    slotsFilter: "typing.Optional[v1SlotsFilter]" = None,
     states: "typing.Optional[typing.Sequence[v1GenericTaskState]]" = None,
     taskIds: "typing.Optional[typing.Sequence[str]]" = None,
     userIds: "typing.Optional[typing.Sequence[int]]" = None,
     users: "typing.Optional[typing.Sequence[str]]" = None,
     workspaceId: "typing.Optional[int]" = None,
 ) -> "v1GetGenericTasksResponse":
-    """Get a list of generic tasks, optionally filtered by owner, workspace, state
-    or parent.
+    """Get a list of generic tasks, optionally filtered by owner, workspace,
+    project, state, parent, name or slot use.
 
     - limit: Limit the number of tasks. A value of 0 denotes no limit.
     - offset: Skip this many tasks before returning results.
     - parentId: Limit tasks to the direct children of this task.
+    - projectId: Limit tasks to this project; 0 for all projects.
+    - search: Limit tasks to those whose name or task ID contains this text, ignoring
+case.
+    - slotsFilter: Limit tasks to those that ask for slots (GPU) or for none (CPU only).
+
+ - SLOTS_FILTER_UNSPECIFIED: No filter.
+ - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a
+resources.slots_per_trial above 0, other tasks with a resources.slots
+above 0.
+ - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or
+resources.slots of 0).
     - states: Limit tasks to these states.
 
  - GENERIC_TASK_STATE_UNSPECIFIED: The task state unknown
@@ -19691,6 +19734,9 @@ def get_GetGenericTasks(
         "limit": limit,
         "offset": offset,
         "parentId": parentId,
+        "projectId": projectId,
+        "search": search,
+        "slotsFilter": slotsFilter.value if slotsFilter is not None else None,
         "states": [x.value for x in states] if states is not None else None,
         "taskIds": taskIds,
         "userIds": userIds,

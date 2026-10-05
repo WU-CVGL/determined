@@ -11089,6 +11089,17 @@ export interface V1Slot {
     draining?: boolean;
 }
 /**
+ * Filter workloads by whether they ask for slots. A slot is a GPU, or a CPU on an agent configured with slot_type cpu.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a resources.slots_per_trial above 0, other tasks with a resources.slots above 0.  - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or resources.slots of 0).
+ * @export
+ * @enum {string}
+ */
+export const V1SlotsFilter = {
+    UNSPECIFIED: 'SLOTS_FILTER_UNSPECIFIED',
+    GPU: 'SLOTS_FILTER_GPU',
+    CPUONLY: 'SLOTS_FILTER_CPU_ONLY',
+} as const
+export type V1SlotsFilter = ValueOf<typeof V1SlotsFilter>
+/**
  * SlotStats contains statistics about a set of slots.
  * @export
  * @interface V1SlotStats
@@ -16765,10 +16776,12 @@ export const ExperimentsApiFetchParamCreator = function (configuration?: Configu
          * @param {Array<number>} [experimentIdFilterIncl] In a set. `in` is a reserved word in python.
          * @param {Array<number>} [experimentIdFilterNotIn] Not in a set.
          * @param {boolean} [showTrialData] whether to surface trial specific data from the best trial.
+         * @param {number} [workspaceId] Limit experiments to those in projects of this workspace, or 0 for all workspaces.
+         * @param {V1SlotsFilter} [slotsFilter] Limit experiments to those that ask for slots (GPU) or for none (CPU only), by resources.slots_per_trial.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a resources.slots_per_trial above 0, other tasks with a resources.slots above 0.  - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or resources.slots of 0).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getExperiments(sortBy?: V1GetExperimentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, description?: string, name?: string, labels?: Array<string>, archived?: boolean, states?: Array<Experimentv1State>, users?: Array<string>, userIds?: Array<number>, projectId?: number, experimentIdFilterLt?: number, experimentIdFilterLte?: number, experimentIdFilterGt?: number, experimentIdFilterGte?: number, experimentIdFilterIncl?: Array<number>, experimentIdFilterNotIn?: Array<number>, showTrialData?: boolean, options: any = {}): FetchArgs {
+        getExperiments(sortBy?: V1GetExperimentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, description?: string, name?: string, labels?: Array<string>, archived?: boolean, states?: Array<Experimentv1State>, users?: Array<string>, userIds?: Array<number>, projectId?: number, experimentIdFilterLt?: number, experimentIdFilterLte?: number, experimentIdFilterGt?: number, experimentIdFilterGte?: number, experimentIdFilterIncl?: Array<number>, experimentIdFilterNotIn?: Array<number>, showTrialData?: boolean, workspaceId?: number, slotsFilter?: V1SlotsFilter, options: any = {}): FetchArgs {
             const localVarPath = `/api/v1/experiments`;
             const localVarUrlObj = new URL(localVarPath, BASE_PATH);
             const localVarRequestOptions = { method: 'GET', ...options };
@@ -16857,6 +16870,14 @@ export const ExperimentsApiFetchParamCreator = function (configuration?: Configu
             
             if (showTrialData !== undefined) {
                 localVarQueryParameter['showTrialData'] = showTrialData
+            }
+            
+            if (workspaceId !== undefined) {
+                localVarQueryParameter['workspaceId'] = workspaceId
+            }
+            
+            if (slotsFilter !== undefined) {
+                localVarQueryParameter['slotsFilter'] = slotsFilter
             }
             
             objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
@@ -18269,11 +18290,13 @@ export const ExperimentsApiFp = function (configuration?: Configuration) {
          * @param {Array<number>} [experimentIdFilterIncl] In a set. `in` is a reserved word in python.
          * @param {Array<number>} [experimentIdFilterNotIn] Not in a set.
          * @param {boolean} [showTrialData] whether to surface trial specific data from the best trial.
+         * @param {number} [workspaceId] Limit experiments to those in projects of this workspace, or 0 for all workspaces.
+         * @param {V1SlotsFilter} [slotsFilter] Limit experiments to those that ask for slots (GPU) or for none (CPU only), by resources.slots_per_trial.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a resources.slots_per_trial above 0, other tasks with a resources.slots above 0.  - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or resources.slots of 0).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getExperiments(sortBy?: V1GetExperimentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, description?: string, name?: string, labels?: Array<string>, archived?: boolean, states?: Array<Experimentv1State>, users?: Array<string>, userIds?: Array<number>, projectId?: number, experimentIdFilterLt?: number, experimentIdFilterLte?: number, experimentIdFilterGt?: number, experimentIdFilterGte?: number, experimentIdFilterIncl?: Array<number>, experimentIdFilterNotIn?: Array<number>, showTrialData?: boolean, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetExperimentsResponse> {
-            const localVarFetchArgs = ExperimentsApiFetchParamCreator(configuration).getExperiments(sortBy, orderBy, offset, limit, description, name, labels, archived, states, users, userIds, projectId, experimentIdFilterLt, experimentIdFilterLte, experimentIdFilterGt, experimentIdFilterGte, experimentIdFilterIncl, experimentIdFilterNotIn, showTrialData, options);
+        getExperiments(sortBy?: V1GetExperimentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, description?: string, name?: string, labels?: Array<string>, archived?: boolean, states?: Array<Experimentv1State>, users?: Array<string>, userIds?: Array<number>, projectId?: number, experimentIdFilterLt?: number, experimentIdFilterLte?: number, experimentIdFilterGt?: number, experimentIdFilterGte?: number, experimentIdFilterIncl?: Array<number>, experimentIdFilterNotIn?: Array<number>, showTrialData?: boolean, workspaceId?: number, slotsFilter?: V1SlotsFilter, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetExperimentsResponse> {
+            const localVarFetchArgs = ExperimentsApiFetchParamCreator(configuration).getExperiments(sortBy, orderBy, offset, limit, description, name, labels, archived, states, users, userIds, projectId, experimentIdFilterLt, experimentIdFilterLte, experimentIdFilterGt, experimentIdFilterGte, experimentIdFilterIncl, experimentIdFilterNotIn, showTrialData, workspaceId, slotsFilter, options);
             return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
                 return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
                     if (response.status >= 200 && response.status < 300) {
@@ -18979,11 +19002,13 @@ export const ExperimentsApiFactory = function (configuration?: Configuration, fe
          * @param {Array<number>} [experimentIdFilterIncl] In a set. `in` is a reserved word in python.
          * @param {Array<number>} [experimentIdFilterNotIn] Not in a set.
          * @param {boolean} [showTrialData] whether to surface trial specific data from the best trial.
+         * @param {number} [workspaceId] Limit experiments to those in projects of this workspace, or 0 for all workspaces.
+         * @param {V1SlotsFilter} [slotsFilter] Limit experiments to those that ask for slots (GPU) or for none (CPU only), by resources.slots_per_trial.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a resources.slots_per_trial above 0, other tasks with a resources.slots above 0.  - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or resources.slots of 0).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getExperiments(sortBy?: V1GetExperimentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, description?: string, name?: string, labels?: Array<string>, archived?: boolean, states?: Array<Experimentv1State>, users?: Array<string>, userIds?: Array<number>, projectId?: number, experimentIdFilterLt?: number, experimentIdFilterLte?: number, experimentIdFilterGt?: number, experimentIdFilterGte?: number, experimentIdFilterIncl?: Array<number>, experimentIdFilterNotIn?: Array<number>, showTrialData?: boolean, options?: any) {
-            return ExperimentsApiFp(configuration).getExperiments(sortBy, orderBy, offset, limit, description, name, labels, archived, states, users, userIds, projectId, experimentIdFilterLt, experimentIdFilterLte, experimentIdFilterGt, experimentIdFilterGte, experimentIdFilterIncl, experimentIdFilterNotIn, showTrialData, options)(fetch, basePath);
+        getExperiments(sortBy?: V1GetExperimentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, description?: string, name?: string, labels?: Array<string>, archived?: boolean, states?: Array<Experimentv1State>, users?: Array<string>, userIds?: Array<number>, projectId?: number, experimentIdFilterLt?: number, experimentIdFilterLte?: number, experimentIdFilterGt?: number, experimentIdFilterGte?: number, experimentIdFilterIncl?: Array<number>, experimentIdFilterNotIn?: Array<number>, showTrialData?: boolean, workspaceId?: number, slotsFilter?: V1SlotsFilter, options?: any) {
+            return ExperimentsApiFp(configuration).getExperiments(sortBy, orderBy, offset, limit, description, name, labels, archived, states, users, userIds, projectId, experimentIdFilterLt, experimentIdFilterLte, experimentIdFilterGt, experimentIdFilterGte, experimentIdFilterIncl, experimentIdFilterNotIn, showTrialData, workspaceId, slotsFilter, options)(fetch, basePath);
         },
         /**
          * 
@@ -19493,12 +19518,14 @@ export class ExperimentsApi extends BaseAPI {
      * @param {Array<number>} [experimentIdFilterIncl] In a set. `in` is a reserved word in python.
      * @param {Array<number>} [experimentIdFilterNotIn] Not in a set.
      * @param {boolean} [showTrialData] whether to surface trial specific data from the best trial.
+     * @param {number} [workspaceId] Limit experiments to those in projects of this workspace, or 0 for all workspaces.
+     * @param {V1SlotsFilter} [slotsFilter] Limit experiments to those that ask for slots (GPU) or for none (CPU only), by resources.slots_per_trial.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a resources.slots_per_trial above 0, other tasks with a resources.slots above 0.  - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or resources.slots of 0).
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      * @memberof ExperimentsApi
      */
-    public getExperiments(sortBy?: V1GetExperimentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, description?: string, name?: string, labels?: Array<string>, archived?: boolean, states?: Array<Experimentv1State>, users?: Array<string>, userIds?: Array<number>, projectId?: number, experimentIdFilterLt?: number, experimentIdFilterLte?: number, experimentIdFilterGt?: number, experimentIdFilterGte?: number, experimentIdFilterIncl?: Array<number>, experimentIdFilterNotIn?: Array<number>, showTrialData?: boolean, options?: any) {
-        return ExperimentsApiFp(this.configuration).getExperiments(sortBy, orderBy, offset, limit, description, name, labels, archived, states, users, userIds, projectId, experimentIdFilterLt, experimentIdFilterLte, experimentIdFilterGt, experimentIdFilterGte, experimentIdFilterIncl, experimentIdFilterNotIn, showTrialData, options)(this.fetch, this.basePath)
+    public getExperiments(sortBy?: V1GetExperimentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, description?: string, name?: string, labels?: Array<string>, archived?: boolean, states?: Array<Experimentv1State>, users?: Array<string>, userIds?: Array<number>, projectId?: number, experimentIdFilterLt?: number, experimentIdFilterLte?: number, experimentIdFilterGt?: number, experimentIdFilterGte?: number, experimentIdFilterIncl?: Array<number>, experimentIdFilterNotIn?: Array<number>, showTrialData?: boolean, workspaceId?: number, slotsFilter?: V1SlotsFilter, options?: any) {
+        return ExperimentsApiFp(this.configuration).getExperiments(sortBy, orderBy, offset, limit, description, name, labels, archived, states, users, userIds, projectId, experimentIdFilterLt, experimentIdFilterLte, experimentIdFilterGt, experimentIdFilterGte, experimentIdFilterIncl, experimentIdFilterNotIn, showTrialData, workspaceId, slotsFilter, options)(this.fetch, this.basePath)
     }
     
     /**
@@ -31284,7 +31311,7 @@ export const TasksApiFetchParamCreator = function (configuration?: Configuration
         },
         /**
          * 
-         * @summary Get a list of generic tasks, optionally filtered by owner, workspace, state or parent.
+         * @summary Get a list of generic tasks, optionally filtered by owner, workspace, project, state, parent, name or slot use.
          * @param {number} [offset] Skip this many tasks before returning results.
          * @param {number} [limit] Limit the number of tasks. A value of 0 denotes no limit.
          * @param {Array<string>} [users] Limit tasks to those owned by users with these usernames.
@@ -31293,10 +31320,13 @@ export const TasksApiFetchParamCreator = function (configuration?: Configuration
          * @param {Array<V1GenericTaskState>} [states] Limit tasks to these states.   - GENERIC_TASK_STATE_UNSPECIFIED: The task state unknown  - GENERIC_TASK_STATE_ACTIVE: The task state unknown  - GENERIC_TASK_STATE_CANCELED: The task state unknown  - GENERIC_TASK_STATE_COMPLETED: The task state unknown  - GENERIC_TASK_STATE_ERROR: The task state unknown  - GENERIC_TASK_STATE_PAUSED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_PAUSED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_CANCELED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_COMPLETED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_ERROR: The task state unknown
          * @param {string} [parentId] Limit tasks to the direct children of this task.
          * @param {Array<string>} [taskIds] Limit tasks to these task IDs.
+         * @param {number} [projectId] Limit tasks to this project; 0 for all projects.
+         * @param {string} [search] Limit tasks to those whose name or task ID contains this text, ignoring case.
+         * @param {V1SlotsFilter} [slotsFilter] Limit tasks to those that ask for slots (GPU) or for none (CPU only).   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a resources.slots_per_trial above 0, other tasks with a resources.slots above 0.  - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or resources.slots of 0).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getGenericTasks(offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, states?: Array<V1GenericTaskState>, parentId?: string, taskIds?: Array<string>, options: any = {}): FetchArgs {
+        getGenericTasks(offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, states?: Array<V1GenericTaskState>, parentId?: string, taskIds?: Array<string>, projectId?: number, search?: string, slotsFilter?: V1SlotsFilter, options: any = {}): FetchArgs {
             const localVarPath = `/api/v1/generic-tasks`;
             const localVarUrlObj = new URL(localVarPath, BASE_PATH);
             const localVarRequestOptions = { method: 'GET', ...options };
@@ -31341,6 +31371,18 @@ export const TasksApiFetchParamCreator = function (configuration?: Configuration
             
             if (taskIds) {
                 localVarQueryParameter['taskIds'] = taskIds
+            }
+            
+            if (projectId !== undefined) {
+                localVarQueryParameter['projectId'] = projectId
+            }
+            
+            if (search !== undefined) {
+                localVarQueryParameter['search'] = search
+            }
+            
+            if (slotsFilter !== undefined) {
+                localVarQueryParameter['slotsFilter'] = slotsFilter
             }
             
             objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
@@ -31882,7 +31924,7 @@ export const TasksApiFp = function (configuration?: Configuration) {
         },
         /**
          * 
-         * @summary Get a list of generic tasks, optionally filtered by owner, workspace, state or parent.
+         * @summary Get a list of generic tasks, optionally filtered by owner, workspace, project, state, parent, name or slot use.
          * @param {number} [offset] Skip this many tasks before returning results.
          * @param {number} [limit] Limit the number of tasks. A value of 0 denotes no limit.
          * @param {Array<string>} [users] Limit tasks to those owned by users with these usernames.
@@ -31891,11 +31933,14 @@ export const TasksApiFp = function (configuration?: Configuration) {
          * @param {Array<V1GenericTaskState>} [states] Limit tasks to these states.   - GENERIC_TASK_STATE_UNSPECIFIED: The task state unknown  - GENERIC_TASK_STATE_ACTIVE: The task state unknown  - GENERIC_TASK_STATE_CANCELED: The task state unknown  - GENERIC_TASK_STATE_COMPLETED: The task state unknown  - GENERIC_TASK_STATE_ERROR: The task state unknown  - GENERIC_TASK_STATE_PAUSED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_PAUSED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_CANCELED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_COMPLETED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_ERROR: The task state unknown
          * @param {string} [parentId] Limit tasks to the direct children of this task.
          * @param {Array<string>} [taskIds] Limit tasks to these task IDs.
+         * @param {number} [projectId] Limit tasks to this project; 0 for all projects.
+         * @param {string} [search] Limit tasks to those whose name or task ID contains this text, ignoring case.
+         * @param {V1SlotsFilter} [slotsFilter] Limit tasks to those that ask for slots (GPU) or for none (CPU only).   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a resources.slots_per_trial above 0, other tasks with a resources.slots above 0.  - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or resources.slots of 0).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getGenericTasks(offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, states?: Array<V1GenericTaskState>, parentId?: string, taskIds?: Array<string>, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetGenericTasksResponse> {
-            const localVarFetchArgs = TasksApiFetchParamCreator(configuration).getGenericTasks(offset, limit, users, userIds, workspaceId, states, parentId, taskIds, options);
+        getGenericTasks(offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, states?: Array<V1GenericTaskState>, parentId?: string, taskIds?: Array<string>, projectId?: number, search?: string, slotsFilter?: V1SlotsFilter, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetGenericTasksResponse> {
+            const localVarFetchArgs = TasksApiFetchParamCreator(configuration).getGenericTasks(offset, limit, users, userIds, workspaceId, states, parentId, taskIds, projectId, search, slotsFilter, options);
             return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
                 return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
                     if (response.status >= 200 && response.status < 300) {
@@ -32154,7 +32199,7 @@ export const TasksApiFactory = function (configuration?: Configuration, fetch?: 
         },
         /**
          * 
-         * @summary Get a list of generic tasks, optionally filtered by owner, workspace, state or parent.
+         * @summary Get a list of generic tasks, optionally filtered by owner, workspace, project, state, parent, name or slot use.
          * @param {number} [offset] Skip this many tasks before returning results.
          * @param {number} [limit] Limit the number of tasks. A value of 0 denotes no limit.
          * @param {Array<string>} [users] Limit tasks to those owned by users with these usernames.
@@ -32163,11 +32208,14 @@ export const TasksApiFactory = function (configuration?: Configuration, fetch?: 
          * @param {Array<V1GenericTaskState>} [states] Limit tasks to these states.   - GENERIC_TASK_STATE_UNSPECIFIED: The task state unknown  - GENERIC_TASK_STATE_ACTIVE: The task state unknown  - GENERIC_TASK_STATE_CANCELED: The task state unknown  - GENERIC_TASK_STATE_COMPLETED: The task state unknown  - GENERIC_TASK_STATE_ERROR: The task state unknown  - GENERIC_TASK_STATE_PAUSED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_PAUSED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_CANCELED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_COMPLETED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_ERROR: The task state unknown
          * @param {string} [parentId] Limit tasks to the direct children of this task.
          * @param {Array<string>} [taskIds] Limit tasks to these task IDs.
+         * @param {number} [projectId] Limit tasks to this project; 0 for all projects.
+         * @param {string} [search] Limit tasks to those whose name or task ID contains this text, ignoring case.
+         * @param {V1SlotsFilter} [slotsFilter] Limit tasks to those that ask for slots (GPU) or for none (CPU only).   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a resources.slots_per_trial above 0, other tasks with a resources.slots above 0.  - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or resources.slots of 0).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getGenericTasks(offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, states?: Array<V1GenericTaskState>, parentId?: string, taskIds?: Array<string>, options?: any) {
-            return TasksApiFp(configuration).getGenericTasks(offset, limit, users, userIds, workspaceId, states, parentId, taskIds, options)(fetch, basePath);
+        getGenericTasks(offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, states?: Array<V1GenericTaskState>, parentId?: string, taskIds?: Array<string>, projectId?: number, search?: string, slotsFilter?: V1SlotsFilter, options?: any) {
+            return TasksApiFp(configuration).getGenericTasks(offset, limit, users, userIds, workspaceId, states, parentId, taskIds, projectId, search, slotsFilter, options)(fetch, basePath);
         },
         /**
          * 
@@ -32334,7 +32382,7 @@ export class TasksApi extends BaseAPI {
     
     /**
      * 
-     * @summary Get a list of generic tasks, optionally filtered by owner, workspace, state or parent.
+     * @summary Get a list of generic tasks, optionally filtered by owner, workspace, project, state, parent, name or slot use.
      * @param {number} [offset] Skip this many tasks before returning results.
      * @param {number} [limit] Limit the number of tasks. A value of 0 denotes no limit.
      * @param {Array<string>} [users] Limit tasks to those owned by users with these usernames.
@@ -32343,12 +32391,15 @@ export class TasksApi extends BaseAPI {
      * @param {Array<V1GenericTaskState>} [states] Limit tasks to these states.   - GENERIC_TASK_STATE_UNSPECIFIED: The task state unknown  - GENERIC_TASK_STATE_ACTIVE: The task state unknown  - GENERIC_TASK_STATE_CANCELED: The task state unknown  - GENERIC_TASK_STATE_COMPLETED: The task state unknown  - GENERIC_TASK_STATE_ERROR: The task state unknown  - GENERIC_TASK_STATE_PAUSED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_PAUSED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_CANCELED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_COMPLETED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_ERROR: The task state unknown
      * @param {string} [parentId] Limit tasks to the direct children of this task.
      * @param {Array<string>} [taskIds] Limit tasks to these task IDs.
+     * @param {number} [projectId] Limit tasks to this project; 0 for all projects.
+     * @param {string} [search] Limit tasks to those whose name or task ID contains this text, ignoring case.
+     * @param {V1SlotsFilter} [slotsFilter] Limit tasks to those that ask for slots (GPU) or for none (CPU only).   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_GPU: Workloads that ask for at least one slot: experiments with a resources.slots_per_trial above 0, other tasks with a resources.slots above 0.  - SLOTS_FILTER_CPU_ONLY: Workloads that ask for no slots (resources.slots_per_trial or resources.slots of 0).
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      * @memberof TasksApi
      */
-    public getGenericTasks(offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, states?: Array<V1GenericTaskState>, parentId?: string, taskIds?: Array<string>, options?: any) {
-        return TasksApiFp(this.configuration).getGenericTasks(offset, limit, users, userIds, workspaceId, states, parentId, taskIds, options)(this.fetch, this.basePath)
+    public getGenericTasks(offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, states?: Array<V1GenericTaskState>, parentId?: string, taskIds?: Array<string>, projectId?: number, search?: string, slotsFilter?: V1SlotsFilter, options?: any) {
+        return TasksApiFp(this.configuration).getGenericTasks(offset, limit, users, userIds, workspaceId, states, parentId, taskIds, projectId, search, slotsFilter, options)(this.fetch, this.basePath)
     }
     
     /**
