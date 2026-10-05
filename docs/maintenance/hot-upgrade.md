@@ -19,9 +19,12 @@ large database were not part of it.
 - **No version gate.** The master accepts agents of any version; it only
   records the version that an agent reports, which `det agent list` shows. The
   CLI prints a warning when its version differs from the master's and works
-  on. A rolling agent upgrade therefore runs with mixed versions: 0.40.1 agents
-  with a 0.41.0 master ran and reattached tasks after restarts. Other
-  combinations have not been tested.
+  on. The agent's code and its messages to and from the master (`agent/`,
+  `master/pkg/aproto`, `master/pkg/cproto`) are the same in 0.40.1 and 0.41.0.
+  A rolling agent upgrade runs with mixed versions: 0.40.1 agents ran under a
+  0.41.0 master and reattached running tasks after agent and master restarts,
+  and a 0.41.0 agent kept its running tasks under the 0.40.1 master after a
+  rollback.
 - **Running tasks keep their SDK.** An upgrade does not replace the SDK inside a
   running task container. Trials with the 0.40.1 SDK continued across the
   master and agent upgrade.
@@ -30,8 +33,12 @@ large database were not part of it.
   migrated database for a rollback by binary swap. The migration of 0.41.0
   is described below.
 - **Agents run under a restart policy.** An agent that cannot reach the
-  master for about 145 seconds exits; only a restart policy, such as Docker's
-  `--restart unless-stopped` or systemd's `Restart=always`, brings it back.
+  master for about 145 seconds exits, and a restarted agent exits at once
+  while the master is still down. Only a restart policy that keeps restarting
+  without a limit, such as Docker's `--restart unless-stopped`, brings it back.
+  A systemd unit, including the packaged `determined-agent.service`, also needs
+  `RestartSec=` of several seconds: with the default 100 ms, systemd stops
+  restarting it after five starts within ten seconds.
 - **The new CLI.** Use the CLI of the new release for administration. The
   0.40.1 CLI cannot create dynamic pools, because it omits the JSON content
   type, and has no `update` or `adopt` command. Users of CLIs and SDKs from
@@ -46,7 +53,7 @@ master stops:
 | Time without a master | What happens |
 | --- | --- |
 | Up to about 145 s | Agents retry every five seconds, 30 times by default. Task containers keep running. A trial blocks in a Core API call that must reach the master, such as a checkpoint report; metrics are queued and delivered afterward, without gaps or duplicates. Task output is buffered in the container. A trial that makes no Core API call keeps computing. |
-| About 145 s | Agents log `exhausted reconnect attempts` and exit; their task containers keep running. A restart policy restarts them with a growing delay, capped at about one minute by Docker. |
+| About 145 s | Agents log `exhausted reconnect attempts` and exit; their task containers keep running. A restart policy restarts them with a growing delay, capped at about one minute by Docker; each restarted agent exits at once until the master is back. |
 | About 661 s (11 minutes) after a task's first failed log upload | The task's log shipper gives up and kills the task, whatever `agent_reconnect_wait` is: exit code 80, `RuntimeError: failure in log shipper; shipper thread died` in the container output. A task that writes no output during the outage is not affected. |
 | About 26 minutes | The SDK's retries of a Core API call (`Retry(total=20, backoff_factor=0.5)`, or `DET_RETRY_CONFIG`) run out. For tasks that write output, the log shipper limit comes first. |
 
@@ -85,9 +92,10 @@ milliseconds. No other table changes, and the database views stay the same.
 The new master logs `migrated from 20260925000000 to 20261005000000` and
 `database views unchanged`.
 
-The migration only adds columns. 0.40.1 starts against the migrated database,
-logs `no migrations to apply; version: 20261005000000`, and ignores the new
-columns, so a rollback is a binary swap.
+The migration adds nullable columns, one column with a default, and a
+constraint that the inserts of 0.40.1 satisfy. 0.40.1 starts against the
+migrated database, logs `no migrations to apply; version: 20261005000000`,
+and ignores the new columns, so a rollback is a binary swap.
 
 ## Before the upgrade
 
@@ -197,7 +205,8 @@ docker start <old-master>
 
 0.40.1 logs `no migrations to apply`, runs every dynamic pool from its saved
 effective configuration, and agents and running tasks carry on, as after the
-upgrade. A 0.41.0 CLI shows an empty `Revision` and `Active` column in
+upgrade. Agents already replaced with 0.41.0 can stay on it. A 0.41.0 CLI
+shows an empty `Revision` column and `-` under `Active` in
 `det resource-pool list-dynamic` against it. Features of 0.41.0, such as
 browser terminals and generic task names, are not available. Roll forward with
 `docker stop <old-master>` and `docker start <new-master>`. Once the new

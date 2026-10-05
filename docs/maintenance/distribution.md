@@ -5,8 +5,10 @@ and its tag as the version reference. The matching master and agent images are
 published to GHCR under `ghcr.io/wu-cvgl/determined-master:0.41.0` and
 `ghcr.io/wu-cvgl/determined-agent:0.41.0`. Pin the images to the release's
 published digests when preparing a deployment. Master and agent do not check
-each other's version: 0.40.1 agents work with a 0.41.0 master during a rolling
-agent upgrade. Other combinations have not been tested.
+each other's version, and the agent's code and its messages to and from the
+master are the same in 0.40.1 and 0.41.0: 0.40.1 agents ran under a 0.41.0
+master during a rolling agent upgrade, and a 0.41.0 agent under the 0.40.1
+master after a rollback.
 
 ## Install the CLI from the repository
 
@@ -58,10 +60,11 @@ PostgreSQL backup. Start the new master, confirm database migration and login,
 then reconnect or update agents and verify tasks, metrics, and checkpoints. To
 keep tasks running, take the backup, replace the master, and then replace the
 agents one node at a time, as described in
-[upgrade with running tasks](hot-upgrade.md). Running tasks survive a master
-outage of a few minutes but not one of ten minutes or more; the procedure was
-rehearsed with CPU tasks. See [task continuity](task-continuity.md) for the
-reconnect limits and a disposable diagnostic.
+[upgrade with running tasks](hot-upgrade.md). Tasks that write output are
+killed after about 11 minutes without a master; keep master outages well under
+ten minutes. The procedure was rehearsed with CPU tasks. See
+[task continuity](task-continuity.md) for the reconnect limits and a
+disposable diagnostic.
 
 ## Rollback and source builds
 
