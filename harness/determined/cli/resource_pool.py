@@ -108,6 +108,22 @@ def update_dynamic(args: argparse.Namespace) -> None:
     _fail_for_failed_pool(resource_pool)
 
 
+def adopt_dynamic(args: argparse.Namespace) -> None:
+    config = _load_dynamic_pool_config(args.config)
+
+    sess = cli.setup_session(args)
+    pool_name = parse.quote(args.pool_name, safe="")
+    resource_pool = sess.post(
+        f"{DYNAMIC_RESOURCE_POOLS_PATH}/{pool_name}/adopt",
+        params=_cluster_params(args.cluster_name),
+        json={"config": config},
+    ).json()
+    if args.json:
+        render.print_json(resource_pool)
+    else:
+        _render_dynamic_pools([resource_pool])
+
+
 def retry_dynamic(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
     pool_name = parse.quote(args.pool_name, safe="")
@@ -244,6 +260,26 @@ args_description = [
                         "--expected-revision",
                         type=int,
                         help="refuse the update unless the saved configuration has this revision",
+                    ),
+                    cli.Arg(
+                        "--cluster-name",
+                        help="target agent resource manager cluster",
+                    ),
+                    cli.Arg("--json", action="store_true", help="print as JSON"),
+                ],
+            ),
+            cli.Cmd(
+                "adopt",
+                adopt_dynamic,
+                "save a resource pool configured in master.yaml as a dynamic resource pool; "
+                "master.yaml keeps serving it until its entry is removed and the master restarts",
+                [
+                    cli.Arg("pool_name", help="name of the resource pool in master.yaml"),
+                    cli.Arg(
+                        "config",
+                        type=argparse.FileType("r"),
+                        help="path to the pool's master.yaml entry, copied verbatim, as YAML or "
+                        "JSON",
                     ),
                     cli.Arg(
                         "--cluster-name",
