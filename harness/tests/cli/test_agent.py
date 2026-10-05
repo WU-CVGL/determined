@@ -278,5 +278,5 @@ def test_describe_agent_without_topology(capsys: pytest.CaptureFixture) -> None:
         )
         cli.main(["agent", "describe", "cpu"])
     lines = capsys.readouterr().out.splitlines()
-    assert "GPU Topology:    not reported (no CUDA slots or excluded GPUs)" in lines
+    assert f"GPU Topology:    {agent.GPU_TOPOLOGY_NOT_REPORTED}" in lines
     assert not any("Slot" in line for line in lines)

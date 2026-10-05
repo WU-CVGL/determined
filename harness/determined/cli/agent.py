@@ -45,6 +45,10 @@ GPU_NARROW_LINK_TEXT = (
     "Actual collective throughput depends on the workload."
 )
 GPU_EXCLUDED_TEXT = "Left out by the agent's exclude list. No task runs on this GPU."
+# An agent without NVIDIA GPUs, a master without GPU topology, or a user who may not view it.
+GPU_TOPOLOGY_NOT_REPORTED = (
+    "not reported (no NVIDIA GPUs, an older master, or no permission to view agent details)"
+)
 
 
 def local_id(address: str) -> str:
@@ -97,8 +101,10 @@ def _gpu_slot_links(
 
 
 def _first_not_ok_status(link: bindings.v1GpuLink, slot_a: int) -> str:
-    """The first known status other than OK, in the order A->B READ, A->B WRITE, B->A READ,
-    B->A WRITE, where A is the lower slot id."""
+    """The first known status other than OK.
+
+    The order is A->B READ, A->B WRITE, B->A READ, B->A WRITE, where A is the lower slot id.
+    """
     forward, backward = link.p2pAToB, link.p2pBToA
     if link.deviceA != slot_a:
         forward, backward = backward, forward
@@ -488,7 +494,7 @@ def describe_agent(args: argparse.Namespace) -> None:
         ("Draining", agent.draining),
     ]
     if topo is None:
-        header.append(("GPU Topology", "not reported (no CUDA slots or excluded GPUs)"))
+        header.append(("GPU Topology", GPU_TOPOLOGY_NOT_REPORTED))
         for key, value in header:
             print(f"{key + ':':<17}{value}")
         return
