@@ -29,6 +29,7 @@ import {
   cancelExperiment,
   deleteExperiment,
   getExperiment,
+  getExpTrials,
   killExperiment,
   openOrCreateTensorBoard,
   pauseExperiment,
@@ -89,25 +90,55 @@ const manageActions = [
 ];
 const dangerActions: Action[] = [Action.Kill, Action.Delete];
 
+type LogsTarget = { fetchTrial: true } | { fetchTrial: false; path: string };
+
 /**
  * Where View Logs leads. Experiment list rows have numTrials and the config, but no trial IDs (the
  * list routes leave them out for speed); only an experiment fetched on its own has trialIds.
  * - One trial with a known ID: that trial's logs page.
  * - A single-trial experiment (by its config, as the experiment page decides; by the searcher type
- *   if the row has no config): the Logs tab of its page, which shows that trial's logs.
+ *   if the row has no config) whose trial ID is not known: its trial is fetched when View Logs is
+ *   chosen (see singleTrialLogsPath).
  * - Otherwise: the Trials tab of the experiment page, to choose a trial.
  * An experiment without trials has no logs yet, so View Logs is left out (see experimentCheckers).
  */
-const experimentLogsPath = (experiment: ProjectExperiment): string => {
+const experimentLogsTarget = (experiment: ProjectExperiment): LogsTarget => {
   const trialId = experiment.numTrials === 1 ? experiment.trialIds?.[0] : undefined;
-  if (trialId !== undefined) return paths.trialLogs(trialId, experiment.id);
+  if (trialId !== undefined) {
+    return { fetchTrial: false, path: paths.trialLogs(trialId, experiment.id) };
+  }
   if (
     isSingleTrialExperiment(experiment) ||
     experiment.searcherType === ExperimentSearcherName.Single
   ) {
-    return `${paths.experimentDetails(experiment.id)}/logs`;
+    return { fetchTrial: true };
   }
-  return `${paths.experimentDetails(experiment.id)}/trials`;
+  return { fetchTrial: false, path: `${paths.experimentDetails(experiment.id)}/trials` };
+};
+
+/**
+ * The logs page of a single-trial experiment's trial, found by fetching the experiment's first
+ * trial. With flat runs, every experiment page path redirects to the search page, which has no Logs
+ * tab, so the trial's own logs page is the one that shows them. If the trial cannot be fetched (or
+ * there is none), View Logs opens the search page with flat runs, where the runs are listed, and
+ * the experiment page's Logs tab without flat runs, as before.
+ */
+const singleTrialLogsPath = async (experimentId: number, flatRuns: boolean): Promise<string> => {
+  try {
+    const { trials } = await getExpTrials({ id: experimentId, limit: 1 });
+    const trial = trials[0];
+    if (trial) return paths.trialLogs(trial.id, experimentId);
+  } catch (e) {
+    handleError(e, {
+      level: ErrorLevel.Error,
+      publicMessage: `Failed to fetch the ${flatRuns ? 'run' : 'trial'} to show its logs.`,
+      silent: true,
+      type: ErrorType.Server,
+    });
+  }
+  return flatRuns
+    ? paths.searchDetails(experimentId)
+    : `${paths.experimentDetails(experimentId)}/logs`;
 };
 
 const ExperimentActionDropdown: React.FC<Props> = ({
@@ -205,7 +236,7 @@ const ExperimentActionDropdown: React.FC<Props> = ({
       ...allowedItems(manageActions),
     ];
   }, [experiment, permissions, taskResourcesEnabled]);
-  const logsPath = experimentLogsPath(experiment);
+  const logsTarget = useMemo(() => experimentLogsTarget(experiment), [experiment]);
 
   const cellCopyData = useMemo(() => {
     if (cell && 'displayData' in cell && isString(cell.displayData)) return cell.displayData;
@@ -277,9 +308,13 @@ const ExperimentActionDropdown: React.FC<Props> = ({
             openCommandResponse(commandResponse);
             break;
           }
-          case Action.ViewLogs:
-            handlePath(e, { path: logsPath });
+          case Action.ViewLogs: {
+            const path = logsTarget.fetchTrial
+              ? await singleTrialLogsPath(experiment.id, f_flat_runs)
+              : logsTarget.path;
+            handlePath(e, { path });
             break;
+          }
           case Action.ViewResources:
             handlePath(e, { path: paths.experimentResources(experiment.id) });
             break;
@@ -376,7 +411,8 @@ const ExperimentActionDropdown: React.FC<Props> = ({
       trialsName,
       link,
       onLink,
-      logsPath,
+      logsTarget,
+      f_flat_runs,
       experiment.id,
       onComplete,
       confirm,
