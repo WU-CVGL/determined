@@ -996,6 +996,12 @@ func TestGetGenericTasksFiltersByProjectSearchAndSlots(t *testing.T) {
 	require.ElementsMatch(t, ids(cpu, noSlots), list(&apiv1.GetGenericTasksRequest{
 		ProjectId: pid, Search: "generic task",
 	}))
+	// A named task's ID is not in its name, so only the task ID can match.
+	require.NotContains(t, name, gpu.String()[9:23])
+	require.Equal(t, ids(gpu), list(&apiv1.GetGenericTasksRequest{
+		Search: strings.ToUpper(gpu.String()[9:23]),
+	}))
+	// A task without a name is shown as "Generic Task <id>", so its ID matches either way.
 	require.Equal(t, ids(cpu), list(&apiv1.GetGenericTasksRequest{
 		Search: strings.ToUpper(cpu.String()[9:23]),
 	}))
