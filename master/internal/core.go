@@ -95,6 +95,14 @@ var staticWebDirectoryPaths = map[string]bool{
 	"/docs/rest-api":           true,
 }
 
+var (
+	// Files that receive a unique hash when bundled and deployed can be cached forever.
+	cacheFileLongTerm = regexp.MustCompile(`(?i)(-[0-9a-z]{1,}\.(js|css))$|(woff2|woff)$`)
+
+	// Other static files should only be cached for a short period of time.
+	cacheFileShortTerm = regexp.MustCompile(`.(antd.\S+(.css)|ico|png|jpe*g|gif|svg)$`)
+)
+
 // Master manages the Determined master state.
 type Master struct {
 	ClusterID string
@@ -1306,12 +1314,6 @@ func (m *Master) Run(ctx context.Context, gRPCLogInitDone chan struct{}) error {
 	m.echo = echo.New()
 	m.echo.Use(middleware.Recover())
 
-	// Files that receive a unique hash when bundled and deployed can be cached forever
-	cacheFileLongTerm := regexp.MustCompile(`(?i)(-[0-9a-z]{1,}\.(js|css))$|(woff2|woff)$`)
-
-	// Other static files should only be cached for a short period of time
-	cacheFileShortTerm := regexp.MustCompile(`.(antd.\S+(.css)|ico|png|jpe*g|gif|svg)$`)
-
 	// API endpoints
 	apiRegex := regexp.MustCompile(`^/api/.+$`)
 
@@ -1469,12 +1471,6 @@ func (m *Master) Run(ctx context.Context, gRPCLogInitDone chan struct{}) error {
 	// Docs and WebUI.
 	webuiRoot := filepath.Join(m.config.Root, "webui")
 	reactRoot := filepath.Join(webuiRoot, "react")
-	reactRootAbs, err := filepath.Abs(reactRoot)
-	if err != nil {
-		return errors.Wrap(err, "failed to get absolute path to react root")
-	}
-	reactIndex := filepath.Join(reactRoot, "index.html")
-	designIndex := filepath.Join(reactRoot, "design", "index.html")
 
 	// Docs.
 	m.echo.Static("/docs/rest-api", filepath.Join(webuiRoot, "docs", "rest-api"))
@@ -1489,48 +1485,9 @@ func (m *Master) Run(ctx context.Context, gRPCLogInitDone chan struct{}) error {
 			c.QueryParam("mode"), c.QueryParam("orientation"),
 		))
 	})
-	webuiGroup.File("/design", designIndex)
-	webuiGroup.File("/design/", designIndex)
-	webuiGroup.File("", reactIndex)
-	webuiGroup.File("/", reactIndex)
-	webuiGroup.GET("/*", func(c echo.Context) error {
-		groupPath := strings.TrimPrefix(c.Request().URL.Path, webuiBaseRoute+"/")
-		requestedFile := filepath.Join(reactRoot, groupPath)
-		// We do a simple check against directory traversal attacks.
-		requestedFileAbs, fErr := filepath.Abs(requestedFile)
-		if fErr != nil {
-			log.WithError(fErr).Error("failed to get absolute path to requested file")
-			return c.File(reactIndex)
-		}
-		isInReactDir := strings.HasPrefix(requestedFileAbs, reactRootAbs)
-		if !isInReactDir {
-			return echo.NewHTTPError(http.StatusForbidden)
-		}
-
-		var hasMatchingFile bool
-		stat, oErr := os.Stat(requestedFile)
-		switch {
-		case os.IsNotExist(oErr):
-		case os.IsPermission(oErr):
-			hasMatchingFile = false
-		case oErr != nil:
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to check if file exists")
-		default:
-			hasMatchingFile = !stat.IsDir()
-		}
-
-		if cacheFileLongTerm.MatchString(requestedFile) {
-			c.Response().Header().Set("cache-control", "public, max-age=31536000")
-		} else if cacheFileShortTerm.MatchString(requestedFile) {
-			c.Response().Header().Set("cache-control", "public, max-age=600")
-		}
-
-		if hasMatchingFile {
-			return c.File(requestedFile)
-		}
-
-		return c.File(reactIndex)
-	})
+	if err = registerWebUIRoutes(webuiGroup, reactRoot); err != nil {
+		return err
+	}
 
 	m.echo.File("/api/v1/api.swagger.json",
 		filepath.Join(m.config.Root, "swagger/determined/api/v1/api.swagger.json"))
@@ -1652,4 +1609,76 @@ func (m *Master) Run(ctx context.Context, gRPCLogInitDone chan struct{}) error {
 	}
 
 	return m.startServers(ctx, cert, gRPCLogInitDone)
+}
+
+// registerWebUIRoutes serves the React web UI in reactRoot under webuiGroup. The HTML pages, the
+// index that also answers the web UI's own routes and the design page, go out with
+// "Cache-Control: no-cache": they name the bundle's hashed files, so a browser that reused a page
+// from an earlier release would run that release's web UI against this master. Browsers
+// revalidate them on every load and get a 304 while they are unchanged. The hashed files keep
+// their long-term caching.
+func registerWebUIRoutes(webuiGroup *echo.Group, reactRoot string) error {
+	reactRootAbs, err := filepath.Abs(reactRoot)
+	if err != nil {
+		return errors.Wrap(err, "failed to get absolute path to react root")
+	}
+	reactIndex := filepath.Join(reactRoot, "index.html")
+	designIndex := filepath.Join(reactRoot, "design", "index.html")
+	page := func(file string) echo.HandlerFunc {
+		return func(c echo.Context) error { return serveWebUIPage(c, file) }
+	}
+
+	webuiGroup.GET("/design", page(designIndex))
+	webuiGroup.GET("/design/", page(designIndex))
+	webuiGroup.GET("", page(reactIndex))
+	webuiGroup.GET("/", page(reactIndex))
+	webuiGroup.GET("/*", func(c echo.Context) error {
+		groupPath := strings.TrimPrefix(c.Request().URL.Path, webuiBaseRoute+"/")
+		requestedFile := filepath.Join(reactRoot, groupPath)
+		// We do a simple check against directory traversal attacks.
+		requestedFileAbs, fErr := filepath.Abs(requestedFile)
+		if fErr != nil {
+			log.WithError(fErr).Error("failed to get absolute path to requested file")
+			return serveWebUIPage(c, reactIndex)
+		}
+		isInReactDir := strings.HasPrefix(requestedFileAbs, reactRootAbs)
+		if !isInReactDir {
+			return echo.NewHTTPError(http.StatusForbidden)
+		}
+
+		var hasMatchingFile bool
+		stat, oErr := os.Stat(requestedFile)
+		switch {
+		case os.IsNotExist(oErr):
+		case os.IsPermission(oErr):
+			hasMatchingFile = false
+		case oErr != nil:
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to check if file exists")
+		default:
+			hasMatchingFile = !stat.IsDir()
+		}
+
+		// The web UI's own routes, and files that are gone, such as the hashed files of an
+		// earlier release that a stale page asks for, get the index, which is never cached.
+		if !hasMatchingFile {
+			return serveWebUIPage(c, reactIndex)
+		}
+
+		switch {
+		case filepath.Ext(requestedFile) == ".html":
+			return serveWebUIPage(c, requestedFile)
+		case cacheFileLongTerm.MatchString(requestedFile):
+			c.Response().Header().Set("cache-control", "public, max-age=31536000")
+		case cacheFileShortTerm.MatchString(requestedFile):
+			c.Response().Header().Set("cache-control", "public, max-age=600")
+		}
+		return c.File(requestedFile)
+	})
+	return nil
+}
+
+// serveWebUIPage serves an HTML page of the web UI, which browsers must revalidate before reuse.
+func serveWebUIPage(c echo.Context, file string) error {
+	c.Response().Header().Set("Cache-Control", "no-cache")
+	return c.File(file)
 }
