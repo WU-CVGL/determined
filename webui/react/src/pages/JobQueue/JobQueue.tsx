@@ -28,11 +28,8 @@ import { columns as columnsFunc, SCHEDULING_VAL_KEY } from 'pages/JobQueue/JobQu
 import { paths } from 'routes/utils';
 import {
   cancelExperiment,
-  getCommands,
   getJobQ,
-  getJupyterLabs,
-  getShells,
-  getTensorBoards,
+  getTask,
   killExperiment,
   killGenericTask,
   killTask,
@@ -40,6 +37,7 @@ import {
 import * as Api from 'services/api-ts-sdk';
 import userStore from 'stores/users';
 import {
+  CommandState,
   CommandTask,
   CommandType,
   DetailedUser,
@@ -49,6 +47,7 @@ import {
   JobState,
   JobType,
   ResourcePool,
+  TaskItem,
 } from 'types';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import { canManageJob, jobTypeToCommandType, orderedSchedulers } from 'utils/job';
@@ -67,12 +66,21 @@ interface Props {
   selectedRp: ResourcePool;
 }
 
-const commandTaskLists = {
-  [CommandType.Command]: getCommands,
-  [CommandType.JupyterLab]: getJupyterLabs,
-  [CommandType.Shell]: getShells,
-  [CommandType.TensorBoard]: getTensorBoards,
-};
+/**
+ * The task of a shell, JupyterLab, command or TensorBoard job, as the task action menu takes it:
+ * the job has the task's ID, name, owner, workspace and pool, and the task's record has its state,
+ * the state of its latest allocation (the master lists the open allocation first).
+ */
+const commandTaskFromJob = (job: FullJob, type: CommandType, task: TaskItem): CommandTask => ({
+  id: job.entityId,
+  name: job.name,
+  resourcePool: job.resourcePool,
+  startTime: task.startTime,
+  state: task.allocations[0]?.state ?? CommandState.Queued,
+  type,
+  userId: job.userId ?? 0,
+  workspaceId: job.workspaceId,
+});
 
 const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
   const resourcesEnabled = useTaskResourcesEnabled();
@@ -81,8 +89,12 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
   const currentUser = Loadable.getOrElse(undefined, useObservable(userStore.currentUser));
   const [managingJob, setManagingJob] = useState<Job>();
   const [jobs, setJobs] = useState<Job[]>([]);
-  // The shells, JupyterLabs, commands and TensorBoards among the jobs, by task ID.
+  // The shells, JupyterLabs, commands and TensorBoards among the jobs on the page, by task ID.
   const [commandTasks, setCommandTasks] = useState<Record<string, CommandTask>>({});
+  // The task IDs on the page, and those being looked up: one lookup per task at a time.
+  const pageTaskIds = useRef<Set<string>>(new Set());
+  const taskLookups = useRef<Set<string>>(new Set());
+  const isMounted = useRef(true);
   const [topJob, setTopJob] = useState<Job>();
   const [total, setTotal] = useState(0);
   const [canceler] = useState(new AbortController());
@@ -105,40 +117,58 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
 
   const isJobOrderAvailable = orderedSchedulers.has(selectedRp.schedulerType);
 
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
   /**
-   * The task action menu of a shell, JupyterLab, command or TensorBoard needs the task itself, such
-   * as its state, which its job does not have. A job without its task keeps the job menu.
+   * The task action menu of a shell, JupyterLab, command or TensorBoard needs the task's state,
+   * which its job does not have. Each such job on the page is looked up by its task ID on every
+   * poll (unless its last lookup is still running), on its own: a failed lookup leaves the other
+   * rows alone, and the jobs table does not wait for the lookups. A job whose task has not been
+   * loaded yet, or whose lookup failed, keeps the job menu; a failed refresh keeps the copy
+   * loaded before.
+   *
+   * The lookup reads the task's record (GET /api/v1/tasks/{id}), which has no credentials. The
+   * shell and notebook APIs return the shell's private key and the notebook's token to its owner
+   * or an admin, and log an admin's read, so they are not polled for a menu.
    */
-  const fetchCommandTasks = useCallback(
-    async (jobs: Job[]) => {
-      const types = _.uniq(
-        jobs.flatMap((job) => {
-          const type = 'entityId' in job ? jobTypeToCommandType(job.type) : undefined;
-          return type ? [type] : [];
-        }),
-      );
-      try {
-        const lists = await Promise.all(
-          types.map((type) =>
-            commandTaskLists[type]({
-              orderBy: 'ORDER_BY_DESC',
-              signal: canceler.signal,
-              sortBy: 'SORT_BY_START_TIME',
-            }),
-          ),
-        );
-        const tasks = _.keyBy(lists.flat(), 'id');
-        setCommandTasks((prev) => (_.isEqual(prev, tasks) ? prev : tasks));
-      } catch (e) {
-        handleError(e, {
-          publicSubject: 'Unable to fetch tasks.',
-          silent: true,
-          type: ErrorType.Api,
-        });
-      }
-    },
-    [canceler.signal],
-  );
+  const refreshCommandTasks = useCallback((jobs: Job[]) => {
+    const lookups = jobs.flatMap((job) => {
+      if (!('entityId' in job) || !job.entityId) return [];
+      const type = jobTypeToCommandType(job.type);
+      return type ? [{ job, type }] : [];
+    });
+    const ids = new Set(lookups.map(({ job }) => job.entityId));
+    pageTaskIds.current = ids;
+    // Forget the tasks of jobs that left the page.
+    setCommandTasks((prev) => {
+      const kept = _.pickBy(prev, (_task, id) => ids.has(id));
+      return _.size(kept) === _.size(prev) ? prev : kept;
+    });
+    lookups.forEach(({ job, type }) => {
+      const id = job.entityId;
+      if (taskLookups.current.has(id)) return;
+      taskLookups.current.add(id);
+      getTask({ taskId: id })
+        .then((item) => {
+          if (!item || !isMounted.current || !pageTaskIds.current.has(id)) return;
+          const task = commandTaskFromJob(job, type, item);
+          setCommandTasks((prev) => (_.isEqual(prev[id], task) ? prev : { ...prev, [id]: task }));
+        })
+        .catch((e) => {
+          handleError(e, {
+            publicSubject: 'Unable to fetch task.',
+            silent: true,
+            type: ErrorType.Api,
+          });
+        })
+        .finally(() => taskLookups.current.delete(id));
+    });
+  }, []);
 
   const fetchJobsTable = useCallback(async () => {
     if (!settings) return;
@@ -171,7 +201,7 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
       const newJobs = jobState ? jobs.jobs.filter((j) => j.summary.state === jobState) : jobs.jobs;
       setJobs(newJobs);
       if (jobs.pagination.total !== undefined) setTotal(jobs.pagination.total);
-      await fetchCommandTasks(newJobs);
+      refreshCommandTasks(newJobs);
     } catch (e) {
       if ((e as DetError)?.publicMessage === 'offset out of bounds' && settings.tableOffset !== 0) {
         updateSettings({ tableOffset: 0 });
@@ -193,7 +223,7 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
     jobState,
     topJob,
     updateSettings,
-    fetchCommandTasks,
+    refreshCommandTasks,
   ]);
 
   usePolling(fetchJobsTable, { rerunOnNewFn: true });
