@@ -93,6 +93,8 @@ describe('GpuTopology', () => {
     // The excluded GPU: no slot id, Free fill, stripes, its label, a dot and an info button.
     const excluded = tile('Excluded GPU 81:00.0');
     expect(excluded).toHaveClass('striped');
+    expect(excluded.querySelector('.tileName')).toHaveTextContent(/^\u2013$/);
+    expect(excluded).not.toHaveTextContent('-1');
     expect(excluded.dataset.fill).toBe('FREE');
     expect(within(excluded).getByText('excluded')).toBeInTheDocument();
     expect(within(excluded).getByRole('img', { name: 'GPU health: ok' })).toBeInTheDocument();
@@ -162,6 +164,27 @@ describe('GpuTopology', () => {
 
     await userEvent.click(button);
     expect(button).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('shows the details on focus, hides the tooltip while pinned, and unpins on Escape', async () => {
+    const agent = agentOf('node01', gpuTopologyCase('node01 with the exclude list'));
+    setup(<GpuTopology agent={agent} />);
+    const button = within(tile('Slot 3')).getByRole('button');
+
+    act(() => button.focus());
+    const tooltip = await screen.findByRole('tooltip');
+    expect(tooltip).toHaveTextContent('Slot 3 on node01: link below max at start');
+    expect(tooltip).toHaveTextContent(GPU_NARROW_LINK_TEXT);
+
+    // Pinned, the popover replaces the tooltip, although the pointer rests on the button. (antd
+    // gives the popover the role tooltip too, and jsdom does not apply antd's hidden class.)
+    await userEvent.click(button);
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    await waitFor(() => expect(tooltip.closest('.ant-tooltip')).toHaveClass('ant-tooltip-hidden'));
+
+    await userEvent.keyboard('{Escape}');
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    expect(button).toHaveFocus();
   });
 
   it('moves focus into the details pinned from the keyboard and back on Escape', async () => {
