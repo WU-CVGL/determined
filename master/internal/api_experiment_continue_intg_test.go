@@ -74,11 +74,15 @@ func endTestExp(t *testing.T, expID int) int {
 	return expID
 }
 
-// codeTestConfig gives an experiment an image, environment variables, a pod spec and a bind mount,
-// so that a continue that sends the whole config back, as the WebUI does, merges each of them.
+// codeTestConfig gives an experiment an image, registry credentials, environment variables, a pod
+// spec and a bind mount, so that a continue that sends the whole config back, as the WebUI does,
+// merges each of them.
 const codeTestConfig = `
 environment:
   image: owner/image:1
+  registry_auth:
+    username: owner
+    password: owner-password
   environment_variables:
     - A=1
     - B=2
@@ -101,8 +105,11 @@ func endedCodeTestExp(t *testing.T, api *apiServer, owner continueTestUser) int 
 }
 
 // resumeOverride returns the override config that Resume Current Trial in the WebUI sends: the whole
-// config that GetExperiment returns, without its workspace and project.
-func resumeOverride(ctx context.Context, t *testing.T, api *apiServer, expID int) string {
+// config that GetExperiment returns, without its workspace and project. withoutRegistryAuth also
+// removes environment.registry_auth, as the WebUI does when the config it fetched has none.
+func resumeOverride(
+	ctx context.Context, t *testing.T, api *apiServer, expID int, withoutRegistryAuth bool,
+) string {
 	t.Helper()
 	resp, err := api.GetExperiment(ctx, &apiv1.GetExperimentRequest{ExperimentId: int32(expID)})
 	require.NoError(t, err)
@@ -112,6 +119,12 @@ func resumeOverride(ctx context.Context, t *testing.T, api *apiServer, expID int
 	require.NoError(t, json.Unmarshal(raw, &config))
 	delete(config, "workspace")
 	delete(config, "project")
+	if withoutRegistryAuth {
+		env, ok := config["environment"].(map[string]any)
+		require.True(t, ok)
+		require.Contains(t, env, "registry_auth")
+		delete(env, "registry_auth")
+	}
 	override, err := json.Marshal(config)
 	require.NoError(t, err)
 	return string(override)
@@ -339,6 +352,10 @@ func TestContinueExperimentOnlyOwnerChangesCode(t *testing.T) {
 		{"entrypoint", "entrypoint", "entrypoint: echo changed"},
 		{"image", "environment", "environment: {image: other/image:1}"},
 		{
+			"registry credentials", "environment",
+			"environment: {registry_auth: {username: other, password: other-password}}",
+		},
+		{
 			"new environment variable", "environment",
 			"environment: {environment_variables: [LD_PRELOAD=/tmp/x.so]}",
 		},
@@ -378,15 +395,24 @@ func TestContinueExperimentOnlyOwnerChangesCode(t *testing.T) {
 		})
 	}
 
-	t.Run("allowed: the whole config, as Resume Current Trial sends it", func(t *testing.T) {
-		expID := endedCodeTestExp(t, api, owner)
-		_, err := api.ContinueExperiment(actor.ctx, &apiv1.ContinueExperimentRequest{
-			Id:             int32(expID),
-			OverrideConfig: resumeOverride(actor.ctx, t, api, expID),
+	for _, withoutRegistryAuth := range []bool{false, true} {
+		name := "allowed: the whole config, as Resume Current Trial sends it"
+		if withoutRegistryAuth {
+			name += ", without registry_auth"
+		}
+		t.Run(name, func(t *testing.T) {
+			expID := endedCodeTestExp(t, api, owner)
+			_, err := api.ContinueExperiment(actor.ctx, &apiv1.ContinueExperimentRequest{
+				Id:             int32(expID),
+				OverrideConfig: resumeOverride(actor.ctx, t, api, expID, withoutRegistryAuth),
+			})
+			require.NoError(t, err)
+			requireRunsAs(t, expID, owner)
+			active, err := api.m.db.ActiveExperimentConfig(expID)
+			require.NoError(t, err)
+			require.Equal(t, "owner-password", active.Environment().RegistryAuth().Password)
 		})
-		require.NoError(t, err)
-		requireRunsAs(t, expID, owner)
-	})
+	}
 
 	t.Run("allowed: fields that are not code", func(t *testing.T) {
 		expID := endedCodeTestExp(t, api, owner)
