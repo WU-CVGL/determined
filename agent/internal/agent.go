@@ -112,11 +112,12 @@ func (a *Agent) run(ctx context.Context) error {
 	}
 
 	a.log.Trace("detecting devices")
-	devices, err := detect.Detect(
-		a.opts.SlotType, a.opts.AgentID, a.opts.VisibleGPUs, a.opts.ArtificialSlots,
+	devices, _, err := detect.Detect(
+		a.opts.SlotType, a.opts.AgentID, a.opts.VisibleGPUs,
+		detect.ParseExcludeGPUs(a.opts.ExcludeGPUs), a.opts.ArtificialSlots,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to detect devices: %v", devices)
+		return fmt.Errorf("failed to detect devices: %w", err)
 	}
 
 	a.log.Tracef("setting up %s runtime", a.opts.ContainerRuntime)
