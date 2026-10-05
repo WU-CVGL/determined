@@ -184,7 +184,7 @@ New master/internal/rm/agentrm/gpu_topology.go holds an immutable `gpuTopology` 
 - Its unknown reason is the wire's `UnknownReason`, "agent <version> does not report GPU topology" (wire nil with CUDA devices), or "not reported since the master started".
 - Topology stays out of `device.Device`, which is a map key (agent_state.go:49) and is compared on reconnect.
 
-agent_state.go gets the field `gpuTopology *gpuTopology` and `setGPUTopology(...)`, which replaces the pointer and never mutates it. `deepCopy` (199-214) leaves it out: its copies feed only the scheduler's fit (`agents.list` and `refreshAgentStateCacheFor`, through `agent.State`, agent.go:195-204), which uses counts. Selection (S3) and `summarize` (section 5.2) read the live state under `a.mu`. It is not in `snapshot()`, so there is no DB change.
+agent_state.go gets the field `gpuTopology *gpuTopology` and `setGPUTopology(...)`, which replaces the pointer and never mutates it. `deepCopy` (199-214) leaves it out: its copies feed the scheduler's fit and the pool's count queries (`GetResourceSummary`, `ValidateResources`, `CapacityCheck`), all through `agents.list` or `refreshAgentStateCacheFor` via `agent.State` (agent.go:195-204), which use counts only. Selection (S3) and `summarize` (section 5.2) read the live state under `a.mu`. It is not in `snapshot()`, so there is no DB change.
 
 There is one set site: master/internal/rm/agentrm/agent.go `HandleIncomingWebsocketMessage`, after the `if a.started { ...match checks } else { a.agentStarted(...) }` block (614-643) and before `a.started = true` (645). It covers a fresh registration, a reconnect, and an agent restart with the same devices, which refreshes P2P, width and errors (R1). After a master restart the snapshot restore (agent.go:147-163) leaves the topology nil until the agent's AgentStarted arrives, a few seconds; meanwhile the agent counts as unknown and its excluded GPUs are not shown. A device mismatch keeps today's shutdown path.
 
@@ -199,7 +199,7 @@ message GpuTopology {
   string unknown_reason = 1;                   // "" = known
   google.protobuf.Timestamp collected_at = 2;  // agent clock, at agent start
   string driver_version = 3;
-  repeated GpuInfo gpus = 4;                   // slots by device_id, then excluded GPUs by pci_bus_id
+  repeated GpuInfo gpus = 4;                   // slots by device_id, then excluded GPUs by pci_bus_id, then uuid ("" bus id first)
   repeated GpuLink links = 5;
 }
 message GpuInfo {
@@ -541,7 +541,7 @@ Decided by the owner: the flag is off by default; P2P comes only from the agent'
 | D18 | Task-log line | open; recommended: yes | 6.8 |
 | D19 | Diagnostic subcommand | open; recommended: yes | 2.5 |
 | D20 | Device choice without the flag | open; recommended: unchanged | 1.4 |
-| D21 | Agents built without `linux && cgo` | open; recommended: the stub (CGO_ENABLED=0, non-Linux, or a cross build, where Go disables cgo by default). A linux/arm64 build with cgo uses NVML. The fork releases only linux/amd64, with cgo | 2.2, 8 |
+| D21 | Agents built without `linux && cgo` | open; recommended: the stub (CGO_ENABLED=0, non-Linux, a cross build, or a native build with no C compiler found, where Go disables cgo by default). A linux/arm64 build with cgo uses NVML. The fork releases only linux/amd64, with cgo | 2.2, 8 |
 | D22 | PR shape | decided: P1 and P2, then PR A, then PR B, then the later PRs | 11 |
 | D23 | Follow-ups in cluster-setup | open; recommended: document the flag and the exclude list (with X3's rollback step), and check that the launch tooling passes the flag through | |
 | D24 | Excluded GPUs | decided; option, safety and compatibility in X1-X3 | 2.6 |
