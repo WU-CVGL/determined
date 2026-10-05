@@ -19,6 +19,7 @@ import (
 	authz2 "github.com/determined-ai/determined/master/internal/authz"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/mocks"
+	"github.com/determined-ai/determined/master/internal/poolaccess"
 	"github.com/determined-ai/determined/master/internal/project"
 	"github.com/determined-ai/determined/master/internal/rm"
 	"github.com/determined-ai/determined/master/internal/rm/tasklist"
@@ -912,4 +913,171 @@ func TestKillPausedGenericTaskCancelsTree(t *testing.T) {
 	require.Equal(t, model.TaskStateCanceled, *got.State)
 	require.NotNil(t, got.EndTime)
 	require.False(t, service.running[childAllocation], "the running child was not killed")
+}
+
+// createGenericTaskForAccessTest creates a generic task as the user of ctx and unregisters its job
+// when the test ends.
+func createGenericTaskForAccessTest(
+	ctx context.Context, t *testing.T, api *apiServer, req *apiv1.CreateGenericTaskRequest,
+) (*apiv1.CreateGenericTaskResponse, error) {
+	t.Helper()
+	resp, err := api.CreateGenericTask(ctx, req)
+	if err == nil {
+		allocationID, spec, specErr := getGenericTaskSpec(ctx, model.TaskID(resp.TaskId))
+		require.NoError(t, specErr)
+		t.Cleanup(func() { unregisterGenericTaskJob(spec.JobID, model.AllocationID(allocationID)) })
+	}
+	return resp, err
+}
+
+func countGenericTasksOwnedBy(
+	ctx context.Context, t *testing.T, userID model.UserID,
+) (jobs int, tasks int) {
+	t.Helper()
+	jobs, err := db.Bun().NewSelect().Table("jobs").Where("owner_id = ?", userID).Count(ctx)
+	require.NoError(t, err)
+	tasks, err = db.Bun().NewSelect().TableExpr("tasks AS t").
+		Join("JOIN jobs AS j ON j.job_id = t.job_id").
+		Where("j.owner_id = ?", userID).Count(ctx)
+	require.NoError(t, err)
+	return jobs, tasks
+}
+
+func TestCreateGenericTaskChecksResolvedPool(t *testing.T) {
+	var aux, compute string
+	api, admin, adminCtx := setupAPITest(t, nil, mockRMWithResolver(resolveOmittedPoolTo(&aux, &compute)))
+	service := &captureAllocationService{}
+	oldService := task.DefaultService
+	task.DefaultService = service
+	t.Cleanup(func() { task.DefaultService = oldService })
+
+	granted := db.RequireMockUser(t, api.m.db)
+	other := db.RequireMockUser(t, api.m.db)
+	aux = accessTestPool(t, "aux", admin, true, granted)
+	compute = accessTestPool(t, "compute", admin, true, granted)
+	open := accessTestPool(t, "open", admin, false)
+	grantedCtx := ntscUserCtx(t, granted)
+	otherCtx := ntscUserCtx(t, other)
+	const entrypoint = "entrypoint: [\"true\"]\n"
+	inPool := func(pool string) string {
+		return entrypoint + "resources:\n  resource_pool: " + pool + "\n"
+	}
+
+	adminTask, err := createGenericTaskForAccessTest(adminCtx, t, api,
+		&apiv1.CreateGenericTaskRequest{Config: inPool(compute)})
+	require.NoError(t, err)
+	parent, err := createGenericTaskForAccessTest(otherCtx, t, api,
+		&apiv1.CreateGenericTaskRequest{Config: inPool(open)})
+	require.NoError(t, err)
+
+	jobs, tasks := countGenericTasksOwnedBy(adminCtx, t, other.ID)
+	for name, tc := range map[string]struct {
+		req  *apiv1.CreateGenericTaskRequest
+		pool string
+	}{
+		"omitted pool": {&apiv1.CreateGenericTaskRequest{Config: entrypoint}, compute},
+		"omitted pool, zero slots": {
+			&apiv1.CreateGenericTaskRequest{Config: entrypoint + "resources:\n  slots: 0\n"}, aux,
+		},
+		"explicit pool": {&apiv1.CreateGenericTaskRequest{Config: inPool(aux)}, aux},
+		"fork":          {&apiv1.CreateGenericTaskRequest{ForkedFrom: &adminTask.TaskId}, compute},
+		"child": {
+			&apiv1.CreateGenericTaskRequest{Config: entrypoint, ParentId: &parent.TaskId}, compute,
+		},
+	} {
+		_, err := createGenericTaskForAccessTest(otherCtx, t, api, tc.req)
+		requirePoolDenied(t, err, other, tc.pool)
+		gotJobs, gotTasks := countGenericTasksOwnedBy(adminCtx, t, other.ID)
+		require.Equal(t, jobs, gotJobs, name)
+		require.Equal(t, tasks, gotTasks, name)
+	}
+
+	_, err = createGenericTaskForAccessTest(otherCtx, t, api,
+		&apiv1.CreateGenericTaskRequest{Config: inPool(open)})
+	require.NoError(t, err)
+	for _, req := range []*apiv1.CreateGenericTaskRequest{
+		{Config: entrypoint}, {ForkedFrom: &adminTask.TaskId}, {Config: inPool(aux)},
+	} {
+		resp, err := createGenericTaskForAccessTest(grantedCtx, t, api, req)
+		require.NoError(t, err)
+		_, spec, err := getGenericTaskSpec(adminCtx, model.TaskID(resp.TaskId))
+		require.NoError(t, err)
+		require.Contains(t, []string{aux, compute}, spec.GenericTaskConfig.Resources.ResourcePool())
+	}
+}
+
+// pausedGenericTaskInPool returns a paused generic task of owner whose allocation ended, ready
+// to resume in pool.
+func pausedGenericTaskInPool(
+	ctx context.Context, t *testing.T, owner model.User, parent *model.TaskID, pool string,
+) model.TaskID {
+	t.Helper()
+	id := preparePausedGenericTaskForResume(t, ctx, owner, parent)
+	allocationID, spec, err := getGenericTaskSpec(ctx, id)
+	require.NoError(t, err)
+	spec.GenericTaskConfig.Resources.SetResourcePool(pool)
+	require.NoError(t, persistGenericTaskSpec(ctx, id, *spec, model.AllocationID(allocationID)))
+	return id
+}
+
+func TestUnpauseGenericTaskChecksPool(t *testing.T) {
+	api, admin, ctx := setupAPITest(t, nil)
+	service := &lifecycleAllocationService{running: map[model.AllocationID]bool{}}
+	oldService := task.DefaultService
+	task.DefaultService = service
+	t.Cleanup(func() { task.DefaultService = oldService })
+
+	owner := db.RequireMockUser(t, api.m.db)
+	ownerCtx := ntscUserCtx(t, owner)
+	restricted := accessTestPool(t, "restricted", admin, true)
+	open := accessTestPool(t, "open", admin, false)
+	unpause := func(id model.TaskID) error {
+		_, err := api.UnpauseGenericTask(ownerCtx, &apiv1.UnpauseGenericTaskRequest{TaskId: id.String()})
+		return err
+	}
+	requireNoPlan := func(id model.TaskID) {
+		plan, err := pendingGenericTaskResume(ctx, id)
+		require.NoError(t, err)
+		require.Empty(t, plan)
+	}
+
+	// The pool was restricted after the task paused: unpausing is a new admission.
+	root := pausedGenericTaskInPool(ctx, t, owner, nil, open)
+	child := pausedGenericTaskInPool(ctx, t, owner, &root, restricted)
+	requirePoolDenied(t, unpause(root), owner, restricted)
+	requireNoPlan(root)
+	require.Empty(t, service.starts)
+
+	// A member whose spec cannot be read fails the request; it is never skipped.
+	unreadableRoot := pausedGenericTaskInPool(ctx, t, owner, nil, open)
+	unreadable := pausedGenericTaskInPool(ctx, t, owner, &unreadableRoot, open)
+	_, err := db.Bun().NewUpdate().Table("command_state").Set("generic_task_spec = NULL").
+		Where("task_id = ?", unreadable).Exec(ctx)
+	require.NoError(t, err)
+	require.Error(t, unpause(unreadableRoot))
+	requireNoPlan(unreadableRoot)
+	require.Empty(t, service.starts)
+	unreadableMembers, err := api.GetTaskChildren(ctx, unreadableRoot, nil)
+	require.NoError(t, err)
+	require.ErrorContains(t, admitGenericTaskResume(ownerCtx, unreadableMembers),
+		fmt.Sprintf("missing task %s spec", unreadable))
+
+	// A plan persisted before the restriction is a continuation and still runs on retry.
+	members, err := api.GetTaskChildren(ctx, root, nil)
+	require.NoError(t, err)
+	_, err = makeGenericTaskResumePlan(ctx, root, members)
+	require.NoError(t, err)
+	require.NoError(t, unpause(root))
+	require.ElementsMatch(t, []model.AllocationID{
+		model.AllocationID(root.String() + ".1"), model.AllocationID(child.String() + ".1"),
+	}, service.starts)
+	requireNoPlan(root)
+
+	// After a grant, the owner's task resumes.
+	_, err = poolaccess.Grant(ctx, restricted, []model.UserID{owner.ID}, admin.ID)
+	require.NoError(t, err)
+	granted := pausedGenericTaskInPool(ctx, t, owner, nil, restricted)
+	require.NoError(t, unpause(granted))
+	starts, _ := service.startsOf(granted)
+	require.Equal(t, []model.AllocationID{model.AllocationID(granted.String() + ".1")}, starts)
 }

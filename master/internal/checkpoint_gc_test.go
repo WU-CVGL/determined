@@ -134,6 +134,10 @@ func TestRunCheckpointGCTask(t *testing.T) {
 			tmp := task.DefaultService
 			task.DefaultService = tt.args.as(t)
 			defer func() { task.DefaultService = tmp }()
+			// Checkpoint GC is a system task, exempt from the resource pool ACL: it starts even
+			// when its pool is restricted for its non-admin owner, and never checks access.
+			accessReads := restrictEveryPoolForTest(t)
+			defer func() { require.Zero(t, accessReads()) }()
 
 			jobID := db.RequireMockJob(t, pgDB, &user.ID)
 

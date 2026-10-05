@@ -98,6 +98,7 @@ func runCheckpointGCTask(
 		return nil
 	}
 
+	// System task: exempt from the resource pool ACL by design; see the poolaccess package doc.
 	rp, err := rm.ResolveResourcePool("", -1, 0)
 	if err != nil {
 		return fmt.Errorf("resolving resource pool: %w", err)

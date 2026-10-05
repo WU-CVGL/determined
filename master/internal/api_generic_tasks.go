@@ -25,6 +25,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/configpolicy"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
+	"github.com/determined-ai/determined/master/internal/poolaccess"
 	"github.com/determined-ai/determined/master/internal/project"
 	"github.com/determined-ai/determined/master/internal/rbac/audit"
 	"github.com/determined-ai/determined/master/internal/rm"
@@ -138,6 +139,11 @@ func (a *apiServer) getGenericTaskLaunchParameters(
 	rawResourcePool := poolName.String()
 	taskConfig.Resources.RawResourcePool = &rawResourcePool
 	taskConfig.Resources.RawSlots = &resources.Slots
+
+	// The pool is final here: the config cannot change it after the line above.
+	if err := poolaccess.CanUseResourcePool(ctx, *userModel, poolName.String()); err != nil {
+		return nil, nil, nil, err
+	}
 
 	// Apply the scheduler's default priority.
 	if taskConfig.Resources.Priority() == nil {
@@ -905,6 +911,11 @@ func (a *apiServer) UnpauseGenericTask(
 					"cannot unpause task %s while descendant %s is still stopping", req.TaskId, member.TaskID)
 			}
 		}
+		// Unpausing is a new admission into each member's pool. A retried plan, which already
+		// exists, is a continuation and is not checked again.
+		if err := admitGenericTaskResume(ctx, tasksToResume); err != nil {
+			return nil, err
+		}
 		plan, err = makeGenericTaskResumePlan(ctx, model.TaskID(req.TaskId), tasksToResume)
 		if err != nil {
 			return nil, err
@@ -914,6 +925,35 @@ func (a *apiServer) UnpauseGenericTask(
 		return nil, fmt.Errorf("unpausing task %s: %w; retry unpause on the same root task ID", req.TaskId, err)
 	}
 	return &apiv1.UnpauseGenericTaskResponse{}, nil
+}
+
+// admitGenericTaskResume checks that the request user may use the pool that each paused member
+// resumes in. A member whose spec cannot be read fails the request; none is skipped.
+func admitGenericTaskResume(ctx context.Context, members []model.Task) error {
+	curUser, _, err := grpcutil.GetUser(ctx)
+	if err != nil {
+		return err
+	}
+	for _, member := range members {
+		if member.State == nil || *member.State != model.TaskStatePaused {
+			continue
+		}
+		_, spec, err := getGenericTaskSpec(ctx, member.TaskID)
+		if err != nil {
+			return fmt.Errorf("retrieving task %s spec: %w", member.TaskID, err)
+		}
+		if spec == nil {
+			return fmt.Errorf("missing task %s spec", member.TaskID)
+		}
+		pool := ""
+		if spec.GenericTaskConfig.Resources.RawResourcePool != nil {
+			pool = *spec.GenericTaskConfig.Resources.RawResourcePool
+		}
+		if err := poolaccess.CanUseResourcePool(ctx, *curUser, pool); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func claimPausedGenericTask(ctx context.Context, taskID model.TaskID, allocationID model.AllocationID) (bool, error) {

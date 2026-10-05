@@ -36,6 +36,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/experiment"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
 	"github.com/determined-ai/determined/master/internal/job/jobservice"
+	"github.com/determined-ai/determined/master/internal/poolaccess"
 	"github.com/determined-ai/determined/master/internal/prom"
 	"github.com/determined-ai/determined/master/internal/rm"
 	"github.com/determined-ai/determined/master/internal/sproto"
@@ -856,16 +857,30 @@ func (a *apiServer) ActivateExperiment(
 	if !ok {
 		return nil, api.NotFoundErrs("experiment", strconv.Itoa(int(req.Id)), true)
 	}
+	if err := admitExperimentPool(ctx, e); err != nil {
+		return nil, err
+	}
 	if err := e.ActivateExperiment(); err != nil {
 		return nil, err
 	}
 	return &apiv1.ActivateExperimentResponse{}, nil
 }
 
+// admitExperimentPool checks that the request user may use the pool that the experiment
+// allocates in when it is activated: its current pool, which a job-queue move may have changed.
+func admitExperimentPool(ctx context.Context, e experiment.Experiment) error {
+	curUser, _, err := grpcutil.GetUser(ctx)
+	if err != nil {
+		return err
+	}
+	return poolaccess.CanUseResourcePool(ctx, *curUser, e.ResourcePool())
+}
+
 func (a *apiServer) ActivateExperiments(
 	ctx context.Context, req *apiv1.ActivateExperimentsRequest,
 ) (*apiv1.ActivateExperimentsResponse, error) {
-	results, err := experiment.ActivateExperiments(ctx, req.ProjectId, req.ExperimentIds, req.Filters)
+	results, err := experiment.ActivateExperiments(ctx, req.ProjectId, req.ExperimentIds, req.Filters,
+		admitExperimentPool)
 	return &apiv1.ActivateExperimentsResponse{Results: experiment.ToAPIResults(results)}, err
 }
 
@@ -1574,8 +1589,9 @@ func (a *apiServer) ContinueExperiment(
 		return nil, errors.Wrapf(err, "failed to start experiment %d", e.ID)
 	}
 
-	_, err = a.ActivateExperiment(ctx, &apiv1.ActivateExperimentRequest{Id: int32(e.ID)})
-	if err != nil {
+	// The request was authorized to edit this experiment and admitted to its pool above, so it
+	// activates the experiment it started rather than deciding again through the RPC.
+	if err = e.ActivateExperiment(); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to activate experiment: %s", err)
 	}
 
@@ -1680,8 +1696,9 @@ func (a *apiServer) CreateExperiment(
 	}
 
 	if req.Activate {
-		_, err = a.ActivateExperiment(ctx, &apiv1.ActivateExperimentRequest{Id: int32(e.ID)})
-		if err != nil {
+		// CanEditExperiment and the pool admission above already decided for this request, so
+		// the experiment it started is activated directly rather than through the RPC.
+		if err = e.ActivateExperiment(); err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to activate experiment: %s", err)
 		}
 	}

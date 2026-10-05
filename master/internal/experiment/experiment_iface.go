@@ -57,4 +57,7 @@ type Experiment interface {
 	PauseExperiment() error
 	CancelExperiment() error
 	KillExperiment() error
+	// ResourcePool is the pool the experiment's trials allocate in, which a job-queue move
+	// changes.
+	ResourcePool() string
 }

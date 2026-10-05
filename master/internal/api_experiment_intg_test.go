@@ -41,6 +41,8 @@ import (
 	expauth "github.com/determined-ai/determined/master/internal/experiment"
 	"github.com/determined-ai/determined/master/internal/mocks"
 	modelauth "github.com/determined-ai/determined/master/internal/model"
+	"github.com/determined-ai/determined/master/internal/poolaccess"
+	"github.com/determined-ai/determined/master/internal/rm"
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/pkg/etc"
 	"github.com/determined-ai/determined/master/pkg/model"
@@ -2673,4 +2675,389 @@ invariant_config:
 		})
 		require.NoError(t, err)
 	})
+}
+
+// accessTestExperimentConfig is a managed single-trial experiment config in pool, or in the
+// default pool when pool is empty.
+func accessTestExperimentConfig(pool string, extra ...string) string {
+	config := `
+entrypoint: test
+searcher:
+  metric: loss
+  name: single
+  max_length: 10
+checkpoint_storage:
+  type: shared_fs
+  host_path: /tmp
+  storage_path: determined-integration-checkpoints
+`
+	if pool != "" {
+		config += "resources:\n  resource_pool: " + pool + "\n"
+	}
+	for _, e := range extra {
+		config += e
+	}
+	return config
+}
+
+func createExperimentForAccessTest(
+	ctx context.Context, t *testing.T, api *apiServer, req *apiv1.CreateExperimentRequest,
+) (*apiv1.CreateExperimentResponse, error) {
+	t.Helper()
+	req.ModelDefinition = []*utilv1.File{{Content: []byte{1}}}
+	if req.ProjectId == 0 {
+		req.ProjectId = 1
+	}
+	resp, err := api.CreateExperiment(ctx, req)
+	if err == nil && resp.Experiment.Id != 0 {
+		id := int(resp.Experiment.Id)
+		t.Cleanup(func() {
+			if e, ok := expauth.ExperimentRegistry.Load(id); ok {
+				_ = e.KillExperiment()
+			}
+		})
+	}
+	return resp, err
+}
+
+func countExperimentsOwnedBy(ctx context.Context, t *testing.T, userID model.UserID) int {
+	t.Helper()
+	count, err := db.Bun().NewSelect().Table("experiments").Where("owner_id = ?", userID).Count(ctx)
+	require.NoError(t, err)
+	return count
+}
+
+func persistedExperimentPool(ctx context.Context, t *testing.T, id int32) string {
+	t.Helper()
+	var pool string
+	require.NoError(t, db.Bun().NewRaw(
+		`SELECT config->'resources'->>'resource_pool' FROM experiments WHERE id = ?`, id,
+	).Scan(ctx, &pool))
+	return pool
+}
+
+func setInvariantExperimentPool(
+	ctx context.Context, t *testing.T, workspaceID int, admin model.User, pool string,
+) {
+	t.Helper()
+	require.NoError(t, configpolicy.SetTaskConfigPolicies(ctx, &model.TaskConfigPolicies{
+		WorkspaceID:     &workspaceID,
+		WorkloadType:    model.ExperimentType,
+		LastUpdatedBy:   admin.ID,
+		InvariantConfig: ptrs.Ptr(fmt.Sprintf(`{"resources": {"resource_pool": %q}}`, pool)),
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, configpolicy.DeleteConfigPolicies(ctx, &workspaceID, model.ExperimentType))
+	})
+}
+
+func TestCreateExperimentChecksFinalPool(t *testing.T) {
+	var unavailable string
+	mockRM := mockRMWithResolver(func(
+		name rm.ResourcePoolName, workspaceID, _ int,
+	) (rm.ResourcePoolName, error) {
+		if name.String() == unavailable {
+			return "", fmt.Errorf("resource pool %s does not exist or is not available to "+
+				"workspace id %d", name, workspaceID)
+		}
+		return name, nil
+	})
+	api, admin, adminCtx := setupAPITest(t, nil, mockRM)
+	granted := db.RequireMockUser(t, api.m.db)
+	other := db.RequireMockUser(t, api.m.db)
+	restricted := accessTestPool(t, "restricted", admin, true, granted)
+	open := accessTestPool(t, "open", admin, false)
+	unavailable = "unavailable-" + uuid.NewString()
+	grantedCtx := ntscUserCtx(t, granted)
+	otherCtx := ntscUserCtx(t, other)
+
+	template := "pool-template-" + uuid.NewString()
+	_, err := db.Bun().NewRaw(`INSERT INTO templates (name, config, workspace_id) VALUES (?, ?, 1)`,
+		template, fmt.Sprintf(`{"resources": {"resource_pool": %q}}`, restricted)).Exec(adminCtx)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := db.Bun().NewRaw(`DELETE FROM templates WHERE name = ?`, template).Exec(adminCtx)
+		require.NoError(t, err)
+	})
+	policyWorkspace, policyProject := createProjectAndWorkspace(adminCtx, t, api)
+	setInvariantExperimentPool(adminCtx, t, policyWorkspace, admin, restricted)
+	badPolicyWorkspace, badPolicyProject := createProjectAndWorkspace(adminCtx, t, api)
+	setInvariantExperimentPool(adminCtx, t, badPolicyWorkspace, admin, unavailable)
+
+	experiments := countExperimentsOwnedBy(adminCtx, t, other.ID)
+	for name, req := range map[string]*apiv1.CreateExperimentRequest{
+		"explicit pool": {Config: accessTestExperimentConfig(restricted)},
+		"template":      {Config: accessTestExperimentConfig(""), Template: &template},
+		"invariant policy": {
+			Config: accessTestExperimentConfig(open), ProjectId: int32(policyProject),
+		},
+		"validate only": {Config: accessTestExperimentConfig(restricted), ValidateOnly: true},
+		"validate only, invariant policy": {
+			Config: accessTestExperimentConfig(open), ProjectId: int32(policyProject), ValidateOnly: true,
+		},
+		"activate": {Config: accessTestExperimentConfig(restricted), Activate: true},
+	} {
+		_, err := createExperimentForAccessTest(otherCtx, t, api, req)
+		requirePoolDenied(t, err, other, restricted)
+		require.Equal(t, experiments, countExperimentsOwnedBy(adminCtx, t, other.ID), name)
+	}
+
+	// A policy pool that the workspace cannot use is the caller's error, not Unknown or Internal.
+	for _, validateOnly := range []bool{false, true} {
+		_, err := createExperimentForAccessTest(adminCtx, t, api, &apiv1.CreateExperimentRequest{
+			Config:       accessTestExperimentConfig(open),
+			ProjectId:    int32(badPolicyProject),
+			ValidateOnly: validateOnly,
+		})
+		require.Equal(t, codes.InvalidArgument, status.Code(err), "%v", err)
+		require.ErrorContains(t, err, "is not available to workspace")
+	}
+	require.Equal(t, experiments, countExperimentsOwnedBy(adminCtx, t, other.ID))
+
+	// Unmanaged experiments never allocate and are not checked.
+	external := uuid.NewString()
+	_, err = api.PutExperiment(otherCtx, &apiv1.PutExperimentRequest{
+		CreateExperimentRequest: &apiv1.CreateExperimentRequest{
+			Config: accessTestExperimentConfig(restricted), Unmanaged: ptrs.Ptr(true), ProjectId: 1,
+		},
+		ExternalExperimentId: external,
+	})
+	require.NoError(t, err)
+
+	resp, err := createExperimentForAccessTest(otherCtx, t, api,
+		&apiv1.CreateExperimentRequest{Config: accessTestExperimentConfig(open)})
+	require.NoError(t, err)
+	require.Equal(t, open, persistedExperimentPool(adminCtx, t, resp.Experiment.Id))
+	resp, err = createExperimentForAccessTest(adminCtx, t, api,
+		&apiv1.CreateExperimentRequest{Config: accessTestExperimentConfig(restricted)})
+	require.NoError(t, err)
+	require.Equal(t, restricted, persistedExperimentPool(adminCtx, t, resp.Experiment.Id))
+
+	// The pool checked for a granted user is the pool that is saved and returned.
+	resp, err = createExperimentForAccessTest(grantedCtx, t, api, &apiv1.CreateExperimentRequest{
+		Config: accessTestExperimentConfig(open), ProjectId: int32(policyProject),
+	})
+	require.NoError(t, err)
+	require.Equal(t, restricted, persistedExperimentPool(adminCtx, t, resp.Experiment.Id))
+	require.Equal(t, restricted,
+		resp.Config.AsMap()["resources"].(map[string]any)["resource_pool"])
+}
+
+func TestCreateExperimentWritesBackCheckedPool(t *testing.T) {
+	var (
+		mu         sync.Mutex
+		omitted    []string
+		calls      []rm.ResourcePoolName
+		notReady   string
+		omittedHit int
+	)
+	mockRM := mockRMWithResolver(func(
+		name rm.ResourcePoolName, _, slots int,
+	) (rm.ResourcePoolName, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls = append(calls, name)
+		switch {
+		case name == "" && slots == 0:
+			return rm.ResourcePoolName(notReady), nil
+		case name == "":
+			// Each resolution of the omitted pool answers differently, as a workspace default
+			// that changes between the check and the save would.
+			pool := omitted[omittedHit%len(omitted)]
+			omittedHit++
+			return rm.ResourcePoolName(pool), nil
+		case name.String() == notReady:
+			return "", fmt.Errorf("validating pool: pool %s is not ready", name)
+		}
+		return name, nil
+	})
+	api, admin, adminCtx := setupAPITest(t, nil, mockRM)
+	owner := db.RequireMockUser(t, api.m.db)
+	ownerCtx := ntscUserCtx(t, owner)
+	omitted = []string{
+		accessTestPool(t, "first", admin, false), accessTestPool(t, "second", admin, false),
+		accessTestPool(t, "third", admin, false),
+	}
+	notReady = accessTestPool(t, "auxnotready", admin, false)
+
+	var checked []string
+	readRestrictions := poolaccess.ReadRestrictions
+	poolaccess.ReadRestrictions = func(
+		ctx context.Context, userID model.UserID, pools []string,
+	) (map[string]bool, error) {
+		checked = append(checked, pools...)
+		return readRestrictions(ctx, userID, pools)
+	}
+	t.Cleanup(func() { poolaccess.ReadRestrictions = readRestrictions })
+
+	resp, err := createExperimentForAccessTest(ownerCtx, t, api,
+		&apiv1.CreateExperimentRequest{Config: accessTestExperimentConfig("")})
+	require.NoError(t, err)
+	require.Equal(t, []string{omitted[1]}, checked, "the pool resolved after the policies is checked")
+	require.Equal(t, omitted[1], persistedExperimentPool(adminCtx, t, resp.Experiment.Id))
+	mu.Lock()
+	require.Equal(t, rm.ResourcePoolName(omitted[1]), calls[len(calls)-1],
+		"newExperiment resolves the checked name, not the omitted pool")
+	mu.Unlock()
+
+	// The global aux default resolves for an omitted pool but is not Ready by name: the create
+	// fails before anything is saved, while validation alone passes.
+	experiments := countExperimentsOwnedBy(adminCtx, t, owner.ID)
+	zeroSlots := accessTestExperimentConfig("", "resources:\n  slots_per_trial: 0\n")
+	_, err = createExperimentForAccessTest(ownerCtx, t, api,
+		&apiv1.CreateExperimentRequest{Config: zeroSlots})
+	require.ErrorContains(t, err, "is not ready")
+	require.Equal(t, experiments, countExperimentsOwnedBy(adminCtx, t, owner.ID))
+	_, err = createExperimentForAccessTest(ownerCtx, t, api,
+		&apiv1.CreateExperimentRequest{Config: zeroSlots, ValidateOnly: true})
+	require.NoError(t, err)
+}
+
+func experimentStateForAccessTest(ctx context.Context, t *testing.T, id int32) model.State {
+	t.Helper()
+	var state model.State
+	require.NoError(t, db.Bun().NewRaw(`SELECT state FROM experiments WHERE id = ?`, id).
+		Scan(ctx, &state))
+	return state
+}
+
+// endedExperimentInPool returns a canceled single-trial experiment of owner in pool, which
+// ContinueExperiment can continue.
+func endedExperimentInPool(
+	ctx context.Context, t *testing.T, api *apiServer, owner model.User, pool string,
+) int32 {
+	t.Helper()
+	trial, _ := createTestTrial(t, api, owner)
+	_, err := db.Bun().NewRaw(`UPDATE experiments SET state = ?,
+		config = jsonb_set(config, '{resources,resource_pool}', to_jsonb(?::text))
+		WHERE id = ?`, model.CanceledState, pool, trial.ExperimentID).Exec(ctx)
+	require.NoError(t, err)
+	id := trial.ExperimentID
+	t.Cleanup(func() {
+		if e, ok := expauth.ExperimentRegistry.Load(id); ok {
+			_ = e.KillExperiment()
+		}
+	})
+	return int32(id)
+}
+
+// experimentRecordForAccessTest is what a refused continue must leave unchanged.
+func experimentRecordForAccessTest(ctx context.Context, t *testing.T, id int32) []string {
+	t.Helper()
+	var record []string
+	require.NoError(t, db.Bun().NewRaw(`
+SELECT e.state::text FROM experiments e WHERE e.id = ?
+UNION ALL SELECT e.config::text FROM experiments e WHERE e.id = ?
+UNION ALL SELECT r.restarts::text || ' ' || r.state::text FROM runs r WHERE r.experiment_id = ?`,
+		id, id, id).Scan(ctx, &record))
+	return record
+}
+
+func TestContinueAndActivateCheckPool(t *testing.T) {
+	mockRM := MockRM()
+	mockRM.On("SmallerValueIsHigherPriority", mock.Anything).Return(true, nil)
+	mockRM.On("Release", mock.Anything).Return()
+	api, admin, adminCtx := setupAPITest(t, nil, mockRM)
+	owner := db.RequireMockUser(t, api.m.db)
+	ownerCtx := ntscUserCtx(t, owner)
+	pool := accessTestPool(t, "paused", admin, false)
+
+	resp, err := createExperimentForAccessTest(ownerCtx, t, api,
+		&apiv1.CreateExperimentRequest{Config: accessTestExperimentConfig(pool)})
+	require.NoError(t, err)
+	id := resp.Experiment.Id
+	require.Equal(t, model.PausedState, experimentStateForAccessTest(adminCtx, t, id))
+	_, err = poolaccess.Restrict(adminCtx, pool, admin.ID)
+	require.NoError(t, err)
+
+	_, err = api.ActivateExperiment(ownerCtx, &apiv1.ActivateExperimentRequest{Id: id})
+	requirePoolDenied(t, err, owner, pool)
+	require.Equal(t, model.PausedState, experimentStateForAccessTest(adminCtx, t, id))
+
+	bulk, err := api.ActivateExperiments(ownerCtx,
+		&apiv1.ActivateExperimentsRequest{ProjectId: 1, ExperimentIds: []int32{id}})
+	require.NoError(t, err)
+	require.Len(t, bulk.Results, 1)
+	require.Equal(t, id, bulk.Results[0].Id)
+	require.Contains(t, bulk.Results[0].Error,
+		fmt.Sprintf("user %q may not use resource pool %q", owner.Username, pool))
+	require.Equal(t, model.PausedState, experimentStateForAccessTest(adminCtx, t, id))
+
+	var runIDs []int32
+	require.NoError(t, db.Bun().NewSelect().Table("runs").Column("id").
+		Where("experiment_id = ?", id).Scan(adminCtx, &runIDs))
+	require.Len(t, runIDs, 1)
+	runs, err := api.ResumeRuns(ownerCtx, &apiv1.ResumeRunsRequest{ProjectId: 1, RunIds: runIDs})
+	require.NoError(t, err)
+	require.Len(t, runs.Results, 1)
+	require.Equal(t, runIDs[0], runs.Results[0].Id)
+	require.Contains(t, runs.Results[0].Error,
+		fmt.Sprintf("user %q may not use resource pool %q", owner.Username, pool))
+	require.Equal(t, model.PausedState, experimentStateForAccessTest(adminCtx, t, id))
+
+	ended := endedExperimentInPool(adminCtx, t, api, owner, pool)
+	before := experimentRecordForAccessTest(adminCtx, t, ended)
+	_, err = api.ContinueExperiment(ownerCtx, &apiv1.ContinueExperimentRequest{Id: ended})
+	requirePoolDenied(t, err, owner, pool)
+	require.Equal(t, before, experimentRecordForAccessTest(adminCtx, t, ended))
+
+	// An admin may activate and continue.
+	_, err = api.ActivateExperiment(adminCtx, &apiv1.ActivateExperimentRequest{Id: id})
+	require.NoError(t, err)
+	require.Equal(t, model.ActiveState, experimentStateForAccessTest(adminCtx, t, id))
+	_, err = api.PauseExperiment(adminCtx, &apiv1.PauseExperimentRequest{Id: id})
+	require.NoError(t, err)
+	require.Equal(t, model.PausedState, experimentStateForAccessTest(adminCtx, t, id))
+	_, err = api.ContinueExperiment(adminCtx, &apiv1.ContinueExperimentRequest{Id: ended})
+	require.NoError(t, err)
+	require.Equal(t, model.ActiveState, experimentStateForAccessTest(adminCtx, t, ended))
+
+	// After a grant, so may the owner.
+	_, err = poolaccess.Grant(adminCtx, pool, []model.UserID{owner.ID}, admin.ID)
+	require.NoError(t, err)
+	_, err = api.ActivateExperiment(ownerCtx, &apiv1.ActivateExperimentRequest{Id: id})
+	require.NoError(t, err)
+	require.Equal(t, model.ActiveState, experimentStateForAccessTest(adminCtx, t, id))
+	endedAgain := endedExperimentInPool(adminCtx, t, api, owner, pool)
+	_, err = api.ContinueExperiment(ownerCtx, &apiv1.ContinueExperimentRequest{Id: endedAgain})
+	require.NoError(t, err)
+	require.Equal(t, model.ActiveState, experimentStateForAccessTest(adminCtx, t, endedAgain))
+}
+
+func TestActivateOnCreateAndContinueReadsAccessOnce(t *testing.T) {
+	mockRM := MockRM()
+	mockRM.On("SmallerValueIsHigherPriority", mock.Anything).Return(true, nil)
+	mockRM.On("Release", mock.Anything).Return()
+	api, admin, adminCtx := setupAPITest(t, nil, mockRM)
+	owner := db.RequireMockUser(t, api.m.db)
+	ownerCtx := ntscUserCtx(t, owner)
+	pool := accessTestPool(t, "once", admin, true, owner)
+
+	// Only the first read of a request succeeds: a second decision would refuse it.
+	reads := 0
+	readRestrictions := poolaccess.ReadRestrictions
+	poolaccess.ReadRestrictions = func(
+		ctx context.Context, userID model.UserID, pools []string,
+	) (map[string]bool, error) {
+		reads++
+		if reads > 1 {
+			return nil, fmt.Errorf("the database went away")
+		}
+		return readRestrictions(ctx, userID, pools)
+	}
+	t.Cleanup(func() { poolaccess.ReadRestrictions = readRestrictions })
+
+	resp, err := createExperimentForAccessTest(ownerCtx, t, api, &apiv1.CreateExperimentRequest{
+		Config: accessTestExperimentConfig(pool), Activate: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, reads)
+	require.Equal(t, model.ActiveState, experimentStateForAccessTest(adminCtx, t, resp.Experiment.Id))
+
+	ended := endedExperimentInPool(adminCtx, t, api, owner, pool)
+	reads = 0
+	_, err = api.ContinueExperiment(ownerCtx, &apiv1.ContinueExperimentRequest{Id: ended})
+	require.NoError(t, err)
+	require.Equal(t, 1, reads)
+	require.Equal(t, model.ActiveState, experimentStateForAccessTest(adminCtx, t, ended))
 }

@@ -23,6 +23,7 @@ import (
 	detContext "github.com/determined-ai/determined/master/internal/context"
 	"github.com/determined-ai/determined/master/internal/db"
 	expauth "github.com/determined-ai/determined/master/internal/experiment"
+	"github.com/determined-ai/determined/master/internal/poolaccess"
 	"github.com/determined-ai/determined/master/internal/project"
 	"github.com/determined-ai/determined/master/internal/rm"
 	"github.com/determined-ai/determined/master/internal/templates"
@@ -274,6 +275,30 @@ func invalidExperimentConfig(err error) error {
 	return status.Errorf(codes.InvalidArgument, "invalid experiment configuration: %s", err)
 }
 
+// admitExperimentConfigPool resolves the pool of a managed experiment's final config, the config
+// after invariant config policies, which can set resources.resource_pool. It checks that user may
+// use that pool and writes the resolved name back. newExperiment resolves the pool again; an
+// explicit name resolves to itself or fails, so the checked pool is the pool that is saved.
+func (m *Master) admitExperimentConfigPool(
+	ctx context.Context, config expconf.ExperimentConfig, workspaceID int, user *model.User,
+) (expconf.ExperimentConfig, error) {
+	if user == nil {
+		return config, status.Error(codes.Internal, "resource pool access checked without a user")
+	}
+	resources := config.Resources()
+	pool, err := m.rm.ResolveResourcePool(
+		rm.ResourcePoolName(resources.ResourcePool()), workspaceID, resources.SlotsPerTrial())
+	if err != nil {
+		return config, status.Errorf(codes.InvalidArgument, "invalid resource configuration: %s", err)
+	}
+	if err := poolaccess.CanUseResourcePool(ctx, *user, pool.String()); err != nil {
+		return config, err
+	}
+	resources.SetResourcePool(pool.String())
+	config.SetResources(resources)
+	return config, nil
+}
+
 func (m *Master) parseCreateExperiment(ctx context.Context, req *apiv1.CreateExperimentRequest,
 	owner *model.User) (
 	*model.Experiment, []byte, expconf.ExperimentConfig, *projectv1.Project, *tasks.TaskSpec, error,
@@ -378,6 +403,11 @@ func (m *Master) parseCreateExperiment(ctx context.Context, req *apiv1.CreateExp
 	}
 
 	config = *configWithInvariantOverrides
+	if !req.GetUnmanaged() {
+		if config, err = m.admitExperimentConfigPool(ctx, config, workspaceID, owner); err != nil {
+			return nil, nil, config, nil, nil, err
+		}
+	}
 	// Make sure the experiment config has all eventuallyRequired fields.
 	if err = schemas.IsComplete(config); err != nil {
 		return nil, nil, config, nil, nil, invalidExperimentConfig(err)
