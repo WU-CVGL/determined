@@ -296,8 +296,9 @@ Version 0.41.0
    **Try Again**.
 
 See :ref:`generic tasks <generic-tasks>`, :ref:`browser terminals <shell-web-terminal>`, the
-:ref:`shell_terminal <master-config-shell-terminal>` settings, and :doc:`dynamic resource pools
-<maintenance/dynamic-pools>` for setup and usage.
+:ref:`shell_terminal <master-config-shell-terminal>` settings, :doc:`dynamic resource pools
+<maintenance/dynamic-pools>`, and :doc:`upgrade with running tasks <maintenance/hot-upgrade>` for
+setup and usage.
 
 **************
  Version 0.40

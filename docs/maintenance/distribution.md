@@ -4,8 +4,9 @@ Use the [0.41.0 GitHub release](https://github.com/WU-CVGL/determined/releases/t
 and its tag as the version reference. The matching master and agent images are
 published to GHCR under `ghcr.io/wu-cvgl/determined-master:0.41.0` and
 `ghcr.io/wu-cvgl/determined-agent:0.41.0`. Pin the images to the release's
-published digests when preparing a deployment; do not mix versions of master
-and agent without testing that combination.
+published digests when preparing a deployment. Master and agent do not check
+each other's version: 0.40.1 agents work with a 0.41.0 master during a rolling
+agent upgrade. Other combinations have not been tested.
 
 ## Install the CLI from the repository
 
@@ -51,22 +52,26 @@ storage. Agents need network access to the master and their container runtime.
 For CPU-only agents, configure `slot_type: cpu`. A Docker socket mount grants
 control of its host and belongs only on trusted agent machines.
 
-Before changing a live cluster, disable agents and wait for running tasks to
-checkpoint and stop, then take a PostgreSQL backup. Start the new master,
-confirm database migration and login, then reconnect or update agents and
-verify tasks, metrics, and checkpoints. A brief master replacement can preserve
-a running CPU task with old agents under a compatible reconnect window, but
-that is not a guarantee for other outage lengths, GPU tasks, or task SDK
-versions. See
-[task continuity](task-continuity.md) for the reconnect limits and a disposable
-diagnostic.
+A live cluster can be upgraded in two ways. For a cold upgrade, disable
+agents and wait for running tasks to checkpoint and stop, then take a
+PostgreSQL backup. Start the new master, confirm database migration and login,
+then reconnect or update agents and verify tasks, metrics, and checkpoints. To
+keep tasks running, take the backup, replace the master, and then replace the
+agents one node at a time, as described in
+[upgrade with running tasks](hot-upgrade.md). Running tasks survive a master
+outage of a few minutes but not one of ten minutes or more; the procedure was
+rehearsed with CPU tasks. See [task continuity](task-continuity.md) for the
+reconnect limits and a disposable diagnostic.
 
 ## Rollback and source builds
 
 Keep the previous image references and a database backup taken before the
-upgrade. If rollback is necessary, stop agents and the master, restore the
-compatible backup, then start the previous master and agents. Switching images
-does not reverse database migrations. Test backup restore and task/checkpoint
+upgrade. When the previous master starts against the migrated database, as
+0.40.1 does after the 0.41.0 migration, a rollback is a binary swap that keeps
+tasks running; [upgrade with running tasks](hot-upgrade.md) lists its
+conditions. Otherwise, stop agents and the master, restore the compatible
+backup, then start the previous master and agents. Switching images does not
+reverse database migrations. Test backup restore and task/checkpoint
 visibility in a disposable environment first.
 
 The release tag identifies the source used for the images. The

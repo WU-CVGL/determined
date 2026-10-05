@@ -23,6 +23,9 @@ KEYPAIR_NAME``.
    The specific upgrade commands vary by environment. You'll need to run the same commands
    (including any flags) that were run when you installed Determined.
 
+To upgrade this fork's master and agents while tasks keep running, follow
+:doc:`/maintenance/hot-upgrade` instead.
+
 Before starting an upgrade, first follow the steps below to safely shut down the cluster. Once the
 upgrade is complete and Determined is restarted, all suspended experiments will be resumed
 automatically.
