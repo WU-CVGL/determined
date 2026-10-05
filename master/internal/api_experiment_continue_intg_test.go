@@ -5,6 +5,7 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -14,6 +15,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/db"
@@ -21,6 +23,8 @@ import (
 	"github.com/determined-ai/determined/master/internal/user"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
+	"github.com/determined-ai/determined/master/pkg/schemas"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 )
@@ -57,13 +61,69 @@ func addContinueTestUser(t *testing.T, admin bool, uid int) continueTestUser {
 // endedTestExp creates an experiment that owner owns and that has ended, so it can be continued.
 func endedTestExp(t *testing.T, api *apiServer, owner continueTestUser) int {
 	t.Helper()
-	exp := createTestExpWithProjectID(t, api, owner.User, 1)
+	return endTestExp(t, createTestExpWithProjectID(t, api, owner.User, 1).ID)
+}
+
+func endTestExp(t *testing.T, expID int) int {
+	t.Helper()
 	_, err := db.Bun().NewUpdate().Table("experiments").
 		Set("state = ?", model.CompletedState).
-		Where("id = ?", exp.ID).
+		Where("id = ?", expID).
 		Exec(context.Background())
 	require.NoError(t, err)
-	return exp.ID
+	return expID
+}
+
+// codeTestConfig gives an experiment an image, environment variables, a pod spec and a bind mount,
+// so that a continue that sends the whole config back, as the WebUI does, merges each of them.
+const codeTestConfig = `
+environment:
+  image: owner/image:1
+  environment_variables:
+    - A=1
+    - B=2
+  pod_spec:
+    metadata:
+      labels:
+        team: owner
+bind_mounts:
+  - host_path: /data
+    container_path: /data
+`
+
+// endedCodeTestExp is endedTestExp with codeTestConfig.
+func endedCodeTestExp(t *testing.T, api *apiServer, owner continueTestUser) int {
+	t.Helper()
+	cfg, err := expconf.ParseAnyExperimentConfigYAML([]byte(codeTestConfig))
+	require.NoError(t, err)
+	activeConfig := schemas.WithDefaults(schemas.Merge(cfg, minExpConfig))
+	return endTestExp(t, createTestExpWithActiveConfig(t, api, owner.User, 1, activeConfig).ID)
+}
+
+// resumeOverride returns the override config that Resume Current Trial in the WebUI sends: the whole
+// config that GetExperiment returns, without its workspace and project.
+func resumeOverride(ctx context.Context, t *testing.T, api *apiServer, expID int) string {
+	t.Helper()
+	resp, err := api.GetExperiment(ctx, &apiv1.GetExperimentRequest{ExperimentId: int32(expID)})
+	require.NoError(t, err)
+	raw, err := protojson.Marshal(resp.Config)
+	require.NoError(t, err)
+	var config map[string]any
+	require.NoError(t, json.Unmarshal(raw, &config))
+	delete(config, "workspace")
+	delete(config, "project")
+	override, err := json.Marshal(config)
+	require.NoError(t, err)
+	return string(override)
+}
+
+func sessionCount(t *testing.T, u continueTestUser) int {
+	t.Helper()
+	n, err := db.Bun().NewSelect().Table("user_sessions").
+		Where("user_id = ?", u.ID).
+		Count(context.Background())
+	require.NoError(t, err)
+	return n
 }
 
 // requireRunsAs checks that the running experiment and each of its trials run as want: the task
@@ -161,6 +221,31 @@ func TestContinueExperimentKeepsOwnerIdentity(t *testing.T) {
 		requireNotContinued(t, expID)
 	})
 
+	t.Run("an administrator may not change the code it runs", func(t *testing.T) {
+		expID := endedTestExp(t, api, owner)
+		_, err := api.ContinueExperiment(admin.ctx, &apiv1.ContinueExperimentRequest{
+			Id:             int32(expID),
+			OverrideConfig: "entrypoint: echo changed",
+		})
+		require.Equal(t, codes.PermissionDenied, status.Code(err), err)
+		require.ErrorContains(t, err, owner.Username)
+		require.ErrorContains(t, err, "entrypoint")
+		requireNotContinued(t, expID)
+	})
+
+	t.Run("the owner may change the code", func(t *testing.T) {
+		expID := endedTestExp(t, api, owner)
+		_, err := api.ContinueExperiment(owner.ctx, &apiv1.ContinueExperimentRequest{
+			Id:             int32(expID),
+			OverrideConfig: "entrypoint: echo changed",
+		})
+		require.NoError(t, err)
+		requireRunsAs(t, expID, owner)
+		active, err := api.m.db.ActiveExperimentConfig(expID)
+		require.NoError(t, err)
+		require.Equal(t, "echo changed", active.Entrypoint().RawEntrypoint)
+	})
+
 	t.Run("with external sessions, another user's experiment is not continued", func(t *testing.T) {
 		ext := &config.GetMasterConfig().InternalConfig.ExternalSessions
 		loginURI := ext.LoginURI
@@ -219,5 +304,86 @@ func TestContinueExperimentChecksActorRunsAsOwner(t *testing.T) {
 		})
 		require.Equal(t, codes.PermissionDenied, status.Code(err), err)
 		requireNotContinued(t, expID)
+	})
+}
+
+// A user who may continue another user's experiment, under RBAC or as an administrator, may not
+// change the code its trials run or what they run it with, because they run as its owner.
+func TestContinueExperimentOnlyOwnerChangesCode(t *testing.T) {
+	api, authZExp, projectAuthZ, _, _ := setupExpAuthTest(t, nil)
+	owner := addContinueTestUser(t, false, 48000)
+	actor := addContinueTestUser(t, false, 49000)
+
+	isActor := mock.MatchedBy(func(m model.User) bool { return m.ID == actor.ID })
+	isOwners := mock.MatchedBy(func(e *model.Experiment) bool {
+		return e.OwnerID != nil && *e.OwnerID == owner.ID
+	})
+	// The mocks are shared with other tests; these expectations match only this test's users.
+	authZExp.On("CanGetExperiment", mock.Anything, isActor, isOwners).Return(nil)
+	authZExp.On("CanEditExperiment", mock.Anything, isActor, isOwners).Return(nil)
+	authZExp.On("CanGetExperimentArtifacts", mock.Anything, isActor, isOwners).Return(nil)
+	projectAuthZ.On("CanGetProject", mock.Anything, isActor, mock.Anything).Return(nil)
+
+	refused := []struct{ name, field, override string }{
+		{"entrypoint", "entrypoint", "entrypoint: echo changed"},
+		{"image", "environment", "environment: {image: other/image:1}"},
+		{"new environment variable", "environment",
+			"environment: {environment_variables: [LD_PRELOAD=/tmp/x.so]}"},
+		{"environment variable value", "environment", "environment: {environment_variables: [A=2]}"},
+		{"pod spec", "environment",
+			"environment: {pod_spec: {spec: {initContainers: [{name: x, image: other/image:1}]}}}"},
+		{"bind mount", "bind_mounts", "bind_mounts: [{host_path: /home/other, container_path: /x}]"},
+		{"checkpoint storage", "checkpoint_storage",
+			"checkpoint_storage: {type: shared_fs, host_path: /home/other}"},
+		{"warm start checkpoint", "searcher.source_checkpoint_uuid",
+			"searcher: {name: single, metric: loss, max_length: {batches: 10}, " +
+				"source_checkpoint_uuid: 7e0bad9e-8c1b-4f4e-9d2a-3a0f1f6b0c01}"},
+		{"warm start trial", "searcher.source_trial_id",
+			"searcher: {name: single, metric: loss, max_length: {batches: 10}, source_trial_id: 1}"},
+	}
+	for _, c := range refused {
+		t.Run("refused: "+c.name, func(t *testing.T) {
+			expID := endedCodeTestExp(t, api, owner)
+			sessions := sessionCount(t, owner)
+			_, err := api.ContinueExperiment(actor.ctx, &apiv1.ContinueExperimentRequest{
+				Id:             int32(expID),
+				OverrideConfig: c.override,
+			})
+			require.Equal(t, codes.PermissionDenied, status.Code(err), err)
+			require.ErrorContains(t, err, c.field)
+			require.ErrorContains(t, err, owner.Username)
+			requireNotContinued(t, expID)
+			require.Equal(t, sessions, sessionCount(t, owner))
+		})
+	}
+
+	t.Run("allowed: the whole config, as Resume Current Trial sends it", func(t *testing.T) {
+		expID := endedCodeTestExp(t, api, owner)
+		_, err := api.ContinueExperiment(actor.ctx, &apiv1.ContinueExperimentRequest{
+			Id:             int32(expID),
+			OverrideConfig: resumeOverride(actor.ctx, t, api, expID),
+		})
+		require.NoError(t, err)
+		requireRunsAs(t, expID, owner)
+	})
+
+	t.Run("allowed: fields that are not code", func(t *testing.T) {
+		expID := endedCodeTestExp(t, api, owner)
+		_, err := api.ContinueExperiment(actor.ctx, &apiv1.ContinueExperimentRequest{
+			Id: int32(expID),
+			OverrideConfig: `
+description: changed
+max_restarts: 7
+searcher: {name: single, metric: loss, max_length: {batches: 20}}
+environment: {environment_variables: [B=2]}
+checkpoint_storage: {type: shared_fs, host_path: /, save_trial_latest: 3}
+`,
+		})
+		require.NoError(t, err)
+		requireRunsAs(t, expID, owner)
+		active, err := api.m.db.ActiveExperimentConfig(expID)
+		require.NoError(t, err)
+		require.Equal(t, 7, active.MaxRestarts())
+		require.Equal(t, 3, active.CheckpointStorage().SaveTrialLatest())
 	})
 }

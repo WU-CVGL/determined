@@ -1361,51 +1361,60 @@ func (a *apiServer) createUnmanagedExperimentTx(
 	}, nil
 }
 
-func (a *apiServer) parseAndMergeContinueConfig(expID int, overrideConfig string) ([]byte, bool, error) {
+// parseAndMergeContinueConfig merges a continue's override config into the experiment's active
+// config. It also returns the code fields (see continueCodeChanges) that the override changes.
+func (a *apiServer) parseAndMergeContinueConfig(expID int, overrideConfig string) (
+	[]byte, bool, []string, error,
+) {
 	if overrideConfig == "" {
 		overrideConfig = "{}" //nolint: goconst
 	}
 
 	activeConfig, err := a.m.db.ActiveExperimentConfig(expID)
 	if err != nil {
-		return nil, false, fmt.Errorf("loading active config for experiment %d: %w", expID, err)
+		return nil, false, nil, fmt.Errorf("loading active config for experiment %d: %w", expID, err)
 	}
 	name := activeConfig.Searcher().AsLegacy().Name
 	isSingle := name == "single"                           //nolint: goconst
 	if !isSingle && (name != "grid" && name != "random") { //nolint: goconst
-		return nil, false, status.Errorf(codes.InvalidArgument,
+		return nil, false, nil, status.Errorf(codes.InvalidArgument,
 			fmt.Sprintf("Unsupported searcher type provided: '%s'", name))
 	}
 	if !isSingle && strings.TrimSpace(overrideConfig) != "{}" { //nolint: goconst
-		return nil, false, status.Errorf(codes.InvalidArgument,
+		return nil, false, nil, status.Errorf(codes.InvalidArgument,
 			fmt.Sprintf("override config is provided and experiment is not single searcher, got '%s' instead", name))
 	}
 
 	providedConfig, err := expconf.ParseAnyExperimentConfigYAML([]byte(overrideConfig))
 	if err != nil {
-		return nil, false, status.Errorf(codes.InvalidArgument,
+		return nil, false, nil, status.Errorf(codes.InvalidArgument,
 			fmt.Errorf("parsing override config: %w", err).Error())
 	}
 
 	if providedConfig.RawProject != nil {
-		return nil, false, status.Errorf(codes.InvalidArgument, "'project' in override config "+
+		return nil, false, nil, status.Errorf(codes.InvalidArgument, "'project' in override config "+
 			"cannot be specified, use `det experiment move` first if you want to change the project")
 	}
 	if providedConfig.RawWorkspace != nil {
-		return nil, false, status.Errorf(codes.InvalidArgument, "'workspace' in override config "+
+		return nil, false, nil, status.Errorf(codes.InvalidArgument, "'workspace' in override config "+
 			"cannot be specified, use `det experiment move` first if you want to change the workspace")
 	}
 	mergedConfig := schemas.Merge(providedConfig, activeConfig)
 	if overrideName := mergedConfig.Searcher().AsLegacy().Name; isSingle && overrideName != "single" {
-		return nil, false, status.Errorf(codes.InvalidArgument,
+		return nil, false, nil, status.Errorf(codes.InvalidArgument,
 			fmt.Sprintf("override config must have single searcher type got '%s' instead", overrideName))
+	}
+	// Compared before the invariant configs are merged in: they are the cluster's, not the override's.
+	codeChanges, err := continueCodeChanges(activeConfig, mergedConfig)
+	if err != nil {
+		return nil, false, nil, fmt.Errorf("comparing the override config: %w", err)
 	}
 
 	// Merge the config with the optionally specified invariant config specified by task config
 	// policies.
 	w, err := getWorkspaceByConfig(activeConfig)
 	if err != nil {
-		return nil, false, status.Errorf(codes.Internal,
+		return nil, false, nil, status.Errorf(codes.Internal,
 			fmt.Sprintf("failed to get workspace %s", activeConfig.Workspace()))
 	}
 
@@ -1413,17 +1422,96 @@ func (a *apiServer) parseAndMergeContinueConfig(expID int, overrideConfig string
 		context.TODO(),
 		w.ID, mergedConfig)
 	if err != nil {
-		return nil, false,
+		return nil, false, nil,
 			fmt.Errorf("failed to merge invariant experiment configs: %w", err)
 	}
 	mergedConfig = *configWithInvariantDefaults
 
 	bytes, err := mergedConfig.Value()
 	if err != nil {
-		return nil, false, fmt.Errorf("getting value of merged config: %w", err)
+		return nil, false, nil, fmt.Errorf("getting value of merged config: %w", err)
 	}
 
-	return bytes.([]byte), isSingle, nil
+	return bytes.([]byte), isSingle, codeChanges, nil
+}
+
+// continueCodeChanges returns the config fields that choose the code a continued experiment's
+// trials run, or what they run it with, and whose value in merged differs from active. They are the
+// entrypoint; the environment (image, environment variables, pod spec, registry credentials and the
+// rest); the bind mounts; and where the trials restore checkpoints from: the checkpoint storage,
+// apart from how many checkpoints it keeps, and the warm start source. The trials run as the
+// experiment's owner, so only the owner may change these when continuing it.
+func continueCodeChanges(active, merged expconf.ExperimentConfig) ([]string, error) {
+	storage := func(c expconf.ExperimentConfig) *expconf.CheckpointStorageConfigV0 {
+		if c.RawCheckpointStorage == nil {
+			return nil
+		}
+		s := schemas.Copy(*c.RawCheckpointStorage)
+		s.RawSaveExperimentBest, s.RawSaveTrialBest, s.RawSaveTrialLatest = nil, nil, nil
+		return &s
+	}
+	var activeSearcher, mergedSearcher expconf.SearcherConfigV0
+	if active.RawSearcher != nil {
+		activeSearcher = *active.RawSearcher
+	}
+	if merged.RawSearcher != nil {
+		mergedSearcher = *merged.RawSearcher
+	}
+	fields := []struct {
+		name           string
+		active, merged any
+	}{
+		{"entrypoint", active.RawEntrypoint, merged.RawEntrypoint},
+		{"environment", effectiveEnvironment(active.RawEnvironment),
+			effectiveEnvironment(merged.RawEnvironment)},
+		{"bind_mounts", active.RawBindMounts, merged.RawBindMounts},
+		{"checkpoint_storage", storage(active), storage(merged)},
+		{"searcher.source_trial_id", activeSearcher.RawSourceTrialID, mergedSearcher.RawSourceTrialID},
+		{
+			"searcher.source_checkpoint_uuid",
+			activeSearcher.RawSourceCheckpointUUID, mergedSearcher.RawSourceCheckpointUUID,
+		},
+	}
+	var changed []string
+	for _, f := range fields {
+		a, err := json.Marshal(f.active)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", f.name, err)
+		}
+		m, err := json.Marshal(f.merged)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", f.name, err)
+		}
+		if string(a) != string(m) {
+			changed = append(changed, f.name)
+		}
+	}
+	return changed, nil
+}
+
+// effectiveEnvironment returns a copy of env whose environment variables keep only the last entry
+// for each variable, sorted. A continue's override variables are appended to the active ones
+// (EnvironmentVariablesMapV0.Merge), and the WebUI's Resume Current Trial sends back the whole
+// config, so a variable repeated with the value it has is not a change.
+func effectiveEnvironment(env *expconf.EnvironmentConfigV0) *expconf.EnvironmentConfigV0 {
+	if env == nil || env.RawEnvironmentVariables == nil {
+		return env
+	}
+	effective := func(vars []string) []string {
+		last := map[string]string{}
+		for _, v := range vars {
+			name, _, _ := strings.Cut(v, "=")
+			last[name] = v
+		}
+		out := maps.Values(last)
+		sort.Strings(out)
+		return out
+	}
+	out := schemas.Copy(*env)
+	out.RawEnvironmentVariables.RawCPU = effective(out.RawEnvironmentVariables.RawCPU)
+	out.RawEnvironmentVariables.RawCUDA = effective(out.RawEnvironmentVariables.RawCUDA)
+	out.RawEnvironmentVariables.RawROCM = effective(out.RawEnvironmentVariables.RawROCM)
+	return &out
 }
 
 func getWorkspaceByConfig(config expconf.ExperimentConfig) (*model.Workspace, error) {
@@ -1475,9 +1563,18 @@ func (a *apiServer) ContinueExperiment(
 	if err != nil {
 		return nil, fmt.Errorf("getting experiment trials: %w", err)
 	}
-	configBytes, isSingle, err := a.parseAndMergeContinueConfig(int(req.Id), req.OverrideConfig)
+	configBytes, isSingle, codeChanges, err := a.parseAndMergeContinueConfig(
+		int(req.Id), req.OverrideConfig)
 	if err != nil {
 		return nil, err
+	}
+	// The trials run as the owner, so a continuer who changed what they run would run their own
+	// code with the owner's token and uid/gid.
+	if actor.ID != owner.ID && len(codeChanges) > 0 {
+		return nil, status.Errorf(codes.PermissionDenied,
+			"experiment %d runs as its owner %q, so only they may change %s when continuing it; "+
+				"to run a changed copy as yourself, fork the experiment",
+			req.Id, owner.Username, strings.Join(codeChanges, ", "))
 	}
 
 	dbExp, modelDef, activeConfig, _, taskSpec, err := a.m.parseCreateExperiment(ctx,
