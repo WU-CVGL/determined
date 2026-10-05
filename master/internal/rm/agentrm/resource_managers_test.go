@@ -35,7 +35,7 @@ func TestResourceManagerForwardMessage(t *testing.T) {
 		},
 	}
 
-	rm, err := New(context.Background(), nil, echo.New(), conf.ResourceManagers()[0], nil, nil)
+	rm, err := New(context.Background(), nil, echo.New(), conf.ResourceManagers()[0], nil, nil, nil)
 	assert.NilError(t, err, "error initializing resource manager")
 
 	taskSummary, err := rm.GetAllocationSummaries()
@@ -53,7 +53,7 @@ func TestAgentRMHealthCheck(t *testing.T) {
 		},
 	}
 
-	rm, err := New(context.Background(), nil, echo.New(), conf.ResourceManagers()[0], nil, nil)
+	rm, err := New(context.Background(), nil, echo.New(), conf.ResourceManagers()[0], nil, nil, nil)
 	require.NoError(t, err)
 
 	require.Equal(t, []model.ResourceManagerHealth{

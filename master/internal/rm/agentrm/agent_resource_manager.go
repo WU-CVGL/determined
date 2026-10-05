@@ -7,6 +7,7 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -34,7 +35,8 @@ import (
 )
 
 // New returns a new ResourceManager, which manages communicating with
-// and scheduling on Determined agents.
+// and scheduling on Determined agents. masterDefaults are the master's task container defaults;
+// when nil, the stored effective configs of dynamic pools are not refreshed.
 func New(
 	ctx context.Context,
 	db *db.PgDB,
@@ -42,11 +44,12 @@ func New(
 	rmConfig *config.ResourceManagerWithPoolsConfig,
 	opts *aproto.MasterSetAgentOptions,
 	cert *tls.Certificate,
+	masterDefaults *model.TaskContainerDefaultsConfig,
 ) (*ResourceManager, error) {
-	var dynamicConfigs []config.ResourcePoolConfig
+	var dynamicPools []storedDynamicPool
 	var err error
 	if db != nil {
-		dynamicConfigs, err = loadDynamicPoolConfigs(
+		dynamicPools, err = loadDynamicPoolConfigs(
 			db, rmConfig.ResourceManager.ClusterName(), rmConfig.ResourcePools,
 		)
 		if err != nil {
@@ -58,8 +61,10 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("creating resource pool registry: %w", err)
 	}
-	for _, dynamicConfig := range dynamicConfigs {
-		if err := registry.addDynamicDesired(dynamicConfig); err != nil {
+	for _, pool := range dynamicPools {
+		if err := registry.addStoredDynamicDesired(
+			pool.config, pool.inherit, pool.record.Revision,
+		); err != nil {
 			return nil, fmt.Errorf("registering dynamic resource pool: %w", err)
 		}
 	}
@@ -78,7 +83,13 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-	if err := markDynamicPoolsReady(context.Background(), db, dynamicConfigs); err != nil {
+	if err := resourceManager.checkDefaultPools(); err != nil {
+		resourceManager.stop()
+		return nil, err
+	}
+	if err := resourceManager.markDynamicPoolsReady(
+		context.Background(), dynamicPools, masterDefaults,
+	); err != nil {
 		resourceManager.stop()
 		return nil, fmt.Errorf("marking dynamic resource pools ready: %w", err)
 	}
@@ -86,6 +97,44 @@ func New(
 		resourceManager.startDynamicPoolWorker(ctx)
 	}
 	return resourceManager, nil
+}
+
+// checkDefaultPools refuses to start when a default pool is neither a master.yaml pool nor a saved
+// dynamic pool in any state. Tasks that name no pool would otherwise be accepted and then fail to
+// find their pool. A cluster without any pool yet can start with the resource_pools key omitted,
+// which adds the built-in pool that the defaults name unless they are set.
+func (a *ResourceManager) checkDefaultPools() error {
+	var names []string
+	settings := make(map[string][]string)
+	for _, pool := range []struct{ setting, name string }{
+		{"default_compute_resource_pool", a.config.DefaultComputeResourcePool},
+		{"default_aux_resource_pool", a.config.DefaultAuxResourcePool},
+	} {
+		if pool.name == "" {
+			continue
+		}
+		if _, desired := a.registry.desiredConfig(pool.name); desired {
+			continue
+		}
+		if _, seen := settings[pool.name]; !seen {
+			names = append(names, pool.name)
+		}
+		settings[pool.name] = append(settings[pool.name], pool.setting)
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	var problems []string
+	for _, name := range names {
+		problems = append(problems, fmt.Sprintf(
+			"resource pool %q, set as %s, is neither configured in master.yaml nor saved as a "+
+				"dynamic pool", name, strings.Join(settings[name], " and "),
+		))
+	}
+	return fmt.Errorf(
+		"%s; create or adopt the pool, or set the default to an existing pool",
+		strings.Join(problems, "; "),
+	)
 }
 
 // A ResourceManager manages many resource pools and routing requests for resources to them.
