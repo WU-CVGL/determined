@@ -205,6 +205,60 @@ func TestTensorboardManagerLifecycle(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// The lists of notebooks, shells, commands and TensorBoards report the slots each one asks for,
+// which tells a GPU task (one slot or more) from a CPU-only one (no slots).
+func TestNTSCListsReportSlots(t *testing.T) {
+	db := setupTest(t)
+
+	for _, slots := range []int{0, 2} {
+		request := func() *CreateGeneric {
+			req := CreateMockGenericReq(t, db)
+			req.Spec.Config.Resources.Slots = slots
+			return req
+		}
+		launch := func(taskType model.TaskType, jobType model.JobType) string {
+			cmd, err := DefaultCmdService.LaunchGenericCommand(taskType, jobType, request())
+			require.NoError(t, err)
+			return cmd.stringID()
+		}
+		listed := map[string]int32{}
+
+		commandID := launch(model.TaskTypeCommand, model.JobTypeCommand)
+		commands, err := DefaultCmdService.GetCommands(&apiv1.GetCommandsRequest{})
+		require.NoError(t, err)
+		for _, c := range commands.Commands {
+			listed[c.Id] = c.Slots
+		}
+		require.Equal(t, int32(slots), listed[commandID], "command with %d slots", slots)
+
+		req := request()
+		notebook, err := DefaultCmdService.LaunchNotebookCommand(req, req.Spec.Base.Owner)
+		require.NoError(t, err)
+		notebooks, err := DefaultCmdService.GetNotebooks(&apiv1.GetNotebooksRequest{})
+		require.NoError(t, err)
+		for _, n := range notebooks.Notebooks {
+			listed[n.Id] = n.Slots
+		}
+		require.Equal(t, int32(slots), listed[notebook.stringID()], "notebook with %d slots", slots)
+
+		shellID := launch(model.TaskTypeShell, model.JobTypeShell)
+		shells, err := DefaultCmdService.GetShells(&apiv1.GetShellsRequest{})
+		require.NoError(t, err)
+		for _, s := range shells.Shells {
+			listed[s.Id] = s.Slots
+		}
+		require.Equal(t, int32(slots), listed[shellID], "shell with %d slots", slots)
+
+		tensorboardID := launch(model.TaskTypeTensorboard, model.JobTypeTensorboard)
+		tensorboards, err := DefaultCmdService.GetTensorboards(&apiv1.GetTensorboardsRequest{})
+		require.NoError(t, err)
+		for _, tb := range tensorboards.Tensorboards {
+			listed[tb.Id] = tb.Slots
+		}
+		require.Equal(t, int32(slots), listed[tensorboardID], "TensorBoard with %d slots", slots)
+	}
+}
+
 func setupTest(t *testing.T) *db.PgDB {
 	// First init the new Command Service
 	var mockRM mocks.ResourceManager

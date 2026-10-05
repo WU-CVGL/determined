@@ -55,4 +55,7 @@ message Tensorboard {
   string job_id = 14;
   // The workspace id.
   int32 workspace_id = 17;
+  // The number of slots the TensorBoard asks for (resources.slots); 0 for a
+  // CPU-only TensorBoard.
+  int32 slots = 100;
 }
