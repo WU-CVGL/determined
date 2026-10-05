@@ -375,3 +375,35 @@ def test_dynamic_pool_create_help_and_required_idempotency_key(
         cli.main(["resource-pool", "create", str(config_path)])
     assert parse_exit.value.code == 2
     assert "--idempotency-key" in capsys.readouterr().err
+
+
+def test_job_list_without_pool_reports_a_hidden_default_pool(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The pool list holds only the pools the user may use: a restricted default is not in it.
+    fixture = pathlib.Path(__file__).resolve().parent.parent / "fixtures" / "resource_pool.json"
+    pool = json.loads(fixture.read_text(encoding="utf-8"))["resourcePool"]
+    pool.update(
+        name="public-pool",
+        defaultComputePool=False,
+        defaultAuxPool=False,
+        agentFluentImage="",
+        clusterName="default",
+        details={},
+        resourceManagerMetadata={},
+    )
+
+    with util.standard_cli_rsps() as rsps:
+        rsps.get(
+            f"{MASTER}/api/v1/resource-pools",
+            status=200,
+            json={"resourcePools": [pool], "pagination": {"total": 1}},
+        )
+        with pytest.raises(SystemExit) as failed_exit:
+            cli.main(["job", "list"])
+        assert failed_exit.value.code == 1
+
+    assert (
+        "the default compute pool is not available to you; name a pool with -r"
+        in capsys.readouterr().err
+    )

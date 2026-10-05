@@ -3,7 +3,7 @@ import datetime
 from typing import Any, List, Union
 
 from determined import cli
-from determined.cli import render
+from determined.cli import errors, render
 from determined.common import api, util
 from determined.common.api import bindings
 
@@ -126,6 +126,11 @@ def check_is_priority(pools: bindings.v1GetResourcePoolsResponse, resource_pool:
     for pool in pools.resourcePools:
         if (resource_pool is None and pool.defaultComputePool) or resource_pool == pool.name:
             return pool.schedulerType == bindings.v1SchedulerType.PRIORITY
+    if resource_pool is None:
+        # The list holds only the pools this user may use, so a restricted default is hidden.
+        raise errors.CliError(
+            "the default compute pool is not available to you; name a pool with -r"
+        )
     raise ValueError(f"Pool {resource_pool} not found")
 
 
