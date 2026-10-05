@@ -43,28 +43,35 @@ func (s Service) Clone() Service {
 // immediately and an error if one was encountered during authentication.
 type ProxyHTTPAuth func(echo.Context) (done bool, err error)
 
+// IsMasterToken reports whether a token was issued by the master, whether or not its session is
+// still valid. It only identifies the master's credentials to keep them from proxied services; it
+// never authenticates anyone.
+type IsMasterToken func(token string) bool
+
 // Proxy is an actor that proxies requests to registered services.
 type Proxy struct {
-	lock     sync.RWMutex
-	HTTPAuth ProxyHTTPAuth
-	services map[string]*Service
-	syslog   *logrus.Entry
+	lock          sync.RWMutex
+	HTTPAuth      ProxyHTTPAuth
+	IsMasterToken IsMasterToken
+	services      map[string]*Service
+	syslog        *logrus.Entry
 }
 
 // DefaultProxy is the global proxy singleton.
 var DefaultProxy *Proxy
 
 // InitProxy initializes the global proxy.
-func InitProxy(httpAuth ProxyHTTPAuth) {
+func InitProxy(httpAuth ProxyHTTPAuth, isMasterToken IsMasterToken) {
 	if DefaultProxy != nil {
 		logrus.Warn(
 			"detected re-initialization of Proxy that should never occur outside of tests",
 		)
 	}
 	DefaultProxy = &Proxy{
-		HTTPAuth: httpAuth,
-		services: make(map[string]*Service),
-		syslog:   logrus.WithField("component", "proxy"),
+		HTTPAuth:      httpAuth,
+		IsMasterToken: isMasterToken,
+		services:      make(map[string]*Service),
+		syslog:        logrus.WithField("component", "proxy"),
 	}
 	err := LoadOrGenCA()
 	if err != nil {
@@ -148,9 +155,9 @@ func (p *Proxy) NewProxyHandler(serviceID string) echo.HandlerFunc {
 		}
 
 		// The proxied service runs whatever its task's owner chose, so it must never see the
-		// visitor's master credentials.
+		// visitor's master credentials, whether or not the master authenticated the request.
 		req := c.Request()
-		stripMasterCredentials(req.Header, !service.AllowUnauthenticated)
+		stripMasterCredentials(req.Header, !service.AllowUnauthenticated, p.IsMasterToken)
 
 		// Set proxy headers.
 		if req.Header.Get(echo.HeaderXRealIP) == "" {
@@ -188,24 +195,38 @@ func (p *Proxy) NewProxyHandler(serviceID string) echo.HandlerFunc {
 // the web UI, and "det_jwt" holds an external session token.
 var masterAuthCookies = map[string]bool{"auth": true, "det_jwt": true}
 
+// masterTokenHeaders are the headers that carry master tokens to the master's gRPC gateway as gRPC
+// metadata. The Python SDK sends a task's session token in Grpc-Metadata-X-Allocation-Token.
+var masterTokenHeaders = []string{
+	"Grpc-Metadata-X-Allocation-Token",
+	"Grpc-Metadata-X-User-Token",
+	"Grpc-Metadata-Grpcgateway-Authorization",
+}
+
 // stripMasterCredentials removes the master's own credentials from a request that is about to be
-// forwarded to a proxied service. Master session cookies are always removed; other cookies, such as
-// JupyterLab's, are kept. When the master authenticated the request (authenticated is true), an
-// Authorization header with the Bearer scheme can only hold a master token, since any other bearer
-// token fails master authentication, so it is removed too. Other schemes are kept, such as the
-// "token" scheme that JupyterLab uses for its notebook token. Services that allow unauthenticated
-// access keep their Authorization header: browsers never attach one by themselves, and it may hold
-// the service's own credentials.
-func stripMasterCredentials(header http.Header, authenticated bool) {
+// forwarded to a proxied service, whether or not the master authenticated it:
+//   - the master's session cookies; other cookies, such as JupyterLab's, are kept as they are;
+//   - the headers that only carry master tokens (masterTokenHeaders);
+//   - Authorization headers with the Bearer scheme that hold a master token. When the master
+//     authenticated the request (authenticated is true), every bearer token is one, since any
+//     other fails master authentication. Otherwise, isMasterToken recognizes the master's tokens,
+//     including ones whose session has ended, and the service keeps any other bearer token, which
+//     may be its own credential.
+//
+// Other Authorization schemes are kept, such as the "token" scheme that JupyterLab uses for its
+// notebook token.
+func stripMasterCredentials(header http.Header, authenticated bool, isMasterToken IsMasterToken) {
 	stripCookies(header, masterAuthCookies)
-	if !authenticated {
-		return
+	for _, name := range masterTokenHeaders {
+		header.Del(name)
 	}
 
 	values := header.Values(echo.HeaderAuthorization)
 	header.Del(echo.HeaderAuthorization)
 	for _, v := range values {
-		if fields := strings.Fields(v); len(fields) > 0 && strings.EqualFold(fields[0], "Bearer") {
+		fields := strings.Fields(v)
+		if len(fields) > 0 && strings.EqualFold(fields[0], "Bearer") &&
+			(authenticated || (len(fields) == 2 && isMasterToken != nil && isMasterToken(fields[1]))) {
 			continue
 		}
 		header.Add(echo.HeaderAuthorization, v)

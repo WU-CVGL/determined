@@ -1,23 +1,13 @@
 import { Loadable, Loaded, NotLoaded } from 'hew/utils/loadable';
 import { observable, WritableObservable } from 'micro-observables';
 
-import { globalStorage } from 'globalStorage';
 import { Auth } from 'types';
-import { getCookie, setCookie } from 'utils/browser';
 
-export const AUTH_COOKIE_KEY = 'auth';
-
-const clearAuthCookie = (): void => {
-  document.cookie = `${AUTH_COOKIE_KEY}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
-};
-
-/**
- * set the auth cookie if it's not already set.
- * @param token auth token
+/*
+ * The browser's session is the master's HttpOnly session cookie: the master sets it when the user
+ * signs in and removes it when they sign out, and the browser sends it with every request to the
+ * master. The web UI never sees its token; this store only keeps whether the user is signed in.
  */
-const ensureAuthCookieSet = (token: string): void => {
-  if (!getCookie(AUTH_COOKIE_KEY)) setCookie(AUTH_COOKIE_KEY, token);
-};
 
 interface AuthState {
   auth: Loadable<Auth>;
@@ -42,10 +32,6 @@ class AuthStore {
   });
 
   public setAuth(newAuth: Auth) {
-    if (newAuth.token) {
-      ensureAuthCookieSet(newAuth.token);
-      globalStorage.authToken = newAuth.token;
-    }
     this.#state.update((s) => ({ ...s, auth: Loaded(newAuth) }));
   }
 
@@ -54,8 +40,6 @@ class AuthStore {
   }
 
   public reset() {
-    clearAuthCookie();
-    globalStorage.removeAuthToken();
     this.#state.set(defaultState);
   }
 }

@@ -3,6 +3,7 @@ import { Dayjs } from 'dayjs';
 import {
   DetailedUser,
   FetchOptions,
+  GenericTaskState,
   Job,
   Metadata,
   Metric,
@@ -18,6 +19,11 @@ import * as Api from './api-ts-sdk/api';
 export interface LoginResponse {
   token: string;
   user: DetailedUser;
+}
+
+export interface StoreSessionTokenParams {
+  /** A session token for the master, from a page outside the web UI. */
+  token: string;
 }
 
 export interface ApiSorter<T = string> {
@@ -165,6 +171,20 @@ export interface SearchRunsParams extends PaginationParams {
 }
 
 export interface GetTaskParams {
+  taskId: string;
+}
+
+export interface GetGenericTasksParams extends PaginationParams {
+  parentId?: string;
+  states?: GenericTaskState[];
+  taskIds?: string[];
+  userIds?: number[];
+  users?: string[];
+  workspaceId?: number;
+}
+
+export interface KillGenericTaskParams {
+  killFromRoot?: boolean;
   taskId: string;
 }
 
@@ -369,6 +389,8 @@ export interface GetAgentsParams {
 }
 
 export interface SetUserPasswordParams {
+  /** The current password; required when users change their own password. */
+  oldPassword?: string;
   password: string;
   userId: number;
 }

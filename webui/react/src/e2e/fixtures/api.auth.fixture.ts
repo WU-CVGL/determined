@@ -70,9 +70,8 @@ export class ApiAuthFixture {
           cookie.domain = new URL(baseUrl()).hostname;
         }
       });
+      // The HttpOnly session cookie authenticates the web UI; it keeps no token of its own.
       await this.browserContext.addCookies(state.cookies);
-      const token = JSON.stringify(await this.getBearerToken(true));
-      await page.evaluate((token) => localStorage.setItem('global/auth-token', token), token);
     }
   }
 

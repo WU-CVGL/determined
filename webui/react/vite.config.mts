@@ -136,6 +136,8 @@ export default defineConfig(({ mode }) => ({
     port: 3001,
     proxy: {
       '/api': { target: webpackProxyUrl },
+      // POST /auth/session-cookie turns a ?jwt= token into the master's session cookie.
+      '/auth': { target: webpackProxyUrl },
       '/ui': { target: webpackProxyUrl },
       '/proxy': { target: webpackProxyUrl },
       '/stream': {
@@ -156,6 +158,8 @@ export default defineConfig(({ mode }) => ({
     port: 3000,
     proxy: {
       '/api': { target: webpackProxyUrl },
+      // POST /auth/session-cookie turns a ?jwt= token into the master's session cookie.
+      '/auth': { target: webpackProxyUrl },
       '/ui': { target: webpackProxyUrl },
       '/proxy': { target: webpackProxyUrl },
       '/stream': {

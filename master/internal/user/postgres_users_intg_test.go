@@ -5,11 +5,13 @@ package user
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
 	"log"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgconn"
@@ -20,6 +22,7 @@ import (
 	"gopkg.in/guregu/null.v3"
 
 	"github.com/determined-ai/determined/master/internal/db"
+	"github.com/determined-ai/determined/master/internal/token"
 	"github.com/determined-ai/determined/master/pkg/etc"
 	"github.com/determined-ai/determined/master/pkg/model"
 )
@@ -348,6 +351,52 @@ func TestByTokenRejectsTokensOfOtherSessionTables(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, admin.ID, u.ID)
 	require.Equal(t, claims, session.InheritedClaims)
+}
+
+func TestIsMasterSignedToken(t *testing.T) {
+	ctx := context.TODO()
+	user, err := addTestUser(nil)
+	require.NoError(t, err)
+
+	sessionToken, err := StartSession(ctx, user)
+	require.NoError(t, err)
+	accessToken, _, err := token.CreateAccessToken(ctx, user.ID)
+	require.NoError(t, err)
+	// A task session token, as db.StartAllocationSession signs it.
+	allocationToken, err := paseto.NewV2().Sign(db.GetTokenKeys().PrivateKey,
+		&model.AllocationSession{ID: 1, AllocationID: "task.1", OwnerID: &user.ID}, nil)
+	require.NoError(t, err)
+	notebookToken, err := db.GenerateNotebookSessionToken(user.ID, "task")
+	require.NoError(t, err)
+	expiredToken, err := paseto.NewV2().Sign(db.GetTokenKeys().PrivateKey,
+		&model.UserSession{ID: 1, UserID: user.ID, Expiry: time.Now().Add(-time.Hour)}, nil)
+	require.NoError(t, err)
+	_, foreignKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	foreignToken, err := paseto.NewV2().Sign(foreignKey,
+		&model.UserSession{ID: 1, UserID: user.ID, Expiry: time.Now().Add(time.Hour)}, nil)
+	require.NoError(t, err)
+
+	// A session that has ended is still the master's credential.
+	require.NoError(t, DeleteSessionByToken(ctx, sessionToken))
+	for name, tok := range map[string]string{
+		"ended user session": sessionToken,
+		"access token":       accessToken,
+		"allocation session": allocationToken,
+		"notebook session":   notebookToken,
+		"expired session":    expiredToken,
+	} {
+		require.True(t, IsMasterSignedToken(tok), name)
+	}
+
+	for name, tok := range map[string]string{
+		"signed with another key": foreignToken,
+		"tampered":                accessToken[:len(accessToken)-4] + "AAAA",
+		"opaque service key":      "svc-key",
+		"empty":                   "",
+	} {
+		require.False(t, IsMasterSignedToken(tok), name)
+	}
 }
 
 func TestByUsername(t *testing.T) {
