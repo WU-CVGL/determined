@@ -1,5 +1,12 @@
 :orphan:
 
+**Breaking Changes**
+
+-  Images: The agent binary is now linked dynamically against glibc, which NVML support requires.
+   The release build links it on Ubuntu 22.04 and checks that it runs on the agent image's base,
+   ``ubuntu:22.04``. A custom agent image needs glibc 2.35, the version in ``ubuntu:22.04``, or
+   newer. Images based on musl, such as Alpine, cannot run the agent.
+
 **New Features**
 
 -  Agents: Each agent measures its NVIDIA GPUs with NVML when it starts: the PCIe topology between
@@ -27,7 +34,3 @@
 
 -  Agents: ``determined-agent gpu-topology`` prints what the agent would report on a host, as JSON,
    and exits with 0 also without NVML.
-
--  Images: The agent binary is now linked dynamically against glibc, which NVML support requires.
-   The release build checks that it runs on the agent image's base, ``ubuntu:22.04``. A custom agent
-   image needs a glibc at least as new.
