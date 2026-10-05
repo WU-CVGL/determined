@@ -193,7 +193,8 @@ const experimentCheckers: Record<ExperimentAction, ExperimentChecker> = {
   [ExperimentAction.Unarchive]: (experiment) =>
     terminalRunStates.has(experiment.state) && experiment.archived,
 
-  [ExperimentAction.ViewLogs]: alwaysTrueExperimentChecker,
+  // Logs belong to trials: an experiment without a trial yet has none to show.
+  [ExperimentAction.ViewLogs]: (experiment) => experiment.numTrials > 0,
 
   [ExperimentAction.ViewResources]: alwaysTrueExperimentChecker,
 

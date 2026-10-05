@@ -77,6 +77,7 @@ export const TaskBar: React.FC<Props> = ({
     () => [
       { key: MenuKey.ViewLogs, label: 'View Logs' },
       {
+        danger: true,
         disabled: Loadable.match(task, {
           _: () => true,
           Loaded: (t) =>

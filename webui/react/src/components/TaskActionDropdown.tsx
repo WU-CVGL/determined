@@ -112,7 +112,7 @@ const TaskActionDropdown: React.FC<Props> = ({
         canModifyWorkspaceNSC({ userId: task.userId, workspace: { id: task.workspaceId } }),
       )
     ) {
-      items.push({ key: Action.Kill, label: 'Kill' });
+      items.push({ danger: true, key: Action.Kill, label: 'Kill' });
     }
     return items;
   }, [

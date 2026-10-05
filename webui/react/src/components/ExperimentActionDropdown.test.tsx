@@ -13,7 +13,8 @@ import {
   pauseExperiment,
   unarchiveExperiment,
 } from 'services/api';
-import { RunState } from 'types';
+import { ProjectExperiment, RunState } from 'types';
+import { isDangerMenuItem, menuLabels } from 'utils/tests/menu';
 
 import ExperimentActionDropdown, { Action } from './ExperimentActionDropdown';
 import { cell, experiment } from './ExperimentActionDropdown.test.mock';
@@ -33,7 +34,12 @@ const mockNavigatorClipboard = () => {
 
 vi.mock('routes/utils', () => ({
   handlePath: vi.fn(),
-  paths: { experimentResources: (id: number) => `/experiments/${id}/resources` },
+  paths: {
+    experimentDetails: (id: number) => `/experiments/${id}`,
+    experimentResources: (id: number) => `/experiments/${id}/resources`,
+    trialLogs: (trialId: number, experimentId: number) =>
+      `/experiments/${experimentId}/trials/${trialId}/logs`,
+  },
   serverAddress: () => 'http://localhost',
 }));
 
@@ -77,7 +83,12 @@ vi.mock('hooks/usePermissions', () => {
   };
 });
 
-const setup = (link?: string, state?: RunState, archived?: boolean) => {
+const setup = (
+  link?: string,
+  state?: RunState,
+  archived?: boolean,
+  overrides: Partial<ProjectExperiment> = {},
+) => {
   const onComplete = vi.fn();
   const onVisibleChange = vi.fn();
   render(
@@ -89,6 +100,7 @@ const setup = (link?: string, state?: RunState, archived?: boolean) => {
             ...experiment,
             archived: archived === undefined ? experiment.archived : archived,
             state: state === undefined ? experiment.state : state,
+            ...overrides,
           }}
           isContextMenu
           link={link}
@@ -106,8 +118,15 @@ const setup = (link?: string, state?: RunState, archived?: boolean) => {
   };
 };
 
+const allowEverything = () => {
+  Object.values(mocks).forEach((mock) => mock.mockImplementation(() => true));
+};
+
 describe('ExperimentActionDropdown', () => {
-  beforeEach(() => vi.mocked(handlePath).mockClear());
+  beforeEach(() => {
+    vi.mocked(handlePath).mockClear();
+    vi.mocked(cancelExperiment).mockClear();
+  });
 
   it('opens the experiment resource selector when artifacts are visible', async () => {
     mocks.canViewExperimentArtifacts.mockImplementation(() => true);
@@ -238,11 +257,35 @@ describe('ExperimentActionDropdown', () => {
     expect(screen.queryByText(Action.Pause)).not.toBeInTheDocument();
   });
 
-  it('should provide Cancel option', async () => {
+  it('should provide Cancel option, labelled Stop, after a confirmation that is not red', async () => {
+    mocks.canModifyExperiment.mockImplementation(() => true);
+    const { onComplete } = setup(undefined, RunState.Running);
+    expect(Action.Cancel).toBe('Stop');
+    await user.click(screen.getByText(Action.Cancel));
+    const stop = await screen.findByRole('button', { name: 'Stop' });
+    expect(screen.getByText(/can't be resumed/)).toBeInTheDocument();
+    expect(stop).not.toHaveClass('ant-btn-dangerous');
+    expect(vi.mocked(cancelExperiment)).not.toBeCalled();
+    await user.click(stop);
+    expect(vi.mocked(cancelExperiment)).toBeCalledWith({ experimentId: experiment.id });
+    expect(onComplete).toBeCalledWith(Action.Cancel, experiment.id);
+  });
+
+  it('does not stop the experiment when the Stop confirmation is cancelled', async () => {
     mocks.canModifyExperiment.mockImplementation(() => true);
     setup(undefined, RunState.Running);
     await user.click(screen.getByText(Action.Cancel));
-    expect(vi.mocked(cancelExperiment)).toBeCalled();
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+    expect(vi.mocked(cancelExperiment)).not.toBeCalled();
+  });
+
+  it('confirms Kill with a red button', async () => {
+    mocks.canModifyExperiment.mockImplementation(() => true);
+    setup(undefined, RunState.Running);
+    await user.click(screen.getByText(Action.Kill));
+    expect(await screen.findByRole('button', { name: Action.Kill })).toHaveClass(
+      'ant-btn-dangerous',
+    );
   });
 
   it('should hide Cancel option without permissions', () => {
@@ -273,5 +316,152 @@ describe('ExperimentActionDropdown', () => {
     mocks.canViewExperimentArtifacts.mockImplementation(() => false);
     setup();
     expect(screen.queryByText(Action.OpenTensorBoard)).not.toBeInTheDocument();
+  });
+});
+
+describe('ExperimentActionDropdown order', () => {
+  beforeEach(allowEverything);
+
+  it('lists an active experiment’s actions in the fixed order', () => {
+    setup('/experiments/7261', RunState.Running, false);
+    expect(menuLabels()).toEqual([
+      Action.NewTab,
+      Action.NewWindow,
+      Action.Copy,
+      'View Logs',
+      'View Resources',
+      'View in TensorBoard',
+      'Copy Experiment ID',
+      'Pause',
+      'Edit',
+      'Move',
+      'Hyperparameter Search',
+      'Retain Logs',
+      'Stop',
+      'Kill',
+    ]);
+  });
+
+  it('puts Resume where Pause was for a paused experiment', () => {
+    setup(undefined, RunState.Paused, false);
+    expect(menuLabels()).toEqual([
+      Action.Copy,
+      'View Logs',
+      'View Resources',
+      'View in TensorBoard',
+      'Copy Experiment ID',
+      'Resume',
+      'Edit',
+      'Move',
+      'Hyperparameter Search',
+      'Retain Logs',
+      'Stop',
+      'Kill',
+    ]);
+  });
+
+  it('ends an archived experiment’s menu with Unarchive and Delete', () => {
+    setup(undefined, RunState.Canceled, true);
+    expect(menuLabels()).toEqual([
+      Action.Copy,
+      'View Logs',
+      'View Resources',
+      'View in TensorBoard',
+      'Copy Experiment ID',
+      'Hyperparameter Search',
+      'Retain Logs',
+      'Unarchive',
+      'Delete',
+    ]);
+  });
+
+  it('ends a finished experiment’s menu with Archive and Delete', () => {
+    setup(undefined, RunState.Completed, false);
+    expect(menuLabels().slice(-6)).toEqual([
+      'Edit',
+      'Move',
+      'Hyperparameter Search',
+      'Retain Logs',
+      'Archive',
+      'Delete',
+    ]);
+  });
+
+  it('offers View Logs and Copy Experiment ID without any permission', () => {
+    Object.values(mocks).forEach((mock) => mock.mockImplementation(() => false));
+    setup(undefined, RunState.Running, false);
+    expect(menuLabels()).toEqual([Action.Copy, 'View Logs', 'Copy Experiment ID']);
+  });
+});
+
+describe('ExperimentActionDropdown View Logs', () => {
+  beforeEach(() => {
+    allowEverything();
+    vi.mocked(handlePath).mockClear();
+  });
+
+  const viewLogsPath = async (overrides: Partial<ProjectExperiment>) => {
+    setup(undefined, RunState.Running, false, overrides);
+    await user.click(screen.getByText(Action.ViewLogs));
+    expect(handlePath).toHaveBeenCalledTimes(1);
+    return vi.mocked(handlePath).mock.calls[0][1]?.path;
+  };
+
+  it('opens the logs tab of a single-trial experiment’s page', async () => {
+    expect(await viewLogsPath({ numTrials: 1, searcherType: 'single', trialIds: [] })).toBe(
+      `/experiments/${experiment.id}/logs`,
+    );
+  });
+
+  it('opens the trial’s logs page when the trial ID is known', async () => {
+    expect(await viewLogsPath({ numTrials: 1, searcherType: 'random', trialIds: [42] })).toBe(
+      `/experiments/${experiment.id}/trials/42/logs`,
+    );
+  });
+
+  it('opens the trials tab of an experiment with several trials', async () => {
+    expect(await viewLogsPath({ numTrials: 5, searcherType: 'random', trialIds: [] })).toBe(
+      `/experiments/${experiment.id}/trials`,
+    );
+  });
+
+  it('opens the trials tab of a search that has started only one trial so far', async () => {
+    expect(await viewLogsPath({ numTrials: 1, searcherType: 'adaptive_asha', trialIds: [] })).toBe(
+      `/experiments/${experiment.id}/trials`,
+    );
+  });
+
+  it('is left out while the experiment has no trial', () => {
+    setup(undefined, RunState.Running, false, { numTrials: 0 });
+    expect(screen.queryByText(Action.ViewLogs)).not.toBeInTheDocument();
+    expect(screen.getByText(Action.CopyExperimentID)).toBeInTheDocument();
+  });
+});
+
+describe('ExperimentActionDropdown Copy Experiment ID', () => {
+  it('copies the experiment ID', async () => {
+    setup();
+    mockNavigatorClipboard();
+    await user.click(screen.getByText(Action.CopyExperimentID));
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(String(experiment.id));
+    expect(await screen.findByText('Experiment ID has been copied to clipboard.')).toBeVisible();
+  });
+});
+
+describe('ExperimentActionDropdown red items', () => {
+  beforeEach(allowEverything);
+
+  it('shows Kill in red and the other actions of an active experiment not', () => {
+    setup(undefined, RunState.Running, false);
+    expect(isDangerMenuItem(Action.Kill)).toBe(true);
+    [Action.ViewLogs, Action.Pause, Action.Cancel, Action.Move].forEach((label) =>
+      expect(isDangerMenuItem(label)).toBe(false),
+    );
+  });
+
+  it('shows Delete in red and Archive not', () => {
+    setup(undefined, RunState.Completed, false);
+    expect(isDangerMenuItem(Action.Delete)).toBe(true);
+    expect(isDangerMenuItem(Action.Archive)).toBe(false);
   });
 });

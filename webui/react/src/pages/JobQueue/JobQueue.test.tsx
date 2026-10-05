@@ -21,6 +21,7 @@ import {
   JobType,
   ResourcePool,
 } from 'types';
+import { isDangerMenuItem } from 'utils/tests/menu';
 
 import JobQueue from './JobQueue';
 
@@ -192,6 +193,8 @@ describe('JobQueue', () => {
       'Manage Job',
       'Kill',
     ]);
+    expect(isDangerMenuItem('Kill')).toBe(true);
+    expect(isDangerMenuItem('Manage Job')).toBe(false);
   });
 
   it('leaves out Manage Job where the scheduler cannot manage the task', async () => {
@@ -246,5 +249,14 @@ describe('JobQueue', () => {
     // Experiments have no View Logs in the job menu.
     expect(menuLabels()).toEqual(['View Resources', 'Manage Job', 'Cancel', 'Kill']);
     expect(getShells).not.toHaveBeenCalled();
+  });
+
+  it('shows Kill in red in an experiment’s job menu, and Cancel not', async () => {
+    mocks.jobs = [experimentJob];
+    setup();
+    await openRowMenu('mnist');
+    await screen.findByText('Manage Job');
+    expect(isDangerMenuItem('Kill')).toBe(true);
+    expect(isDangerMenuItem('Cancel')).toBe(false);
   });
 });

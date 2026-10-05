@@ -5,6 +5,7 @@ import { ConfirmationProvider } from 'hew/useConfirm';
 import { MemoryRouter } from 'react-router-dom';
 
 import { CommandState, CommandTask, CommandType } from 'types';
+import { isDangerMenuItem } from 'utils/tests/menu';
 
 import TaskBar from './TaskBar';
 
@@ -31,7 +32,7 @@ vi.mock('hooks/usePermissions', () => ({
 }));
 
 describe('TaskBar', () => {
-  it('lists View Logs first and Kill last, like the task action menu', async () => {
+  it('lists View Logs first and Kill last, in red, like the task action menu', async () => {
     const handleViewLogsClick = vi.fn();
     render(
       <MemoryRouter>
@@ -54,6 +55,8 @@ describe('TaskBar', () => {
       'View Logs',
       'Kill',
     ]);
+    expect(isDangerMenuItem('Kill')).toBe(true);
+    expect(isDangerMenuItem('View Logs')).toBe(false);
     await userEvent.click(screen.getByText('View Logs'));
     expect(handleViewLogsClick).toHaveBeenCalledTimes(1);
   });

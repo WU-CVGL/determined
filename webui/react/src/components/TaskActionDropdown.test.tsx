@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 
 import userStore from 'stores/users';
 import { CommandState, CommandTask, CommandType, DetailedUser } from 'types';
+import { isDangerMenuItem } from 'utils/tests/menu';
 import { NOTEBOOK_ACCESS_DENIED } from 'utils/wait';
 
 import TaskActionDropdown from './TaskActionDropdown';
@@ -344,6 +345,18 @@ describe('TaskActionDropdown', () => {
       await openLaunchAgainMenu(runningShell, owner);
       await screen.findByText('Launch Again');
       expect(menuLabels()).toEqual(FULL_SHELL_MENU);
+    });
+
+    it.each([
+      ['action menu', false],
+      ['right-click menu', true],
+    ])('shows Kill in red and the other actions not, in the %s', async (_, contextMenu) => {
+      await openLaunchAgainMenu(runningShell, owner, contextMenu);
+      await screen.findByText('Launch Again');
+      expect(isDangerMenuItem('Kill')).toBe(true);
+      FULL_SHELL_MENU.filter((label) => label !== 'Kill').forEach((label) =>
+        expect(isDangerMenuItem(label)).toBe(false),
+      );
     });
 
     it('uses the same order in the right-click menu', async () => {

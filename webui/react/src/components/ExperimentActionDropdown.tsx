@@ -37,6 +37,7 @@ import {
 import {
   BulkExperimentItem,
   ExperimentAction,
+  ExperimentSearcherName,
   FullExperimentItem,
   ProjectExperiment,
   ValueOf,
@@ -61,6 +62,7 @@ interface Props {
 
 export const Action = {
   Copy: 'Copy Value',
+  CopyExperimentID: 'Copy Experiment ID',
   NewTab: 'Open Link in New Tab',
   NewWindow: 'Open Link in New Window',
   ...ExperimentAction,
@@ -68,22 +70,47 @@ export const Action = {
 
 type Action = ValueOf<typeof Action>;
 
-const dropdownActions = [
-  Action.SwitchPin,
+// One order wherever the menu appears, after the link and Copy Value items: viewing first, then
+// Copy Experiment ID, then changing the experiment, with Stop, Kill and Delete last. Items that do
+// not apply are left out.
+const viewActions = [Action.ViewLogs, Action.ViewResources, Action.OpenTensorBoard];
+const manageActions = [
   Action.Activate,
   Action.Pause,
+  Action.Edit,
+  Action.Move,
+  Action.HyperparameterSearch,
+  Action.RetainLogs,
   Action.Archive,
   Action.Unarchive,
   Action.Cancel,
   Action.Kill,
-  Action.Edit,
-  Action.Move,
-  Action.RetainLogs,
-  Action.OpenTensorBoard,
-  Action.ViewResources,
-  Action.HyperparameterSearch,
   Action.Delete,
 ];
+const dangerActions: Action[] = [Action.Kill, Action.Delete];
+
+/**
+ * Where View Logs leads. The experiment lists' rows have numTrials (a count from the database)
+ * and searcherType, but not trialIds: the list endpoints leave trial IDs out for speed, so trialIds
+ * is empty there, and only an experiment fetched on its own has them.
+ * - One trial with a known ID: that trial's logs page.
+ * - One trial of a single-searcher experiment: the Logs tab of the experiment page, which shows
+ *   the logs of that trial.
+ * - Otherwise: the Trials tab of the experiment page, to choose a trial. (A grid or random
+ *   experiment with max_trials 1 also gets the single-trial page, where the Trials tab falls back
+ *   to Overview; the rows do not have the config that would tell.)
+ * An experiment without trials has no logs yet, so View Logs is left out (see experimentCheckers).
+ */
+const experimentLogsPath = (experiment: ProjectExperiment): string => {
+  if (experiment.numTrials === 1) {
+    const trialId = experiment.trialIds?.[0];
+    if (trialId !== undefined) return paths.trialLogs(trialId, experiment.id);
+    if (experiment.searcherType === ExperimentSearcherName.Single) {
+      return `${paths.experimentDetails(experiment.id)}/logs`;
+    }
+  }
+  return `${paths.experimentDetails(experiment.id)}/trials`;
+};
 
 const ExperimentActionDropdown: React.FC<Props> = ({
   experiment,
@@ -167,15 +194,19 @@ const ExperimentActionDropdown: React.FC<Props> = ({
     onComplete?.(ExperimentAction.RetainLogs, experiment.id);
   }, [experiment.id, onComplete]);
 
-  const menuItems = getActionsForExperiment(experiment, dropdownActions, usePermissions())
-    .filter(
-      (action) =>
-        action !== Action.SwitchPin &&
-        (action !== Action.ViewResources || taskResourcesEnabled === true),
-    )
-    .map((action) => {
-      return { danger: action === Action.Delete, key: action, label: action };
-    });
+  const permissions = usePermissions();
+  const menuItems: MenuItem[] = useMemo(() => {
+    const allowedItems = (actions: ExperimentAction[]): MenuItem[] =>
+      getActionsForExperiment(experiment, actions, permissions)
+        .filter((action) => action !== Action.ViewResources || taskResourcesEnabled === true)
+        .map((action) => ({ danger: dangerActions.includes(action), key: action, label: action }));
+    return [
+      ...allowedItems(viewActions),
+      { key: Action.CopyExperimentID, label: Action.CopyExperimentID },
+      ...allowedItems(manageActions),
+    ];
+  }, [experiment, permissions, taskResourcesEnabled]);
+  const logsPath = experimentLogsPath(experiment);
 
   const cellCopyData = useMemo(() => {
     if (cell && 'displayData' in cell && isString(cell.displayData)) return cell.displayData;
@@ -220,8 +251,24 @@ const ExperimentActionDropdown: React.FC<Props> = ({
             await onComplete?.(action, experiment.id);
             break;
           case Action.Cancel:
-            await cancelExperiment({ experimentId: experiment.id });
-            await onComplete?.(action, experiment.id);
+            // Not red: Stop ends the trials gracefully, unlike Kill.
+            confirm({
+              content: `Stop ${entityName} ${experiment.id}? Its trials are asked to save a checkpoint and exit; a stopped ${entityName} can't be resumed.`,
+              okText: 'Stop',
+              onConfirm: async () => {
+                await cancelExperiment({ experimentId: experiment.id });
+                await onComplete?.(action, experiment.id);
+              },
+              onError: handleError,
+              title: `Confirm ${capitalize(entityName)} Stop`,
+            });
+            break;
+          case Action.CopyExperimentID:
+            await copyToClipboard(String(experiment.id));
+            openToast({
+              severity: 'Confirm',
+              title: 'Experiment ID has been copied to clipboard.',
+            });
             break;
           case Action.OpenTensorBoard: {
             const commandResponse = await openOrCreateTensorBoard({
@@ -231,6 +278,9 @@ const ExperimentActionDropdown: React.FC<Props> = ({
             openCommandResponse(commandResponse);
             break;
           }
+          case Action.ViewLogs:
+            handlePath(e, { path: logsPath });
+            break;
           case Action.ViewResources:
             handlePath(e, { path: paths.experimentResources(experiment.id) });
             break;
@@ -326,6 +376,7 @@ const ExperimentActionDropdown: React.FC<Props> = ({
       entityName,
       link,
       onLink,
+      logsPath,
       experiment.id,
       onComplete,
       confirm,

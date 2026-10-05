@@ -348,6 +348,7 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
                           [JobAction.Cancel]: { cancelText: 'Abort', onError: handleError },
                           [JobAction.Kill]: { danger: true, onError: handleError },
                         }}
+                        danger={{ [JobAction.Kill]: true }}
                         id={record.name}
                         kind="job"
                         onError={handleError}
