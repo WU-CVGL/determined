@@ -78,6 +78,15 @@ func TestCollectTimeout(t *testing.T) {
 	require.Equal(t, "NVML collection did not finish within 60s", timeoutReason(gpuTopologyTimeout))
 }
 
+func TestCollectPanicKeepsInventory(t *testing.T) {
+	topo := detectGPUTopology(cudaDevices("GPU-a"), nil, func([]aproto.GPUInfo) *aproto.GPUTopology {
+		panic("index out of range")
+	}, time.Minute)
+	require.Equal(t, &aproto.GPUTopology{
+		UnknownReason: "NVML collection failed", GPUs: []aproto.GPUInfo{{UUID: "GPU-a"}},
+	}, topo)
+}
+
 func TestGPUTopologySummary(t *testing.T) {
 	zero, one := 0, 1
 	topo := &aproto.GPUTopology{

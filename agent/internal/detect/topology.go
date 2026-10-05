@@ -63,7 +63,20 @@ func detectGPUTopology(
 	// be canceled), and its result is discarded.
 	result := make(chan *aproto.GPUTopology, 1)
 	own := append([]aproto.GPUInfo(nil), inventory...)
-	go func() { result <- collector(own) }()
+	go func() {
+		defer func() {
+			// A Go panic in the collection never fails agent start; a crash inside the C library
+			// still does.
+			if r := recover(); r != nil {
+				log.Errorf("GPU topology collection panicked: %v", r)
+				result <- &aproto.GPUTopology{
+					UnknownReason: "NVML collection failed",
+					GPUs:          append([]aproto.GPUInfo(nil), inventory...),
+				}
+			}
+		}()
+		result <- collector(own)
+	}()
 
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
