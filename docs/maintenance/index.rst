@@ -7,4 +7,5 @@
 
    distribution
    dynamic-pools
+   resource-pool-access
    task-continuity
