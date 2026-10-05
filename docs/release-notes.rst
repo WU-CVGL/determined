@@ -15,22 +15,6 @@ Version 0.41.0
 
 **Release Date:** October 5, 2026
 
-**Breaking Changes**
-
--  Accounts: Users who change their own password or username must enter their current password.
-   Upgrade the CLI and the SDK, which ask for it.
-
--  API: ``POST /api/v1/users/{user_id}/password`` takes ``{"password": "...", "old_password":
-   "..."}`` instead of a bare JSON string.
-
--  Reverse proxies: Forward the browser's ``Host`` header unchanged, including the port, or list the
-   WebUI's address in ``security.csrf.trusted_origins``.
-
--  Generic tasks: Only generic tasks created with ``--pausable`` can be paused.
-
--  Resource pools: Dynamic pools with a saved spec follow the master's ``scheduler`` and
-   ``task_container_defaults`` from the next master start.
-
 **New Features**
 
 -  WebUI: Open a terminal in a running shell from the browser.
@@ -54,9 +38,15 @@ Version 0.41.0
 -  Generic tasks: Schedule generic tasks as job queue entries whose priority and weight persist
    across pause and master restarts.
 
+-  Generic tasks: Allow pausing only generic tasks created with ``--pausable``, because unpausing
+   runs the entrypoint again.
+
 -  Shells: Keep idle ``det shell open`` sessions connected through proxies.
 
 **Bug Fixes**
+
+-  Resource pools: Apply the master's ``scheduler`` and ``task_container_defaults`` to dynamic
+   pools, as to ``master.yaml`` pools.
 
 -  Agents: Keep an agent registered when it reconnects with a different device count or resource
    pool.
@@ -80,14 +70,15 @@ Version 0.41.0
    administrators.
 
 -  WebUI: Keep the session in an ``HttpOnly``, ``SameSite=Lax`` cookie instead of local storage, and
-   refuse cross-site requests that rely on it.
+   refuse cross-site requests that rely on it. Reverse proxies must forward the ``Host`` header.
+
+-  Accounts: Require the current password to change your own password or username, and revoke a
+   user's access tokens when their password changes. Upgrade the CLI and the SDK, which ask for it.
 
 -  API: Allow only a task, its owner, and administrators to make the task's reporting calls under
    ``/api/v1/allocations/{id}/``.
 
 -  Proxy: Remove Determined credentials from requests forwarded to task services.
-
--  Accounts: Revoke a user's access tokens when their password changes.
 
 See :ref:`generic tasks <generic-tasks>`, :ref:`browser terminals <shell-web-terminal>`,
 :doc:`dynamic resource pools <maintenance/dynamic-pools>`, and :doc:`upgrade with running tasks
