@@ -19,9 +19,9 @@
 
 -  Resource pools: An agent resource manager accepts ``resource_pools: []``, so that all of its
    pools can be dynamic pools. ``default_compute_resource_pool`` and ``default_aux_resource_pool``
-   may name dynamic pools, and the master logs a warning at startup when they name a pool that
-   exists neither in ``master.yaml`` nor as a dynamic pool. Omitting ``resource_pools`` adds a pool
-   named ``default``, as for any agent resource manager.
+   may name dynamic pools, and the master refuses to start when they name a pool that exists neither
+   in ``master.yaml`` nor as a dynamic pool. Omitting ``resource_pools`` adds a pool named
+   ``default``, as for any agent resource manager.
 
 **Improvements**
 

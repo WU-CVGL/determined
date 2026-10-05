@@ -1343,25 +1343,12 @@ func TestStartupRestoresAgentStateForAdoptedPoolRemovedFromYAML(t *testing.T) {
 	require.False(t, exists)
 }
 
-func TestDefaultPoolWarning(t *testing.T) {
+func TestDefaultPoolMustExist(t *testing.T) {
 	database, cleanup := db.MustResolveNewPostgresDatabase(t)
 	defer cleanup()
 	db.MustMigrateTestPostgres(t, database, "file://../../../static/migrations", "up")
 	ctx := context.Background()
 
-	logs := logrustest.NewGlobal()
-	t.Cleanup(logs.Reset)
-	defaultPoolWarnings := func() []string {
-		var warnings []string
-		for _, entry := range logs.AllEntries() {
-			if entry.Level == logrus.WarnLevel &&
-				strings.Contains(entry.Message, "neither configured in master.yaml nor saved") {
-				warnings = append(warnings, entry.Message)
-			}
-		}
-		logs.Reset()
-		return warnings
-	}
 	masterDefaults := *model.DefaultTaskContainerDefaults()
 	withDefaultPools := func(
 		rmConfig *config.ResourceManagerWithPoolsConfig, poolName string,
@@ -1371,14 +1358,22 @@ func TestDefaultPoolWarning(t *testing.T) {
 		return rmConfig
 	}
 
-	// A default pool that is no pool at all only warns.
+	// A default pool that is no pool at all stops startup.
 	rmConfig := withDefaultPools(testDynamicPoolRMConfig(42), "missing")
-	manager, err := New(ctx, database, echo.New(), rmConfig, nil, nil, &masterDefaults)
+	_, err := New(ctx, database, echo.New(), rmConfig, nil, nil, &masterDefaults)
+	require.EqualError(t, err, `resource pool "missing", set as default_compute_resource_pool `+
+		`and default_aux_resource_pool, is neither configured in master.yaml nor saved as a `+
+		`dynamic pool; create or adopt the pool, or set the default to an existing pool`)
+
+	// Only the aux default is missing.
+	rmConfig = testDynamicPoolRMConfig(42)
+	rmConfig.ResourceManager.AgentRM.DefaultAuxResourcePool = "missing-aux"
+	_, err = New(ctx, database, echo.New(), rmConfig, nil, nil, &masterDefaults)
+	require.ErrorContains(t, err, `resource pool "missing-aux", set as default_aux_resource_pool,`)
+
+	manager, err := New(ctx, database, echo.New(), testDynamicPoolRMConfig(42), nil, nil,
+		&masterDefaults)
 	require.NoError(t, err)
-	defer manager.stop()
-	require.Equal(t, []string{`resource pool "missing", set as default_compute_resource_pool ` +
-		`and default_aux_resource_pool, is neither configured in master.yaml nor saved as a ` +
-		`dynamic pool`}, defaultPoolWarnings())
 	manager.StopDynamicPoolWorker()
 	insertSpecDynamicPool(t, manager, "pending-operation", `{"pool_name":"pending"}`,
 		masterDefaults)
@@ -1387,11 +1382,9 @@ func TestDefaultPoolWarning(t *testing.T) {
 	// A dynamic pool, in any state, can be a default pool, even with no master.yaml pools.
 	rmConfig = withDefaultPools(testDynamicPoolRMConfig(42), "pending")
 	rmConfig.ResourcePools = []config.ResourcePoolConfig{}
-	logs.Reset()
 	manager, err = New(ctx, database, echo.New(), rmConfig, nil, nil, &masterDefaults)
 	require.NoError(t, err)
 	defer manager.stop()
-	require.Empty(t, defaultPoolWarnings())
 	pools, err := manager.GetResourcePools()
 	require.NoError(t, err)
 	require.Len(t, pools.ResourcePools, 1)

@@ -83,7 +83,10 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-	resourceManager.warnMissingDefaultPools()
+	if err := resourceManager.checkDefaultPools(); err != nil {
+		resourceManager.stop()
+		return nil, err
+	}
 	if err := resourceManager.markDynamicPoolsReady(
 		context.Background(), dynamicPools, masterDefaults,
 	); err != nil {
@@ -96,9 +99,11 @@ func New(
 	return resourceManager, nil
 }
 
-// warnMissingDefaultPools reports default pools that are neither master.yaml pools nor saved
-// dynamic pools in any state. Startup continues: a dynamic pool may still be created with the name.
-func (a *ResourceManager) warnMissingDefaultPools() {
+// checkDefaultPools refuses to start when a default pool is neither a master.yaml pool nor a saved
+// dynamic pool in any state. Tasks that name no pool would otherwise be accepted and then fail to
+// find their pool. A cluster without any pool yet can start with the resource_pools key omitted,
+// which adds the built-in pool that the defaults name unless they are set.
+func (a *ResourceManager) checkDefaultPools() error {
 	var names []string
 	settings := make(map[string][]string)
 	for _, pool := range []struct{ setting, name string }{
@@ -116,12 +121,20 @@ func (a *ResourceManager) warnMissingDefaultPools() {
 		}
 		settings[pool.name] = append(settings[pool.name], pool.setting)
 	}
+	if len(names) == 0 {
+		return nil
+	}
+	var problems []string
 	for _, name := range names {
-		a.syslog.Warnf(
+		problems = append(problems, fmt.Sprintf(
 			"resource pool %q, set as %s, is neither configured in master.yaml nor saved as a "+
 				"dynamic pool", name, strings.Join(settings[name], " and "),
-		)
+		))
 	}
+	return fmt.Errorf(
+		"%s; create or adopt the pool, or set the default to an existing pool",
+		strings.Join(problems, "; "),
+	)
 }
 
 // A ResourceManager manages many resource pools and routing requests for resources to them.

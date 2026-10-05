@@ -309,8 +309,12 @@ pool instead.
 
 `default_compute_resource_pool` and `default_aux_resource_pool` may name
 dynamic pools. When either names a pool that is neither configured in
-`master.yaml` nor saved as a dynamic pool in any state, the master logs a
-warning at startup and starts anyway.
+`master.yaml` nor saved as a dynamic pool in any state, the master refuses to
+start and names the setting: tasks that name no pool would otherwise be
+accepted and then fail to find their pool. To start a cluster before its first
+dynamic pool exists, omit the `resource_pools` key, which adds the built-in
+`default` pool that both defaults name unless they are set, create or adopt the
+pools, then point the defaults at them.
 
 An agent resource manager accepts `resource_pools: []`, so all of its pools
 can be dynamic pools. When the `resource_pools` key is omitted, the master
@@ -374,9 +378,9 @@ needs one master restart besides the upgrade.
    `Active` equal to `Revision` and no pending restart; that
    `det dev curl /api/v1/resource-pools` reports `defaultComputePool` and
    `defaultAuxPool` as `true` for the expected pools, which the WebUI cluster
-   page labels as default pools; that the master log has neither the "still
-   defined in master.yaml" warning nor a default-pool warning; and that agents
-   and running tasks are present in every pool.
+   page labels as default pools; that the master log has no "still defined in
+   master.yaml" warning; and that agents and running tasks are present in every
+   pool.
 8. Optionally, once a rollback is no longer needed, set `resource_pools: []` to
    drop the built-in `default` pool. Every agent must then set its
    `resource_pool`.
