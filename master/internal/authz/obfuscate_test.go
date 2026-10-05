@@ -82,6 +82,16 @@ func TestObfuscateAgentSlots(t *testing.T) {
 	}
 }
 
+func TestObfuscateAgentGPUTopology(t *testing.T) {
+	agent := &agentv1.Agent{
+		GpuTopology: &agentv1.GpuTopology{
+			Gpus: []*agentv1.GpuInfo{{DeviceId: 0, Uuid: "GPU-a", PciBusId: "0000:41:00.0"}},
+		},
+	}
+	require.NoError(t, ObfuscateAgent(agent))
+	require.Nil(t, agent.GpuTopology)
+}
+
 func TestObfuscateExperiments(t *testing.T) {
 	mustMarshalJSONString := func(v interface{}) string {
 		p, err := json.Marshal(v)

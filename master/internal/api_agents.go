@@ -14,6 +14,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/grpcutil"
 	"github.com/determined-ai/determined/master/internal/rm/rmerrors"
 	"github.com/determined-ai/determined/master/pkg/model"
+	"github.com/determined-ai/determined/proto/pkg/agentv1"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 )
 
@@ -49,6 +50,9 @@ func (a *apiServer) GetAgents(
 		}
 		if req.ExcludeSlots {
 			agent.Slots = nil
+			agent.GpuTopology = nil
+		} else {
+			classifyGPUHealth(agent.GpuTopology)
 		}
 		if req.ExcludeContainers {
 			agent.Containers = nil
@@ -81,7 +85,37 @@ func (a *apiServer) GetAgent(
 			return nil, err
 		}
 	}
+	classifyGPUHealth(resp.Agent.GetGpuTopology())
 	return resp, nil
+}
+
+// classifyGPUHealth sets the health of every GPU of an agent (H1). The first matching row wins:
+//   - ERROR: an NVML health call failed at the agent's last start;
+//   - LINK_BELOW_MAX: at agent start, the current and maximum link widths were both known and
+//     current < max;
+//   - OK: the topology is known, and at agent start both widths were known and equal;
+//   - UNKNOWN (unspecified): anything else.
+//
+// The link generation never changes the state, and an excluded GPU gets its own state by the same
+// rules. It is the only place the state is computed, so the CLI and the WebUI never disagree.
+func classifyGPUHealth(topo *agentv1.GpuTopology) {
+	if topo == nil {
+		return
+	}
+	known := topo.UnknownReason == ""
+	for _, g := range topo.Gpus {
+		widthsKnown := g.PcieLinkWidth > 0 && g.PcieLinkWidthMax > 0
+		switch {
+		case g.NvmlError != "":
+			g.Health = agentv1.GpuHealth_GPU_HEALTH_ERROR
+		case widthsKnown && g.PcieLinkWidth < g.PcieLinkWidthMax:
+			g.Health = agentv1.GpuHealth_GPU_HEALTH_LINK_BELOW_MAX
+		case known && widthsKnown && g.PcieLinkWidth == g.PcieLinkWidthMax:
+			g.Health = agentv1.GpuHealth_GPU_HEALTH_OK
+		default:
+			g.Health = agentv1.GpuHealth_GPU_HEALTH_UNSPECIFIED
+		}
+	}
 }
 
 func (a *apiServer) GetSlots(
@@ -158,7 +192,11 @@ func (a *apiServer) EnableAgent(
 	if err := a.canUpdateAgents(ctx); err != nil {
 		return nil, err
 	}
-	return a.m.rm.EnableAgent(req)
+	resp, err = a.m.rm.EnableAgent(req)
+	if err == nil {
+		classifyGPUHealth(resp.GetAgent().GetGpuTopology())
+	}
+	return resp, err
 }
 
 func (a *apiServer) DisableAgent(
@@ -167,7 +205,11 @@ func (a *apiServer) DisableAgent(
 	if err := a.canUpdateAgents(ctx); err != nil {
 		return nil, err
 	}
-	return a.m.rm.DisableAgent(req)
+	resp, err = a.m.rm.DisableAgent(req)
+	if err == nil {
+		classifyGPUHealth(resp.GetAgent().GetGpuTopology())
+	}
+	return resp, err
 }
 
 func (a *apiServer) EnableSlot(

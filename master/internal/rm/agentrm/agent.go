@@ -768,6 +768,7 @@ func (a *agent) summarize() model.AgentSummary {
 		result.Enabled = a.agentState.enabled
 		result.Draining = a.agentState.draining
 		result.NumContainers = len(a.agentState.containerAllocation)
+		result.GPUTopology = a.agentState.gpuTopologyProto()
 	}
 
 	return result

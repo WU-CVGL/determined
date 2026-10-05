@@ -22,6 +22,8 @@ type AgentSummary struct {
 	Enabled        bool         `json:"enabled"`
 	Draining       bool         `json:"draining"`
 	Version        string       `json:"version"`
+	// GPUTopology is nil for agents with neither CUDA slots nor excluded GPUs.
+	GPUTopology *agentv1.GpuTopology `json:"gpu_topology,omitempty"`
 }
 
 type slotStats map[string]*agentv1.DeviceStats
@@ -95,6 +97,7 @@ func (a AgentSummary) ToProto() *agentv1.Agent {
 		Enabled:        a.Enabled,
 		Draining:       a.Draining,
 		Version:        a.Version,
+		GpuTopology:    a.GPUTopology,
 	}
 }
 
