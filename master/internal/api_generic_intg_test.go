@@ -6,10 +6,13 @@ package internal
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -17,6 +20,7 @@ import (
 
 	apiPkg "github.com/determined-ai/determined/master/internal/api"
 	authz2 "github.com/determined-ai/determined/master/internal/authz"
+	"github.com/determined-ai/determined/master/internal/command"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/mocks"
 	"github.com/determined-ai/determined/master/internal/project"
@@ -912,4 +916,138 @@ func TestKillPausedGenericTaskCancelsTree(t *testing.T) {
 	require.Equal(t, model.TaskStateCanceled, *got.State)
 	require.NotNil(t, got.EndTime)
 	require.False(t, service.running[childAllocation], "the running child was not killed")
+}
+
+// addGenericTaskInProjectForTest persists an active generic task in a project, with a name and a
+// slot count. A nil slot count leaves resources.slots out of the stored spec.
+func addGenericTaskInProjectForTest(
+	ctx context.Context, t *testing.T, owner model.User, workspaceID, projectID int, name string,
+	slots *int,
+) model.TaskID {
+	t.Helper()
+	taskID := addGenericTaskForAuthZTest(ctx, t, owner, workspaceID, nil, model.TaskStateActive)
+	allocationID, spec, err := getGenericTaskSpec(ctx, taskID)
+	require.NoError(t, err)
+	spec.ProjectID = projectID
+	spec.GenericTaskConfig.Name = name
+	spec.GenericTaskConfig.Resources.RawSlots = slots
+	require.NoError(t, persistGenericTaskSpec(ctx, taskID, *spec, model.AllocationID(allocationID)))
+	return taskID
+}
+
+func TestGetGenericTasksFiltersByProjectSearchAndSlots(t *testing.T) {
+	api, owner, ctx := setupAPITest(t, nil)
+	workspaceID, projectID := createProjectAndWorkspace(ctx, t, api)
+	otherWorkspaceID, otherProjectID := createProjectAndWorkspace(ctx, t, api)
+
+	name := "Sweep-ALPHA-" + uuid.NewString()
+	gpu := addGenericTaskInProjectForTest(ctx, t, owner, workspaceID, projectID, name, ptrs.Ptr(2))
+	cpu := addGenericTaskInProjectForTest(ctx, t, owner, workspaceID, projectID, "", ptrs.Ptr(0))
+	noSlots := addGenericTaskInProjectForTest(ctx, t, owner, workspaceID, projectID, "", nil)
+	elsewhere := addGenericTaskInProjectForTest(
+		ctx, t, owner, otherWorkspaceID, otherProjectID, "", ptrs.Ptr(1))
+
+	list := func(req *apiv1.GetGenericTasksRequest) []string {
+		t.Helper()
+		resp, err := api.GetGenericTasks(ctx, req)
+		require.NoError(t, err)
+		out := []string{}
+		for _, task := range resp.Tasks {
+			out = append(out, task.TaskId)
+		}
+		return out
+	}
+	ids := func(taskIDs ...model.TaskID) []string {
+		out := []string{}
+		for _, id := range taskIDs {
+			out = append(out, id.String())
+		}
+		return out
+	}
+
+	// The filters read the stored spec by its Go field names: the spec has no JSON tags.
+	var storedProject int
+	var storedSlots *string
+	require.NoError(t, db.Bun().NewSelect().Table("command_state").
+		ColumnExpr("(generic_task_spec->>'ProjectID')::int").
+		ColumnExpr("generic_task_spec->'GenericTaskConfig'->'resources'->>'slots'").
+		Where("task_id = ?", gpu).Scan(ctx, &storedProject, &storedSlots))
+	require.Equal(t, projectID, storedProject)
+	require.Equal(t, "2", *storedSlots)
+	var hasSlots bool
+	require.NoError(t, db.Bun().NewSelect().Table("command_state").
+		ColumnExpr("jsonb_exists(generic_task_spec->'GenericTaskConfig'->'resources', 'slots')").
+		Where("task_id = ?", noSlots).Scan(ctx, &hasSlots))
+	require.False(t, hasSlots)
+
+	// Project.
+	pid := int32(projectID)
+	require.ElementsMatch(t, ids(gpu, cpu, noSlots), list(&apiv1.GetGenericTasksRequest{ProjectId: pid}))
+	require.Equal(t, ids(elsewhere),
+		list(&apiv1.GetGenericTasksRequest{ProjectId: int32(otherProjectID)}))
+	require.Empty(t, list(&apiv1.GetGenericTasksRequest{
+		ProjectId: pid, WorkspaceId: int32(otherWorkspaceID),
+	}))
+	_, err := api.GetGenericTasks(ctx, &apiv1.GetGenericTasksRequest{ProjectId: 1 << 30})
+	require.Equal(t, apiPkg.NotFoundErrs("project", strconv.Itoa(1<<30), true).Error(), err.Error())
+
+	// Search: the shown name, or the task ID, ignoring case.
+	require.Equal(t, ids(gpu), list(&apiv1.GetGenericTasksRequest{Search: strings.ToLower(name)}))
+	require.ElementsMatch(t, ids(cpu, noSlots), list(&apiv1.GetGenericTasksRequest{
+		ProjectId: pid, Search: "generic task",
+	}))
+	require.Equal(t, ids(cpu), list(&apiv1.GetGenericTasksRequest{
+		Search: strings.ToUpper(cpu.String()[9:23]),
+	}))
+	require.Empty(t, list(&apiv1.GetGenericTasksRequest{Search: "no such task " + uuid.NewString()}))
+
+	// Slots. A spec without a slot count counts as 0 slots, which is what its slots field reads.
+	require.Equal(t, ids(gpu), list(&apiv1.GetGenericTasksRequest{
+		ProjectId: pid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_GPU,
+	}))
+	require.ElementsMatch(t, ids(cpu, noSlots), list(&apiv1.GetGenericTasksRequest{
+		ProjectId: pid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_CPU_ONLY,
+	}))
+	resp, err := api.GetGenericTasks(ctx, &apiv1.GetGenericTasksRequest{TaskIds: ids(noSlots)})
+	require.NoError(t, err)
+	require.Len(t, resp.Tasks, 1)
+	require.Equal(t, int32(0), resp.Tasks[0].Slots)
+
+	// Paging counts only the matching tasks.
+	resp, err = api.GetGenericTasks(ctx, &apiv1.GetGenericTasksRequest{
+		ProjectId: pid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_CPU_ONLY, Limit: 1,
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Tasks, 1)
+	require.Equal(t, int32(2), resp.Pagination.Total)
+	resp, err = api.GetGenericTasks(ctx, &apiv1.GetGenericTasksRequest{
+		ProjectId: pid, Search: "generic task", Offset: 1,
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Tasks, 1)
+	require.Equal(t, int32(2), resp.Pagination.Total)
+
+	_, err = api.GetGenericTasks(ctx, &apiv1.GetGenericTasksRequest{SlotsFilter: 99})
+	require.Equal(t, codes.InvalidArgument, status.Code(err), "%v", err)
+}
+
+func TestGetGenericTasksChecksProjectView(t *testing.T) {
+	api, projectAuthZ, _, curUser, ctx := setupProjectAuthZTest(t, nil)
+	_, projectID := createProjectAndWorkspace(ctx, t, api)
+	nscAuthZ := &mocks.NSCAuthZ{}
+	nscAuthZ.Test(t)
+	command.AuthZProvider.RegisterOverride("mock", nscAuthZ)
+	t.Cleanup(func() {
+		if authZNSC != nil {
+			command.AuthZProvider.RegisterOverride("mock", authZNSC)
+		}
+	})
+
+	// A project the user can't view is not found, before any task is looked at.
+	projectAuthZ.On("CanGetProject", mock.Anything, curUser, mock.Anything).
+		Return(authz2.PermissionDeniedError{}).Once()
+	_, err := api.GetGenericTasks(ctx, &apiv1.GetGenericTasksRequest{ProjectId: int32(projectID)})
+	require.Error(t, err)
+	require.Equal(t, apiPkg.NotFoundErrs("project", strconv.Itoa(projectID), true).Error(), err.Error())
+	nscAuthZ.AssertNotCalled(t, "AccessibleScopes", mock.Anything, mock.Anything, mock.Anything)
 }

@@ -10,6 +10,7 @@ import "protoc-gen-swagger/options/annotations.proto";
 
 import "determined/api/v1/command.proto";
 import "determined/api/v1/pagination.proto";
+import "determined/api/v1/slots_filter.proto";
 import "determined/common/v1/common.proto";
 import "determined/checkpoint/v1/checkpoint.proto";
 import "determined/metric/v1/metric.proto";
@@ -125,6 +126,12 @@ message GetExperimentsRequest {
   determined.common.v1.Int32FieldFilter experiment_id_filter = 13;
   // whether to surface trial specific data from the best trial
   bool show_trial_data = 14;
+  // Limit experiments to those in projects of this workspace, or 0 for all
+  // workspaces.
+  int32 workspace_id = 100;
+  // Limit experiments to those that ask for slots (GPU) or for none (CPU
+  // only), by resources.slots_per_trial.
+  SlotsFilter slots_filter = 101;
 }
 // Response to GetExperimentsRequest.
 message GetExperimentsResponse {

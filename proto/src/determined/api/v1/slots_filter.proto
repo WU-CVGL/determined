@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package determined.api.v1;
+option go_package = "github.com/determined-ai/determined/proto/pkg/apiv1";
+
+// Filter workloads by whether they ask for slots. A slot is a GPU, or a CPU on
+// an agent configured with slot_type cpu.
+enum SlotsFilter {
+  // No filter.
+  SLOTS_FILTER_UNSPECIFIED = 0;
+  // Workloads that ask for at least one slot: experiments with a
+  // resources.slots_per_trial above 0, other tasks with a resources.slots
+  // above 0.
+  SLOTS_FILTER_GPU = 1;
+  // Workloads that ask for no slots (resources.slots_per_trial or
+  // resources.slots of 0).
+  SLOTS_FILTER_CPU_ONLY = 2;
+}

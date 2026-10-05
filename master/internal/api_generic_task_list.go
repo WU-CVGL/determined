@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -40,8 +41,13 @@ type genericTaskListRow struct {
 	Spec         *tasks.GenericTaskSpec `bun:"generic_task_spec"`
 }
 
-// GetGenericTasks lists generic tasks, newest first, filtered by owner, workspace, state or
-// parent, among those in workspaces the user may view.
+// genericTaskSlotsExpr is the slot count a generic task asks for. Creating a task always
+// stores it; a spec without one counts as 0 slots, as the task's slots field reports it.
+const genericTaskSlotsExpr = "COALESCE((cs.generic_task_spec->'GenericTaskConfig'" +
+	"->'resources'->>'slots')::int, 0)"
+
+// GetGenericTasks lists generic tasks, newest first, filtered by owner, workspace, project,
+// state, parent, name or slot use, among those in workspaces the user may view.
 func (a *apiServer) GetGenericTasks(
 	ctx context.Context, req *apiv1.GetGenericTasksRequest,
 ) (*apiv1.GetGenericTasksResponse, error) {
@@ -54,6 +60,11 @@ func (a *apiServer) GetGenericTasks(
 	}
 	if req.WorkspaceId != 0 {
 		if _, err := a.GetWorkspaceByID(ctx, req.WorkspaceId, *curUser, false); err != nil {
+			return nil, err
+		}
+	}
+	if req.ProjectId != 0 {
+		if _, err := a.GetProjectByID(ctx, req.ProjectId, *curUser); err != nil {
 			return nil, err
 		}
 	}
@@ -100,12 +111,26 @@ func (a *apiServer) GetGenericTasks(
 	if len(req.TaskIds) > 0 {
 		query = query.Where("t.task_id IN (?)", bun.In(req.TaskIds))
 	}
+	if req.ProjectId != 0 {
+		// The spec has no JSON tags, so its keys are the Go field names.
+		query = query.Where("(cs.generic_task_spec->>'ProjectID')::int = ?", req.ProjectId)
+	}
+	switch req.SlotsFilter {
+	case apiv1.SlotsFilter_SLOTS_FILTER_UNSPECIFIED:
+	case apiv1.SlotsFilter_SLOTS_FILTER_GPU:
+		query = query.Where(genericTaskSlotsExpr + " > 0")
+	case apiv1.SlotsFilter_SLOTS_FILTER_CPU_ONLY:
+		query = query.Where(genericTaskSlotsExpr + " <= 0")
+	default:
+		return nil, status.Errorf(codes.InvalidArgument, "invalid slots filter %s", req.SlotsFilter)
+	}
 
 	var rows []genericTaskListRow
 	if err := query.Scan(ctx, &rows); err != nil {
 		return nil, err
 	}
 
+	search := strings.ToLower(req.Search)
 	resp := &apiv1.GetGenericTasksResponse{Tasks: make([]*taskv1.GenericTask, 0, len(rows))}
 	for _, row := range rows {
 		if row.Spec == nil || !scopes[model.AccessScopeID(row.Spec.WorkspaceID)] {
@@ -114,7 +139,13 @@ func (a *apiServer) GetGenericTasks(
 		if req.WorkspaceId != 0 && int32(row.Spec.WorkspaceID) != req.WorkspaceId {
 			continue
 		}
-		resp.Tasks = append(resp.Tasks, row.toProto())
+		task := row.toProto()
+		// The name shown for a task without one is made from its ID, so search what clients see.
+		if search != "" && !strings.Contains(strings.ToLower(task.Name), search) &&
+			!strings.Contains(strings.ToLower(task.TaskId), search) {
+			continue
+		}
+		resp.Tasks = append(resp.Tasks, task)
 	}
 	return resp, api.Paginate(&resp.Pagination, &resp.Tasks, req.Offset, req.Limit)
 }
