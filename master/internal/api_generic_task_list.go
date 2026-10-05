@@ -47,7 +47,7 @@ const genericTaskSlotsExpr = "COALESCE((cs.generic_task_spec->'GenericTaskConfig
 	"->'resources'->>'slots')::int, 0)"
 
 // GetGenericTasks lists generic tasks, newest first, filtered by owner, workspace, project,
-// state, parent, name or slot use, among those in workspaces the user may view.
+// state, parent, name or slot count, among those in workspaces the user may view.
 func (a *apiServer) GetGenericTasks(
 	ctx context.Context, req *apiv1.GetGenericTasksRequest,
 ) (*apiv1.GetGenericTasksResponse, error) {
@@ -117,9 +117,9 @@ func (a *apiServer) GetGenericTasks(
 	}
 	switch req.SlotsFilter {
 	case apiv1.SlotsFilter_SLOTS_FILTER_UNSPECIFIED:
-	case apiv1.SlotsFilter_SLOTS_FILTER_GPU:
+	case apiv1.SlotsFilter_SLOTS_FILTER_HAS_SLOTS:
 		query = query.Where(genericTaskSlotsExpr + " > 0")
-	case apiv1.SlotsFilter_SLOTS_FILTER_CPU_ONLY:
+	case apiv1.SlotsFilter_SLOTS_FILTER_ZERO_SLOTS:
 		query = query.Where(genericTaskSlotsExpr + " <= 0")
 	default:
 		return nil, status.Errorf(codes.InvalidArgument, "invalid slots filter %s", req.SlotsFilter)

@@ -648,9 +648,9 @@ func (a *apiServer) GetExperiments(
 	}
 	switch req.SlotsFilter {
 	case apiv1.SlotsFilter_SLOTS_FILTER_UNSPECIFIED:
-	case apiv1.SlotsFilter_SLOTS_FILTER_GPU:
+	case apiv1.SlotsFilter_SLOTS_FILTER_HAS_SLOTS:
 		query = query.Where(experimentSlotsPerTrialExpr + " > 0")
-	case apiv1.SlotsFilter_SLOTS_FILTER_CPU_ONLY:
+	case apiv1.SlotsFilter_SLOTS_FILTER_ZERO_SLOTS:
 		query = query.Where(experimentSlotsPerTrialExpr + " <= 0")
 	default:
 		return nil, status.Errorf(codes.InvalidArgument, "invalid slots filter %s", req.SlotsFilter)

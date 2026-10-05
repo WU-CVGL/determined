@@ -2690,19 +2690,19 @@ func TestGetExperimentsFiltersByWorkspaceAndSlots(t *testing.T) {
 			RawResources: &expconf.ResourcesConfig{RawSlotsPerTrial: ptrs.Ptr(slots)},
 		}, minExpConfig))
 	}
-	gpu := createTestExpWithActiveConfig(t, api, curUser, projectID, withSlotsPerTrial(2))
-	cpu := createTestExpWithActiveConfig(
+	twoSlots := createTestExpWithActiveConfig(t, api, curUser, projectID, withSlotsPerTrial(2))
+	zeroSlots := createTestExpWithActiveConfig(
 		t, api, curUser, int(sameWorkspaceProject.Project.Id), withSlotsPerTrial(0))
-	// A config without resources.slots_per_trial has the default of 1.
-	noSlots := createTestExpWithProjectID(t, api, curUser, projectID)
+	// A config without resources.slots_per_trial has the default of 1, so it has slots.
+	unsetSlots := createTestExpWithProjectID(t, api, curUser, projectID)
 	_, err = db.Bun().NewRaw(
 		"UPDATE experiments SET config = config #- '{resources,slots_per_trial}' WHERE id = ?",
-		noSlots.ID).Exec(ctx)
+		unsetSlots.ID).Exec(ctx)
 	require.NoError(t, err)
 	var hasSlots bool
 	require.NoError(t, db.Bun().NewRaw(
 		"SELECT jsonb_exists(config->'resources', 'slots_per_trial') FROM experiments WHERE id = ?",
-		noSlots.ID).Scan(ctx, &hasSlots))
+		unsetSlots.ID).Scan(ctx, &hasSlots))
 	require.False(t, hasSlots)
 	createTestExpWithProjectID(t, api, curUser, otherProjectID)
 
@@ -2726,8 +2726,9 @@ func TestGetExperimentsFiltersByWorkspaceAndSlots(t *testing.T) {
 
 	// Workspace: every project in it, no other workspace.
 	wid := int32(workspaceID)
-	require.ElementsMatch(t, ids(gpu, cpu, noSlots), list(&apiv1.GetExperimentsRequest{WorkspaceId: wid}))
-	require.Equal(t, ids(cpu), list(&apiv1.GetExperimentsRequest{
+	require.ElementsMatch(t, ids(twoSlots, zeroSlots, unsetSlots),
+		list(&apiv1.GetExperimentsRequest{WorkspaceId: wid}))
+	require.Equal(t, ids(zeroSlots), list(&apiv1.GetExperimentsRequest{
 		WorkspaceId: wid, ProjectId: sameWorkspaceProject.Project.Id,
 	}))
 	require.Empty(t, list(&apiv1.GetExperimentsRequest{
@@ -2736,21 +2737,21 @@ func TestGetExperimentsFiltersByWorkspaceAndSlots(t *testing.T) {
 	_, err = api.GetExperiments(ctx, &apiv1.GetExperimentsRequest{WorkspaceId: 1 << 30})
 	require.Equal(t, apiPkg.NotFoundErrs("workspace", strconv.Itoa(1<<30), true).Error(), err.Error())
 
-	// Slots per trial.
-	require.ElementsMatch(t, ids(gpu, noSlots), list(&apiv1.GetExperimentsRequest{
-		WorkspaceId: wid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_GPU,
+	// Slot count per trial: HAS_SLOTS is above 0, the unset default of 1 included; ZERO_SLOTS is 0.
+	require.ElementsMatch(t, ids(twoSlots, unsetSlots), list(&apiv1.GetExperimentsRequest{
+		WorkspaceId: wid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_HAS_SLOTS,
 	}))
-	require.Equal(t, ids(cpu), list(&apiv1.GetExperimentsRequest{
-		WorkspaceId: wid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_CPU_ONLY,
+	require.Equal(t, ids(zeroSlots), list(&apiv1.GetExperimentsRequest{
+		WorkspaceId: wid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_ZERO_SLOTS,
 	}))
-	require.Equal(t, ids(cpu), list(&apiv1.GetExperimentsRequest{
-		ExperimentIdFilter: &commonv1.Int32FieldFilter{Incl: ids(gpu, cpu, noSlots)},
-		SlotsFilter:        apiv1.SlotsFilter_SLOTS_FILTER_CPU_ONLY,
+	require.Equal(t, ids(zeroSlots), list(&apiv1.GetExperimentsRequest{
+		ExperimentIdFilter: &commonv1.Int32FieldFilter{Incl: ids(twoSlots, zeroSlots, unsetSlots)},
+		SlotsFilter:        apiv1.SlotsFilter_SLOTS_FILTER_ZERO_SLOTS,
 	}))
 
 	// Paging counts only the matching experiments.
 	resp, err := api.GetExperiments(ctx, &apiv1.GetExperimentsRequest{
-		WorkspaceId: wid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_GPU, Limit: 1,
+		WorkspaceId: wid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_HAS_SLOTS, Limit: 1,
 	})
 	require.NoError(t, err)
 	require.Len(t, resp.Experiments, 1)

@@ -392,7 +392,8 @@ message GetGenericTasksRequest {
   // Limit tasks to those whose name or task ID contains this text, ignoring
   // case.
   string search = 10;
-  // Limit tasks to those that ask for slots (GPU) or for none (CPU only).
+  // Limit tasks by the slot count they request (resources.slots): at least
+  // one slot, or none.
   SlotsFilter slots_filter = 11;
 }
 // Response to GetGenericTasksRequest.
