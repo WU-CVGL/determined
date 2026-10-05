@@ -378,22 +378,29 @@ describe('Dashboard', () => {
       ).toBeTruthy();
     });
 
-    it('opens the shell launch form with permission to launch', async () => {
-      vi.mocked(usePermissions).mockImplementation(
-        () =>
-          ({
-            canCreateNSC: true,
-            canCreateTemplateWorkspace: () => false,
-            canCreateWorkspaceNSC: () => true,
-          }) as unknown as ReturnType<typeof usePermissions>,
-      );
-      setup();
+    it.each([
+      ['Launch Shell', 'Shell'],
+      ['Launch JupyterLab', 'JupyterLab'],
+    ])(
+      '"%s" opens the launch form with %s selected, with permission to launch',
+      async (button, type) => {
+        vi.mocked(usePermissions).mockImplementation(
+          () =>
+            ({
+              canCreateNSC: true,
+              canCreateTemplateWorkspace: () => false,
+              canCreateWorkspaceNSC: () => true,
+            }) as unknown as ReturnType<typeof usePermissions>,
+        );
+        setup();
 
-      const shell = await screen.findByRole('button', { name: 'Launch Shell' });
-      expect(shell).toBeEnabled();
-      await userEvent.click(shell);
-      expect(await screen.findByText('Start from')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Launch' })).toBeInTheDocument();
-    });
+        const entry = await screen.findByRole('button', { name: button });
+        expect(entry).toBeEnabled();
+        await userEvent.click(entry);
+        expect(await screen.findByText('Start from')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Launch' })).toBeInTheDocument();
+        expect(screen.getByRole('radio', { name: type })).toBeChecked();
+      },
+    );
   });
 });

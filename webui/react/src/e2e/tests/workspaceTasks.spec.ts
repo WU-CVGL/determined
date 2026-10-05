@@ -14,9 +14,12 @@ test.describe('Workspace Tasks', () => {
       await workspaceDetails.tasksTab.pwLocator.click();
 
       await workspaceDetails.taskList.jupyterLabButton.pwLocator.click();
-      await workspaceDetails.taskList.jupyterLabModal.pwLocator.waitFor();
-      await workspaceDetails.taskList.jupyterLabModal.footer.submit.pwLocator.click();
-      await workspaceDetails.taskList.jupyterLabModal.pwLocator.waitFor({ state: 'hidden' });
+      await workspaceDetails.taskList.launchModal.pwLocator.waitFor();
+      await expect(
+        workspaceDetails.taskList.launchModal.typeSelect.jupyterLab.pwLocator,
+      ).toHaveClass(/ant-radio-button-wrapper-checked/);
+      await workspaceDetails.taskList.launchModal.footer.submit.pwLocator.click();
+      await workspaceDetails.taskList.launchModal.pwLocator.waitFor({ state: 'hidden' });
 
       const jupyterLabPage = await context.waitForEvent('page', { timeout: 10_000 });
       await jupyterLabPage.close();

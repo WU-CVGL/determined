@@ -3,7 +3,7 @@ import { BaseReactFragment } from 'playwright-page-model-base/BaseReactFragment'
 
 import { Modal } from 'e2e/models/common/ant/Modal';
 import { DropdownMenu } from 'e2e/models/common/hew/Dropdown';
-import { JupyterLabModal } from 'e2e/models/components/JupyterLabModal';
+import { NtscLaunchModal } from 'e2e/models/components/NtscLaunchModal';
 import { HeadRow, InteractiveTable, Row } from 'e2e/models/components/Table/InteractiveTable';
 import { TaskAction } from 'types';
 
@@ -51,8 +51,12 @@ export class TaskList extends BaseReactFragment {
     parent: this,
     selector: '[data-testid="jupyter-lab-button"]',
   });
-  readonly jupyterLabModal = new JupyterLabModal({
+  readonly launchModal = new NtscLaunchModal({
     root: this.root,
+  });
+  readonly shellButton = new BaseComponent({
+    parent: this,
+    selector: '[data-testid="shell-button"]',
   });
   readonly table = new InteractiveTable({
     parent: this,

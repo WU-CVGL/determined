@@ -1,39 +1,27 @@
 import Button from 'hew/Button';
-import { useModal } from 'hew/Modal';
 import Tooltip from 'hew/Tooltip';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback } from 'react';
 
-import ShellLaunchedModalComponent from 'components/ShellLaunchedModal';
-import ShellModalComponent from 'components/ShellModal';
-import { CommandResponse, Workspace } from 'types';
+import { useLaunchForm } from 'hooks/useLaunchForm';
+import { CommandType, Workspace } from 'types';
 
 interface Props {
   enabled?: boolean;
   workspace?: Workspace;
 }
 
+/** Opens the launch form with Shell selected. */
 const ShellButton: React.FC<Props> = ({ enabled, workspace }: Props) => {
-  const ShellModal = useModal(ShellModalComponent);
-  const ShellLaunchedModal = useModal(ShellLaunchedModalComponent);
-  const [launched, setLaunched] = useState<CommandResponse>();
+  const { launchFormModals, openLaunchForm } = useLaunchForm({ workspace });
 
-  const openShellLaunched = ShellLaunchedModal.open;
-
-  const handleLaunched = useCallback(
-    (response: CommandResponse) => {
-      setLaunched(response);
-      openShellLaunched();
-    },
-    [openShellLaunched],
-  );
+  const handleClick = useCallback(() => openLaunchForm(CommandType.Shell), [openLaunchForm]);
 
   return (
     <div data-testid="shell-button">
       {enabled ? (
         <>
-          <Button onClick={ShellModal.open}>Launch Shell</Button>
-          <ShellModal.Component workspace={workspace} onLaunched={handleLaunched} />
-          {launched && <ShellLaunchedModal.Component response={launched} />}
+          <Button onClick={handleClick}>Launch Shell</Button>
+          {launchFormModals}
         </>
       ) : (
         <Tooltip content="You do not have permission to launch a shell" placement="leftBottom">

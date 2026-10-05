@@ -1,21 +1,19 @@
-import { useModal } from 'hew/Modal';
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 
-import JupyterLabModalComponent from 'components/JupyterLabModal';
-import ShellLaunchedModalComponent from 'components/ShellLaunchedModal';
-import ShellModalComponent from 'components/ShellModal';
-import { CommandResponse, CommandTask, CommandType, Workspace } from 'types';
+import { useLaunchForm } from 'hooks/useLaunchForm';
+import { CommandTask, Workspace } from 'types';
+import { isNtscLaunchType } from 'utils/ntscConfig';
 
 interface Return {
-  /** Opens the launch form of a shell or JupyterLab, starting from that task's config. */
+  /** Opens the launch form with the task's type selected, starting from that task's config. */
   launchAgain: (task: CommandTask) => void;
-  /** The launch forms and the shell's launch result; render them once next to the list. */
+  /** The launch form and the shell's launch result; render them once next to the list. */
   launchAgainModals: React.ReactNode;
 }
 
 /**
- * "Launch Again" for task lists: the forms that the task action menu's Launch Again opens, and
- * the result shown after a shell launch.
+ * "Launch Again" for task lists: the launch form that the task action menu's Launch Again opens
+ * (the same form as Launch JupyterLab and Launch Shell), and the result shown after a shell launch.
  */
 export const useLaunchAgain = ({
   onLaunched,
@@ -25,54 +23,17 @@ export const useLaunchAgain = ({
   onLaunched?: () => void;
   workspace?: Workspace;
 }): Return => {
-  const JupyterLabAgainModal = useModal(JupyterLabModalComponent);
-  const ShellAgainModal = useModal(ShellModalComponent);
-  const ShellLaunchedModal = useModal(ShellLaunchedModalComponent);
-  const [launchAgainTask, setLaunchAgainTask] = useState<CommandTask>();
-  const [launchedShell, setLaunchedShell] = useState<CommandResponse>();
-  const openJupyterLabAgain = JupyterLabAgainModal.open;
-  const openShellAgain = ShellAgainModal.open;
-  const openShellLaunched = ShellLaunchedModal.open;
+  const { launchFormModals, openLaunchForm } = useLaunchForm({
+    onShellLaunched: onLaunched,
+    workspace,
+  });
 
   const launchAgain = useCallback(
     (task: CommandTask) => {
-      setLaunchAgainTask(task);
-      if (task.type === CommandType.Shell) openShellAgain();
-      else if (task.type === CommandType.JupyterLab) openJupyterLabAgain();
+      if (isNtscLaunchType(task.type)) openLaunchForm(task.type, task);
     },
-    [openJupyterLabAgain, openShellAgain],
+    [openLaunchForm],
   );
 
-  const handleShellLaunched = useCallback(
-    (response: CommandResponse) => {
-      setLaunchedShell(response);
-      openShellLaunched();
-      onLaunched?.();
-    },
-    [onLaunched, openShellLaunched],
-  );
-
-  return {
-    launchAgain,
-    launchAgainModals: (
-      <>
-        {launchAgainTask?.type === CommandType.JupyterLab && (
-          <JupyterLabAgainModal.Component
-            initialTask={launchAgainTask}
-            key={launchAgainTask.id}
-            workspace={workspace}
-          />
-        )}
-        {launchAgainTask?.type === CommandType.Shell && (
-          <ShellAgainModal.Component
-            initialTask={launchAgainTask}
-            key={launchAgainTask.id}
-            workspace={workspace}
-            onLaunched={handleShellLaunched}
-          />
-        )}
-        {launchedShell && <ShellLaunchedModal.Component response={launchedShell} />}
-      </>
-    ),
-  };
+  return { launchAgain, launchAgainModals: launchFormModals };
 };

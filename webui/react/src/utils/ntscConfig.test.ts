@@ -1,8 +1,12 @@
 import { cloneDeep } from 'lodash';
 
+import { CommandType } from 'types';
+
 import {
+  configForLaunchType,
   configFromForm,
   formFieldsFromConfig,
+  isNtscLaunchType,
   minimalDiff,
   redactSensitiveEnv,
   sanitizeConfig,
@@ -103,6 +107,36 @@ describe('ntscConfig', () => {
     it('keeps a description from the form or a template', () => {
       expect(toShellConfig({ description: 'debug box' }).description).toBe('debug box');
     });
+  });
+
+  describe('configForLaunchType', () => {
+    it('drops the name the master generated for the other type', () => {
+      const notebook = { description: 'JupyterLab (kindly-quick-heron)', idle_timeout: '30m' };
+      expect(configForLaunchType(notebook, CommandType.Shell)).toEqual({ idle_timeout: '30m' });
+      expect(
+        configForLaunchType({ description: 'Shell (lively-calm-fox)' }, CommandType.JupyterLab),
+      ).toEqual({});
+      // The input is not changed.
+      expect(notebook.description).toBe('JupyterLab (kindly-quick-heron)');
+    });
+
+    it('keeps the name of the same type and any name given by the user', () => {
+      const shell = { description: 'Shell (lively-calm-fox)' };
+      expect(configForLaunchType(shell, CommandType.Shell)).toBe(shell);
+      const notebook = { description: 'JupyterLab (kindly-quick-heron)' };
+      expect(configForLaunchType(notebook, CommandType.JupyterLab)).toBe(notebook);
+      expect(configForLaunchType({ description: 'debug box' }, CommandType.Shell)).toEqual({
+        description: 'debug box',
+      });
+      expect(configForLaunchType({}, CommandType.JupyterLab)).toEqual({});
+    });
+  });
+
+  it('tells the launch form’s task types from the others', () => {
+    expect(isNtscLaunchType(CommandType.JupyterLab)).toBe(true);
+    expect(isNtscLaunchType(CommandType.Shell)).toBe(true);
+    expect(isNtscLaunchType(CommandType.Command)).toBe(false);
+    expect(isNtscLaunchType(CommandType.TensorBoard)).toBe(false);
   });
 
   describe('templateFromConfig', () => {

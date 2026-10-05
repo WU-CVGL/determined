@@ -198,9 +198,9 @@ const setup = async (props: Partial<Props> = {}) => {
       <UIProvider theme={DefaultTheme.Light}>
         <ThemeProvider>
           <ModalTrigger
-            type={CommandType.Shell}
+            initialType={CommandType.Shell}
             workspace={WORKSPACE}
-            onLaunched={onLaunched}
+            onShellLaunched={onLaunched}
             {...props}
           />
         </ThemeProvider>
@@ -217,6 +217,13 @@ const openStartFrom = async (user: ReturnType<typeof userEvent.setup>) => {
 };
 
 const launchButton = () => screen.getByRole('button', { name: 'Launch' });
+
+const typeRadio = (label: 'JupyterLab' | 'Shell') => screen.getByRole('radio', { name: label });
+
+const selectType = async (
+  user: ReturnType<typeof userEvent.setup>,
+  label: 'JupyterLab' | 'Shell',
+) => await user.click(typeRadio(label));
 
 const launch = async (user: ReturnType<typeof userEvent.setup>) => {
   await user.click(launchButton());
@@ -254,15 +261,20 @@ describe('NtscLaunchModal', () => {
   });
 
   it.each([
-    [CommandType.JupyterLab, 'Launch JupyterLab'],
-    [CommandType.Shell, 'Launch Shell'],
-  ])('renders the shared form for %s', async (type, title) => {
-    await setup({ type });
-    expect(screen.getByText(title)).toBeInTheDocument();
-    expect(screen.getByText('Start from')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Name (optional)')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Show Full Config' })).toBeInTheDocument();
-  });
+    [CommandType.JupyterLab, 'Launch JupyterLab', 'JupyterLab', 'Shell'],
+    [CommandType.Shell, 'Launch Shell', 'Shell', 'JupyterLab'],
+  ] as const)(
+    'renders the shared form for %s with its type selected',
+    async (type, title, selected, other) => {
+      await setup({ initialType: type });
+      expect(screen.getByText(title)).toBeInTheDocument();
+      expect(typeRadio(selected)).toBeChecked();
+      expect(typeRadio(other)).not.toBeChecked();
+      expect(screen.getByText('Start from')).toBeInTheDocument();
+      expect(screen.getByPlaceholderText('Name (optional)')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Show Full Config' })).toBeInTheDocument();
+    },
+  );
 
   describe('shell', () => {
     it('launches from the simple form, reports the shell and records it in this browser', async () => {
@@ -318,45 +330,69 @@ describe('NtscLaunchModal', () => {
     });
 
     it('lists recent tasks on the cluster, this browser’s history and templates', async () => {
+      const now = vi.spyOn(Date, 'now');
+      now.mockReturnValue(Date.parse('2026-01-01T09:00:00Z'));
       recordLaunch(USER_ID, CommandType.Shell, {
         config: { description: 'from browser', resources: { resource_pool: 'cpu', slots: 0 } },
         workspaceId: WORKSPACE.id,
       });
+      now.mockReturnValue(Date.parse('2026-01-01T09:30:00Z'));
       recordLaunch(USER_ID, CommandType.JupyterLab, {
         config: { description: 'a notebook' },
         workspaceId: WORKSPACE.id,
       });
+      now.mockRestore();
       mocks.getShells.mockResolvedValue([task(CommandType.Shell)]);
+      mocks.getJupyterLabs.mockResolvedValue([
+        task(CommandType.JupyterLab, { name: 'nb', startTime: '2026-01-01T11:00:00Z' }),
+      ]);
       const { user } = await setup();
 
-      await waitFor(() =>
-        expect(mocks.getShells).toHaveBeenCalledWith({
-          limit: 20,
-          orderBy: 'ORDER_BY_DESC',
-          sortBy: 'SORT_BY_START_TIME',
-          users: [String(USER_ID)],
-          workspaceId: WORKSPACE.id,
-        }),
-      );
-      expect(mocks.getJupyterLabs).not.toHaveBeenCalled();
+      // Both types, whichever type the form launches.
+      const params = {
+        limit: 20,
+        orderBy: 'ORDER_BY_DESC',
+        sortBy: 'SORT_BY_START_TIME',
+        users: [String(USER_ID)],
+        workspaceId: WORKSPACE.id,
+      };
+      await waitFor(() => expect(mocks.getShells).toHaveBeenCalledWith(params));
+      expect(mocks.getJupyterLabs).toHaveBeenCalledWith(params);
 
       await openStartFrom(user);
       expect(await screen.findByText('Recent on cluster')).toBeInTheDocument();
       expect(screen.getByText('Recently launched in this browser')).toBeInTheDocument();
       expect(screen.getByText('Templates')).toBeInTheDocument();
-      expect(screen.getByText(/^cluster task · Terminated ·/)).toBeInTheDocument();
-      expect(screen.getByText(/^from browser · cpu, 0 slots ·/)).toBeInTheDocument();
+      // Each item is labelled with its type, newest first.
+      const recent = await screen.findByText(/^JupyterLab · nb · Terminated ·/);
+      const recentShell = screen.getByText(/^Shell · cluster task · Terminated ·/);
+      expect(
+        recent.compareDocumentPosition(recentShell) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      const browserNotebook = screen.getByText(/^JupyterLab · a notebook · default pool, 1 slot ·/);
+      const browserShell = screen.getByText(/^Shell · from browser · cpu, 0 slots ·/);
+      expect(
+        browserNotebook.compareDocumentPosition(browserShell) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
       expect(screen.getByText('gpu-template')).toBeInTheDocument();
-      expect(screen.queryByText(/^a notebook/)).not.toBeInTheDocument();
       // A config is only fetched once an item is picked.
       expect(mocks.getShellConfig).not.toHaveBeenCalled();
+      expect(mocks.getJupyterLabConfig).not.toHaveBeenCalled();
+    });
+
+    it('still lists one type when the other fails to load', async () => {
+      mocks.getShells.mockRejectedValue(new Error('503'));
+      mocks.getJupyterLabs.mockResolvedValue([task(CommandType.JupyterLab, { name: 'nb' })]);
+      const { user } = await setup();
+      await openStartFrom(user);
+      expect(await screen.findByText(/^JupyterLab · nb ·/)).toBeInTheDocument();
     });
 
     it('starts from a recent task: fetches its config, fills the form and launches the merged config', async () => {
       mocks.getShells.mockResolvedValue([task(CommandType.Shell)]);
       const { onLaunched, user } = await setup();
       await openStartFrom(user);
-      await user.click(await screen.findByText(/^cluster task ·/));
+      await user.click(await screen.findByText(/^Shell · cluster task ·/));
 
       await waitFor(() =>
         expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('old shell'),
@@ -382,7 +418,7 @@ describe('NtscLaunchModal', () => {
       mocks.getShellConfig.mockRejectedValue(new Error('shell not found'));
       const { user } = await setup();
       await openStartFrom(user);
-      await user.click(await screen.findByText(/^cluster task ·/));
+      await user.click(await screen.findByText(/^Shell · cluster task ·/));
 
       await waitFor(() =>
         expect(mocks.makeToast).toHaveBeenCalledWith(
@@ -394,7 +430,9 @@ describe('NtscLaunchModal', () => {
       );
       expect(launchButton()).toBeEnabled();
       await openStartFrom(user);
-      await waitFor(() => expect(screen.queryByText(/^cluster task ·/)).not.toBeInTheDocument());
+      await waitFor(() =>
+        expect(screen.queryByText(/^Shell · cluster task ·/)).not.toBeInTheDocument(),
+      );
     });
 
     it('starts from this browser’s history', async () => {
@@ -408,7 +446,7 @@ describe('NtscLaunchModal', () => {
       });
       const { onLaunched, user } = await setup();
       await openStartFrom(user);
-      await user.click(await screen.findByText(/^from browser ·/));
+      await user.click(await screen.findByText(/^Shell · from browser ·/));
 
       await waitFor(() =>
         expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('from browser'),
@@ -451,7 +489,7 @@ describe('NtscLaunchModal', () => {
         expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('old shell'),
       );
       expect(mocks.getShellConfig).toHaveBeenCalledWith({ commandId: 'shell-old' });
-      expect(screen.getByText(/^cluster task ·/)).toBeInTheDocument();
+      expect(screen.getByText(/^Shell · cluster task ·/)).toBeInTheDocument();
 
       await launch(user);
       await waitFor(() => expect(onLaunched).toHaveBeenCalled());
@@ -519,9 +557,11 @@ describe('NtscLaunchModal', () => {
         });
         const config = deferred<RawJson>();
         getConfig.mockReturnValue(config.promise);
-        const { user } = await setup({ initialTask: task(type), type });
+        const { user } = await setup({ initialTask: task(type), initialType: type });
 
         await waitFor(() => expect(getConfig).toHaveBeenCalledWith({ commandId: `${type}-old` }));
+        // The task's type is selected.
+        expect(typeRadio(type === CommandType.Shell ? 'Shell' : 'JupyterLab')).toBeChecked();
         expect(launchButton()).toBeDisabled();
         expect(screen.getByRole('button', { name: 'Show Full Config' })).toBeDisabled();
 
@@ -546,13 +586,13 @@ describe('NtscLaunchModal', () => {
       );
       const { onLaunched, user } = await setup();
 
-      await pick(user, /^task a ·/);
+      await pick(user, /^Shell · task a ·/);
       await waitFor(() =>
         expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('config a'),
       );
       expect(launchButton()).toBeEnabled();
 
-      await pick(user, /^task b ·/);
+      await pick(user, /^Shell · task b ·/);
       await waitFor(() =>
         expect(mocks.getShellConfig).toHaveBeenCalledWith({ commandId: taskB.id }),
       );
@@ -604,7 +644,7 @@ describe('NtscLaunchModal', () => {
         command: task(CommandType.JupyterLab),
         warnings: [],
       });
-      const { user } = await setup({ type: CommandType.JupyterLab });
+      const { user } = await setup({ initialType: CommandType.JupyterLab });
       await openStartFrom(user);
       await user.click(await screen.findByText('gpu-template'));
       await launch(user);
@@ -627,11 +667,12 @@ describe('NtscLaunchModal', () => {
         idle_timeout: '1h',
         resources: { priority: 42, resource_pool: 'gpu', slots: 1 },
       });
-      const { user } = await setup({ type: CommandType.JupyterLab });
+      const { user } = await setup({ initialType: CommandType.JupyterLab });
       await openStartFrom(user);
-      await user.click(await screen.findByText(/^nb ·/));
-      await waitFor(() => expect(mocks.getJupyterLabConfig).toHaveBeenCalled());
-      expect(mocks.getShells).not.toHaveBeenCalled();
+      await user.click(await screen.findByText(/^JupyterLab · nb ·/));
+      await waitFor(() =>
+        expect(mocks.getJupyterLabConfig).toHaveBeenCalledWith({ commandId: 'jupyter-lab-old' }),
+      );
       expect(mocks.getShellConfig).not.toHaveBeenCalled();
 
       await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
@@ -650,9 +691,194 @@ describe('NtscLaunchModal', () => {
     });
   });
 
+  describe('task type', () => {
+    const launchedNotebook = {
+      command: task(CommandType.JupyterLab, { id: 'nb-new', state: CommandState.Queued }),
+      config: { description: 'JupyterLab (kindly-quick-heron)' },
+      warnings: [],
+    };
+    /** A notebook's merged config as GET /api/v1/notebooks/{id} returns it. */
+    const clusterNotebookConfig = {
+      description: 'JupyterLab (kindly-quick-heron)',
+      entrypoint: ['/run/determined/jupyter/notebook-entrypoint.sh'],
+      environment: { image: { cuda: 'custom:1' } },
+      idle_timeout: '1h',
+      resources: { priority: 42, resource_pool: 'gpu', slots: 1 },
+    };
+    const launchedNotebookConfig = {
+      environment: { image: { cuda: 'custom:1' } },
+      idle_timeout: '1h',
+      resources: { resource_pool: 'gpu', slots: 1 },
+    };
+
+    beforeEach(() => {
+      mocks.launchJupyterLab.mockResolvedValue(launchedNotebook);
+      mocks.getJupyterLabConfig.mockResolvedValue(clusterNotebookConfig);
+    });
+
+    it('launches a JupyterLab and opens its wait page after switching from Shell', async () => {
+      const { onLaunched, user } = await setup();
+      await user.type(screen.getByPlaceholderText('Name (optional)'), 'my notebook');
+      await selectType(user, 'JupyterLab');
+
+      expect(screen.getByText('Launch JupyterLab')).toBeInTheDocument();
+      expect(screen.queryByText('Launch Shell')).not.toBeInTheDocument();
+      expect(typeRadio('JupyterLab')).toBeChecked();
+      await launch(user);
+
+      await waitFor(() => expect(mocks.openCommandResponse).toHaveBeenCalled());
+      expect(mocks.launchJupyterLab).toHaveBeenCalledWith({
+        config: { description: 'my notebook', resources: { resource_pool: undefined, slots: 1 } },
+        templateName: undefined,
+        workspaceId: WORKSPACE.id,
+      });
+      expect(mocks.launchShell).not.toHaveBeenCalled();
+      expect(onLaunched).not.toHaveBeenCalled();
+      expect(listLaunchHistory(USER_ID, CommandType.JupyterLab)).toHaveLength(1);
+      expect(listLaunchHistory(USER_ID, CommandType.Shell)).toHaveLength(0);
+    });
+
+    it('launches a shell and reports it after switching from JupyterLab', async () => {
+      const { onLaunched, user } = await setup({ initialType: CommandType.JupyterLab });
+      await user.type(screen.getByPlaceholderText('Name (optional)'), 'my box');
+      await selectType(user, 'Shell');
+
+      expect(screen.getByText('Launch Shell')).toBeInTheDocument();
+      expect(typeRadio('Shell')).toBeChecked();
+      await launch(user);
+
+      await waitFor(() => expect(onLaunched).toHaveBeenCalledWith(launchedShell));
+      expect(mocks.launchShell).toHaveBeenCalledWith({
+        config: { description: 'my box', resources: { resource_pool: undefined, slots: 1 } },
+        templateName: undefined,
+        workspaceId: WORKSPACE.id,
+      });
+      expect(mocks.launchJupyterLab).not.toHaveBeenCalled();
+      expect(mocks.openCommandResponse).not.toHaveBeenCalled();
+      expect(listLaunchHistory(USER_ID, CommandType.Shell)).toHaveLength(1);
+    });
+
+    it('keeps the entered fields and the picked template when the type is switched', async () => {
+      const { onLaunched, user } = await setup();
+      await user.type(screen.getByPlaceholderText('Name (optional)'), 'kept');
+      await openStartFrom(user);
+      await user.click(await screen.findByText('gpu-template'));
+
+      await selectType(user, 'JupyterLab');
+      expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('kept');
+      await selectType(user, 'Shell');
+      expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('kept');
+      await launch(user);
+
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell).toHaveBeenCalledWith({
+        config: { description: 'kept', resources: { resource_pool: 'gpu', slots: 4 } },
+        templateName: 'gpu-template',
+        workspaceId: WORKSPACE.id,
+      });
+    });
+
+    it('starts from a recent task of the other type without changing the selected type', async () => {
+      mocks.getJupyterLabs.mockResolvedValue([task(CommandType.JupyterLab, { name: 'nb' })]);
+      const { onLaunched, user } = await setup();
+      await openStartFrom(user);
+      await user.click(await screen.findByText(/^JupyterLab · nb ·/));
+
+      // The config comes from the notebook's own API.
+      await waitFor(() =>
+        expect(mocks.getJupyterLabConfig).toHaveBeenCalledWith({ commandId: 'jupyter-lab-old' }),
+      );
+      expect(mocks.getShellConfig).not.toHaveBeenCalled();
+      expect(screen.getByText('Launch Shell')).toBeInTheDocument();
+      expect(typeRadio('Shell')).toBeChecked();
+      await waitFor(() => expect(launchButton()).toBeEnabled());
+      await launch(user);
+
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell).toHaveBeenCalledWith({
+        config: launchedNotebookConfig,
+        workspaceId: WORKSPACE.id,
+      });
+      expect(mocks.launchJupyterLab).not.toHaveBeenCalled();
+    });
+
+    it('starts from a browser history entry of the other type without changing the selected type', async () => {
+      recordLaunch(USER_ID, CommandType.Shell, {
+        config: {
+          description: 'shell from browser',
+          resources: { resource_pool: 'cpu', slots: 0 },
+        },
+        workspaceId: WORKSPACE.id,
+      });
+      const { user } = await setup({ initialType: CommandType.JupyterLab });
+      await openStartFrom(user);
+      await user.click(await screen.findByText(/^Shell · shell from browser ·/));
+      await waitFor(() =>
+        expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('shell from browser'),
+      );
+      expect(typeRadio('JupyterLab')).toBeChecked();
+      await launch(user);
+
+      await waitFor(() => expect(mocks.openCommandResponse).toHaveBeenCalled());
+      expect(mocks.launchJupyterLab).toHaveBeenCalledWith({
+        config: {
+          description: 'shell from browser',
+          resources: { resource_pool: 'cpu', slots: 0 },
+        },
+        workspaceId: WORKSPACE.id,
+      });
+      expect(mocks.launchShell).not.toHaveBeenCalled();
+    });
+
+    it('clears the browser history of both types', async () => {
+      recordLaunch(USER_ID, CommandType.Shell, {
+        config: { description: 'a shell' },
+        workspaceId: WORKSPACE.id,
+      });
+      recordLaunch(USER_ID, CommandType.JupyterLab, {
+        config: { description: 'a notebook' },
+        workspaceId: WORKSPACE.id,
+      });
+      const { user } = await setup();
+      await user.click(screen.getByRole('button', { name: 'Clear browser history' }));
+      expect(listLaunchHistory(USER_ID, CommandType.Shell)).toEqual([]);
+      expect(listLaunchHistory(USER_ID, CommandType.JupyterLab)).toEqual([]);
+      expect(
+        screen.queryByRole('button', { name: 'Clear browser history' }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('keeps the full config when the type is switched and lets the master name the task after its type', async () => {
+      const { onLaunched, user } = await setup({ initialType: CommandType.JupyterLab });
+      await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+      await waitFor(() =>
+        expect(screen.getByTestId('code-editor')).toHaveTextContent(
+          'JupyterLab (kindly-quick-heron)',
+        ),
+      );
+      const yamlText = screen.getByTestId('code-editor').textContent;
+      expect(mocks.previewJupyterLab).toHaveBeenCalledTimes(1);
+
+      await selectType(user, 'Shell');
+      expect(screen.getByText('Launch Shell')).toBeInTheDocument();
+      // Not previewed again: the YAML stays as it was.
+      expect(mocks.previewJupyterLab).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId('code-editor').textContent).toBe(yamlText);
+      await launch(user);
+
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      const { config } = mocks.launchShell.mock.calls[0][0];
+      // The JupyterLab preview's name is not used for the shell.
+      expect(config).not.toHaveProperty('description');
+      expect(config.environment).toEqual({ image: { cuda: 'default:1' } });
+      expect(config.resources).toEqual({ priority: 42, resource_pool: 'default', slots: 1 });
+      expect(mocks.launchJupyterLab).not.toHaveBeenCalled();
+    });
+  });
+
   describe('Save as Template', () => {
     it('opens a prefilled new template with only the non-default settings and creates it', async () => {
-      const { user } = await setup({ type: CommandType.JupyterLab });
+      const { user } = await setup({ initialType: CommandType.JupyterLab });
       await user.type(screen.getByPlaceholderText('Name (optional)'), 'tpl source');
       await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
       await waitFor(() => expect(screen.getByTestId('code-editor')).toHaveTextContent('custom:2'));

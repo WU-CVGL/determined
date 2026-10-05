@@ -88,21 +88,26 @@ vi.mock('hooks/usePermissions', () => ({
 }));
 vi.mock('hooks/useTaskResourcesEnabled', () => ({ default: () => true }));
 vi.mock('hooks/useFeature', () => ({ default: () => ({ isOn: () => true }) }));
-// The launch form itself is tested with the Tasks page's buttons. The stand-in is a modal, so it
-// shows only once Launch Again opens it.
-vi.mock('components/ShellModal', async () => {
+// The launch form itself is tested in NtscLaunchModal.test.tsx and useLaunchForm.test.tsx. The
+// stand-in is a modal, so it shows only once Launch Again opens it, and its title shows the task
+// and the type the form opens with.
+vi.mock('components/NtscLaunchModal', async () => {
   const { Modal } = await import('hew/Modal');
   const Button = (await import('hew/Button')).default;
   return {
     default: ({
       initialTask,
-      onLaunched,
+      initialType,
+      onShellLaunched,
     }: {
       initialTask?: CommandTask;
-      onLaunched?: (response: CommandResponse) => void;
+      initialType: CommandType;
+      onShellLaunched?: (response: CommandResponse) => void;
     }) => (
-      <Modal title={`Launch form for ${initialTask?.id}`}>
-        <Button onClick={() => launched.response && onLaunched?.(launched.response)}>Launch</Button>
+      <Modal title={`Launch form for ${initialTask?.id} (${initialType})`}>
+        <Button onClick={() => launched.response && onShellLaunched?.(launched.response)}>
+          Launch
+        </Button>
       </Modal>
     ),
   };
@@ -219,10 +224,11 @@ describe('JobQueue', () => {
   it('opens the launch form from Launch Again and shows the launch result', async () => {
     setup();
     await waitForShells();
-    expect(screen.queryByText('Launch form for shell-1')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Launch form for/)).not.toBeInTheDocument();
     await openRowMenu(/Shell shell-/);
     await userEvent.click(await screen.findByText('Launch Again'));
-    expect(await screen.findByText('Launch form for shell-1')).toBeInTheDocument();
+    // The form opens with the task's type selected.
+    expect(await screen.findByText('Launch form for shell-1 (shell)')).toBeInTheDocument();
     const fetches = vi.mocked(getJobQ).mock.calls.length;
     await userEvent.click(screen.getByRole('button', { name: 'Launch' }));
     expect(await screen.findByText('Shell Launched')).toBeInTheDocument();

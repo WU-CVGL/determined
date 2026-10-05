@@ -5,6 +5,18 @@ import { CommandType, RawJson } from 'types';
 /** The task types the launch modal can start. */
 export type NtscLaunchType = typeof CommandType.JupyterLab | typeof CommandType.Shell;
 
+/** The launch form's task types, in the order its type selector shows them. */
+export const NTSC_LAUNCH_TYPES: NtscLaunchType[] = [CommandType.JupyterLab, CommandType.Shell];
+
+/** How the launch form and its "Start from" picker name each task type. */
+export const NTSC_LAUNCH_TYPE_LABELS: Record<NtscLaunchType, string> = {
+  [CommandType.JupyterLab]: 'JupyterLab',
+  [CommandType.Shell]: 'Shell',
+};
+
+export const isNtscLaunchType = (type: CommandType): type is NtscLaunchType =>
+  (NTSC_LAUNCH_TYPES as CommandType[]).includes(type);
+
 /** The simple launch form's fields, as the launch helpers take them. */
 export interface NtscLaunchOptions {
   name?: string;
@@ -26,6 +38,7 @@ export interface LaunchFormFields {
  */
 const AUTO_DESCRIPTION = /^(JupyterLab|Shell) \([a-z]+(-[a-z]+)*\)$/;
 const AUTO_JUPYTERLAB_DESCRIPTION = /^JupyterLab \([a-z]+(-[a-z]+)*\)$/;
+const AUTO_SHELL_DESCRIPTION = /^Shell \([a-z]+(-[a-z]+)*\)$/;
 
 /** Environment variable names that probably hold a credential. */
 const SECRET_ENV_NAME = /TOKEN|SECRET|PASSW|KEY|AUTH|CRED/i;
@@ -88,6 +101,25 @@ export const toShellConfig = (previewConfig: RawJson): RawJson => {
   if (typeof out.description === 'string' && AUTO_JUPYTERLAB_DESCRIPTION.test(out.description)) {
     delete out.description;
   }
+  return out;
+};
+
+/**
+ * Prepares a config for a launch of the given type: a description that the
+ * master generated for the other type is removed, so that the master names the
+ * new task after its own type. The launch form keeps its full config when the
+ * task type is switched, and a JupyterLab preview names the config
+ * "JupyterLab (<pet name>)". Everything else is the same for both types: a
+ * shell ignores idle_timeout and notebook_idle_type.
+ */
+export const configForLaunchType = (config: RawJson, type: NtscLaunchType): RawJson => {
+  const otherAutoDescription =
+    type === CommandType.Shell ? AUTO_JUPYTERLAB_DESCRIPTION : AUTO_SHELL_DESCRIPTION;
+  if (typeof config.description !== 'string' || !otherAutoDescription.test(config.description)) {
+    return config;
+  }
+  const out = cloneDeep(config);
+  delete out.description;
   return out;
 };
 
