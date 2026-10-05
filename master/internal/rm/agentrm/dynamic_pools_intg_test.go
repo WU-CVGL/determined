@@ -104,6 +104,24 @@ func waitForDynamicPoolReady(
 	}, 10*time.Second, 20*time.Millisecond)
 }
 
+// requireInheritedTaskDefaults checks that a pool resolves its own task_container_defaults block
+// against the master defaults, as a master.yaml pool does.
+func requireInheritedTaskDefaults(
+	t *testing.T,
+	manager *ResourceManager,
+	poolName string,
+	masterDefaults model.TaskContainerDefaultsConfig,
+	poolDefaults string,
+) {
+	var override model.TaskContainerDefaultsConfig
+	require.NoError(t, json.Unmarshal([]byte(poolDefaults), &override))
+	expected, err := masterDefaults.Merge(override)
+	require.NoError(t, err)
+	actual, err := manager.TaskContainerDefaults(rm.ResourcePoolName(poolName), masterDefaults)
+	require.NoError(t, err)
+	require.Equal(t, expected, actual, "pool %q must inherit master defaults", poolName)
+}
+
 func TestDynamicPoolPersistenceRestart(t *testing.T) {
 	database, cleanup := db.MustResolveNewPostgresDatabase(t)
 	defer cleanup()
@@ -143,10 +161,25 @@ func TestDynamicPoolPersistenceRestart(t *testing.T) {
 	require.True(t, active)
 	require.EqualValues(t, 1, activeRevision)
 
+	// A pool with its own task_container_defaults block merges it into the master defaults, both
+	// when the worker initializes it and after a restart.
+	const overrideDefaults = `{"add_capabilities":["CAP_POOL"]}`
+	_, _, err = first.CreateDynamicResourcePool(
+		context.Background(),
+		"override-operation",
+		json.RawMessage(`{"pool_name":"online-override","task_container_defaults":`+
+			overrideDefaults+`}`),
+		masterDefaults,
+	)
+	require.NoError(t, err)
+	waitForDynamicPoolReady(t, database, first, "online-override")
+	requireInheritedTaskDefaults(t, first, "online-override", masterDefaults, overrideDefaults)
+
 	// The master is restarted with different task container defaults and RM scheduler.
 	first.stop()
 	changedMasterDefaults := *model.DefaultTaskContainerDefaults()
 	changedMasterDefaults.ShmSizeBytes = 16 << 30
+	changedMasterDefaults.AddCapabilities = []string{"CAP_CHANGED"}
 	restarted, err := New(
 		context.Background(), database, echo.New(), testDynamicPoolRMConfig(7), nil, nil,
 		&changedMasterDefaults,
@@ -160,6 +193,9 @@ func TestDynamicPoolPersistenceRestart(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, changedMasterDefaults, restartedDefaults,
 		"a created pool must inherit master defaults like a master.yaml pool")
+	requireInheritedTaskDefaults(
+		t, restarted, "online-override", changedMasterDefaults, overrideDefaults,
+	)
 	scheduler, ok := restarted.ResourcePoolSchedulerConfig(record.PoolName)
 	require.True(t, ok)
 	require.Equal(t, 7, *scheduler.Priority.DefaultPriority)
@@ -175,6 +211,7 @@ func TestDynamicPoolPersistenceRestart(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, legacyDefaults.ForcePullImage, "legacy dynamic defaults must remain frozen")
 	require.EqualValues(t, 4<<30, legacyDefaults.ShmSizeBytes)
+	require.Empty(t, legacyDefaults.AddCapabilities, "legacy dynamic defaults must remain frozen")
 	legacyScheduler, ok := restarted.ResourcePoolSchedulerConfig("legacy-frozen")
 	require.True(t, ok)
 	require.Equal(t, 42, *legacyScheduler.Priority.DefaultPriority)
@@ -218,8 +255,10 @@ func TestDynamicPoolStartupRefreshesSnapshot(t *testing.T) {
 	require.Equal(t, db.DynamicResourcePoolReady, unchanged.State)
 	require.Equal(t, specBefore.ConfigHash, unchanged.ConfigHash)
 
+	// The frozen config of the legacy pool cannot hide an added capability when it is merged.
 	changedMasterDefaults := *model.DefaultTaskContainerDefaults()
 	changedMasterDefaults.ShmSizeBytes = 16 << 30
+	changedMasterDefaults.AddCapabilities = []string{"CAP_CHANGED"}
 	startWith(&changedMasterDefaults)
 	refreshed, err := database.DynamicResourcePoolByName(ctx, "refreshed")
 	require.NoError(t, err)
@@ -234,6 +273,7 @@ func TestDynamicPoolStartupRefreshesSnapshot(t *testing.T) {
 	require.False(t, inherit)
 	require.False(t, snapshot.TaskContainerDefaults.ForcePullImage)
 	require.EqualValues(t, 16<<30, snapshot.TaskContainerDefaults.ShmSizeBytes)
+	require.Equal(t, []string{"CAP_CHANGED"}, snapshot.TaskContainerDefaults.AddCapabilities)
 	legacyAfter, err := database.DynamicResourcePoolByName(ctx, "legacy")
 	require.NoError(t, err)
 	require.Equal(t, legacyBefore.ConfigHash, legacyAfter.ConfigHash)
@@ -905,14 +945,19 @@ WHERE pool_name = ?`, other.PoolName).Exec(ctx)
 	}, 10*time.Second, 20*time.Millisecond)
 	_, desired := manager.registry.desiredConfig("failed")
 	require.True(t, desired)
-	recovered, err := update("failed", `{"pool_name":"failed","description":"fixed"}`,
-		&failed.Revision)
+	const fixedDefaults = `{"add_capabilities":["CAP_X"]}`
+	recovered, err := update("failed", `{"pool_name":"failed","description":"fixed",
+		"task_container_defaults":`+fixedDefaults+`}`, &failed.Revision)
 	require.NoError(t, err)
 	require.Equal(t, db.DynamicResourcePoolPending, recovered.State)
 	require.Nil(t, recovered.Error)
 	require.EqualValues(t, 2, recovered.Revision)
 	waitForDynamicPoolReady(t, database, manager, "failed")
 	require.Equal(t, "fixed", poolSummaryDescription(t, manager, "failed"))
+	// The replaced entry inherits like the entry it replaces.
+	inheritedDefaults := masterDefaults
+	inheritedDefaults.ForcePullImage = true
+	requireInheritedTaskDefaults(t, manager, "failed", inheritedDefaults, fixedDefaults)
 	activeRevision, active := manager.ActiveDynamicResourcePoolRevision("failed")
 	require.True(t, active)
 	require.EqualValues(t, 2, activeRevision)
