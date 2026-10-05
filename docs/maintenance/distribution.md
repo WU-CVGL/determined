@@ -75,9 +75,6 @@ version from the corresponding Git tag. Confirm the GHCR packages are public
 before using the unauthenticated pull commands above. For a manual
 source build, check out the release tag and set both `VERSION` and
 `FORK_VERSION` to `0.40.1` so binaries, wheel, and WebUI agree; a local build
-is not published automatically. The agent binary is built with cgo, for NVML,
-and links glibc dynamically: build it with a C compiler on a system whose glibc
-is no newer than the image base (`ubuntu:22.04`), as the release workflow does,
-and check it with `tools/fork/check-agent-build.sh`. Run the
+is not published automatically. Run the
 [`tools/fork/smoke.sh`](https://github.com/WU-CVGL/determined/blob/main/tools/fork/smoke.sh) CPU packaging check for a
 new build before deploying it; it does not validate GPU workloads.
