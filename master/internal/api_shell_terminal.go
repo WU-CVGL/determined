@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -233,8 +234,16 @@ func (s *shellTerminalService) serve(
 	}
 
 	ctx, cancel := context.WithCancelCause(s.baseCtx)
+	// The terminal's slot is released only after its recheck has stopped, so that nothing the
+	// terminal started outlives it.
+	var recheckDone sync.WaitGroup
+	defer recheckDone.Wait()
 	defer cancel(nil)
-	go s.recheck(ctx, cancel, req, curUser, target.TaskID)
+	recheckDone.Add(1)
+	go func() {
+		defer recheckDone.Done()
+		s.recheck(ctx, cancel, req, curUser, target.TaskID)
+	}()
 
 	stats := shellterm.Serve(ctx, ws, sshTarget, opts, log)
 

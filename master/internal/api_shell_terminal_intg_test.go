@@ -132,6 +132,14 @@ func setupShellTerminalTest(
 		env.taskLogs = append(env.taskLogs, msg)
 	}
 	env.svc = svc
+	// A terminal ends on the server a moment after its client closes the WebSocket. Wait for every
+	// terminal to end, so that nothing it reads runs into the next test's setup.
+	t.Cleanup(func() {
+		require.Eventually(t, func() bool {
+			total, _ := svc.limiter.Active(0)
+			return total == 0
+		}, 10*time.Second, 10*time.Millisecond, "a shell terminal is still open")
+	})
 
 	// The master's middleware chain, as far as it concerns this route.
 	e := echo.New()
