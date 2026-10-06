@@ -78,6 +78,9 @@ Version 0.41.0
 -  Accounts: Handle password changes sent by 0.40 clients, such as WebUI tabs opened before the
    upgrade, instead of failing with a decoding error.
 
+-  Experiments: Refuse to continue an experiment whose owner is deactivated, and stop leaving a
+   session open when a continue fails before the experiment starts.
+
 -  Generic tasks: Fix pausing, killing, and scheduling of generic task trees.
 
 -  WebUI: Offer to retry when a notebook's address fails to load.
@@ -102,6 +105,10 @@ Version 0.41.0
    ``/api/v1/allocations/{id}/``.
 
 -  Proxy: Remove Determined credentials from requests forwarded to task services.
+
+-  Experiments: Run a continued experiment as its owner, and let anyone else change only its name,
+   description, labels, ``max_restarts``, ``searcher.max_length``, and checkpoint retention counts
+   when continuing it.
 
 -  TensorBoard: Use an experiment's image, image pull secrets, and ``registry_auth`` only for
    TensorBoards that the experiment's owner starts.
