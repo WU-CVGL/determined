@@ -265,6 +265,12 @@ func TestTCPProxyLogsProtocolErrorAsError(t *testing.T) {
 	require.NoError(t, resp.Body.Close())
 	defer func() { _ = ws.Close() }()
 	upstream := acceptUpstream(t, conns)
+	// A proxy that never answers fails the test in seconds instead of blocking it until the package
+	// timeout.
+	deadline := time.Now().Add(5 * time.Second)
+	require.NoError(t, ws.SetReadDeadline(deadline))
+	// The frame below goes to the connection directly, which gorilla's write deadline does not cover.
+	require.NoError(t, ws.UnderlyingConn().SetWriteDeadline(deadline))
 
 	// A final binary frame with one byte of payload and no mask, which a client must set.
 	_, err = ws.UnderlyingConn().Write([]byte{0x82, 0x01, 'x'})

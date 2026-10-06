@@ -462,8 +462,7 @@ func (e *internalExperiment) stop() error {
 			if err := runCheckpointGCForCheckpoints(
 				e.rm, e.db, e.JobID, e.StartTime, taskSpec,
 				e.Experiment.ID, e.activeConfig.AsLegacy(), checkpoints,
-				[]string{fullDeleteGlob},
-				false, taskSpec.AgentUserGroup, taskSpec.Owner, e.logCtx,
+				[]string{fullDeleteGlob}, false, e.logCtx,
 			); err != nil {
 				e.syslog.WithError(err).Error("failed to GC experiment checkpoints")
 			}

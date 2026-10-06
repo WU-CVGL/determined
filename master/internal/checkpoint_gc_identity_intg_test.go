@@ -1,0 +1,906 @@
+//go:build integration
+// +build integration
+
+package internal
+
+import (
+	"context"
+	"crypto/rand"
+	"fmt"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/docker/docker/api/types/mount"
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/metadata"
+	"gopkg.in/guregu/null.v3"
+	k8sV1 "k8s.io/api/core/v1"
+
+	apiPkg "github.com/determined-ai/determined/master/internal/api"
+	"github.com/determined-ai/determined/master/internal/db"
+	"github.com/determined-ai/determined/master/internal/mocks"
+	"github.com/determined-ai/determined/master/internal/mocks/allocationmocks"
+	"github.com/determined-ai/determined/master/internal/rm"
+	"github.com/determined-ai/determined/master/internal/sproto"
+	"github.com/determined-ai/determined/master/internal/storage"
+	"github.com/determined-ai/determined/master/internal/task"
+	"github.com/determined-ai/determined/master/internal/user"
+	"github.com/determined-ai/determined/master/pkg/device"
+	"github.com/determined-ai/determined/master/pkg/model"
+	"github.com/determined-ai/determined/master/pkg/ptrs"
+	"github.com/determined-ai/determined/master/pkg/schemas"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
+	"github.com/determined-ai/determined/master/pkg/tasks"
+	"github.com/determined-ai/determined/proto/pkg/apiv1"
+	"github.com/determined-ai/determined/proto/pkg/checkpointv1"
+	"github.com/determined-ai/determined/proto/pkg/experimentv1"
+	"github.com/determined-ai/determined/proto/pkg/utilv1"
+)
+
+const gcTestHostPath = "/srv/gc-test-checkpoints"
+
+// gcTestOwnerAUG is the agent user and group of the experiment owner in these tests. The admin of
+// setupAPITest has none of its own.
+var gcTestOwnerAUG = model.AgentUserGroup{UID: 4242, GID: 4343, User: "gc-owner", Group: "gc-owners"}
+
+// gcTestExperimentEnv is what an experiment's owner could set to run code of their choice in each
+// container that takes the experiment's environment: BASH_ENV before the bash entrypoint,
+// LD_PRELOAD and PYTHONPATH before the Python code, all from a bind mount of their own.
+var gcTestExperimentEnv = []string{
+	"BASH_ENV=/hooks/run-first.sh",
+	"LD_PRELOAD=/hooks/libhook.so",
+	"PYTHONPATH=/hooks",
+}
+
+// addGCTestOwner adds a user who is not an administrator, with gcTestOwnerAUG.
+func addGCTestOwner(t *testing.T) model.User {
+	owner := model.User{
+		Username:     uuid.NewString(),
+		PasswordHash: null.NewString("", false),
+		Active:       true,
+	}
+	aug := gcTestOwnerAUG
+	id, err := user.Add(context.TODO(), &owner, &aug)
+	require.NoError(t, err)
+	owner.ID = id
+	return owner
+}
+
+// userContext returns a request context of u.
+func userContext(t *testing.T, u model.User) context.Context {
+	token, err := user.StartSession(context.TODO(), &u)
+	require.NoError(t, err)
+	return metadata.NewIncomingContext(context.TODO(),
+		metadata.Pairs("x-user-token", "Bearer "+token))
+}
+
+// createGCTestExperiment creates a completed experiment of owner, with gcTestExperimentEnv, a bind
+// mount and shared_fs checkpoint storage at gcTestHostPath, and one checkpoint, whose UUID it
+// returns. The experiment is in a project of its own, so that tests that delete every experiment
+// of a project leave it alone. ctx is an administrator's.
+//
+// nolint: exhaustruct
+func createGCTestExperiment(
+	ctx context.Context, t *testing.T, api *apiServer, owner model.User,
+) (*model.Experiment, string) {
+	return createGCTestExperimentWithStorage(ctx, t, api, owner, &expconf.CheckpointStorageConfig{
+		RawSharedFSConfig: &expconf.SharedFSConfig{RawHostPath: ptrs.Ptr(gcTestHostPath)},
+	})
+}
+
+// createGCTestExperimentWithStorage is createGCTestExperiment with other checkpoint storage, and
+// these bind mounts after the one of /hooks.
+//
+// nolint: exhaustruct
+func createGCTestExperimentWithStorage(
+	ctx context.Context, t *testing.T, api *apiServer, owner model.User,
+	storage *expconf.CheckpointStorageConfig, bindMounts ...expconf.BindMountV0,
+) (*model.Experiment, string) {
+	env := gcTestExperimentEnv
+	conf := expconf.ExperimentConfig{
+		RawEnvironment: &expconf.EnvironmentConfigV0{
+			RawEnvironmentVariables: &expconf.EnvironmentVariablesMapV0{
+				RawCPU: env, RawCUDA: env, RawROCM: env,
+			},
+		},
+		RawBindMounts: append(expconf.BindMountsConfigV0{{
+			RawHostPath:      "/home/gc-owner/hooks",
+			RawContainerPath: "/hooks",
+		}}, bindMounts...),
+		RawCheckpointStorage: storage,
+	}
+	_, projectID := createProjectAndWorkspace(ctx, t, api)
+	exp := createTestExpWithActiveConfig(t, api, owner, projectID,
+		schemas.WithDefaults(schemas.Merge(conf, minExpConfig)))
+	require.Equal(t, storage.RawSharedFSConfig != nil,
+		exp.Config.CheckpointStorage.RawSharedFSConfig != nil)
+	require.Equal(t, gcTestExperimentEnv,
+		exp.Config.Environment.EnvironmentVariables().For(device.CPU))
+	require.Len(t, exp.Config.BindMounts, 1+len(bindMounts))
+
+	requestID := model.NewRequestID(rand.Reader)
+	tk := &model.Task{
+		TaskType:   model.TaskTypeTrial,
+		LogVersion: model.TaskLogVersion1,
+		StartTime:  time.Now(),
+		TaskID:     trialTaskID(exp.ID, requestID),
+	}
+	require.NoError(t, db.AddTask(ctx, tk))
+	tr := &model.Trial{
+		StartTime:    time.Now(),
+		RequestID:    &requestID,
+		State:        model.CompletedState,
+		ExperimentID: exp.ID,
+	}
+	require.NoError(t, db.AddTrial(ctx, tr, tk.TaskID))
+	aID := model.AllocationID(string(tk.TaskID) + "-1")
+	require.NoError(t, db.AddAllocation(ctx, &model.Allocation{
+		AllocationID: aID,
+		TaskID:       tk.TaskID,
+		Slots:        1,
+		ResourcePool: "default",
+		StartTime:    ptrs.Ptr(time.Now().UTC().Truncate(time.Millisecond)),
+	}))
+	ckpt := &model.CheckpointV2{
+		UUID:         uuid.New(),
+		TaskID:       tk.TaskID,
+		AllocationID: &aID,
+		ReportTime:   time.Now(),
+		State:        model.CompletedState,
+		Resources:    map[string]int64{"model.pt": 128},
+		Metadata:     map[string]interface{}{"steps_completed": 5},
+	}
+	require.NoError(t, db.AddCheckpointMetadata(ctx, ckpt, tr.ID))
+
+	_, err := db.Bun().NewUpdate().Table("experiments").
+		Set("state = ?", model.CompletedState).Where("id = ?", exp.ID).Exec(ctx)
+	require.NoError(t, err)
+	return exp, ckpt.UUID.String()
+}
+
+// captureCheckpointGC replaces the allocation service with one that hands each started checkpoint
+// GC task to the returned channel and finishes it at once.
+func captureCheckpointGC(t *testing.T) chan tasks.GCCkptSpec {
+	specs := make(chan tasks.GCCkptSpec, 16)
+	var as allocationmocks.AllocationService
+	as.On("StartAllocation", mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		mock.Anything, mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+		specs <- args.Get(4).(tasks.GCCkptSpec)
+		args.Get(5).(func(*task.AllocationExited))(&task.AllocationExited{
+			FinalState: task.AllocationState{State: model.AllocationStateTerminated},
+		})
+	})
+	old := task.DefaultService
+	task.DefaultService = &as
+	t.Cleanup(func() { task.DefaultService = old })
+	return specs
+}
+
+func nextGCSpec(t *testing.T, specs chan tasks.GCCkptSpec) tasks.GCCkptSpec {
+	t.Helper()
+	select {
+	case spec := <-specs:
+		return spec
+	case <-time.After(30 * time.Second):
+		t.Fatal("no checkpoint GC task was started")
+		return tasks.GCCkptSpec{} //nolint:exhaustruct
+	}
+}
+
+// requireGCRunsAsOwner checks that a checkpoint GC task of the experiment runs as its owner, with
+// no user session, and with none of the experiment's environment variables or bind mounts, but
+// with its checkpoint storage. It reports every check that fails, then stops the test.
+func requireGCRunsAsOwner(t *testing.T, spec tasks.GCCkptSpec, owner model.User, expID int) {
+	t.Helper()
+	require.Equal(t, expID, spec.ExperimentID)
+	require.NotNil(t, spec.Base.Owner)
+	require.NotNil(t, spec.Base.AgentUserGroup)
+	failed := t.Failed()
+
+	// Identity.
+	assert.Equal(t, owner.ID, spec.Base.Owner.ID, "GC must run as the experiment's owner")
+	assert.Equal(t, owner.Username, spec.Base.Owner.Username)
+	assert.Equal(t, gcTestOwnerAUG.UID, spec.Base.AgentUserGroup.UID, "agent uid")
+	assert.Equal(t, gcTestOwnerAUG.GID, spec.Base.AgentUserGroup.GID, "agent gid")
+	assert.Equal(t, gcTestOwnerAUG.User, spec.Base.AgentUserGroup.User)
+	assert.Equal(t, gcTestOwnerAUG.Group, spec.Base.AgentUserGroup.Group)
+	assert.Empty(t, spec.Base.UserSessionToken, "GC must get no user session")
+
+	// Environment.
+	ts := spec.ToTaskSpec()
+	assert.NotContains(t, ts.EnvVars(), "DET_USER_TOKEN")
+	for _, d := range []device.Type{device.CPU, device.CUDA, device.ROCM} {
+		for _, v := range ts.Environment.EnvironmentVariables().For(d) {
+			for _, name := range []string{"BASH_ENV", "LD_PRELOAD", "PYTHONPATH"} {
+				assert.False(t, strings.HasPrefix(v, name+"="),
+					"GC takes %q from the experiment's environment for %s", v, d)
+			}
+		}
+	}
+	for _, m := range ts.Mounts {
+		assert.NotEqual(t, "/hooks", m.Target, "GC takes the experiment's bind mount %+v", m)
+	}
+
+	// Storage.
+	assert.Equal(t, gcTestHostPath, spec.CheckpointStorage.RawSharedFSConfig.HostPath())
+	assert.Contains(t, ts.Mounts, mount.Mount{
+		Type:        mount.TypeBind,
+		Source:      gcTestHostPath,
+		Target:      expconf.DefaultSharedFSContainerPath,
+		BindOptions: &mount.BindOptions{Propagation: expconf.DefaultSharedFSPropagation},
+	})
+	if !failed && t.Failed() {
+		t.FailNow()
+	}
+}
+
+func waitForExperimentDeleted(ctx context.Context, t *testing.T, api *apiServer, expID int) {
+	t.Helper()
+	for i := 0; i < 30; i++ {
+		_, err := api.GetExperiment(ctx, &apiv1.GetExperimentRequest{ExperimentId: int32(expID)})
+		if err != nil {
+			require.Equal(t, apiPkg.NotFoundErrs("experiment", strconv.Itoa(expID), true), err)
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatalf("experiment %d was not deleted", expID)
+}
+
+// A checkpoint GC task that a user starts on another user's experiment runs as the experiment's
+// owner. Before, it ran with the starting user's session token, and the experiment's environment
+// variables and bind mounts ran code of the owner's choice in it, so an administrator who deleted a
+// user's checkpoints, experiment or TensorBoard files handed that user their token.
+func TestCheckpointGCRunsAsExperimentOwner(t *testing.T) {
+	api, admin, adminCtx := setupAPITest(t, nil)
+	require.True(t, admin.Admin)
+	owner := addGCTestOwner(t)
+	require.False(t, owner.Admin)
+	ownerCtx := userContext(t, owner)
+	specs := captureCheckpointGC(t)
+
+	t.Run("an admin removes files of the owner's checkpoint", func(t *testing.T) {
+		exp, ckpt := createGCTestExperiment(adminCtx, t, api, owner)
+		_, err := api.CheckpointsRemoveFiles(adminCtx, &apiv1.CheckpointsRemoveFilesRequest{
+			CheckpointUuids: []string{ckpt},
+			CheckpointGlobs: []string{"optimizer/**"},
+		})
+		require.NoError(t, err)
+		spec := nextGCSpec(t, specs)
+		requireGCRunsAsOwner(t, spec, owner, exp.ID)
+		require.Equal(t, ckpt, spec.ToDelete)
+	})
+
+	t.Run("an admin deletes the owner's checkpoint", func(t *testing.T) {
+		exp, ckpt := createGCTestExperiment(adminCtx, t, api, owner)
+		_, err := api.DeleteCheckpoints(adminCtx, &apiv1.DeleteCheckpointsRequest{
+			CheckpointUuids: []string{ckpt},
+		})
+		require.NoError(t, err)
+		spec := nextGCSpec(t, specs)
+		requireGCRunsAsOwner(t, spec, owner, exp.ID)
+		require.Equal(t, []string{fullDeleteGlob}, spec.CheckpointGlobs)
+	})
+
+	t.Run("an admin deletes the owner's experiment", func(t *testing.T) {
+		exp, ckpt := createGCTestExperiment(adminCtx, t, api, owner)
+		_, err := api.DeleteExperiments(adminCtx, &apiv1.DeleteExperimentsRequest{
+			ProjectId:     int32(exp.ProjectID),
+			ExperimentIds: []int32{int32(exp.ID)},
+		})
+		require.NoError(t, err)
+		spec := nextGCSpec(t, specs)
+		requireGCRunsAsOwner(t, spec, owner, exp.ID)
+		require.Equal(t, ckpt, spec.ToDelete)
+		require.True(t, spec.DeleteTensorboards)
+		waitForExperimentDeleted(adminCtx, t, api, exp.ID)
+	})
+
+	t.Run("an admin deletes one experiment of the owner", func(t *testing.T) {
+		exp, _ := createGCTestExperiment(adminCtx, t, api, owner)
+		_, err := api.DeleteExperiment(adminCtx, &apiv1.DeleteExperimentRequest{
+			ExperimentId: int32(exp.ID),
+		})
+		require.NoError(t, err)
+		requireGCRunsAsOwner(t, nextGCSpec(t, specs), owner, exp.ID)
+		waitForExperimentDeleted(adminCtx, t, api, exp.ID)
+	})
+
+	t.Run("an admin deletes the TensorBoard files of the owner's experiment", func(t *testing.T) {
+		exp, _ := createGCTestExperiment(adminCtx, t, api, owner)
+		_, err := api.DeleteTensorboardFiles(adminCtx, &apiv1.DeleteTensorboardFilesRequest{
+			ExperimentId: int32(exp.ID),
+		})
+		require.NoError(t, err)
+		spec := nextGCSpec(t, specs)
+		requireGCRunsAsOwner(t, spec, owner, exp.ID)
+		require.Empty(t, spec.ToDelete)
+		require.True(t, spec.DeleteTensorboards)
+	})
+
+	t.Run("the owner removes files of their own checkpoint", func(t *testing.T) {
+		exp, ckpt := createGCTestExperiment(adminCtx, t, api, owner)
+		_, err := api.CheckpointsRemoveFiles(ownerCtx, &apiv1.CheckpointsRemoveFilesRequest{
+			CheckpointUuids: []string{ckpt},
+			CheckpointGlobs: []string{"optimizer/**"},
+		})
+		require.NoError(t, err)
+		requireGCRunsAsOwner(t, nextGCSpec(t, specs), owner, exp.ID)
+	})
+
+	t.Run("another user still cannot remove files of the owner's checkpoint", func(t *testing.T) {
+		_, ckpt := createGCTestExperiment(adminCtx, t, api, owner)
+		other := addGCTestOwner(t)
+		_, err := api.CheckpointsRemoveFiles(userContext(t, other),
+			&apiv1.CheckpointsRemoveFilesRequest{CheckpointUuids: []string{ckpt}})
+		require.ErrorContains(t, err, "PermissionDenied")
+		select {
+		case spec := <-specs:
+			t.Fatalf("a checkpoint GC task was started for experiment %d", spec.ExperimentID)
+		case <-time.After(time.Second):
+		}
+	})
+}
+
+// The GC task keeps what the administrator sets: the task container defaults of its pool, with
+// their environment variables and bind mounts, and the checkpoint GC pod spec.
+func TestCheckpointGCKeepsTaskContainerDefaults(t *testing.T) {
+	api, _, adminCtx := setupAPITest(t, nil)
+	owner := addGCTestOwner(t)
+	specs := captureCheckpointGC(t)
+
+	proxy := []string{"HTTPS_PROXY=http://proxy.admin.example:3128"}
+	gcPodSpec := &k8sV1.Pod{Spec: k8sV1.PodSpec{Volumes: []k8sV1.Volume{{Name: "gc-pod-spec"}}}}
+	//nolint:exhaustruct
+	tcd := model.TaskContainerDefaultsConfig{
+		EnvironmentVariables: &model.RuntimeItems{CPU: proxy, CUDA: proxy, ROCM: proxy},
+		BindMounts: model.BindMountsConfig{{
+			HostPath: "/opt/admin-ca", ContainerPath: "/opt/admin-ca", ReadOnly: true,
+			Propagation: "rprivate",
+		}},
+		CheckpointGCPodSpec: gcPodSpec,
+	}
+	var gcRM mocks.ResourceManager
+	gcRM.On("ResolveResourcePool", mock.Anything, mock.Anything, mock.Anything).
+		Return(rm.ResourcePoolName("aux"), nil)
+	gcRM.On("TaskContainerDefaults", rm.ResourcePoolName("aux"), mock.Anything).Return(tcd, nil)
+	api.m.rm = &gcRM
+
+	exp, ckpt := createGCTestExperiment(adminCtx, t, api, owner)
+	_, err := api.CheckpointsRemoveFiles(userContext(t, owner), &apiv1.CheckpointsRemoveFilesRequest{
+		CheckpointUuids: []string{ckpt},
+		CheckpointGlobs: []string{fullDeleteGlob},
+	})
+	require.NoError(t, err)
+	spec := nextGCSpec(t, specs)
+	requireGCRunsAsOwner(t, spec, owner, exp.ID)
+
+	ts := spec.ToTaskSpec()
+	for _, d := range []device.Type{device.CPU, device.CUDA, device.ROCM} {
+		require.Equal(t, proxy, ts.Environment.EnvironmentVariables().For(d))
+	}
+	require.Equal(t, gcPodSpec.Spec, ts.Environment.PodSpec().Spec)
+	require.Contains(t, ts.Mounts, mount.Mount{
+		Type: mount.TypeBind, Source: "/opt/admin-ca", Target: "/opt/admin-ca", ReadOnly: true,
+		BindOptions: &mount.BindOptions{Propagation: "rprivate"},
+	})
+	require.Len(t, ts.Mounts, 2)
+}
+
+// The GC task of a deactivated owner still runs as the owner, and its allocation token, the only
+// credential it has and the one the GC code reports with, can still record the deleted files.
+func TestCheckpointGCOfDeactivatedOwner(t *testing.T) {
+	api, _, adminCtx := setupAPITest(t, nil)
+	owner := addGCTestOwner(t)
+	specs := captureCheckpointGC(t)
+
+	exp, ckpt := createGCTestExperiment(adminCtx, t, api, owner)
+	require.NoError(t, user.SetActive(context.TODO(), []model.UserID{owner.ID}, false))
+
+	_, err := api.DeleteCheckpoints(adminCtx, &apiv1.DeleteCheckpointsRequest{
+		CheckpointUuids: []string{ckpt},
+	})
+	require.NoError(t, err)
+	spec := nextGCSpec(t, specs)
+	requireGCRunsAsOwner(t, spec, owner, exp.ID)
+	require.False(t, spec.Base.Owner.Active)
+
+	// What gc_checkpoints.py does once the files are gone, with the token the master gives the
+	// task's allocation, which acts as spec.Base.Owner.
+	tk := db.RequireMockTask(t, api.m.db, &owner.ID)
+	allocationID := db.RequireMockAllocation(t, api.m.db, tk.TaskID).AllocationID
+	token, err := db.StartAllocationSession(context.TODO(), allocationID, spec.Base.Owner)
+	require.NoError(t, err)
+	taskCtx := metadata.NewIncomingContext(context.TODO(),
+		metadata.Pairs("x-allocation-token", fmt.Sprintf("Bearer %s", token)))
+	_, err = api.PatchCheckpoints(taskCtx, &apiv1.PatchCheckpointsRequest{
+		Checkpoints: []*checkpointv1.PatchCheckpoint{{
+			Uuid: ckpt,
+			Resources: &checkpointv1.PatchCheckpoint_OptionalResources{
+				Resources: map[string]int64{},
+			},
+		}},
+	})
+	require.NoError(t, err)
+	_, _, state := getCheckpointSizeResourcesState(adminCtx, t, ckpt)
+	require.Equal(t, model.DeletedState, state)
+}
+
+// gcTestRM returns a resource manager that runs GC tasks in a pool with these task container
+// defaults and does not say whether it applies pod specs.
+func gcTestRM(tcd model.TaskContainerDefaultsConfig) *mocks.ResourceManager {
+	var gcRM mocks.ResourceManager
+	gcRM.On("ResolveResourcePool", mock.Anything, mock.Anything, mock.Anything).
+		Return(rm.ResourcePoolName("aux"), nil)
+	gcRM.On("TaskContainerDefaults", rm.ResourcePoolName("aux"), mock.Anything).Return(tcd, nil)
+	gcRM.On("DeleteJob", mock.Anything).Return(func(sproto.DeleteJob) sproto.DeleteJobResponse {
+		return sproto.EmptyDeleteJobResponse()
+	}, nil)
+	return &gcRM
+}
+
+// useGCTaskContainerDefaults makes the GC tasks that api starts run in a pool with these task
+// container defaults, on a resource manager that does not say whether it applies pod specs. The
+// experiments that a test creates through the API must exist before.
+func useGCTaskContainerDefaults(api *apiServer, tcd model.TaskContainerDefaultsConfig) {
+	api.m.rm = gcTestRM(tcd)
+}
+
+// podSpecsRM is a resource manager that applies the pod specs of the tasks in every pool, as the
+// Kubernetes resource manager does, or none, as the agent resource manager does.
+type podSpecsRM struct {
+	*mocks.ResourceManager
+	applies bool
+}
+
+func (r podSpecsRM) AppliesPodSpecs(rm.ResourcePoolName) (bool, error) {
+	return r.applies, nil
+}
+
+// useGCTaskContainerDefaultsOn is useGCTaskContainerDefaults on a resource manager that applies
+// pod specs, for the experiment's trials and for GC, or applies none.
+func useGCTaskContainerDefaultsOn(
+	api *apiServer, appliesPodSpecs bool, tcd model.TaskContainerDefaultsConfig,
+) {
+	api.m.rm = podSpecsRM{ResourceManager: gcTestRM(tcd), applies: appliesPodSpecs}
+}
+
+// requireNoGCTask checks that no checkpoint GC task was started.
+func requireNoGCTask(t *testing.T, specs chan tasks.GCCkptSpec) {
+	t.Helper()
+	select {
+	case spec := <-specs:
+		t.Fatalf("a checkpoint GC task was started for experiment %d", spec.ExperimentID)
+	default:
+	}
+}
+
+// Directory checkpoint storage is a path in the container. When the experiment mounts it with a
+// bind mount of its own, its checkpoints are on that mount, which a GC task does not take from the
+// experiment. The master refuses to start a GC task that would not see the storage where the
+// trials saw it, rather than let it record the checkpoints as deleted while their files remain.
+// A task container default bind mount of the same container path but another host path does not
+// help; one of the same host path does.
+func TestCheckpointGCRefusesUnmountedDirectoryStorage(t *testing.T) {
+	api, _, adminCtx := setupAPITest(t, nil)
+	owner := addGCTestOwner(t)
+	specs := captureCheckpointGC(t)
+
+	//nolint:exhaustruct
+	exp, _ := createGCTestExperimentWithStorage(adminCtx, t, api, owner,
+		&expconf.CheckpointStorageConfig{
+			RawDirectoryConfig: &expconf.DirectoryConfig{RawContainerPath: ptrs.Ptr("/mnt/ckpts/run")},
+		},
+		expconf.BindMountV0{RawHostPath: "/data/owner-ckpts", RawContainerPath: "/mnt/ckpts"},
+	)
+	require.Equal(t, "/mnt/ckpts/run",
+		exp.Config.CheckpointStorage.RawDirectoryConfig.ContainerPath())
+	deleteTensorboards := func() error {
+		_, err := api.DeleteTensorboardFiles(adminCtx, &apiv1.DeleteTensorboardFilesRequest{
+			ExperimentId: int32(exp.ID),
+		})
+		return err
+	}
+
+	err := deleteTensorboards()
+	require.ErrorContains(t, err, "checkpoint storage is the directory /mnt/ckpts/run")
+	require.ErrorContains(t, err, "checkpoints are kept")
+	requireNoGCTask(t, specs)
+
+	// The same container path from another host path.
+	//nolint:exhaustruct
+	useGCTaskContainerDefaults(api, model.TaskContainerDefaultsConfig{
+		BindMounts: model.BindMountsConfig{{
+			HostPath: "/data/ckpts", ContainerPath: "/mnt/ckpts", Propagation: "rprivate",
+		}},
+	})
+	err = deleteTensorboards()
+	require.ErrorContains(t, err, "checkpoint storage is the directory /mnt/ckpts/run")
+	require.ErrorContains(t, err, "on a bind mount of host path /data/owner-ckpts/run,")
+	require.NotContains(t, err.Error(), "/data/ckpts")
+	requireNoGCTask(t, specs)
+
+	// The same host path.
+	//nolint:exhaustruct
+	useGCTaskContainerDefaults(api, model.TaskContainerDefaultsConfig{
+		BindMounts: model.BindMountsConfig{{
+			HostPath: "/data/owner-ckpts", ContainerPath: "/mnt/ckpts", Propagation: "rprivate",
+		}},
+	})
+	require.NoError(t, deleteTensorboards())
+	spec := nextGCSpec(t, specs)
+	require.Equal(t, owner.ID, spec.Base.Owner.ID)
+	require.Equal(t, []mount.Mount{{
+		Type: mount.TypeBind, Source: "/data/owner-ckpts", Target: "/mnt/ckpts",
+		BindOptions: &mount.BindOptions{Propagation: "rprivate"},
+	}}, spec.ToTaskSpec().Mounts)
+}
+
+// createGCTestExperimentFromYAML creates an experiment of owner as the CLI does, through the
+// master's config parsing, which merges the task container defaults of api's master config into
+// its config, with directory checkpoint storage at /mnt/ckpts/run and the rest of the config in
+// yaml. It returns the experiment as the database has it. ctx is an administrator's.
+func createGCTestExperimentFromYAML(
+	ctx context.Context, t *testing.T, api *apiServer, owner model.User, yaml string,
+) *model.Experiment {
+	_, projectID := createProjectAndWorkspace(ctx, t, api)
+	created, err := api.CreateExperiment(userContext(t, owner), &apiv1.CreateExperimentRequest{
+		ModelDefinition: []*utilv1.File{{Content: []byte{1}}},
+		Config: "entrypoint: train.py\n" +
+			"searcher:\n  name: single\n  metric: loss\n" +
+			"checkpoint_storage:\n  type: directory\n  container_path: /mnt/ckpts/run\n" + yaml,
+		ProjectId: int32(projectID),
+	})
+	require.NoError(t, err)
+	require.Equal(t, int32(owner.ID), created.Experiment.UserId)
+	exp, err := db.ExperimentByID(ctx, int(created.Experiment.Id))
+	require.NoError(t, err)
+	require.Equal(t, "/mnt/ckpts/run",
+		exp.Config.CheckpointStorage.RawDirectoryConfig.ContainerPath())
+	return exp
+}
+
+// The master merges the experiment's bind mounts over those of the task container defaults when it
+// creates the experiment, as its trials get them. Storage on a task container default bind mount
+// that GC tasks still have is collected. An experiment's own bind mount at the same container path
+// replaces the default one, and its storage is on another host path, so GC is refused although
+// the container path is mounted for the task.
+//
+//nolint:exhaustruct
+func TestCheckpointGCOfDirectoryStorageOnATaskContainerDefaultMount(t *testing.T) {
+	api, _, adminCtx := setupAPITest(t, nil)
+	owner := addGCTestOwner(t)
+	specs := captureCheckpointGC(t)
+
+	defaultMount := model.BindMount{
+		HostPath: "/srv/default", ContainerPath: "/mnt/ckpts", Propagation: "rprivate",
+	}
+	api.m.config.TaskContainerDefaults.BindMounts = model.BindMountsConfig{defaultMount}
+	onDefault := createGCTestExperimentFromYAML(adminCtx, t, api, owner, "")
+	ownMount := createGCTestExperimentFromYAML(adminCtx, t, api, owner,
+		"bind_mounts:\n  - host_path: /srv/alice\n    container_path: /mnt/ckpts\n")
+	hostPaths := func(e *model.Experiment) []string {
+		var paths []string
+		for _, m := range e.Config.BindMounts {
+			require.Equal(t, "/mnt/ckpts", m.ContainerPath())
+			paths = append(paths, m.HostPath())
+		}
+		return paths
+	}
+	require.Equal(t, []string{"/srv/default"}, hostPaths(onDefault))
+	require.Equal(t, []string{"/srv/alice"}, hostPaths(ownMount))
+
+	useGCTaskContainerDefaults(api, model.TaskContainerDefaultsConfig{
+		BindMounts: model.BindMountsConfig{defaultMount},
+	})
+	_, err := api.DeleteTensorboardFiles(adminCtx, &apiv1.DeleteTensorboardFilesRequest{
+		ExperimentId: int32(ownMount.ID),
+	})
+	require.ErrorContains(t, err, "checkpoint storage is the directory /mnt/ckpts/run")
+	require.ErrorContains(t, err, "on a bind mount of host path /srv/alice/run,")
+	require.NotContains(t, err.Error(), "/srv/default")
+	requireNoGCTask(t, specs)
+
+	_, err = api.DeleteTensorboardFiles(adminCtx, &apiv1.DeleteTensorboardFilesRequest{
+		ExperimentId: int32(onDefault.ID),
+	})
+	require.NoError(t, err)
+	spec := nextGCSpec(t, specs)
+	require.Equal(t, onDefault.ID, spec.ExperimentID)
+	require.Equal(t, owner.ID, spec.Base.Owner.ID)
+	require.Equal(t, []mount.Mount{{
+		Type: mount.TypeBind, Source: "/srv/default", Target: "/mnt/ckpts",
+		BindOptions: &mount.BindOptions{Propagation: "rprivate"},
+	}}, spec.ToTaskSpec().Mounts)
+}
+
+// A pod spec is no evidence by itself. On Kubernetes, when the experiment's pod spec mounts its
+// directory storage from a persistent volume claim, a GC pod spec with only a nodeSelector does not
+// see it, and GC is refused. A checkpoint_gc_pod_spec that mounts the same claim, here under another
+// volume name, does.
+//
+//nolint:exhaustruct
+func TestCheckpointGCConfirmsThePodSpecVolumeOfDirectoryStorage(t *testing.T) {
+	api, _, adminCtx := setupAPITest(t, nil)
+	owner := addGCTestOwner(t)
+	specs := captureCheckpointGC(t)
+
+	exp := createGCTestExperimentFromYAML(adminCtx, t, api, owner, `environment:
+  pod_spec:
+    spec:
+      volumes:
+        - name: ckpts
+          persistentVolumeClaim:
+            claimName: owner-ckpts
+      containers:
+        - name: determined-container
+          volumeMounts:
+            - name: ckpts
+              mountPath: /mnt/ckpts
+`)
+	require.NotNil(t, exp.Config.Environment.PodSpec())
+	deleteTensorboards := func() error {
+		_, err := api.DeleteTensorboardFiles(adminCtx, &apiv1.DeleteTensorboardFilesRequest{
+			ExperimentId: int32(exp.ID),
+		})
+		return err
+	}
+
+	useGCTaskContainerDefaultsOn(api, true, model.TaskContainerDefaultsConfig{
+		CPUPodSpec: &k8sV1.Pod{Spec: k8sV1.PodSpec{NodeSelector: map[string]string{"gc": "yes"}}},
+	})
+	err := deleteTensorboards()
+	require.ErrorContains(t, err, "checkpoint storage is the directory /mnt/ckpts/run")
+	require.ErrorContains(t, err, "on path /run of the persistentVolumeClaim owner-ckpts,")
+	require.ErrorContains(t, err, "kept until checkpoint_gc_pod_spec")
+	requireNoGCTask(t, specs)
+
+	gcPodSpec := &k8sV1.Pod{Spec: k8sV1.PodSpec{
+		Volumes: []k8sV1.Volume{{
+			Name: "gc-ckpts",
+			VolumeSource: k8sV1.VolumeSource{
+				PersistentVolumeClaim: &k8sV1.PersistentVolumeClaimVolumeSource{
+					ClaimName: "owner-ckpts",
+				},
+			},
+		}},
+		Containers: []k8sV1.Container{{
+			Name:         model.DeterminedK8ContainerName,
+			VolumeMounts: []k8sV1.VolumeMount{{Name: "gc-ckpts", MountPath: "/mnt/ckpts"}},
+		}},
+	}}
+	useGCTaskContainerDefaultsOn(api, true, model.TaskContainerDefaultsConfig{
+		CheckpointGCPodSpec: gcPodSpec,
+	})
+	require.NoError(t, deleteTensorboards())
+	spec := nextGCSpec(t, specs)
+	require.Equal(t, owner.ID, spec.Base.Owner.ID)
+	require.Equal(t, gcPodSpec.Spec, spec.ToTaskSpec().Environment.PodSpec().Spec)
+	require.Empty(t, spec.ToTaskSpec().Mounts)
+}
+
+// A hostPath volume is on the node where the pod runs. On Kubernetes, the experiment's pod spec
+// pins its trials to node-a and mounts its directory storage from host path /data/ckpts there. A cpu_pod_spec that
+// mounts the same host path on node-b does not see it, and GC is refused, without naming node-b. A
+// checkpoint_gc_pod_spec that mounts it on node-a does.
+//
+//nolint:exhaustruct
+func TestCheckpointGCOfAHostPathOnTheTrialsNode(t *testing.T) {
+	api, _, adminCtx := setupAPITest(t, nil)
+	owner := addGCTestOwner(t)
+	specs := captureCheckpointGC(t)
+
+	exp := createGCTestExperimentFromYAML(adminCtx, t, api, owner, `environment:
+  pod_spec:
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: node-a
+      volumes:
+        - name: ckpts
+          hostPath:
+            path: /data/ckpts
+      containers:
+        - name: determined-container
+          volumeMounts:
+            - name: ckpts
+              mountPath: /mnt/ckpts
+`)
+	deleteTensorboards := func() error {
+		_, err := api.DeleteTensorboardFiles(adminCtx, &apiv1.DeleteTensorboardFilesRequest{
+			ExperimentId: int32(exp.ID),
+		})
+		return err
+	}
+	onNode := func(node string) *k8sV1.Pod {
+		return &k8sV1.Pod{Spec: k8sV1.PodSpec{
+			NodeSelector: map[string]string{"kubernetes.io/hostname": node},
+			Volumes: []k8sV1.Volume{{
+				Name: "ckpts",
+				VolumeSource: k8sV1.VolumeSource{
+					HostPath: &k8sV1.HostPathVolumeSource{Path: "/data/ckpts"},
+				},
+			}},
+			Containers: []k8sV1.Container{{
+				Name:         model.DeterminedK8ContainerName,
+				VolumeMounts: []k8sV1.VolumeMount{{Name: "ckpts", MountPath: "/mnt/ckpts"}},
+			}},
+		}}
+	}
+
+	useGCTaskContainerDefaultsOn(api, true,
+		model.TaskContainerDefaultsConfig{CPUPodSpec: onNode("node-b")})
+	err := deleteTensorboards()
+	require.ErrorContains(t, err, "on a hostPath volume of host path /data/ckpts/run on node node-a,")
+	require.ErrorContains(t, err, "kept until checkpoint_gc_pod_spec pins the pod to node node-a")
+	require.NotContains(t, err.Error(), "node-b")
+	requireNoGCTask(t, specs)
+
+	gcPodSpec := onNode("node-a")
+	useGCTaskContainerDefaultsOn(api, true, model.TaskContainerDefaultsConfig{
+		CPUPodSpec: onNode("node-b"), CheckpointGCPodSpec: gcPodSpec,
+	})
+	require.NoError(t, deleteTensorboards())
+	spec := nextGCSpec(t, specs)
+	require.Equal(t, owner.ID, spec.Base.Owner.ID)
+	require.Equal(t, gcPodSpec.Spec, spec.ToTaskSpec().Environment.PodSpec().Spec)
+}
+
+// On the agent resource manager, a task's container gets its bind mounts and no pod spec. Here
+// the task container defaults' gpu_pod_spec mounts the persistent volume claim ckpts at /mnt/ckpts,
+// which the experiment gets merged into its pod spec, and a GC task into its own, and the
+// experiment bind-mounts host path /srv/alice at /mnt. Its trials wrote to /srv/alice/ckpts/run, and
+// a GC task, with no bind mount there, would find its own empty /mnt/ckpts/run and record the
+// checkpoints as deleted. GC is refused and no GC task is started, also on a resource manager that
+// does not say whether it applies pod specs. On Kubernetes, where the trials and the GC task both
+// have the claim at /mnt/ckpts, GC runs.
+//
+//nolint:exhaustruct
+func TestCheckpointGCOfABindMountUnderAPodSpecVolumeOnTheAgentRM(t *testing.T) {
+	api, _, adminCtx := setupAPITest(t, nil)
+	owner := addGCTestOwner(t)
+	specs := captureCheckpointGC(t)
+
+	ckptsPVC := &k8sV1.Pod{Spec: k8sV1.PodSpec{
+		Volumes: []k8sV1.Volume{{
+			Name: "ckpts",
+			VolumeSource: k8sV1.VolumeSource{
+				PersistentVolumeClaim: &k8sV1.PersistentVolumeClaimVolumeSource{ClaimName: "ckpts"},
+			},
+		}},
+		Containers: []k8sV1.Container{{
+			Name:         model.DeterminedK8ContainerName,
+			VolumeMounts: []k8sV1.VolumeMount{{Name: "ckpts", MountPath: "/mnt/ckpts"}},
+		}},
+	}}
+	api.m.config.TaskContainerDefaults.GPUPodSpec = ckptsPVC
+	exp := createGCTestExperimentFromYAML(adminCtx, t, api, owner,
+		"bind_mounts:\n  - host_path: /srv/alice\n    container_path: /mnt\n")
+	require.Equal(t, ckptsPVC.Spec.Volumes, exp.Config.Environment.PodSpec().Spec.Volumes)
+	deleteTensorboards := func() error {
+		_, err := api.DeleteTensorboardFiles(adminCtx, &apiv1.DeleteTensorboardFilesRequest{
+			ExperimentId: int32(exp.ID),
+		})
+		return err
+	}
+	gcTCD := model.TaskContainerDefaultsConfig{GPUPodSpec: ckptsPVC}
+
+	useGCTaskContainerDefaultsOn(api, false, gcTCD)
+	err := deleteTensorboards()
+	require.ErrorContains(t, err, "checkpoint storage is the directory /mnt/ckpts/run")
+	require.ErrorContains(t, err, "on a bind mount of host path /srv/alice/ckpts/run,")
+	require.ErrorContains(t, err, "kept until task_container_defaults.bind_mounts mounts host path "+
+		"/srv/alice/ckpts/run at /mnt/ckpts/run")
+	requireNoGCTask(t, specs)
+
+	useGCTaskContainerDefaults(api, gcTCD)
+	err = deleteTensorboards()
+	require.ErrorContains(t, err, "What the experiment's trials had at /mnt/ckpts/run depends on "+
+		"whether the resource manager of the experiment's resource pool applied their pod spec")
+	require.ErrorContains(t, err, "checkpoints are kept")
+	requireNoGCTask(t, specs)
+
+	useGCTaskContainerDefaultsOn(api, true, gcTCD)
+	require.NoError(t, deleteTensorboards())
+	spec := nextGCSpec(t, specs)
+	require.Equal(t, owner.ID, spec.Base.Owner.ID)
+	require.Equal(t, ckptsPVC.Spec.Volumes, spec.ToTaskSpec().Environment.PodSpec().Spec.Volumes)
+	require.Empty(t, spec.ToTaskSpec().Mounts)
+}
+
+// Control: for directory checkpoint storage that the experiment does not mount, the check does not
+// apply and the existing handling is kept: the GC task runs as before and records it as deleted.
+// Only the experiment's /hooks mount is there, which does not cover the storage, and it does not
+// reach the task.
+func TestCheckpointGCOfDirectoryStorageTheExperimentDoesNotMount(t *testing.T) {
+	api, _, adminCtx := setupAPITest(t, nil)
+	owner := addGCTestOwner(t)
+	specs := captureCheckpointGC(t)
+
+	//nolint:exhaustruct
+	exp, ckpt := createGCTestExperimentWithStorage(adminCtx, t, api, owner,
+		&expconf.CheckpointStorageConfig{
+			RawDirectoryConfig: &expconf.DirectoryConfig{RawContainerPath: ptrs.Ptr("/mnt/ckpts/run")},
+		})
+
+	_, err := api.DeleteCheckpoints(adminCtx, &apiv1.DeleteCheckpointsRequest{
+		CheckpointUuids: []string{ckpt},
+	})
+	require.NoError(t, err)
+	spec := nextGCSpec(t, specs)
+	require.Equal(t, exp.ID, spec.ExperimentID)
+	require.Equal(t, owner.ID, spec.Base.Owner.ID)
+	require.Equal(t, ckpt, spec.ToDelete)
+	require.Equal(t, "/mnt/ckpts/run",
+		spec.CheckpointStorage.RawDirectoryConfig.ContainerPath())
+	require.Empty(t, spec.ToTaskSpec().Mounts)
+}
+
+// A trial can save its checkpoints to other storage than the experiment's, which it reports to the
+// master (core.init's checkpoint_storage). Here the experiment's own storage is shared_fs, which its
+// trials had mounted at /determined_shared_fs, and its checkpoint is in directory storage at
+// /determined_shared_fs/mine, on that mount. A GC task of the directory storage does not get the
+// shared_fs mount, so deleting the experiment is refused and leaves it in DELETE_FAILED, with no GC
+// task, until the task container defaults mount the same host path there.
+func TestCheckpointGCOfDirectoryStorageOnTheExperimentSharedFSMount(t *testing.T) {
+	api, _, adminCtx := setupAPITest(t, nil)
+	owner := addGCTestOwner(t)
+	specs := captureCheckpointGC(t)
+
+	exp, ckpt := createGCTestExperiment(adminCtx, t, api, owner)
+	require.Equal(t, gcTestHostPath, exp.Config.CheckpointStorage.RawSharedFSConfig.HostPath())
+	//nolint:exhaustruct
+	storageID, err := storage.AddBackend(adminCtx, &expconf.CheckpointStorageConfig{
+		RawDirectoryConfig: &expconf.DirectoryConfig{
+			RawContainerPath: ptrs.Ptr("/determined_shared_fs/mine"),
+		},
+	})
+	require.NoError(t, err)
+	_, err = db.Bun().NewUpdate().Table("checkpoints_v2").
+		Set("storage_id = ?", storageID).Where("uuid = ?", ckpt).Exec(adminCtx)
+	require.NoError(t, err)
+	deleteExperiment := func() {
+		_, err := api.DeleteExperiment(adminCtx, &apiv1.DeleteExperimentRequest{
+			ExperimentId: int32(exp.ID),
+		})
+		require.NoError(t, err)
+	}
+
+	useGCTaskContainerDefaults(api, model.TaskContainerDefaultsConfig{})
+	deleteExperiment()
+	for i := 0; ; i++ {
+		e, err := api.GetExperiment(adminCtx, &apiv1.GetExperimentRequest{
+			ExperimentId: int32(exp.ID),
+		})
+		require.NoError(t, err)
+		if e.Experiment.State == experimentv1.State_STATE_DELETE_FAILED {
+			break
+		}
+		require.Less(t, i, 30, "experiment %d is %s, not DELETE_FAILED", exp.ID, e.Experiment.State)
+		time.Sleep(500 * time.Millisecond)
+	}
+	requireNoGCTask(t, specs)
+
+	//nolint:exhaustruct
+	useGCTaskContainerDefaults(api, model.TaskContainerDefaultsConfig{
+		BindMounts: model.BindMountsConfig{{
+			HostPath: gcTestHostPath, ContainerPath: "/determined_shared_fs", Propagation: "rprivate",
+		}},
+	})
+	deleteExperiment()
+	spec := nextGCSpec(t, specs)
+	require.Equal(t, exp.ID, spec.ExperimentID)
+	require.Equal(t, owner.ID, spec.Base.Owner.ID)
+	require.Equal(t, ckpt, spec.ToDelete)
+	require.Equal(t, "/determined_shared_fs/mine",
+		spec.CheckpointStorage.RawDirectoryConfig.ContainerPath())
+	require.Equal(t, []mount.Mount{{
+		Type: mount.TypeBind, Source: gcTestHostPath, Target: "/determined_shared_fs",
+		BindOptions: &mount.BindOptions{Propagation: "rprivate"},
+	}}, spec.ToTaskSpec().Mounts)
+	waitForExperimentDeleted(adminCtx, t, api, exp.ID)
+}

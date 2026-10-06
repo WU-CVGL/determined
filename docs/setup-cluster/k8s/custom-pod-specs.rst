@@ -277,11 +277,21 @@ Example ``expconf.yaml``
 *******************************
 
 Determined also provides a way to configure CheckpointGC pod specs. This configuration is done using
-the ``task_container_defaults.checkpointGcPodSpec`` field within your ``value.yaml`` file. User can
-create a custom pod specification for CheckpointGC, it will override the default experiment's pod
-spec settings. Determined by default uses the experiment's pod spec, but by providing custom pod
-spec users have the flexibility to customize and configure the pod spec directly in this field. User
-can tailor the garbage collection settings according to the specific GC needs.
+the ``task_container_defaults.checkpointGcPodSpec`` field within your ``value.yaml`` file. A
+CheckpointGC task never uses the experiment's pod spec. Without ``checkpointGcPodSpec``, it uses the
+resource pool's ``cpuPodSpec``. Either one is merged over the ``gpuPodSpec`` by Kubernetes strategic
+merge, so with only a ``gpuPodSpec`` set, the task uses that one. By providing a custom pod spec in
+this field, administrators can tailor the garbage collection settings to the specific GC needs, for
+example to mount the volume of ``directory`` checkpoint storage that experiments mount with their
+own pod specs. The master starts a CheckpointGC task for such storage only if this pod spec mounts
+the same ``persistentVolumeClaim``, ``hostPath`` or ``nfs`` volume, with the same ``subPath``, at
+the same place in the ``determined-container``. Storage on other kinds of volumes, except
+``emptyDir``, is never collected. For storage on a host path, a ``hostPath`` volume or a bind mount,
+whose files are on the node where the pod runs, the experiment's pod spec may pin its pods to a node
+by ``nodeName``, a ``kubernetes.io/hostname`` ``nodeSelector``, or a required node affinity of one
+term with one ``kubernetes.io/hostname`` value. This pod spec must then pin the CheckpointGC pod to
+the same node in one of these ways. Other placement of the experiment's pods is not read, and a host
+path of pods that are not pinned this way is taken to be the same storage on every node.
 
 Example of configuring custom CheckpointGC pod specs in ``values.yaml``:
 

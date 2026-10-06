@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	authz2 "github.com/determined-ai/determined/master/internal/authz"
@@ -219,6 +220,25 @@ func TestCheckpointGCShipsItsOwnLogs(t *testing.T) {
 	requireCode(t, codes.PermissionDenied,
 		postTaskLogsGRPC(sessionContext(t, owner), api, removeFiles.taskID, "forged"))
 	require.Equal(t, 1, taskLogRows(t, removeFiles.taskID))
+
+	// A request that carries a user's token acts as that user, even with the GC task's own
+	// allocation token next to it, so the allocation token does not let the user write.
+	t.Run("user token beside the allocation token", func(t *testing.T) {
+		gc := addCheckpointGCTaskForLogsTest(ctx, t, "experiment job", exp.JobID,
+			expGCTaskID(exp.ID))
+		ownSession := allocationSessionCtx(t, gc.allocationID, owner)
+		require.NoError(t, postTaskLogsGRPC(ownSession, api, gc.taskID, "shipped"))
+		own, ok := metadata.FromIncomingContext(ownSession)
+		require.True(t, ok)
+		// The user's token as a gRPC client and as the gateway send it.
+		for _, header := range []string{"x-user-token", "grpcgateway-authorization"} {
+			both := metadata.NewIncomingContext(context.Background(), metadata.Join(own,
+				metadata.Pairs(header, "Bearer "+sessionToken(t, deleter))))
+			requireCode(t, codes.PermissionDenied,
+				postTaskLogsGRPC(both, api, gc.taskID, "forged"))
+		}
+		require.Equal(t, 1, taskLogRows(t, gc.taskID))
+	})
 }
 
 // TestTaskLogWritesNTSCAuthZ checks which authz methods the write rule asks, as under RBAC.
