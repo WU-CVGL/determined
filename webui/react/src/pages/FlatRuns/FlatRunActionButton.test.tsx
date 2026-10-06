@@ -5,6 +5,7 @@ import UIProvider, { DefaultTheme } from 'hew/Theme';
 
 import FlatRunActionButton from 'pages/FlatRuns/FlatRunActionButton';
 import { FlatRun, RunState } from 'types';
+import { isDangerMenuItem } from 'utils/tests/menu';
 
 vi.mock('stores/users', async (importOriginal) => {
   const loadable = await import('hew/utils/loadable');
@@ -91,6 +92,16 @@ describe('canActionFlatRun function', () => {
       expect(await screen.findByText('Unarchive')).toBeInTheDocument();
       expect(await screen.findByText('Delete')).toBeInTheDocument();
       expect(await screen.findByText('Kill')).toBeInTheDocument();
+    });
+
+    it('shows Kill and Delete in red and the other actions not', async () => {
+      const { user } = setup(flatRuns);
+      await user.click(await screen.findByText('Actions'));
+      await screen.findByText('Kill');
+      expect(isDangerMenuItem('Kill')).toBe(true);
+      expect(isDangerMenuItem('Delete')).toBe(true);
+      expect(isDangerMenuItem('Move')).toBe(false);
+      expect(isDangerMenuItem('Pause')).toBe(false);
     });
 
     it('should kill runs', async () => {

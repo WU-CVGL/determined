@@ -52,9 +52,12 @@ describe('Dashboard', () => {
     expect(screen.getByRole('button')).toBeDisabled();
   });
 
-  it('opens JupyterLabModal', async () => {
+  it('opens the launch form with JupyterLab selected', async () => {
     setup(true);
     await user.click(screen.getByRole('button'));
     expect(screen.getByText(SIMPLE_CONFIG_START_FROM_TEXT)).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Launch JupyterLab' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'JupyterLab' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Shell' })).not.toBeChecked();
   });
 });

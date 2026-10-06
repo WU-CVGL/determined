@@ -18,6 +18,12 @@ describe('Job Utilities', () => {
       expect(utils.jobTypeLabel(JobType.GENERIC)).toEqual('Generic Task');
       expect(utils.jobTypeLabel(JobType.EXPERIMENT)).toEqual('Experiment');
     });
+    it('should spell JupyterLab and TensorBoard as the WebUI does', () => {
+      expect(utils.jobTypeLabel(JobType.NOTEBOOK)).toEqual('JupyterLab');
+      expect(utils.jobTypeLabel(JobType.TENSORBOARD)).toEqual('TensorBoard');
+      expect(utils.jobTypeLabel(JobType.SHELL)).toEqual('Shell');
+      expect(utils.jobTypeLabel(JobType.COMMAND)).toEqual('Command');
+    });
   });
 
   describe('genericJobLabel', () => {
@@ -30,6 +36,18 @@ describe('Job Utilities', () => {
         `Generic Task ${taskId}`,
       );
       expect(utils.genericJobLabel('', taskId)).toEqual(`Generic Task ${taskId}`);
+    });
+  });
+
+  describe('taskJobLabel', () => {
+    const taskId = 'cb96190b-7f15-4707-990a-c4677ab45ded';
+    it('should show the name with the short task ID', () => {
+      expect(utils.taskJobLabel(JobType.SHELL, 'multiview_3090_0slot_48c', taskId)).toEqual(
+        'multiview_3090_0slot_48c (cb96190b)',
+      );
+    });
+    it('should fall back to the type and the short task ID without a name', () => {
+      expect(utils.taskJobLabel(JobType.NOTEBOOK, '', taskId)).toEqual('JupyterLab cb96190b');
     });
   });
 

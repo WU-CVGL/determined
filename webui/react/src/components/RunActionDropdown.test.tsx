@@ -13,6 +13,7 @@ import {
   unarchiveRuns,
 } from 'services/api';
 import { FlatRunExperiment, RunState } from 'types';
+import { isDangerMenuItem } from 'utils/tests/menu';
 
 import RunActionDropdown, { Action } from './RunActionDropdown';
 import { cell, run } from './RunActionDropdown.test.mock';
@@ -232,5 +233,20 @@ describe('RunActionDropdown', () => {
     mocks.canModifyFlatRun.mockImplementation(() => false);
     setup();
     expect(screen.queryByText(Action.Resume)).not.toBeInTheDocument();
+  });
+
+  it('shows Kill in red and Resume not', () => {
+    mocks.canModifyFlatRun.mockImplementation(() => true);
+    setup(undefined, RunState.Paused, false);
+    expect(isDangerMenuItem(Action.Kill)).toBe(true);
+    expect(isDangerMenuItem(Action.Resume)).toBe(false);
+  });
+
+  it('shows Delete in red and Archive not', () => {
+    mocks.canDeleteFlatRun.mockImplementation(() => true);
+    mocks.canModifyFlatRun.mockImplementation(() => true);
+    setup();
+    expect(isDangerMenuItem(Action.Delete)).toBe(true);
+    expect(isDangerMenuItem(Action.Archive)).toBe(false);
   });
 });
