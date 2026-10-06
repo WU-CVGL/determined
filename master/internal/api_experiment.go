@@ -1428,7 +1428,7 @@ func (a *apiServer) CreateExperiment(
 	}
 
 	dbExp, modelDef, activeConfig, p, taskSpec, err := a.m.parseCreateExperiment(ctx,
-		req, user, user,
+		req, user, user, 0,
 	)
 	if err != nil {
 		return nil, err
@@ -1561,7 +1561,7 @@ func (a *apiServer) PutExperiment(
 	}
 
 	dbExp, modelDef, activeConfig, p, _, err := a.m.parseCreateExperiment(ctx,
-		req.CreateExperimentRequest, user, user,
+		req.CreateExperimentRequest, user, user, 0,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse exp config: %w", err)

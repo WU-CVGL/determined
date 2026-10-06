@@ -18,7 +18,9 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/determined-ai/determined/master/internal/authz"
 	"github.com/determined-ai/determined/master/internal/config"
+	"github.com/determined-ai/determined/master/internal/configpolicy"
 	"github.com/determined-ai/determined/master/internal/db"
 	expauth "github.com/determined-ai/determined/master/internal/experiment"
 	"github.com/determined-ai/determined/master/internal/user"
@@ -28,6 +30,7 @@ import (
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
+	"github.com/determined-ai/determined/proto/pkg/projectv1"
 )
 
 // continueTestUser is a user with its own agent user group, and a context that authenticates as it.
@@ -115,10 +118,19 @@ func endedTestExpWithConfig(
 	t *testing.T, api *apiServer, owner continueTestUser, config string,
 ) int {
 	t.Helper()
+	return endedTestExpInProject(t, api, owner, model.DefaultProjectID, config)
+}
+
+// endedTestExpInProject is endedTestExpWithConfig in project projectID.
+func endedTestExpInProject(
+	t *testing.T, api *apiServer, owner continueTestUser, projectID int, config string,
+) int {
+	t.Helper()
 	cfg, err := expconf.ParseAnyExperimentConfigYAML([]byte(config))
 	require.NoError(t, err)
 	activeConfig := schemas.WithDefaults(schemas.Merge(cfg, minExpConfig))
-	return endTestExp(t, createTestExpWithActiveConfig(t, api, owner.User, 1, activeConfig).ID)
+	return endTestExp(t,
+		createTestExpWithActiveConfig(t, api, owner.User, projectID, activeConfig).ID)
 }
 
 // resumeOverride returns the override config that Resume Current Trial in the WebUI sends: the whole
@@ -187,6 +199,25 @@ func requireRunsAs(t *testing.T, expID int, want continueTestUser) {
 		require.Equal(t, want.group.User, spec.AgentUserGroup.User, "%s: agent user", name)
 		require.Equal(t, want.group.Group, spec.AgentUserGroup.Group, "%s: agent group", name)
 	}
+}
+
+// requireInProject checks that the running experiment is in project projectID: in the database, in
+// the master, and in the workspace and project names that its tasks get.
+func requireInProject(t *testing.T, expID, projectID int, workspaceName, projectName string) {
+	t.Helper()
+	exp, err := db.ExperimentByID(context.Background(), expID)
+	require.NoError(t, err)
+	require.Equal(t, projectID, exp.ProjectID, "project in the database")
+
+	ref, ok := expauth.ExperimentRegistry.Load(expID)
+	require.True(t, ok, "experiment %d is not running", expID)
+	e, ok := ref.(*internalExperiment)
+	require.True(t, ok)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	require.Equal(t, projectID, e.ProjectID, "project of the running experiment")
+	require.Equal(t, workspaceName, e.taskSpec.Workspace, "workspace its tasks get")
+	require.Equal(t, projectName, e.taskSpec.Project, "project its tasks get")
 }
 
 func requireNotContinued(t *testing.T, expID int) {
@@ -353,6 +384,46 @@ func TestContinueExperimentChecksActorRunsAsOwner(t *testing.T) {
 	projectAuthZ.AssertCalled(t, "CanGetProject", mock.Anything, isUser(actor), mock.Anything)
 	requireRunsAs(t, expID, owner)
 
+	// The experiment was moved out of Uncategorized, which its config still names.
+	t.Run("project access is checked on the experiment's own project", func(t *testing.T) {
+		wsID, _ := db.RequireMockWorkspaceID(t, api.m.db, "")
+		projID, _ := db.RequireMockProjectID(t, api.m.db, wsID, false)
+		isProject := mock.MatchedBy(func(p *projectv1.Project) bool { return p.Id == int32(projID) })
+		for _, c := range []struct {
+			name   string
+			uid    int
+			access error
+		}{
+			{"allowed", 47100, nil},
+			{"refused", 47200, authz.PermissionDeniedError{}},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				u := addContinueTestUser(t, false, c.uid)
+				expID := endedTestExpInProject(t, api, owner, projID,
+					"{workspace: Uncategorized, project: Uncategorized}")
+				isExp := mock.MatchedBy(func(e *model.Experiment) bool { return e.ID == expID })
+				authZExp.On("CanGetExperiment", mock.Anything, isUser(u), isExp).Return(nil)
+				authZExp.On("CanEditExperiment", mock.Anything, isUser(u), isExp).Return(nil)
+				authZExp.On("CanGetExperimentArtifacts", mock.Anything, isUser(u), isExp).Return(nil)
+				projectAuthZ.On("CanGetProject", mock.Anything, isUser(u), isProject).Return(c.access)
+				projectAuthZ.On("CanGetProject", mock.Anything, isUser(u), mock.Anything).
+					Return(fmt.Errorf("checked on another project")).Maybe()
+
+				_, err := api.ContinueExperiment(u.ctx, &apiv1.ContinueExperimentRequest{
+					Id: int32(expID),
+				})
+				projectAuthZ.AssertCalled(t, "CanGetProject", mock.Anything, isUser(u), isProject)
+				if c.access == nil {
+					require.NoError(t, err)
+					requireRunsAs(t, expID, owner)
+				} else {
+					require.Equal(t, codes.NotFound, status.Code(err), err)
+					requireNotContinued(t, expID)
+				}
+			})
+		}
+	})
+
 	t.Run("a user who may not edit the experiment is refused", func(t *testing.T) {
 		refused := addContinueTestUser(t, false, 47000)
 		expID := endedTestExp(t, api, owner)
@@ -366,6 +437,68 @@ func TestContinueExperimentChecksActorRunsAsOwner(t *testing.T) {
 		})
 		require.Equal(t, codes.PermissionDenied, status.Code(err), err)
 		requireNotContinued(t, expID)
+	})
+}
+
+// A continue keeps the experiment in its own project, not the workspace and project its config
+// names: none when it was created with a project ID, the old ones when it was moved. That project's
+// workspace gives its tasks their agent user group and its invariant config.
+func TestContinueExperimentKeepsItsProject(t *testing.T) {
+	api, _, _ := setupAPITest(t, nil)
+	ctx := context.Background()
+	owner := addContinueTestUser(t, false, 50000)
+
+	// A workspace with an agent user group and an invariant config, and a project in it.
+	wsID, wsName := db.RequireMockWorkspaceID(t, api.m.db, "")
+	wsGroup := model.AgentUserGroup{User: "ws-agent", UID: 50100, Group: "ws-group", GID: 50101}
+	_, err := db.Bun().NewUpdate().Table("workspaces").
+		Set("uid = ?", wsGroup.UID).Set("user_ = ?", wsGroup.User).
+		Set("gid = ?", wsGroup.GID).Set("group_ = ?", wsGroup.Group).
+		Where("id = ?", wsID).
+		Exec(ctx)
+	require.NoError(t, err)
+	require.NoError(t, configpolicy.SetTaskConfigPolicies(ctx, &model.TaskConfigPolicies{
+		WorkspaceID: &wsID, WorkloadType: model.ExperimentType, LastUpdatedBy: owner.ID,
+		InvariantConfig: ptrs.Ptr(`{"max_restarts": 3}`),
+	}))
+	projID, projName := db.RequireMockProjectID(t, api.m.db, wsID, false)
+	inWorkspace := owner
+	inWorkspace.group = wsGroup
+
+	for _, c := range []struct{ name, config string }{
+		{"created with a project ID: its config names no project", "{}"},
+		{
+			"moved out of Uncategorized: its config names Uncategorized",
+			"{workspace: Uncategorized, project: Uncategorized}",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			expID := endedTestExpInProject(t, api, owner, projID, c.config)
+			_, err := api.ContinueExperiment(owner.ctx, &apiv1.ContinueExperimentRequest{
+				Id: int32(expID),
+			})
+			require.NoError(t, err)
+			requireRunsAs(t, expID, inWorkspace)
+			requireInProject(t, expID, projID, wsName, projName)
+			active, err := api.m.db.ActiveExperimentConfig(expID)
+			require.NoError(t, err)
+			require.Equal(t, 3, active.MaxRestarts(), "the workspace's invariant config")
+		})
+	}
+
+	// Uncategorized (ID 1) is bound as any other project, not read as "no project".
+	t.Run("moved to Uncategorized: its config names the project it left", func(t *testing.T) {
+		expID := endedTestExpInProject(t, api, owner, model.DefaultProjectID,
+			fmt.Sprintf("{workspace: %q, project: %q}", wsName, projName))
+		_, err := api.ContinueExperiment(owner.ctx, &apiv1.ContinueExperimentRequest{
+			Id: int32(expID),
+		})
+		require.NoError(t, err)
+		requireRunsAs(t, expID, owner)
+		requireInProject(t, expID, model.DefaultProjectID, model.DefaultWorkspaceName, "Uncategorized")
+		active, err := api.m.db.ActiveExperimentConfig(expID)
+		require.NoError(t, err)
+		require.NotEqual(t, 3, active.MaxRestarts(), "the other workspace's invariant config")
 	})
 }
 

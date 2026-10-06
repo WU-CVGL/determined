@@ -18,6 +18,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/experiment"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
 	"github.com/determined-ai/determined/master/internal/user"
+	"github.com/determined-ai/determined/master/internal/workspace"
 	"github.com/determined-ai/determined/master/pkg/command"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/schemas"
@@ -35,7 +36,9 @@ type continueConfig struct {
 	ownerOnlyChanges []string
 }
 
-func (a *apiServer) parseAndMergeContinueConfig(expID int, overrideConfig string) (
+// parseAndMergeContinueConfig merges the override config into the active config of experiment
+// expID, in project projectID, whose workspace's invariant configs it applies.
+func (a *apiServer) parseAndMergeContinueConfig(expID, projectID int, overrideConfig string) (
 	*continueConfig, error,
 ) {
 	if overrideConfig == "" {
@@ -82,12 +85,11 @@ func (a *apiServer) parseAndMergeContinueConfig(expID int, overrideConfig string
 		return nil, fmt.Errorf("comparing the override config: %w", err)
 	}
 
-	// Merge the config with the optionally specified invariant config specified by task config
-	// policies.
-	w, err := getWorkspaceByConfig(activeConfig)
+	// The project's workspace, not the one the config names, which can be missing or stale.
+	w, err := workspace.WorkspaceByProjectID(context.TODO(), projectID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal,
-			fmt.Sprintf("failed to get workspace %s", activeConfig.Workspace()))
+			"failed to get the workspace of project %d: %s", projectID, err)
 	}
 
 	configWithInvariantDefaults, err := configpolicy.MergeWithInvariantExperimentConfigs(
@@ -273,7 +275,10 @@ func (a *apiServer) ContinueExperiment(
 	if err != nil {
 		return nil, fmt.Errorf("getting experiment trials: %w", err)
 	}
-	merged, err := a.parseAndMergeContinueConfig(int(req.Id), req.OverrideConfig)
+	// The experiment stays in its project, whatever workspace and project its config names: none
+	// when it was created with a project ID, the old ones when it was moved.
+	merged, err := a.parseAndMergeContinueConfig(int(req.Id), origExperiment.ProjectID,
+		req.OverrideConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +294,7 @@ func (a *apiServer) ContinueExperiment(
 	dbExp, modelDef, activeConfig, _, taskSpec, err := a.m.parseCreateExperiment(ctx,
 		&apiv1.CreateExperimentRequest{
 			Config: string(merged.config),
-		}, actor, &owner,
+		}, actor, &owner, origExperiment.ProjectID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("parsing continue experiment request: %w", err)
