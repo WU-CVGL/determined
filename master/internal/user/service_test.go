@@ -20,6 +20,11 @@ func TestStandardAuth(t *testing.T) {
 
 	c.SetPath("/random/unlisted/endpoint")
 	require.Equal(t, authStandard, service.getAuthLevel(c))
+
+	// Unmanaged trials post their logs here with the session of the user who runs them.
+	c.SetPath("/task-logs")
+	c.SetRequest(httptest.NewRequest(http.MethodPost, "/task-logs", nil))
+	require.Equal(t, authStandard, service.getAuthLevel(c))
 }
 
 func TestNoAuth(t *testing.T) {
