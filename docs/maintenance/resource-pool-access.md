@@ -52,7 +52,7 @@ pool:
 - Setting a new default compute or aux pool of a workspace.
 
 Requests that code in a task makes, such as a submission from inside a running
-experiment, are checked as the task's owner.
+experiment, are checked as the user who launched the task.
 
 `GET /api/v1/resource-pools` lists only the pools that the user may use, so the
 WebUI's pool pickers and cluster pages, the CLI, and the SDK show only those.
@@ -160,21 +160,20 @@ det resource-pool access set gpu-a100 --mode restricted
 
 ## Running another user's code
 
-A task authenticates as its owner, so the requests that its code makes carry
-the owner's grants and, for an administrator, every administrator power,
-including changing pool access. Running an image or code that another user
-chose in a task of your own lends that user your session. These actions do so
-on purpose:
+A task authenticates as the user who launched it, so the requests that its
+code makes carry that user's grants and, for an administrator, every
+administrator power, including changing pool access. When you launch a task
+that runs an image or code that another user chose, you lend that user your
+session. You do this on purpose when you:
 
-- forking or cloning another user's experiment, which reuses its model
-  definition;
-- forking another user's generic task, or creating a child task that inherits
-  its context;
-- launching with a template that sets the container image.
+- fork or clone another user's experiment, which reuses its model definition;
+- fork another user's generic task, or create a child task that inherits its
+  context;
+- launch with another user's template that sets the container image.
 
 Continuing another user's experiment, as an administrator or, with RBAC, as a
-user allowed to update it, also runs the owner's code with the session and the
-agent user and group of the user who continues it.
+user allowed to update it, also runs the experiment owner's code with the
+session and the agent user and group of the user who continues it.
 
 A TensorBoard takes an experiment's image, image pull secrets, and
 `registry_auth` only when the user who starts it owns the experiment.
