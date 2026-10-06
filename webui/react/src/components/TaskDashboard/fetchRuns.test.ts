@@ -216,6 +216,14 @@ describe('fetchRunPage', () => {
     expect(vi.mocked(getShells).mock.calls[0][0].users).toBeUndefined();
   });
 
+  it('asks for all the notebooks, shells, commands and TensorBoards (limit 0)', async () => {
+    await fetchRunPage(globalJobs());
+
+    [getCommands, getJupyterLabs, getShells, getTensorBoards].forEach((fn) =>
+      expect(vi.mocked(fn).mock.calls[0][0].limit).toBe(0),
+    );
+  });
+
   it('skips the paged sources that the kind filter leaves out', async () => {
     const page = await fetchRunPage(globalJobs({ kinds: [RunKind.JupyterLab] }));
 

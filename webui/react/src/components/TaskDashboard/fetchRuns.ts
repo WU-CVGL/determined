@@ -87,9 +87,10 @@ export const fetchRunPage = async (query: RunQuery, signal?: AbortSignal): Promi
   const window = { limit: offset + limit, offset: 0 };
 
   const commandKinds = COMMAND_KINDS.filter((kind) => pageKinds.includes(kind));
+  // Limit 0: all of them. Without it the API wrapper asks for the first 1000 by ID, not the newest.
   const commandLists = commandKinds.map((kind) =>
     commandListers[kind](
-      { users: userId !== undefined ? [String(userId)] : undefined, workspaceId },
+      { limit: 0, users: userId !== undefined ? [String(userId)] : undefined, workspaceId },
       options,
     ),
   );
