@@ -182,6 +182,22 @@ class _LogSender(threading.Thread):
         except Exception as e:
             self._disabled.set()
             self._warn(f"stopped sending output to the master after an error: {e!r}")
+        finally:
+            self._release()
+
+    def _release(self) -> None:
+        """
+        Let go of the output that will never be sent, once the sender stops. _closing or _disabled
+        is set by then, so writes no longer queue; a write that checked them just before can still
+        leave its one item.
+        """
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break
+        self._buf = ""
+        self._msgs = []
 
     def _add(self, t: float, data: str) -> None:
         self._buf += data

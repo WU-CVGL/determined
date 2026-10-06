@@ -208,7 +208,7 @@ done
 `)
 	sshd := filepath.Join(dir, "sshd")
 	writeScript(t, sshd, `
-printf '%s\n' "$*" >"$ARGS_FILE"
+printf '%s\0' "$@" >"$ARGS_FILE"
 printf '%s\r\n' "$LISTENING" >&2
 for _ in $(seq 200); do
     if [[ -s $READY_FILE ]]; then
@@ -225,7 +225,10 @@ exit 3
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	sshdArgs := []string{"-f", "/run/determined/ssh/sshd_config", "-p", "2222", "-D", "-e"}
+	// One argument has a space: only a quoted "$@" passes it to sshd as one argument.
+	sshdArgs := []string{
+		"-f", "/run/determined/ssh/sshd_config", "-p", "2222", "-D", "-e", "-o", "LogLevel VERBOSE",
+	}
 	cmd := exec.CommandContext(ctx, "bash", //nolint:gosec
 		append([]string{"-c", "set -e\nshopt -s extglob\n" + tail, "shell-entrypoint.sh"}, sshdArgs...)...)
 	cmd.WaitDelay = 10 * time.Second
@@ -255,5 +258,8 @@ exit 3
 	require.Equal(t, sshdListening+"\r\n", string(ready))
 	args, err := os.ReadFile(argsFile) //nolint:gosec
 	require.NoError(t, err)
-	require.Equal(t, strings.Join(sshdArgs, " ")+"\n", string(args))
+	// The stand-in ends each argument with a NUL, which no argument can contain.
+	got := strings.Split(string(args), "\x00")
+	require.Equal(t, "", got[len(got)-1], "the last argument ends with a NUL: %q", args)
+	require.Equal(t, sshdArgs, got[:len(got)-1])
 }
