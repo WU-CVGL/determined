@@ -71,6 +71,8 @@ func ObfuscateAgent(agent *agentv1.Agent) error {
 		return errors.New("agent must be defined")
 	}
 	agent.Addresses = []string{hiddenString}
+	// GPU UUIDs, bus ids and topology are sensitive agent information.
+	agent.GpuTopology = nil
 
 	if agent.Containers != nil {
 		obfuscatedContainers := make(map[string]*containerv1.Container)
