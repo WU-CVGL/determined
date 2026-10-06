@@ -5,7 +5,7 @@ import userStore from 'stores/users';
 import { CommandResponse, CommandType, RawJson } from 'types';
 import { JupyterLabLaunchOptions, previewJupyterLab } from 'utils/jupyter';
 import { recordLaunch } from 'utils/launchHistory';
-import { NtscLaunchOptions, simpleLaunchConfig, toShellConfig } from 'utils/ntscConfig';
+import { configForLaunchType, NtscLaunchOptions, simpleLaunchConfig } from 'utils/ntscConfig';
 
 export interface ShellLaunchOptions extends NtscLaunchOptions {
   /** A full config. When given, name, pool, slots and template are ignored. */
@@ -37,12 +37,18 @@ export const launchShell = async (options: ShellLaunchOptions = {}): Promise<Com
 /**
  * The master's LaunchShell has no preview mode, so the full shell config is
  * previewed through the JupyterLab preview, which merges the cluster defaults,
- * the template and the form fields exactly as a shell launch does, and then
- * has its notebook-only keys removed (see toShellConfig). No task is created.
+ * the template and the form fields exactly as a shell launch does
+ * (getCommandLaunchParams). No task is created.
+ *
+ * The config is kept whole, including the notebook settings idle_timeout and
+ * notebook_idle_type: the launch form keeps this one config when the type is
+ * switched back to JupyterLab, and a shell ignores them. Only the preview's
+ * generated "JupyterLab (<pet name>)" name is left out, as configForLaunchType
+ * leaves it out of a shell launch; the master names the shell.
  */
 export const previewShell = async (options: JupyterLabLaunchOptions = {}): Promise<RawJson> => {
   try {
-    return toShellConfig(await previewJupyterLab(options));
+    return configForLaunchType(await previewJupyterLab(options), CommandType.Shell);
   } catch (e) {
     throw new Error('Unable to load shell config.');
   }

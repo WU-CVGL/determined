@@ -1370,6 +1370,11 @@ custom base Docker image, if needed. Credentials are specified as the following 
 -  ``serveraddress`` (required)
 -  ``email`` (optional)
 
+The master returns an experiment's ``registry_auth`` only to the user who created the experiment and
+to administrators. Other users get the experiment's configuration without it. The copy of the
+experiment's configuration that its checkpoints and model versions carry has ``registry_auth`` set
+to ``null`` for every user.
+
 ``environment_variables``
 =========================
 

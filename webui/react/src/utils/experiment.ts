@@ -12,7 +12,6 @@ import {
   BulkExperimentItem,
   ContinuableNonSingleSearcherName,
   ExperimentAction,
-  ExperimentBase,
   ExperimentPermissionsArgs,
   ExperimentSearcherName,
   FullExperimentItem,
@@ -54,10 +53,12 @@ export const isExperiment = <T extends BulkExperimentItem | FullExperimentItem>(
   return 'hyperparameters' in obj && 'archived' in obj;
 };
 
-export const isSingleTrialExperiment = (experiment: ExperimentBase): boolean => {
+// Decided by the config, which an experiment fetched on its own always has and an experiment
+// list row has too (the list routes send it, though the API marks it deprecated there).
+export const isSingleTrialExperiment = (experiment: ProjectExperiment): boolean => {
   return (
-    experiment?.config.searcher.name === ExperimentSearcherName.Single ||
-    experiment?.config.searcher.max_trials === 1
+    experiment?.config?.searcher?.name === ExperimentSearcherName.Single ||
+    experiment?.config?.searcher?.max_trials === 1
   );
 };
 
@@ -193,7 +194,8 @@ const experimentCheckers: Record<ExperimentAction, ExperimentChecker> = {
   [ExperimentAction.Unarchive]: (experiment) =>
     terminalRunStates.has(experiment.state) && experiment.archived,
 
-  [ExperimentAction.ViewLogs]: alwaysTrueExperimentChecker,
+  // Logs belong to trials: an experiment without a trial yet has none to show.
+  [ExperimentAction.ViewLogs]: (experiment) => experiment.numTrials > 0,
 
   [ExperimentAction.ViewResources]: alwaysTrueExperimentChecker,
 
