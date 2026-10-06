@@ -134,8 +134,9 @@ func TestRunCheckpointGCTask(t *testing.T) {
 			tmp := task.DefaultService
 			task.DefaultService = tt.args.as(t)
 			defer func() { task.DefaultService = tmp }()
-			// Checkpoint GC is a system task, exempt from the resource pool ACL: it starts even
-			// when its pool is restricted for its non-admin owner, and never checks access.
+			// Checkpoint GC does not check resource pool access (a known gap, see
+			// runCheckpointGCTask): it starts even when its pool is restricted for the non-admin
+			// user who starts it, and reads no access table.
 			accessReads := restrictEveryPoolForTest(t)
 			defer func() { require.Zero(t, accessReads()) }()
 

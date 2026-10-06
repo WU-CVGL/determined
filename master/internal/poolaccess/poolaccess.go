@@ -17,7 +17,9 @@
 // task.DefaultService.StartAllocation or rm.Allocate calls either. Continuations (experiment,
 // trial, command and generic task restore; trial allocations and restarts; generic task resume
 // recovery and retried resume plans) are not checked, because they continue work that a pool
-// has accepted; system tasks (checkpoint GC) are not checked, because the master starts them.
+// has accepted. Checkpoint GC is not checked either, and that is a known gap, not a rule: GC runs
+// in the cluster's default aux pool also when a user's request (deleting checkpoints or
+// TensorBoard files) starts it. See runCheckpointGCTask.
 package poolaccess
 
 import (

@@ -87,7 +87,7 @@ func resolveOmittedPoolTo(aux, compute *string) func(
 
 // restrictEveryPoolForTest makes every access check until the test ends see every pool as
 // restricted with no grants, and returns the number of access reads made since. Continuations and
-// system tasks never check access, so they must leave the count at zero.
+// checkpoint GC never check access, so they must leave the count at zero.
 func restrictEveryPoolForTest(t *testing.T) func() int {
 	var mu sync.Mutex
 	reads := 0
