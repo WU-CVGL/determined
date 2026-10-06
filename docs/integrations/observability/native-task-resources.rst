@@ -49,10 +49,23 @@ Queries are limited to seven days, 1,440 points per series, a minimum 15-second 
 Reading the Charts
 ==================
 
-Select a preset or a custom time range and optionally one allocation. Running tasks refresh
-every 30 seconds while the page is visible; ended tasks use a window preceding their end time.
+Select a preset or a custom time range and optionally one allocation. The default range,
+**Since start**, begins when the task's first allocation got its resources, so time spent queued
+is not shown; with one allocation selected, it runs from that allocation's start to its end, or to
+now while it runs. If no allocation has got its resources, or the master cannot list the
+allocations within 10 seconds, it begins when the task was submitted.
+It shows at most the most recent 7 days. The other presets count back from now, or from the end of
+an ended task. Running tasks refresh every 30 seconds while the page is visible.
 Drag across a chart to zoom the shared timeline. Empty periods remain gaps rather than zeros.
 If a refresh fails, retained charts are explicitly marked as the last successful response.
+
+Trials, notebooks, and shells record the GPUs each container sees when it starts, in the order of
+``nvidia-smi`` inside the container. A GPU legend shows a GPU's position in that list (``GPU 0``,
+``GPU 1``, ...) only when the lists of the allocation's containers together name as many GPUs as
+the allocation has slots, since a list can miss GPUs that ``nvidia-smi`` failed to report.
+Otherwise, and for commands, generic tasks, and TensorBoards, which record no GPUs, the legend
+shows the start of the GPU UUID. Hover over a legend entry for the GPU UUID, host, allocation, PCI
+bus ID, GPU index on the host, and model.
 
 GPU values describe the entire assigned device and may include other processes. Shared-device
 ownership conflicts are omitted by the recording rules. Child tasks are not aggregated. An

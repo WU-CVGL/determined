@@ -226,18 +226,24 @@ func (m *Master) getExperimentModelDefinition(c echo.Context) error {
 	return c.Blob(http.StatusOK, "application/x-gtar", modelDef)
 }
 
+// getCreateExperimentsProject returns the experiment's project, once user may see it: fixedProjectID
+// when it is set (above 0), else the request's project when it is above 1, else the project the
+// config names, else Uncategorized.
 func getCreateExperimentsProject(
 	m *Master, req *apiv1.CreateExperimentRequest, user *model.User, config expconf.ExperimentConfig,
+	fixedProjectID int,
 ) (*projectv1.Project, error) {
-	// Place experiment in Uncategorized, unless project set in request params or config.
-	// Request params supersede the project specified in the config.
 	var err error
 	projectID := model.DefaultProjectID
 	errProjectNotFound := api.NotFoundErrs("project", strconv.Itoa(projectID), true)
-	if req.ProjectId > 1 {
+	switch {
+	case fixedProjectID > 0:
+		projectID = fixedProjectID
+		errProjectNotFound = api.NotFoundErrs("project", strconv.Itoa(projectID), true)
+	case req.ProjectId > 1:
 		projectID = int(req.ProjectId)
 		errProjectNotFound = api.NotFoundErrs("project", strconv.Itoa(projectID), true)
-	} else {
+	default:
 		if (config.Workspace() == "") != (config.Project() == "") {
 			return nil,
 				fmt.Errorf("workspace and project must both be included in config if one is provided")
@@ -274,8 +280,14 @@ func invalidExperimentConfig(err error) error {
 	return status.Errorf(codes.InvalidArgument, "invalid experiment configuration: %s", err)
 }
 
+// parseCreateExperiment builds the experiment and its task spec from a request that actor sends for
+// an experiment that owner owns. Access to the template and the project is checked for actor. The
+// experiment's tasks run as owner: its session token, uid/gid and DET_USER. Creating an experiment,
+// including a fork or a clone, makes actor its owner; continuing one keeps its owner. A continue
+// also passes the experiment's project as fixedProjectID (0 otherwise), because the workspace and
+// project the config names can be missing or stale.
 func (m *Master) parseCreateExperiment(ctx context.Context, req *apiv1.CreateExperimentRequest,
-	owner *model.User) (
+	actor, owner *model.User, fixedProjectID int) (
 	*model.Experiment, []byte, expconf.ExperimentConfig, *projectv1.Project, *tasks.TaskSpec, error,
 ) {
 	// Read the config as the user provided it.
@@ -292,7 +304,7 @@ func (m *Master) parseCreateExperiment(ctx context.Context, req *apiv1.CreateExp
 	// Apply the template that the user specified.
 	if req.Template != nil {
 		var tc expconf.ExperimentConfig
-		err := templates.UnmarshalTemplateConfig(ctx, *req.Template, owner, &tc, true)
+		err := templates.UnmarshalTemplateConfig(ctx, *req.Template, actor, &tc, true)
 		if err != nil {
 			return nil, nil, config, nil, nil, err
 		}
@@ -302,7 +314,7 @@ func (m *Master) parseCreateExperiment(ctx context.Context, req *apiv1.CreateExp
 	defaulted := schemas.WithDefaults(config)
 	resources := defaulted.Resources()
 
-	p, err := getCreateExperimentsProject(m, req, owner, defaulted)
+	p, err := getCreateExperimentsProject(m, req, actor, defaulted, fixedProjectID)
 	if err != nil {
 		return nil, nil, config, nil, nil, err
 	}
@@ -409,6 +421,9 @@ func (m *Master) parseCreateExperiment(ctx context.Context, req *apiv1.CreateExp
 		}
 	}
 
+	if err = checkTaskRunsAs(actor, owner); err != nil {
+		return nil, nil, config, nil, nil, err
+	}
 	token, createSessionErr := getTaskSessionToken(ctx, owner)
 	if createSessionErr != nil {
 		return nil, nil, config, nil, nil, errors.Wrapf(

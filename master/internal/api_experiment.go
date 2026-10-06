@@ -1358,71 +1358,6 @@ func (a *apiServer) createUnmanagedExperimentTx(
 	}, nil
 }
 
-func (a *apiServer) parseAndMergeContinueConfig(expID int, overrideConfig string) ([]byte, bool, error) {
-	if overrideConfig == "" {
-		overrideConfig = "{}" //nolint: goconst
-	}
-
-	activeConfig, err := a.m.db.ActiveExperimentConfig(expID)
-	if err != nil {
-		return nil, false, fmt.Errorf("loading active config for experiment %d: %w", expID, err)
-	}
-	name := activeConfig.Searcher().AsLegacy().Name
-	isSingle := name == "single"                           //nolint: goconst
-	if !isSingle && (name != "grid" && name != "random") { //nolint: goconst
-		return nil, false, status.Errorf(codes.InvalidArgument,
-			fmt.Sprintf("Unsupported searcher type provided: '%s'", name))
-	}
-	if !isSingle && strings.TrimSpace(overrideConfig) != "{}" { //nolint: goconst
-		return nil, false, status.Errorf(codes.InvalidArgument,
-			fmt.Sprintf("override config is provided and experiment is not single searcher, got '%s' instead", name))
-	}
-
-	providedConfig, err := expconf.ParseAnyExperimentConfigYAML([]byte(overrideConfig))
-	if err != nil {
-		return nil, false, status.Errorf(codes.InvalidArgument,
-			fmt.Errorf("parsing override config: %w", err).Error())
-	}
-
-	if providedConfig.RawProject != nil {
-		return nil, false, status.Errorf(codes.InvalidArgument, "'project' in override config "+
-			"cannot be specified, use `det experiment move` first if you want to change the project")
-	}
-	if providedConfig.RawWorkspace != nil {
-		return nil, false, status.Errorf(codes.InvalidArgument, "'workspace' in override config "+
-			"cannot be specified, use `det experiment move` first if you want to change the workspace")
-	}
-	mergedConfig := schemas.Merge(providedConfig, activeConfig)
-	if overrideName := mergedConfig.Searcher().AsLegacy().Name; isSingle && overrideName != "single" {
-		return nil, false, status.Errorf(codes.InvalidArgument,
-			fmt.Sprintf("override config must have single searcher type got '%s' instead", overrideName))
-	}
-
-	// Merge the config with the optionally specified invariant config specified by task config
-	// policies.
-	w, err := getWorkspaceByConfig(activeConfig)
-	if err != nil {
-		return nil, false, status.Errorf(codes.Internal,
-			fmt.Sprintf("failed to get workspace %s", activeConfig.Workspace()))
-	}
-
-	configWithInvariantDefaults, err := configpolicy.MergeWithInvariantExperimentConfigs(
-		context.TODO(),
-		w.ID, mergedConfig)
-	if err != nil {
-		return nil, false,
-			fmt.Errorf("failed to merge invariant experiment configs: %w", err)
-	}
-	mergedConfig = *configWithInvariantDefaults
-
-	bytes, err := mergedConfig.Value()
-	if err != nil {
-		return nil, false, fmt.Errorf("getting value of merged config: %w", err)
-	}
-
-	return bytes.([]byte), isSingle, nil
-}
-
 func getWorkspaceByConfig(config expconf.ExperimentConfig) (*model.Workspace, error) {
 	wkspName := config.Workspace()
 	if wkspName == "" {
@@ -1430,160 +1365,6 @@ func getWorkspaceByConfig(config expconf.ExperimentConfig) (*model.Workspace, er
 	}
 	ctx := context.TODO()
 	return workspace.WorkspaceByName(ctx, wkspName)
-}
-
-var errContinueHPSearchCompleted = status.Error(codes.FailedPrecondition,
-	"experiment has been completed, cannot continue this experiment")
-
-func (a *apiServer) ContinueExperiment(
-	ctx context.Context, req *apiv1.ContinueExperimentRequest,
-) (*apiv1.ContinueExperimentResponse, error) {
-	user, _, err := grpcutil.GetUser(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get the user: %s", err)
-	}
-
-	origExperiment, _, err := a.getExperimentAndCheckCanDoActions(ctx, int(req.Id),
-		experiment.AuthZProvider.Get().CanEditExperiment)
-	if err != nil {
-		return nil, err
-	}
-
-	trialsResp, err := a.GetExperimentTrials(ctx, &apiv1.GetExperimentTrialsRequest{
-		ExperimentId: req.Id,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("getting experiment trials: %w", err)
-	}
-	configBytes, isSingle, err := a.parseAndMergeContinueConfig(int(req.Id), req.OverrideConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	dbExp, modelDef, activeConfig, _, taskSpec, err := a.m.parseCreateExperiment(ctx,
-		&apiv1.CreateExperimentRequest{
-			Config: string(configBytes),
-		}, user,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("parsing continue experiment request: %w", err)
-	}
-	dbExp.ID = int(req.Id)
-	dbExp.JobID = origExperiment.JobID // Revive job.
-
-	e, launchWarnings, err := newExperiment(a.m, dbExp, modelDef, activeConfig, taskSpec)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to create experiment: %s", err)
-	}
-
-	err = db.Bun().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		// Lock experiment state.
-		var expState model.State
-		if err = tx.
-			NewRaw(`SELECT state FROM experiments WHERE id = ? FOR UPDATE`, req.Id).
-			Scan(ctx, &expState); err != nil {
-			return fmt.Errorf("getting / locking experiment state: %w", err)
-		}
-		if !model.TerminalStates[expState] {
-			return status.Error(codes.FailedPrecondition, fmt.Sprintf(
-				"experiment in non terminal state '%s', try again later", expState))
-		}
-
-		if expState == model.CompletedState && !isSingle {
-			hasIncompleteTrials := false
-			for _, trial := range trialsResp.Trials {
-				if trial.State != trialv1.State_STATE_COMPLETED {
-					hasIncompleteTrials = true
-					break
-				}
-			}
-			if !hasIncompleteTrials {
-				return errContinueHPSearchCompleted
-			}
-		} else if isSingle && len(trialsResp.Trials) > 0 {
-			if _, err := tx.NewUpdate().Table("runs"). // TODO(nick-runs) call runs package.
-									Set("state = ?", model.PausedState).
-									Where("id = ?", trialsResp.Trials[0].Id).
-									Exec(ctx); err != nil {
-				return fmt.Errorf("changing trial state to PAUSED: %w", err)
-			}
-		}
-
-		if _, err := tx.NewUpdate().Model(&model.Experiment{}).
-			Set("state = ?", model.PausedState). // Throw it in paused.
-			Set("progress = ?", 0.0).            // Reset progress.
-			Set("end_time = null").
-			Where("id = ?", req.Id).
-			Exec(ctx); err != nil {
-			return fmt.Errorf("updating experiments config: %w", err)
-		}
-
-		if _, err := db.Bun().NewUpdate().Model(&model.Job{}).
-			Set("q_position = DEFAULT").
-			Where("job_id = ?", dbExp.JobID).
-			Exec(ctx); err != nil {
-			return fmt.Errorf("updating experiment's job: %w", err)
-		}
-
-		// Update active config but not original config.
-		// We actually do this in experiment's PreStart in setWeight but relying on that
-		// is a fun regression waiting to happen.
-		activeConfigStr, err := json.Marshal(activeConfig)
-		if err != nil {
-			return fmt.Errorf("unmarshaling exp config %v: %w", activeConfig, err)
-		}
-		if _, err := tx.NewUpdate().Model(&model.Experiment{}).
-			Set("config = ?", string(activeConfigStr)).
-			Where("id = ?", req.Id).
-			Exec(ctx); err != nil {
-			return fmt.Errorf("updating experiments config: %w", err)
-		}
-
-		// Zero out trial restarts. We do somewhat lose information about how many times
-		// the previous failed but likely people care only about current run.
-		var trialIDs []int32
-		for _, t := range trialsResp.Trials {
-			trialIDs = append(trialIDs, t.Id)
-		}
-		if len(trialIDs) > 0 {
-			if _, err := tx.NewUpdate().Table("runs"). // TODO(nick-runs) call runs package.
-									Set("restarts = 0").
-									Set("end_time = null").
-									Where("id IN (?)", bun.In(trialIDs)).
-									Exec(ctx); err != nil {
-				return fmt.Errorf("zeroing out trial restarts: %w", err)
-			}
-		}
-
-		e.continueTrials = true
-
-		// Check at the end to minimize chance of experiment already being created somehow.
-		if _, ok := experiment.ExperimentRegistry.Load(int(req.Id)); ok {
-			return fmt.Errorf("experiment already exists")
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("experiment continue database updates: %w", err)
-	}
-
-	if err = e.Start(); err != nil {
-		return nil, errors.Wrapf(err, "failed to start experiment %d", e.ID)
-	}
-
-	_, err = a.ActivateExperiment(ctx, &apiv1.ActivateExperimentRequest{Id: int32(e.ID)})
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to activate experiment: %s", err)
-	}
-
-	protoExp, err := a.getExperiment(ctx, *user, int(req.Id))
-	if err != nil {
-		return nil, err
-	}
-	return &apiv1.ContinueExperimentResponse{
-		Experiment: protoExp,
-		Warnings:   command.LaunchWarningToProto(launchWarnings),
-	}, nil
 }
 
 func (a *apiServer) CreateExperiment(
@@ -1617,7 +1398,7 @@ func (a *apiServer) CreateExperiment(
 	}
 
 	dbExp, modelDef, activeConfig, p, taskSpec, err := a.m.parseCreateExperiment(ctx,
-		req, user,
+		req, user, user, 0,
 	)
 	if err != nil {
 		return nil, err
@@ -1750,7 +1531,7 @@ func (a *apiServer) PutExperiment(
 	}
 
 	dbExp, modelDef, activeConfig, p, _, err := a.m.parseCreateExperiment(ctx,
-		req.CreateExperimentRequest, user,
+		req.CreateExperimentRequest, user, user, 0,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse exp config: %w", err)

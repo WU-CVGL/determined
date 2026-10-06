@@ -56,6 +56,10 @@ type Options struct {
 
 	SlotType    string `json:"slot_type"`
 	VisibleGPUs string `json:"visible_gpus"`
+	// ExcludeGPUs is a comma-separated list of GPU UUIDs that the agent reports but never offers
+	// as slots. It is set only by the config key and the flag, never by an environment variable:
+	// an older agent would ignore the variable and run tasks on the GPUs.
+	ExcludeGPUs string `json:"exclude_gpus"`
 
 	Security SecurityOptions `json:"security"`
 

@@ -589,23 +589,23 @@ func TestParseAndMergeContinueConfig(t *testing.T) {
 	api, curUser, ctx := setupAPITest(t, nil, mockRM)
 	exp := createTestExp(t, api, curUser)
 
-	_, _, err := api.parseAndMergeContinueConfig(exp.ID, ``)
+	_, err := api.parseAndMergeContinueConfig(exp.ID, exp.ProjectID, ``)
 	require.NoError(t, err)
 
-	_, _, err = api.parseAndMergeContinueConfig(exp.ID, `{}`)
+	_, err = api.parseAndMergeContinueConfig(exp.ID, exp.ProjectID, `{}`)
 	require.NoError(t, err)
 
-	_, _, err = api.parseAndMergeContinueConfig(exp.ID, `
+	_, err = api.parseAndMergeContinueConfig(exp.ID, exp.ProjectID, `
 project: test
 `)
 	require.ErrorContains(t, err, "'project' in override config cannot be specified")
 
-	_, _, err = api.parseAndMergeContinueConfig(exp.ID, `
+	_, err = api.parseAndMergeContinueConfig(exp.ID, exp.ProjectID, `
 workspace: test
 `)
 	require.ErrorContains(t, err, "'workspace' in override config cannot be specified")
 
-	_, _, err = api.parseAndMergeContinueConfig(exp.ID, `
+	_, err = api.parseAndMergeContinueConfig(exp.ID, exp.ProjectID, `
 searcher:
   name: random
   metric: accuracy
@@ -639,10 +639,11 @@ resources:
 	mockRM.On("SmallerValueIsHigherPriority", mock.Anything).Return(true, nil)
 	resp, err := api.CreateExperiment(ctx, createReq)
 	require.NoError(t, err)
-	_, _, err = api.parseAndMergeContinueConfig(int(resp.Experiment.Id), `{}`)
+	expID, projectID := int(resp.Experiment.Id), int(resp.Experiment.ProjectId)
+	_, err = api.parseAndMergeContinueConfig(expID, projectID, `{}`)
 	require.NoError(t, err)
 
-	_, _, err = api.parseAndMergeContinueConfig(int(resp.Experiment.Id), `
+	_, err = api.parseAndMergeContinueConfig(expID, projectID, `
 searcher:
   name: random
   metric: accuracy

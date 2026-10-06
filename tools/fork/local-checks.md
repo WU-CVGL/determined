@@ -13,7 +13,9 @@ tools/fork/check.sh
 It runs one checkpoint archive-safety regression and, when the dynamic resource-pool CLI is
 present, its six CLI tests. It disables pytest's cache and Python bytecode output so the run does
 not leave test artifacts in the checkout. On a maintenance-only branch without the pool CLI, the
-archive regression still runs.
+archive regression still runs. When the checkout has the agent's GPU topology collection, the
+default check also runs the `det agent` CLI tests and the `topology` mode below, so it then needs
+Go and a C compiler as well.
 
 Run additional tests only for the area being changed:
 
@@ -23,6 +25,10 @@ tools/fork/check.sh progress
 
 # Run the complete focused Python archive-safety suite.
 tools/fork/check.sh security
+
+# Build the agent without cgo for linux/amd64 and darwin/arm64 (the NVML stub), run the stub
+# tests, then the NVML mock, agent, wire and agentrm GPU topology tests with cgo.
+tools/fork/check.sh topology
 
 # Run registry, scheduler, and dynamic-pool unit tests with Go's race detector.
 tools/fork/check.sh pools
@@ -78,3 +84,10 @@ make -C master check
 For an explicit, disposable CPU control-plane fault probe, see
 [task continuity](../../docs/maintenance/task-continuity.md). It measures a real
 NumPy/Core API experiment and is never part of the default quick check.
+
+The release build links the agent with cgo against glibc. After building release binaries
+locally, `tools/fork/check-agent-build.sh binary <agent> <master> ubuntu:22.04` checks the cgo
+build, the shared libraries and the glibc symbol versions against the image base, and
+`tools/fork/check-agent-build.sh image <agent image>` checks that `determined-agent
+gpu-topology` reports `ERROR_LIBRARY_NOT_FOUND (12)` in the image on a host without NVIDIA GPUs.
+Both use Docker; the release workflow runs them.

@@ -148,6 +148,21 @@ grep -q 'fork-static-task-ok' <<<"${static_output}"
 static_id=$(det command list --json | jq -er '.[0].id')
 det command describe "${static_id}" --json >/dev/null
 
+# A CPU agent reports no GPU topology: the API leaves it out, and the CLI columns stay blank.
+phase "Verify that the CPU agent reports no GPU topology"
+det agent list --json | jq -e \
+    'any(.[]; .id == "fork-static-agent" and .gpu_topology == "" and .gpu_health == "")' \
+    >/dev/null
+[[ $(det agent describe fork-static-agent --json) == null ]]
+static_login=$(curl --fail --silent --show-error \
+    -H 'Content-Type: application/json' \
+    --data '{"username":"admin","password":"fork-smoke-password","isHashed":false}' \
+    "${master_url}/api/v1/auth/login")
+static_token=$(jq -er '.token' <<<"${static_login}")
+curl --fail --silent --show-error -H "Authorization: Bearer ${static_token}" \
+    "${master_url}/api/v1/agents/fork-static-agent" \
+    | jq -e '.agent.id == "fork-static-agent" and .agent.gpuTopology == null' >/dev/null
+
 if [[ ${dynamic_pool_smoke} != 1 ]]; then
     echo "CPU image smoke passed; dynamic-pool extension was not requested."
     exit 0
