@@ -547,40 +547,70 @@ func (a *apiServer) monitor(ctx context.Context, taskID model.TaskID, logs []*mo
 	return nil
 }
 
+// addTaskLogsForUser writes a batch of task logs that curUser posts. PostTaskLogs and the legacy
+// POST /task-logs route share it, so both apply the same rules before anything is written: at
+// least one log, no log with an ID, a single task for the whole batch, and that task passes
+// canDoActionsOnTaskForUser with CanEditExperiment. That means edit permission for a trial's
+// experiment, but only view permission (CanGetNSC) for commands, notebooks, shells, TensorBoards
+// and generic tasks, and none for checkpoint GC tasks. It returns the task's workspace and,
+// for a trial, its experiment ID.
+func (a *apiServer) addTaskLogsForUser(
+	ctx context.Context, curUser model.User, logs []*model.TaskLog,
+) (*model.AccessScopeID, *int, error) {
+	if len(logs) == 0 {
+		return nil, nil, status.Error(codes.InvalidArgument, "len logs must be greater than 0")
+	}
+	if slices.Contains(logs, nil) {
+		return nil, nil, status.Error(codes.InvalidArgument, "logs must not be null")
+	}
+	taskID := logs[0].TaskID
+
+	workspaceID, expID, err := a.canDoActionsOnTaskForUser(ctx, model.TaskID(taskID), curUser,
+		expauth.AuthZProvider.Get().CanEditExperiment)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for _, l := range logs {
+		if l.ID != nil {
+			return nil, nil, status.Errorf(codes.InvalidArgument,
+				"ID must be nil on logs got %d instead", *l.ID)
+		}
+		if l.TaskID != taskID {
+			// There isn't a hard reason for this requirement other than we would have to RBAC
+			// against all provided taskIDs. This usecase seems pretty unlikely.
+			return nil, nil, status.Errorf(codes.InvalidArgument,
+				"can only post logs of a single taskID per task log request got '%s' and '%s'",
+				taskID, l.TaskID)
+		}
+	}
+
+	if err := a.m.taskLogBackend.AddTaskLogs(logs); err != nil {
+		return nil, nil, fmt.Errorf("adding task logs to task log backend: %w", err)
+	}
+	return workspaceID, expID, nil
+}
+
 func (a *apiServer) PostTaskLogs(
 	ctx context.Context, req *apiv1.PostTaskLogsRequest,
 ) (*apiv1.PostTaskLogsResponse, error) {
 	if len(req.Logs) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "len logs must be greater than 0")
 	}
-	taskID := req.Logs[0].TaskId
-
-	workspaceID, expID, err := a.canDoActionsOnTask(ctx, model.TaskID(taskID),
-		expauth.AuthZProvider.Get().CanEditExperiment)
+	curUser, _, err := grpcutil.GetUser(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	logs := make([]*model.TaskLog, len(req.Logs))
 	for i := range req.Logs {
-		if req.Logs[i].Id != nil {
-			return nil, status.Errorf(codes.InvalidArgument,
-				"ID must be nil on logs got %d instead", *req.Logs[i].Id)
-		}
-		if req.Logs[i].TaskId != taskID {
-			// There isn't a hard reason for this requirement other than we would have to RBAC
-			// against all provided taskIDs. This usecase seems pretty unlikely.
-			return nil, status.Errorf(codes.InvalidArgument,
-				"can only post logs of a single taskID per task log request got '%s' and '%s'",
-				taskID, req.Logs[i].TaskId)
-		}
-
 		logs[i] = model.TaskLogFromProto(req.Logs[i])
 	}
-
-	if err := a.m.taskLogBackend.AddTaskLogs(logs); err != nil {
-		return nil, fmt.Errorf("adding task logs to task log backend: %w", err)
+	workspaceID, expID, err := a.addTaskLogsForUser(ctx, *curUser, logs)
+	if err != nil {
+		return nil, err
 	}
+	taskID := logs[0].TaskID
 
 	switch err := webhooks.ScanLogs(ctx, logs, *workspaceID, expID); {
 	case err != nil && errors.Is(err, context.Canceled):
