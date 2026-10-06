@@ -173,8 +173,9 @@ func writeScript(t *testing.T, path, body string) {
 }
 
 // The end of shell-entrypoint.sh, with stand-ins for sshd and check_ready_logs.py: sshd gets the
-// script's arguments, the readiness check sees "Server listening on" while sshd runs, the task log
-// gets every line but the login records message, and the script exits with sshd's exit status.
+// script's arguments, the readiness check gets "Server listening on" as its regex and sees that line
+// while sshd runs, the task log gets every line but the login records message, and the script exits
+// with sshd's exit status.
 func TestShellEntrypointSSHDLogs(t *testing.T) {
 	defs, sshdCommand := shellEntrypointTail(t)
 	// The only check on how the end of the script is written: sshd's command has no pipe. A command
@@ -193,7 +194,7 @@ func TestShellEntrypointSSHDLogs(t *testing.T) {
 
 	python := filepath.Join(dir, "python")
 	writeScript(t, python, `
-[[ $1 == /run/determined/check_ready_logs.py && $2 == --ready-regex ]] || exit 2
+[[ $1 == /run/determined/check_ready_logs.py && $2 == --ready-regex && $3 == "Server listening on" ]] || exit 2
 # Like check_ready_logs.py: report the first line that starts with a match, then stop reading.
 while IFS= read -r line; do
     if [[ $line == "$3"* ]]; then
