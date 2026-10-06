@@ -173,6 +173,26 @@ func TestTaskResourceGPUIndexes(t *testing.T) {
 			want:   map[string]int{},
 		},
 		{
+			// The count matches, but one of the lists it sums is not trustworthy.
+			name: "a broken list on one node leaves every node of the allocation unnumbered",
+			series: concatSeries(gpuSeries("t.1", "node-a", "GPU-a", "GPU-b"),
+				gpuSeries("t.1", "node-b", "GPU-e")),
+			sets: []taskResourceGPUSet{
+				gpuSet("t.1", "c1", 4, "GPU-b", "GPU-a"), gpuSet("t.1", "c2", 4, "GPU-e", "GPU-e"),
+			},
+			want: map[string]int{},
+		},
+		{
+			name: "a container with two different rows leaves every node of the allocation unnumbered",
+			series: concatSeries(gpuSeries("t.1", "node-a", "GPU-a", "GPU-b"),
+				gpuSeries("t.1", "node-b", "GPU-e", "GPU-f")),
+			sets: []taskResourceGPUSet{
+				gpuSet("t.1", "c1", 4, "GPU-b", "GPU-a"), gpuSet("t.1", "c2", 4, "GPU-e", "GPU-f"),
+				gpuSet("t.1", "c2", 4, "GPU-f", "GPU-e"),
+			},
+			want: map[string]int{},
+		},
+		{
 			// GPU-e is reported on node-b by another allocation.
 			name: "a list spanning two nodes is not numbered",
 			series: concatSeries(gpuSeries("t.1", "node-a", "GPU-a"),

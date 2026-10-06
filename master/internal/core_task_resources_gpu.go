@@ -91,10 +91,10 @@ func setTaskResourceGPUIndexes(ctx context.Context, taskID string, series []task
 // taskResourceGPUIndexes numbers GPUs as nvidia-smi inside the task's container does: by their
 // position in the list that container recorded. A list can be partial (nvidia-smi lines that
 // fail to parse are skipped), so an allocation's GPUs are numbered only when its containers'
-// lists add up to the allocation's slots. An allocation's GPUs on one node are also left
-// unnumbered when a GPU series is not in exactly one usable list, when the series come from
-// more than one list, or when a GPU of that list is reported on another node. A list is not
-// usable when it names a GPU twice or its container recorded another list.
+// lists add up to the allocation's slots and none of them names a GPU twice or differs from
+// another row of its container. An allocation's GPUs on one node are also left unnumbered when
+// a GPU series is not in exactly one list, when the series come from more than one list, or
+// when a GPU of that list is reported on another node.
 func taskResourceGPUIndexes(series []taskResourceSeries, sets []taskResourceGPUSet,
 ) map[taskResourceGPUKey]int {
 	type container struct{ allocationID, containerID string }
@@ -113,9 +113,12 @@ func taskResourceGPUIndexes(series []taskResourceSeries, sets []taskResourceGPUS
 		slices.Sort(sorted)
 		invalid[c] = len(slices.Compact(sorted)) != len(set.UUIDs)
 	}
+	// A broken list leaves its allocation's count unreliable, so it voids the whole allocation.
 	recorded := map[string]int{}
+	broken := map[string]bool{}
 	for c, uuids := range lists {
 		recorded[c.allocationID] += len(uuids)
+		broken[c.allocationID] = broken[c.allocationID] || invalid[c]
 	}
 
 	// The list and the position of each GPU of an allocation.
@@ -123,7 +126,7 @@ func taskResourceGPUIndexes(series []taskResourceSeries, sets []taskResourceGPUS
 	owner := map[taskResourceGPUKey]container{}
 	position := map[taskResourceGPUKey]int{}
 	for c, uuids := range lists {
-		usable := !invalid[c] && recorded[c.allocationID] == slots[c.allocationID]
+		usable := !broken[c.allocationID] && recorded[c.allocationID] == slots[c.allocationID]
 		for i, uuid := range uuids {
 			key := taskResourceGPUKey{c.allocationID, uuid}
 			if _, listed := owner[key]; listed || !usable {
