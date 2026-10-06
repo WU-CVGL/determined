@@ -44,9 +44,9 @@ func newPoolAccessRoutes(
 	for _, u := range users {
 		byUsername[u.Username] = u
 	}
-	originalUser := dynamicPoolRequestUser
-	t.Cleanup(func() { dynamicPoolRequestUser = originalUser })
-	dynamicPoolRequestUser = func(request *http.Request) (*model.User, *model.UserSession, error) {
+	originalUser := masterConfigRouteUser
+	t.Cleanup(func() { masterConfigRouteUser = originalUser })
+	masterConfigRouteUser = func(request *http.Request) (*model.User, *model.UserSession, error) {
 		u, ok := byUsername[request.Header.Get(testUserHeader)]
 		if !ok {
 			return nil, nil, echo.ErrUnauthorized

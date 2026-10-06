@@ -2,10 +2,7 @@ package internal
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -24,8 +21,8 @@ import (
 )
 
 // The admin API of resource pool access. Like the dynamic pool routes, these are Echo routes
-// without a proto: dynamicPoolAuth authenticates them, reading needs the permission to read the
-// master configuration and writing the permission to update it.
+// without a proto: requireMasterConfigAccess authenticates them, reading needs the permission to
+// read the master configuration and writing the permission to update it.
 
 const (
 	resourcePoolAccessPath            = "/api/v1/resource-pool-access"
@@ -95,10 +92,10 @@ type resourcePoolAccessWriteResponse struct {
 
 func (m *Master) registerResourcePoolAccessRoutes() {
 	group := m.echo.Group(resourcePoolAccessPath)
-	group.GET("", m.listResourcePoolAccess, m.dynamicPoolAuth(false))
-	group.PUT("/:pool", m.setResourcePoolAccess, m.dynamicPoolAuth(true))
-	group.POST("/:pool/grant", m.grantResourcePoolAccess, m.dynamicPoolAuth(true))
-	group.POST("/:pool/revoke", m.revokeResourcePoolAccess, m.dynamicPoolAuth(true))
+	group.GET("", m.listResourcePoolAccess, requireMasterConfigAccess(false))
+	group.PUT("/:pool", m.setResourcePoolAccess, requireMasterConfigAccess(true))
+	group.POST("/:pool/grant", m.grantResourcePoolAccess, requireMasterConfigAccess(true))
+	group.POST("/:pool/revoke", m.revokeResourcePoolAccess, requireMasterConfigAccess(true))
 }
 
 // listResourcePoolAccess lists every pool name that is a known pool or has access records:
@@ -125,7 +122,7 @@ func (m *Master) setResourcePoolAccess(c echo.Context) error {
 		return err
 	}
 	var request setResourcePoolAccessRequest
-	if err := decodeResourcePoolAccessRequest(c, &request); err != nil {
+	if err := decodeJSONBody(c, maxResourcePoolAccessRequestBytes, &request); err != nil {
 		return err
 	}
 	ctx := c.Request().Context()
@@ -167,7 +164,7 @@ func (m *Master) changeResourcePoolGrants(c echo.Context, grant bool) error {
 		return err
 	}
 	var request resourcePoolAccessUsersRequest
-	if err := decodeResourcePoolAccessRequest(c, &request); err != nil {
+	if err := decodeJSONBody(c, maxResourcePoolAccessRequestBytes, &request); err != nil {
 		return err
 	}
 	ctx := c.Request().Context()
@@ -496,41 +493,4 @@ func resourcePoolAccessPoolParam(c echo.Context) (string, error) {
 		return "", echo.NewHTTPError(http.StatusBadRequest, "a resource pool name is required")
 	}
 	return pool, nil
-}
-
-// decodeResourcePoolAccessRequest decodes a body that must be labeled as JSON and hold exactly
-// one JSON value of at most 64 KiB, with no field that target does not have.
-func decodeResourcePoolAccessRequest(c echo.Context, target interface{}) error {
-	contentType := c.Request().Header.Get(echo.HeaderContentType)
-	if !strings.HasPrefix(strings.ToLower(contentType), echo.MIMEApplicationJSON) {
-		return echo.NewHTTPError(
-			http.StatusUnsupportedMediaType, "Content-Type must be application/json",
-		)
-	}
-	c.Request().Body = http.MaxBytesReader(
-		c.Response(), c.Request().Body, maxResourcePoolAccessRequestBytes,
-	)
-	decoder := json.NewDecoder(c.Request().Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		return resourcePoolAccessBodyError(err)
-	}
-	var extra interface{}
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err == nil {
-			return echo.NewHTTPError(
-				http.StatusBadRequest, "JSON body must contain exactly one value",
-			)
-		}
-		return resourcePoolAccessBodyError(err)
-	}
-	return nil
-}
-
-func resourcePoolAccessBodyError(err error) error {
-	var tooLarge *http.MaxBytesError
-	if errors.As(err, &tooLarge) {
-		return echo.NewHTTPError(http.StatusRequestEntityTooLarge, "request body exceeds 64 KiB")
-	}
-	return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("invalid JSON body: %v", err))
 }

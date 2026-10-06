@@ -7,46 +7,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/determined-ai/determined/master/internal/cluster"
 	"github.com/determined-ai/determined/master/internal/config"
-	detContext "github.com/determined-ai/determined/master/internal/context"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/rm/agentrm"
-	"github.com/determined-ai/determined/master/internal/user"
-	"github.com/determined-ai/determined/master/pkg/model"
 )
 
 const maxDynamicPoolRequestBytes = 1 << 20
-
-var dynamicPoolRequestUser = func(
-	request *http.Request,
-) (*model.User, *model.UserSession, error) {
-	return user.GetService().UserAndSessionFromRequest(request)
-}
-
-var authorizeDynamicPoolRequest = func(
-	request *http.Request, currentUser *model.User, update bool,
-) (permErr error, err error) {
-	return authorizeDynamicPoolWithProvider(
-		cluster.AuthZProvider.Get(), request, currentUser, update,
-	)
-}
-
-func authorizeDynamicPoolWithProvider(
-	provider cluster.MiscAuthZ,
-	request *http.Request,
-	currentUser *model.User,
-	update bool,
-) (permErr error, err error) {
-	if update {
-		return provider.CanUpdateMasterConfig(request.Context(), currentUser)
-	}
-	return provider.CanGetMasterConfig(request.Context(), currentUser)
-}
 
 type createDynamicResourcePoolRequest struct {
 	ClusterName    string `json:"cluster_name,omitempty"`
@@ -94,51 +63,16 @@ type dynamicResourcePoolListResponse struct {
 
 func (m *Master) registerDynamicResourcePoolRoutes() {
 	group := m.echo.Group("/api/v1/resource-pools/dynamic")
-	group.POST("", m.createDynamicResourcePool, m.dynamicPoolAuth(true))
-	group.GET("", m.listDynamicResourcePools, m.dynamicPoolAuth(false))
-	group.PUT("/:name", m.updateDynamicResourcePool, m.dynamicPoolAuth(true))
-	group.POST("/:name/adopt", m.adoptDynamicResourcePool, m.dynamicPoolAuth(true))
-	group.POST("/:name/retry", m.retryDynamicResourcePool, m.dynamicPoolAuth(true))
-}
-
-// dynamicPoolAuth authenticates direct /api/v1 Echo routes explicitly. Generic Echo auth exempts
-// /api/v1 because normal routes there are authenticated by gRPC interceptors; these routes do not
-// pass through gRPC.
-func (m *Master) dynamicPoolAuth(update bool) echo.MiddlewareFunc {
-	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			currentUser, session, err := dynamicPoolRequestUser(c.Request())
-			switch {
-			case errors.Is(err, db.ErrNotFound):
-				return echo.NewHTTPError(http.StatusUnauthorized, "invalid authentication")
-			case err != nil:
-				var httpErr *echo.HTTPError
-				if errors.As(err, &httpErr) && httpErr.Code == http.StatusUnauthorized {
-					return httpErr
-				}
-				return err
-			case !currentUser.Active:
-				return echo.NewHTTPError(http.StatusForbidden, "user not active")
-			}
-
-			ctx := c.(*detContext.DetContext)
-			ctx.SetUser(*currentUser)
-			ctx.SetUserSession(*session)
-			permErr, err := authorizeDynamicPoolRequest(c.Request(), currentUser, update)
-			if err != nil {
-				return err
-			}
-			if permErr != nil {
-				return echo.NewHTTPError(http.StatusForbidden, permErr.Error())
-			}
-			return next(c)
-		}
-	}
+	group.POST("", m.createDynamicResourcePool, requireMasterConfigAccess(true))
+	group.GET("", m.listDynamicResourcePools, requireMasterConfigAccess(false))
+	group.PUT("/:name", m.updateDynamicResourcePool, requireMasterConfigAccess(true))
+	group.POST("/:name/adopt", m.adoptDynamicResourcePool, requireMasterConfigAccess(true))
+	group.POST("/:name/retry", m.retryDynamicResourcePool, requireMasterConfigAccess(true))
 }
 
 func (m *Master) createDynamicResourcePool(c echo.Context) error {
 	var request createDynamicResourcePoolRequest
-	if err := decodeStrictBoundedJSON(c, &request, createDynamicPoolRequestFields); err != nil {
+	if err := decodeDynamicPoolRequest(c, &request, createDynamicPoolRequestFields); err != nil {
 		return err
 	}
 	resourceManager, clusterName, err := m.selectDynamicAgentRM(request.ClusterName)
@@ -196,7 +130,7 @@ func (m *Master) listDynamicResourcePools(c echo.Context) error {
 
 func (m *Master) updateDynamicResourcePool(c echo.Context) error {
 	var request updateDynamicResourcePoolRequest
-	if err := decodeStrictBoundedJSON(c, &request, updateDynamicPoolRequestFields); err != nil {
+	if err := decodeDynamicPoolRequest(c, &request, updateDynamicPoolRequestFields); err != nil {
 		return err
 	}
 	resourceManager, _, err := m.selectDynamicAgentRM(c.QueryParam("cluster_name"))
@@ -232,7 +166,7 @@ func (m *Master) updateDynamicResourcePool(c echo.Context) error {
 
 func (m *Master) adoptDynamicResourcePool(c echo.Context) error {
 	var request adoptDynamicResourcePoolRequest
-	if err := decodeStrictBoundedJSON(c, &request, adoptDynamicPoolRequestFields); err != nil {
+	if err := decodeDynamicPoolRequest(c, &request, adoptDynamicPoolRequestFields); err != nil {
 		return err
 	}
 	resourceManager, clusterName, err := m.selectDynamicAgentRM(c.QueryParam("cluster_name"))
@@ -381,38 +315,20 @@ func (m *Master) staticResourcePoolCluster(poolName string) (string, bool) {
 	return "", false
 }
 
-func decodeStrictBoundedJSON(
+// decodeDynamicPoolRequest decodes a dynamic pool request body into target. Before the body is
+// decoded, its top-level fields must be among allowedFields and its config must pass
+// validateDynamicPoolRequestJSON.
+func decodeDynamicPoolRequest(
 	c echo.Context, target interface{}, allowedFields map[string]bool,
 ) error {
-	contentType := c.Request().Header.Get(echo.HeaderContentType)
-	if !strings.HasPrefix(strings.ToLower(contentType), echo.MIMEApplicationJSON) {
-		return echo.NewHTTPError(http.StatusUnsupportedMediaType, "Content-Type must be application/json")
-	}
-	c.Request().Body = http.MaxBytesReader(c.Response(), c.Request().Body, maxDynamicPoolRequestBytes)
-	body, err := io.ReadAll(c.Request().Body)
+	body, err := readJSONBody(c, maxDynamicPoolRequestBytes)
 	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			return echo.NewHTTPError(http.StatusRequestEntityTooLarge, "request body exceeds 1 MiB")
-		}
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("reading JSON body: %v", err))
+		return err
 	}
 	if err = validateDynamicPoolRequestJSON(body, allowedFields); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("invalid JSON body: %v", err))
-	}
-	var extra interface{}
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err == nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "JSON body must contain exactly one value")
-		}
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("invalid JSON body: %v", err))
-	}
-	return nil
+	return decodeJSONValue(body, target)
 }
 
 // ResourcePoolConfig and TaskContainerDefaultsConfig implement custom JSON unmarshaling, so the

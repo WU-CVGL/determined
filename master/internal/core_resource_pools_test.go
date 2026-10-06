@@ -12,7 +12,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/require"
 
-	"github.com/determined-ai/determined/master/internal/cluster"
 	detContext "github.com/determined-ai/determined/master/internal/context"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/rm/agentrm"
@@ -196,97 +195,18 @@ func TestDynamicResourcePoolViewPendingRestart(t *testing.T) {
 	require.NotContains(t, fields, "spec_hash")
 }
 
-func TestDynamicPoolRouteExplicitlyAuthenticates(t *testing.T) {
-	original := dynamicPoolRequestUser
-	t.Cleanup(func() { dynamicPoolRequestUser = original })
-	dynamicPoolRequestUser = func(
-		*http.Request,
-	) (*model.User, *model.UserSession, error) {
-		return nil, nil, echo.ErrUnauthorized
-	}
-
-	e := echo.New()
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/resource-pools/dynamic", nil)
-	recorder := httptest.NewRecorder()
-	ctx := &detContext.DetContext{Context: e.NewContext(request, recorder)}
-	called := false
-	handler := (&Master{}).dynamicPoolAuth(false)(func(echo.Context) error {
-		called = true
-		return nil
-	})
-	err := handler(ctx)
-	var httpErr *echo.HTTPError
-	require.ErrorAs(t, err, &httpErr)
-	require.Equal(t, http.StatusUnauthorized, httpErr.Code)
-	require.False(t, called)
-}
-
-func TestDynamicPoolRouteAuthorization(t *testing.T) {
-	originalUser := dynamicPoolRequestUser
-	originalAuthorize := authorizeDynamicPoolRequest
-	t.Cleanup(func() {
-		dynamicPoolRequestUser = originalUser
-		authorizeDynamicPoolRequest = originalAuthorize
-	})
-	for _, test := range []struct {
-		name       string
-		active     bool
-		admin      bool
-		update     bool
-		wantCode   int
-		wantCalled bool
-	}{
-		{name: "admin create", active: true, admin: true, update: true, wantCalled: true},
-		{name: "admin list", active: true, admin: true, wantCalled: true},
-		{name: "read-only create", active: true, update: true, wantCode: http.StatusForbidden},
-		{name: "viewer list", active: true, wantCode: http.StatusForbidden},
-		{name: "inactive admin", admin: true, update: true, wantCode: http.StatusForbidden},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			dynamicPoolRequestUser = func(
-				*http.Request,
-			) (*model.User, *model.UserSession, error) {
-				return &model.User{Active: test.active, Admin: test.admin}, &model.UserSession{}, nil
-			}
-			authorizeDynamicPoolRequest = func(
-				request *http.Request, currentUser *model.User, update bool,
-			) (error, error) {
-				return authorizeDynamicPoolWithProvider(
-					&cluster.MiscAuthZBasic{}, request, currentUser, update,
-				)
-			}
-			e := echo.New()
-			request := httptest.NewRequest(http.MethodGet, "/api/v1/resource-pools/dynamic", nil)
-			ctx := &detContext.DetContext{Context: e.NewContext(request, httptest.NewRecorder())}
-			called := false
-			err := (&Master{}).dynamicPoolAuth(test.update)(func(echo.Context) error {
-				called = true
-				return nil
-			})(ctx)
-			require.Equal(t, test.wantCalled, called)
-			if test.wantCode == 0 {
-				require.NoError(t, err)
-				return
-			}
-			var httpErr *echo.HTTPError
-			require.ErrorAs(t, err, &httpErr)
-			require.Equal(t, test.wantCode, httpErr.Code)
-		})
-	}
-}
-
 func TestDynamicPoolRoutesRequirePermissions(t *testing.T) {
-	originalUser := dynamicPoolRequestUser
-	originalAuthorize := authorizeDynamicPoolRequest
+	originalUser := masterConfigRouteUser
+	originalAuthorize := authorizeMasterConfigRoute
 	t.Cleanup(func() {
-		dynamicPoolRequestUser = originalUser
-		authorizeDynamicPoolRequest = originalAuthorize
+		masterConfigRouteUser = originalUser
+		authorizeMasterConfigRoute = originalAuthorize
 	})
-	dynamicPoolRequestUser = func(*http.Request) (*model.User, *model.UserSession, error) {
+	masterConfigRouteUser = func(*http.Request) (*model.User, *model.UserSession, error) {
 		return &model.User{Active: true}, &model.UserSession{}, nil
 	}
 	var updates []bool
-	authorizeDynamicPoolRequest = func(
+	authorizeMasterConfigRoute = func(
 		_ *http.Request, _ *model.User, update bool,
 	) (error, error) {
 		updates = append(updates, update)

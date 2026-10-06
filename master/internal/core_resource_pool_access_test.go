@@ -16,17 +16,17 @@ import (
 )
 
 func TestResourcePoolAccessRoutesRequirePermissions(t *testing.T) {
-	originalUser := dynamicPoolRequestUser
-	originalAuthorize := authorizeDynamicPoolRequest
+	originalUser := masterConfigRouteUser
+	originalAuthorize := authorizeMasterConfigRoute
 	t.Cleanup(func() {
-		dynamicPoolRequestUser = originalUser
-		authorizeDynamicPoolRequest = originalAuthorize
+		masterConfigRouteUser = originalUser
+		authorizeMasterConfigRoute = originalAuthorize
 	})
-	dynamicPoolRequestUser = func(*http.Request) (*model.User, *model.UserSession, error) {
+	masterConfigRouteUser = func(*http.Request) (*model.User, *model.UserSession, error) {
 		return &model.User{Active: true}, &model.UserSession{}, nil
 	}
 	var updates []bool
-	authorizeDynamicPoolRequest = func(
+	authorizeMasterConfigRoute = func(
 		_ *http.Request, _ *model.User, update bool,
 	) (error, error) {
 		updates = append(updates, update)
