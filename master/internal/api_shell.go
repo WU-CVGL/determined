@@ -145,12 +145,7 @@ func (a *apiServer) KillShell(
 		}
 	}()
 
-	getResponse, _, err := a.getShell(ctx, req.ShellId)
-	if err != nil {
-		return nil, err
-	}
-
-	curUser, _, err := grpcutil.GetUser(ctx)
+	getResponse, curUser, err := a.getShell(ctx, req.ShellId)
 	if err != nil {
 		return nil, err
 	}
@@ -180,12 +175,7 @@ func (a *apiServer) SetShellPriority(
 		}
 	}()
 
-	getResponse, _, err := a.getShell(ctx, req.ShellId)
-	if err != nil {
-		return nil, err
-	}
-
-	curUser, _, err := grpcutil.GetUser(ctx)
+	getResponse, curUser, err := a.getShell(ctx, req.ShellId)
 	if err != nil {
 		return nil, err
 	}

@@ -269,11 +269,7 @@ func (a *apiServer) KillCommand(
 		}
 	}()
 
-	targetCmd, _, err := a.getCommand(ctx, req.CommandId)
-	if err != nil {
-		return nil, err
-	}
-	curUser, _, err := grpcutil.GetUser(ctx)
+	targetCmd, curUser, err := a.getCommand(ctx, req.CommandId)
 	if err != nil {
 		return nil, err
 	}
@@ -305,11 +301,7 @@ func (a *apiServer) SetCommandPriority(
 			err = apiutils.MapAndFilterErrors(err, nil, nil)
 		}
 	}()
-	targetCmd, _, err := a.getCommand(ctx, req.CommandId)
-	if err != nil {
-		return nil, err
-	}
-	curUser, _, err := grpcutil.GetUser(ctx)
+	targetCmd, curUser, err := a.getCommand(ctx, req.CommandId)
 	if err != nil {
 		return nil, err
 	}

@@ -154,12 +154,7 @@ func (a *apiServer) KillTensorboard(
 		}
 	}()
 
-	getResponse, _, err := a.getTensorboard(ctx, req.TensorboardId)
-	if err != nil {
-		return nil, err
-	}
-
-	curUser, _, err := grpcutil.GetUser(ctx)
+	getResponse, curUser, err := a.getTensorboard(ctx, req.TensorboardId)
 	if err != nil {
 		return nil, err
 	}
@@ -192,12 +187,7 @@ func (a *apiServer) SetTensorboardPriority(
 		}
 	}()
 
-	getResponse, _, err := a.getTensorboard(ctx, req.TensorboardId)
-	if err != nil {
-		return nil, err
-	}
-
-	curUser, _, err := grpcutil.GetUser(ctx)
+	getResponse, curUser, err := a.getTensorboard(ctx, req.TensorboardId)
 	if err != nil {
 		return nil, err
 	}

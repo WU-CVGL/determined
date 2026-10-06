@@ -138,11 +138,7 @@ func (a *apiServer) getNotebook(
 }
 
 func (a *apiServer) validateToKillNotebook(ctx context.Context, notebookID string) error {
-	targetNotebook, _, err := a.getNotebook(ctx, notebookID)
-	if err != nil {
-		return err
-	}
-	curUser, _, err := grpcutil.GetUser(ctx)
+	targetNotebook, curUser, err := a.getNotebook(ctx, notebookID)
 	if err != nil {
 		return err
 	}
@@ -188,12 +184,7 @@ func (a *apiServer) KillNotebook(
 func (a *apiServer) SetNotebookPriority(
 	ctx context.Context, req *apiv1.SetNotebookPriorityRequest,
 ) (resp *apiv1.SetNotebookPriorityResponse, err error) {
-	targetNotebook, _, err := a.getNotebook(ctx, req.NotebookId)
-	if err != nil {
-		return nil, err
-	}
-
-	curUser, _, err := grpcutil.GetUser(ctx)
+	targetNotebook, curUser, err := a.getNotebook(ctx, req.NotebookId)
 	if err != nil {
 		return nil, err
 	}
