@@ -539,15 +539,21 @@ def describe_agent(args: argparse.Namespace) -> None:
         slot = slots.get(gpu.deviceId)
         if slot is None:
             return "?"
-        if slot.draining:
-            return "DRAINING"
-        if not slot.enabled:
-            return "DISABLED"
+        # As in the WebUI: the scheduler gives a disabled or draining agent no new work, also when
+        # a slot of it is enabled on its own. An agent without the fields counts as enabled.
+        off = ""
+        if slot.draining or agent.draining:
+            off = "DRAINING"
+        elif not slot.enabled or agent.enabled is False:
+            off = "DISABLED"
         if slot.container:
+            # A disabled or draining slot can still run a task: show both.
             if slot.container.id and not slot.container.permissionDenied:
-                return slot.container.id
-            return "OCCUPIED"
-        return "FREE"
+                occupant = slot.container.id
+            else:
+                occupant = "OCCUPIED"
+            return f"{occupant} ({off})" if off else occupant
+        return off or "FREE"
 
     gpus = _gpu_slots(topo) + [g for g in topo.gpus if g.excluded]
     rows = [

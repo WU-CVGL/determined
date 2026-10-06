@@ -208,7 +208,8 @@ def test_describe_agent(capsys: pytest.CaptureFixture) -> None:
 
     assert row("0")[1:4] == ["container-a", "ok", topology["gpus"][0]["uuid"]]
     assert row("1")[1] == "DISABLED"
-    assert row("2")[1] == "DRAINING"
+    # A draining slot that still runs a task shows the task and the drain.
+    assert row("2")[1] == "container-b (DRAINING)"
     assert row("3")[1:3] == ["OCCUPIED", "narrow"]
     assert row("5")[1] == "FREE"
     assert row("3")[4:] == ["0000:61:00.0", "0", "x8/x16", "Gen4/Gen4"]
@@ -236,6 +237,38 @@ def test_describe_agent(capsys: pytest.CaptureFixture) -> None:
     assert matrix[9] == ["81:00.0", "SYS", "SYS", "SYS", "SYS", "NODE", "NODE", "NODE", "X"]
     assert "P2P: usable for every pair (READ and WRITE are OK in both directions)." in lines
     assert "P2P READ/WRITE" not in out
+
+
+def describe_slot_states(capsys: pytest.CaptureFixture, agent: Dict[str, Any]) -> Dict[str, str]:
+    """The State column of `det agent describe`, by slot id."""
+    with util.standard_cli_rsps() as rsps:
+        rsps.get(f"{MASTER}/api/v1/agents/{agent['id']}", status=200, json={"agent": agent})
+        cli.main(["agent", "describe", agent["id"]])
+    lines = capsys.readouterr().out.splitlines()
+    table = lines[: lines.index("Details:")]
+    rows = [[c.strip() for c in line.split("|")] for line in table if "|" in line]
+    assert rows[0][:2] == ["Slot", "State"]
+    return {r[0]: r[1] for r in rows[1:]}
+
+
+def test_describe_agent_disabled_agent_enabled_slot(capsys: pytest.CaptureFixture) -> None:
+    # `det slot enable` can enable a slot of a disabled agent; the agent still takes no new work.
+    topology = topology_case("g292 today")
+    assert topology is not None
+    states = describe_slot_states(capsys, agent_json("g292", topology, enabled=False))
+    assert states and set(states.values()) == {"DISABLED"}
+
+
+def test_describe_agent_draining_agent_occupied_slot(capsys: pytest.CaptureFixture) -> None:
+    topology = topology_case("g292 today")
+    assert topology is not None
+    slots = {g["deviceId"]: slot_json(g["deviceId"]) for g in topology["gpus"]}
+    slots[0] = slot_json(0, container_id="container-x")
+    states = describe_slot_states(
+        capsys, agent_json("g292", topology, slots=slots, enabled=False, draining=True)
+    )
+    assert states.pop("0") == "container-x (DRAINING)"
+    assert states and set(states.values()) == {"DRAINING"}
 
 
 def test_describe_agent_p2p_matrix(capsys: pytest.CaptureFixture) -> None:

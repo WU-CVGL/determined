@@ -354,10 +354,12 @@ Both count only the GPUs that are slots, and leave out excluded GPUs, except whe
 
 ``det agent describe AGENT_ID`` lists each slot and excluded GPU with its state (``FREE``, the ID of
 the container that uses it or ``OCCUPIED``, ``DISABLED``, ``DRAINING`` or ``EXCLUDED``), health,
-UUID, bus ID, NUMA node, link width and generation, and the four facts of its health. When the
-topology is known, it then prints the link levels between all GPUs and, when P2P is not usable for
-every pair, the ``READ`` and ``WRITE`` statuses in each direction. ``--json`` prints the agent's
-``gpu_topology``.
+UUID, bus ID, NUMA node, link width and generation, and the four facts of its health. As in the
+WebUI, a slot of a disabled or draining agent shows as disabled or draining, and a slot that is
+disabled or draining while a task still uses it shows both: the container ID or ``OCCUPIED``,
+followed by ``(DISABLED)`` or ``(DRAINING)``. When the topology is known, it then prints the link
+levels between all GPUs and, when P2P is not usable for every pair, the ``READ`` and ``WRITE``
+statuses in each direction. ``--json`` prints the agent's ``gpu_topology``.
 
 The WebUI's resource pool page groups each agent's GPUs by NUMA node and PCIe switch. A switch group
 holds GPUs whose pairs are ``PIX``, one switch between them; ``PXB`` and the other levels show only
