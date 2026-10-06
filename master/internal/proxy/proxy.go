@@ -3,16 +3,20 @@ package proxy
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/textproto"
 	"net/url"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/hashicorp/go-cleanhttp"
 
 	"github.com/labstack/echo/v4"
@@ -335,4 +339,55 @@ func asyncCopy(dst io.Writer, src io.Reader) chan error {
 		}
 	}()
 	return errs
+}
+
+// closedConnectionErrors are the errors with which a copy stops when a connection ended or
+// dropped, whether a side closed it or it broke off: the end of the stream, also in the middle of
+// a message or record (io.ErrUnexpectedEOF), a connection closed here, a peer gone (broken pipe)
+// or a reset connection. websocket.ErrCloseSent is a secondary error: a write to a WebSocket after
+// a close was already sent on it, the reply to the client's close or the close that
+// gorilla/websocket sends itself on a protocol error. The original close or protocol error ends
+// the copy in the other direction and is logged by its own type; a protocol error is not in this
+// list, so it stays an error.
+var closedConnectionErrors = []error{
+	io.EOF, io.ErrUnexpectedEOF, net.ErrClosed, syscall.EPIPE, syscall.ECONNRESET,
+	websocket.ErrCloseSent,
+}
+
+// isConnectionClosed reports whether err, an error from copying between the two sides of a
+// proxied connection, only says that the connection ended or dropped: a WebSocket close with code
+// 1000 (normal), 1001 (going away), 1005 (no status) or 1006 (closed without a close message), or
+// one of closedConnectionErrors, also when wrapped, as io.Copy wraps them in *net.OpError. It
+// decides by the final error in the chain, not by where it came from: a TLS connection that broke
+// off with io.ErrUnexpectedEOF counts as closed too.
+//
+// Closed shell sessions and JupyterLab tabs end with these errors, but so do abrupt disconnects,
+// such as a browser gone away, a network drop or a service that exited. The proxies log them at
+// debug level so that every transport drop does not become a master error; in exchange, the
+// default logs no longer show these disconnect reasons.
+func isConnectionClosed(err error) bool {
+	var closeErr *websocket.CloseError
+	if errors.As(err, &closeErr) {
+		return websocket.IsCloseError(closeErr, websocket.CloseNormalClosure,
+			websocket.CloseGoingAway, websocket.CloseNoStatusReceived, websocket.CloseAbnormalClosure)
+	}
+	for _, closed := range closedConnectionErrors {
+		if errors.Is(err, closed) {
+			return true
+		}
+	}
+	return false
+}
+
+// logCopyError logs err, if any, the error from copying the request or response body (direction)
+// of a proxied connection to target: at debug level if isConnectionClosed, otherwise as an error.
+func logCopyError(c echo.Context, direction string, target *url.URL, err error) {
+	if err == nil {
+		return
+	}
+	logf := c.Logger().Errorf
+	if isConnectionClosed(err) {
+		logf = c.Logger().Debugf
+	}
+	logf("error copying %s body for %v: %v", direction, target, err)
 }
