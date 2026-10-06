@@ -175,11 +175,14 @@ func TestLogGPUTopology(t *testing.T) {
 		"info GPU topology collected: slots=2 excluded=1 nvml_errors=0 driver=610.57.04",
 	}, messages())
 
+	// nvml_errors counts failed calls, one per line that follows.
+	topo.GPUs[0].NVMLError = "GetPciInfo: ERROR_NOT_READY (27)"
 	topo.GPUs[2].NVMLError = "GetCurrPcieLinkWidth: ERROR_GPU_IS_LOST (15); " +
 		"GetMaxPcieLinkWidth: ERROR_UNKNOWN (999)"
 	logGPUTopology(topo)
 	require.Equal(t, []string{
-		"warning GPU topology collected: slots=2 excluded=1 nvml_errors=1 driver=610.57.04",
+		"warning GPU topology collected: slots=2 excluded=1 nvml_errors=3 driver=610.57.04",
+		"warning GPU NVML error: uuid=GPU-a excluded=false call=GetPciInfo return=ERROR_NOT_READY (27)",
 		"warning GPU NVML error: uuid=GPU-c excluded=true call=GetCurrPcieLinkWidth " +
 			"return=ERROR_GPU_IS_LOST (15)",
 		"warning GPU NVML error: uuid=GPU-c excluded=true call=GetMaxPcieLinkWidth " +

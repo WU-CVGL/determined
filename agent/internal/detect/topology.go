@@ -1,6 +1,7 @@
 package detect
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -164,43 +165,43 @@ func gpuInventory(devices, excluded []device.Device) []aproto.GPUInfo {
 	return inventory
 }
 
-// logGPUTopology logs one summary line, and one line per failed NVML call of a GPU. The
-// matrices, NUMA groups and P2P states are in the agent API, the CLI, the WebUI and the
-// gpu-topology subcommand.
+// logGPUTopology logs one summary line, and one line per failed NVML call of a GPU; nvml_errors
+// counts those lines. The matrices, NUMA groups and P2P states are in the agent API, the CLI, the
+// WebUI and the gpu-topology subcommand.
 func logGPUTopology(topo *aproto.GPUTopology) {
 	if topo == nil {
 		return
 	}
-	slots, excluded, nvmlErrors := 0, 0, 0
+	slots, excluded := 0, 0
+	var failedCalls []string
 	for _, g := range topo.GPUs {
 		if g.Excluded {
 			excluded++
 		} else {
 			slots++
 		}
-		if g.NVMLError != "" {
-			nvmlErrors++
-		}
-	}
-	switch {
-	case topo.UnknownReason != "":
-		log.Warnf("GPU topology unknown: slots=%d excluded=%d reason=%q",
-			slots, excluded, topo.UnknownReason)
-	case nvmlErrors > 0:
-		log.Warnf("GPU topology collected: slots=%d excluded=%d nvml_errors=%d driver=%s",
-			slots, excluded, nvmlErrors, topo.DriverVersion)
-	default:
-		log.Infof("GPU topology collected: slots=%d excluded=%d nvml_errors=0 driver=%s",
-			slots, excluded, topo.DriverVersion)
-	}
-	for _, g := range topo.GPUs {
 		if g.NVMLError == "" {
 			continue
 		}
 		// NVMLError lists "<call>: <NAME> (<code>)" entries, separated by "; ".
 		for _, e := range strings.Split(g.NVMLError, "; ") {
 			call, ret, _ := strings.Cut(e, ": ")
-			log.Warnf("GPU NVML error: uuid=%s excluded=%t call=%s return=%s", g.UUID, g.Excluded, call, ret)
+			failedCalls = append(failedCalls, fmt.Sprintf(
+				"GPU NVML error: uuid=%s excluded=%t call=%s return=%s", g.UUID, g.Excluded, call, ret))
 		}
+	}
+	switch {
+	case topo.UnknownReason != "":
+		log.Warnf("GPU topology unknown: slots=%d excluded=%d reason=%q",
+			slots, excluded, topo.UnknownReason)
+	case len(failedCalls) > 0:
+		log.Warnf("GPU topology collected: slots=%d excluded=%d nvml_errors=%d driver=%s",
+			slots, excluded, len(failedCalls), topo.DriverVersion)
+	default:
+		log.Infof("GPU topology collected: slots=%d excluded=%d nvml_errors=0 driver=%s",
+			slots, excluded, topo.DriverVersion)
+	}
+	for _, line := range failedCalls {
+		log.Warn(line)
 	}
 }
