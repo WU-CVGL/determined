@@ -74,8 +74,14 @@ Work that a pool has accepted keeps its access:
 - Changes to the priority, weight, or `max_slots` of accepted work. Raising
   `max_slots` lets an accepted experiment use more slots of its pool.
 
-Checkpoint garbage collection is a system task. It runs in the cluster's
-default aux pool even when that pool is restricted.
+Checkpoint garbage collection is not checked either. It runs in the cluster's
+default aux pool even when that pool is restricted, and it runs with the
+experiment's environment variables and bind mounts. Code that these settings
+make it run, for example through `PYTHONPATH` or `LD_PRELOAD`, runs in that pool
+too. Restricting the cluster's default aux pool therefore does not keep a user
+without a grant from running CPU work there this way: garbage collection starts
+when an experiment ends with checkpoints to delete, and when a user deletes
+checkpoints or an experiment's TensorBoard files.
 
 ## Revocation
 
@@ -104,10 +110,12 @@ without slots, such as TensorBoards, CPU commands, notebooks and shells, and CPU
 generic tasks.
 
 Administrators may restrict a default pool. Every submission that omits its
-pool and would run there is then refused for users without a grant. The
-response to the restriction warns about each default the pool is, and
-`det resource-pool access list` shows them in its `Defaults` column, including
-when a `master.yaml` edit makes a restricted pool a default.
+pool and would run there is then refused for users without a grant, while
+checkpoint garbage collection still runs in the cluster's default aux pool (see
+"What is not checked"). The response to the restriction warns about each
+default the pool is, and `det resource-pool access list` shows them in its
+`Defaults` column, including when a `master.yaml` edit makes a restricted pool
+a default.
 
 ### Who may change workspace defaults
 
@@ -174,6 +182,11 @@ session. You do this on purpose when you:
 Continuing another user's experiment, as an administrator or, with RBAC, as a
 user allowed to update it, also runs the experiment owner's code with the
 session and the agent user and group of the user who continues it.
+
+Deleting another user's checkpoints or TensorBoard files starts checkpoint
+garbage collection with your session and with that experiment's environment
+variables and bind mounts, which can make it run code that the experiment's
+owner chose.
 
 A TensorBoard takes an experiment's image, image pull secrets, and
 `registry_auth` only when the user who starts it owns the experiment.
