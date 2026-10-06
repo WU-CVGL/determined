@@ -1392,8 +1392,9 @@ func (a *apiServer) createUnmanagedExperimentTx(
 type continueConfig struct {
 	config   []byte
 	isSingle bool
-	// codeChanges are the fields that continueCodeChanges reports the override to change.
-	codeChanges []string
+	// ownerOnlyChanges are the top-level fields that continueOwnerOnlyChanges reports the override
+	// to change.
+	ownerOnlyChanges []string
 }
 
 func (a *apiServer) parseAndMergeContinueConfig(expID int, overrideConfig string) (
@@ -1438,7 +1439,7 @@ func (a *apiServer) parseAndMergeContinueConfig(expID int, overrideConfig string
 			fmt.Sprintf("override config must have single searcher type got '%s' instead", overrideName))
 	}
 	// Compared before the invariant configs are merged in: they are the cluster's, not the override's.
-	codeChanges, err := continueCodeChanges(activeConfig, mergedConfig)
+	ownerOnlyChanges, err := continueOwnerOnlyChanges(activeConfig, mergedConfig)
 	if err != nil {
 		return nil, fmt.Errorf("comparing the override config: %w", err)
 	}
@@ -1465,63 +1466,117 @@ func (a *apiServer) parseAndMergeContinueConfig(expID int, overrideConfig string
 		return nil, fmt.Errorf("getting value of merged config: %w", err)
 	}
 
-	return &continueConfig{config: bytes.([]byte), isSingle: isSingle, codeChanges: codeChanges}, nil
+	return &continueConfig{
+		config: bytes.([]byte), isSingle: isSingle, ownerOnlyChanges: ownerOnlyChanges,
+	}, nil
 }
 
-// continueCodeChanges returns the config fields that choose the code a continued experiment's
-// trials run, or what they run it with, and whose value in merged differs from active. They are the
-// entrypoint; the environment (image, environment variables, pod spec, registry credentials and the
-// rest); the bind mounts; and where the trials restore checkpoints from: the checkpoint storage,
-// apart from how many checkpoints it keeps, and the warm start source. The trials run as the
-// experiment's owner, so only the owner may change these when continuing it.
-func continueCodeChanges(active, merged expconf.ExperimentConfig) ([]string, error) {
-	storage := func(c expconf.ExperimentConfig) *expconf.CheckpointStorageConfigV0 {
-		if c.RawCheckpointStorage == nil {
-			return nil
+// continueNonOwnerFields are the config fields, as paths, that someone other than an experiment's
+// owner may change when they continue it. Its trials run as the owner, so every other field stays as
+// the owner set it: the ones that choose the code, the image, the mounts, the environment, the
+// storage location, the resource pool, the launcher's arguments, and the hyperparameters and data
+// that the code reads. These only name the experiment or bound the training it already does:
+//   - name, description and labels are metadata, which PatchExperiment also changes. Resume
+//     Current Trial in the WebUI prefixes the description with "Fork of".
+//   - max_restarts is how many times a failed trial is restarted.
+//   - searcher.max_length is how long the trial trains; extending it is what continue is for.
+//     Only a single-trial experiment takes an override config.
+//   - checkpoint_storage.save_* are how many checkpoints are kept, which PatchExperiment also
+//     changes. Where they are stored does not change.
+//
+// Left out on purpose: resources, because the resource pool brings its own task container defaults
+// (image, environment variables, mounts, pod spec), and priority, weight and max_slots are set on
+// the running experiment, which checks the workspace's limits; min_validation_period,
+// min_checkpoint_period, log_policies and debug, which no continue needs.
+var continueNonOwnerFields = [][]string{
+	{"name"},
+	{"description"},
+	{"labels"},
+	{"max_restarts"},
+	{"searcher", "max_length"},
+	{"checkpoint_storage", "save_experiment_best"},
+	{"checkpoint_storage", "save_trial_best"},
+	{"checkpoint_storage", "save_trial_latest"},
+}
+
+// continueNonOwnerFieldNames returns continueNonOwnerFields for messages.
+func continueNonOwnerFieldNames() string {
+	names := make([]string, 0, len(continueNonOwnerFields))
+	for _, path := range continueNonOwnerFields {
+		names = append(names, strings.Join(path, "."))
+	}
+	return strings.Join(names, ", ")
+}
+
+// continueOwnerOnlyChanges returns the top-level config fields whose value in merged differs from
+// active once continueNonOwnerFields are left out: what only the owner may change when continuing
+// the experiment. Both configs are compared in the same form, with defaults and with environment
+// variables by their effective values.
+func continueOwnerOnlyChanges(active, merged expconf.ExperimentConfig) ([]string, error) {
+	a, err := continueComparableConfig(active)
+	if err != nil {
+		return nil, fmt.Errorf("active config: %w", err)
+	}
+	m, err := continueComparableConfig(merged)
+	if err != nil {
+		return nil, fmt.Errorf("merged config: %w", err)
+	}
+	fields := maps.Keys(a)
+	for f := range m {
+		if _, ok := a[f]; !ok {
+			fields = append(fields, f)
 		}
-		s := schemas.Copy(*c.RawCheckpointStorage)
-		s.RawSaveExperimentBest, s.RawSaveTrialBest, s.RawSaveTrialLatest = nil, nil, nil
-		return &s
 	}
-	var activeSearcher, mergedSearcher expconf.SearcherConfigV0
-	if active.RawSearcher != nil {
-		activeSearcher = *active.RawSearcher
-	}
-	if merged.RawSearcher != nil {
-		mergedSearcher = *merged.RawSearcher
-	}
-	fields := []struct {
-		name           string
-		active, merged any
-	}{
-		{"entrypoint", active.RawEntrypoint, merged.RawEntrypoint},
-		{
-			"environment",
-			effectiveEnvironment(active.RawEnvironment), effectiveEnvironment(merged.RawEnvironment),
-		},
-		{"bind_mounts", active.RawBindMounts, merged.RawBindMounts},
-		{"checkpoint_storage", storage(active), storage(merged)},
-		{"searcher.source_trial_id", activeSearcher.RawSourceTrialID, mergedSearcher.RawSourceTrialID},
-		{
-			"searcher.source_checkpoint_uuid",
-			activeSearcher.RawSourceCheckpointUUID, mergedSearcher.RawSourceCheckpointUUID,
-		},
-	}
+	sort.Strings(fields)
 	var changed []string
 	for _, f := range fields {
-		a, err := json.Marshal(f.active)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", f.name, err)
-		}
-		m, err := json.Marshal(f.merged)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", f.name, err)
-		}
-		if string(a) != string(m) {
-			changed = append(changed, f.name)
+		// A field left out of one config (omitempty) and set in the other is a change.
+		if a[f] != m[f] {
+			changed = append(changed, f)
 		}
 	}
 	return changed, nil
+}
+
+// continueComparableConfig returns c's top-level fields as canonical JSON, with defaults, with
+// environment variables by their effective values, and without continueNonOwnerFields.
+func continueComparableConfig(c expconf.ExperimentConfig) (map[string]string, error) {
+	c = schemas.WithDefaults(c)
+	c.RawEnvironment = effectiveEnvironment(c.RawEnvironment)
+	raw, err := json.Marshal(c)
+	if err != nil {
+		return nil, err
+	}
+	var config map[string]any
+	d := json.NewDecoder(strings.NewReader(string(raw)))
+	d.UseNumber() // Large integers stay exact.
+	if err := d.Decode(&config); err != nil {
+		return nil, err
+	}
+	for _, path := range continueNonOwnerFields {
+		parent := config
+		for _, key := range path[:len(path)-1] {
+			next, ok := parent[key].(map[string]any)
+			if !ok {
+				parent = nil
+				break
+			}
+			parent = next
+		}
+		if parent != nil {
+			delete(parent, path[len(path)-1])
+		}
+	}
+	out := make(map[string]string, len(config))
+	for f, v := range config {
+		// Maps marshal with sorted keys.
+		b, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", f, err)
+		}
+		out[f] = string(b)
+	}
+	return out, nil
 }
 
 // effectiveEnvironment returns a copy of env whose environment variables keep only the last entry
@@ -1602,13 +1657,15 @@ func (a *apiServer) ContinueExperiment(
 	if err != nil {
 		return nil, err
 	}
-	// The trials run as the owner, so a continuer who changed what they run would run their own
-	// code with the owner's token and uid/gid.
-	if actor.ID != owner.ID && len(merged.codeChanges) > 0 {
+	// The trials run as the owner, so a continuer who changed what they run, or what they run it
+	// with, would run their own choice with the owner's token and uid/gid. Anyone but the owner may
+	// change only the fields that bound the training (continueNonOwnerFields).
+	if actor.ID != owner.ID && len(merged.ownerOnlyChanges) > 0 {
 		return nil, status.Errorf(codes.PermissionDenied,
 			"experiment %d runs as its owner %q, so only they may change %s when continuing it; "+
-				"to run a changed copy as yourself, fork the experiment",
-			req.Id, owner.Username, strings.Join(merged.codeChanges, ", "))
+				"anyone else may change only %s. To run a changed copy as yourself, fork the experiment",
+			req.Id, owner.Username, strings.Join(merged.ownerOnlyChanges, ", "),
+			continueNonOwnerFieldNames())
 	}
 
 	dbExp, modelDef, activeConfig, _, taskSpec, err := a.m.parseCreateExperiment(ctx,

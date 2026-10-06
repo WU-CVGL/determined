@@ -17,16 +17,16 @@
 
 -  Experiment: **Important:** When someone other than an experiment's owner continues it, the
    override config (``det experiment continue --config`` or ``--config-file``, or the config edited
-   in **Resume Current Trial**) can no longer change what its trials run or what they run it with:
-   ``entrypoint``; ``environment``, including the image, environment variables, pod spec, and
-   registry credentials; ``bind_mounts``; ``checkpoint_storage``, apart from its ``save_*`` counts;
-   and ``searcher.source_trial_id`` and ``searcher.source_checkpoint_uuid``. Otherwise they could
-   run code of their choice as the owner. Such a continue returns ``403 Forbidden``
-   (``PermissionDenied``), names the fields and the owner, and starts nothing. This applies to
-   administrators too. Other fields, such as ``searcher.max_length``, ``max_restarts``, and
-   ``resources``, can still be changed, and sending back the experiment's whole config unchanged, as
-   **Resume Current Trial** does, still works. To run changed code as yourself, fork the experiment.
-   The owner can still change every field.
+   in **Resume Current Trial**) can change only ``name``, ``description``, ``labels``,
+   ``max_restarts``, ``searcher.max_length``, and the ``checkpoint_storage`` counts
+   ``save_experiment_best``, ``save_trial_best``, and ``save_trial_latest``. Every other field must
+   keep its value. Fields such as ``hyperparameters``, ``data``, ``entrypoint``, ``environment``,
+   ``bind_mounts``, ``resources.resource_pool``, and ``slurm`` choose what the owner's trials run,
+   load, and run with, so anyone else who changed them could run code of their choice as the owner.
+   Such a continue returns ``403 Forbidden`` (``PermissionDenied``), names the changed fields and
+   the owner, and starts nothing. This applies to administrators too. Sending back the experiment's
+   whole config unchanged, as **Resume Current Trial** does, still works. To run a changed copy as
+   yourself, fork the experiment. The owner can still change every field.
 
 **Bug Fixes**
 

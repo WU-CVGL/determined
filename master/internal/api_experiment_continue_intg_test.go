@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -74,10 +75,17 @@ func endTestExp(t *testing.T, expID int) int {
 	return expID
 }
 
-// codeTestConfig gives an experiment an image, registry credentials, environment variables, a pod
-// spec and a bind mount, so that a continue that sends the whole config back, as the WebUI does,
-// merges each of them.
+// codeTestConfig gives an experiment a description, hyperparameters, data, an image, registry
+// credentials, environment variables, a pod spec and a bind mount, so that a continue that sends
+// the whole config back, as the WebUI does, merges each of them.
 const codeTestConfig = `
+description: the owner's run
+hyperparameters:
+  model_name: mnist
+  batch_size: 64
+  lr: {type: const, val: 0.1}
+data:
+  url: https://example.com/owner.tar
 environment:
   image: owner/image:1
   registry_auth:
@@ -105,11 +113,9 @@ func endedCodeTestExp(t *testing.T, api *apiServer, owner continueTestUser) int 
 }
 
 // resumeOverride returns the override config that Resume Current Trial in the WebUI sends: the whole
-// config that GetExperiment returns, without its workspace and project. withoutRegistryAuth also
-// removes environment.registry_auth, as the WebUI does when the config it fetched has none.
-func resumeOverride(
-	ctx context.Context, t *testing.T, api *apiServer, expID int, withoutRegistryAuth bool,
-) string {
+// config that GetExperiment returns to the user of ctx, without its workspace and project, and with
+// "Fork of" before its description.
+func resumeOverride(ctx context.Context, t *testing.T, api *apiServer, expID int) string {
 	t.Helper()
 	resp, err := api.GetExperiment(ctx, &apiv1.GetExperimentRequest{ExperimentId: int32(expID)})
 	require.NoError(t, err)
@@ -119,11 +125,8 @@ func resumeOverride(
 	require.NoError(t, json.Unmarshal(raw, &config))
 	delete(config, "workspace")
 	delete(config, "project")
-	if withoutRegistryAuth {
-		env, ok := config["environment"].(map[string]any)
-		require.True(t, ok)
-		require.Contains(t, env, "registry_auth")
-		delete(env, "registry_auth")
+	if description, ok := config["description"].(string); ok && description != "" {
+		config["description"] = "Fork of " + description
 	}
 	override, err := json.Marshal(config)
 	require.NoError(t, err)
@@ -259,6 +262,32 @@ func TestContinueExperimentKeepsOwnerIdentity(t *testing.T) {
 		require.Equal(t, "echo changed", active.Entrypoint().RawEntrypoint)
 	})
 
+	t.Run("an administrator may not change the hyperparameters", func(t *testing.T) {
+		expID := endedTestExp(t, api, owner)
+		_, err := api.ContinueExperiment(admin.ctx, &apiv1.ContinueExperimentRequest{
+			Id:             int32(expID),
+			OverrideConfig: "hyperparameters: {model_name: other-model}",
+		})
+		require.Equal(t, codes.PermissionDenied, status.Code(err), err)
+		require.ErrorContains(t, err, owner.Username)
+		require.ErrorContains(t, err, "hyperparameters")
+		requireNotContinued(t, expID)
+	})
+
+	t.Run("the owner may change the hyperparameters", func(t *testing.T) {
+		expID := endedTestExp(t, api, owner)
+		_, err := api.ContinueExperiment(owner.ctx, &apiv1.ContinueExperimentRequest{
+			Id:             int32(expID),
+			OverrideConfig: "hyperparameters: {model_name: other-model}",
+		})
+		require.NoError(t, err)
+		requireRunsAs(t, expID, owner)
+		active, err := api.m.db.ActiveExperimentConfig(expID)
+		require.NoError(t, err)
+		require.Equal(t, "other-model",
+			active.Hyperparameters()["model_name"].RawConstHyperparameter.RawVal)
+	})
+
 	t.Run("a continue that fails leaves the owner no new session", func(t *testing.T) {
 		// Not ended, so the continue fails after the session for its tasks is made.
 		expID := createTestExpWithProjectID(t, api, owner.User, 1).ID
@@ -331,14 +360,16 @@ func TestContinueExperimentChecksActorRunsAsOwner(t *testing.T) {
 	})
 }
 
-// A user who may continue another user's experiment, under RBAC or as an administrator, may not
-// change the code its trials run or what they run it with, because they run as its owner.
-func TestContinueExperimentOnlyOwnerChangesCode(t *testing.T) {
+// A user who may continue another user's experiment, under RBAC or as an administrator, may change
+// only the fields that bound its training (continueNonOwnerFields), because its trials run as its
+// owner. Everything else, code or not, stays as the owner set it.
+func TestContinueExperimentNonOwnerChangesOnlyOperationalFields(t *testing.T) {
 	api, authZExp, projectAuthZ, _, _ := setupExpAuthTest(t, nil)
 	owner := addContinueTestUser(t, false, 48000)
 	actor := addContinueTestUser(t, false, 49000)
 
 	isActor := mock.MatchedBy(func(m model.User) bool { return m.ID == actor.ID })
+	isOwner := mock.MatchedBy(func(m model.User) bool { return m.ID == owner.ID })
 	isOwners := mock.MatchedBy(func(e *model.Experiment) bool {
 		return e.OwnerID != nil && *e.OwnerID == owner.ID
 	})
@@ -347,6 +378,9 @@ func TestContinueExperimentOnlyOwnerChangesCode(t *testing.T) {
 	authZExp.On("CanEditExperiment", mock.Anything, isActor, isOwners).Return(nil)
 	authZExp.On("CanGetExperimentArtifacts", mock.Anything, isActor, isOwners).Return(nil)
 	projectAuthZ.On("CanGetProject", mock.Anything, isActor, mock.Anything).Return(nil)
+	// The owner only reads the config, for the round trip with registry credentials.
+	authZExp.On("CanGetExperiment", mock.Anything, isOwner, isOwners).Return(nil)
+	authZExp.On("CanGetExperimentArtifacts", mock.Anything, isOwner, isOwners).Return(nil).Maybe()
 
 	refused := []struct{ name, field, override string }{
 		{"entrypoint", "entrypoint", "entrypoint: echo changed"},
@@ -370,14 +404,26 @@ func TestContinueExperimentOnlyOwnerChangesCode(t *testing.T) {
 			"checkpoint_storage: {type: shared_fs, host_path: /home/other}",
 		},
 		{
-			"warm start checkpoint", "searcher.source_checkpoint_uuid",
+			"warm start checkpoint", "searcher",
 			"searcher: {name: single, metric: loss, max_length: {batches: 10}, " +
 				"source_checkpoint_uuid: 7e0bad9e-8c1b-4f4e-9d2a-3a0f1f6b0c01}",
 		},
 		{
-			"warm start trial", "searcher.source_trial_id",
+			"warm start trial", "searcher",
 			"searcher: {name: single, metric: loss, max_length: {batches: 10}, source_trial_id: 1}",
 		},
+		// The trial's code can choose what it loads by its hyperparameters and data, for example
+		// a model version from the registry, whose checkpoint brings its own code.
+		{"hyperparameter value", "hyperparameters", "hyperparameters: {model_name: other-model}"},
+		{"new hyperparameter", "hyperparameters", "hyperparameters: {model_version: 2}"},
+		{"data", "data", "data: {url: https://example.com/other.tar}"},
+		// Launcher arguments.
+		{"slurm.sbatch_args", "slurm", "slurm: {sbatch_args: [--export=ALL]}"},
+		// Not code, but not one of continueNonOwnerFields either.
+		{"resources.priority", "resources", "resources: {priority: 1}"},
+		{"resources.resource_pool", "resources", "resources: {resource_pool: other}"},
+		{"min_validation_period", "min_validation_period", "min_validation_period: {batches: 1}"},
+		{"debug", "debug", "debug: true"},
 	}
 	for _, c := range refused {
 		t.Run("refused: "+c.name, func(t *testing.T) {
@@ -388,33 +434,101 @@ func TestContinueExperimentOnlyOwnerChangesCode(t *testing.T) {
 				OverrideConfig: c.override,
 			})
 			require.Equal(t, codes.PermissionDenied, status.Code(err), err)
-			require.ErrorContains(t, err, c.field)
+			require.ErrorContains(t, err, "only they may change "+c.field+" when")
 			require.ErrorContains(t, err, owner.Username)
+			require.ErrorContains(t, err, "fork the experiment")
 			requireNotContinued(t, expID)
 			require.Equal(t, sessions, sessionCount(t, owner))
 		})
 	}
 
-	for _, withoutRegistryAuth := range []bool{false, true} {
-		name := "allowed: the whole config, as Resume Current Trial sends it"
-		if withoutRegistryAuth {
-			name += ", without registry_auth"
-		}
-		t.Run(name, func(t *testing.T) {
+	allowed := []struct {
+		name, override string
+		check          func(t *testing.T, active expconf.ExperimentConfig)
+	}{
+		{"name", "name: renamed", func(t *testing.T, active expconf.ExperimentConfig) {
+			require.Equal(t, "renamed", active.Name().String())
+		}},
+		{"description", "description: changed", func(t *testing.T, active expconf.ExperimentConfig) {
+			require.Equal(t, "changed", *active.Description())
+		}},
+		{"labels", "labels: [added]", func(t *testing.T, active expconf.ExperimentConfig) {
+			require.True(t, active.Labels()["added"])
+		}},
+		{"max_restarts", "max_restarts: 7", func(t *testing.T, active expconf.ExperimentConfig) {
+			require.Equal(t, 7, active.MaxRestarts())
+		}},
+		{
+			"searcher.max_length", "searcher: {name: single, metric: loss, max_length: {batches: 20}}",
+			func(t *testing.T, active expconf.ExperimentConfig) {
+				require.Equal(t, uint64(20), active.Searcher().RawSingleConfig.MaxLength().Units)
+			},
+		},
+		{
+			"checkpoint_storage.save_experiment_best", "checkpoint_storage: {save_experiment_best: 2}",
+			func(t *testing.T, active expconf.ExperimentConfig) {
+				require.Equal(t, 2, active.CheckpointStorage().SaveExperimentBest())
+			},
+		},
+		{
+			"checkpoint_storage.save_trial_best", "checkpoint_storage: {save_trial_best: 3}",
+			func(t *testing.T, active expconf.ExperimentConfig) {
+				require.Equal(t, 3, active.CheckpointStorage().SaveTrialBest())
+			},
+		},
+		{
+			"checkpoint_storage.save_trial_latest", "checkpoint_storage: {save_trial_latest: 4}",
+			func(t *testing.T, active expconf.ExperimentConfig) {
+				require.Equal(t, 4, active.CheckpointStorage().SaveTrialLatest())
+			},
+		},
+	}
+	for _, c := range allowed {
+		t.Run("allowed: "+c.name, func(t *testing.T) {
 			expID := endedCodeTestExp(t, api, owner)
 			_, err := api.ContinueExperiment(actor.ctx, &apiv1.ContinueExperimentRequest{
 				Id:             int32(expID),
-				OverrideConfig: resumeOverride(actor.ctx, t, api, expID, withoutRegistryAuth),
+				OverrideConfig: c.override,
 			})
 			require.NoError(t, err)
 			requireRunsAs(t, expID, owner)
 			active, err := api.m.db.ActiveExperimentConfig(expID)
 			require.NoError(t, err)
-			require.Equal(t, "owner-password", active.Environment().RegistryAuth().Password)
+			c.check(t, active)
+			require.Equal(t, "mnist", active.Hyperparameters()["model_name"].RawConstHyperparameter.RawVal)
 		})
 	}
 
-	t.Run("allowed: fields that are not code", func(t *testing.T) {
+	// GetExperiment leaves environment.registry_auth out for anyone but the owner and
+	// administrators (redactExperimentRegistryAuth), so their WebUI sends the config without it,
+	// and the owner's or an administrator's WebUI sends it back.
+	for _, reader := range []struct {
+		name              string
+		ctx               context.Context //nolint:containedctx
+		sendsRegistryAuth bool
+	}{
+		{"as the user who continues sees it", actor.ctx, false},
+		{"with registry credentials", owner.ctx, true},
+	} {
+		t.Run("allowed: the whole config, as Resume Current Trial sends it, "+reader.name,
+			func(t *testing.T) {
+				expID := endedCodeTestExp(t, api, owner)
+				override := resumeOverride(reader.ctx, t, api, expID)
+				require.Equal(t, reader.sendsRegistryAuth, strings.Contains(override, "owner-password"))
+				_, err := api.ContinueExperiment(actor.ctx, &apiv1.ContinueExperimentRequest{
+					Id:             int32(expID),
+					OverrideConfig: override,
+				})
+				require.NoError(t, err)
+				requireRunsAs(t, expID, owner)
+				active, err := api.m.db.ActiveExperimentConfig(expID)
+				require.NoError(t, err)
+				require.Equal(t, "owner-password", active.Environment().RegistryAuth().Password)
+				require.Equal(t, "Fork of the owner's run", *active.Description())
+			})
+	}
+
+	t.Run("allowed: several fields at once, with other values repeated as they are", func(t *testing.T) {
 		expID := endedCodeTestExp(t, api, owner)
 		_, err := api.ContinueExperiment(actor.ctx, &apiv1.ContinueExperimentRequest{
 			Id: int32(expID),
@@ -422,6 +536,7 @@ func TestContinueExperimentOnlyOwnerChangesCode(t *testing.T) {
 description: changed
 max_restarts: 7
 searcher: {name: single, metric: loss, max_length: {batches: 20}}
+hyperparameters: {model_name: mnist}
 environment: {environment_variables: [B=2]}
 checkpoint_storage: {type: shared_fs, host_path: /, save_trial_latest: 3}
 `,
