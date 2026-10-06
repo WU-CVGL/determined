@@ -1,3 +1,6 @@
+-- experiment_config has environment.registry_auth, the container registry credentials of the
+-- experiment's owner, set to null, as in an experiment without them: users who may not see them
+-- can read checkpoints and model versions, and nothing is launched from this copy of the config.
 CREATE VIEW checkpoints_view AS
 SELECT c.id,
     c.uuid,
@@ -9,7 +12,10 @@ SELECT c.id,
     c.metadata,
     r.id AS trial_id,
     e.id AS experiment_id,
-    e.config AS experiment_config,
+    CASE WHEN jsonb_typeof(e.config -> 'environment'::text) = 'object'::text
+        THEN jsonb_set(e.config, '{environment,registry_auth}'::text[], 'null'::jsonb, false)
+        ELSE e.config
+    END AS experiment_config,
     r.hparams,
     s.metrics AS training_metrics,
     v.metrics -> 'validation_metrics'::text AS validation_metrics,

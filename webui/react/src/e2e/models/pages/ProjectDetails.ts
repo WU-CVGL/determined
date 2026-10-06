@@ -3,6 +3,7 @@ import { DeterminedPage } from 'e2e/models/common/base/BasePage';
 import { DynamicTabs } from 'e2e/models/components/DynamicTabs';
 import { F_ExperimentList } from 'e2e/models/components/F_ExperimentList';
 import { PageComponent } from 'e2e/models/components/Page';
+import { TaskDashboard } from 'e2e/models/components/TaskDashboard';
 
 /**
  * Represents the SignIn page from src/pages/ProjectDetails.tsx
@@ -40,7 +41,9 @@ export class ProjectDetails extends DeterminedPage {
   readonly runsTab = this.dynamicTabs.pivot.tab('runs');
   readonly experimentsTab = this.dynamicTabs.pivot.tab('experiments');
   readonly searchesTab = this.dynamicTabs.pivot.tab('searches');
+  readonly jobsTab = this.dynamicTabs.pivot.tab('jobs');
   readonly notesTab = this.dynamicTabs.pivot.tab('notes');
   readonly f_experimentList = new F_ExperimentList({ parent: this.dynamicTabs.pivot.tabContent });
+  readonly taskDashboard = new TaskDashboard({ parent: this.dynamicTabs.pivot.tabContent });
   // TODO add models for other tabs
 }

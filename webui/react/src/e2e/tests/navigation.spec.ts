@@ -24,11 +24,11 @@ test.describe('Navigation', () => {
       await expect.soft(authedPage).toHaveDeterminedTitle('Model Registry');
     });
 
-    await test.step('Tasks', async () => {
-      await userManagementPage.nav.sidebar.tasks.pwLocator.click();
-      const expectedURL = /tasks/;
+    await test.step('Jobs', async () => {
+      await userManagementPage.nav.sidebar.jobs.pwLocator.click();
+      const expectedURL = /jobs/;
       await authedPage.waitForURL(expectedURL);
-      await expect.soft(authedPage).toHaveDeterminedTitle('Tasks');
+      await expect.soft(authedPage).toHaveDeterminedTitle('Jobs');
     });
 
     await test.step('Webhooks', async () => {

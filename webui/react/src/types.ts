@@ -787,8 +787,10 @@ export const BulkExperimentItem = t.intersection([
     jobSummary: JobSummary,
     modelDefinitionSize: t.number,
     notes: t.string,
+    parentArchived: t.boolean,
     progress: t.number,
     projectName: t.string,
+    projectOwnerId: t.number,
     searcherMetric: t.string,
     searcherMetricValue: t.number,
     trialIds: t.array(t.number),
@@ -996,6 +998,8 @@ export interface CommandTask extends Task {
   displayName?: string;
   misc?: CommandMisc;
   resourcePool: string;
+  /** The slots the task asks for: 0 for a CPU-only task; unset if the master does not say. */
+  slots?: number;
   state: CommandState;
   type: CommandType;
   userId: number;
@@ -1055,14 +1059,6 @@ export interface ExperimentFilters {
 
 export interface ExperimentTrialFilters {
   states?: string[];
-}
-
-export interface TaskFilters<T extends CommandType | TaskType = TaskType> {
-  limit: number;
-  states?: string[];
-  types?: T[];
-  users?: string[];
-  workspaces?: string[];
 }
 
 export const LogLevel = {

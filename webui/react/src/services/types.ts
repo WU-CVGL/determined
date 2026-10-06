@@ -103,9 +103,13 @@ export interface GetExperimentsParams extends PaginationParams {
     | 'SORT_BY_PROGRESS'
     | 'SORT_BY_USER'
     | 'SORT_BY_NAME';
+  /** GPU (one slot or more per trial) or CPU-only (no slots) experiments. */
+  slotsFilter?: Api.V1SlotsFilter;
   states?: Array<`STATE_${RunState}`>;
   userIds?: Array<number>;
   users?: Array<string>;
+  /** The experiments of the projects in this workspace. */
+  workspaceId?: number;
 }
 
 export interface SearchExperimentsParams extends PaginationParams {
@@ -177,6 +181,12 @@ export interface GetTaskParams {
 
 export interface GetGenericTasksParams extends PaginationParams {
   parentId?: string;
+  /** The tasks of this project. */
+  projectId?: number;
+  /** A part of the task's name or ID, in any case. */
+  search?: string;
+  /** GPU (one slot or more) or CPU-only (no slots) tasks. */
+  slotsFilter?: Api.V1SlotsFilter;
   states?: GenericTaskState[];
   taskIds?: string[];
   userIds?: number[];
