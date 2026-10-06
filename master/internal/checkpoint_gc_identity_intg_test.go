@@ -431,9 +431,9 @@ func TestCheckpointGCOfDeactivatedOwner(t *testing.T) {
 	require.Equal(t, model.DeletedState, state)
 }
 
-// useGCTaskContainerDefaults makes the GC tasks that api starts run in a pool with these task
-// container defaults. The experiments that a test creates through the API must exist before.
-func useGCTaskContainerDefaults(api *apiServer, tcd model.TaskContainerDefaultsConfig) {
+// gcTestRM returns a resource manager that runs GC tasks in a pool with these task container
+// defaults and does not say whether it applies pod specs.
+func gcTestRM(tcd model.TaskContainerDefaultsConfig) *mocks.ResourceManager {
 	var gcRM mocks.ResourceManager
 	gcRM.On("ResolveResourcePool", mock.Anything, mock.Anything, mock.Anything).
 		Return(rm.ResourcePoolName("aux"), nil)
@@ -441,7 +441,33 @@ func useGCTaskContainerDefaults(api *apiServer, tcd model.TaskContainerDefaultsC
 	gcRM.On("DeleteJob", mock.Anything).Return(func(sproto.DeleteJob) sproto.DeleteJobResponse {
 		return sproto.EmptyDeleteJobResponse()
 	}, nil)
-	api.m.rm = &gcRM
+	return &gcRM
+}
+
+// useGCTaskContainerDefaults makes the GC tasks that api starts run in a pool with these task
+// container defaults, on a resource manager that does not say whether it applies pod specs. The
+// experiments that a test creates through the API must exist before.
+func useGCTaskContainerDefaults(api *apiServer, tcd model.TaskContainerDefaultsConfig) {
+	api.m.rm = gcTestRM(tcd)
+}
+
+// podSpecsRM is a resource manager that applies the pod specs of the tasks in every pool, as the
+// Kubernetes resource manager does, or none, as the agent resource manager does.
+type podSpecsRM struct {
+	*mocks.ResourceManager
+	applies bool
+}
+
+func (r podSpecsRM) AppliesPodSpecs(rm.ResourcePoolName) (bool, error) {
+	return r.applies, nil
+}
+
+// useGCTaskContainerDefaultsOn is useGCTaskContainerDefaults on a resource manager that applies
+// pod specs, for the experiment's trials and for GC, or applies none.
+func useGCTaskContainerDefaultsOn(
+	api *apiServer, appliesPodSpecs bool, tcd model.TaskContainerDefaultsConfig,
+) {
+	api.m.rm = podSpecsRM{ResourceManager: gcTestRM(tcd), applies: appliesPodSpecs}
 }
 
 // requireNoGCTask checks that no checkpoint GC task was started.
@@ -593,10 +619,10 @@ func TestCheckpointGCOfDirectoryStorageOnATaskContainerDefaultMount(t *testing.T
 	}}, spec.ToTaskSpec().Mounts)
 }
 
-// A pod spec is no evidence by itself. When the experiment's pod spec mounts its directory storage
-// from a persistent volume claim, a GC pod spec with only a nodeSelector does not see it, and GC is
-// refused. A checkpoint_gc_pod_spec that mounts the same claim, here under another volume name,
-// does.
+// A pod spec is no evidence by itself. On Kubernetes, when the experiment's pod spec mounts its
+// directory storage from a persistent volume claim, a GC pod spec with only a nodeSelector does not
+// see it, and GC is refused. A checkpoint_gc_pod_spec that mounts the same claim, here under another
+// volume name, does.
 //
 //nolint:exhaustruct
 func TestCheckpointGCConfirmsThePodSpecVolumeOfDirectoryStorage(t *testing.T) {
@@ -625,7 +651,7 @@ func TestCheckpointGCConfirmsThePodSpecVolumeOfDirectoryStorage(t *testing.T) {
 		return err
 	}
 
-	useGCTaskContainerDefaults(api, model.TaskContainerDefaultsConfig{
+	useGCTaskContainerDefaultsOn(api, true, model.TaskContainerDefaultsConfig{
 		CPUPodSpec: &k8sV1.Pod{Spec: k8sV1.PodSpec{NodeSelector: map[string]string{"gc": "yes"}}},
 	})
 	err := deleteTensorboards()
@@ -648,7 +674,7 @@ func TestCheckpointGCConfirmsThePodSpecVolumeOfDirectoryStorage(t *testing.T) {
 			VolumeMounts: []k8sV1.VolumeMount{{Name: "gc-ckpts", MountPath: "/mnt/ckpts"}},
 		}},
 	}}
-	useGCTaskContainerDefaults(api, model.TaskContainerDefaultsConfig{
+	useGCTaskContainerDefaultsOn(api, true, model.TaskContainerDefaultsConfig{
 		CheckpointGCPodSpec: gcPodSpec,
 	})
 	require.NoError(t, deleteTensorboards())
@@ -658,8 +684,8 @@ func TestCheckpointGCConfirmsThePodSpecVolumeOfDirectoryStorage(t *testing.T) {
 	require.Empty(t, spec.ToTaskSpec().Mounts)
 }
 
-// A hostPath volume is on the node where the pod runs. The experiment's pod spec pins its trials
-// to node-a and mounts its directory storage from host path /data/ckpts there. A cpu_pod_spec that
+// A hostPath volume is on the node where the pod runs. On Kubernetes, the experiment's pod spec
+// pins its trials to node-a and mounts its directory storage from host path /data/ckpts there. A cpu_pod_spec that
 // mounts the same host path on node-b does not see it, and GC is refused, without naming node-b. A
 // checkpoint_gc_pod_spec that mounts it on node-a does.
 //
@@ -706,7 +732,8 @@ func TestCheckpointGCOfAHostPathOnTheTrialsNode(t *testing.T) {
 		}}
 	}
 
-	useGCTaskContainerDefaults(api, model.TaskContainerDefaultsConfig{CPUPodSpec: onNode("node-b")})
+	useGCTaskContainerDefaultsOn(api, true,
+		model.TaskContainerDefaultsConfig{CPUPodSpec: onNode("node-b")})
 	err := deleteTensorboards()
 	require.ErrorContains(t, err, "on a hostPath volume of host path /data/ckpts/run on node node-a,")
 	require.ErrorContains(t, err, "kept until checkpoint_gc_pod_spec pins the pod to node node-a")
@@ -714,13 +741,75 @@ func TestCheckpointGCOfAHostPathOnTheTrialsNode(t *testing.T) {
 	requireNoGCTask(t, specs)
 
 	gcPodSpec := onNode("node-a")
-	useGCTaskContainerDefaults(api, model.TaskContainerDefaultsConfig{
+	useGCTaskContainerDefaultsOn(api, true, model.TaskContainerDefaultsConfig{
 		CPUPodSpec: onNode("node-b"), CheckpointGCPodSpec: gcPodSpec,
 	})
 	require.NoError(t, deleteTensorboards())
 	spec := nextGCSpec(t, specs)
 	require.Equal(t, owner.ID, spec.Base.Owner.ID)
 	require.Equal(t, gcPodSpec.Spec, spec.ToTaskSpec().Environment.PodSpec().Spec)
+}
+
+// On the agent resource manager, a task's container gets its bind mounts and no pod spec. Here
+// the task container defaults' gpu_pod_spec mounts the persistent volume claim ckpts at /mnt/ckpts,
+// which the experiment gets merged into its pod spec, and a GC task into its own, and the
+// experiment bind-mounts host path /srv/alice at /mnt. Its trials wrote to /srv/alice/ckpts/run, and
+// a GC task, with no bind mount there, would find its own empty /mnt/ckpts/run and record the
+// checkpoints as deleted. GC is refused and no GC task is started, also on a resource manager that
+// does not say whether it applies pod specs. On Kubernetes, where the trials and the GC task both
+// have the claim at /mnt/ckpts, GC runs.
+//
+//nolint:exhaustruct
+func TestCheckpointGCOfABindMountUnderAPodSpecVolumeOnTheAgentRM(t *testing.T) {
+	api, _, adminCtx := setupAPITest(t, nil)
+	owner := addGCTestOwner(t)
+	specs := captureCheckpointGC(t)
+
+	ckptsPVC := &k8sV1.Pod{Spec: k8sV1.PodSpec{
+		Volumes: []k8sV1.Volume{{
+			Name: "ckpts",
+			VolumeSource: k8sV1.VolumeSource{
+				PersistentVolumeClaim: &k8sV1.PersistentVolumeClaimVolumeSource{ClaimName: "ckpts"},
+			},
+		}},
+		Containers: []k8sV1.Container{{
+			Name:         model.DeterminedK8ContainerName,
+			VolumeMounts: []k8sV1.VolumeMount{{Name: "ckpts", MountPath: "/mnt/ckpts"}},
+		}},
+	}}
+	api.m.config.TaskContainerDefaults.GPUPodSpec = ckptsPVC
+	exp := createGCTestExperimentFromYAML(adminCtx, t, api, owner,
+		"bind_mounts:\n  - host_path: /srv/alice\n    container_path: /mnt\n")
+	require.Equal(t, ckptsPVC.Spec.Volumes, exp.Config.Environment.PodSpec().Spec.Volumes)
+	deleteTensorboards := func() error {
+		_, err := api.DeleteTensorboardFiles(adminCtx, &apiv1.DeleteTensorboardFilesRequest{
+			ExperimentId: int32(exp.ID),
+		})
+		return err
+	}
+	gcTCD := model.TaskContainerDefaultsConfig{GPUPodSpec: ckptsPVC}
+
+	useGCTaskContainerDefaultsOn(api, false, gcTCD)
+	err := deleteTensorboards()
+	require.ErrorContains(t, err, "checkpoint storage is the directory /mnt/ckpts/run")
+	require.ErrorContains(t, err, "on a bind mount of host path /srv/alice/ckpts/run,")
+	require.ErrorContains(t, err, "kept until task_container_defaults.bind_mounts mounts host path "+
+		"/srv/alice/ckpts/run at /mnt/ckpts/run")
+	requireNoGCTask(t, specs)
+
+	useGCTaskContainerDefaults(api, gcTCD)
+	err = deleteTensorboards()
+	require.ErrorContains(t, err, "What the experiment's trials had at /mnt/ckpts/run depends on "+
+		"whether the resource manager of the experiment's resource pool applied their pod spec")
+	require.ErrorContains(t, err, "checkpoints are kept")
+	requireNoGCTask(t, specs)
+
+	useGCTaskContainerDefaultsOn(api, true, gcTCD)
+	require.NoError(t, deleteTensorboards())
+	spec := nextGCSpec(t, specs)
+	require.Equal(t, owner.ID, spec.Base.Owner.ID)
+	require.Equal(t, ckptsPVC.Spec.Volumes, spec.ToTaskSpec().Environment.PodSpec().Spec.Volumes)
+	require.Empty(t, spec.ToTaskSpec().Mounts)
 }
 
 // Control: for directory checkpoint storage that the experiment does not mount, the check does not

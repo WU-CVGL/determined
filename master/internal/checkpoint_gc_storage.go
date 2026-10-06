@@ -3,12 +3,18 @@ package internal
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/docker/docker/api/types/mount"
 	k8sV1 "k8s.io/api/core/v1"
 
+	"github.com/determined-ai/determined/master/internal/rm"
+	"github.com/determined-ai/determined/master/internal/rm/agentrm"
+	"github.com/determined-ai/determined/master/internal/rm/dispatcherrm"
+	"github.com/determined-ai/determined/master/internal/rm/kubernetesrm"
+	"github.com/determined-ai/determined/master/internal/rm/multirm"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/schemas"
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
@@ -17,6 +23,8 @@ import (
 
 // checkpointGCSeesStorage returns an error for directory checkpoint storage that a checkpoint GC
 // task with these task container defaults would not see where the experiment's trials saw it.
+// trialPods and gcPods say whether the resource managers that ran the trials and run the GC task
+// apply pod specs.
 //
 // That storage is a path in the container, and its files are wherever the container's mounts put
 // that path. The trials had the mounts that task_trial.go gives them: the experiment's bind mounts,
@@ -39,6 +47,12 @@ import (
 // The places must be the same at the storage directory and at every mount point below it, where
 // checkpoints and TensorBoard files are too, wherever the trials had a mount.
 //
+// A pod spec counts only for a task whose resource manager applies it, as the Kubernetes resource
+// manager does: its volumeMounts and the node it pins the pod to. The agent resource manager starts
+// a container from its Docker spec, with its bind mounts alone, and the dispatcher resource managers
+// read no pod spec either. Where the master cannot tell (podSpecsUnknown), a place counts only if it
+// is the same with the pod spec and without it, the trials' node counts, and the GC task's does not.
+//
 // A host path, of a hostPath volume or of a bind mount, which Kubernetes makes a hostPath volume,
 // is on the node where the pod runs. If the trials' pod spec pins them to a node (pinnedNode), the
 // GC task's pod spec must pin it to the same node. If it pins them to none that the master can
@@ -49,11 +63,12 @@ import (
 // Where the trials had no mount, or an emptyDir volume, the check does not apply and the existing
 // handling is kept: the task runs and records the checkpoints as deleted, as before. This also
 // covers a path that the container runtime binds by default (Singularity or enroot on Slurm/PBS).
-// Pod specs are taken to apply, as on Kubernetes.
 func checkpointGCSeesStorage(
 	storage expconf.CheckpointStorageConfig,
 	exp expconf.LegacyConfig,
+	trialPods podSpecs,
 	tcd model.TaskContainerDefaultsConfig,
+	gcPods podSpecs,
 ) error {
 	dir := storage.RawDirectoryConfig
 	if dir == nil || dir.RawContainerPath == nil {
@@ -70,19 +85,28 @@ func checkpointGCSeesStorage(
 		})
 	}
 	trialPod, gcPod := exp.Environment.PodSpec(), tasks.GCPodSpec(tcd)
-	trial := append(bindMountsOf(trialBinds), volumeMountsOf(trialPod)...)
-	gc := append(bindMountsOf(tasks.GCMounts(tcd, storage)), volumeMountsOf(gcPod)...)
-	trialNode, gcNode := pinnedNode(trialPod), pinnedNode(gcPod)
+	trial := taskMounts{bindMountsOf(trialBinds), volumeMountsOf(trialPod), trialPods}
+	gc := taskMounts{bindMountsOf(tasks.GCMounts(tcd, storage)), volumeMountsOf(gcPod), gcPods}
+	var trialNode, gcNode string
+	if trialPods != podSpecsIgnored {
+		trialNode = pinnedNode(trialPod)
+	}
+	if gcPods == podSpecsApplied {
+		gcNode = pinnedNode(gcPod)
+	}
 
 	paths := []string{storagePath}
-	for _, m := range append(append([]containerMount{}, trial...), gc...) {
+	for _, m := range slices.Concat(trial.binds, trial.volumes, gc.binds, gc.volumes) {
 		if m.target != storagePath && pathCovers(storagePath, m.target) {
 			paths = append(paths, m.target)
 		}
 	}
 	sort.Strings(paths)
 	for _, p := range paths {
-		seen := placeOf(trial, p)
+		seen, known := trial.placeOf(p)
+		if !known {
+			return fmt.Errorf(gcRefusalTrialsPodSpec, storagePath, p)
+		}
 		if seen.kind == placeContainer || seen.kind == placeEmptyDir {
 			continue
 		}
@@ -90,7 +114,7 @@ func checkpointGCSeesStorage(
 		if seen.kind == placeBind || seen.kind == placeHostPath {
 			node = trialNode
 		}
-		if seen.same(placeOf(gc, p)) && (node == "" || gcNode == node) {
+		if got, known := gc.placeOf(p); known && seen.same(got) && (node == "" || gcNode == node) {
 			continue
 		}
 		return gcStorageRefusal(storagePath, p, seen, node)
@@ -98,10 +122,68 @@ func checkpointGCSeesStorage(
 	return nil
 }
 
+// podSpecs says whether the resource manager that runs a task applies its pod spec.
+type podSpecs int
+
+const (
+	// podSpecsUnknown is for a resource manager that the master cannot find or that does not say.
+	podSpecsUnknown podSpecs = iota
+	// podSpecsIgnored is for the agent and dispatcher resource managers.
+	podSpecsIgnored
+	// podSpecsApplied is for the Kubernetes resource manager.
+	podSpecsApplied
+)
+
+// The resource managers say whether they apply pod specs.
+var (
+	_ rm.PodSpecApplier = (*agentrm.ResourceManager)(nil)
+	_ rm.PodSpecApplier = (*kubernetesrm.ResourceManager)(nil)
+	_ rm.PodSpecApplier = (*dispatcherrm.DispatcherResourceManager)(nil)
+	_ rm.PodSpecApplier = (*multirm.MultiRMRouter)(nil)
+)
+
+// podSpecsOf returns whether the resource manager of r that runs the tasks of the pool applies their
+// pod specs.
+func podSpecsOf(r rm.ResourceManager, pool rm.ResourcePoolName) podSpecs {
+	applier, ok := r.(rm.PodSpecApplier)
+	if !ok {
+		return podSpecsUnknown
+	}
+	switch applies, err := applier.AppliesPodSpecs(pool); {
+	case err != nil:
+		return podSpecsUnknown
+	case applies:
+		return podSpecsApplied
+	default:
+		return podSpecsIgnored
+	}
+}
+
+// taskMounts are the mounts of a task container: its bind mounts, which it gets from every resource
+// manager, and the volumeMounts of its pod spec, which it gets where podSpecs says.
+type taskMounts struct {
+	binds, volumes []containerMount
+	podSpecs       podSpecs
+}
+
+// placeOf returns the place of the files at path p of the task container. It returns false if the
+// master cannot tell whether the task's resource manager applies its pod spec and the place differs
+// with it and without it.
+func (m taskMounts) placeOf(p string) (storagePlace, bool) {
+	binds := placeOf(m.binds, p)
+	if m.podSpecs == podSpecsIgnored {
+		return binds, true
+	}
+	withPod := placeOf(slices.Concat(m.binds, m.volumes), p)
+	return withPod, m.podSpecs == podSpecsApplied || withPod == binds
+}
+
 // The refusals of checkpointGCSeesStorage. Each names the storage directory, the path where a GC
 // task would not see what the trials saw, the trials' place there, which comes from the
 // experiment's config, and the setting that gives GC tasks the same place. None says what a GC
 // task has there: its host paths, claims, servers and node come from the task container defaults.
+// Where the trials' place depends on whether their resource manager applied their pod spec, which
+// the master cannot tell, the refusal names no place.
 const (
 	gcRefusal = "its checkpoint storage is the directory %[1]s. The experiment's trials had %[2]s on "
 	gcLacks   = ", and a checkpoint GC task, which takes no bind_mounts or pod_spec from the " +
@@ -122,6 +204,11 @@ const (
 	gcRefusalHostPathOnNode = gcRefusal + "a hostPath volume of host path %[3]s on node %[4]s, " +
 		"where their pod spec pins them" + gcLacks + gcPin +
 		"mounts a hostPath volume of host path %[3]s at %[2]s in determined-container"
+
+	gcRefusalTrialsPodSpec = "its checkpoint storage is the directory %[1]s. What the " +
+		"experiment's trials had at %[2]s depends on whether the resource manager of the " +
+		"experiment's resource pool applied their pod spec, which the master cannot tell, so its " +
+		"checkpoints are kept, whatever checkpoint GC tasks mount"
 )
 
 // gcStorageRefusal returns the refusal for storage at storagePath that a GC task would not see at

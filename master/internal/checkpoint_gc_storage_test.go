@@ -7,9 +7,25 @@ import (
 	"github.com/stretchr/testify/require"
 	k8sV1 "k8s.io/api/core/v1"
 
+	"github.com/determined-ai/determined/master/internal/mocks"
+	"github.com/determined-ai/determined/master/internal/rm/agentrm"
+	"github.com/determined-ai/determined/master/internal/rm/dispatcherrm"
+	"github.com/determined-ai/determined/master/internal/rm/kubernetesrm"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 )
+
+// The Kubernetes resource manager applies pod specs, and the agent and dispatcher ones do not. For
+// a resource manager that does not say, such as a mock, the master cannot tell.
+//
+//nolint:exhaustruct
+func TestPodSpecsOf(t *testing.T) {
+	require.Equal(t, podSpecsApplied, podSpecsOf(&kubernetesrm.ResourceManager{}, "default"))
+	require.Equal(t, podSpecsIgnored, podSpecsOf(&agentrm.ResourceManager{}, "default"))
+	require.Equal(t, podSpecsIgnored,
+		podSpecsOf(&dispatcherrm.DispatcherResourceManager{}, "default"))
+	require.Equal(t, podSpecsUnknown, podSpecsOf(&mocks.ResourceManager{}, "default"))
+}
 
 // Directory checkpoint storage is collected only where the master finds that a GC task sees it at
 // the same place as the experiment's trials did: the same host path of a bind mount, or the
@@ -19,6 +35,10 @@ import (
 // spec pins them to, if it pins them to one; a host path of trials that are not pinned to a node is
 // assumed to be the same on every node. Where the trials had no mount, or an emptyDir volume, the
 // check does not apply and the existing handling is kept.
+//
+// The first two tables are on Kubernetes, which applies the pod specs of the trials and of GC. The
+// last one has the agent resource manager, which applies none, and a resource manager that the
+// master cannot find, for the trials or for GC.
 //
 //nolint:exhaustruct
 func TestCheckpointGCSeesStorage(t *testing.T) {
@@ -564,7 +584,7 @@ func TestCheckpointGCSeesStorage(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := checkpointGCSeesStorage(tc.storage, tc.exp, tc.tcd)
+			err := checkpointGCSeesStorage(tc.storage, tc.exp, podSpecsApplied, tc.tcd, podSpecsApplied)
 			if tc.sees {
 				require.NoError(t, err)
 			} else {
@@ -674,7 +694,7 @@ func TestCheckpointGCSeesStorage(t *testing.T) {
 		},
 	} {
 		t.Run("message/"+tc.name, func(t *testing.T) {
-			err := checkpointGCSeesStorage(tc.storage, tc.exp, tc.tcd)
+			err := checkpointGCSeesStorage(tc.storage, tc.exp, podSpecsApplied, tc.tcd, podSpecsApplied)
 			require.ErrorContains(t, err, "checkpoints are kept")
 			for _, s := range tc.says {
 				require.ErrorContains(t, err, s)
@@ -682,6 +702,112 @@ func TestCheckpointGCSeesStorage(t *testing.T) {
 			for _, s := range tc.not {
 				require.NotContains(t, err.Error(), s)
 			}
+		})
+	}
+	// A pod spec counts only where the resource manager applies it. On the agent resource manager,
+	// a container gets its bind mounts alone: no volume and no node of a pod spec, which the trials
+	// can have from the task container defaults' gpu_pod_spec, merged into the experiment's, and a
+	// GC task from the same, merged into its own. Where the master cannot tell, a place counts only
+	// if it is the same with the pod spec and without it.
+	ckptsPVC := pod(volumeMount{source: pvc("ckpts"), mountPath: "/mnt/ckpts"})
+	alice := bind{"/srv/alice", "/mnt"}
+	pinnedBind := exp(on("node-a", &k8sV1.Pod{}), bind{"/data/ckpts", "/mnt/ckpts"})
+	k8s, agent, unknown := podSpecsApplied, podSpecsIgnored, podSpecsUnknown
+	for _, tc := range []struct {
+		name      string
+		exp       expconf.LegacyConfig
+		trialPods podSpecs
+		tcd       model.TaskContainerDefaultsConfig
+		gcPods    podSpecs
+		sees      bool
+		says      string
+	}{
+		{
+			// The trials wrote to /srv/alice/ckpts, and a GC task has an empty /mnt/ckpts.
+			"agent RM: a trial bind mount under a gpu_pod_spec PVC, GC no bind mount",
+			exp(ckptsPVC, alice), agent, gpuPod(ckptsPVC), agent, false,
+			"had /mnt/ckpts on a bind mount of host path /srv/alice/ckpts,",
+		},
+		{
+			"agent RM: a trial bind mount under a gpu_pod_spec PVC, GC the same bind mount",
+			exp(ckptsPVC, alice), agent, func() model.TaskContainerDefaultsConfig {
+				tcd := gc(alice)
+				tcd.GPUPodSpec = ckptsPVC
+				return tcd
+			}(), agent, true, "",
+		},
+		{
+			"Kubernetes: a trial bind mount under a gpu_pod_spec PVC, the same PVC for GC",
+			exp(ckptsPVC, alice), k8s, gpuPod(ckptsPVC), k8s, true, "",
+		},
+		{
+			"agent RM: a trial PVC alone, the same for GC", exp(ckptsPVC), agent, gpuPod(ckptsPVC), agent,
+			true, "",
+		},
+		{
+			"agent RM: a trial pod spec on a node, the same bind mount for GC not pinned",
+			pinnedBind, agent, gc(bind{"/data/ckpts", "/mnt/ckpts"}), agent, true, "",
+		},
+		{
+			"trials on Kubernetes, GC on the agent RM: a trial PVC, the same in gpu_pod_spec",
+			exp(ckptsPVC), k8s, gpuPod(ckptsPVC), agent, false,
+			"had /mnt/ckpts on path / of the persistentVolumeClaim ckpts,",
+		},
+		{
+			"trials on Kubernetes, GC on the agent RM: a trial bind mount on a node, the same on it",
+			pinnedBind, k8s, gcWith(on("node-a", &k8sV1.Pod{}), bind{"/data/ckpts", "/mnt/ckpts"}),
+			agent, false, "on node node-a, where their pod spec pins them",
+		},
+		{
+			"trials on the agent RM, GC on Kubernetes: a trial bind mount under a PVC, GC the PVC",
+			exp(ckptsPVC, alice), agent, gcWith(ckptsPVC, alice), k8s, false,
+			"had /mnt/ckpts on a bind mount of host path /srv/alice/ckpts,",
+		},
+		{
+			"trials on the agent RM, GC on Kubernetes: a trial bind mount, the same for GC",
+			exp(ckptsPVC, alice), agent, gc(alice), k8s, true, "",
+		},
+		{
+			"trials unknown: a trial bind mount under a PVC, the same PVC for GC on Kubernetes",
+			exp(ckptsPVC, alice), unknown, gpuPod(ckptsPVC), k8s, false,
+			"What the experiment's trials had at /mnt/ckpts depends on whether the resource manager " +
+				"of the experiment's resource pool applied their pod spec",
+		},
+		{
+			"trials unknown: a trial PVC alone, the same for GC on Kubernetes",
+			exp(ckptsPVC), unknown, gpuPod(ckptsPVC), k8s, false, "depends on whether",
+		},
+		{
+			"trials unknown: a trial bind mount and no pod spec, the same for GC on the agent RM",
+			exp(nil, alice), unknown, gc(alice), agent, true, "",
+		},
+		{
+			"trials unknown: a trial pod spec on a node, the same bind mount for GC on the agent RM",
+			pinnedBind, unknown, gc(bind{"/data/ckpts", "/mnt/ckpts"}), agent, false,
+			"on node node-a, where their pod spec pins them",
+		},
+		{
+			"GC unknown: a trial bind mount, the same for GC under a PVC",
+			exp(nil, alice), agent, gcWith(ckptsPVC, alice), unknown, false,
+			"had /mnt/ckpts on a bind mount of host path /srv/alice/ckpts,",
+		},
+		{
+			"GC unknown: a trial bind mount, the same for GC", exp(nil, alice), agent, gc(alice), unknown,
+			true, "",
+		},
+		{
+			"GC unknown: a trial PVC on Kubernetes, the same for GC", exp(ckptsPVC), k8s, gpuPod(ckptsPVC),
+			unknown, false, "had /mnt/ckpts on path / of the persistentVolumeClaim ckpts,",
+		},
+	} {
+		t.Run("resource managers/"+tc.name, func(t *testing.T) {
+			err := checkpointGCSeesStorage(dir("/mnt/ckpts"), tc.exp, tc.trialPods, tc.tcd, tc.gcPods)
+			if tc.sees {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, "checkpoints are kept")
+			require.ErrorContains(t, err, tc.says)
 		})
 	}
 }

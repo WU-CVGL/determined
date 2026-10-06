@@ -106,6 +106,19 @@ func checkpointGCIdentity(
 	return ptrs.Ptr(owner.ToUser()), agentUserGroup, nil
 }
 
+// trialsPodSpecs returns whether the resource manager of the experiment's resource pool, where its
+// trials ran, applies pod specs. The pool is the one that the experiment's config names now, or the
+// default one if it names none.
+func trialsPodSpecs(ctx context.Context, r rm.ResourceManager, expID int) (podSpecs, error) {
+	var pool string
+	if err := db.Bun().NewSelect().Table("experiments").
+		ColumnExpr("COALESCE(config->'resources'->>'resource_pool', '')").
+		Where("id = ?", expID).Scan(ctx, &pool); err != nil {
+		return podSpecsUnknown, fmt.Errorf("getting the resource pool of experiment %d: %w", expID, err)
+	}
+	return podSpecsOf(r, rm.ResourcePoolName(pool)), nil
+}
+
 func runCheckpointGCTask(
 	rm rm.ResourceManager,
 	pgDB *db.PgDB,
@@ -167,7 +180,13 @@ func runCheckpointGCTask(
 	}
 	// The experiment's bind mounts and pod spec serve only to check here that the task sees the
 	// storage. The task's spec takes nothing from the experiment's config but the storage.
-	if err := checkpointGCSeesStorage(checkpointStorage, legacyConfig, tcd); err != nil {
+	trialPods, err := trialsPodSpecs(context.TODO(), rm, expID)
+	if err != nil {
+		return err
+	}
+	if err := checkpointGCSeesStorage(
+		checkpointStorage, legacyConfig, trialPods, tcd, podSpecsOf(rm, rp),
+	); err != nil {
 		return fmt.Errorf("checkpoint GC of experiment %d: %w", expID, err)
 	}
 

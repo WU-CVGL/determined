@@ -627,6 +627,12 @@ func (a *ResourceManager) TaskContainerDefaults(
 	return result, nil
 }
 
+// AppliesPodSpecs implements rm.PodSpecApplier. An agent starts a task's container from its Docker
+// spec (tasks.TaskSpec.ToDockerSpec), with its bind mounts and no pod spec, in every pool.
+func (*ResourceManager) AppliesPodSpecs(rm.ResourcePoolName) (bool, error) {
+	return false, nil
+}
+
 // ValidateResources implements rm.ResourceManager.
 func (a *ResourceManager) ValidateResources(
 	msg sproto.ValidateResourcesRequest,

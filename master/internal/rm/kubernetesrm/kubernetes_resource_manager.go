@@ -541,6 +541,12 @@ func (k ResourceManager) IsReattachableOnlyAfterStarted() bool {
 	return false
 }
 
+// AppliesPodSpecs implements rm.PodSpecApplier: the pod of a task is built from its pod spec, in
+// every pool.
+func (ResourceManager) AppliesPodSpecs(rm.ResourcePoolName) (bool, error) {
+	return true, nil
+}
+
 // TaskContainerDefaults returns TaskContainerDefaults for the specified pool.
 func (k ResourceManager) TaskContainerDefaults(
 	resourcePoolName rm.ResourcePoolName,
