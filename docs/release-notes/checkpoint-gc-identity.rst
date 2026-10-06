@@ -22,14 +22,14 @@
    ``checkpoint_gc_pod_spec`` volume of the same claim, host path or NFS export and ``subPath``. For
    a host path, if the experiment's ``pod_spec`` pins its trials to a node by ``nodeName``, a
    ``kubernetes.io/hostname`` ``nodeSelector`` or a required node affinity on one hostname, the GC
-   pod spec must pin the task to the same node. The master reads the experiment's ``pod_spec`` on
-   every resource manager, so its volume mounts and node pins also count where pod specs are
-   ignored, such as the agent resource manager. Otherwise deleting the experiment ends in
-   ``DELETE_FAILED``, retryable once the GC task has the same storage and node (never for other
-   volume types), and its checkpoints are kept, also beyond the ``save_*`` settings, with the reason
-   in the master log. Trials placed in other ways count as not pinned, and their host paths are
-   taken to be the same storage on every node, which is not checked. Storage that the trials did not
-   have on a mount, or had on an ``emptyDir`` volume, is handled as before.
+   pod spec must pin the task to the same node. A pod spec counts only where the resource manager
+   applies it, as on Kubernetes, and not on the agent resource manager, which starts containers with
+   their bind mounts alone. Otherwise deleting the experiment ends in ``DELETE_FAILED``, retryable
+   once the GC task has the same storage and node (never for other volume types), and its
+   checkpoints are kept, also beyond the ``save_*`` settings, with the reason in the master log.
+   Trials placed in other ways count as not pinned, and their host paths are taken to be the same
+   storage on every node, which is not checked. Storage that the trials did not have on a mount, or
+   had on an ``emptyDir`` volume, is handled as before.
 
 -  Checkpoints: Known limitation of this fix: ``shared_fs`` storage is not checked. GC tasks do not
    follow a node that the experiment's ``pod_spec`` pins, so ``host_path`` must be the same storage
