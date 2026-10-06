@@ -359,9 +359,11 @@ topology is known, it then prints the link levels between all GPUs and, when P2P
 every pair, the ``READ`` and ``WRITE`` statuses in each direction. ``--json`` prints the agent's
 ``gpu_topology``.
 
-The WebUI's resource pool page groups each agent's GPUs by NUMA node and PCIe switch. A tile's
-colour is the slot state, its dot is the GPU's health, stripes mark disabled, draining and excluded
-GPUs, and the details of a GPU show on hover or focus and stay open after a click.
+The WebUI's resource pool page groups each agent's GPUs by NUMA node and PCIe switch. A switch group
+holds GPUs whose pairs are ``PIX``, one switch between them; ``PXB`` and the other levels show only
+in the pairwise matrix. A tile's colour is the slot state, its dot is the GPU's health, stripes mark
+disabled, draining and excluded GPUs, and the details of a GPU show on hover or focus and stay open
+after a click.
 
 Coverage
 ========

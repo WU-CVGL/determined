@@ -491,6 +491,30 @@
           {"deviceA": 1, "deviceB": 2, "uuidA": "GPU-12000000-0000-0000-0000-000000000001", "uuidB": "GPU-12000000-0000-0000-0000-000000000002", "level": "GPU_LINK_LEVEL_SYS", "nvlinks": 0, "p2pAToB": {"read": "GPU_P2P_STATUS_OK", "write": "GPU_P2P_STATUS_OK"}, "p2pBToA": {"read": "GPU_P2P_STATUS_OK", "write": "GPU_P2P_STATUS_OK"}, "p2p": "GPU_P2P_USABLE"}
         ]
       }
+    },
+    {
+      "name": "two PCIe switches under a common switch: PIX inside each, PXB across",
+      "topology": "4 PIX/PXB p2p",
+      "health": "ok",
+      "gpuTopology": {
+        "unknownReason": "",
+        "collectedAt": "2026-10-05T08:00:00Z",
+        "driverVersion": "610.57.04",
+        "gpus": [
+          {"deviceId": 0, "uuid": "GPU-14000000-0000-0000-0000-000000000000", "pciBusId": "0000:1a:00.0", "numaNode": 0, "pcieLinkWidth": 16, "pcieLinkWidthMax": 16, "pcieLinkGen": 4, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_OK", "excluded": false},
+          {"deviceId": 1, "uuid": "GPU-14000000-0000-0000-0000-000000000001", "pciBusId": "0000:1b:00.0", "numaNode": 0, "pcieLinkWidth": 16, "pcieLinkWidthMax": 16, "pcieLinkGen": 4, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_OK", "excluded": false},
+          {"deviceId": 2, "uuid": "GPU-14000000-0000-0000-0000-000000000002", "pciBusId": "0000:1d:00.0", "numaNode": 0, "pcieLinkWidth": 16, "pcieLinkWidthMax": 16, "pcieLinkGen": 4, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_OK", "excluded": false},
+          {"deviceId": 3, "uuid": "GPU-14000000-0000-0000-0000-000000000003", "pciBusId": "0000:1e:00.0", "numaNode": 0, "pcieLinkWidth": 16, "pcieLinkWidthMax": 16, "pcieLinkGen": 4, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_OK", "excluded": false}
+        ],
+        "links": [
+          {"deviceA": 0, "deviceB": 1, "uuidA": "GPU-14000000-0000-0000-0000-000000000000", "uuidB": "GPU-14000000-0000-0000-0000-000000000001", "level": "GPU_LINK_LEVEL_PIX", "nvlinks": 0, "p2pAToB": {"read": "GPU_P2P_STATUS_OK", "write": "GPU_P2P_STATUS_OK"}, "p2pBToA": {"read": "GPU_P2P_STATUS_OK", "write": "GPU_P2P_STATUS_OK"}, "p2p": "GPU_P2P_USABLE"},
+          {"deviceA": 0, "deviceB": 2, "uuidA": "GPU-14000000-0000-0000-0000-000000000000", "uuidB": "GPU-14000000-0000-0000-0000-000000000002", "level": "GPU_LINK_LEVEL_PXB", "nvlinks": 0, "p2pAToB": {"read": "GPU_P2P_STATUS_OK", "write": "GPU_P2P_STATUS_OK"}, "p2pBToA": {"read": "GPU_P2P_STATUS_OK", "write": "GPU_P2P_STATUS_OK"}, "p2p": "GPU_P2P_USABLE"},
+          {"deviceA": 0, "deviceB": 3, "uuidA": "GPU-14000000-0000-0000-0000-000000000000", "uuidB": "GPU-14000000-0000-0000-0000-000000000003", "level": "GPU_LINK_LEVEL_PXB", "nvlinks": 0, "p2pAToB": {"read": "GPU_P2P_STATUS_OK", "write": "GPU_P2P_STATUS_OK"}, "p2pBToA": {"read": "GPU_P2P_STATUS_OK", "write": "GPU_P2P_STATUS_OK"}, "p2p": "GPU_P2P_USABLE"},
+          {"deviceA": 1, "deviceB": 2, "uuidA": "GPU-14000000-0000-0000-0000-000000000001", "uuidB": "GPU-14000000-0000-0000-0000-000000000002", "level": "GPU_LINK_LEVEL_PXB", "nvlinks": 0, "p2pAToB": {"read": "GPU_P2P_STATUS_OK", "write": "GPU_P2P_STATUS_OK"}, "p2pBToA": {"read": "GPU_P2P_STATUS_OK", "write": "GPU_P2P_STATUS_OK"}, "p2p": "GPU_P2P_USABLE"},
+          {"deviceA": 1, "deviceB": 3, "uuidA": "GPU-14000000-0000-0000-0000-000000000001", "uuidB": "GPU-14000000-0000-0000-0000-000000000003", "level": "GPU_LINK_LEVEL_PXB", "nvlinks": 0, "p2pAToB": {"read": "GPU_P2P_STATUS_OK", "write": "GPU_P2P_STATUS_OK"}, "p2pBToA": {"read": "GPU_P2P_STATUS_OK", "write": "GPU_P2P_STATUS_OK"}, "p2p": "GPU_P2P_USABLE"},
+          {"deviceA": 2, "deviceB": 3, "uuidA": "GPU-14000000-0000-0000-0000-000000000002", "uuidB": "GPU-14000000-0000-0000-0000-000000000003", "level": "GPU_LINK_LEVEL_PIX", "nvlinks": 0, "p2pAToB": {"read": "GPU_P2P_STATUS_OK", "write": "GPU_P2P_STATUS_OK"}, "p2pBToA": {"read": "GPU_P2P_STATUS_OK", "write": "GPU_P2P_STATUS_OK"}, "p2p": "GPU_P2P_USABLE"}
+        ]
+      }
     }
   ]
 }

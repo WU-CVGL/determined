@@ -294,6 +294,14 @@ describe('GpuTopology', () => {
     expect(cells[2]).toHaveTextContent('NODEno P2P: GNS');
   });
 
+  it('shows a PCIe switch group for each PIX group, never one across PXB', () => {
+    setup(<GpuTopology agent={agentOf('a', gpuTopologyCase('two PCIe switches'))} />);
+    expect(screen.getAllByText('PCIe switch (PIX)')).toHaveLength(2);
+    expect(screen.queryByText(/PXB\)/)).not.toBeInTheDocument();
+    const rows = within(screen.getByRole('table')).getAllByRole('row');
+    expect(within(rows[1]).getAllByRole('cell')[2]).toHaveTextContent('PXB');
+  });
+
   it('marks unknown levels and unknown P2P with ?', () => {
     setup(<GpuTopology agent={agentOf('a', gpuTopologyCase('every pair unknown'))} />);
     const rows = within(screen.getByRole('table')).getAllByRole('row');

@@ -20,9 +20,6 @@ import { Resource, ResourceState, SlotState } from 'types';
 /** Link levels from best to worst, as NVML's GetTopologyCommonAncestor reports them. */
 export const GPU_LINK_LEVELS = ['INTERNAL', 'PIX', 'PXB', 'PHB', 'NODE', 'SYS'] as const;
 
-/** Levels that mean a PCIe switch between two GPUs: a switch group is connected by these. */
-const SWITCH_LEVELS: string[] = ['PIX', 'PXB'];
-
 /** Short P2P status codes, as nvidia-smi topo -p2p prints them where it can. */
 export const GPU_P2P_STATUS_CODES: Record<V1GpuP2pStatus, string> = {
   [V1GpuP2pStatus.UNSPECIFIED]: '?',
@@ -233,8 +230,11 @@ export const numaGroups = (gpus: V1GpuInfo[]): { numaNode: number; gpus: V1GpuIn
   }));
 
 /**
- * Switch groups: the connected components of PIX and PXB links among the given GPUs, in the
- * order of their first GPU. A GPU without such a link is a group of its own.
+ * Switch groups: the connected components of PIX links among the given GPUs, in the order of their
+ * first GPU. A GPU without a PIX link is a group of its own. PIX means one PCIe switch between two
+ * GPUs, so a group is the GPUs behind one switch. PXB (several switches, no host bridge) never joins
+ * a group: GPUs behind two switches under a common switch would otherwise show as one switch. It
+ * shows in the pairwise matrix only.
  */
 export const switchGroups = (topo: V1GpuTopology, gpus: V1GpuInfo[]): V1GpuInfo[][] => {
   const lookup = gpuLinkLookup(topo);
@@ -246,8 +246,7 @@ export const switchGroups = (topo: V1GpuTopology, gpus: V1GpuInfo[]): V1GpuInfo[
   gpus.forEach((a, i) =>
     gpus.forEach((b, j) => {
       if (j <= i) return;
-      const level = linkLevelName(lookup(a, b)?.link.level);
-      if (SWITCH_LEVELS.includes(level)) parent[find(j)] = find(i);
+      if (linkLevelName(lookup(a, b)?.link.level) === 'PIX') parent[find(j)] = find(i);
     }),
   );
   const groups = new Map<number, V1GpuInfo[]>();

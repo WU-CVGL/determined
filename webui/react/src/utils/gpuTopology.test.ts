@@ -122,14 +122,24 @@ describe('gpuTopology', () => {
       expect(switchGroups(node02, node02.gpus).every((g) => g.length === 1)).toBe(true);
     });
 
-    it('chains PXB links into one switch group', () => {
+    it('keeps two switches under a common switch apart', () => {
+      // 0-1 and 2-3 are PIX; the four pairs across are PXB.
+      const topo = gpuTopologyCase('two PCIe switches');
+      const groups = switchGroups(topo, topo.gpus);
+      expect(groups.map((g) => g.map((gpu) => gpu.deviceId))).toEqual([
+        [0, 1],
+        [2, 3],
+      ]);
+      expect(groups.map((g) => pairLevels(topo, g))).toEqual([['PIX'], ['PIX']]);
+      expect(pairLevels(topo, topo.gpus)).toEqual(['PIX', 'PXB']);
+    });
+
+    it('never groups by PXB links', () => {
       const topo = gpuTopologyCase('every pair unknown');
       const groups = switchGroups(topo, topo.gpus);
       // 0-1, 1-2 and 3-4 are PXB; 2-3 is missing from the report.
-      expect(groups.map((g) => g.map((gpu) => gpu.deviceId))).toEqual([
-        [0, 1, 2],
-        [3, 4],
-      ]);
+      expect(groups.map((g) => g.map((gpu) => gpu.deviceId))).toEqual([[0], [1], [2], [3], [4]]);
+      expect(pairLevels(topo, topo.gpus)).toEqual(['PXB']);
     });
   });
 
