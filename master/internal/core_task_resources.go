@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -191,9 +192,15 @@ func serveTaskResourceAllocations(c echo.Context, deps taskResourceDependencies)
 	if len(c.QueryParams()) > 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "unsupported or repeated query parameter")
 	}
+	// The WebUI waits for this list before it asks for the series, so the read gets the same
+	// budget as the metric queries. A failed or slow read makes the WebUI fall back to the task
+	// start.
+	ctx, cancel := context.WithTimeout(ctx, taskResourceTimeout)
+	defer cancel()
 	allocations, err := deps.allocations(ctx, taskID)
 	if err != nil {
-		return err
+		log.WithError(err).Warn("task resources: the allocation list is unavailable")
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "task resource allocations are unavailable")
 	}
 	return c.JSON(http.StatusOK, taskResourceAllocationsResponse{Allocations: allocations})
 }

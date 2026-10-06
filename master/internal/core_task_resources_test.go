@@ -222,6 +222,45 @@ func TestTaskResourceAllocationsResponseShape(t *testing.T) {
 	]}`, rec.Body.String())
 }
 
+func TestTaskResourceAllocationsReadTimesOut(t *testing.T) {
+	authorize := func(context.Context, model.User, string) error { return nil }
+
+	// The read gets the metric queries' budget even when the request has no deadline.
+	c, rec := taskResourceAllocationsContext(t, "")
+	err := serveTaskResourceAllocations(c, taskResourceDependencies{
+		authorize: authorize,
+		allocations: func(ctx context.Context, _ string) ([]taskResourceAllocation, error) {
+			deadline, ok := ctx.Deadline()
+			require.True(t, ok, "the read has no deadline")
+			require.WithinDuration(t, time.Now().Add(taskResourceTimeout), deadline, time.Second)
+			return []taskResourceAllocation{}, nil
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	// A slow query is cut off at the deadline (shortened here) with an error that names nothing
+	// internal, and the WebUI falls back to the task start.
+	c, _ = taskResourceAllocationsContext(t, "")
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 50*time.Millisecond)
+	defer cancel()
+	c.SetRequest(c.Request().WithContext(ctx))
+	started := time.Now()
+	err = serveTaskResourceAllocations(c, taskResourceDependencies{
+		authorize: authorize,
+		allocations: func(ctx context.Context, _ string) ([]taskResourceAllocation, error) {
+			<-ctx.Done()
+			return nil, fmt.Errorf("reading task resource allocations: %w", ctx.Err())
+		},
+	})
+	require.Less(t, time.Since(started), taskResourceTimeout)
+	he, ok := err.(*echo.HTTPError)
+	require.True(t, ok)
+	require.Equal(t, http.StatusServiceUnavailable, he.Code)
+	require.NotContains(t, fmt.Sprint(he.Message), "deadline")
+	require.NotContains(t, fmt.Sprint(he.Message), "reading")
+}
+
 // The WebUI derives the step as max(15, ceil(span / 1439)) for every span up to 7 days.
 func TestTaskResourcesUIStepFitsEverySpanUpToSevenDays(t *testing.T) {
 	end := int64(2000000000)
