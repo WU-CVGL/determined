@@ -49,4 +49,7 @@ message Command {
   string job_id = 13;
   // The workspace id.
   int32 workspace_id = 16;
+  // The slot count the command requests (resources.slots), 0 when it
+  // requests none.
+  int32 slots = 100;
 }

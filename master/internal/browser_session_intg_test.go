@@ -213,12 +213,14 @@ func TestBrowserSessionThroughGateway(t *testing.T) {
 	}.send(t, srv)
 	require.Equal(t, http.StatusOK, resp.StatusCode, body)
 
-	// The body is the whole request, {"password", "old_password"}; a bare JSON string, the
-	// format before the current password was required, is refused.
+	// The body is the whole request, {"password", "old_password"}. A bare JSON string, the
+	// format before the current password was required, carries only the new password, so a user
+	// who changes their own is refused.
 	r = changePassword
 	r.origin, r.fetchSite, r.contentType, r.body = self, sameOrigin, jsonContentType, `"Bare-1234"`
-	resp, _ = r.send(t, srv)
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	resp, body = r.send(t, srv)
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode, body)
+	require.Contains(t, body, "enter your current password")
 
 	// The web UI's own request passes, with the cookie and the current password.
 	r = changePassword

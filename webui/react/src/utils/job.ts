@@ -16,10 +16,16 @@ export const jobTypeIconName = (jobType: JobType): IconName => {
 };
 
 export const jobTypeLabel = (jobType: JobType): string => {
-  if (jobType === JobType.GENERIC) {
-    return 'Generic Task';
+  switch (jobType) {
+    case JobType.GENERIC:
+      return 'Generic Task';
+    case JobType.NOTEBOOK:
+      return 'JupyterLab';
+    case JobType.TENSORBOARD:
+      return 'TensorBoard';
+    default:
+      return capitalize(jobTypeIconName(jobType));
   }
-  return capitalize(jobTypeIconName(jobType));
 };
 
 /*
@@ -30,6 +36,16 @@ export const genericJobLabel = (name: string, taskId: string): string => {
   if (!name || name === 'Generic Task') return `Generic Task ${taskId}`;
   if (name.includes(taskId)) return name;
   return `${name} (${taskId.split('-')[0]})`;
+};
+
+/*
+ * The job name of a notebook, shell, command or TensorBoard with its short task ID, as the
+ * Tasks page shows it. Tasks without a name keep the type and the short ID.
+ */
+export const taskJobLabel = (jobType: JobType, name: string, taskId: string): string => {
+  const shortId = taskId.split('-')[0];
+  if (!name) return `${jobTypeLabel(jobType)} ${shortId}`;
+  return `${name} (${shortId})`;
 };
 
 // translate JobType to CommandType

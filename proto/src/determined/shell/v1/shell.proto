@@ -58,4 +58,7 @@ message Shell {
   string job_id = 15;
   // The workspace id.
   int32 workspace_id = 18;
+  // The slot count the shell requests (resources.slots), 0 when it
+  // requests none.
+  int32 slots = 100;
 }

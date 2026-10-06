@@ -107,10 +107,12 @@ func (a *apiServer) GetNotebook(
 			resp.Notebook.ServiceAddress, token)
 		logCredentialRead(*curUser, "notebook token", req.NotebookId, resp.Notebook.UserId)
 	}
+	redactTaskConfig(*curUser, resp.Notebook.UserId, req.NotebookId, resp.Config)
 	return resp, nil
 }
 
-// getNotebook returns a notebook, without its Jupyter token, if the current user may see it.
+// getNotebook returns a notebook, without its Jupyter token but with its full config, if the
+// current user may see it.
 func (a *apiServer) getNotebook(
 	ctx context.Context, notebookID string,
 ) (*apiv1.GetNotebookResponse, *model.User, error) {
@@ -136,11 +138,7 @@ func (a *apiServer) getNotebook(
 }
 
 func (a *apiServer) validateToKillNotebook(ctx context.Context, notebookID string) error {
-	targetNotebook, _, err := a.getNotebook(ctx, notebookID)
-	if err != nil {
-		return err
-	}
-	curUser, _, err := grpcutil.GetUser(ctx)
+	targetNotebook, curUser, err := a.getNotebook(ctx, notebookID)
 	if err != nil {
 		return err
 	}
@@ -186,12 +184,7 @@ func (a *apiServer) KillNotebook(
 func (a *apiServer) SetNotebookPriority(
 	ctx context.Context, req *apiv1.SetNotebookPriorityRequest,
 ) (resp *apiv1.SetNotebookPriorityResponse, err error) {
-	targetNotebook, _, err := a.getNotebook(ctx, req.NotebookId)
-	if err != nil {
-		return nil, err
-	}
-
-	curUser, _, err := grpcutil.GetUser(ctx)
+	targetNotebook, curUser, err := a.getNotebook(ctx, req.NotebookId)
 	if err != nil {
 		return nil, err
 	}

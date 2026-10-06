@@ -26,9 +26,9 @@ import { useObservable } from 'utils/observable';
 
 import TemplateList from './Templates/TemplatesList';
 import ResourcePoolsBound from './WorkspaceDetails/ResourcePoolsBound';
+import { workspaceJobsTab, WorkspaceJobsTab } from './WorkspaceDetails/WorkspaceJobs';
 import WorkspaceMembers from './WorkspaceDetails/WorkspaceMembers';
 import WorkspaceProjects from './WorkspaceDetails/WorkspaceProjects';
-import WorkspaceTasks from './WorkspaceDetails/WorkspaceTasks';
 import { useWorkspaceActionMenu } from './WorkspaceList/WorkspaceActionDropdown';
 
 type Params = {
@@ -38,11 +38,13 @@ type Params = {
 
 export const WorkspaceDetailsTab = {
   ConfigPolicies: 'policies',
+  Jobs: WorkspaceJobsTab.Jobs,
   Members: 'members',
   ModelRegistry: 'models',
   Projects: 'projects',
   ResourcePools: 'pools',
-  Tasks: 'tasks',
+  // The Jobs tab without experiments, by URL only.
+  Tasks: WorkspaceJobsTab.Tasks,
   Templates: 'templates',
 } as const;
 
@@ -181,11 +183,7 @@ const WorkspaceDetails: React.FC = () => {
         key: WorkspaceDetailsTab.Projects,
         label: 'Projects',
       },
-      {
-        children: <WorkspaceTasks workspace={workspace} />,
-        key: WorkspaceDetailsTab.Tasks,
-        label: 'Tasks',
-      },
+      workspaceJobsTab(workspace, tabKey),
     ];
 
     if (rbacEnabled) {
@@ -250,6 +248,7 @@ const WorkspaceDetails: React.FC = () => {
     id,
     rbacEnabled,
     rolesAssignableToScope,
+    tabKey,
     usersAssignedDirectly,
     workspace,
     workspaceAssignments,

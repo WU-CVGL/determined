@@ -119,9 +119,6 @@ export const paths = {
     const path = `/generic-tasks/${encodeURIComponent(taskId)}`;
     return tab ? `${path}/${tab}` : path;
   },
-  genericTaskList: (): string => {
-    return '/tasks/generic';
-  },
   interactive: (command: CommandTask, maxSlotsExceeded = false): string => {
     const path = [
       'interactive',
@@ -135,6 +132,7 @@ export const paths = {
       .join('/');
     return `/${path}/?currentSlotsExceeded=${maxSlotsExceeded}`;
   },
+  /** The Jobs page: runs of every kind. */
   jobs: (): string => {
     return routeById.jobs.path;
   },
@@ -176,6 +174,7 @@ export const paths = {
       ? 'https://airtable.com/shr87rnMuHhiDTpLo'
       : 'https://airtable.com/shrodYROolF0E1iYf';
   },
+  /** The tasks-only view of the Jobs page: everything but experiments. */
   taskList: (): string => {
     return '/tasks';
   },

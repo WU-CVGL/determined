@@ -112,23 +112,37 @@ func (a *apiServer) GetTensorboards(
 func (a *apiServer) GetTensorboard(
 	ctx context.Context, req *apiv1.GetTensorboardRequest,
 ) (*apiv1.GetTensorboardResponse, error) {
+	resp, curUser, err := a.getTensorboard(ctx, req.TensorboardId)
+	if err != nil {
+		return nil, err
+	}
+	redactTaskConfig(*curUser, resp.Tensorboard.UserId, req.TensorboardId, resp.Config)
+	return resp, nil
+}
+
+// getTensorboard returns a TensorBoard, with its full config, if the current user may see it.
+func (a *apiServer) getTensorboard(
+	ctx context.Context, tensorboardID string,
+) (*apiv1.GetTensorboardResponse, *model.User, error) {
 	curUser, _, err := grpcutil.GetUser(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	resp, err := command.DefaultCmdService.GetTensorboard(req)
+	resp, err := command.DefaultCmdService.GetTensorboard(
+		&apiv1.GetTensorboardRequest{TensorboardId: tensorboardID})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	ctx = audit.SupplyEntityID(ctx, req.TensorboardId)
+	ctx = audit.SupplyEntityID(ctx, tensorboardID)
 	if err := command.AuthZProvider.Get().CanGetTensorboard(
 		ctx, *curUser, model.AccessScopeID(resp.Tensorboard.WorkspaceId),
 		resp.Tensorboard.ExperimentIds, resp.Tensorboard.TrialIds); err != nil {
-		return nil, authz.SubIfUnauthorized(err, api.NotFoundErrs("tensorboard", req.TensorboardId, true))
+		return nil, nil, authz.SubIfUnauthorized(err,
+			api.NotFoundErrs("tensorboard", tensorboardID, true))
 	}
-	return resp, nil
+	return resp, curUser, nil
 }
 
 func (a *apiServer) KillTensorboard(
@@ -140,13 +154,7 @@ func (a *apiServer) KillTensorboard(
 		}
 	}()
 
-	getResponse, err := a.GetTensorboard(ctx,
-		&apiv1.GetTensorboardRequest{TensorboardId: req.TensorboardId})
-	if err != nil {
-		return nil, err
-	}
-
-	curUser, _, err := grpcutil.GetUser(ctx)
+	getResponse, curUser, err := a.getTensorboard(ctx, req.TensorboardId)
 	if err != nil {
 		return nil, err
 	}
@@ -179,13 +187,7 @@ func (a *apiServer) SetTensorboardPriority(
 		}
 	}()
 
-	getResponse, err := a.GetTensorboard(ctx,
-		&apiv1.GetTensorboardRequest{TensorboardId: req.TensorboardId})
-	if err != nil {
-		return nil, err
-	}
-
-	curUser, _, err := grpcutil.GetUser(ctx)
+	getResponse, curUser, err := a.getTensorboard(ctx, req.TensorboardId)
 	if err != nil {
 		return nil, err
 	}
@@ -405,7 +407,14 @@ func (a *apiServer) LaunchTensorboard(
 
 	launchReq.Spec.Base.ExtraEnvVars = uniqEnvVars
 
-	if !model.UsingCustomImage(req) {
+	// The TensorBoard runs as its launcher, with the launcher's session token and agent user. The
+	// experiment's image is code chosen by the experiment's owner, and its image pull secrets and
+	// registry_auth are the owner's credentials. So inherit them only from the launcher's own
+	// experiment. A TensorBoard on another user's experiment, an admin's included, keeps the image
+	// and credentials it was launched with.
+	ownsExperiment := exp.OwnerID != nil && *exp.OwnerID == user.ID
+
+	if ownsExperiment && !model.UsingCustomImage(req) {
 		launchReq.Spec.Config.Environment.Image = model.RuntimeItem{
 			CPU:  exp.Config.Environment.Image().CPU(),
 			CUDA: exp.Config.Environment.Image().CUDA(),
@@ -432,7 +441,7 @@ func (a *apiServer) LaunchTensorboard(
 		}
 	}
 	// Prefer RegistryAuth already present over the one from inferred from the experiment.
-	if launchReq.Spec.Config.Environment.RegistryAuth == nil {
+	if ownsExperiment && launchReq.Spec.Config.Environment.RegistryAuth == nil {
 		launchReq.Spec.Config.Environment.RegistryAuth = exp.Config.Environment.RegistryAuth()
 	}
 

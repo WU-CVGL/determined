@@ -3,7 +3,7 @@ import { BaseReactFragment } from 'playwright-page-model-base/BaseReactFragment'
 
 import { Modal } from 'e2e/models/common/ant/Modal';
 import { DropdownMenu } from 'e2e/models/common/hew/Dropdown';
-import { JupyterLabModal } from 'e2e/models/components/JupyterLabModal';
+import { NtscLaunchModal } from 'e2e/models/components/NtscLaunchModal';
 import { HeadRow, InteractiveTable, Row } from 'e2e/models/components/Table/InteractiveTable';
 import { TaskAction } from 'types';
 
@@ -44,16 +44,23 @@ class TaskKillModal extends Modal {
 }
 
 /**
- * Represents the TaskList in src/components/TaskList.tsx
+ * Represents the TaskDashboard in src/components/TaskDashboard/TaskDashboard.tsx: the Jobs page,
+ * the tasks-only view at /tasks, and the Jobs tabs of workspaces and projects.
  */
-export class TaskList extends BaseReactFragment {
+export class TaskDashboard extends BaseReactFragment {
   readonly jupyterLabButton = new BaseComponent({
     parent: this,
     selector: '[data-testid="jupyter-lab-button"]',
   });
-  readonly jupyterLabModal = new JupyterLabModal({
+  readonly launchModal = new NtscLaunchModal({
     root: this.root,
   });
+  readonly shellButton = new BaseComponent({
+    parent: this,
+    selector: '[data-testid="shell-button"]',
+  });
+  readonly kindChip = (kind: string): BaseComponent =>
+    new BaseComponent({ parent: this, selector: `[data-testid="kind-${kind}"]` });
   readonly table = new InteractiveTable({
     parent: this,
     tableArgs: {

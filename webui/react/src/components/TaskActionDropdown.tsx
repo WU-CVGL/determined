@@ -18,20 +18,20 @@ import { paths, serverAddress } from 'routes/utils';
 import { killTask } from 'services/api';
 import { openShellTerminalTab } from 'services/shellTerminal';
 import userStore from 'stores/users';
-import { TaskAction as Action, CommandState, CommandTask, CommandType, DetailedUser } from 'types';
+import { TaskAction as Action, CommandTask, CommandType } from 'types';
 import { copyToClipboard } from 'utils/dom';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import { capitalize } from 'utils/string';
-import { canOpenShellTerminal, isTaskKillable } from 'utils/task';
+import { canConnectToTask, canOpenShellTerminal, isTaskKillable } from 'utils/task';
 import { getJupyterLabAddress, NOTEBOOK_ACCESS_DENIED } from 'utils/wait';
 
 interface Props {
   children?: React.ReactNode;
-  curUser?: DetailedUser;
   onComplete?: (action?: Action) => void;
   /** Offers "Launch Again" on the user's own shells and JupyterLabs when given. */
   onLaunchAgain?: (task: CommandTask) => void;
-  onVisibleChange?: (visible: boolean) => void;
+  /** Offers "Manage Job" (the job queue's priority, weight and pool) when given. */
+  onManageJob?: () => void;
   task: CommandTask;
 }
 
@@ -39,24 +39,20 @@ const relaunchableTaskTypes: CommandType[] = [CommandType.JupyterLab, CommandTyp
 
 const TaskActionDropdown: React.FC<Props> = ({
   task,
-  curUser,
   onComplete,
   onLaunchAgain,
+  onManageJob,
   children,
 }: Props) => {
   const { canCreateWorkspaceNSC, canModifyWorkspaceNSC } = usePermissions();
   const resourcesEnabled = useTaskResourcesEnabled();
   const terminalEnabled = useFeature().isOn('shell_terminal');
+  // The signed-in user, for every rule of the menu that depends on who is asking.
   const currentUser = Loadable.getOrElse(undefined, useObservable(userStore.currentUser));
   const { openToast } = useToast();
   const TaskConnectModal = useModal(TaskConnectModalComponent);
   // Listings never include a notebook's Jupyter token, so it is fetched when connecting.
   const [jupyterLabAddress, setJupyterLabAddress] = useState<string>();
-
-  const isConnectable = (task: CommandTask): boolean => {
-    const connectableTaskTypes: CommandType[] = [CommandType.JupyterLab, CommandType.Shell];
-    return connectableTaskTypes.includes(task.type) && task.state === CommandState.Running;
-  };
 
   const confirm = useConfirm();
 
@@ -81,53 +77,49 @@ const TaskActionDropdown: React.FC<Props> = ({
     }
   }, [task, jupyterLabAddress]);
 
+  // One order everywhere the menu appears: viewing first, then connecting, then launching and
+  // managing, with the destructive Kill last. Items that do not apply are left out.
   const menuItems: MenuItem[] = useMemo(() => {
-    const items: MenuItem[] = [
-      {
-        key: Action.ViewLogs,
-        label: 'View Logs',
-      },
-      {
-        key: Action.CopyTaskID,
-        label: 'Copy Task ID',
-      },
-    ];
-    if (resourcesEnabled) items.unshift({ key: Action.ViewResources, label: 'View Resources' });
+    const items: MenuItem[] = [{ key: Action.ViewLogs, label: 'View Logs' }];
+    if (resourcesEnabled) items.push({ key: Action.ViewResources, label: 'View Resources' });
+    items.push({ key: Action.CopyTaskID, label: 'Copy Task ID' });
+    // Only the owner or an admin gets the notebook's token or the shell's key from the master.
+    if (canConnectToTask(task, currentUser)) {
+      items.push({
+        key: Action.Connect,
+        label: task.type === CommandType.Shell ? 'Connect via CLI' : 'Connect',
+      });
+    }
+    if (terminalEnabled && canOpenShellTerminal(task, currentUser)) {
+      items.push({ key: Action.OpenTerminal, label: 'Open Terminal' });
+    }
+    // A UI rule only: the API lets anyone who can view a task read its config.
+    if (
+      onLaunchAgain &&
+      relaunchableTaskTypes.includes(task.type) &&
+      !!currentUser &&
+      (currentUser.id === task.userId || currentUser.isAdmin) &&
+      canCreateWorkspaceNSC({ workspace: { id: task.workspaceId } })
+    ) {
+      items.push({ key: Action.LaunchAgain, label: 'Launch Again' });
+    }
+    if (onManageJob) items.push({ key: Action.ManageJob, label: 'Manage Job' });
     if (
       isTaskKillable(
         task,
         canModifyWorkspaceNSC({ userId: task.userId, workspace: { id: task.workspaceId } }),
       )
     ) {
-      items.push({ key: Action.Kill, label: 'Kill' });
-    }
-    if (terminalEnabled && canOpenShellTerminal(task, currentUser)) {
-      items.push({ key: Action.OpenTerminal, label: 'Open Terminal' });
-    }
-    if (isConnectable(task)) {
-      items.push({
-        key: Action.Connect,
-        label: task.type === CommandType.Shell ? 'Connect via CLI' : 'Connect',
-      });
-    }
-    // A UI rule only: the API lets anyone who can view a task read its config.
-    if (
-      onLaunchAgain &&
-      relaunchableTaskTypes.includes(task.type) &&
-      !!curUser &&
-      (curUser.id === task.userId || curUser.isAdmin) &&
-      canCreateWorkspaceNSC({ workspace: { id: task.workspaceId } })
-    ) {
-      items.push({ key: Action.LaunchAgain, label: 'Launch Again' });
+      items.push({ danger: true, key: Action.Kill, label: 'Kill' });
     }
     return items;
   }, [
     task,
     canCreateWorkspaceNSC,
     canModifyWorkspaceNSC,
-    curUser,
     currentUser,
     onLaunchAgain,
+    onManageJob,
     resourcesEnabled,
     terminalEnabled,
   ]);
@@ -154,6 +146,9 @@ const TaskActionDropdown: React.FC<Props> = ({
           break;
         case Action.LaunchAgain:
           onLaunchAgain?.(task);
+          break;
+        case Action.ManageJob:
+          onManageJob?.();
           break;
         case Action.Kill:
           confirm({
@@ -194,10 +189,17 @@ const TaskActionDropdown: React.FC<Props> = ({
     }
     // TODO show loading indicator when we have a button component that supports it.
   };
+  // The connect modal is rendered for the right-click menu, too, so that Connect works from it.
+  const taskConnectModal = (
+    <TaskConnectModal.Component fields={taskConnectFields} title={`Connect to ${task.name}`} />
+  );
   return children ? (
-    <Dropdown isContextMenu menu={menuItems} onClick={handleDropdown}>
-      {children}
-    </Dropdown>
+    <>
+      <Dropdown isContextMenu menu={menuItems} onClick={handleDropdown}>
+        {children}
+      </Dropdown>
+      {taskConnectModal}
+    </>
   ) : (
     <div className={css.base} title="Open actions menu">
       <Dropdown menu={menuItems} placement="bottomRight" onClick={handleDropdown}>
@@ -206,7 +208,7 @@ const TaskActionDropdown: React.FC<Props> = ({
           type="text"
         />
       </Dropdown>
-      <TaskConnectModal.Component fields={taskConnectFields} title={`Connect to ${task.name}`} />
+      {taskConnectModal}
     </div>
   );
 };
