@@ -28,7 +28,7 @@
    (``PermissionDenied``), names the changed fields and the owner, and starts nothing. This applies
    to administrators too. Sending back the experiment's whole config unchanged, as **Resume Current
    Trial** does, still works, unless the config has ``data.secrets``, which the WebUI sends back
-   masked; then use ``det experiment continue`` without ``--config``, or ask the owner. To run a
+   masked; then use ``det experiment continue`` without ``--config``, which keeps them. To run a
    changed copy as yourself, fork the experiment. The owner can still change every field.
 
 **Bug Fixes**
