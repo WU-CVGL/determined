@@ -406,15 +406,19 @@ describe('TaskDashboard', () => {
     expect(screen.getByText('cpu-notebook')).toBeInTheDocument();
   });
 
-  it('explains GPU and CPU-only in a tooltip', async () => {
+  it('explains GPU and CPU-only in a tooltip on an icon, never over the open options', async () => {
+    const hint = 'GPU: asks for at least one slot. CPU-only: asks for none.';
     setup();
     expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
 
-    await user.hover(screen.getByTestId('slots'));
+    await user.click(within(screen.getByTestId('slots')).getByRole('combobox'));
+    expect((await screen.findAllByTitle('CPU-only')).length).toBeGreaterThan(0);
+    // Longer than the tooltip's 0.1 s open delay.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
 
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(
-      'GPU: asks for at least one slot. CPU-only: asks for none.',
-    );
+    await user.hover(screen.getByLabelText(hint));
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(hint);
   });
 
   it('keeps the filters of the Jobs page and of the tasks-only view apart', async () => {
