@@ -26,10 +26,12 @@ const TaskResourceChart: React.FC<Props> = ({ metric, range, series }) => {
   const hasData = series.some((item) =>
     item.samples.some(([, value]) => value != null && Number.isFinite(value)),
   );
-  // The options depend only on the labels, so a re-render with new series arrays but the same
-  // labels keeps the chart and only updates its data.
+  // UPlotChart rebuilds the chart whenever the options change, which drops series hidden from the
+  // legend. The options depend only on the labels and the range bounds, so a re-render with new
+  // series arrays or a new range object with the same bounds keeps the chart and updates its data.
   const legendKey = JSON.stringify(resourceLegend(series));
   const legend = useMemo(() => JSON.parse(legendKey) as ResourceLegendEntry[], [legendKey]);
+  const { end: rangeEnd, start: rangeStart } = range;
   const options = useMemo<Options>(() => {
     const format = (value: number): string =>
       metric.unit === 'bytes'
@@ -57,7 +59,7 @@ const TaskResourceChart: React.FC<Props> = ({ metric, range, series }) => {
           },
         },
       ],
-      scales: { x: { max: range.end, min: range.start, time: true } },
+      scales: { x: { max: rangeEnd, min: rangeStart, time: true } },
       series: [
         { label: 'Time', value: (_plot, value) => new Date(value * 1000).toLocaleString() },
         ...legend.map(({ label }, index) => ({
@@ -70,7 +72,7 @@ const TaskResourceChart: React.FC<Props> = ({ metric, range, series }) => {
         })),
       ],
     };
-  }, [legend, metric, range]);
+  }, [legend, metric, rangeEnd, rangeStart]);
 
   return (
     <Section bodyBorder title={metric.title}>

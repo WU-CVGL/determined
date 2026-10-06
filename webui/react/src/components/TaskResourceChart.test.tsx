@@ -1,9 +1,9 @@
-import { render, waitFor } from '@testing-library/react';
+import { fireEvent, render, waitFor } from '@testing-library/react';
 import { SyncProvider } from 'hew/LineChart/SyncProvider';
 import { DefaultTheme, UIProvider } from 'hew/Theme';
 
 import { ThemeProvider } from 'components/ThemeProvider';
-import { RESOURCE_METRICS, ResourceSeries } from 'utils/taskResources';
+import { RESOURCE_METRICS, ResourceRange, ResourceSeries } from 'utils/taskResources';
 
 import TaskResourceChart from './TaskResourceChart';
 
@@ -41,13 +41,13 @@ const gpu = (index: number, uuid: string): ResourceSeries => ({
 
 const metric = RESOURCE_METRICS.find((item) => item.key === 'gpu_utilization_percent');
 const range = { end: 115, start: 100, step: 15 };
-const chart = (series: ResourceSeries[]) => {
+const chart = (series: ResourceSeries[], chartRange: ResourceRange = range) => {
   if (!metric) throw new Error('missing metric');
   return (
     <UIProvider theme={DefaultTheme.Light}>
       <ThemeProvider>
         <SyncProvider>
-          <TaskResourceChart metric={metric} range={range} series={series} />
+          <TaskResourceChart metric={metric} range={chartRange} series={series} />
         </SyncProvider>
       </ThemeProvider>
     </UIProvider>
@@ -81,18 +81,29 @@ it('renders the live legend with GPU numbers and details on hover', async () => 
   expect(rows[2].title).toContain('PCI bus ID: 00000000:42:00.0');
 });
 
-it('keeps the chart when it re-renders with the same labels', async () => {
+it('keeps the chart and its hidden series when it re-renders with the same labels', async () => {
   const series = [gpu(0, UUID), gpu(1, 'GPU-9f8e7d6c-0000-1111-2222-333344445555')];
   const view = render(chart(series));
   await waitFor(() => expect(legendLabels(view.container)).toEqual(['Time', 'GPU 0', 'GPU 1']));
   const legend = view.container.querySelector('.u-legend');
+  const rows = () => view.container.querySelectorAll<HTMLElement>('.u-legend .u-series');
+  // Hide GPU 0 from the legend.
+  const label = rows()[1].querySelector('.u-label');
+  if (!label) throw new Error('missing legend label');
+  fireEvent.click(label);
+  expect(rows()[1]).toHaveClass('u-off');
 
-  // A refresh hands over new arrays with the same labels: the chart and its legend stay.
-  view.rerender(chart(series.map((item) => ({ ...item, samples: [...item.samples] }))));
-  expect(view.container.querySelector('.u-legend')).toBe(legend);
-  expect(view.container.querySelectorAll<HTMLElement>('.u-legend .u-series')[1].title).toContain(
-    UUID,
+  // A refresh of an ended task hands over new arrays and a new range object with the same labels
+  // and bounds: the chart, its legend and the hidden series stay.
+  view.rerender(
+    chart(
+      series.map((item) => ({ ...item, samples: [...item.samples] })),
+      { ...range },
+    ),
   );
+  expect(view.container.querySelector('.u-legend')).toBe(legend);
+  expect(rows()[1]).toHaveClass('u-off');
+  expect(rows()[1].title).toContain(UUID);
 
   // New labels rebuild the legend.
   view.rerender(
