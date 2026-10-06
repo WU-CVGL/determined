@@ -392,12 +392,13 @@ def _link_text(cur: int, cur_max: int, prefix: str) -> str:
     return f"{value(cur)} of {value(cur_max)}"
 
 
-def _link_gen_text(gen_max: int) -> str:
-    """A GPU's PCIe link generation: the highest that the GPU and its slot support, ? if unknown (0).
+def _link_gen_text(gen_max: int, unknown: str = "Gen?") -> str:
+    """A GPU's PCIe link generation: the highest that the GPU and its slot support.
 
-    The current generation drops while a GPU is idle, so it is left out, as in the WebUI.
+    `unknown` is shown when it is unknown (0). The current generation drops while a GPU is idle, so
+    it is left out, as in the WebUI.
     """
-    return f"Gen{gen_max}" if gen_max > 0 else "Gen?"
+    return f"Gen{gen_max}" if gen_max > 0 else unknown
 
 
 def _cur_max(cur: int, cur_max: int, prefix: str) -> str:
@@ -570,7 +571,7 @@ def describe_agent(args: argparse.Namespace) -> None:
             g.pciBusId or "?",
             g.numaNode if g.numaNode >= 0 else "?",
             _cur_max(g.pcieLinkWidth, g.pcieLinkWidthMax, "x"),
-            _link_gen_text(g.pcieLinkGenMax),
+            _link_gen_text(g.pcieLinkGenMax, "?"),
         ]
         for g in gpus
     ]

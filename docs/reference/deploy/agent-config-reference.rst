@@ -334,10 +334,11 @@ generation that the GPU and its slot support, for example ``x8 of x16, Gen4``; `
 NVML health calls that failed at agent start; and ``Collected at``, the time of the measurement by
 the agent's clock. XID errors are not collected.
 
-The current link generation is not shown: a GPU lowers it while it is idle, often to Gen1, so its
-value at agent start says little about the link under load. The highest generation says what the GPU
-and its slot support, not what the link runs at: a link that trains to a lower generation under load
-still shows it. The agent API reports both, as ``pcie_link_gen`` and ``pcie_link_gen_max``.
+The details leave out the current link generation: a GPU lowers it while it is idle, often to Gen1,
+so its value at agent start says little about the link under load. The highest generation says what
+the GPU and its slot support, not what the link runs at: a link that trains to a lower generation
+under load still shows it. The agent API reports both, as ``pcie_link_gen`` and
+``pcie_link_gen_max``.
 
 CLI and WebUI
 =============

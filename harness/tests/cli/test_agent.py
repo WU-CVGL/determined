@@ -201,6 +201,17 @@ def test_list_agents_gpu_columns(capsys: pytest.CaptureFixture) -> None:
     assert listed["cpu-agent"]["gpu_health"] == ""
 
 
+def table_row(lines: List[str], first: str) -> List[str]:
+    """The cells of the first table row of `det agent describe` whose first cell is `first`."""
+    found = [
+        [c.strip() for c in line.split("|")]
+        for line in lines
+        if "|" in line and line.split("|")[0].strip() == first
+    ]
+    assert found, first
+    return found[0]
+
+
 def test_describe_agent(capsys: pytest.CaptureFixture) -> None:
     topology = topology_case("node01 with the exclude list")
     assert topology is not None
@@ -227,13 +238,7 @@ def test_describe_agent(capsys: pytest.CaptureFixture) -> None:
     assert "GPU Health:      narrow: 3,5 (x8 of x16); excluded: 81:00.0" in lines
 
     def row(first: str) -> List[str]:
-        found = [
-            [c.strip() for c in line.split("|")]
-            for line in lines
-            if "|" in line and line.split("|")[0].strip() == first
-        ]
-        assert found, first
-        return found[0]
+        return table_row(lines, first)
 
     assert row("0")[1:4] == ["container-a", "ok", topology["gpus"][0]["uuid"]]
     assert row("1")[1] == "DISABLED"
@@ -361,6 +366,25 @@ def test_describe_agent_unknown_topology(capsys: pytest.CaptureFixture) -> None:
     ]
     assert f"  Excluded GPU {excluded_uuid} (unknown):" in lines
     assert not any(line.startswith("Link levels") for line in lines)
+
+
+def test_describe_agent_unknown_link(capsys: pytest.CaptureFixture) -> None:
+    topology = topology_case("every pair unknown")
+    assert topology is not None
+    with util.standard_cli_rsps() as rsps:
+        rsps.get(
+            f"{MASTER}/api/v1/agents/a",
+            status=200,
+            json={"agent": agent_json("a", topology)},
+        )
+        cli.main(["agent", "describe", "a"])
+    lines = capsys.readouterr().out.splitlines()
+    # The table writes an unknown value as ?, the details as in the WebUI.
+    assert table_row(lines, "0")[-2:] == ["?/?", "?"]
+    assert table_row(lines, "1")[-2:] == ["x8/x16", "Gen4"]
+    assert table_row(lines, "2")[-2:] == ["x4/x16", "?"]
+    assert table_row(lines, "3")[-2:] == ["?/x16", "Gen4"]
+    assert lines[lines.index("  Slot 2 (narrow):") + 1] == "    PCIe link: x4 of x16, Gen?"
 
 
 def test_describe_agent_json(capsys: pytest.CaptureFixture) -> None:
