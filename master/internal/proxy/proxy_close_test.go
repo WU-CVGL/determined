@@ -71,6 +71,8 @@ func TestIsConnectionClosed(t *testing.T) {
 		},
 		{"connection reset on read", opError("read", os.NewSyscallError("read", syscall.ECONNRESET)), true},
 		{"closed connection", opError("read", net.ErrClosed), true},
+		{"write after the client's close", opError("writeto", websocket.ErrCloseSent), true},
+		{"unwrapped write after the client's close", websocket.ErrCloseSent, true},
 		{"EOF", io.EOF, true},
 		{"unexpected EOF", io.ErrUnexpectedEOF, true},
 		{"wrapped unexpected EOF", fmt.Errorf("reading: %w", io.ErrUnexpectedEOF), true},
@@ -197,6 +199,37 @@ func TestTCPProxyLogsNormalCloseAtDebug(t *testing.T) {
 	require.NoError(t, upstream.Close())
 
 	requireOnlyDebugCopyError(t, hook, addr, "websocket: close 1000 (normal): goodbye")
+}
+
+// The service can still write after the client closed its WebSocket and the proxy replied to the
+// close, as sshd does with trailing output; the proxy then cannot send it.
+func TestTCPProxyLogsWriteAfterCloseAtDebug(t *testing.T) {
+	hook := captureLogs(t)
+	var sawAuthCookie string
+	p, base := newTestProxy(t, &sawAuthCookie)
+	ln, conns := listenUpstream(t)
+	addr := ln.Addr().String()
+	p.Register("svc", &url.URL{Scheme: "http", Host: addr}, true, true)
+
+	dialer := websocket.Dialer{HandshakeTimeout: 5 * time.Second}
+	ws, resp, err := dialer.Dial("ws"+strings.TrimPrefix(base, "http")+"/proxy/svc/", nil)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	defer func() { _ = ws.Close() }()
+	upstream := acceptUpstream(t, conns)
+
+	// The client disconnects and the proxy replies to its close, then the service writes and
+	// hangs up.
+	require.NoError(t, ws.WriteControl(websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseNormalClosure, "goodbye"),
+		time.Now().Add(5*time.Second)))
+	_, _, err = ws.ReadMessage()
+	require.True(t, websocket.IsCloseError(err, websocket.CloseNormalClosure), err)
+	_, err = upstream.Write([]byte("late data"))
+	require.NoError(t, err)
+	require.NoError(t, upstream.Close())
+
+	requireOnlyDebugCopyError(t, hook, addr, "websocket: close sent")
 }
 
 // A browser that goes away can reset its connection to a proxied JupyterLab or TensorBoard.

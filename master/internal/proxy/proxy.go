@@ -342,10 +342,13 @@ func asyncCopy(dst io.Writer, src io.Reader) chan error {
 }
 
 // closedConnectionErrors are the errors with which a copy stops when a side ended the connection:
-// the end of the stream, a connection closed here, and one that the other side closed (broken
-// pipe) or reset.
+// the end of the stream, a connection closed here, one that the other side closed (broken pipe)
+// or reset, and a write to a WebSocket after the reply to the client's close was sent. The
+// proxies never close a WebSocket on their own, so that reply always answers a close that the
+// client sent, and the copy in the other direction reports the client's close code.
 var closedConnectionErrors = []error{
 	io.EOF, io.ErrUnexpectedEOF, net.ErrClosed, syscall.EPIPE, syscall.ECONNRESET,
+	websocket.ErrCloseSent,
 }
 
 // isConnectionClosed reports whether err, an error from copying between the two sides of a
