@@ -243,6 +243,9 @@ const storeBeforeLoad = (settings: Record<string, unknown>, storagePath = JOBS_S
   });
 };
 
+/* For a page that first loads stored settings, which takes seconds in a full test run. */
+const AFTER_LOAD = { timeout: 10_000 };
+
 /** The settings in the store, as the page last updated them. */
 const stored = (storagePath = JOBS_SETTINGS): Record<string, unknown> =>
   (Loadable.getOrElse(undefined, userSettings.getAll().get())?.get(storagePath) ?? {}) as Record<
@@ -413,17 +416,20 @@ describe('TaskDashboard', () => {
     storeBeforeLoad({ columns: OLD_COLUMNS, columnWidths: OLD_WIDTHS, type: ['experiment'] });
     setup({}, '/jobs?type=shell', { browser: true });
 
-    await waitFor(() => expect(stored().columns).toContain('slots'));
-    await waitFor(() => expect(stored().type).toEqual(['shell']));
+    await waitFor(() => expect(stored().columns).toContain('slots'), AFTER_LOAD);
+    await waitFor(() => expect(stored().type).toEqual(['shell']), AFTER_LOAD);
     // Long enough for the URL and the settings to undo each other, as they did.
     await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
     expect(new URLSearchParams(window.location.search).getAll('type')).toEqual(['shell']);
     expect(stored().type).toEqual(['shell']);
     expect(screen.getByTestId('kind-shell')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('kind-experiment')).toHaveAttribute('aria-pressed', 'false');
-    await waitFor(() => expect(screen.queryByText('bert-finetune')).not.toBeInTheDocument());
+    await waitFor(
+      () => expect(screen.queryByText('bert-finetune')).not.toBeInTheDocument(),
+      AFTER_LOAD,
+    );
     expect(screen.getByText('gpu-shell')).toBeInTheDocument();
-  });
+  }, 30_000);
 
   it('keeps old ?type values of the task list working', async () => {
     setup({ tasksOnly: true }, '/tasks?type=jupyter-lab');
@@ -547,9 +553,9 @@ describe('TaskDashboard', () => {
       async (_, settings) => {
         storeBeforeLoad(settings);
         setup();
-        expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+        expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
 
-        await waitFor(() => expect(stored().columnWidths).toHaveLength(10));
+        await waitFor(() => expect(stored().columnWidths).toHaveLength(10), AFTER_LOAD);
         expect(storedWidths()).toEqual({
           endTime: 309,
           id: 302,
@@ -564,9 +570,7 @@ describe('TaskDashboard', () => {
         });
         // ID, User, Location, Resource Pool and Ended are hidden below the md breakpoint, as in
         // tests. The table takes the new widths a render later, which takes seconds in a full run.
-        await waitFor(() => expect(shownWidths()).toMatchObject({ Slots: '72px' }), {
-          timeout: 10_000,
-        });
+        await waitFor(() => expect(shownWidths()).toMatchObject({ Slots: '72px' }), AFTER_LOAD);
         expect(shownWidths()).toMatchObject({
           Kind: '301px',
           Name: '303px',
