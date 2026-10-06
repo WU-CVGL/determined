@@ -118,10 +118,14 @@ default resource pool is needed.
 In every mode, a new default must be a pool that the user who sets it may use:
 administrators and public pools pass, and a restricted pool needs that user's
 grant. This also applies to the defaults given when a workspace is created.
-Unsetting a default, or sending its current value again, is not checked. A
-restricted pool therefore becomes a workspace default only through an
-administrator, or through the workspace's owner holding a grant; nobody else can
-point a shared workspace at a restricted pool.
+Unsetting a default, or sending its current value again, is not checked.
+
+With basic authorization, a restricted pool therefore becomes a workspace
+default only through an administrator, or through the workspace's owner holding
+a grant; nobody else can point a shared workspace at a restricted pool. With
+RBAC, it becomes the default of an existing workspace through any user who may
+use the pool and has the permission to set the workspace's default resource
+pool, whether or not that user owns the workspace.
 
 ## Pools and names
 
