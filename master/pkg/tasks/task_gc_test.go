@@ -59,28 +59,10 @@ func Test_GCCkptSpec_ToTaskSpec(t *testing.T) {
 						},
 					},
 				},
-				LegacyConfig: expconf.LegacyConfig{
-					Environment: expconf.EnvironmentConfig{
-						RawEnvironmentVariables: &expconf.EnvironmentVariablesMap{
-							RawCPU:  []string{"HOME=/where/the/heart/is"},
-							RawCUDA: []string{"HOME=/where/the/heart/is"},
-							RawROCM: []string{"HOME=/where/the/heart/is"},
-						},
-						RawPodSpec: &expconf.PodSpec{
-							Spec: k8sV1.PodSpec{
-								Volumes: []k8sV1.Volume{
-									{
-										Name: "Legacy Pod Spec",
-									},
-								},
-							},
-						},
-					},
-				},
 			},
 		},
-		// The experiment's pod spec is never used.
-		"CPUPodSpecNotLegacyPodSpecTestCase": {
+		// Without checkpoint_gc_pod_spec, the CPU pod spec.
+		"CPUPodSpecTestCase": {
 			expectedDescription:  "gc",
 			expectedEntrypoint:   filepath.Join("/run/determined/checkpoint_gc", etc.GCCheckpointsEntrypointResource),
 			expectedType:         model.TaskTypeCheckpointGC,
@@ -108,24 +90,6 @@ func Test_GCCkptSpec_ToTaskSpec(t *testing.T) {
 						},
 					},
 				},
-				LegacyConfig: expconf.LegacyConfig{
-					Environment: expconf.EnvironmentConfig{
-						RawEnvironmentVariables: &expconf.EnvironmentVariablesMap{
-							RawCPU:  []string{"HOME=/where/the/heart/is"},
-							RawCUDA: []string{"HOME=/where/the/heart/is"},
-							RawROCM: []string{"HOME=/where/the/heart/is"},
-						},
-						RawPodSpec: &expconf.PodSpec{
-							Spec: k8sV1.PodSpec{
-								Volumes: []k8sV1.Volume{
-									{
-										Name: "Legacy Pod Spec",
-									},
-								},
-							},
-						},
-					},
-				},
 			},
 		},
 	}
@@ -146,8 +110,7 @@ func Test_GCCkptSpec_ToTaskSpec(t *testing.T) {
 
 // The GC task's pod spec is checkpoint_gc_pod_spec, else cpu_pod_spec, with gpu_pod_spec merged
 // under it by Kubernetes strategic merge, as before; with only gpu_pod_spec set it is that one, and
-// with none set there is none. The experiment's pod spec is never used. checkpointGCSeesStorage
-// relies on the task having a pod spec whenever any of the three is set.
+// with none set there is none. GCPodSpec, which checkpointGCSeesStorage reads, gives the same.
 //
 //nolint:exhaustruct
 func Test_GCCkptSpec_ToTaskSpecPodSpec(t *testing.T) {
@@ -155,14 +118,9 @@ func Test_GCCkptSpec_ToTaskSpecPodSpec(t *testing.T) {
 	pod := func(name string) *k8sV1.Pod {
 		return &k8sV1.Pod{Spec: k8sV1.PodSpec{Volumes: []k8sV1.Volume{{Name: name}}}}
 	}
-	legacy := expconf.LegacyConfig{
-		CheckpointStorage: schemas.WithDefaults(expconf.CheckpointStorageConfig{
-			RawSharedFSConfig: &expconf.SharedFSConfig{RawHostPath: ptrs.Ptr("/srv/gc-ckpts")},
-		}),
-		Environment: schemas.WithDefaults(expconf.EnvironmentConfig{
-			RawPodSpec: (*expconf.PodSpec)(pod("experiment")),
-		}),
-	}
+	storage := schemas.WithDefaults(expconf.CheckpointStorageConfig{
+		RawSharedFSConfig: &expconf.SharedFSConfig{RawHostPath: ptrs.Ptr("/srv/gc-ckpts")},
+	})
 
 	for _, tc := range []struct {
 		name    string
@@ -196,9 +154,10 @@ func Test_GCCkptSpec_ToTaskSpecPodSpec(t *testing.T) {
 					TaskContainerDefaults: tc.tcd,
 					AgentUserGroup:        &model.AgentUserGroup{UID: 4242, GID: 4343},
 				},
-				ExperimentID: 1,
-				LegacyConfig: legacy,
+				ExperimentID:      1,
+				CheckpointStorage: storage,
 			}.ToTaskSpec()
+			require.Equal(t, GCPodSpec(tc.tcd), res.Environment.PodSpec())
 
 			if tc.volumes == nil {
 				require.Nil(t, res.Environment.PodSpec())
@@ -214,41 +173,17 @@ func Test_GCCkptSpec_ToTaskSpecPodSpec(t *testing.T) {
 	}
 }
 
-// The GC task's environment comes from the task container defaults and the checkpoint storage, never
-// from the experiment: no environment variables, bind mounts, pod spec or image of its own.
+// The GC task's environment variables, image, bind mounts and pod spec come from the task container
+// defaults and the checkpoint storage, which is the only part of the experiment's config that the
+// spec has.
 //
 //nolint:exhaustruct
 func Test_GCCkptSpec_ToTaskSpecTakesNoExperimentEnvironment(t *testing.T) {
 	require.NoError(t, etc.SetRootPath("../../static/srv/"))
 
-	experimentEnv := []string{
-		"BASH_ENV=/hooks/run-first.sh",
-		"LD_PRELOAD=/hooks/libhook.so",
-		"PYTHONPATH=/hooks",
-		"AWS_ACCESS_KEY_ID=owner-key",
-		"HTTPS_PROXY=http://proxy.owner.example:3128",
-	}
-	legacy := expconf.LegacyConfig{
-		CheckpointStorage: schemas.WithDefaults(expconf.CheckpointStorageConfig{
-			RawSharedFSConfig: &expconf.SharedFSConfig{RawHostPath: ptrs.Ptr("/srv/gc-ckpts")},
-		}),
-		BindMounts: schemas.WithDefaults(expconf.BindMountsConfig{{
-			RawHostPath:      "/home/owner/hooks",
-			RawContainerPath: "/hooks",
-		}}),
-		Environment: schemas.WithDefaults(expconf.EnvironmentConfig{
-			RawEnvironmentVariables: &expconf.EnvironmentVariablesMap{
-				RawCPU: experimentEnv, RawCUDA: experimentEnv, RawROCM: experimentEnv,
-			},
-			RawImage: &expconf.EnvironmentImageMap{
-				RawCPU: ptrs.Ptr("owner/image:cpu"), RawCUDA: ptrs.Ptr("owner/image:cuda"),
-				RawROCM: ptrs.Ptr("owner/image:rocm"),
-			},
-			RawPodSpec: &expconf.PodSpec{Spec: k8sV1.PodSpec{
-				Volumes: []k8sV1.Volume{{Name: "Experiment Pod Spec"}},
-			}},
-		}),
-	}
+	storage := schemas.WithDefaults(expconf.CheckpointStorageConfig{
+		RawSharedFSConfig: &expconf.SharedFSConfig{RawHostPath: ptrs.Ptr("/srv/gc-ckpts")},
+	})
 	tcd := model.TaskContainerDefaultsConfig{
 		Image: &model.RuntimeItem{CPU: "admin/image:cpu", CUDA: "admin/image:cuda", ROCM: "admin/image:rocm"},
 		EnvironmentVariables: &model.RuntimeItems{
@@ -268,9 +203,9 @@ func Test_GCCkptSpec_ToTaskSpecTakesNoExperimentEnvironment(t *testing.T) {
 			Owner:                 &owner,
 			AgentUserGroup:        &model.AgentUserGroup{UID: 4242, GID: 4343, User: "ou", Group: "og"},
 		},
-		ExperimentID: 1,
-		LegacyConfig: legacy,
-		ToDelete:     "7f3c7a6e-1f7e-4f43-9c9e-0e0f5c3e0001",
+		ExperimentID:      1,
+		CheckpointStorage: storage,
+		ToDelete:          "7f3c7a6e-1f7e-4f43-9c9e-0e0f5c3e0001",
 	}
 
 	res := gc.ToTaskSpec()
@@ -291,6 +226,7 @@ func Test_GCCkptSpec_ToTaskSpecTakesNoExperimentEnvironment(t *testing.T) {
 			BindOptions: &mount.BindOptions{Propagation: expconf.DefaultSharedFSPropagation},
 		},
 	}, res.Mounts)
+	require.Equal(t, GCMounts(tcd, storage), res.Mounts)
 
 	// The storage configuration still reaches the task, owned by the owner's agent user.
 	var storageConfig []byte

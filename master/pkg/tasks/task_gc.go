@@ -22,8 +22,11 @@ type GCCkptSpec struct {
 	Base TaskSpec
 
 	ExperimentID int
-	LegacyConfig expconf.LegacyConfig
-	ToDelete     string
+	// CheckpointStorage is the storage of the checkpoints. It is all that the task takes from the
+	// experiment's config: the experiment's environment, bind mounts and pod spec have no place
+	// here. The master checks before that the task sees the storage.
+	CheckpointStorage expconf.CheckpointStorageConfig
+	ToDelete          string
 	// If len(CheckpointGlobs) == 0 then we won't delete any checkpoint files
 	// and just refresh the state of the checkpoint.
 	CheckpointGlobs    []string
@@ -65,7 +68,7 @@ func (g GCCkptSpec) ToTaskSpec() TaskSpec {
 				g.Base.AgentUserGroup.OwnedArchiveItem("checkpoint_gc", nil, 0o700, tar.TypeDir),
 				g.Base.AgentUserGroup.OwnedArchiveItem(
 					storageConfigPath,
-					[]byte(jsonify(g.LegacyConfig.CheckpointStorage)),
+					[]byte(jsonify(g.CheckpointStorage)),
 					0o600,
 					tar.TypeReg,
 				),
@@ -112,7 +115,7 @@ func (g GCCkptSpec) ToTaskSpec() TaskSpec {
 		res.Entrypoint = append(res.Entrypoint, "--delete-tensorboards")
 	}
 
-	res.Mounts = GCMounts(tcd, g.LegacyConfig.CheckpointStorage)
+	res.Mounts = GCMounts(tcd, g.CheckpointStorage)
 	res.TaskType = model.TaskTypeCheckpointGC
 
 	return res

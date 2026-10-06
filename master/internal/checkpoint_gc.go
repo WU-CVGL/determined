@@ -390,27 +390,27 @@ func runCheckpointGCTask(
 	// end-of-experiment GC, that is the experiment's own, which stop() revokes.
 	taskSpec.UserSessionToken = ""
 
-	gcSpec := tasks.GCCkptSpec{
-		Base:               taskSpec,
-		ExperimentID:       expID,
-		LegacyConfig:       legacyConfig,
-		ToDelete:           deleteCheckpointsStr,
-		CheckpointGlobs:    checkpointGlobs,
-		DeleteTensorboards: deleteTensorboards,
-	}
-
-	// Update checkpoint storage with storageID.
+	// The checkpoints' storage: the storage backend they were saved to, else the experiment's.
+	checkpointStorage := legacyConfig.CheckpointStorage
 	if storageID != nil {
-		checkpointStorage, err := storage.Backend(context.TODO(), *storageID)
+		checkpointStorage, err = storage.Backend(context.TODO(), *storageID)
 		if err != nil {
 			return fmt.Errorf("getting storage id %d in create gc task: %w", *storageID, err)
 		}
-		gcSpec.LegacyConfig.CheckpointStorage = checkpointStorage
 	}
-	if err := checkpointGCSeesStorage(
-		gcSpec.LegacyConfig.CheckpointStorage, gcSpec.LegacyConfig, tcd,
-	); err != nil {
+	// The experiment's bind mounts and pod spec serve only to check here that the task sees the
+	// storage. The task's spec takes nothing from the experiment's config but the storage.
+	if err := checkpointGCSeesStorage(checkpointStorage, legacyConfig, tcd); err != nil {
 		return fmt.Errorf("checkpoint GC of experiment %d: %w", expID, err)
+	}
+
+	gcSpec := tasks.GCCkptSpec{
+		Base:               taskSpec,
+		ExperimentID:       expID,
+		CheckpointStorage:  checkpointStorage,
+		ToDelete:           deleteCheckpointsStr,
+		CheckpointGlobs:    checkpointGlobs,
+		DeleteTensorboards: deleteTensorboards,
 	}
 
 	logCtx = logger.MergeContexts(logCtx, logger.Context{

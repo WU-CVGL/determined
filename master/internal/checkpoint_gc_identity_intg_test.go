@@ -224,7 +224,7 @@ func requireGCRunsAsOwner(t *testing.T, spec tasks.GCCkptSpec, owner model.User,
 	}
 
 	// Storage.
-	assert.Equal(t, gcTestHostPath, spec.LegacyConfig.CheckpointStorage.RawSharedFSConfig.HostPath())
+	assert.Equal(t, gcTestHostPath, spec.CheckpointStorage.RawSharedFSConfig.HostPath())
 	assert.Contains(t, ts.Mounts, mount.Mount{
 		Type:        mount.TypeBind,
 		Source:      gcTestHostPath,
@@ -676,6 +676,6 @@ func TestCheckpointGCOfDirectoryStorageTheExperimentDoesNotMount(t *testing.T) {
 	require.Equal(t, owner.ID, spec.Base.Owner.ID)
 	require.Equal(t, ckpt, spec.ToDelete)
 	require.Equal(t, "/mnt/ckpts/run",
-		spec.LegacyConfig.CheckpointStorage.RawDirectoryConfig.ContainerPath())
+		spec.CheckpointStorage.RawDirectoryConfig.ContainerPath())
 	require.Empty(t, spec.ToTaskSpec().Mounts)
 }
