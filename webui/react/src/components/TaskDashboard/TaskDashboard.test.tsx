@@ -645,10 +645,10 @@ describe('TaskDashboard', () => {
       expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
 
       await waitFor(() => expect(stored().columns).toContain('slots'), AFTER_LOAD);
-      expect(storedWidths()).toMatchObject({ id: 100, kind: 64, name: 220, slots: 72 });
+      expect(storedWidths()).toMatchObject({ id: 100, kind: 64, name: 240, slots: 72 });
       // The widths keep their count, which the table alone would not take up.
       await waitFor(() => expect(shownWidths()).toMatchObject({ Kind: '64px' }), AFTER_LOAD);
-      expect(shownWidths()).toMatchObject({ Name: '220px', Slots: '72px', State: '120px' });
+      expect(shownWidths()).toMatchObject({ Name: '240px', Slots: '72px', State: '120px' });
     }, 30_000);
   });
 
@@ -734,7 +734,7 @@ describe('TaskDashboard', () => {
     await resize('Name', 450);
     // Widths stored alone would be bound by place to the default columns of a later version.
     await waitFor(() =>
-      expect(saved('columnWidths')).toEqual([64, 100, 450, 120, 85, 180, 128, 72, 117, 117]),
+      expect(saved('columnWidths')).toEqual([64, 100, 450, 120, 85, 230, 128, 72, 117, 117]),
     );
     expect(saved('columns')).toEqual(NEW_COLUMNS);
     expect(storedWidths()).toMatchObject({ kind: 64, name: 450, slots: 72 });
