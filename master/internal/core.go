@@ -1072,13 +1072,21 @@ func (m *Master) checkIfRMDefaultsAreUnbound(rmConfig *config.ResourceManagerCon
 	return fmt.Errorf("no Resource Manager found")
 }
 
+// postTaskLogs serves POST /task-logs, which unmanaged trials ship their output to with the
+// session of the user who runs them. It applies the rules of PostTaskLogs: the user must be signed
+// in, and the batch must be for a single task that the user may edit.
 func (m *Master) postTaskLogs(c echo.Context) (interface{}, error) {
 	var logs []*model.TaskLog
 	if err := json.NewDecoder(c.Request().Body).Decode(&logs); err != nil {
-		return "", fmt.Errorf("decoding task logs: %w", err)
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "decoding task logs: "+err.Error())
 	}
-	if err := m.taskLogBackend.AddTaskLogs(logs); err != nil {
-		return "", errors.Wrap(err, "receiving task logs")
+	curUser := c.(*detContext.DetContext).MustGetUser()
+	_, _, err := (&apiServer{m: m}).addTaskLogsForUser(c.Request().Context(), curUser, logs)
+	if err != nil {
+		if ok, httpErr := api.GrpcErrToEcho(err); ok {
+			return nil, httpErr
+		}
+		return nil, errors.Wrap(err, "receiving task logs")
 	}
 	return "", nil
 }
