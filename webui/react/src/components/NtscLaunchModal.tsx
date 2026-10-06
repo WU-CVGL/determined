@@ -4,6 +4,7 @@ import Form, { FormInstance } from 'hew/Form';
 import Input from 'hew/Input';
 import InputNumber from 'hew/InputNumber';
 import { Modal, useModal } from 'hew/Modal';
+import RadioGroup from 'hew/RadioGroup';
 import Row from 'hew/Row';
 import Select, { Option, SelectValue } from 'hew/Select';
 import Spinner from 'hew/Spinner';
@@ -26,8 +27,11 @@ import { CommandResponse, CommandTask, CommandType, RawJson, ResourcePool, Works
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import { launchJupyterLab, previewJupyterLab } from 'utils/jupyter';
 import {
+  configForLaunchType,
   configFromForm,
   formFieldsFromConfig,
+  NTSC_LAUNCH_TYPE_LABELS,
+  NTSC_LAUNCH_TYPES,
   NtscLaunchOptions,
   NtscLaunchType,
   sanitizeConfig,
@@ -39,6 +43,11 @@ import { launchShell, previewShell } from 'utils/shell';
 
 const DEFAULT_SLOT_COUNT = 1;
 const BASE_FORM_ID = 'ntsc-launch-form';
+
+const TYPE_OPTIONS = NTSC_LAUNCH_TYPES.map((type) => ({
+  id: type,
+  label: NTSC_LAUNCH_TYPE_LABELS[type],
+}));
 
 /** The simple form's values. `source` is the "Start from" picker's value. */
 interface LaunchFormValues extends NtscLaunchOptions {
@@ -91,7 +100,10 @@ interface TypeCopy {
 
 /**
  * Per-type text and the per-user settings (last-used form values, kept on the
- * server). JupyterLab keeps its existing 'jupyter-lab' storage path.
+ * server). JupyterLab keeps its existing 'jupyter-lab' storage path. The form
+ * opens with the last values of its preselected type. A launch saves the form's
+ * values for the type it launches; a cancel saves them back to the preselected
+ * type, where they came from, even after the type was switched.
  */
 const TYPE_COPY: Record<NtscLaunchType, TypeCopy> = {
   [CommandType.JupyterLab]: {
@@ -121,17 +133,24 @@ const settingsFromForm = (values: LaunchFormValues): NtscLaunchOptions => ({
 export interface Props {
   /** "Launch Again": start from this task's config. */
   initialTask?: CommandTask;
-  /** Shells only: called with the new shell after a successful launch. */
-  onLaunched?: (response: CommandResponse) => void;
-  type: NtscLaunchType;
+  /** The task type selected when the form opens; the user can switch it. */
+  initialType: NtscLaunchType;
+  /**
+   * Called with the new shell after a successful shell launch, to show how to
+   * connect. A JupyterLab launch opens the notebook's wait page instead.
+   */
+  onShellLaunched?: (response: CommandResponse) => void;
   workspace?: Workspace;
 }
 
 const CodeEditor = React.lazy(() => import('hew/CodeEditor'));
 
 /**
- * The launch modal shared by JupyterLab and shells: a simple form (workspace,
- * "Start from", name, pool, slots) and a full-config YAML mode.
+ * The launch modal for JupyterLab and shells, which share one config format: a
+ * task type selector, then a simple form (workspace, "Start from", name, pool,
+ * slots) and a full-config YAML mode. The selected type decides the launch API,
+ * the title, the master's default name and what follows a launch; switching it
+ * keeps everything entered, including the full config's YAML.
  *
  * Start from a template: the template name is sent with the simple fields.
  * Start from a config (a recent task or this browser's history): the config
@@ -141,10 +160,11 @@ const CodeEditor = React.lazy(() => import('hew/CodeEditor'));
  */
 const NtscLaunchModalComponent: React.FC<Props> = ({
   initialTask,
-  onLaunched,
-  type,
+  initialType,
+  onShellLaunched,
   workspace,
 }: Props) => {
+  const [type, setType] = useState<NtscLaunchType>(initialType);
   const copy = TYPE_COPY[type];
   const idPrefix = useId();
   const [showFullConfig, setShowFullConfig] = useState(false);
@@ -182,14 +202,20 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     setFullConfigFormInvalid(hasError);
   }, [currentWorkspace, fullConfigForm]);
 
-  const { settings: defaults, updateSettings: updateDefaults } = useSettings<NtscLaunchOptions>(
-    copy.settings,
+  const jupyterLabSettings = useSettings<NtscLaunchOptions>(
+    TYPE_COPY[CommandType.JupyterLab].settings,
   );
+  const shellSettings = useSettings<NtscLaunchOptions>(TYPE_COPY[CommandType.Shell].settings);
+  const settingsFor = (t: NtscLaunchType) =>
+    t === CommandType.Shell ? shellSettings : jupyterLabSettings;
+  const defaults = settingsFor(initialType).settings;
+  const saveLaunchDefaults = settingsFor(type).updateSettings;
+  const saveCancelDefaults = settingsFor(initialType).updateSettings;
 
   const handleModalClose = useCallback(() => {
     const fields: LaunchFormValues = form.getFieldsValue(true);
-    updateDefaults(settingsFromForm(fields));
-  }, [form, updateDefaults]);
+    saveCancelDefaults(settingsFromForm(fields));
+  }, [form, saveCancelDefaults]);
 
   /** The launch or preview options for the simple form's current values. */
   const simpleOptions = useCallback(
@@ -206,6 +232,8 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     [baseConfig],
   );
 
+  // Previewed once, when the full config opens: switching the type afterwards
+  // keeps the YAML as the user left it.
   const fetchConfig = useCallback(async () => {
     setConfig(NotLoaded);
 
@@ -220,25 +248,29 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
 
   const handleSecondary = useCallback(() => {
     if (showFullConfig) setFullConfigFormInvalid(false);
+    else fetchConfig();
     setShowFullConfig((show) => !show);
-  }, [showFullConfig]);
+  }, [fetchConfig, showFullConfig]);
+
+  const handleTypeChange = useCallback((next: NtscLaunchType) => setType(next), []);
 
   const launch = useCallback(
-    async (options: NtscLaunchOptions & { config?: RawJson }) => {
+    async ({ config, ...options }: NtscLaunchOptions & { config?: RawJson }) => {
+      const launchOptions = { ...options, config: config && configForLaunchType(config, type) };
       if (type === CommandType.Shell) {
-        const response = await launchShell(options);
-        onLaunched?.(response);
+        const response = await launchShell(launchOptions);
+        onShellLaunched?.(response);
       } else {
         // JupyterLab opens in a new tab and reports its own errors.
-        launchJupyterLab(options);
+        launchJupyterLab(launchOptions);
       }
     },
-    [onLaunched, type],
+    [onShellLaunched, type],
   );
 
   const handleSubmit = useCallback(async () => {
     const fields: LaunchFormValues = form.getFieldsValue(true);
-    updateDefaults(settingsFromForm(fields));
+    saveLaunchDefaults(settingsFromForm(fields));
     if (showFullConfig) {
       const values = await fullConfigForm.validateFields();
       const usableConfig = Loadable.isLoaded(config) ? config.data : '';
@@ -253,7 +285,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       const values = await form.validateFields();
       if (values) await launch(simpleOptions(fields));
     }
-  }, [config, fullConfigForm, form, launch, showFullConfig, simpleOptions, updateDefaults]);
+  }, [config, fullConfigForm, form, launch, saveLaunchDefaults, showFullConfig, simpleOptions]);
 
   const handleConfigChange = useCallback(
     (config: string) => {
@@ -351,13 +383,6 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
 
   useEffect(() => workspaceStore.fetch(), []);
 
-  // Fetch full config when showing advanced mode.
-  useEffect(() => {
-    if (showFullConfig) {
-      fetchConfig();
-    }
-  }, [fetchConfig, showFullConfig]);
-
   return (
     <Modal
       cancel
@@ -383,6 +408,13 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       }}
       title={copy.title}
       onClose={handleModalClose}>
+      <div data-test-component="launch-type-select">
+        <RadioGroup<NtscLaunchType>
+          options={TYPE_OPTIONS}
+          value={type}
+          onChange={handleTypeChange}
+        />
+      </div>
       {showFullConfig ? (
         <FullConfig
           config={config}
@@ -394,7 +426,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
           lockedWorkspace={!!workspace}
           note={
             type === CommandType.Shell
-              ? 'Shells have no preview of their own: this config is previewed like a JupyterLab, with the JupyterLab-only settings (idle_timeout, notebook_idle_type) removed. The master checks it again at launch.'
+              ? 'Shells have no preview of their own: this config is previewed like a JupyterLab. A shell ignores the JupyterLab settings idle_timeout and notebook_idle_type, which are kept for a switch back to JupyterLab. The master checks the config again at launch.'
               : undefined
           }
           setWorkspace={setCurrentWorkspace}
@@ -412,7 +444,6 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
           lockedWorkspace={!!workspace}
           setWorkspace={setCurrentWorkspace}
           startFromLoadingTask={startFromLoadingTask}
-          type={type}
           workspaces={workspaces}
           onStartFrom={handleStartFrom}
           onStartFromAutoSelected={handleStartFromAutoSelected}
@@ -584,7 +615,6 @@ interface LaunchFormProps {
   onStartFromLoadingTask: (taskId?: string) => void;
   setWorkspace: (arg0: Workspace | undefined) => void;
   startFromLoadingTask?: string;
-  type: NtscLaunchType;
   workspaces: Workspace[];
 }
 
@@ -601,7 +631,6 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
   onStartFromLoadingTask,
   setWorkspace,
   startFromLoadingTask,
-  type,
   workspaces,
 }: LaunchFormProps) => {
   const selectedWorkspaceId = Form.useWatch('workspaceId', form);
@@ -704,7 +733,6 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
           initialTask={initialTask}
           loadingTaskId={startFromLoadingTask}
           lockedWorkspaceId={lockedWorkspace ? currentWorkspace?.id : undefined}
-          type={type}
           onAutoSelected={onStartFromAutoSelected}
           onLoadingTaskChange={onStartFromLoadingTask}
           onResolve={onStartFrom}

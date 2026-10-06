@@ -29,6 +29,7 @@ import {
   cancelExperiment,
   deleteExperiment,
   getExperiment,
+  getExpTrials,
   killExperiment,
   openOrCreateTensorBoard,
   pauseExperiment,
@@ -37,12 +38,13 @@ import {
 import {
   BulkExperimentItem,
   ExperimentAction,
+  ExperimentSearcherName,
   FullExperimentItem,
   ProjectExperiment,
   ValueOf,
 } from 'types';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
-import { getActionsForExperiment } from 'utils/experiment';
+import { getActionsForExperiment, isSingleTrialExperiment } from 'utils/experiment';
 import { capitalize } from 'utils/string';
 import { openCommandResponse } from 'utils/wait';
 
@@ -61,6 +63,7 @@ interface Props {
 
 export const Action = {
   Copy: 'Copy Value',
+  CopyExperimentID: 'Copy Experiment ID',
   NewTab: 'Open Link in New Tab',
   NewWindow: 'Open Link in New Window',
   ...ExperimentAction,
@@ -68,22 +71,75 @@ export const Action = {
 
 type Action = ValueOf<typeof Action>;
 
-const dropdownActions = [
-  Action.SwitchPin,
+// One order wherever the menu appears, after the link and Copy Value items: viewing first, then
+// Copy Experiment ID, then changing the experiment, with Stop, Kill and Delete last. Items that do
+// not apply are left out.
+const viewActions = [Action.ViewLogs, Action.ViewResources, Action.OpenTensorBoard];
+const manageActions = [
   Action.Activate,
   Action.Pause,
+  Action.Edit,
+  Action.Move,
+  Action.HyperparameterSearch,
+  Action.RetainLogs,
   Action.Archive,
   Action.Unarchive,
   Action.Cancel,
   Action.Kill,
-  Action.Edit,
-  Action.Move,
-  Action.RetainLogs,
-  Action.OpenTensorBoard,
-  Action.ViewResources,
-  Action.HyperparameterSearch,
   Action.Delete,
 ];
+const dangerActions: Action[] = [Action.Kill, Action.Delete];
+
+type LogsTarget = { fetchTrial: true } | { fetchTrial: false; path: string };
+
+/**
+ * Where View Logs leads. Experiment list rows have numTrials and the config, but no trial IDs (the
+ * list routes leave them out for speed); only an experiment fetched on its own has trialIds.
+ * - One trial with a known ID: that trial's logs page.
+ * - A single-trial experiment (by its config, as the experiment page decides; by the searcher type
+ *   if the row has no config) whose trial ID is not known: its trial is fetched when View Logs is
+ *   chosen (see singleTrialLogsPath).
+ * - Otherwise: the Trials tab of the experiment page, to choose a trial.
+ * An experiment without trials has no logs yet, so View Logs is left out (see experimentCheckers).
+ */
+const experimentLogsTarget = (experiment: ProjectExperiment): LogsTarget => {
+  const trialId = experiment.numTrials === 1 ? experiment.trialIds?.[0] : undefined;
+  if (trialId !== undefined) {
+    return { fetchTrial: false, path: paths.trialLogs(trialId, experiment.id) };
+  }
+  if (
+    isSingleTrialExperiment(experiment) ||
+    experiment.searcherType === ExperimentSearcherName.Single
+  ) {
+    return { fetchTrial: true };
+  }
+  return { fetchTrial: false, path: `${paths.experimentDetails(experiment.id)}/trials` };
+};
+
+/**
+ * The logs page of a single-trial experiment's trial, found by fetching the experiment's first
+ * trial. With flat runs, every experiment page path redirects to the search page, which has no Logs
+ * tab, so the trial's own logs page is the one that shows them. If the trial cannot be fetched (or
+ * there is none), View Logs opens the search page with flat runs, where the runs are listed, and
+ * the experiment page's Logs tab without flat runs, as before.
+ */
+const singleTrialLogsPath = async (experimentId: number, flatRuns: boolean): Promise<string> => {
+  try {
+    const { trials } = await getExpTrials({ id: experimentId, limit: 1 });
+    const trial = trials[0];
+    if (trial) return paths.trialLogs(trial.id, experimentId);
+  } catch (e) {
+    handleError(e, {
+      level: ErrorLevel.Error,
+      publicMessage: `Failed to fetch the ${flatRuns ? 'run' : 'trial'} to show its logs.`,
+      silent: true,
+      type: ErrorType.Server,
+    });
+  }
+  return flatRuns
+    ? paths.searchDetails(experimentId)
+    : `${paths.experimentDetails(experimentId)}/logs`;
+};
 
 const ExperimentActionDropdown: React.FC<Props> = ({
   experiment,
@@ -117,6 +173,7 @@ const ExperimentActionDropdown: React.FC<Props> = ({
   const taskResourcesEnabled = useTaskResourcesEnabled();
 
   const entityName = f_flat_runs ? 'search' : 'experiment';
+  const trialsName = f_flat_runs ? 'runs' : 'trials';
 
   // this is required when experiment does not contain `config`.
   // since we removed config. See #8765 on GitHub
@@ -167,15 +224,19 @@ const ExperimentActionDropdown: React.FC<Props> = ({
     onComplete?.(ExperimentAction.RetainLogs, experiment.id);
   }, [experiment.id, onComplete]);
 
-  const menuItems = getActionsForExperiment(experiment, dropdownActions, usePermissions())
-    .filter(
-      (action) =>
-        action !== Action.SwitchPin &&
-        (action !== Action.ViewResources || taskResourcesEnabled === true),
-    )
-    .map((action) => {
-      return { danger: action === Action.Delete, key: action, label: action };
-    });
+  const permissions = usePermissions();
+  const menuItems: MenuItem[] = useMemo(() => {
+    const allowedItems = (actions: ExperimentAction[]): MenuItem[] =>
+      getActionsForExperiment(experiment, actions, permissions)
+        .filter((action) => action !== Action.ViewResources || taskResourcesEnabled === true)
+        .map((action) => ({ danger: dangerActions.includes(action), key: action, label: action }));
+    return [
+      ...allowedItems(viewActions),
+      { key: Action.CopyExperimentID, label: Action.CopyExperimentID },
+      ...allowedItems(manageActions),
+    ];
+  }, [experiment, permissions, taskResourcesEnabled]);
+  const logsTarget = useMemo(() => experimentLogsTarget(experiment), [experiment]);
 
   const cellCopyData = useMemo(() => {
     if (cell && 'displayData' in cell && isString(cell.displayData)) return cell.displayData;
@@ -220,8 +281,24 @@ const ExperimentActionDropdown: React.FC<Props> = ({
             await onComplete?.(action, experiment.id);
             break;
           case Action.Cancel:
-            await cancelExperiment({ experimentId: experiment.id });
-            await onComplete?.(action, experiment.id);
+            // Not red: Stop ends the trials gracefully, unlike Kill.
+            confirm({
+              content: `Stop ${entityName} ${experiment.id}? Its ${trialsName} are asked to save a checkpoint and exit.`,
+              okText: 'Stop',
+              onConfirm: async () => {
+                await cancelExperiment({ experimentId: experiment.id });
+                await onComplete?.(action, experiment.id);
+              },
+              onError: handleError,
+              title: `Confirm ${capitalize(entityName)} Stop`,
+            });
+            break;
+          case Action.CopyExperimentID:
+            await copyToClipboard(String(experiment.id));
+            openToast({
+              severity: 'Confirm',
+              title: 'Experiment ID has been copied to clipboard.',
+            });
             break;
           case Action.OpenTensorBoard: {
             const commandResponse = await openOrCreateTensorBoard({
@@ -229,6 +306,13 @@ const ExperimentActionDropdown: React.FC<Props> = ({
               workspaceId: experiment.workspaceId,
             });
             openCommandResponse(commandResponse);
+            break;
+          }
+          case Action.ViewLogs: {
+            const path = logsTarget.fetchTrial
+              ? await singleTrialLogsPath(experiment.id, f_flat_runs)
+              : logsTarget.path;
+            handlePath(e, { path });
             break;
           }
           case Action.ViewResources:
@@ -324,8 +408,11 @@ const ExperimentActionDropdown: React.FC<Props> = ({
     },
     [
       entityName,
+      trialsName,
       link,
       onLink,
+      logsTarget,
+      f_flat_runs,
       experiment.id,
       onComplete,
       confirm,
@@ -340,18 +427,6 @@ const ExperimentActionDropdown: React.FC<Props> = ({
       onVisibleChange,
     ],
   );
-
-  if (dropdownMenu.length === 0) {
-    return (
-      (children as JSX.Element) ?? (
-        <div className={css.base} title="No actions available">
-          <Button disabled type="text">
-            <Icon name="overflow-vertical" title="Disabled action menu" />
-          </Button>
-        </div>
-      )
-    );
-  }
 
   const shared = (
     <>

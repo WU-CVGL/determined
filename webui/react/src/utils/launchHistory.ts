@@ -5,6 +5,9 @@
  * config again at launch, and the list can be empty or missing at any time
  * (private windows, blocked or cleared storage, another browser).
  *
+ * The type of each launch is kept by storing each type's list under its own
+ * key; the picker lists both types together (listAllLaunchHistory).
+ *
  * What is stored, in window.localStorage under `u:<user id>/launch-history/<type>`:
  * the launch config the master returned (after sanitizeConfig: no entrypoint,
  * no registry_auth, no generated description, no priority), with environment
@@ -24,6 +27,7 @@ import * as io from 'io-ts';
 import { RawJson } from 'types';
 import md5 from 'utils/md5';
 import {
+  NTSC_LAUNCH_TYPES,
   NtscLaunchType,
   redactSensitiveEnv,
   sanitizeConfig,
@@ -147,3 +151,17 @@ export const clearLaunchHistory = (userId: number | undefined, type: NtscLaunchT
   if (userId === undefined) return;
   writeHistory(userId, type, []);
 };
+
+/** A history entry with the type of task it was launched as. */
+export interface TypedLaunchHistoryEntry extends LaunchHistoryEntry {
+  type: NtscLaunchType;
+}
+
+/** The history of every task type the launch form starts, newest first. */
+export const listAllLaunchHistory = (userId: number | undefined): TypedLaunchHistoryEntry[] =>
+  NTSC_LAUNCH_TYPES.flatMap((type) =>
+    listLaunchHistory(userId, type).map((entry) => ({ ...entry, type })),
+  ).sort((a, b) => b.savedAt - a.savedAt);
+
+export const clearAllLaunchHistory = (userId: number | undefined): void =>
+  NTSC_LAUNCH_TYPES.forEach((type) => clearLaunchHistory(userId, type));

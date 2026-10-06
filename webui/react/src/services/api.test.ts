@@ -66,6 +66,9 @@ describe('generic task services', () => {
       'p',
       undefined,
       undefined,
+      undefined,
+      undefined,
+      undefined,
     );
     expect(response.tasks[0].state).toBe(GenericTaskState.Active);
     expect(response.pagination.total).toBe(1);

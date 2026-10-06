@@ -15,6 +15,13 @@
    refuses an action. After an unpause fails, it offers to retry the unpause on the same task, also
    once the task is active again, so that the master can resume the rest of its tree.
 
+-  WebUI: Each row of the generic task lists has an action menu, from its actions button or a right
+   click, in the order of the other task menus: **View Logs**, **View Resources** (when task
+   resources are enabled), **Copy Task ID**, **Pause** or **Unpause**, and **Kill** in red. Pause,
+   unpause and kill are offered to the task's owner or an admin when the task's state allows them,
+   as on the detail page, and ask the detail page's confirmations; **Kill** kills the task and its
+   descendants.
+
 **Improvements**
 
 -  WebUI: Generic tasks in the job queue are shown under their name with a task icon instead of as

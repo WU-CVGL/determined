@@ -16,18 +16,39 @@ import {
   getFullPaginationConfig,
   userRenderer,
 } from 'components/Table/Table';
+import TaskActionDropdown from 'components/TaskActionDropdown';
 import { V1SchedulerTypeToLabel } from 'constants/states';
 import useFeature from 'hooks/useFeature';
+import { useLaunchAgain } from 'hooks/useLaunchAgain';
 import usePermissions from 'hooks/usePermissions';
 import usePolling from 'hooks/usePolling';
 import { useSettings } from 'hooks/useSettings';
 import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
 import { columns as columnsFunc, SCHEDULING_VAL_KEY } from 'pages/JobQueue/JobQueue.table';
 import { paths } from 'routes/utils';
-import { cancelExperiment, getJobQ, killExperiment, killGenericTask, killTask } from 'services/api';
+import {
+  cancelExperiment,
+  getJobQ,
+  getTask,
+  killExperiment,
+  killGenericTask,
+  killTask,
+} from 'services/api';
 import * as Api from 'services/api-ts-sdk';
 import userStore from 'stores/users';
-import { DetailedUser, FullJob, Job, JobAction, JobState, JobType, ResourcePool } from 'types';
+import {
+  CommandState,
+  CommandTask,
+  CommandType,
+  DetailedUser,
+  FullJob,
+  Job,
+  JobAction,
+  JobState,
+  JobType,
+  ResourcePool,
+  TaskItem,
+} from 'types';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import { canManageJob, jobTypeToCommandType, orderedSchedulers } from 'utils/job';
 import { useObservable } from 'utils/observable';
@@ -45,12 +66,34 @@ interface Props {
   selectedRp: ResourcePool;
 }
 
+/**
+ * The task of a shell, JupyterLab, command or TensorBoard job, as the task action menu takes it:
+ * the job has the task's ID, name, owner, workspace and pool, and the task's record has its state,
+ * the state of its latest allocation (the master lists the open allocation first).
+ */
+const commandTaskFromJob = (job: FullJob, type: CommandType, task: TaskItem): CommandTask => ({
+  id: job.entityId,
+  name: job.name,
+  resourcePool: job.resourcePool,
+  startTime: task.startTime,
+  state: task.allocations[0]?.state ?? CommandState.Queued,
+  type,
+  userId: job.userId ?? 0,
+  workspaceId: job.workspaceId,
+});
+
 const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
   const resourcesEnabled = useTaskResourcesEnabled();
   const { canModifyExperiment, canModifyWorkspaceNSC } = usePermissions();
   const users = Loadable.getOrElse([], useObservable(userStore.getUsers()));
   const [managingJob, setManagingJob] = useState<Job>();
   const [jobs, setJobs] = useState<Job[]>([]);
+  // The shells, JupyterLabs, commands and TensorBoards among the jobs on the page, by task ID.
+  const [commandTasks, setCommandTasks] = useState<Record<string, CommandTask>>({});
+  // The task IDs on the page, and those being looked up: one lookup per task at a time.
+  const pageTaskIds = useRef<Set<string>>(new Set());
+  const taskLookups = useRef<Set<string>>(new Set());
+  const isMounted = useRef(true);
   const [topJob, setTopJob] = useState<Job>();
   const [total, setTotal] = useState(0);
   const [canceler] = useState(new AbortController());
@@ -72,6 +115,59 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
   const settingsColumns = useMemo(() => [...settings.columns], [settings.columns]);
 
   const isJobOrderAvailable = orderedSchedulers.has(selectedRp.schedulerType);
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
+  /**
+   * The task action menu of a shell, JupyterLab, command or TensorBoard needs the task's state,
+   * which its job does not have. Each such job on the page is looked up by its task ID on every
+   * poll (unless its last lookup is still running), on its own: a failed lookup leaves the other
+   * rows alone, and the jobs table does not wait for the lookups. A job whose task has not been
+   * loaded yet, or whose lookup failed, keeps the job menu; a failed refresh keeps the copy
+   * loaded before.
+   *
+   * The lookup reads the task's record (GET /api/v1/tasks/{id}), which has no credentials. The
+   * shell and notebook APIs return the shell's private key and the notebook's token to its owner
+   * or an admin, and log an admin's read, so they are not polled for a menu.
+   */
+  const refreshCommandTasks = useCallback((jobs: Job[]) => {
+    const lookups = jobs.flatMap((job) => {
+      if (!('entityId' in job) || !job.entityId) return [];
+      const type = jobTypeToCommandType(job.type);
+      return type ? [{ job, type }] : [];
+    });
+    const ids = new Set(lookups.map(({ job }) => job.entityId));
+    pageTaskIds.current = ids;
+    // Forget the tasks of jobs that left the page.
+    setCommandTasks((prev) => {
+      const kept = _.pickBy(prev, (_task, id) => ids.has(id));
+      return _.size(kept) === _.size(prev) ? prev : kept;
+    });
+    lookups.forEach(({ job, type }) => {
+      const id = job.entityId;
+      if (taskLookups.current.has(id)) return;
+      taskLookups.current.add(id);
+      getTask({ taskId: id })
+        .then((item) => {
+          if (!item || !isMounted.current || !pageTaskIds.current.has(id)) return;
+          const task = commandTaskFromJob(job, type, item);
+          setCommandTasks((prev) => (_.isEqual(prev[id], task) ? prev : { ...prev, [id]: task }));
+        })
+        .catch((e) => {
+          handleError(e, {
+            publicSubject: 'Unable to fetch task.',
+            silent: true,
+            type: ErrorType.Api,
+          });
+        })
+        .finally(() => taskLookups.current.delete(id));
+    });
+  }, []);
 
   const fetchJobsTable = useCallback(async () => {
     if (!settings) return;
@@ -101,8 +197,10 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
 
       // Process jobs response.
       if (firstJob && !_.isEqual(firstJob, topJob)) setTopJob(firstJob);
-      setJobs(jobState ? jobs.jobs.filter((j) => j.summary.state === jobState) : jobs.jobs);
+      const newJobs = jobState ? jobs.jobs.filter((j) => j.summary.state === jobState) : jobs.jobs;
+      setJobs(newJobs);
       if (jobs.pagination.total !== undefined) setTotal(jobs.pagination.total);
+      refreshCommandTasks(newJobs);
     } catch (e) {
       if ((e as DetError)?.publicMessage === 'offset out of bounds' && settings.tableOffset !== 0) {
         updateSettings({ tableOffset: 0 });
@@ -117,19 +215,40 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
     } finally {
       setPageState((cur) => ({ ...cur, isLoading: false }));
     }
-  }, [canceler.signal, selectedRp.name, settings, jobState, topJob, updateSettings]);
+  }, [
+    canceler.signal,
+    selectedRp.name,
+    settings,
+    jobState,
+    topJob,
+    updateSettings,
+    refreshCommandTasks,
+  ]);
 
   usePolling(fetchJobsTable, { rerunOnNewFn: true });
+
+  const { launchAgain, launchAgainModals } = useLaunchAgain({ onLaunched: fetchJobsTable });
+
+  const canControlJob = useCallback(
+    (job: FullJob) =>
+      job.type === JobType.EXPERIMENT
+        ? canModifyExperiment({ userId: job.userId, workspace: { id: job.workspaceId } })
+        : canModifyWorkspaceNSC({ userId: job.userId, workspace: { id: job.workspaceId } }),
+    [canModifyExperiment, canModifyWorkspaceNSC],
+  );
+
+  // Whether to offer Manage Job, in the job menu and the task menu alike.
+  const canManage = useCallback(
+    (job: FullJob) => canControlJob(job) && canManageJob(job, selectedRp),
+    [canControlJob, selectedRp],
+  );
 
   const dropDownOnTrigger = useCallback(
     (job: Job) => {
       if (!('entityId' in job) || !job.entityId) return {};
       const triggers: Triggers<JobAction> = {};
       const commandType = jobTypeToCommandType(job.type);
-      const canControl =
-        job.type === JobType.EXPERIMENT
-          ? canModifyExperiment({ userId: job.userId, workspace: { id: job.workspaceId } })
-          : canModifyWorkspaceNSC({ userId: job.userId, workspace: { id: job.workspaceId } });
+      const canControl = canControlJob(job);
 
       if (commandType) {
         if (canControl) {
@@ -169,7 +288,7 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
         }
       }
 
-      if (canControl && canManageJob(job, selectedRp)) {
+      if (canManage(job)) {
         triggers[JobAction.ManageJob] = () => setManagingJob(job);
       }
 
@@ -184,7 +303,7 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
       });
       return triggers;
     },
-    [selectedRp, fetchJobsTable, resourcesEnabled, canModifyExperiment, canModifyWorkspaceNSC],
+    [fetchJobsTable, resourcesEnabled, canControlJob, canManage],
   );
 
   const onModalClose = useCallback(() => {
@@ -224,27 +343,48 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
               ...col,
               render: createOmitableRenderer<Job, FullJob>(
                 'entityId',
-                (_, record) => (
-                  <div>
-                    <ActionDropdown<JobAction>
-                      actionOrder={[
-                        JobAction.ManageJob,
-                        JobAction.ViewLog,
-                        JobAction.ViewResources,
-                        JobAction.Cancel,
-                        JobAction.Kill,
-                      ]}
-                      confirmations={{
-                        [JobAction.Cancel]: { cancelText: 'Abort', onError: handleError },
-                        [JobAction.Kill]: { danger: true, onError: handleError },
-                      }}
-                      id={record.name}
-                      kind="job"
-                      onError={handleError}
-                      onTrigger={dropDownOnTrigger(record)}
-                    />
-                  </div>
-                ),
+                (_, record) => {
+                  // Shells, JupyterLabs, commands and TensorBoards get the Tasks page's menu.
+                  const task = jobTypeToCommandType(record.type)
+                    ? commandTasks[record.entityId]
+                    : undefined;
+                  if (task) {
+                    return (
+                      <div>
+                        <TaskActionDropdown
+                          task={task}
+                          onComplete={fetchJobsTable}
+                          onLaunchAgain={launchAgain}
+                          onManageJob={canManage(record) ? () => setManagingJob(record) : undefined}
+                        />
+                      </div>
+                    );
+                  }
+                  // The same order as the task menu: Manage Job after the viewing actions, and
+                  // Cancel and Kill last.
+                  return (
+                    <div>
+                      <ActionDropdown<JobAction>
+                        actionOrder={[
+                          JobAction.ViewLog,
+                          JobAction.ViewResources,
+                          JobAction.ManageJob,
+                          JobAction.Cancel,
+                          JobAction.Kill,
+                        ]}
+                        confirmations={{
+                          [JobAction.Cancel]: { cancelText: 'Abort', onError: handleError },
+                          [JobAction.Kill]: { danger: true, onError: handleError },
+                        }}
+                        danger={{ [JobAction.Kill]: true }}
+                        id={record.name}
+                        kind="job"
+                        onError={handleError}
+                        onTrigger={dropDownOnTrigger(record)}
+                      />
+                    </div>
+                  );
+                },
                 null,
               ),
             };
@@ -346,6 +486,10 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
     settings.sortKey,
     settings.sortDesc,
     selectedRp.schedulerType,
+    canManage,
+    commandTasks,
+    fetchJobsTable,
+    launchAgain,
   ]);
 
   // table title using selectedRp and schedulerType from list of resource pools
@@ -397,6 +541,7 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
           onFinish={onModalClose}
         />
       )}
+      {launchAgainModals}
     </div>
   );
 };

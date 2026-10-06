@@ -1,22 +1,22 @@
 import { matchesShortcut } from 'hew/InputShortcut';
-import { useModal } from 'hew/Modal';
 import React, { useEffect } from 'react';
 
-import JupyterLabModalComponent from 'components/JupyterLabModal';
 import shortCutSettingsConfig, {
   Settings as ShortcutSettings,
 } from 'components/UserSettings.settings';
 import { keyEmitter, KeyEvent } from 'hooks/useKeyTracker';
+import { useLaunchForm } from 'hooks/useLaunchForm';
 import { useSettings } from 'hooks/useSettings';
-import { Workspace } from 'types';
+import { CommandType, Workspace } from 'types';
 
 interface Props {
   enabled?: boolean;
   workspace?: Workspace;
 }
 
+/** The JupyterLab keyboard shortcut: opens the launch form with JupyterLab selected. */
 const JupyterLabGlobal: React.FC<Props> = ({ enabled, workspace }) => {
-  const JupyterLabModal = useModal(JupyterLabModalComponent);
+  const { launchFormModals, openLaunchForm } = useLaunchForm({ workspace });
   const {
     settings: { jupyterLab: jupyterLabShortcut },
   } = useSettings<ShortcutSettings>(shortCutSettingsConfig);
@@ -24,7 +24,7 @@ const JupyterLabGlobal: React.FC<Props> = ({ enabled, workspace }) => {
   useEffect(() => {
     const keyDownListener = (e: KeyboardEvent) => {
       if (matchesShortcut(e, jupyterLabShortcut)) {
-        JupyterLabModal.open();
+        openLaunchForm(CommandType.JupyterLab);
       }
     };
 
@@ -33,9 +33,9 @@ const JupyterLabGlobal: React.FC<Props> = ({ enabled, workspace }) => {
     return () => {
       keyEmitter.off(KeyEvent.KeyDown, keyDownListener);
     };
-  }, [JupyterLabModal, jupyterLabShortcut, enabled]);
+  }, [openLaunchForm, jupyterLabShortcut, enabled]);
 
-  return <JupyterLabModal.Component workspace={workspace} />;
+  return <>{launchFormModals}</>;
 };
 
 export default JupyterLabGlobal;

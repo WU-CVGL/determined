@@ -19,6 +19,8 @@ vi.mock('services/api', () => ({
   updateUserSetting: () => Promise.resolve(),
 }));
 
+vi.mock('hooks/useTaskResourcesEnabled', () => ({ default: () => true }));
+
 vi.mock('utils/wait', () => ({
   openCommand: () => null,
   openCommandResponse: mocks.openCommandResponse,
@@ -55,7 +57,7 @@ describe('ShellButton', () => {
     expect(screen.getByRole('button', { name: 'Launch Shell' })).toBeDisabled();
   });
 
-  it('launches a shell and shows how to connect to it', async () => {
+  it('opens the launch form with Shell selected, launches a shell and shows how to connect to it', async () => {
     mocks.launchShell.mockResolvedValue({
       command: {
         id: 'shell-123',
@@ -75,16 +77,20 @@ describe('ShellButton', () => {
 
     await user.click(screen.getByRole('button', { name: 'Launch Shell' }));
     await screen.findByText('Start from');
+    expect(screen.getByRole('radio', { name: 'Shell' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'JupyterLab' })).not.toBeChecked();
     await user.click(screen.getByRole('button', { name: 'Launch' }));
 
     expect(await screen.findByText('Shell Launched')).toBeInTheDocument();
     expect(screen.getByText('det shell open shell-123')).toBeInTheDocument();
-    expect(
-      screen.getByText(/terminal in the browser is planned for a follow-up/),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Terminal' })).toBeInTheDocument();
     expect(screen.getByText('View Logs').closest('a')).toHaveAttribute(
       'href',
       expect.stringContaining('/shell/shell-123/logs'),
+    );
+    expect(screen.getByText('View Resources').closest('a')).toHaveAttribute(
+      'href',
+      expect.stringContaining('/tasks/shell-123/resources'),
     );
     expect(mocks.launchShell).toHaveBeenCalledWith(
       expect.objectContaining({ workspaceId: WORKSPACE.id }),

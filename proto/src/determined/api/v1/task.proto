@@ -8,6 +8,7 @@ import "google/protobuf/wrappers.proto";
 import "determined/checkpoint/v1/checkpoint.proto";
 import "determined/api/v1/command.proto";
 import "determined/api/v1/pagination.proto";
+import "determined/api/v1/slots_filter.proto";
 import "determined/task/v1/task.proto";
 import "determined/api/v1/trial.proto";
 import "determined/log/v1/log.proto";
@@ -386,6 +387,14 @@ message GetGenericTasksRequest {
   optional string parent_id = 7;
   // Limit tasks to these task IDs.
   repeated string task_ids = 8;
+  // Limit tasks to this project; 0 for all projects.
+  int32 project_id = 9;
+  // Limit tasks to those whose name or task ID contains this text, ignoring
+  // case.
+  string search = 10;
+  // Limit tasks by the slot count they request (resources.slots): at least
+  // one slot, or none.
+  SlotsFilter slots_filter = 11;
 }
 // Response to GetGenericTasksRequest.
 message GetGenericTasksResponse {

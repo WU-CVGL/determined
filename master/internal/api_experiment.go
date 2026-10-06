@@ -517,6 +517,10 @@ func getExperimentColumns(q *bun.SelectQuery) *bun.SelectQuery {
 		Join("LEFT JOIN runs AS r ON r.id = e.best_trial_id")
 }
 
+// experimentSlotsPerTrialExpr is the slot count each trial of an experiment asks for, with
+// the config default of 1 for a config that has none.
+const experimentSlotsPerTrialExpr = "COALESCE((e.config->'resources'->>'slots_per_trial')::int, 1)"
+
 func (a *apiServer) GetExperiments(
 	ctx context.Context, req *apiv1.GetExperimentsRequest,
 ) (*apiv1.GetExperimentsResponse, error) {
@@ -636,6 +640,21 @@ func (a *apiServer) GetExperiments(
 		}
 
 		query = query.Where("e.project_id = ?", req.ProjectId)
+	}
+	if req.WorkspaceId != 0 {
+		if _, err := a.GetWorkspaceByID(ctx, req.WorkspaceId, *curUser, false); err != nil {
+			return nil, err
+		}
+		query = query.Where("p.workspace_id = ?", req.WorkspaceId)
+	}
+	switch req.SlotsFilter {
+	case apiv1.SlotsFilter_SLOTS_FILTER_UNSPECIFIED:
+	case apiv1.SlotsFilter_SLOTS_FILTER_HAS_SLOTS:
+		query = query.Where(experimentSlotsPerTrialExpr + " > 0")
+	case apiv1.SlotsFilter_SLOTS_FILTER_ZERO_SLOTS:
+		query = query.Where(experimentSlotsPerTrialExpr + " <= 0")
+	default:
+		return nil, status.Errorf(codes.InvalidArgument, "invalid slots filter %s", req.SlotsFilter)
 	}
 	if query, err = experiment.AuthZProvider.Get().
 		FilterExperimentsQuery(ctx, *curUser, proj, query,
