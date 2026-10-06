@@ -1,4 +1,4 @@
-// Package poolaccess decides who may start new work in a resource pool (Pool ACL v1).
+// Package poolaccess decides who may start new work in a resource pool.
 //
 // A user may start new work in pool P when any of these holds:
 //   - the user passes the admin predicate (cluster CanUpdateMasterConfig; users.admin in basic
@@ -16,7 +16,8 @@
 // called only by the resource pool list (GetResourcePools). Nothing at or below
 // task.DefaultService.StartAllocation or rm.Allocate calls either. Continuations (experiment,
 // trial, command and generic task restore; trial allocations and restarts; generic task resume
-// recovery and retried resume plans) and system tasks (checkpoint GC) are exempt by design.
+// recovery and retried resume plans) are not checked, because they continue work that a pool
+// has accepted; system tasks (checkpoint GC) are not checked, because the master starts them.
 package poolaccess
 
 import (

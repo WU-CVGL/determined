@@ -1,4 +1,4 @@
--- Resource pool access (Pool ACL v1). A pool without a restriction row is public. A restricted pool
+-- Resource pool access. A pool without a restriction row is public. A restricted pool
 -- may be used by administrators and by the users granted access to it. Rows are keyed by pool name
 -- and have no foreign key to a pool, so a pool can be restricted before it exists and a re-created
 -- pool gets its records back. A grant on a public pool is stored and applies once it is restricted.

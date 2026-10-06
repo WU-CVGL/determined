@@ -85,7 +85,8 @@ checkpoints or an experiment's TensorBoard files.
 
 ## Revocation
 
-Restricting a pool or revoking a grant applies from the next request. Nothing
+Restricting a pool or revoking a grant applies from the next request; a request
+whose access was checked before the change was saved is not stopped. Nothing
 that runs is killed, paused, or moved, and workspace defaults that name the pool
 stay. A user without access can no longer submit, activate, unpause, continue,
 fork, or clone work into the pool, move a job into it, or make it a new
@@ -193,17 +194,47 @@ A TensorBoard takes an experiment's image, image pull secrets, and
 
 ## Backup, rollback, and upgrade
 
-Access is stored in two database tables. Upgrading creates them empty, so no
-pool changes who may use it until an administrator restricts it.
-Non-administrator submissions, pool lists, and changes of workspace defaults
-read the tables, and fail with `503 Service Unavailable` when the database
-cannot be read; administrators are not affected.
+Access is stored in two database tables, `resource_pool_restrictions` and
+`resource_pool_grants`. Upgrading creates them empty, so no pool changes who
+may use it until an administrator restricts it. Non-administrator submissions,
+pool lists, and changes of workspace defaults read the tables, and fail with
+`503 Service Unavailable` when the database cannot be read; administrators are
+not affected.
+
+Pool access relies on the TensorBoard rule in "Running another user's code": a
+grant makes a user's session worth more, so a TensorBoard must not run another
+user's image with it. Every master with pool access has that rule.
 
 Restoring a database dump taken before the tables existed, or rolling back to a
-master without pool access, makes every pool public. Rolling forward to a master
-with pool access restores the restrictions as they were in the database. Save
-the output of `det resource-pool access list --json` with each database dump,
-and restrict and grant again from it after such a restore.
+master without pool access, which ignores the tables, makes every pool public.
+Rolling forward to a master with pool access restores the restrictions as they
+were in the database. Save the output of
+`det resource-pool access list --json` with each database dump, and restrict
+and grant again from it after such a restore.
+
+## Error messages
+
+A request that access refuses, or cannot decide, fails with one of these
+messages. The REST API returns the HTTP status in parentheses.
+
+- `PermissionDenied` (`403`): `user "<user>" may not use resource pool
+  "<pool>": the pool is restricted; choose another pool or ask an
+  administrator for access (if resources.resource_pool was not set, "<pool>" is
+  the default pool for this workspace or the cluster)`.
+- `Unavailable` (`503`): `could not check access to resource pool "<pool>":
+  <error>; try again`, and for the pool list `could not check access to
+  resource pools: <error>; try again`. The access records could not be read.
+- `InvalidArgument` (`400`): `moving a job to another resource pool requires
+  the target pool name`, for a job-queue move that names no pool.
+- `Internal` (`500`): `resource pool access checked before the pool was
+  resolved`. This is a bug in the master.
+- `PermissionDenied` (`403`), with basic authorization, when a user who is
+  neither the workspace's owner nor an administrator changes its default pools:
+  `only admins may set other user's workspaces default resource pools`.
+
+Activating experiments in bulk and resuming runs report a refusal in the result
+of each refused experiment and activate the others. The admin API's errors are
+listed with its endpoints below.
 
 ## REST API
 
@@ -298,7 +329,8 @@ over 64 KiB `413`.
 
 ## CLI
 
-`det resource-pool access`, or `det rp access`, manages access:
+`det resource-pool access`, or `det rp access`, manages access. The WebUI has
+no page for it.
 
 ```sh
 det resource-pool access list
