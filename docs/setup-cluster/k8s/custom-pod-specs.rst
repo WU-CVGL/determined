@@ -284,8 +284,9 @@ merge, so with only a ``gpuPodSpec`` set, the task uses that one. By providing a
 this field, administrators can tailor the garbage collection settings to the specific GC needs, for
 example to mount the volume of ``directory`` checkpoint storage that experiments mount with their
 own pod specs. The master starts a CheckpointGC task for such storage only if this pod spec mounts
-the same ``persistentVolumeClaim`` or ``hostPath`` volume, with the same ``subPath``, at the same
-place in the ``determined-container``.
+the same ``persistentVolumeClaim``, ``hostPath`` or ``nfs`` volume, with the same ``subPath``, at
+the same place in the ``determined-container``. Storage on other kinds of volumes, except
+``emptyDir``, is never collected.
 
 Example of configuring custom CheckpointGC pod specs in ``values.yaml``:
 

@@ -17,6 +17,7 @@
    or proxies that only the experiment provided belong in ``checkpoint_storage`` or
    ``task_container_defaults``. ``directory`` storage that the trials had on a mount is collected
    only if the GC task has the same storage there: a task container default bind mount of the same
-   host path, or a ``checkpoint_gc_pod_spec`` volume of the same claim or host path and ``subPath``.
-   Otherwise deleting the experiment ends in ``DELETE_FAILED`` (retryable), and its checkpoints are
-   kept, also beyond the ``save_*`` settings, with the reason in the master log.
+   host path, or a ``checkpoint_gc_pod_spec`` volume of the same claim, host path or NFS export and
+   ``subPath``. Otherwise deleting the experiment ends in ``DELETE_FAILED``, retryable once that
+   mount is set (never for other volume types), and its checkpoints are kept, also beyond the
+   ``save_*`` settings, with the reason in the master log.
