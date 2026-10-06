@@ -218,6 +218,14 @@ func TestTaskResourceGPUIndexes(t *testing.T) {
 			sets: []taskResourceGPUSet{gpuSet("t.1", "c1", 2, "GPU-b", "GPU-a")},
 			want: map[string]int{},
 		},
+		{
+			// Every GPU of the list is reported on node-b, the last node GPU-a is seen on.
+			name: "a one-GPU list reported on two nodes is not numbered",
+			series: concatSeries(gpuSeries("t.1", "node-a", "GPU-a"),
+				gpuSeries("t.1", "node-b", "GPU-a")),
+			sets: []taskResourceGPUSet{gpuSet("t.1", "c1", 1, "GPU-a")},
+			want: map[string]int{},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, gpuIndexes(taskResourceGPUIndexes(tc.series, tc.sets)))
