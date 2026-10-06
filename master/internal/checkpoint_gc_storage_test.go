@@ -155,6 +155,17 @@ func TestCheckpointGCSeesStorage(t *testing.T) {
 		return tcd
 	}
 	dataCkpts := pod(volumeMount{source: hostPath("/data/ckpts"), mountPath: "/mnt/ckpts"})
+	// A gpu_pod_spec with that volume on node-a, and a cpu_pod_spec on this node, whose hostname is
+	// merged over the gpu_pod_spec's. The cpu_pod_spec lists determined-container, else the strategic
+	// merge would drop the gpu_pod_spec's containers and their volumeMounts.
+	cpuOverGPUData := func(node string) model.TaskContainerDefaultsConfig {
+		cpu := &k8sV1.Pod{Spec: k8sV1.PodSpec{
+			Containers: []k8sV1.Container{{Name: model.DeterminedK8ContainerName}},
+		}}
+		return model.TaskContainerDefaultsConfig{
+			GPUPodSpec: on("node-a", dataCkpts), CPUPodSpec: on(node, cpu),
+		}
+	}
 
 	for _, tc := range []struct {
 		name    string
@@ -496,6 +507,18 @@ func TestCheckpointGCSeesStorage(t *testing.T) {
 			"a trial hostPath volume by hostname affinity, the same path by the same affinity",
 			dir("/mnt/ckpts"), exp(onAffinity(dataCkpts, "node-a")), gcPod(onAffinity(dataCkpts, "node-a")),
 			true,
+		},
+		{
+			"a trial hostPath volume on a node, the same path on the same node in gpu_pod_spec",
+			dir("/mnt/ckpts"), exp(on("node-a", dataCkpts)), gpuPod(on("node-a", dataCkpts)), true,
+		},
+		{
+			"a trial hostPath volume on a node, the same path in gpu_pod_spec, cpu_pod_spec on the same node",
+			dir("/mnt/ckpts"), exp(on("node-a", dataCkpts)), cpuOverGPUData("node-a"), true,
+		},
+		{
+			"a trial hostPath volume on a node, the same path in gpu_pod_spec, cpu_pod_spec on another node",
+			dir("/mnt/ckpts"), exp(on("node-a", dataCkpts)), cpuOverGPUData("node-b"), false,
 		},
 		{
 			"a trial hostPath volume not pinned, the same path on a node", dir("/mnt/ckpts"),
