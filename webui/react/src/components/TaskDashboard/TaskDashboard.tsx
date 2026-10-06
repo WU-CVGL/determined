@@ -251,14 +251,22 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
   }, [isLoading, settings.type, updateSettings, urlKinds]);
 
   // Stored columns and widths, also from before the Slots column, get one width for each column.
+  const layoutUpdate = useMemo(
+    () =>
+      isLoading
+        ? undefined
+        : normalizedLayout({ columns: settings.columns, columnWidths: settings.columnWidths }),
+    [isLoading, settings.columns, settings.columnWidths],
+  );
   useEffect(() => {
-    if (isLoading) return;
-    const update = normalizedLayout({
-      columns: settings.columns,
-      columnWidths: settings.columnWidths,
-    });
-    if (update) updateSettings(update);
-  }, [isLoading, settings.columns, settings.columnWidths, updateSettings]);
+    if (layoutUpdate) updateSettings(layoutUpdate);
+  }, [layoutUpdate, updateSettings]);
+  /*
+   * The table takes the widths it mounts with, and later ones only when their count changes. It
+   * mounts again once the stored layout has loaded and has one width for each column, so that it
+   * shows (and a resize keeps) the stored widths, not the default ones.
+   */
+  const layoutReady = !isLoading && !layoutUpdate;
 
   const selectedKinds = useMemo(
     () => (settings.type ?? []).filter((kind) => pageKinds.includes(kind)),
@@ -830,6 +838,7 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
             ContextMenu={RowContextMenu}
             dataSource={page?.rows}
             defaultColumns={DEFAULT_COLUMNS}
+            key={layoutReady ? 'layout-ready' : 'layout-pending'}
             loading={page === undefined}
             pagination={{
               ...getFullPaginationConfig({ limit, offset }, page?.total ?? 0),

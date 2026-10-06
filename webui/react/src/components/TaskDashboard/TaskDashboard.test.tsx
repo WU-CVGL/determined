@@ -21,6 +21,7 @@ import {
   killGenericTask,
   killTask,
   unpauseGenericTask,
+  updateUserSetting,
 } from 'services/api';
 import { V1SlotsFilter } from 'services/api-ts-sdk';
 import authStore from 'stores/auth';
@@ -149,7 +150,7 @@ vi.mock('services/api', () => ({
   pauseGenericTask: vi.fn(() => Promise.resolve()),
   resetUserSetting: () => Promise.resolve(),
   unpauseGenericTask: vi.fn(() => Promise.resolve()),
-  updateUserSetting: () => Promise.resolve(),
+  updateUserSetting: vi.fn(() => Promise.resolve()),
 }));
 
 // Every permission granted, unless a test limits it: the menus' own rules are tested with each menu.
@@ -253,6 +254,16 @@ const stored = (storagePath = JOBS_SETTINGS): Record<string, unknown> =>
     unknown
   >;
 
+/** The last value of this Jobs page setting that the page sent to the master. */
+const saved = (key: string): unknown => {
+  const value = vi
+    .mocked(updateUserSetting)
+    .mock.calls.flatMap(([params]) => params.settings ?? [])
+    .filter((setting) => setting.storagePath === JOBS_SETTINGS && setting.key === key)
+    .at(-1)?.value;
+  return value === undefined ? undefined : JSON.parse(value);
+};
+
 /* The columns and widths the Jobs page stored before its Slots column. */
 const OLD_COLUMNS = [
   'kind',
@@ -266,6 +277,43 @@ const OLD_COLUMNS = [
   'endTime',
 ];
 const OLD_WIDTHS = [301, 302, 303, 304, 305, 306, 307, 308, 309];
+
+/* The same with the Slots column, as this version stores them. */
+const NEW_COLUMNS = [...OLD_COLUMNS.slice(0, 7), 'slots', ...OLD_COLUMNS.slice(7)];
+const NEW_WIDTHS = [...OLD_WIDTHS.slice(0, 7), 72, ...OLD_WIDTHS.slice(7)];
+
+/* The width of each stored column: the table binds the stored widths to the columns by place. */
+const storedWidths = () => {
+  const { columns, columnWidths } = stored() as { columns: string[]; columnWidths: number[] };
+  expect(columnWidths).toHaveLength(columns.length);
+  return Object.fromEntries(columns.map((col, i) => [col, columnWidths[i]]));
+};
+
+/** The width of each column the table shows, by its title. */
+const shownWidths = () => {
+  const table = screen.getAllByRole('table')[0];
+  const titles = within(table)
+    .getAllByRole('columnheader')
+    .map((th) => th.textContent?.trim());
+  const widths = [...table.querySelectorAll('colgroup > col')].map(
+    (col) => (col as HTMLElement).style.width,
+  );
+  expect(widths).toHaveLength(titles.length);
+  return Object.fromEntries(titles.map((title, i) => [title, widths[i]]));
+};
+
+/** Drags the right edge of the column with this title to x, as a user resizes it. */
+const resize = async (title: string, x: number) => {
+  const header = screen
+    .getAllByRole('columnheader')
+    .find((th) => th.textContent?.trim() === title) as HTMLElement;
+  const edge = header.querySelector('[class*="columnResizeHandle"]') as HTMLElement;
+  fireEvent.mouseDown(edge, { button: 0, clientX: 0 });
+  fireEvent.mouseMove(document, { clientX: x });
+  // The table takes a new width after a short throttle.
+  await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
+  fireEvent.mouseUp(document, { clientX: x });
+};
 
 const user = userEvent.setup();
 
@@ -525,26 +573,6 @@ describe('TaskDashboard', () => {
   });
 
   describe('with widths stored before the Slots column', () => {
-    /* The width of each stored column: the table binds the stored widths to the columns by place. */
-    const storedWidths = () => {
-      const { columns, columnWidths } = stored() as { columns: string[]; columnWidths: number[] };
-      expect(columnWidths).toHaveLength(columns.length);
-      return Object.fromEntries(columns.map((col, i) => [col, columnWidths[i]]));
-    };
-
-    /** The width of each column the table shows, by its title. */
-    const shownWidths = () => {
-      const table = screen.getAllByRole('table')[0];
-      const titles = within(table)
-        .getAllByRole('columnheader')
-        .map((th) => th.textContent?.trim());
-      const widths = [...table.querySelectorAll('colgroup > col')].map(
-        (col) => (col as HTMLElement).style.width,
-      );
-      expect(widths).toHaveLength(titles.length);
-      return Object.fromEntries(titles.map((title, i) => [title, widths[i]]));
-    };
-
     it.each([
       ['only the widths, as a resize stores them', { columnWidths: OLD_WIDTHS }],
       ['the columns and their widths', { columns: OLD_COLUMNS, columnWidths: OLD_WIDTHS }],
@@ -580,6 +608,62 @@ describe('TaskDashboard', () => {
       },
       30_000,
     );
+
+    it('gives columns stored in another order without their widths their own widths', async () => {
+      const reordered = [
+        'name',
+        'kind',
+        ...OLD_COLUMNS.filter((c) => !['name', 'kind'].includes(c)),
+      ];
+      storeBeforeLoad({ columns: reordered });
+      setup();
+      expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+
+      await waitFor(() => expect(stored().columns).toContain('slots'), AFTER_LOAD);
+      expect(storedWidths()).toMatchObject({ id: 100, kind: 64, name: 220, slots: 72 });
+      // The widths keep their count, which the table alone would not take up.
+      await waitFor(() => expect(shownWidths()).toMatchObject({ Kind: '64px' }), AFTER_LOAD);
+      expect(shownWidths()).toMatchObject({ Name: '220px', Slots: '72px', State: '120px' });
+    }, 30_000);
+  });
+
+  describe('with the columns and widths of this version stored', () => {
+    it.each([
+      ['the columns and their widths', { columns: NEW_COLUMNS, columnWidths: NEW_WIDTHS }],
+      ['only the widths, as a resize stores them', { columnWidths: NEW_WIDTHS }],
+    ])(
+      'shows each column at its stored width on a first load when they were %s',
+      async (_, settings) => {
+        storeBeforeLoad(settings);
+        setup();
+        expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+
+        // The table mounted while the settings loaded; it mounts again once they have.
+        await waitFor(() => expect(shownWidths()).toMatchObject({ Kind: '301px' }), AFTER_LOAD);
+        expect(shownWidths()).toMatchObject({
+          Name: '303px',
+          Slots: '72px',
+          Started: '308px',
+          State: '304px',
+        });
+      },
+      30_000,
+    );
+
+    it('stores a resize after a first load', async () => {
+      storeBeforeLoad({ columns: NEW_COLUMNS, columnWidths: NEW_WIDTHS });
+      setup();
+      expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+      await waitFor(() => expect(shownWidths()).toMatchObject({ Kind: '301px' }), AFTER_LOAD);
+
+      await resize('Name', 450);
+      // The resize changes the table's own widths in place, not the stored ones it started from,
+      // so the settings see a change and store it.
+      await waitFor(() =>
+        expect(saved('columnWidths')).toEqual([301, 302, 450, 304, 305, 306, 307, 72, 308, 309]),
+      );
+      expect(shownWidths()).toMatchObject({ Kind: '301px', Name: '450px' });
+    }, 30_000);
   });
 
   it('keeps the filters of the Jobs page and of the tasks-only view apart', async () => {

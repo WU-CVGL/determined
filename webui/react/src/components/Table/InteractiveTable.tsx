@@ -395,7 +395,8 @@ const InteractiveTable = <
   );
 
   const [widthData, setWidthData] = useState(() => {
-    const widths = settings.columnWidths || [];
+    // A copy: a resize changes these widths in place, and the settings' own must stay as stored.
+    const widths = [...(settings.columnWidths || [])];
     return {
       dropLeftStyles:
         widths.map((width, idx) => ({
@@ -470,7 +471,7 @@ const InteractiveTable = <
       newSettings.columnWidths = reorderedWidths;
 
       updateSettings(newSettings);
-      setWidthData({ ...widthData, widths: reorderedWidths });
+      setWidthData({ ...widthData, widths: [...reorderedWidths] });
     },
     [settingsColumns, settings.columnWidths, widthData, updateSettings],
   );
