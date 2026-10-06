@@ -66,6 +66,22 @@ type taskResourceResponse struct {
 	Warnings []taskResourceWarning `json:"warnings"`
 }
 
+// taskResourceAllocation is one allocation of a task with the times its resources were held.
+// ContainerStart is when the allocation got its resources: the end of its first QUEUED
+// task_stats row (a restored allocation records another QUEUED row when the master restarts),
+// else allocations.start_time (set when the first container starts pulling or running). It is
+// null while the allocation is still queued. Image pulling comes after it on purpose, since the
+// devices are held while pulling. End is null while the allocation has not been released.
+type taskResourceAllocation struct {
+	AllocationID   string     `json:"allocation_id" bun:"allocation_id"`
+	ContainerStart *time.Time `json:"container_start" bun:"container_start"`
+	End            *time.Time `json:"end" bun:"end_time"`
+}
+
+type taskResourceAllocationsResponse struct {
+	Allocations []taskResourceAllocation `json:"allocations"`
+}
+
 type taskResourceRange struct {
 	Start int64
 	End   int64
@@ -93,6 +109,14 @@ func (m *Master) getTaskResources(c echo.Context) error {
 	return serveTaskResources(c, conf, m.taskResourceDependencies())
 }
 
+func (m *Master) getTaskResourceAllocations(c echo.Context) error {
+	c.Response().Header().Set("Cache-Control", "no-store")
+	if !m.config.Integrations.TaskResources.Enabled() {
+		return echo.NewHTTPError(http.StatusNotFound, "task resources are disabled")
+	}
+	return serveTaskResourceAllocations(c, m.taskResourceDependencies())
+}
+
 func (m *Master) taskResourceDependencies() taskResourceDependencies {
 	conf := m.config.Integrations.TaskResources
 	return taskResourceDependencies{
@@ -110,6 +134,7 @@ func (m *Master) taskResourceDependencies() taskResourceDependencies {
 		query: func(ctx context.Context, expr string, r taskResourceRange) ([]prometheusTaskSeries, error) {
 			return queryTaskPrometheus(ctx, conf.PrometheusURL, expr, r)
 		},
+		allocations: queryTaskResourceAllocations,
 	}
 }
 
@@ -117,6 +142,47 @@ type taskResourceDependencies struct {
 	authorize         func(context.Context, model.User, string) error
 	allocationBelongs func(context.Context, string, string) (bool, error)
 	query             func(context.Context, string, taskResourceRange) ([]prometheusTaskSeries, error)
+	allocations       func(context.Context, string) ([]taskResourceAllocation, error)
+}
+
+// queryTaskResourceAllocations reads a task's allocations and their container start in one query.
+func queryTaskResourceAllocations(ctx context.Context, taskID string) ([]taskResourceAllocation, error) {
+	allocations := []taskResourceAllocation{}
+	err := db.Bun().NewRaw(`
+SELECT a.allocation_id, COALESCE(q.queued_end, a.start_time) AS container_start, a.end_time
+FROM allocations a
+LEFT JOIN (
+	SELECT ts.allocation_id, min(ts.end_time) AS queued_end
+	FROM task_stats ts
+	JOIN allocations qa ON qa.allocation_id = ts.allocation_id
+	WHERE qa.task_id = ? AND ts.event_type = 'QUEUED'
+	GROUP BY ts.allocation_id
+) q ON q.allocation_id = a.allocation_id
+WHERE a.task_id = ?
+ORDER BY container_start ASC NULLS LAST, a.allocation_id ASC`, taskID, taskID).Scan(ctx, &allocations)
+	if err != nil {
+		return nil, fmt.Errorf("reading task resource allocations: %w", err)
+	}
+	return allocations, nil
+}
+
+// serveTaskResourceAllocations lists a task's allocations for the resources view. Like the
+// resources endpoint it authorizes the task before reading anything else.
+func serveTaskResourceAllocations(c echo.Context, deps taskResourceDependencies) error {
+	user := c.(*detcontext.DetContext).MustGetUser()
+	ctx := c.Request().Context()
+	taskID := c.Param("task_id")
+	if err := authorizeTaskResources(ctx, user, taskID, deps); err != nil {
+		return err
+	}
+	if len(c.QueryParams()) > 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "unsupported or repeated query parameter")
+	}
+	allocations, err := deps.allocations(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, taskResourceAllocationsResponse{Allocations: allocations})
 }
 
 func serveTaskResources(c echo.Context, conf config.TaskResourcesConfig, deps taskResourceDependencies) error {
@@ -134,14 +200,8 @@ func serveTaskResources(c echo.Context, conf config.TaskResourcesConfig, deps ta
 func collectTaskResources(ctx context.Context, user model.User, taskID string, params url.Values,
 	conf config.TaskResourcesConfig, deps taskResourceDependencies,
 ) (taskResourceResponse, error) {
-	if taskID == "" {
-		return taskResourceResponse{}, echo.NewHTTPError(http.StatusBadRequest, "task_id is required")
-	}
 	// Authorize before inspecting query parameters, allocation ownership, or Prometheus.
-	if err := deps.authorize(ctx, user, taskID); err != nil {
-		if code := grpcTaskResourcesAuthCode(err); code != 0 {
-			return taskResourceResponse{}, echo.NewHTTPError(code, api.NotFoundErrMsg("task", taskID))
-		}
+	if err := authorizeTaskResources(ctx, user, taskID, deps); err != nil {
 		return taskResourceResponse{}, err
 	}
 	r, allocationID, err := parseTaskResourceRange(params, time.Now())
@@ -196,6 +256,21 @@ func collectTaskResources(ctx context.Context, user model.User, taskID string, p
 	})
 	resp.Warnings = taskResourceWarnings(resp.Series)
 	return resp, nil
+}
+
+func authorizeTaskResources(ctx context.Context, user model.User, taskID string,
+	deps taskResourceDependencies,
+) error {
+	if taskID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "task_id is required")
+	}
+	if err := deps.authorize(ctx, user, taskID); err != nil {
+		if code := grpcTaskResourcesAuthCode(err); code != 0 {
+			return echo.NewHTTPError(code, api.NotFoundErrMsg("task", taskID))
+		}
+		return err
+	}
+	return nil
 }
 
 func grpcTaskResourcesAuthCode(err error) int {

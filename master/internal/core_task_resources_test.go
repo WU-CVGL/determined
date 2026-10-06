@@ -147,3 +147,113 @@ func TestTaskResourcesResponseKeepsOnlyAllowlistedLabels(t *testing.T) {
 	require.Equal(t, "node-a", response.Series[0].Labels.Node)
 	require.False(t, strings.Contains(rec.Body.String(), "prometheus_url"))
 }
+
+func taskResourceAllocationsContext(t *testing.T, query string) (*detcontext.DetContext, *httptest.ResponseRecorder) {
+	t.Helper()
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	ctx := &detcontext.DetContext{Context: e.NewContext(
+		httptest.NewRequest(http.MethodGet, "/ui/task-resources/task.1/allocations?"+query, nil), rec,
+	)}
+	ctx.SetParamNames("task_id")
+	ctx.SetParamValues("task.1")
+	ctx.SetUser(model.User{})
+	return ctx, rec
+}
+
+func TestTaskResourceAllocationsAuthorizeBeforeReading(t *testing.T) {
+	for _, authErr := range []error{
+		status.Error(codes.PermissionDenied, "secret permission"),
+		status.Error(codes.NotFound, "secret missing"),
+	} {
+		// Even a malformed query is reported as a missing task when the task is not visible.
+		c, _ := taskResourceAllocationsContext(t, "unexpected=1")
+		read := false
+		err := serveTaskResourceAllocations(c, taskResourceDependencies{
+			authorize: func(context.Context, model.User, string) error { return authErr },
+			allocations: func(context.Context, string) ([]taskResourceAllocation, error) {
+				read = true
+				return nil, nil
+			},
+		})
+		require.False(t, read)
+		he, ok := err.(*echo.HTTPError)
+		require.True(t, ok)
+		require.Equal(t, http.StatusNotFound, he.Code)
+		require.NotContains(t, fmt.Sprint(he.Message), "secret")
+	}
+
+	c, _ := taskResourceAllocationsContext(t, "unexpected=1")
+	read := false
+	err := serveTaskResourceAllocations(c, taskResourceDependencies{
+		authorize: func(context.Context, model.User, string) error { return nil },
+		allocations: func(context.Context, string) ([]taskResourceAllocation, error) {
+			read = true
+			return nil, nil
+		},
+	})
+	require.False(t, read)
+	he, ok := err.(*echo.HTTPError)
+	require.True(t, ok)
+	require.Equal(t, http.StatusBadRequest, he.Code)
+}
+
+func TestTaskResourceAllocationsResponseShape(t *testing.T) {
+	c, rec := taskResourceAllocationsContext(t, "")
+	started := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
+	ended := started.Add(time.Hour)
+	err := serveTaskResourceAllocations(c, taskResourceDependencies{
+		authorize: func(context.Context, model.User, string) error { return nil },
+		allocations: func(_ context.Context, taskID string) ([]taskResourceAllocation, error) {
+			require.Equal(t, "task.1", taskID)
+			return []taskResourceAllocation{
+				{AllocationID: "task.1.1", ContainerStart: &started, End: &ended},
+				{AllocationID: "task.1.2", ContainerStart: &ended},
+				{AllocationID: "task.1.3"},
+			}, nil
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.JSONEq(t, `{"allocations":[
+		{"allocation_id":"task.1.1","container_start":"2026-10-01T08:00:00Z","end":"2026-10-01T09:00:00Z"},
+		{"allocation_id":"task.1.2","container_start":"2026-10-01T09:00:00Z","end":null},
+		{"allocation_id":"task.1.3","container_start":null,"end":null}
+	]}`, rec.Body.String())
+}
+
+// The WebUI derives the step as max(15, ceil(span / 1439)) for every span up to 7 days.
+func TestTaskResourcesUIStepFitsEverySpanUpToSevenDays(t *testing.T) {
+	end := int64(2000000000)
+	now := time.Unix(end, 0)
+	maxSpan := int64(taskResourceMaxRange.Seconds())
+	uiStep := func(span int64) int64 {
+		step := (span + 1438) / 1439
+		if step < taskResourceMinStep {
+			return taskResourceMinStep
+		}
+		return step
+	}
+	for span := int64(1); span <= maxSpan; span++ {
+		step := uiStep(span)
+		_, _, err := parseTaskResourceRange(url.Values{
+			"start": {strconv.FormatInt(end-span, 10)},
+			"end":   {strconv.FormatInt(end, 10)},
+			"step":  {strconv.FormatInt(step, 10)},
+		}, now)
+		require.NoError(t, err, "span %d step %d", span, step)
+	}
+	for _, tc := range []struct{ span, step int64 }{
+		{maxSpan + 1, uiStep(maxSpan)}, // one second past the 7-day limit
+		{maxSpan, uiStep(maxSpan) - 1}, // 1,441 points
+		{1439 * 15, 14},                // below the minimum step
+		{1440 * 15, 15},                // 1,441 points at the minimum step
+	} {
+		_, _, err := parseTaskResourceRange(url.Values{
+			"start": {strconv.FormatInt(end-tc.span, 10)},
+			"end":   {strconv.FormatInt(end, 10)},
+			"step":  {strconv.FormatInt(tc.step, 10)},
+		}, now)
+		require.Error(t, err, "span %d step %d", tc.span, tc.step)
+	}
+}

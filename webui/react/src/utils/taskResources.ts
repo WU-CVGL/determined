@@ -28,12 +28,92 @@ export interface ResourceRange {
   step: number;
 }
 
-export const resourceRange = (start: number, end: number): ResourceRange => ({
-  end: Math.floor(end),
-  start: Math.floor(start),
+// The longest range the master answers in one query, in seconds.
+export const RESOURCE_MAX_SPAN = 7 * 86400;
+
+export const resourceRange = (start: number, end: number): ResourceRange => {
+  const from = Math.floor(start);
+  const to = Math.floor(end);
   // Include both endpoints within the backend's 1,440-point limit.
-  step: Math.max(15, Math.ceil((end - start) / 1439)),
-});
+  return { end: to, start: from, step: Math.max(15, Math.ceil((to - from) / 1439)) };
+};
+
+export interface ResourceAllocation {
+  allocationId: string;
+  // When the allocation got its resources, in Unix seconds; absent while it is queued.
+  containerStart?: number;
+  // When the allocation released its resources; absent while it still holds them.
+  end?: number;
+}
+
+const unixSeconds = (value: unknown): number | undefined => {
+  if (typeof value !== 'string') return undefined;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : undefined;
+};
+
+// Anything that is not an allocation list, such as an older master's answer, yields undefined.
+export const parseResourceAllocations = (data: unknown): ResourceAllocation[] | undefined => {
+  const items = (data as { allocations?: unknown } | null)?.allocations;
+  if (!Array.isArray(items)) return undefined;
+  const allocations: ResourceAllocation[] = [];
+  for (const item of items as {
+    allocation_id?: unknown;
+    container_start?: unknown;
+    end?: unknown;
+  }[]) {
+    if (typeof item?.allocation_id !== 'string') return undefined;
+    allocations.push({
+      allocationId: item.allocation_id,
+      containerStart: unixSeconds(item.container_start),
+      end: unixSeconds(item.end),
+    });
+  }
+  return allocations;
+};
+
+export interface SinceStartBounds {
+  start: number;
+  end?: number;
+  // No container start is recorded for the selection, so the range begins at the task start.
+  noContainerStart?: boolean;
+}
+
+// "Since start" covers the earliest container start of all allocations, or one allocation from
+// its container start to its end. Without an allocation list it begins at the task start.
+export const sinceStartBounds = (
+  allocations: ResourceAllocation[] | null,
+  allocationId: string,
+  taskStart: number,
+): SinceStartBounds => {
+  if (!allocations) return { start: taskStart };
+  if (!allocationId) {
+    const starts = allocations
+      .map((item) => item.containerStart)
+      .filter((start): start is number => start !== undefined);
+    return starts.length
+      ? { start: Math.min(...starts) }
+      : { noContainerStart: true, start: taskStart };
+  }
+  const item = allocations.find((candidate) => candidate.allocationId === allocationId);
+  if (!item) return { start: taskStart };
+  if (item.containerStart === undefined) return { noContainerStart: true, start: taskStart };
+  return { end: item.end, start: item.containerStart };
+};
+
+// Limits a "Since start" range to the most recent RESOURCE_MAX_SPAN seconds before `now`.
+export const sinceStartWindow = (
+  bounds: SinceStartBounds,
+  now: number,
+): { start: number; end: number; clamped: boolean } => {
+  const end = Math.floor(bounds.end === undefined ? now : Math.min(bounds.end, now));
+  const earliest = end - RESOURCE_MAX_SPAN;
+  return {
+    clamped: bounds.start < earliest,
+    end,
+    start: Math.min(Math.max(Math.floor(bounds.start), earliest), end - 1),
+  };
+};
 
 // A full sampling grid preserves missing scrapes as nulls. Never interpolate
 // absent samples or convert them to zero, including between allocation runs.

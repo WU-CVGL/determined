@@ -11,9 +11,13 @@ import TaskResourceChart from 'components/TaskResourceChart';
 import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
 import { serverAddress } from 'routes/utils';
 import {
+  parseResourceAllocations,
   RESOURCE_METRICS,
+  ResourceAllocation,
   ResourceRange,
   resourceRange,
+  sinceStartBounds,
+  sinceStartWindow,
   TaskResourcesResponse,
 } from 'utils/taskResources';
 
@@ -26,7 +30,11 @@ interface Props {
   initialAllocationId?: string;
 }
 
+// From when the container got its resources; Custom range is 0 and the others count seconds.
+const SINCE_START = -1;
+
 const PERIODS = [
+  { label: 'Since start', value: SINCE_START },
   { label: 'Last 15 minutes', value: 900 },
   { label: 'Last hour', value: 3600 },
   { label: 'Last 6 hours', value: 21600 },
@@ -50,7 +58,7 @@ const TaskResourcesPanel: React.FC<Props> = ({
   initialAllocationId,
 }) => {
   const enabled = useTaskResourcesEnabled();
-  const [period, setPeriod] = useState(3600);
+  const [period, setPeriod] = useState(SINCE_START);
   const [allocation, setAllocation] = useState(initialAllocationId || '');
   const [refresh, setRefresh] = useState(Date.now);
   const [customStart, setCustomStart] = useState(() => dayjs().subtract(1, 'hour'));
@@ -63,24 +71,72 @@ const TaskResourcesPanel: React.FC<Props> = ({
   }>();
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(false);
+  // An unavailable list (null) falls back to the task start.
+  const [allocationList, setAllocationList] = useState<{
+    taskId: string;
+    items: ResourceAllocation[] | null;
+  }>();
   const customValid =
     customEnd.isAfter(customStart) &&
     customEnd.diff(customStart, 'second') <= 604800 &&
     customEnd.valueOf() <= Date.now();
 
-  const range = useMemo(() => {
-    if (!period) return appliedCustom;
+  const taskStart = Math.floor(Date.parse(startTime) / 1000);
+  const allocations = allocationList?.taskId === taskId ? allocationList.items : undefined;
+  const bounds =
+    allocations === undefined ? undefined : sinceStartBounds(allocations, allocation, taskStart);
+  // Primitive bounds keep the range stable when a refreshed list has not changed.
+  const boundStart = bounds?.start;
+  const boundEnd = bounds?.end;
+
+  const timeWindow = useMemo(() => {
+    if (!period) return appliedCustom && { clamped: false, range: appliedCustom };
     const end = Math.floor(Math.min(endTime ? Date.parse(endTime) : refresh, refresh) / 1000);
-    const start = Math.max(Math.floor(Date.parse(startTime) / 1000), end - period);
+    if (period === SINCE_START) {
+      if (boundStart === undefined) return undefined;
+      const since = sinceStartWindow({ end: boundEnd, start: boundStart }, end);
+      if (!Number.isFinite(since.start) || !Number.isFinite(since.end)) return undefined;
+      return { clamped: since.clamped, range: resourceRange(since.start, since.end) };
+    }
+    const start = Math.max(taskStart, end - period);
     if (!Number.isFinite(start) || !Number.isFinite(end)) return undefined;
-    return resourceRange(Math.min(start, end - 1), end);
-  }, [appliedCustom, endTime, period, refresh, startTime]);
+    return { clamped: false, range: resourceRange(Math.min(start, end - 1), end) };
+  }, [appliedCustom, boundEnd, boundStart, endTime, period, refresh, taskStart]);
+  const range = timeWindow?.range;
+  const listPending = period === SINCE_START && allocations === undefined;
 
   useEffect(() => {
     setAllocation(initialAllocationId || '');
   }, [taskId, initialAllocationId]);
 
   useEffect(() => setPayload(undefined), [taskId]);
+
+  // The list is refreshed with a running task, whose allocations may still get resources.
+  const listRefresh = endTime ? 0 : refresh;
+  useEffect(() => {
+    if (!enabled || !taskId) return;
+    const controller = new AbortController();
+    fetch(serverAddress(`/ui/task-resources/${encodeURIComponent(taskId)}/allocations`), {
+      credentials: 'include',
+      signal: controller.signal,
+    })
+      .then(async (response) =>
+        response.ok ? parseResourceAllocations(await response.json()) : undefined,
+      )
+      .catch(() => undefined)
+      .then((items) => {
+        if (controller.signal.aborted) return;
+        // A failed refresh keeps the last list; without one the range begins at the task start.
+        setAllocationList((previous) =>
+          items
+            ? { items, taskId }
+            : previous?.taskId === taskId && previous.items
+              ? previous
+              : { items: null, taskId },
+        );
+      });
+    return () => controller.abort();
+  }, [enabled, listRefresh, taskId]);
 
   useEffect(() => {
     if (!enabled || !range || !taskId) return;
@@ -127,6 +183,7 @@ const TaskResourcesPanel: React.FC<Props> = ({
         .map((item) => item.labels.allocation_id)
         .filter((id): id is string => !!id),
     );
+    allocations?.forEach((item) => ids.add(item.allocationId));
     if (allocation) ids.add(allocation);
     return [
       { label: 'All allocations', value: '' },
@@ -134,7 +191,7 @@ const TaskResourcesPanel: React.FC<Props> = ({
         .sort()
         .map((id) => ({ label: id, value: id })),
     ];
-  }, [allocation, payload]);
+  }, [allocation, allocations, payload]);
 
   if (enabled === undefined) return <Spinner center spinning />;
   if (!enabled)
@@ -146,7 +203,7 @@ const TaskResourcesPanel: React.FC<Props> = ({
     <div className={css.base}>
       <div className={css.filters}>
         <Select
-          label={endTime ? 'Window before task end' : 'Time range'}
+          label={endTime && period !== SINCE_START ? 'Window before task end' : 'Time range'}
           options={PERIODS}
           value={period}
           width={190}
@@ -167,7 +224,11 @@ const TaskResourcesPanel: React.FC<Props> = ({
           Refresh
         </Button>
         <span className={css.status}>
-          {loading ? 'Loading…' : payload ? `Updated ${payload.updated.toLocaleTimeString()}` : ''}
+          {loading || listPending
+            ? 'Loading…'
+            : payload
+              ? `Updated ${payload.updated.toLocaleTimeString()}`
+              : ''}
           {!endTime && period ? ' · live, every 30s' : ''}
         </span>
       </div>
@@ -198,6 +259,17 @@ const TaskResourcesPanel: React.FC<Props> = ({
           {!customValid && <span>Choose a past time range of up to 7 days.</span>}
         </div>
       )}
+      {period === SINCE_START && timeWindow?.clamped && (
+        <p className={css.explanation}>
+          The time since start is longer than the 7-day query limit, so the most recent 7 days are
+          shown.
+        </p>
+      )}
+      {period === SINCE_START && bounds?.noContainerStart && (
+        <p className={css.explanation}>
+          No container start is recorded yet, so the range begins when the task was submitted.
+        </p>
+      )}
       <p className={css.explanation}>
         Each allocation is shown separately. Gaps mean no confirmed samples, not zero use. GPU
         readings describe the entire assigned device and may include other processes. Child tasks
@@ -215,7 +287,7 @@ const TaskResourcesPanel: React.FC<Props> = ({
       {payload?.data.warnings.map((warning) => (
         <Alert key={warning.code} message={warning.message} type="warning" />
       ))}
-      {loading && !payload && <Spinner center spinning />}
+      {(loading || listPending) && !payload && <Spinner center spinning />}
       {payload && (
         <SyncProvider key={`${payload.range.start}:${payload.range.end}`}>
           <div className={css.grid}>
