@@ -35,8 +35,11 @@ cannot take new work while their reservations are retained.
 **Upgrading only the master does not change a running agent's settings.** An
 unmodified 0.38.1 agent defaults to five attempts at five-second intervals;
 the 0.38.1 master's default wait is 25 seconds. Existing explicit agent
-settings and saved dynamic resource-pool configurations also keep their
-effective reconnect values.
+settings keep their values, as does an `agent_reconnect_wait` set in a
+resource pool's configuration. A pool that leaves it out uses the master's
+default, except a dynamic resource pool saved without a spec, which keeps the
+effective value it was saved with (see
+[dynamic resource pools](dynamic-pools.md)).
 
 Before a rolling or hot upgrade, inspect both sides of the actual deployment;
 configure a compatible window and test the same agent, task SDK, checkpoint

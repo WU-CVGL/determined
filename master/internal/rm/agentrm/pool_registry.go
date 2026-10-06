@@ -10,7 +10,8 @@ import (
 )
 
 // poolRegistry owns resource-pool desired configuration and initialized runtime pools.
-// Entries are append-only: a runtime pool is published only after initialization completes.
+// Entries are never removed. A published entry never changes; the dynamic-pool worker may replace
+// an unready entry's config. A runtime pool is published only after initialization completes.
 type poolRegistry struct {
 	mu      sync.RWMutex
 	entries map[string]poolRegistryEntry
@@ -21,6 +22,8 @@ type poolRegistryEntry struct {
 	config                config.ResourcePoolConfig
 	pool                  *resourcePool
 	taskDefaultsEffective bool
+	// revision is the durable revision of a dynamic pool's config; 0 means a master.yaml pool.
+	revision int64
 }
 
 func newPoolRegistry(configs []config.ResourcePoolConfig) (*poolRegistry, error) {
@@ -35,18 +38,23 @@ func newPoolRegistry(configs []config.ResourcePoolConfig) (*poolRegistry, error)
 
 // addDesired appends a desired pool configuration. Existing entries are never replaced.
 func (r *poolRegistry) addDesired(cfg config.ResourcePoolConfig) error {
-	return r.addDesiredEntry(cfg, false)
+	return r.addDesiredEntry(cfg, false, 0)
 }
 
-// addDynamicDesired appends a persisted dynamic config whose task container defaults have already
-// been resolved and frozen. Keeping this bit with the config avoids database work on task paths.
-func (r *poolRegistry) addDynamicDesired(cfg config.ResourcePoolConfig) error {
-	return r.addDesiredEntry(cfg, true)
+// addStoredDynamicDesired appends a decoded durable dynamic pool. A pool that inherits resolves its
+// scheduler and task container defaults against the master configuration at use, like a
+// master.yaml pool. Otherwise its config holds task container defaults that were resolved and
+// frozen when it was saved; keeping this bit with the config avoids database work on task paths.
+func (r *poolRegistry) addStoredDynamicDesired(
+	cfg config.ResourcePoolConfig, inherit bool, revision int64,
+) error {
+	return r.addDesiredEntry(cfg, !inherit, revision)
 }
 
 func (r *poolRegistry) addDesiredEntry(
 	cfg config.ResourcePoolConfig,
 	taskDefaultsEffective bool,
+	revision int64,
 ) error {
 	if cfg.PoolName == "" {
 		return fmt.Errorf("resource pool name cannot be empty")
@@ -64,9 +72,54 @@ func (r *poolRegistry) addDesiredEntry(
 	r.entries[cfg.PoolName] = poolRegistryEntry{
 		config:                cfgCopy,
 		taskDefaultsEffective: taskDefaultsEffective,
+		revision:              revision,
 	}
 	r.order = append(r.order, cfg.PoolName)
 	return nil
+}
+
+// replaceUnready replaces the config of an entry whose runtime pool is not published and keeps
+// its position. It is safe only while one goroutine, the dynamic-pool worker, advances records.
+func (r *poolRegistry) replaceUnready(
+	cfg config.ResourcePoolConfig,
+	taskDefaultsEffective bool,
+	revision int64,
+) error {
+	cfgCopy, err := cloneResourcePoolConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("copying resource pool %s configuration: %w", cfg.PoolName, err)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.entries[cfg.PoolName]
+	if !ok {
+		return fmt.Errorf("cannot replace undesired resource pool %s", cfg.PoolName)
+	}
+	if entry.pool != nil {
+		return fmt.Errorf("resource pool %s is already ready", cfg.PoolName)
+	}
+	r.entries[cfg.PoolName] = poolRegistryEntry{
+		config:                cfgCopy,
+		taskDefaultsEffective: taskDefaultsEffective,
+		revision:              revision,
+	}
+	return nil
+}
+
+// activeRevision reports the revision that a published runtime pool runs. Unpublished entries
+// report no revision; master.yaml pools report 0.
+func (r *poolRegistry) activeRevision(name string) (revision int64, published bool, exists bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	entry, ok := r.entries[name]
+	if !ok {
+		return 0, false, false
+	}
+	if entry.pool == nil {
+		return 0, false, true
+	}
+	return entry.revision, true, true
 }
 
 // desiredConfig returns configuration regardless of whether its runtime pool is Ready. This is

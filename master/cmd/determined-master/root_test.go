@@ -6,12 +6,14 @@ import (
 	k8sV1 "k8s.io/api/core/v1"
 	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/spf13/viper"
 	"google.golang.org/api/compute/v1"
 	"gotest.tools/assert"
 
 	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/config/provconfig"
 	"github.com/determined-ai/determined/master/pkg/aproto"
+	"github.com/determined-ai/determined/master/pkg/check"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/schemas"
 )
@@ -320,4 +322,49 @@ func TestApplyBackwardsCompatibility(t *testing.T) {
 			assert.DeepEqual(t, after, tc.expected)
 		})
 	}
+}
+
+func TestEmptyResourcePoolsForAgentRM(t *testing.T) {
+	// Merges accumulate in the global viper instance, so each config starts from a fresh one.
+	original := v
+	t.Cleanup(func() { v = original })
+	load := func(raw string) (*config.Config, error) {
+		v = viper.NewWithOptions(viper.KeyDelimiter(viperKeyDelimiter))
+		conf, err := mergeConfigIntoViper([]byte(raw))
+		if err != nil {
+			return nil, err
+		}
+		return conf, check.Validate(conf)
+	}
+
+	// Every pool of an agent resource manager may be a dynamic pool.
+	conf, err := load(`
+resource_manager:
+  type: agent
+  default_compute_resource_pool: gpu
+  default_aux_resource_pool: gpu
+resource_pools: []
+`)
+	assert.NilError(t, err)
+	assert.Equal(t, len(conf.ResourceManagers()), 1)
+	assert.Assert(t, conf.ResourceManagers()[0].ResourcePools != nil)
+	assert.Equal(t, len(conf.ResourceManagers()[0].ResourcePools), 0)
+
+	// Leaving the key out still configures the default pool.
+	conf, err = load(`
+resource_manager:
+  type: agent
+`)
+	assert.NilError(t, err)
+	assert.Equal(t, len(conf.ResourceManagers()[0].ResourcePools), 1)
+	assert.Equal(t, conf.ResourceManagers()[0].ResourcePools[0].PoolName, "default")
+
+	// A Kubernetes resource manager still needs a pool.
+	_, err = load(`
+resource_manager:
+  type: kubernetes
+  max_slots_per_pod: 1
+resource_pools: []
+`)
+	assert.ErrorContains(t, err, "you must specify at least one resource pool")
 }
