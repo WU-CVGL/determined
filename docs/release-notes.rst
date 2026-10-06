@@ -103,6 +103,9 @@ Version 0.41.0
 
 -  Generic tasks: Fix pausing, killing, and scheduling of generic task trees.
 
+-  Detached mode: Keep an unmanaged trial printing and able to exit when sending its output to the
+   master fails or stalls, and send each line's own timestamp and the worker's rank.
+
 -  WebUI: Offer to retry when a notebook's address fails to load.
 
 -  WebUI: Serve the WebUI's index with ``Cache-Control: no-cache``, so that browsers load a new
@@ -140,6 +143,9 @@ Version 0.41.0
 
 -  API: Require a signed-in session for ``POST /task-logs`` and apply the same permission check as
    ``POST /api/v1/task/logs``.
+
+-  API: Let only a task's own containers, its owner, and administrators add lines to the logs of
+   notebooks, shells, commands, TensorBoards, generic tasks, and checkpoint GC tasks.
 
 See :ref:`generic tasks <generic-tasks>`, :ref:`browser terminals <shell-web-terminal>`,
 :doc:`dynamic resource pools <maintenance/dynamic-pools>`, :ref:`GPU topology and health
