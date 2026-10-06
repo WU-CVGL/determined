@@ -3,39 +3,27 @@ package internal
 import (
 	"context"
 	"fmt"
-	"regexp"
+	"slices"
 	"sort"
-	"strconv"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/uptrace/bun"
 
 	"github.com/determined-ai/determined/master/internal/db"
-	"github.com/determined-ai/determined/master/pkg/model"
 )
 
-const (
-	// More recorded GPU sets than this leaves every GPU without an in-container index.
-	taskResourceMaxGPUSets = 4096
-	// At most this many GPUs without a fetched series are looked up, in one extra query.
-	taskResourceMaxGPULookups = 64
-)
+// More recorded GPU lists than this leaves every GPU without an in-container index.
+const taskResourceMaxGPUSets = 4096
 
-var (
-	// Only plain UUIDs go into the lookup query; anything else stays without a bus ID.
-	taskResourceGPUUUIDPattern = regexp.MustCompile(`^[A-Za-z0-9-]{1,128}$`)
-	// domain:bus:device.function, as DCGM ("00000000:01:00.0") or sysfs ("0000:01:00.0") write it.
-	taskResourcePCIBusIDPattern = regexp.MustCompile(
-		`^([0-9a-f]{1,8}):([0-9a-f]{1,2}):([0-9a-f]{1,2})\.([0-7])$`)
-)
-
-// taskResourceGPUInfo is what DCGM reports about one GPU. A GPU reported with two different
-// bus IDs or nodes in the range is a conflict and is never numbered.
-type taskResourceGPUInfo struct {
-	busID    string
-	node     string
-	conflict bool
+// taskResourceGPUSet is the GPUs one container recorded at start (prep_container --resources),
+// in nvidia-smi index order inside the container, with the slots the master assigned to the
+// whole allocation.
+type taskResourceGPUSet struct {
+	AllocationID string   `bun:"allocation_id"`
+	ContainerID  string   `bun:"container_id"`
+	UUIDs        []string `bun:"accelerator_uuids,array"`
+	Slots        int      `bun:"slots"`
 }
 
 type taskResourceGPUKey struct {
@@ -43,15 +31,14 @@ type taskResourceGPUKey struct {
 	gpuUUID      string
 }
 
-// queryTaskResourceGPUSets reads the GPU sets the task's containers recorded for the given
-// allocations. Each row is one container's GPUs as nvidia-smi inside it listed them; only
-// trials, notebooks and shells record them (prep_container --resources).
+// queryTaskResourceGPUSets reads the GPU lists the task's containers recorded for the given
+// allocations, with each allocation's slots. Only trials, notebooks and shells record them.
 func queryTaskResourceGPUSets(
 	ctx context.Context, taskID string, allocationIDs []string,
-) ([]model.AcceleratorData, error) {
-	sets := []model.AcceleratorData{}
+) ([]taskResourceGPUSet, error) {
+	sets := []taskResourceGPUSet{}
 	err := db.Bun().NewRaw(`
-SELECT aa.allocation_id, aa.container_id, aa.accelerator_uuids
+SELECT aa.allocation_id, aa.container_id, aa.accelerator_uuids, a.slots
 FROM allocation_accelerators aa
 JOIN allocations a ON a.allocation_id = aa.allocation_id
 WHERE a.task_id = ? AND aa.allocation_id IN (?)
@@ -66,54 +53,10 @@ LIMIT ?`, taskID, bun.In(allocationIDs), taskResourceMaxGPUSets+1).Scan(ctx, &se
 	return sets, nil
 }
 
-// pciBusIDKey normalises a PCI bus ID so that string order is bus order, whatever the case
-// and the width of the domain. ok is false for anything that is not a PCI bus ID.
-func pciBusIDKey(id string) (key string, ok bool) {
-	m := taskResourcePCIBusIDPattern.FindStringSubmatch(strings.ToLower(strings.TrimSpace(id)))
-	if m == nil {
-		return "", false
-	}
-	parts := make([]uint64, 4)
-	for i := range parts {
-		v, err := strconv.ParseUint(m[i+1], 16, 32)
-		if err != nil {
-			return "", false
-		}
-		parts[i] = v
-	}
-	return fmt.Sprintf("%08x:%02x:%02x.%x", parts[0], parts[1], parts[2], parts[3]), true
-}
-
-// addTaskResourceGPUInfo records the DCGM labels of one result for its GPU.
-func addTaskResourceGPUInfo(gpus map[string]taskResourceGPUInfo, metric map[string]string) {
-	uuid := metric["gpu_uuid"]
-	if uuid == "" {
-		return
-	}
-	info := taskResourceGPUInfo{busID: metric["pci_bus_id"], node: metric["node"]}
-	if prev, ok := gpus[uuid]; ok {
-		prevKey, prevValid := pciBusIDKey(prev.busID)
-		key, valid := pciBusIDKey(info.busID)
-		info.conflict = prev.conflict || prevValid != valid || prevKey != key || prev.node != info.node
-	}
-	gpus[uuid] = info
-}
-
-// taskResourceGPUInfoQuery reads the bus ID and node of GPUs without a fetched series.
-func taskResourceGPUInfoQuery(cluster string, uuids []string) string {
-	quoted := make([]string, len(uuids))
-	for i, uuid := range uuids {
-		quoted[i] = regexp.QuoteMeta(uuid)
-	}
-	return `group by (det_cluster,gpu_uuid,pci_bus_id,node) (DCGM_FI_DEV_GPU_UTIL{job="dcgm",det_cluster=` +
-		promLabel(cluster) + `,gpu_uuid=~` + promLabel(strings.Join(quoted, "|")) + `})`
-}
-
-// setTaskResourceGPUIndexes sets gpu_index on GPU series: the number nvidia-smi inside the
-// task's container shows for the GPU. Without a complete GPU set and bus IDs for the GPU's
-// container, the series keeps no index; a failed lookup never fails the response.
-func setTaskResourceGPUIndexes(ctx context.Context, cluster, taskID string, r taskResourceRange,
-	series []taskResourceSeries, gpus map[string]taskResourceGPUInfo, deps taskResourceDependencies,
+// setTaskResourceGPUIndexes sets gpu_index on the GPU series that taskResourceGPUIndexes can
+// number. A failed read never fails the response.
+func setTaskResourceGPUIndexes(ctx context.Context, taskID string, series []taskResourceSeries,
+	deps taskResourceDependencies,
 ) {
 	if deps.gpuSets == nil {
 		return
@@ -136,30 +79,7 @@ func setTaskResourceGPUIndexes(ctx context.Context, cluster, taskID string, r ta
 		log.WithError(err).Warn("task resources: GPU sets are unavailable; GPUs keep their UUID labels")
 		return
 	}
-
-	missing := []string{}
-	wanted := map[string]bool{}
-	for _, set := range sets {
-		for _, uuid := range set.AcceleratorUuids {
-			if _, ok := gpus[uuid]; !ok && !wanted[uuid] && taskResourceGPUUUIDPattern.MatchString(uuid) {
-				wanted[uuid] = true
-				missing = append(missing, uuid)
-			}
-		}
-	}
-	if len(missing) > 0 && len(missing) <= taskResourceMaxGPULookups {
-		sort.Strings(missing)
-		results, err := deps.query(ctx, taskResourceGPUInfoQuery(cluster, missing), r)
-		if err == nil {
-			for _, result := range results {
-				if result.Metric["det_cluster"] == cluster && wanted[result.Metric["gpu_uuid"]] {
-					addTaskResourceGPUInfo(gpus, result.Metric)
-				}
-			}
-		}
-	}
-
-	indexes := taskResourceGPUIndexes(series, sets, gpus)
+	indexes := taskResourceGPUIndexes(series, sets)
 	for i := range series {
 		labels := &series[i].Labels
 		if index, ok := indexes[taskResourceGPUKey{labels.AllocationID, labels.GPUUUID}]; ok {
@@ -168,119 +88,97 @@ func setTaskResourceGPUIndexes(ctx context.Context, cluster, taskID string, r ta
 	}
 }
 
-// taskResourceGPUIndexes numbers GPUs the way nvidia-smi inside the task's container does:
-// by PCI bus ID among all GPUs of that container, which is one recorded GPU set. The container
-// recorded its GPUs in nvidia-smi index order, so the bus-ID order must agree with the recorded
-// order. Every GPU series of an allocation on one node must belong to the same set, and every
-// GPU of that set needs a known bus ID; otherwise none of that allocation's GPUs on that node
-// is numbered.
-func taskResourceGPUIndexes(series []taskResourceSeries, sets []model.AcceleratorData,
-	gpus map[string]taskResourceGPUInfo,
+// taskResourceGPUIndexes numbers GPUs as nvidia-smi inside the task's container does: by their
+// position in the list that container recorded. A list can be partial (nvidia-smi lines that
+// fail to parse are skipped), so an allocation's GPUs are numbered only when its containers'
+// lists add up to the allocation's slots. An allocation's GPUs on one node are also left
+// unnumbered when a GPU series is not in exactly one usable list, when the series come from
+// more than one list, or when a GPU of that list is reported on another node. A list is not
+// usable when it names a GPU twice or its container recorded another list.
+func taskResourceGPUIndexes(series []taskResourceSeries, sets []taskResourceGPUSet,
 ) map[taskResourceGPUKey]int {
-	const ambiguous = -1
-	// The set each GPU belongs to; a GPU listed in two different sets of one allocation is
-	// ambiguous. Identical rows of one container are the same set; rows that list the same GPUs
-	// in different orders are different sets.
-	owner := map[taskResourceGPUKey]int{}
-	members := [][]string{}
-	signatures := map[string]int{}
+	type container struct{ allocationID, containerID string }
+	lists := map[container][]string{}
+	invalid := map[container]bool{}
+	slots := map[string]int{}
 	for _, set := range sets {
-		allocationID := string(set.AllocationID)
-		uuids := set.AcceleratorUuids
-		listed := make(map[string]bool, len(uuids))
-		duplicate := false
-		for _, uuid := range uuids {
-			duplicate = duplicate || listed[uuid]
-			listed[uuid] = true
-		}
-		if duplicate {
-			for _, uuid := range uuids {
-				owner[taskResourceGPUKey{allocationID, uuid}] = ambiguous
-			}
+		c := container{set.AllocationID, set.ContainerID}
+		slots[set.AllocationID] = set.Slots
+		if prev, ok := lists[c]; ok {
+			invalid[c] = invalid[c] || !slices.Equal(prev, set.UUIDs)
 			continue
 		}
-		signature := allocationID + "\x00" + strings.Join(uuids, "\x00")
-		index, ok := signatures[signature]
-		if !ok {
-			index = len(members)
-			signatures[signature] = index
-			members = append(members, uuids)
-		}
-		for _, uuid := range uuids {
-			key := taskResourceGPUKey{allocationID, uuid}
-			if prev, seen := owner[key]; !seen {
-				owner[key] = index
-			} else if prev != index {
-				owner[key] = ambiguous
+		lists[c] = set.UUIDs
+		sorted := slices.Clone(set.UUIDs)
+		slices.Sort(sorted)
+		invalid[c] = len(slices.Compact(sorted)) != len(set.UUIDs)
+	}
+	recorded := map[string]int{}
+	for c, uuids := range lists {
+		recorded[c.allocationID] += len(uuids)
+	}
+
+	// The list and the position of each GPU of an allocation.
+	const ambiguous = -1
+	owner := map[taskResourceGPUKey]container{}
+	position := map[taskResourceGPUKey]int{}
+	for c, uuids := range lists {
+		usable := !invalid[c] && recorded[c.allocationID] == slots[c.allocationID]
+		for i, uuid := range uuids {
+			key := taskResourceGPUKey{c.allocationID, uuid}
+			if _, listed := owner[key]; listed || !usable {
+				position[key] = ambiguous
+			} else {
+				position[key] = i
 			}
+			owner[key] = c
 		}
 	}
 
-	// Ranks within each set, when every member has one distinct bus ID on one node and the bus-ID
-	// order is the recorded order.
-	ranks := make([]map[string]int, len(members))
-	nodes := make([]string, len(members))
-	for i, uuids := range members {
-		keys := make(map[string]string, len(uuids))
-		complete := true
-		for j, uuid := range uuids {
-			info, ok := gpus[uuid]
-			key, valid := pciBusIDKey(info.busID)
-			if !ok || !valid || info.conflict || (j > 0 && info.node != nodes[i]) {
-				complete = false
-				break
+	// A GPU UUID is one device, so its series must all name one node.
+	nodes := map[string]string{}
+	conflicts := map[string]bool{}
+	for _, s := range series {
+		if strings.HasPrefix(s.Metric, "gpu_") && s.Labels.GPUUUID != "" {
+			uuid := s.Labels.GPUUUID
+			if node, ok := nodes[uuid]; ok && node != s.Labels.Node {
+				conflicts[uuid] = true
 			}
-			nodes[i] = info.node
-			keys[uuid] = key
+			nodes[uuid] = s.Labels.Node
 		}
-		if !complete {
-			continue
-		}
-		ordered := append([]string(nil), uuids...)
-		sort.Slice(ordered, func(a, b int) bool { return keys[ordered[a]] < keys[ordered[b]] })
-		rank := make(map[string]int, len(ordered))
-		for j, uuid := range ordered {
-			if j > 0 && keys[uuid] == keys[ordered[j-1]] {
-				rank = nil
-				break
-			}
-			rank[uuid] = j
-		}
-		for j, uuid := range uuids {
-			if rank == nil || rank[uuid] != j {
-				rank = nil
-				break
-			}
-		}
-		ranks[i] = rank
 	}
 
 	type group struct{ allocationID, node string }
-	groups := map[group]int{}
+	type verdict struct {
+		list container
+		ok   bool
+	}
+	groups := map[group]verdict{}
 	for _, s := range series {
 		if !strings.HasPrefix(s.Metric, "gpu_") || s.Labels.GPUUUID == "" {
 			continue
 		}
 		g := group{s.Labels.AllocationID, s.Labels.Node}
-		set, ok := owner[taskResourceGPUKey{g.allocationID, s.Labels.GPUUUID}]
-		if !ok || set == ambiguous || ranks[set] == nil || nodes[set] != g.node {
-			set = ambiguous
+		key := taskResourceGPUKey{g.allocationID, s.Labels.GPUUUID}
+		c, listed := owner[key]
+		ok := listed && position[key] != ambiguous
+		for _, uuid := range lists[c] {
+			if node, seen := nodes[uuid]; seen && (node != g.node || conflicts[uuid]) {
+				ok = false
+			}
 		}
-		if prev, seen := groups[g]; seen && prev != set {
-			set = ambiguous
+		if prev, seen := groups[g]; seen {
+			ok = ok && prev.ok && prev.list == c
 		}
-		groups[g] = set
+		groups[g] = verdict{list: c, ok: ok}
 	}
 
 	indexes := map[taskResourceGPUKey]int{}
 	for _, s := range series {
-		if !strings.HasPrefix(s.Metric, "gpu_") || s.Labels.GPUUUID == "" {
-			continue
-		}
-		set := groups[group{s.Labels.AllocationID, s.Labels.Node}]
-		if set != ambiguous {
+		if strings.HasPrefix(s.Metric, "gpu_") && s.Labels.GPUUUID != "" &&
+			groups[group{s.Labels.AllocationID, s.Labels.Node}].ok {
 			key := taskResourceGPUKey{s.Labels.AllocationID, s.Labels.GPUUUID}
-			indexes[key] = ranks[set][s.Labels.GPUUUID]
+			indexes[key] = position[key]
 		}
 	}
 	return indexes

@@ -47,8 +47,9 @@ type taskResourceLabels struct {
 	AllocationID string `json:"allocation_id,omitempty"`
 	Node         string `json:"node,omitempty"`
 	GPUUUID      string `json:"gpu_uuid,omitempty"`
-	// GPUIndex is the GPU's number in nvidia-smi inside the task's container. It is omitted
-	// unless the container's complete GPU set and every bus ID in it are known.
+	// GPUIndex is the GPU's number in nvidia-smi inside the task's container: its position in
+	// the GPU list the container recorded. It is omitted unless the lists of the allocation's
+	// containers add up to its slots (see taskResourceGPUIndexes).
 	GPUIndex *int `json:"gpu_index,omitempty"`
 	// DCGM's labels: the PCI bus ID, the host's NVML index (nvidia-smi on the node) and model.
 	PCIBusID     string `json:"pci_bus_id,omitempty"`
@@ -154,7 +155,7 @@ type taskResourceDependencies struct {
 	query             func(context.Context, string, taskResourceRange) ([]prometheusTaskSeries, error)
 	allocations       func(context.Context, string) ([]taskResourceAllocation, error)
 	// gpuSets reads the recorded GPU sets of a task's allocations; nil skips GPU numbering.
-	gpuSets func(context.Context, string, []string) ([]model.AcceleratorData, error)
+	gpuSets func(context.Context, string, []string) ([]taskResourceGPUSet, error)
 }
 
 // queryTaskResourceAllocations reads a task's allocations and their container start in one query.
@@ -240,7 +241,6 @@ func collectTaskResources(ctx context.Context, user model.User, taskID string, p
 
 	resp := taskResourceResponse{Enabled: true, Series: []taskResourceSeries{},
 		Warnings: []taskResourceWarning{}}
-	gpus := map[string]taskResourceGPUInfo{}
 	for _, q := range taskResourceQueries(conf.DetCluster, taskID, allocationID) {
 		results, err := deps.query(ctx, q.Expr, r)
 		if err != nil {
@@ -264,12 +264,11 @@ func collectTaskResources(ctx context.Context, user model.User, taskID string, p
 				series.Labels.PCIBusID = result.Metric["pci_bus_id"]
 				series.Labels.HostGPUIndex = result.Metric["gpu"]
 				series.Labels.ModelName = result.Metric["modelName"]
-				addTaskResourceGPUInfo(gpus, result.Metric)
 			}
 			resp.Series = append(resp.Series, series)
 		}
 	}
-	setTaskResourceGPUIndexes(ctx, conf.DetCluster, taskID, r, resp.Series, gpus, deps)
+	setTaskResourceGPUIndexes(ctx, taskID, resp.Series, deps)
 	sort.SliceStable(resp.Series, func(i, j int) bool {
 		return taskResourceSeriesLess(resp.Series[i], resp.Series[j])
 	})

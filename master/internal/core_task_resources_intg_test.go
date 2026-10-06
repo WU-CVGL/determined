@@ -276,10 +276,10 @@ func TestTaskResourceGPUSets(t *testing.T) {
 	_, trialTask := createTestTrial(t, api, curUser)
 	_, otherTask := createTestTrial(t, api, curUser)
 	taskID := trialTask.TaskID
-	add := func(task model.TaskID, run int) string {
+	add := func(task model.TaskID, run, slots int) string {
 		aID := model.AllocationID(fmt.Sprintf("%s.%d", task, run))
 		require.NoError(t, db.AddAllocation(ctx, &model.Allocation{
-			AllocationID: aID, TaskID: task, Slots: 2, ResourcePool: "default",
+			AllocationID: aID, TaskID: task, Slots: slots, ResourcePool: "default",
 			Ports: map[string]int{},
 		}))
 		return string(aID)
@@ -290,25 +290,27 @@ func TestTaskResourceGPUSets(t *testing.T) {
 			AcceleratorType: "cuda", AcceleratorUuids: uuids,
 		}))
 	}
-	first, second, cpuOnly := add(taskID, 1), add(taskID, 2), add(taskID, 3)
-	other := add(otherTask.TaskID, 1)
+	first, second, cpuOnly := add(taskID, 1, 3), add(taskID, 2, 1), add(taskID, 3, 0)
+	partial := add(taskID, 4, 2)
+	other := add(otherTask.TaskID, 1, 1)
 	// A two-node allocation records one row per container, in nvidia-smi order inside it.
 	record(first, "c1", "agent-a", "GPU-b", "GPU-a")
 	record(first, "c2", "agent-b", "GPU-c")
 	record(second, "c3", "agent-a", "GPU-a")
 	record(cpuOnly, "c4", "agent-a")
 	record(other, "c5", "agent-a", "GPU-z")
+	// The container of this 2-slot allocation recorded only one of its GPUs.
+	record(partial, "c6", "agent-a", "GPU-q")
 
-	// Only the requested allocations of this task; another task's allocation is never read.
+	// Only the requested allocations of this task, with their slots; another task's allocation
+	// is never read.
 	got, err := queryTaskResourceGPUSets(ctx, string(taskID), []string{first, cpuOnly, other})
 	require.NoError(t, err)
-	require.Len(t, got, 3)
-	require.Equal(t, model.AllocationID(first), got[0].AllocationID)
-	require.Equal(t, "c1", got[0].ContainerID)
-	require.Equal(t, []string{"GPU-b", "GPU-a"}, got[0].AcceleratorUuids)
-	require.Equal(t, []string{"GPU-c"}, got[1].AcceleratorUuids)
-	require.Equal(t, model.AllocationID(cpuOnly), got[2].AllocationID)
-	require.Empty(t, got[2].AcceleratorUuids)
+	require.Equal(t, []taskResourceGPUSet{
+		{AllocationID: first, ContainerID: "c1", UUIDs: []string{"GPU-b", "GPU-a"}, Slots: 3},
+		{AllocationID: first, ContainerID: "c2", UUIDs: []string{"GPU-c"}, Slots: 3},
+		{AllocationID: cpuOnly, ContainerID: "c4", UUIDs: nil, Slots: 0},
+	}, got)
 
 	none, err := queryTaskResourceGPUSets(ctx, string(otherTask.TaskID), []string{first})
 	require.NoError(t, err)
@@ -334,7 +336,7 @@ func TestTaskResourceGPUSets(t *testing.T) {
 		authorize:         func(context.Context, model.User, string) error { return nil },
 		allocationBelongs: func(context.Context, string, string) (bool, error) { return true, nil },
 		query: func(_ context.Context, expr string, _ taskResourceRange) ([]prometheusTaskSeries, error) {
-			if !strings.Contains(expr, "DCGM_FI_DEV_GPU_UTIL") || strings.HasPrefix(expr, "group by") {
+			if !strings.Contains(expr, "DCGM_FI_DEV_GPU_UTIL") {
 				return nil, nil
 			}
 			return []prometheusTaskSeries{
@@ -342,6 +344,7 @@ func TestTaskResourceGPUSets(t *testing.T) {
 				gpu(first, "node-a", "GPU-b", "00000000:25:00.0"),
 				gpu(first, "node-b", "GPU-c", "00000000:C1:00.0"),
 				gpu(second, "node-a", "GPU-a", "00000000:81:00.0"),
+				gpu(partial, "node-a", "GPU-q", "00000000:01:00.0"),
 			}, nil
 		},
 		gpuSets: queryTaskResourceGPUSets,
@@ -351,9 +354,12 @@ func TestTaskResourceGPUSets(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	indexes := map[string]int{}
 	for _, s := range resp.Series {
-		require.NotNil(t, s.Labels.GPUIndex, "%s/%s", s.Labels.AllocationID, s.Labels.GPUUUID)
-		indexes[s.Labels.AllocationID+"/"+s.Labels.GPUUUID] = *s.Labels.GPUIndex
+		if s.Labels.GPUIndex != nil {
+			indexes[s.Labels.AllocationID+"/"+s.Labels.GPUUUID] = *s.Labels.GPUIndex
+		}
 	}
+	// The partial list is not numbered.
+	require.Len(t, resp.Series, 5)
 	require.Equal(t, map[string]int{
 		first + "/GPU-b": 0, first + "/GPU-a": 1, first + "/GPU-c": 0, second + "/GPU-a": 0,
 	}, indexes)
