@@ -120,10 +120,11 @@ type allocation struct {
 	// (observability.task_mapping_delay), counted from model.StartTime, so allocations that end
 	// sooner are never attributed. metricsDue is set once that time has passed, metricsStopTimer
 	// stops the pending timer, and metricsClosed is set when the allocation finalizes, after
-	// which nothing is exported.
+	// which nothing is exported. metricsTimerDone is closed when the timer's goroutine returns.
 	metricsDelay     time.Duration
 	metricsDue       bool
 	metricsStopTimer func()
+	metricsTimerDone chan struct{}
 	metricsClosed    bool
 	// Separates the existence of resources from us having started them.
 	resourcesStarted bool
@@ -928,9 +929,11 @@ func (a *allocation) armResourceMetrics() bool {
 		a.metricsDue = true
 		return true
 	}
-	stop := make(chan struct{})
+	stop, done := make(chan struct{}), make(chan struct{})
 	a.metricsStopTimer = func() { close(stop) }
+	a.metricsTimerDone = done
 	a.wg.Go(func(ctx context.Context) {
+		defer close(done)
 		t := time.NewTimer(wait)
 		defer t.Stop()
 		select {

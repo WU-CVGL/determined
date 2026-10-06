@@ -4,8 +4,6 @@
 package task
 
 import (
-	"runtime"
-	"strings"
 	"testing"
 	"time"
 
@@ -18,11 +16,25 @@ import (
 	"github.com/determined-ai/determined/master/pkg/ptrs"
 )
 
-// mappingTimers counts the goroutines waiting in an allocation's mapping timer.
-func mappingTimers() int {
-	buf := make([]byte, 8<<20)
-	n := runtime.Stack(buf, true)
-	return strings.Count(string(buf[:n]), "(*allocation).armResourceMetrics.func")
+// mappingTimer reports whether the allocation's mapping timer is pending, and returns the
+// channel closed when its goroutine returns, or nil if no timer was started.
+func mappingTimer(a *allocation) (bool, chan struct{}) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.metricsStopTimer != nil, a.metricsTimerDone
+}
+
+// requireTimerReturns waits for the goroutine of a started mapping timer to return.
+func requireTimerReturns(t *testing.T, a *allocation) {
+	t.Helper()
+	pending, done := mappingTimer(a)
+	require.False(t, pending)
+	require.NotNil(t, done)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the mapping timer's goroutine did not return")
+	}
 }
 
 func startMappedAllocation(
@@ -45,19 +57,19 @@ func TestAllocationIsMappedWhenDue(t *testing.T) {
 	defer closeDB()
 	defer a.detach()
 
-	timers := mappingTimers()
 	runResource(a, list[0])
 	_, ok := allocationTaskValue(t, a)
 	require.False(t, ok)
 	list[0].requireMapped(t, false)
-	require.Equal(t, timers+1, mappingTimers())
+	pending, _ := mappingTimer(a)
+	require.True(t, pending)
 
 	a.resourceMetricsDue()
 	value, ok := allocationTaskValue(t, a)
 	require.True(t, ok)
 	require.InDelta(t, 1, value, 0)
 	list[0].requireMapped(t, true)
-	require.True(t, waitForCondition(5*time.Second, func() bool { return mappingTimers() == timers }))
+	requireTimerReturns(t, a)
 
 	terminateResource(a, list[0])
 	_, ok = allocationTaskValue(t, a)
@@ -90,15 +102,15 @@ func TestAllocationStoppedBeforeTheDelayIsNeverMapped(t *testing.T) {
 	defer closeDB()
 	defer a.detach()
 
-	timers := mappingTimers()
 	runResource(a, list[0])
-	require.Equal(t, timers+1, mappingTimers())
+	pending, _ := mappingTimer(a)
+	require.True(t, pending)
 	terminateResource(a, list[0])
 	require.NotNil(t, a.exited)
 
 	// The timer stops with the allocation, and a timer that fired as the allocation finalized
 	// exports nothing.
-	require.True(t, waitForCondition(5*time.Second, func() bool { return mappingTimers() == timers }))
+	requireTimerReturns(t, a)
 	a.resourceMetricsDue()
 	_, ok := allocationTaskValue(t, a)
 	require.False(t, ok)
@@ -110,12 +122,13 @@ func TestAllocationWithoutDelayIsMappedAtOnce(t *testing.T) {
 	defer closeDB()
 	defer a.detach()
 
-	timers := mappingTimers()
 	runResource(a, list[0])
 	_, ok := allocationTaskValue(t, a)
 	require.True(t, ok)
 	list[0].requireMapped(t, true)
-	require.Equal(t, timers, mappingTimers())
+	pending, done := mappingTimer(a)
+	require.False(t, pending)
+	require.Nil(t, done, "no timer")
 
 	terminateResource(a, list[0])
 	_, ok = allocationTaskValue(t, a)
@@ -130,10 +143,13 @@ func TestMultiContainerAllocationMappings(t *testing.T) {
 	defer closeDB()
 	defer a.detach()
 
-	timers := mappingTimers()
 	runResource(a, list[0])
+	_, first := mappingTimer(a)
 	runResource(a, list[1])
-	require.Equal(t, timers+1, mappingTimers(), "one timer per allocation")
+	pending, second := mappingTimer(a)
+	require.True(t, pending)
+	require.NotNil(t, first)
+	require.True(t, first == second, "one timer per allocation")
 	terminateResource(a, list[0])
 	require.Nil(t, a.exited)
 
