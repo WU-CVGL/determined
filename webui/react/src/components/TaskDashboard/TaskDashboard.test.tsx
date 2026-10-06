@@ -666,6 +666,20 @@ describe('TaskDashboard', () => {
     }, 30_000);
   });
 
+  it('stores the columns with the widths of a resize', async () => {
+    setup();
+    expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+    await settingsLoaded();
+
+    await resize('Name', 450);
+    // Widths stored alone would be bound by place to the default columns of a later version.
+    await waitFor(() =>
+      expect(saved('columnWidths')).toEqual([64, 100, 450, 120, 85, 180, 128, 72, 117, 117]),
+    );
+    expect(saved('columns')).toEqual(NEW_COLUMNS);
+    expect(storedWidths()).toMatchObject({ kind: 64, name: 450, slots: 72 });
+  });
+
   it('keeps the filters of the Jobs page and of the tasks-only view apart', async () => {
     const jobs = setup();
     expect(await screen.findByText('bert-finetune')).toBeInTheDocument();

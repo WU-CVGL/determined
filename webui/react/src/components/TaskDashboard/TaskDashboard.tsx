@@ -267,6 +267,19 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
    * shows (and a resize keeps) the stored widths, not the default ones.
    */
   const layoutReady = !isLoading && !layoutUpdate;
+  /*
+   * The table stores only the widths on a resize. The columns they belong to are stored with them,
+   * so that the widths still find their columns once the default columns change.
+   */
+  const updateTableSettings = useCallback(
+    (update: Partial<Settings>) =>
+      updateSettings(
+        update.columnWidths && !update.columns
+          ? { ...update, columns: [...settings.columns] }
+          : update,
+      ),
+    [settings.columns, updateSettings],
+  );
 
   const selectedKinds = useMemo(
     () => (settings.type ?? []).filter((kind) => pageKinds.includes(kind)),
@@ -855,7 +868,7 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
             settings={settings}
             showSorterTooltip={false}
             size="small"
-            updateSettings={updateSettings}
+            updateSettings={updateTableSettings}
           />
         </GenericTaskActionStateContext.Provider>
       </div>
