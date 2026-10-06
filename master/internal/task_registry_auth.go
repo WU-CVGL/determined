@@ -77,19 +77,20 @@ func parseTextConfig(config string) (map[string]interface{}, map[string]interfac
 	return parsed, env, nil
 }
 
-// removeRegistryAuthText deletes environment.registry_auth from a JSON or YAML config. It returns
-// a config without the key unchanged, and a config it changed as JSON.
+// removeRegistryAuthText returns a JSON or YAML config as JSON, without environment.registry_auth.
+// It always encodes the config it parsed, never the text it was given: the master's parser keeps
+// the last of duplicate keys, while the database keeps the text as submitted, so the text can hold
+// credentials that the parsed config does not. Examples are a registry_auth in an environment
+// section that a later environment section replaces, a registry_auth that a later
+// "registry_auth: null" replaces, and credentials in YAML comments. A blank config comes back
+// empty. A config that does not parse is an error: there is no telling what it holds.
 func removeRegistryAuthText(config string) (string, error) {
 	if strings.TrimSpace(config) == "" {
-		return config, nil
+		return "", nil
 	}
 	parsed, env, err := parseTextConfig(config)
 	if err != nil {
-		// Without parsing it, there is no telling whether the config holds credentials.
 		return "", err
-	}
-	if _, ok := env[registryAuthKey]; !ok {
-		return config, nil
 	}
 	delete(env, registryAuthKey)
 	out, err := json.Marshal(parsed)
@@ -118,19 +119,18 @@ func redactTaskConfigText(user model.User, ownerID int32, taskID, config string)
 }
 
 // redactExperimentRegistryAuth removes environment.registry_auth from an experiment's config and
-// original config unless user owns the experiment or is an admin. Experiments are read often, by
-// the WebUI's polling among others, so an admin's reads are not logged.
+// original config unless user owns the experiment or is an admin; they get the original config as
+// it was submitted. Anyone else gets the original config from removeRegistryAuthText, as JSON, even
+// when the config has no registry_auth: the original text can hold credentials that the config,
+// which the master parsed from it, does not. For them, an original config that does not parse
+// fails the read; the master parsed every original config with this parser when it accepted it.
+// Experiments are read often, by the WebUI's polling among others, so an admin's reads are not
+// logged.
 func redactExperimentRegistryAuth(user model.User, exp *experimentv1.Experiment) error {
 	if canReadTaskCredential(user, exp.UserId) {
 		return nil
 	}
-	hadAuth := hasRegistryAuth(exp.Config) //nolint:staticcheck
-	removeRegistryAuth(exp.Config)         //nolint:staticcheck
-	if !hadAuth {
-		// The config is the original config merged with defaults, so an original config that set
-		// registry_auth would have put it there too. Leave the original config as it is.
-		return nil
-	}
+	removeRegistryAuth(exp.Config) //nolint:staticcheck
 	out, err := removeRegistryAuthText(exp.OriginalConfig)
 	if err != nil {
 		return fmt.Errorf(

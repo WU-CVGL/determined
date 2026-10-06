@@ -17,6 +17,9 @@
    /api/v1/experiments/{id}`` (both ``config`` and ``original_config``), ``GET
    /api/v1/experiments``, and ``POST /api/v1/experiments-search``, and so to ``det experiment
    config`` and the WebUI. Only the experiment's owner and administrators see its ``registry_auth``.
+   Other users get ``original_config`` as JSON, encoded from the configuration as the master read
+   it, without the formatting and comments of the submitted text, which could hold credentials that
+   the master did not read, for example under a key that a later duplicate key replaced.
 
 -  API: **Important:** The experiment configuration that a checkpoint or model version carries in
    ``training.experiment_config`` now has ``environment.registry_auth`` set to ``null`` for every

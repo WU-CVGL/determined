@@ -76,18 +76,15 @@ func TestRemoveRegistryAuthText(t *testing.T) {
 		name, in, want string
 	}{
 		{name: "empty", in: "", want: ""},
-		{name: "blank", in: "  \n", want: "  \n"},
+		{name: "blank", in: "  \n", want: ""},
+		// A config is always returned as the master parsed it, with or without credentials.
 		{
-			name: "JSON without credentials is unchanged",
-			in:   `{"environment": {"image": "i"}}`,
-			want: `{"environment": {"image": "i"}}`,
+			name: "JSON without credentials",
+			in:   `{"name": "exp", "environment": {"image": "i"}}`,
+			want: redacted,
 		},
-		{
-			name: "YAML without credentials is unchanged",
-			in:   "environment:\n  image: i\n",
-			want: "environment:\n  image: i\n",
-		},
-		{name: "YAML without environment is unchanged", in: "name: exp\n", want: "name: exp\n"},
+		{name: "YAML without credentials", in: "name: exp\nenvironment:\n  image: i\n", want: redacted},
+		{name: "YAML without environment", in: "name: exp\n", want: `{"name":"exp"}`},
 		{
 			name: "JSON",
 			in:   `{"name": "exp", "environment": {"image": "i", "registry_auth": {"password": "p"}}}`,
@@ -106,9 +103,9 @@ func TestRemoveRegistryAuthText(t *testing.T) {
 		// The master accepts YAML through schemas.JSONFromYaml (ghodss/yaml on yaml.v2), and these
 		// configs must parse the same way here.
 		{
-			name: "YAML with a duplicate key and without credentials is unchanged",
-			in:   "name: exp\ndescription: x\ndescription: y\n",
-			want: "name: exp\ndescription: x\ndescription: y\n",
+			name: "YAML with a duplicate key and without credentials",
+			in:   "name: exp\ndescription: first\ndescription: second\n",
+			want: `{"description":"second","name":"exp"}`,
 		},
 		{
 			name: "YAML with a duplicate key, the last one wins",
@@ -125,6 +122,43 @@ func TestRemoveRegistryAuthText(t *testing.T) {
 			name: "YAML 1.1 booleans",
 			in:   "name: exp\ndebug: yes\nenvironment:\n  image: i\n  registry_auth:\n    password: p\n",
 			want: `{"debug":true,"environment":{"image":"i"},"name":"exp"}`,
+		},
+		// Credentials that the master did not read stay in the submitted text, and must not come
+		// back from it.
+		{
+			name: "YAML with credentials in an environment that a later one replaces",
+			in: "name: exp\nenvironment:\n  registry_auth:\n    password: p\n" +
+				"environment:\n  image: i\n",
+			want: redacted,
+		},
+		{
+			name: "YAML flow mappings with credentials in an environment that a later one replaces",
+			in: "name: exp\nenvironment: {registry_auth: {password: p}}\n" +
+				"environment: {image: i}\n",
+			want: redacted,
+		},
+		{
+			name: "JSON with credentials in an environment that a later one replaces",
+			in: `{"name": "exp", "environment": {"registry_auth": {"password": "p"}}, ` +
+				`"environment": {"image": "i"}}`,
+			want: redacted,
+		},
+		{
+			name: "YAML with credentials that a later null replaces",
+			in: "name: exp\nenvironment:\n  image: i\n  registry_auth:\n    password: p\n" +
+				"  registry_auth: null\n",
+			want: redacted,
+		},
+		{
+			name: "JSON with credentials that a later null replaces",
+			in: `{"name": "exp", "environment": {"image": "i", ` +
+				`"registry_auth": {"password": "p"}, "registry_auth": null}}`,
+			want: redacted,
+		},
+		{
+			name: "YAML with credentials in a comment",
+			in:   "name: exp\nenvironment:\n  image: i\n  # registry_auth: {password: p}\n",
+			want: redacted,
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -189,17 +223,32 @@ func TestRedactExperimentRegistryAuth(t *testing.T) {
 	require.False(t, hasRegistryAuth(exp.Config)) //nolint:staticcheck
 	require.Empty(t, exp.OriginalConfig)
 
-	// Without credentials in its config, an experiment's original config is returned as it is,
-	// without being parsed.
-	for _, want := range []string{
-		"name: exp\ndescription: x\ndescription: y\n",
-		"environment: [unterminated",
+	// Without credentials in its config, which the master parsed from the original config, an
+	// experiment's original config can still hold credentials that a later key replaced. Another
+	// user gets the original config as the master parsed it, whatever the config holds.
+	for original, want := range map[string]string{
+		"name: exp\ndescription: first\ndescription: second\n": `{"description":"second","name":"exp"}`,
+		"name: exp\nenvironment:\n  registry_auth:\n    password: p\n" +
+			"environment:\n  image: i\n": `{"environment":{"image":"i"},"name":"exp"}`,
+		"name: exp\nenvironment:\n  image: i\n  registry_auth:\n    password: p\n" +
+			"  registry_auth: null\n": `{"environment":{"image":"i"},"name":"exp"}`,
 	} {
 		exp = newExp()
 		removeRegistryAuth(exp.Config) //nolint:staticcheck
-		exp.OriginalConfig = want
+		exp.OriginalConfig = original
 		require.NoError(t, redactExperimentRegistryAuth(model.User{ID: 8}, exp))
 		require.Equal(t, want, exp.OriginalConfig)
+	}
+
+	// An original config that does not parse fails another user's read, with or without
+	// credentials in the config.
+	for _, withAuth := range []bool{true, false} {
+		exp = newExp()
+		if !withAuth {
+			removeRegistryAuth(exp.Config) //nolint:staticcheck
+		}
+		exp.OriginalConfig = "environment: [unterminated"
+		require.Error(t, redactExperimentRegistryAuth(model.User{ID: 8}, exp))
 	}
 
 	// With credentials, integer mapping keys elsewhere in the original config do not stop them

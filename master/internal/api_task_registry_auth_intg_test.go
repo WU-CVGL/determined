@@ -33,6 +33,7 @@ import (
 	"github.com/determined-ai/determined/proto/pkg/checkpointv1"
 	"github.com/determined-ai/determined/proto/pkg/commonv1"
 	"github.com/determined-ai/determined/proto/pkg/modelv1"
+	"github.com/determined-ai/determined/proto/pkg/utilv1"
 )
 
 const (
@@ -408,14 +409,13 @@ func TestExperimentOriginalConfigRedactedLikeTheMasterParsesIt(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// No credentials: the original config is returned as it is.
+	// No credentials: the original config is returned as the master parsed it.
 	plain := createTestExpWithProjectID(t, api, alice, projectID)
-	const duplicateKey = "name: plain\ndescription: x\ndescription: y\n"
-	setOriginalConfig(plain, duplicateKey)
+	setOriginalConfig(plain, "name: plain\ndescription: first\ndescription: second\n")
 	got, err := api.GetExperiment(bobCtx,
 		&apiv1.GetExperimentRequest{ExperimentId: int32(plain.ID)})
 	require.NoError(t, err)
-	require.Equal(t, duplicateKey, got.Experiment.OriginalConfig)
+	require.JSONEq(t, `{"name": "plain", "description": "second"}`, got.Experiment.OriginalConfig)
 
 	// Credentials and integer mapping keys: the credentials are removed.
 	withAuth, name, image := createTestExpWithRegistryAuth(t, api, alice, projectID)
@@ -434,6 +434,82 @@ func TestExperimentOriginalConfigRedactedLikeTheMasterParsesIt(t *testing.T) {
 	requireConfigRegistryAuth(t, original, false)
 	require.Equal(t, "cat", original.Fields["data"].GetStructValue().
 		Fields["label_map"].GetStructValue().Fields["0"].GetStringValue())
+}
+
+// An experiment's original config is the text its owner submitted, which the master reads with a
+// parser that keeps the last of duplicate keys. The text can therefore hold credentials that the
+// experiment's config does not; another user gets neither.
+func TestExperimentOriginalConfigWithReplacedRegistryAuth(t *testing.T) {
+	api, admin, adminCtx := setupAPITest(t, nil)
+	require.True(t, admin.Admin)
+	alice := db.RequireMockUser(t, api.m.db)
+	bob := db.RequireMockUser(t, api.m.db)
+	_, projectID := createProjectAndWorkspace(adminCtx, t, api)
+
+	const (
+		image = "public-image:1"
+		base  = "entrypoint: train.py\n" +
+			"checkpoint_storage:\n  type: shared_fs\n  host_path: /tmp\n" +
+			"searcher:\n  name: single\n  metric: loss\n"
+		auth = "  registry_auth:\n" +
+			"    username: " + testRegistryUsername + "\n" +
+			"    password: " + testRegistryPassword + "\n" +
+			"    serveraddress: " + testRegistryServer + "\n"
+	)
+	for _, c := range []struct{ name, config string }{
+		{
+			name: "an environment that a later one replaces",
+			config: "name: replaced-environment\n" + base +
+				"environment:\n" + auth +
+				"environment:\n  image: " + image + "\n",
+		},
+		{
+			name: "registry_auth that a later null replaces",
+			config: "name: replaced-registry-auth\n" + base +
+				"environment:\n  image: " + image + "\n" + auth +
+				"  registry_auth: null\n",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			// Alice submits the config as the CLI does, through the master's config parsing.
+			created, err := api.CreateExperiment(ntscUserCtx(t, alice),
+				&apiv1.CreateExperimentRequest{
+					ModelDefinition: []*utilv1.File{{Content: []byte{1}}},
+					Config:          c.config,
+					ProjectId:       int32(projectID),
+				})
+			require.NoError(t, err)
+			require.Equal(t, int32(alice.ID), created.Experiment.UserId)
+
+			for _, reader := range registryAuthReaders(alice, bob, admin) {
+				got, err := api.GetExperiment(ntscUserCtx(t, reader.user),
+					&apiv1.GetExperimentRequest{ExperimentId: created.Experiment.Id})
+				require.NoError(t, err, reader.name)
+
+				// The master did not read the credentials into the config.
+				raw, err := protojson.Marshal(got.Config)
+				require.NoError(t, err)
+				require.NotContains(t, string(raw), testRegistryPassword, reader.name)
+				require.NotContains(t, string(raw), testRegistryUsername, reader.name)
+				require.Contains(t, string(raw), image, reader.name)
+
+				if reader.seesAuth {
+					require.Equal(t, c.config, got.Experiment.OriginalConfig, reader.name)
+					continue
+				}
+				require.NotContains(t, got.Experiment.OriginalConfig, testRegistryPassword)
+				require.NotContains(t, got.Experiment.OriginalConfig, testRegistryUsername)
+				original := &structpb.Struct{}
+				require.NoError(t,
+					protojson.Unmarshal([]byte(got.Experiment.OriginalConfig), original))
+				env := original.Fields["environment"].GetStructValue()
+				require.NotNil(t, env)
+				require.NotContains(t, env.Fields, "registry_auth")
+				require.Equal(t, image, env.Fields["image"].GetStringValue())
+				require.Equal(t, "train.py", original.Fields["entrypoint"].GetStringValue())
+			}
+		})
+	}
 }
 
 // The experiment config that checkpoints and model versions carry in training.experiment_config
