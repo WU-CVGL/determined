@@ -1,8 +1,6 @@
 package detect
 
 import (
-	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -65,7 +63,7 @@ var nvmlRunning = make(chan struct{}, 1)
 // CUDA slot nor an excluded GPU.
 func DetectGPUTopology(devices, excluded []device.Device) *aproto.GPUTopology {
 	topo := collectGPUs(devices, excluded, false, runNVMLSession, nvmlTimeout).Topology
-	logGPUTopology(topo, devices)
+	logGPUTopology(topo)
 	return topo
 }
 
@@ -161,150 +159,43 @@ func gpuInventory(devices, excluded []device.Device) []aproto.GPUInfo {
 	return inventory
 }
 
-// logGPUTopology logs one line: Info when the topology is known and no GPU has an NVML error,
-// Warn otherwise.
-func logGPUTopology(topo *aproto.GPUTopology, devices []device.Device) {
+// logGPUTopology logs one summary line, and one line per failed NVML call of a GPU. The
+// matrices, NUMA groups and P2P states are in the agent API, the CLI, the WebUI and the
+// gpu-topology subcommand.
+func logGPUTopology(topo *aproto.GPUTopology) {
 	if topo == nil {
 		return
 	}
-	if topo.UnknownReason != "" {
-		log.Warnf("GPU topology unknown: %s (%d GPUs)", topo.UnknownReason, len(topo.GPUs))
-		return
-	}
-	line, hasErrors := gpuTopologySummary(topo, devices)
-	if hasErrors {
-		log.Warn(line)
-		return
-	}
-	log.Info(line)
-}
-
-// gpuTopologySummary renders the log line, for example "GPU topology: 8 GPUs, NUMA 4+4, levels
-// NODE/SYS, P2P usable, width below max at start: slot 1 (x8 of x16), NVML errors: none,
-// driver 610.57.04".
-func gpuTopologySummary(topo *aproto.GPUTopology, devices []device.Device) (string, bool) {
-	slotOf := map[string]string{}
-	for _, d := range devices {
-		if d.Type == device.CUDA {
-			slotOf[d.UUID] = "slot " + strconv.Itoa(int(d.ID))
-		}
-	}
-	name := func(g aproto.GPUInfo) string {
-		if s, ok := slotOf[g.UUID]; ok && !g.Excluded {
-			return s
-		}
-		if g.PCIBusID != "" {
-			return "excluded " + g.PCIBusID
-		}
-		return "excluded " + g.UUID
-	}
-
-	slots := map[string]bool{}
-	numa := map[int]int{} // NUMA node (-1 unknown) to slot count
-	var narrow, nvmlErrors []string
-	numExcluded := 0
+	slots, excluded, nvmlErrors := 0, 0, 0
 	for _, g := range topo.GPUs {
 		if g.Excluded {
-			numExcluded++
+			excluded++
 		} else {
-			slots[g.UUID] = true
-			key := -1
-			if g.NUMANode != nil {
-				key = *g.NUMANode
-			}
-			numa[key]++
-		}
-		if g.PCIeLinkWidth > 0 && g.PCIeLinkWidthMax > 0 && g.PCIeLinkWidth < g.PCIeLinkWidthMax {
-			narrow = append(narrow, fmt.Sprintf("%s (x%d of x%d)", name(g), g.PCIeLinkWidth,
-				g.PCIeLinkWidthMax))
+			slots++
 		}
 		if g.NVMLError != "" {
-			nvmlErrors = append(nvmlErrors, fmt.Sprintf("%s (%s)", name(g), g.NVMLError))
+			nvmlErrors++
 		}
 	}
-	numaNodes := make([]int, 0, len(numa))
-	for k := range numa {
-		numaNodes = append(numaNodes, k)
+	switch {
+	case topo.UnknownReason != "":
+		log.Warnf("GPU topology unknown: slots=%d excluded=%d reason=%q",
+			slots, excluded, topo.UnknownReason)
+	case nvmlErrors > 0:
+		log.Warnf("GPU topology collected: slots=%d excluded=%d nvml_errors=%d driver=%s",
+			slots, excluded, nvmlErrors, topo.DriverVersion)
+	default:
+		log.Infof("GPU topology collected: slots=%d excluded=%d nvml_errors=0 driver=%s",
+			slots, excluded, topo.DriverVersion)
 	}
-	sort.Ints(numaNodes)
-	numaSizes := make([]string, 0, len(numaNodes))
-	for _, k := range numaNodes {
-		if k >= 0 {
-			numaSizes = append(numaSizes, strconv.Itoa(numa[k]))
-		}
-	}
-	if n := numa[-1]; n > 0 {
-		numaSizes = append(numaSizes, strconv.Itoa(n)+" unknown")
-	}
-
-	levelSeen := map[aproto.GPULinkLevel]bool{}
-	usable, notUsable, unknown := 0, 0, 0
-	for _, l := range topo.Links {
-		if !slots[l.UUIDA] || !slots[l.UUIDB] {
+	for _, g := range topo.GPUs {
+		if g.NVMLError == "" {
 			continue
 		}
-		if l.Level.Known() {
-			levelSeen[l.Level] = true
-		}
-		switch aproto.P2PUsability(l) {
-		case aproto.GPUP2PUsable:
-			usable++
-		case aproto.GPUP2PNotUsable:
-			notUsable++
-		default:
-			unknown++
+		// NVMLError lists "<call>: <NAME> (<code>)" entries, separated by "; ".
+		for _, e := range strings.Split(g.NVMLError, "; ") {
+			call, ret, _ := strings.Cut(e, ": ")
+			log.Warnf("GPU NVML error: uuid=%s excluded=%t call=%s return=%s", g.UUID, g.Excluded, call, ret)
 		}
 	}
-	var levels []string
-	for _, l := range []aproto.GPULinkLevel{
-		aproto.GPULinkLevelInternal, aproto.GPULinkLevelPIX, aproto.GPULinkLevelPXB,
-		aproto.GPULinkLevelPHB, aproto.GPULinkLevelNode, aproto.GPULinkLevelSys,
-	} {
-		if levelSeen[l] {
-			levels = append(levels, string(l))
-		}
-	}
-	if len(levels) == 0 {
-		levels = []string{"unknown"}
-	}
-
-	total := usable + notUsable + unknown
-	var p2p string
-	switch {
-	case total == 0:
-		p2p = "P2P n/a"
-	case usable == total:
-		p2p = "P2P usable"
-	case unknown == total:
-		p2p = "P2P unknown"
-	case usable == 0 && unknown == 0:
-		p2p = "P2P not usable"
-	default:
-		p2p = fmt.Sprintf("P2P usable %d/%d", usable, total)
-		if unknown > 0 {
-			p2p += fmt.Sprintf(" (%d unknown)", unknown)
-		}
-	}
-
-	gpus := fmt.Sprintf("%d GPUs", len(topo.GPUs))
-	if numExcluded > 0 {
-		gpus += fmt.Sprintf(" (%d excluded)", numExcluded)
-	}
-	parts := []string{
-		gpus,
-		"NUMA " + strings.Join(numaSizes, "+"),
-		"levels " + strings.Join(levels, "/"),
-		p2p,
-		"width below max at start: " + noneIfEmpty(narrow),
-		"NVML errors: " + noneIfEmpty(nvmlErrors),
-		"driver " + topo.DriverVersion,
-	}
-	return "GPU topology: " + strings.Join(parts, ", "), len(nvmlErrors) > 0
-}
-
-func noneIfEmpty(items []string) string {
-	if len(items) == 0 {
-		return "none"
-	}
-	return strings.Join(items, ", ")
 }

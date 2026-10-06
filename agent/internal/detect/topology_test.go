@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -136,34 +137,45 @@ func TestCollectGPUsTimeout(t *testing.T) {
 	require.Equal(t, "NVML did not finish within 60s", timeoutReason(nvmlTimeout))
 }
 
-func TestGPUTopologySummary(t *testing.T) {
-	zero, one := 0, 1
+func TestLogGPUTopology(t *testing.T) {
+	hook := logtest.NewGlobal()
+	t.Cleanup(hook.Reset)
+	messages := func() []string {
+		var out []string
+		for _, e := range hook.AllEntries() {
+			out = append(out, e.Level.String()+" "+e.Message)
+		}
+		hook.Reset()
+		return out
+	}
+
 	topo := &aproto.GPUTopology{
 		DriverVersion: "610.57.04",
 		GPUs: []aproto.GPUInfo{
-			{UUID: "GPU-a", NUMANode: &zero, PCIeLinkWidth: 16, PCIeLinkWidthMax: 16},
-			{UUID: "GPU-b", NUMANode: &zero, PCIeLinkWidth: 8, PCIeLinkWidthMax: 16},
-			{UUID: "GPU-c", NUMANode: &one, PCIeLinkWidth: 16, PCIeLinkWidthMax: 16},
-			{
-				UUID: "GPU-d", PCIBusID: "0000:81:00.0", Excluded: true,
-				NVMLError: "GetCurrPcieLinkWidth: ERROR_GPU_IS_LOST (15)",
-			},
+			{UUID: "GPU-a"}, {UUID: "GPU-b"}, {UUID: "GPU-c", Excluded: true},
 		},
 	}
-	ok := aproto.GPUP2PCaps{Read: aproto.GPUP2PStatusOK, Write: aproto.GPUP2PStatusOK}
-	for _, p := range [][2]string{{"GPU-a", "GPU-b"}, {"GPU-a", "GPU-c"}, {"GPU-b", "GPU-c"}} {
-		level := aproto.GPULinkLevelSys
-		if p == [2]string{"GPU-a", "GPU-b"} {
-			level = aproto.GPULinkLevelNode
-		}
-		topo.Links = append(topo.Links, aproto.GPULink{
-			UUIDA: p[0], UUIDB: p[1], Level: level, P2PAToB: ok, P2PBToA: ok,
-		})
-	}
-	line, hasErrors := gpuTopologySummary(topo, cudaDevices("GPU-a", "GPU-b", "GPU-c"))
-	require.True(t, hasErrors)
-	require.Equal(t, "GPU topology: 4 GPUs (1 excluded), NUMA 2+1, levels NODE/SYS, P2P usable, "+
-		"width below max at start: slot 1 (x8 of x16), "+
-		"NVML errors: excluded 0000:81:00.0 (GetCurrPcieLinkWidth: ERROR_GPU_IS_LOST (15)), "+
-		"driver 610.57.04", line)
+	logGPUTopology(topo)
+	require.Equal(t, []string{
+		"info GPU topology collected: slots=2 excluded=1 nvml_errors=0 driver=610.57.04",
+	}, messages())
+
+	topo.GPUs[2].NVMLError = "GetCurrPcieLinkWidth: ERROR_GPU_IS_LOST (15); " +
+		"GetMaxPcieLinkWidth: ERROR_UNKNOWN (999)"
+	logGPUTopology(topo)
+	require.Equal(t, []string{
+		"warning GPU topology collected: slots=2 excluded=1 nvml_errors=1 driver=610.57.04",
+		"warning GPU NVML error: uuid=GPU-c excluded=true call=GetCurrPcieLinkWidth " +
+			"return=ERROR_GPU_IS_LOST (15)",
+		"warning GPU NVML error: uuid=GPU-c excluded=true call=GetMaxPcieLinkWidth " +
+			"return=ERROR_UNKNOWN (999)",
+	}, messages())
+
+	logGPUTopology(unmeasured(topo.GPUs, "NVML init: ERROR_LIBRARY_NOT_FOUND (12)"))
+	require.Equal(t, []string{
+		`warning GPU topology unknown: slots=2 excluded=1 reason="NVML init: ERROR_LIBRARY_NOT_FOUND (12)"`,
+	}, messages())
+
+	logGPUTopology(nil)
+	require.Empty(t, messages())
 }
