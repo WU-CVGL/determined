@@ -220,8 +220,6 @@ export type ExperimentRunRow = RunRowBase & {
 
 export type RunRow = CommandRunRow | GenericTaskRunRow | ExperimentRunRow;
 
-export const isCommandRow = (row: RunRow): row is CommandRunRow => isCommandKind(row.kind);
-
 export const runRowKey = (kind: RunKind, id: string | number): string => `${kind}:${id}`;
 
 export const commandRow = (task: CommandTask): CommandRunRow => ({

@@ -525,11 +525,7 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         );
       }
       return (
-        <TaskActionDropdown
-          task={row.task}
-          onComplete={fetchRuns}
-          onLaunchAgain={launchAgain}
-          onVisibleChange={contextMenu?.onVisibleChange}>
+        <TaskActionDropdown task={row.task} onComplete={fetchRuns} onLaunchAgain={launchAgain}>
           {contextMenu?.children}
         </TaskActionDropdown>
       );
