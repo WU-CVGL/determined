@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/docker/docker/api/types/mount"
+	"github.com/sirupsen/logrus"
 	k8sV1 "k8s.io/api/core/v1"
 
 	"github.com/determined-ai/determined/master/internal/rm"
@@ -151,6 +152,8 @@ func podSpecsOf(r rm.ResourceManager, pool rm.ResourcePoolName) podSpecs {
 	}
 	switch applies, err := applier.AppliesPodSpecs(pool); {
 	case err != nil:
+		logrus.WithError(err).Warnf(
+			"cannot tell whether the resource manager of resource pool %q applies pod specs", pool)
 		return podSpecsUnknown
 	case applies:
 		return podSpecsApplied
