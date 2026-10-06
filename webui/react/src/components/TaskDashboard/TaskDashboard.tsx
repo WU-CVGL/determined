@@ -229,7 +229,6 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
   const [page, setPage] = useState<RunPage>();
   const [selected, setSelected] = useState<ReadonlyMap<string, RunRow>>(() => new Map());
   const containerRef = useRef<HTMLDivElement>(null);
-  const fetchSeq = useRef(0);
   const canceler = useRef<AbortController>();
   const requestedProjects = useRef(new Set<number>());
   const location = useLocation();
@@ -295,14 +294,13 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
     canceler.current?.abort();
     const controller = new AbortController();
     canceler.current = controller;
-    const seq = ++fetchSeq.current;
     try {
       const result = await fetchRunPage(query, controller.signal);
-      // A later fetch (new filters, a new page) replaces this one.
-      if (seq !== fetchSeq.current) return;
+      // A later fetch (new filters, a new page) or an unmount aborted this one: its reply is stale.
+      if (controller.signal.aborted) return;
       setPage((prev) => (_.isEqual(prev, result) ? prev : result));
     } catch (e) {
-      if (seq !== fetchSeq.current) return;
+      if (controller.signal.aborted) return;
       handleError(e, {
         publicSubject: 'Unable to fetch jobs.',
         silent: true,
