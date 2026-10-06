@@ -19,8 +19,9 @@ import {
 } from 'utils/resourcePoolAccess';
 
 import PoolAccessUsersModalComponent, {
-  GROUP_EXPANSION_NOTE,
+  GRANT_GROUP_NOTE,
   MEMBERSHIP_CHANGED_MESSAGE,
+  REVOKE_GROUP_NOTE,
 } from './PoolAccessUsersModal';
 
 const OPEN = 'Open';
@@ -145,7 +146,8 @@ describe('PoolAccessUsersModal', () => {
     );
     const onApplied = await setup(poolsNamed('gpu-a100', 'gpu-h100'));
 
-    expect(screen.getByText(GROUP_EXPANSION_NOTE)).toBeInTheDocument();
+    expect(screen.getByText(GRANT_GROUP_NOTE)).toBeInTheDocument();
+    expect(screen.queryByText(REVOKE_GROUP_NOTE)).not.toBeInTheDocument();
     expect(screen.getByTestId('pool-access-modal-pools')).toHaveTextContent(
       'Grant access to gpu-a100, gpu-h100',
     );
@@ -276,6 +278,8 @@ describe('PoolAccessUsersModal', () => {
     await setup(poolsNamed('cpu', 'gpu-a100'), 'revoke');
 
     expect(screen.getByText(/Revoking applies from the next request/)).toBeInTheDocument();
+    expect(screen.getByText(REVOKE_GROUP_NOTE)).toBeInTheDocument();
+    expect(screen.queryByText(GRANT_GROUP_NOTE)).not.toBeInTheDocument();
     await choose('Users', 'bob');
     await user.click(screen.getByRole('button', { name: 'Revoke from 1 user' }));
 

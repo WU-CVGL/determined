@@ -36,9 +36,12 @@ const GROUPS_PAGE_SIZE = 500;
 /** The preview lists at most this many usernames. */
 const PREVIEW_LIMIT = 200;
 
-export const GROUP_EXPANSION_NOTE =
+export const GRANT_GROUP_NOTE =
   'A group is expanded to its members once, when you apply: each member gets a grant of their ' +
   "own. Later changes to the group's membership do not change any grant.";
+export const REVOKE_GROUP_NOTE =
+  "A group is expanded to its members once, when you apply: each member's own grant is " +
+  'revoked. Users who join the group later are not affected.';
 export const MEMBERSHIP_CHANGED_MESSAGE =
   'Group membership changed since the preview. Check the updated list and apply again.';
 
@@ -301,7 +304,7 @@ const PoolAccessUsersModalComponent: React.FC<Props> = ({
             })}
           </Select>
           {groupsError && <Alert message={`Unable to list groups: ${groupsError}`} type="error" />}
-          <p className={css.hint}>{GROUP_EXPANSION_NOTE}</p>
+          <p className={css.hint}>{isGrant ? GRANT_GROUP_NOTE : REVOKE_GROUP_NOTE}</p>
         </div>
         {/* hew's TextArea takes no id, so the label wraps it instead of naming it. */}
         <label className={css.field}>

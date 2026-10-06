@@ -375,10 +375,11 @@ means for each selected pool.
 Grant and revoke take users, user groups, and pasted usernames together, and
 show the resulting usernames without duplicates before anything is sent:
 
-- A group is expanded to its members when the change is applied, and each
-  member gets a grant of their own. Later changes to the group's membership
-  change no grant. When the members changed since the preview, nothing is sent
-  and the new list is shown.
+- A group is expanded to its members when the change is applied. A grant
+  gives each member a grant of their own, and a revoke revokes each member's
+  own grant. Later changes to the group's membership change no grant: users who
+  join the group later are not affected. When the members changed since the
+  preview, nothing is sent and the new list is shown.
 - Every pasted username must be a known user; one per line, or separated by
   commas or spaces. A username that contains a space goes on a line of its own.
 - The usernames go to each pool in requests below the 64 KiB body limit. A
