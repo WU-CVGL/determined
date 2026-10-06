@@ -241,10 +241,11 @@ system other than Linux, has no NVML support and reports the topology as unknown
 
 The agent initializes NVML once per start, after device detection, and waits at most 60 seconds for
 loading the library, initialization and the measurement together. After that it starts without the
-measurement. Device detection itself runs ``nvidia-smi`` without a timeout, so a hanging
-``nvidia-smi`` still blocks agent start. The 60 seconds cover hangs only: a crash inside
-``libnvidia-ml.so.1`` at agent start stops the agent. To recover, run the previous agent image,
-after the rollback step of :ref:`exclude_gpus <agent-exclude-gpus>` if the agent uses it.
+measurement. On GPUs without persistence mode, initialization alone can add several seconds to agent
+start. Device detection itself runs ``nvidia-smi`` without a timeout, so a hanging ``nvidia-smi``
+still blocks agent start. The 60 seconds cover hangs only: a crash inside ``libnvidia-ml.so.1`` at
+agent start stops the agent. To recover, run the previous agent image, after the rollback step of
+:ref:`exclude_gpus <agent-exclude-gpus>` if the agent uses it.
 
 NVML support links the agent binary dynamically against glibc. A custom agent image needs glibc
 2.35, the version in ``ubuntu:22.04``, or newer; images based on musl, such as Alpine, cannot run
@@ -271,6 +272,8 @@ GPU, and for nothing else. A restart measures again, for example after a driver 
 A pair's P2P is usable only when ``READ`` and ``WRITE`` are ``OK`` in both directions, the condition
 under which NCCL uses P2P between two GPUs. It is not usable when any of the four statuses is a
 known status other than ``OK``, and unknown otherwise. NVLinks do not count without usable P2P.
+Usable means that NVML reports ``OK``, not that a transfer was measured: a host whose BAR1 P2P setup
+is broken can still report ``OK``.
 
 NVML results appear as their symbolic name and number, for example ``ERROR_GPU_IS_LOST (15)``.
 
