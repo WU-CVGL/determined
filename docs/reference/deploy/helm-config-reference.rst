@@ -270,10 +270,12 @@
 
    -  ``enabled``: Whether collection is enabled. Defaults to ``true``.
 
--  ``observability``: Specifies whether Determined enables Prometheus monitoring routes. See
-   :ref:`Prometheus <prometheus>` for details.
+-  ``observability``: Configures the Prometheus monitoring routes. See :ref:`Prometheus
+   <prometheus>` for details.
 
    -  ``enable_prometheus``: Whether Prometheus endpoints are present. Defaults to ``true``.
+   -  ``task_mapping_delay``: How long an allocation runs before its metrics are attributed to its
+      task. Defaults to ``5m``. See :ref:`master-config-observability`.
 
 -  ``tensorboardTimeout``: Specifies the duration in seconds before idle TensorBoard instances are
    automatically terminated. A TensorBoard instance is considered to be idle if it does not receive

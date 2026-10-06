@@ -319,6 +319,9 @@ stringData:
     {{- if .Values.observability }}
     observability:
       enable_prometheus: {{ required "A valid .Values.observability.enable_prometheus must be provided if setting .Values.observability!" .Values.observability.enable_prometheus }}
+      {{- if .Values.observability.task_mapping_delay }}
+      task_mapping_delay: {{ .Values.observability.task_mapping_delay | quote }}
+      {{- end }}
     {{- end }}
 
     {{- if .Values.clusterName }}
