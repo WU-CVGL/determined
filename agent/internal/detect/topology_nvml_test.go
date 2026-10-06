@@ -730,8 +730,9 @@ func TestCollectGPUsBlockingInit(t *testing.T) {
 	require.Equal(t, "NVML did not finish within 0.05s", c.Topology.UnknownReason)
 	require.Equal(t, inventoryOf(gpus, 7), c.Topology.GPUs, "the slots and the excluded GPU, unmeasured")
 
-	// The first Init is still blocked: a second collection must not start another one.
-	c = collectGPUs(devices, excluded, true, f.session(), time.Minute)
+	// The first Init is still blocked: a second collection must not start another one. The short
+	// deadline makes a second Init fail fast: it would block and report the deadline instead.
+	c = collectGPUs(devices, excluded, true, f.session(), 50*time.Millisecond)
 	require.Equal(t, "TIMEOUT", c.NVMLInit)
 	require.Equal(t, "an earlier NVML session has not finished", c.Topology.UnknownReason)
 	require.Equal(t, inventoryOf(gpus, 7), c.Topology.GPUs)

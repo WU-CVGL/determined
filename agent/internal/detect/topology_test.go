@@ -127,14 +127,29 @@ func TestCollectGPUsTimeout(t *testing.T) {
 	}, c)
 	require.NotSame(t, &calls.inventories[0][0], &c.Topology.GPUs[0], "the session works on its own copy")
 
-	// While the first session may still be blocked, no second session starts.
-	c = collectGPUs(devices, excluded, true, blocking, time.Minute)
+	// While the first session may still be blocked, no second session starts. The short deadline
+	// makes a second session fail fast: it would block and report the deadline instead.
+	c = collectGPUs(devices, excluded, true, blocking, 50*time.Millisecond)
 	require.Equal(t, "TIMEOUT", c.NVMLInit)
 	require.Equal(t, "an earlier NVML session has not finished", c.Topology.UnknownReason)
 	require.Equal(t, wantGPUs, c.Topology.GPUs)
 	require.Equal(t, 1, calls.count())
 
 	require.Equal(t, "NVML did not finish within 60s", timeoutReason(nvmlTimeout))
+}
+
+func TestCollectGPUsBackToBack(t *testing.T) {
+	// A collection right after a finished one finds the guard free: the session releases it
+	// before it hands back its result. The window was narrow; this many collections take about a
+	// second with -race and caught the release after the send in every run.
+	devices := cudaDevices("GPU-a")
+	instant := func(inv []aproto.GPUInfo) GPUCollection {
+		return GPUCollection{NVMLInit: "SUCCESS", Topology: &aproto.GPUTopology{GPUs: inv}}
+	}
+	for i := 0; i < 200000; i++ {
+		c := collectGPUs(devices, nil, false, instant, time.Minute)
+		require.Equal(t, "SUCCESS", c.NVMLInit, "collection %d", i)
+	}
 }
 
 func TestLogGPUTopology(t *testing.T) {

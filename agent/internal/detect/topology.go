@@ -113,8 +113,13 @@ func runSession(session nvmlSession, inventory []aproto.GPUInfo, timeout time.Du
 	result := make(chan GPUCollection, 1)
 	own := append([]aproto.GPUInfo(nil), inventory...)
 	go func() {
-		defer func() { <-nvmlRunning }()
-		result <- session(own)
+		// The guard is released before the send: a caller that collects again as soon as it has
+		// this result must find it free.
+		c := func() GPUCollection {
+			defer func() { <-nvmlRunning }()
+			return session(own)
+		}()
+		result <- c
 	}()
 
 	timer := time.NewTimer(timeout)
