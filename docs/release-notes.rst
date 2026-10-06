@@ -147,6 +147,14 @@ Version 0.41.0
 -  API: Let only a task's own containers, its owner, and administrators add lines to the logs of
    notebooks, shells, commands, TensorBoards, generic tasks, and checkpoint GC tasks.
 
+-  Checkpoints: Run checkpoint garbage collection as the experiment's owner, without a user session,
+   and with the GC pool's task container defaults and the experiment's checkpoint storage instead of
+   the experiment's environment, mounts, and pod spec.
+
+-  Checkpoints: Collect ``directory`` checkpoint storage only when the GC task has the same storage
+   mounted as the trials, and otherwise keep the checkpoints with the reason in the master log. An
+   experiment's own mount over part of the ``shared_fs`` path is not detected.
+
 See :ref:`generic tasks <generic-tasks>`, :ref:`browser terminals <shell-web-terminal>`,
 :doc:`dynamic resource pools <maintenance/dynamic-pools>`, :ref:`GPU topology and health
 <agent-gpu-topology>`, and :doc:`upgrade with running tasks <maintenance/hot-upgrade>` for setup and
