@@ -169,7 +169,7 @@ describe('GpuTopology', () => {
     expect(tooltip).toHaveTextContent('Slot 3 on node01: link below max');
     expect(tooltip).toHaveTextContent('UUID');
     expect(tooltip).toHaveTextContent('0000:61:00.0');
-    expect(tooltip).toHaveTextContent(/PCIe linkx8 of x16, Gen4 of Gen4NVML errors/);
+    expect(tooltip).toHaveTextContent(/PCIe linkx8 of x16, Gen4NVML errors/);
     // Only the time: the details end with it, before the narrow link text.
     expect(tooltip).toHaveTextContent(
       /NVML errorsnoneCollected at\d{4}-\d{2}-\d{2}, \d{2}:\d{2}:\d{2}A lower link width/,

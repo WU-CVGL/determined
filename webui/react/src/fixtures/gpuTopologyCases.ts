@@ -5,13 +5,15 @@ import { V1GpuTopology } from 'services/api-ts-sdk';
 
 /**
  * Agent GPU topologies as the master's API returns them, with the `det agent list` strings they
- * give. Shared with harness/tests/cli/test_agent.py, so the CLI and the WebUI show the same
- * strings. For tests only: it reads the file from the repository.
+ * give and, where pcieLink is given, the PCIe link of each GPU in its details, in the order of
+ * gpuTopology.gpus. Shared with harness/tests/cli/test_agent.py, so the CLI and the WebUI show the
+ * same strings. For tests only: it reads the file from the repository.
  */
 export interface GpuTopologyCase {
   name: string;
   topology: string;
   health: string;
+  pcieLink?: string[];
   gpuTopology: V1GpuTopology | null;
 }
 

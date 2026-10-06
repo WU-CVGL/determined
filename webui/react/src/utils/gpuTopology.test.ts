@@ -44,6 +44,14 @@ describe('gpuTopology', () => {
       expect(gpuHealthSummary(topo)).toBe((c as GpuTopologyCase).health);
     });
 
+    it.each(GPU_TOPOLOGY_CASES.filter((c) => c.pcieLink).map((c) => [c.name, c]))(
+      'PCIe link of each GPU: %s',
+      (_, c) => {
+        const { gpuTopology, pcieLink } = c as GpuTopologyCase;
+        expect(gpuTopology?.gpus.map(linkText)).toEqual(pcieLink);
+      },
+    );
+
     it.each([
       ['no-p2p:', '3 PHB no-p2p(TOPOLOGY_NOT_SUPPORTED) (1 unknown)'],
       // Each of the four positions of the lowest NOT_USABLE pair holds a different status, so
@@ -228,9 +236,15 @@ describe('gpuTopology', () => {
 
     it('describes the PCIe link and the NVML errors', () => {
       const topo = gpuTopologyCase('every pair unknown');
-      expect(linkText(topo.gpus[1])).toBe('x8 of x16, Gen1 of Gen4');
+      // Idle at Gen1 of Gen4: the width as measured, the highest generation only.
+      expect(linkText(topo.gpus[1])).toBe('x8 of x16, Gen4');
+      // Gen3 with an unknown highest generation.
+      expect(linkText(topo.gpus[2])).toBe('x4 of x16, Gen?');
       expect(linkText(topo.gpus[0])).toBe('unknown');
-      expect(linkText(topo.gpus[3])).toBe('x? of x16, Gen4 of Gen4');
+      expect(linkText(topo.gpus[3])).toBe('x? of x16, Gen4');
+      // Only the current generation known.
+      const genOnly = { ...topo.gpus[0], pcieLinkGen: 1 };
+      expect(linkText(genOnly)).toBe('unknown');
       expect(nvmlErrorsText(topo, topo.gpus[0])).toBe('GetPciInfo: ERROR_GPU_IS_LOST (15)');
       expect(nvmlErrorsText(topo, topo.gpus[1])).toBe('none');
       const unknown = gpuTopologyCase('NVML init failed');

@@ -359,20 +359,22 @@ export const slotFillEdgeColor = (state: SlotState): string | undefined =>
 export const slotFillOnColor = (state: SlotState): string =>
   state === SlotState.Free ? 'var(--theme-surface-on)' : getStateColorCssVar(state, { isOn: true });
 
-/** "<cur> of <max>" for a link width or generation, with ? for an unknown value (0). */
+/** "<cur> of <max>" for a link width, with ? for an unknown value (0). */
 export const linkValueText = (cur: number, max: number, prefix: string): string => {
   const value = (v: number) => (v > 0 ? `${prefix}${v}` : `${prefix}?`);
   return `${value(cur)} of ${value(max)}`;
 };
 
-/** The first fact of a GPU's health: its PCIe link, as measured at agent start. */
+/**
+ * The first fact of a GPU's health: its PCIe link, as measured at agent start. The width as current
+ * of max, and the generation as the highest that the GPU and its slot support: the current
+ * generation drops while a GPU is idle, so it is left out, as in `det agent describe`.
+ */
 export const linkText = (gpu: V1GpuInfo): string => {
-  const { pcieLinkWidth, pcieLinkWidthMax, pcieLinkGen, pcieLinkGenMax } = gpu;
-  if (!pcieLinkWidth && !pcieLinkWidthMax && !pcieLinkGen && !pcieLinkGenMax) return 'unknown';
-  return (
-    `${linkValueText(pcieLinkWidth, pcieLinkWidthMax, 'x')}, ` +
-    linkValueText(pcieLinkGen, pcieLinkGenMax, 'Gen')
-  );
+  const { pcieLinkWidth, pcieLinkWidthMax, pcieLinkGenMax } = gpu;
+  if (!pcieLinkWidth && !pcieLinkWidthMax && !pcieLinkGenMax) return 'unknown';
+  const gen = pcieLinkGenMax > 0 ? `Gen${pcieLinkGenMax}` : 'Gen?';
+  return `${linkValueText(pcieLinkWidth, pcieLinkWidthMax, 'x')}, ${gen}`;
 };
 
 /** The second fact of a GPU's health: its NVML errors, as measured at agent start. */

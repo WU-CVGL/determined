@@ -384,12 +384,21 @@ def list_slots(args: argparse.Namespace) -> None:
 
 
 def _link_text(cur: int, cur_max: int, prefix: str) -> str:
-    """A link width or generation as "<cur> of <max>", with ? for an unknown value (0)."""
+    """A link width as "<cur> of <max>", with ? for an unknown value (0)."""
 
     def value(v: int) -> str:
         return f"{prefix}{v}" if v > 0 else f"{prefix}?"
 
     return f"{value(cur)} of {value(cur_max)}"
+
+
+def _link_gen_text(gen_max: int, unknown: str = "Gen?") -> str:
+    """A GPU's PCIe link generation: the highest that the GPU and its slot support.
+
+    `unknown` is shown when it is unknown (0). The current generation drops while a GPU is idle, so
+    it is left out, as in the WebUI.
+    """
+    return f"Gen{gen_max}" if gen_max > 0 else unknown
 
 
 def _cur_max(cur: int, cur_max: int, prefix: str) -> str:
@@ -411,10 +420,10 @@ def _gpu_details(
     lines = []
     if gpu.excluded:
         lines.append(GPU_EXCLUDED_TEXT)
-    if gpu.pcieLinkWidth or gpu.pcieLinkWidthMax or gpu.pcieLinkGen or gpu.pcieLinkGenMax:
+    if gpu.pcieLinkWidth or gpu.pcieLinkWidthMax or gpu.pcieLinkGenMax:
         link = (
             f"{_link_text(gpu.pcieLinkWidth, gpu.pcieLinkWidthMax, 'x')}, "
-            f"{_link_text(gpu.pcieLinkGen, gpu.pcieLinkGenMax, 'Gen')}"
+            f"{_link_gen_text(gpu.pcieLinkGenMax)}"
         )
     else:
         link = "unknown"
@@ -562,13 +571,13 @@ def describe_agent(args: argparse.Namespace) -> None:
             g.pciBusId or "?",
             g.numaNode if g.numaNode >= 0 else "?",
             _cur_max(g.pcieLinkWidth, g.pcieLinkWidthMax, "x"),
-            _cur_max(g.pcieLinkGen, g.pcieLinkGenMax, "Gen"),
+            _link_gen_text(g.pcieLinkGenMax, "?"),
         ]
         for g in gpus
     ]
     print()
     render.tabulate_or_csv(
-        ["Slot", "State", "Health", "UUID", "PCI Bus ID", "NUMA", "Width cur/max", "Gen cur/max"],
+        ["Slot", "State", "Health", "UUID", "PCI Bus ID", "NUMA", "Width cur/max", "Gen max"],
         rows,
         False,
     )

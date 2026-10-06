@@ -82,6 +82,35 @@ def test_gpu_summaries_match_shared_fixture(case: Dict[str, Any]) -> None:
     assert agent.gpu_health_summary(topo) == case["health"]
 
 
+def details_link(gpu: bindings.v1GpuInfo, topo: bindings.v1GpuTopology) -> str:
+    """The PCIe link in the details of a GPU in `det agent describe`."""
+    found = [line for line in agent._gpu_details(gpu, topo, "") if line.startswith("PCIe link: ")]
+    assert len(found) == 1, found
+    return found[0][len("PCIe link: ") :]
+
+
+@pytest.mark.parametrize(
+    "case", [c for c in CASES if "pcieLink" in c], ids=[c["name"] for c in CASES if "pcieLink" in c]
+)
+def test_gpu_link_matches_shared_fixture(case: Dict[str, Any]) -> None:
+    topo = bindings.v1GpuTopology.from_json(case["gpuTopology"])
+    assert [details_link(g, topo) for g in topo.gpus] == case["pcieLink"]
+
+
+def test_gpu_link_shows_highest_generation() -> None:
+    raw = topology_case("every pair unknown")
+    assert raw is not None
+    topo = bindings.v1GpuTopology.from_json(raw)
+    # Idle at Gen1 of Gen4: the width as measured, the highest generation only.
+    assert details_link(topo.gpus[1], topo) == "x8 of x16, Gen4"
+    # Gen3 with an unknown highest generation.
+    assert details_link(topo.gpus[2], topo) == "x4 of x16, Gen?"
+    assert details_link(topo.gpus[0], topo) == "unknown"
+    # Only the current generation known.
+    topo.gpus[0].pcieLinkGen = 1
+    assert details_link(topo.gpus[0], topo) == "unknown"
+
+
 @pytest.mark.parametrize(
     "name_prefix,expected",
     [
@@ -172,6 +201,17 @@ def test_list_agents_gpu_columns(capsys: pytest.CaptureFixture) -> None:
     assert listed["cpu-agent"]["gpu_health"] == ""
 
 
+def table_row(lines: List[str], first: str) -> List[str]:
+    """The cells of the first table row of `det agent describe` whose first cell is `first`."""
+    found = [
+        [c.strip() for c in line.split("|")]
+        for line in lines
+        if "|" in line and line.split("|")[0].strip() == first
+    ]
+    assert found, first
+    return found[0]
+
+
 def test_describe_agent(capsys: pytest.CaptureFixture) -> None:
     topology = topology_case("node01 with the exclude list")
     assert topology is not None
@@ -198,13 +238,7 @@ def test_describe_agent(capsys: pytest.CaptureFixture) -> None:
     assert "GPU Health:      narrow: 3,5 (x8 of x16); excluded: 81:00.0" in lines
 
     def row(first: str) -> List[str]:
-        found = [
-            [c.strip() for c in line.split("|")]
-            for line in lines
-            if "|" in line and line.split("|")[0].strip() == first
-        ]
-        assert found, first
-        return found[0]
+        return table_row(lines, first)
 
     assert row("0")[1:4] == ["container-a", "ok", topology["gpus"][0]["uuid"]]
     assert row("1")[1] == "DISABLED"
@@ -212,14 +246,16 @@ def test_describe_agent(capsys: pytest.CaptureFixture) -> None:
     assert row("2")[1] == "container-b (DRAINING)"
     assert row("3")[1:3] == ["OCCUPIED", "narrow"]
     assert row("5")[1] == "FREE"
-    assert row("3")[4:] == ["0000:61:00.0", "0", "x8/x16", "Gen4/Gen4"]
+    # Idle at Gen1 of Gen4: the highest generation only.
+    assert row("3")[4:] == ["0000:61:00.0", "0", "x8/x16", "Gen4"]
+    assert row("Slot")[4:] == ["PCI Bus ID", "NUMA", "Width cur/max", "Gen max"]
     excluded = row("-")
     assert excluded[1:5] == ["EXCLUDED", "ok", topology["gpus"][-1]["uuid"], "0000:81:00.0"]
 
     assert "  Slot 3 (narrow):" in lines
     details = lines[lines.index("  Slot 3 (narrow):") + 1 :][:5]
     assert details == [
-        "    PCIe link: x8 of x16, Gen4 of Gen4",
+        "    PCIe link: x8 of x16, Gen4",
         "    A lower link width lowers this link's bandwidth cap.",
         "    NVML errors: none",
         "    Collected at: 2026-10-05 08:00:00+0000",
@@ -330,6 +366,25 @@ def test_describe_agent_unknown_topology(capsys: pytest.CaptureFixture) -> None:
     ]
     assert f"  Excluded GPU {excluded_uuid} (unknown):" in lines
     assert not any(line.startswith("Link levels") for line in lines)
+
+
+def test_describe_agent_unknown_link(capsys: pytest.CaptureFixture) -> None:
+    topology = topology_case("every pair unknown")
+    assert topology is not None
+    with util.standard_cli_rsps() as rsps:
+        rsps.get(
+            f"{MASTER}/api/v1/agents/a",
+            status=200,
+            json={"agent": agent_json("a", topology)},
+        )
+        cli.main(["agent", "describe", "a"])
+    lines = capsys.readouterr().out.splitlines()
+    # The table writes an unknown value as ?, the details as in the WebUI.
+    assert table_row(lines, "0")[-2:] == ["?/?", "?"]
+    assert table_row(lines, "1")[-2:] == ["x8/x16", "Gen4"]
+    assert table_row(lines, "2")[-2:] == ["x4/x16", "?"]
+    assert table_row(lines, "3")[-2:] == ["?/x16", "Gen4"]
+    assert lines[lines.index("  Slot 2 (narrow):") + 1] == "    PCIe link: x4 of x16, Gen?"
 
 
 def test_describe_agent_json(capsys: pytest.CaptureFixture) -> None:
