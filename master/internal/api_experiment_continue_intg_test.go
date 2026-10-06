@@ -391,48 +391,18 @@ func TestContinueExperimentNonOwnerChangesOnlyOperationalFields(t *testing.T) {
 	authZExp.On("CanGetExperiment", mock.Anything, isOwner, isOwners).Return(nil)
 	authZExp.On("CanGetExperimentArtifacts", mock.Anything, isOwner, isOwners).Return(nil).Maybe()
 
+	// Representative refusals; continueOwnerOnlyChanges has the full matrix in a unit test.
 	refused := []struct{ name, field, override string }{
 		{"entrypoint", "entrypoint", "entrypoint: echo changed"},
-		{"image", "environment", "environment: {image: other/image:1}"},
-		{
-			"registry credentials", "environment",
-			"environment: {registry_auth: {username: other, password: other-password}}",
-		},
-		{
-			"new environment variable", "environment",
-			"environment: {environment_variables: [LD_PRELOAD=/tmp/x.so]}",
-		},
 		{"environment variable value", "environment", "environment: {environment_variables: [A=2]}"},
-		{
-			"pod spec", "environment",
-			"environment: {pod_spec: {spec: {initContainers: [{name: x, image: other/image:1}]}}}",
-		},
 		{"bind mount", "bind_mounts", "bind_mounts: [{host_path: /home/other, container_path: /x}]"},
 		{
 			"checkpoint storage", "checkpoint_storage",
 			"checkpoint_storage: {type: shared_fs, host_path: /home/other}",
 		},
-		{
-			"warm start checkpoint", "searcher",
-			"searcher: {name: single, metric: loss, max_length: {batches: 10}, " +
-				"source_checkpoint_uuid: 7e0bad9e-8c1b-4f4e-9d2a-3a0f1f6b0c01}",
-		},
-		{
-			"warm start trial", "searcher",
-			"searcher: {name: single, metric: loss, max_length: {batches: 10}, source_trial_id: 1}",
-		},
-		// The trial's code can choose what it loads by its hyperparameters and data, for example
-		// a model version from the registry, whose checkpoint brings its own code.
 		{"hyperparameter value", "hyperparameters", "hyperparameters: {model_name: other-model}"},
-		{"new hyperparameter", "hyperparameters", "hyperparameters: {model_version: 2}"},
 		{"data", "data", "data: {url: https://example.com/other.tar}"},
-		// Launcher arguments.
-		{"slurm.sbatch_args", "slurm", "slurm: {sbatch_args: [--export=ALL]}"},
-		// Not code, but not one of continueNonOwnerFields either.
-		{"resources.priority", "resources", "resources: {priority: 1}"},
 		{"resources.resource_pool", "resources", "resources: {resource_pool: other}"},
-		{"min_validation_period", "min_validation_period", "min_validation_period: {batches: 1}"},
-		{"debug", "debug", "debug: true"},
 	}
 	for _, c := range refused {
 		t.Run("refused: "+c.name, func(t *testing.T) {
@@ -448,63 +418,6 @@ func TestContinueExperimentNonOwnerChangesOnlyOperationalFields(t *testing.T) {
 			require.ErrorContains(t, err, "fork the experiment")
 			requireNotContinued(t, expID)
 			require.Equal(t, sessions, sessionCount(t, owner))
-		})
-	}
-
-	allowed := []struct {
-		name, override string
-		check          func(t *testing.T, active expconf.ExperimentConfig)
-	}{
-		{"name", "name: renamed", func(t *testing.T, active expconf.ExperimentConfig) {
-			require.Equal(t, "renamed", active.Name().String())
-		}},
-		{"description", "description: changed", func(t *testing.T, active expconf.ExperimentConfig) {
-			require.Equal(t, "changed", *active.Description())
-		}},
-		{"labels", "labels: [added]", func(t *testing.T, active expconf.ExperimentConfig) {
-			require.True(t, active.Labels()["added"])
-		}},
-		{"max_restarts", "max_restarts: 7", func(t *testing.T, active expconf.ExperimentConfig) {
-			require.Equal(t, 7, active.MaxRestarts())
-		}},
-		{
-			"searcher.max_length", "searcher: {name: single, metric: loss, max_length: {batches: 20}}",
-			func(t *testing.T, active expconf.ExperimentConfig) {
-				require.Equal(t, uint64(20), active.Searcher().RawSingleConfig.MaxLength().Units)
-			},
-		},
-		{
-			"checkpoint_storage.save_experiment_best", "checkpoint_storage: {save_experiment_best: 2}",
-			func(t *testing.T, active expconf.ExperimentConfig) {
-				require.Equal(t, 2, active.CheckpointStorage().SaveExperimentBest())
-			},
-		},
-		{
-			"checkpoint_storage.save_trial_best", "checkpoint_storage: {save_trial_best: 3}",
-			func(t *testing.T, active expconf.ExperimentConfig) {
-				require.Equal(t, 3, active.CheckpointStorage().SaveTrialBest())
-			},
-		},
-		{
-			"checkpoint_storage.save_trial_latest", "checkpoint_storage: {save_trial_latest: 4}",
-			func(t *testing.T, active expconf.ExperimentConfig) {
-				require.Equal(t, 4, active.CheckpointStorage().SaveTrialLatest())
-			},
-		},
-	}
-	for _, c := range allowed {
-		t.Run("allowed: "+c.name, func(t *testing.T) {
-			expID := endedCodeTestExp(t, api, owner)
-			_, err := api.ContinueExperiment(actor.ctx, &apiv1.ContinueExperimentRequest{
-				Id:             int32(expID),
-				OverrideConfig: c.override,
-			})
-			require.NoError(t, err)
-			requireRunsAs(t, expID, owner)
-			active, err := api.m.db.ActiveExperimentConfig(expID)
-			require.NoError(t, err)
-			c.check(t, active)
-			require.Equal(t, "mnist", active.Hyperparameters()["model_name"].RawConstHyperparameter.RawVal)
 		})
 	}
 
@@ -537,26 +450,38 @@ func TestContinueExperimentNonOwnerChangesOnlyOperationalFields(t *testing.T) {
 			})
 	}
 
-	t.Run("allowed: several fields at once, with other values repeated as they are", func(t *testing.T) {
-		expID := endedCodeTestExp(t, api, owner)
-		_, err := api.ContinueExperiment(actor.ctx, &apiv1.ContinueExperimentRequest{
-			Id: int32(expID),
-			OverrideConfig: `
+	t.Run("allowed: every allowed field at once, with other values repeated as they are",
+		func(t *testing.T) {
+			expID := endedCodeTestExp(t, api, owner)
+			_, err := api.ContinueExperiment(actor.ctx, &apiv1.ContinueExperimentRequest{
+				Id: int32(expID),
+				OverrideConfig: `
+name: renamed
 description: changed
+labels: [added]
 max_restarts: 7
 searcher: {name: single, metric: loss, max_length: {batches: 20}}
 hyperparameters: {model_name: mnist}
 environment: {environment_variables: [B=2]}
-checkpoint_storage: {type: shared_fs, host_path: /, save_trial_latest: 3}
+checkpoint_storage:
+  {type: shared_fs, host_path: /, save_experiment_best: 2, save_trial_best: 3, save_trial_latest: 4}
 `,
+			})
+			require.NoError(t, err)
+			requireRunsAs(t, expID, owner)
+			active, err := api.m.db.ActiveExperimentConfig(expID)
+			require.NoError(t, err)
+			require.Equal(t, "renamed", active.Name().String())
+			require.Equal(t, "changed", *active.Description())
+			require.True(t, active.Labels()["added"])
+			require.Equal(t, 7, active.MaxRestarts())
+			require.Equal(t, uint64(20), active.Searcher().RawSingleConfig.MaxLength().Units)
+			require.Equal(t, 2, active.CheckpointStorage().SaveExperimentBest())
+			require.Equal(t, 3, active.CheckpointStorage().SaveTrialBest())
+			require.Equal(t, 4, active.CheckpointStorage().SaveTrialLatest())
+			require.Equal(t, "mnist",
+				active.Hyperparameters()["model_name"].RawConstHyperparameter.RawVal)
 		})
-		require.NoError(t, err)
-		requireRunsAs(t, expID, owner)
-		active, err := api.m.db.ActiveExperimentConfig(expID)
-		require.NoError(t, err)
-		require.Equal(t, 7, active.MaxRestarts())
-		require.Equal(t, 3, active.CheckpointStorage().SaveTrialLatest())
-	})
 
 	// GetExperiment shows every value under data.secrets as "********" to everyone
 	// (authz.ObfuscateExperiments), so Resume Current Trial sends the placeholder back, which is a

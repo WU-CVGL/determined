@@ -109,31 +109,18 @@ func (a *apiServer) parseAndMergeContinueConfig(expID int, overrideConfig string
 	}, nil
 }
 
-// continueNonOwnerFields are the config fields, as paths, that someone other than an experiment's
-// owner may change when they continue it. Its trials run as the owner, so every other field stays as
-// the owner set it: the ones that choose the code, the image, the mounts, the environment, the
-// storage location, the resource pool, the launcher's arguments, and the hyperparameters and data
-// that the code reads. These name the experiment or bound the training it already does:
-//   - name, description and labels, which PatchExperiment also writes into the config, for
-//     anyone with CanEditExperimentsMetadata (UPDATE_EXPERIMENT_METADATA under RBAC, which is
-//     weaker than continue), and a continue without an override then uses. Resume Current Trial
-//     in the WebUI prefixes the description with "Fork of". Labels also reach the launcher: when
-//     its job_project_source is "label" or "label:<prefix>", they set the Slurm --wckey and the
-//     PBS -P project that the owner's job is accounted to (jobAndProjectLabels in pkg/tasks), each
-//     one quoted argument. They do not choose the code, and refusing them here would not stop
-//     PatchExperiment.
-//   - max_restarts is how many times a failed trial is restarted.
-//   - searcher.max_length is how long the trial trains, for code that still reads it: legacy
-//     Trial classes, and Trainer.fit without max_length. It is deprecated; where the code sets
-//     the length itself, from the entrypoint or the hyperparameters, only the owner can extend
-//     it. Only a single-trial experiment takes an override config.
-//   - checkpoint_storage.save_* are how many checkpoints are kept, which PatchExperiment also
-//     changes. Where they are stored does not change.
+// continueNonOwnerFields is the allow-list: the config paths that someone other than the owner may
+// change when continuing an experiment. Its trials run as the owner, so everything that chooses
+// what they run, load or run with (code, image, environment, mounts, storage location, resource
+// pool, launcher arguments, hyperparameters, data) stays as the owner set it. These only name the
+// experiment or bound the training it already does:
+//   - name, description, labels: PatchExperiment lets a weaker permission edit them anyway. Labels
+//     can also set the launcher's Slurm --wckey or PBS project, as one quoted argument.
+//   - max_restarts, and searcher.max_length (deprecated; read only by code that still uses it).
+//   - checkpoint_storage.save_*: how many checkpoints are kept, not where.
 //
-// Left out on purpose: resources, because the resource pool brings its own task container defaults
-// (image, environment variables, mounts, pod spec), and priority, weight and max_slots are set on
-// the running experiment, which checks the workspace's limits; min_validation_period,
-// min_checkpoint_period, log_policies and debug, which no continue needs.
+// resources stays out: the pool brings its own task container defaults, and priority, weight and
+// max_slots are set on the running experiment, which checks the workspace's limits.
 var continueNonOwnerFields = [][]string{
 	{"name"},
 	{"description"},
@@ -145,7 +132,7 @@ var continueNonOwnerFields = [][]string{
 	{"checkpoint_storage", "save_trial_latest"},
 }
 
-// continueNonOwnerFieldNames returns continueNonOwnerFields for messages.
+// continueNonOwnerFieldNames returns continueNonOwnerFields as the dotted list that errors show.
 func continueNonOwnerFieldNames() string {
 	names := make([]string, 0, len(continueNonOwnerFields))
 	for _, path := range continueNonOwnerFields {
@@ -154,10 +141,8 @@ func continueNonOwnerFieldNames() string {
 	return strings.Join(names, ", ")
 }
 
-// continueOwnerOnlyChanges returns the top-level config fields whose value in merged differs from
-// active once continueNonOwnerFields are left out: what only the owner may change when continuing
-// the experiment. Both configs are compared in the same form, with defaults and with environment
-// variables by their effective values.
+// continueOwnerOnlyChanges returns, sorted, the top-level fields that differ between active and
+// merged outside continueNonOwnerFields: the changes only the owner may make.
 func continueOwnerOnlyChanges(active, merged expconf.ExperimentConfig) ([]string, error) {
 	a, err := continueComparableConfig(active)
 	if err != nil {
@@ -225,10 +210,9 @@ func continueComparableConfig(c expconf.ExperimentConfig) (map[string]string, er
 	return out, nil
 }
 
-// effectiveEnvironment returns a copy of env whose environment variables keep only the last entry
-// for each variable, sorted. A continue's override variables are appended to the active ones
-// (EnvironmentVariablesMapV0.Merge), and the WebUI's Resume Current Trial sends back the whole
-// config, so a variable repeated with the value it has is not a change.
+// effectiveEnvironment returns a copy of env that keeps the last entry of each environment
+// variable, sorted. A merge appends the override's variables, and Resume Current Trial sends them
+// all back, so repeating a variable with its value is not a change.
 func effectiveEnvironment(env *expconf.EnvironmentConfigV0) *expconf.EnvironmentConfigV0 {
 	if env == nil || env.RawEnvironmentVariables == nil {
 		return env
@@ -267,8 +251,7 @@ func (a *apiServer) ContinueExperiment(
 		return nil, err
 	}
 
-	// The continued experiment keeps its owner: an administrator, or under RBAC another user who
-	// may edit it, continues the owner's code, and its tasks run as the owner, not as them.
+	// The continued experiment keeps its owner, and its tasks run as the owner, whoever continues it.
 	if origExperiment.OwnerID == nil {
 		return nil, status.Errorf(codes.Internal, "experiment %d has no owner", req.Id)
 	}
@@ -294,9 +277,7 @@ func (a *apiServer) ContinueExperiment(
 	if err != nil {
 		return nil, err
 	}
-	// The trials run as the owner, so a continuer who changed what they run, or what they run it
-	// with, would run their own choice with the owner's token and uid/gid. Anyone but the owner may
-	// change only the fields that bound the training (continueNonOwnerFields).
+	// Anyone else who changed what the owner's trials run would run it with the owner's identity.
 	if actor.ID != owner.ID && len(merged.ownerOnlyChanges) > 0 {
 		return nil, status.Errorf(codes.PermissionDenied,
 			"experiment %d runs as its owner %q, so only they may change %s when continuing it; "+
