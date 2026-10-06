@@ -993,3 +993,63 @@ export const mapV1ActionResults = (
 
 export const decodeProjectColumnsResponse = (r: unknown): ioTypes.ioTypeProjectColumnsResponse =>
   ioTypes.decode(ioTypes.ioProjectColumnsResponse, r);
+
+/* Resource pool access: the master's Echo routes answer in snake_case JSON without a proto. */
+
+interface RawResourcePoolAccessUser {
+  active?: boolean;
+  admin?: boolean;
+  id?: number;
+  username?: string;
+}
+
+interface RawResourcePoolAccessWorkspaceDefault {
+  kind?: string;
+  workspace?: string;
+  workspace_id?: number;
+}
+
+export interface RawResourcePoolAccess {
+  default_aux?: boolean;
+  default_compute?: boolean;
+  exists?: boolean;
+  mode?: string;
+  pool_name?: string;
+  restricted_at?: string | null;
+  restricted_by?: string | null;
+  users?: RawResourcePoolAccessUser[] | null;
+  warnings?: string[] | null;
+  workspace_defaults?: RawResourcePoolAccessWorkspaceDefault[] | null;
+}
+
+export const mapResourcePoolAccess = (data: RawResourcePoolAccess): types.ResourcePoolAccess => ({
+  defaultAux: !!data.default_aux,
+  defaultCompute: !!data.default_compute,
+  exists: !!data.exists,
+  // Only a restriction record makes a pool restricted; anything else is the public default.
+  mode:
+    data.mode === types.ResourcePoolAccessMode.Restricted
+      ? types.ResourcePoolAccessMode.Restricted
+      : types.ResourcePoolAccessMode.Public,
+  poolName: data.pool_name ?? '',
+  restrictedAt: data.restricted_at ?? undefined,
+  restrictedBy: data.restricted_by ?? undefined,
+  users: (data.users ?? []).map((user) => ({
+    active: !!user.active,
+    admin: !!user.admin,
+    id: user.id ?? 0,
+    username: user.username ?? '',
+  })),
+  workspaceDefaults: (data.workspace_defaults ?? []).map((workspaceDefault) => ({
+    kind: workspaceDefault.kind ?? '',
+    workspace: workspaceDefault.workspace ?? '',
+    workspaceId: workspaceDefault.workspace_id ?? 0,
+  })),
+});
+
+export const mapResourcePoolAccessChange = (
+  data: RawResourcePoolAccess,
+): types.ResourcePoolAccessChange => ({
+  ...mapResourcePoolAccess(data),
+  warnings: data.warnings ?? [],
+});

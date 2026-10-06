@@ -49,6 +49,7 @@ vi.mock('stores/permissions', async (importOriginal) => {
           {
             id: V1PermissionType.VIEWWORKSPACE,
           },
+          { id: V1PermissionType.UPDATEMASTERCONFIG },
           { id: V1PermissionType.UPDATENSC },
           { id: V1PermissionType.UPDATEEXPERIMENT },
           { id: V1PermissionType.UPDATEEXPERIMENTMETADATA },
@@ -88,5 +89,12 @@ describe('usePermissions for RBAC admin user', () => {
     ]) {
       expect(check({ userId: 102, workspace: { id: 10 } })).toBe(true);
     }
+  });
+
+  it('lets a user who may update the master configuration manage pool access', () => {
+    const { result } = renderHook(() => usePermissionsHook());
+    expect(result.current.canManageResourcePoolAccess).toBe(true);
+    // Groups are visible to every user with RBAC.
+    expect(result.current.canViewGroups).toBe(true);
   });
 });

@@ -70,4 +70,25 @@ describe('usePermissions for OSS', () => {
       act(() => currentUser.set(original));
     }
   });
+
+  it('lets only admins manage pool access and see groups', () => {
+    const currentUser = testUserStore.currentUser as WritableObservable<Loadable<DetailedUser>>;
+    const original = currentUser.get();
+    const user = Loadable.getOrElse(undefined, original);
+    expect(user).toBeDefined();
+
+    const member = renderHook(() => usePermissionsHook()).result.current;
+    expect(member.canManageResourcePoolAccess).toBe(false);
+    expect(member.canViewGroups).toBe(false);
+
+    act(() => currentUser.set(Loaded({ ...user!, isAdmin: true })));
+    try {
+      const admin = renderHook(() => usePermissionsHook()).result.current;
+      expect(admin.canManageResourcePoolAccess).toBe(true);
+      expect(admin.canViewGroups).toBe(true);
+      expect(admin.canModifyGroups).toBe(true);
+    } finally {
+      act(() => currentUser.set(original));
+    }
+  });
 });

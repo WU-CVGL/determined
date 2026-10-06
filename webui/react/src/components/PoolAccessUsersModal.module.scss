@@ -1,0 +1,40 @@
+.base {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  p {
+    margin: 0;
+  }
+}
+.pools {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.note,
+.hint {
+  color: var(--theme-surface-on-weak);
+  font-size: 12px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.preview {
+  border: 1px solid var(--theme-surface-border);
+  border-radius: var(--theme-border-radius);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+}
+.usernames {
+  columns: 3 120px;
+  font-size: 12px;
+  list-style: none;
+  margin: 0;
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 0;
+}

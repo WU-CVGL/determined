@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { DefaultTheme, UIProvider } from 'hew/Theme';
 import React, { useCallback, useEffect } from 'react';
 import { DndProvider } from 'react-dnd';
@@ -9,8 +10,10 @@ import { BrowserRouter } from 'react-router-dom';
 import { ThemeProvider } from 'components/ThemeProvider';
 import { SettingsProvider } from 'hooks/useSettingsProvider';
 import authStore from 'stores/auth';
+import determinedStore from 'stores/determinedInfo';
 import userStore from 'stores/users';
 import { DetailedUser } from 'types';
+import { WritableObservable } from 'utils/observable';
 
 import Admin from '.';
 
@@ -29,6 +32,9 @@ const mocks = vi.hoisted(() => {
   return {
     canAdministrateUsers: false,
     canAssignRoles: vi.fn(),
+    canManageResourcePoolAccess: false,
+    canViewGroups: false,
+    listRoles: vi.fn(() => Promise.resolve([])),
   };
 });
 
@@ -50,6 +56,8 @@ vi.mock('hooks/usePermissions', () => {
     return {
       canAdministrateUsers: mocks.canAdministrateUsers,
       canAssignRoles: mocks.canAssignRoles,
+      canManageResourcePoolAccess: mocks.canManageResourcePoolAccess,
+      canViewGroups: mocks.canViewGroups,
     };
   });
   return {
@@ -58,6 +66,8 @@ vi.mock('hooks/usePermissions', () => {
 });
 
 vi.mock('services/api', () => ({
+  getGroup: () => Promise.resolve({ group: { users: [] } }),
+  getGroupRoles: () => Promise.resolve([]),
   getGroups: () =>
     Promise.resolve({
       groups: [],
@@ -69,11 +79,15 @@ vi.mock('services/api', () => ({
         total: 10,
       },
     }),
+  getResourcePoolAccess: () => Promise.resolve([]),
   getUsers: () => {
     const users: Array<DetailedUser> = [CURRENT_USER];
     return Promise.resolve({ pagination: { total: 1 }, users });
   },
-  listRoles: () => Promise.resolve([]),
+  grantResourcePoolAccess: vi.fn(),
+  listRoles: mocks.listRoles,
+  revokeResourcePoolAccess: vi.fn(),
+  setResourcePoolAccessMode: vi.fn(),
 }));
 
 const Container: React.FC = () => {
@@ -99,6 +113,13 @@ const Container: React.FC = () => {
   );
 };
 
+const setRbacEnabled = (rbacEnabled: boolean) => {
+  const info = determinedStore.info as unknown as WritableObservable<{ rbacEnabled: boolean }>;
+  act(() => info.set({ ...info.get(), rbacEnabled }));
+};
+
+const user = userEvent.setup();
+
 const setup = () =>
   render(
     <UIProvider theme={DefaultTheme.Light}>
@@ -111,6 +132,14 @@ const setup = () =>
   );
 
 describe('Admin page', () => {
+  beforeEach(() => {
+    setRbacEnabled(true);
+    mocks.listRoles.mockClear();
+    mocks.canAdministrateUsers = false;
+    mocks.canManageResourcePoolAccess = false;
+    mocks.canViewGroups = false;
+  });
+
   it('should hide users tab without permissions', () => {
     setup();
     expect(screen.getByText('Admin Settings')).toBeInTheDocument();
@@ -122,5 +151,37 @@ describe('Admin page', () => {
     setup();
     expect(screen.getByText('Admin Settings')).toBeInTheDocument();
     expect(await screen.findByText('Users (1)')).toBeInTheDocument();
+  });
+
+  it('shows the Groups tab when groups may be viewed, also without RBAC', async () => {
+    setRbacEnabled(false);
+    mocks.canAdministrateUsers = true;
+    mocks.canViewGroups = true;
+    setup();
+    expect(await screen.findByText('Users (1)')).toBeInTheDocument();
+    await user.click(screen.getByText(/^Groups/));
+
+    // Group management works without RBAC and asks for no roles.
+    expect(await screen.findByRole('button', { name: 'New Group' })).toBeInTheDocument();
+    expect(mocks.listRoles).not.toHaveBeenCalled();
+  });
+
+  it('hides the Groups tab when groups may not be viewed', async () => {
+    mocks.canAdministrateUsers = true;
+    setup();
+    expect(await screen.findByText('Users (1)')).toBeInTheDocument();
+    expect(screen.queryByText(/^Groups/)).not.toBeInTheDocument();
+  });
+
+  it('shows the Pool Access tab only to users who may update the master configuration', async () => {
+    mocks.canAdministrateUsers = true;
+    const { unmount } = setup();
+    expect(await screen.findByText('Users (1)')).toBeInTheDocument();
+    expect(screen.queryByText('Pool Access')).not.toBeInTheDocument();
+    unmount();
+
+    mocks.canManageResourcePoolAccess = true;
+    setup();
+    expect(await screen.findByText('Pool Access')).toBeInTheDocument();
   });
 });

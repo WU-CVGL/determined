@@ -6,7 +6,7 @@ import { DefaultTheme, UIProvider } from 'hew/Theme';
 import React from 'react';
 
 import { ThemeProvider } from 'components/ThemeProvider';
-import { createGroup as mockCreateGroup } from 'services/api';
+import { createGroup as mockCreateGroup, updateGroup as mockUpdateGroup } from 'services/api';
 import { V1GroupSearchResult } from 'services/api-ts-sdk';
 import { GetGroupParams } from 'services/types';
 import { DetailedUser } from 'types';
@@ -39,6 +39,7 @@ const users: Array<DetailedUser> = [
 ];
 
 vi.mock('services/api', () => ({
+  assignRolesToGroup: vi.fn(),
   createGroup: vi.fn(),
   getGroup: (params: GetGroupParams) => {
     return Promise.resolve({
@@ -49,6 +50,8 @@ vi.mock('services/api', () => ({
       },
     });
   },
+  removeRolesFromGroup: vi.fn(),
+  updateGroup: vi.fn(),
 }));
 
 interface Props {
@@ -116,5 +119,26 @@ describe('Create Group Modal', () => {
     await setup(group);
 
     expect(screen.getByLabelText(GROUP_NAME_LABEL)).toBeInTheDocument();
+  });
+
+  it('saves nothing for an unchanged group without RBAC', async () => {
+    const group = { group: { groupId: 1, name: GROUPNAME }, numMembers: 0 };
+    await setup(group);
+
+    await user.click(screen.getByRole('button', { name: MODAL_HEADER_LABEL_EDIT }));
+    expect(await screen.findByText('No changes to save.')).toBeInTheDocument();
+    expect(mockUpdateGroup).not.toHaveBeenCalled();
+  });
+
+  it('renames a group without RBAC', async () => {
+    const group = { group: { groupId: 1, name: GROUPNAME }, numMembers: 0 };
+    await setup(group);
+
+    await user.clear(screen.getByLabelText(GROUP_NAME_LABEL));
+    await user.type(screen.getByLabelText(GROUP_NAME_LABEL), 'renamed');
+    await user.click(screen.getByRole('button', { name: MODAL_HEADER_LABEL_EDIT }));
+    await waitFor(() =>
+      expect(mockUpdateGroup).toHaveBeenCalledWith({ groupId: 1, name: 'renamed' }),
+    );
   });
 });

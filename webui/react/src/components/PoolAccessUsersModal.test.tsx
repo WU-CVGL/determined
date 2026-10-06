@@ -1,0 +1,293 @@
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import Button from 'hew/Button';
+import { useModal } from 'hew/Modal';
+import { DefaultTheme, UIProvider } from 'hew/Theme';
+import { Loadable } from 'hew/utils/loadable';
+import React from 'react';
+
+import { ThemeProvider } from 'components/ThemeProvider';
+import { resourcePoolAccessResponse } from 'fixtures/resourcePoolAccess';
+import { mapResourcePoolAccess, mapResourcePoolAccessChange } from 'services/decoder';
+import userStore from 'stores/users';
+import { DetailedUser, ResourcePoolAccess } from 'types';
+import { DetError } from 'utils/error';
+import {
+  PoolAccessUsersAction,
+  RESOURCE_POOL_ACCESS_MAX_BODY_BYTES,
+  usernamesBodyBytes,
+} from 'utils/resourcePoolAccess';
+
+import PoolAccessUsersModalComponent, {
+  GROUP_EXPANSION_NOTE,
+  MEMBERSHIP_CHANGED_MESSAGE,
+} from './PoolAccessUsersModal';
+
+const OPEN = 'Open';
+const PASTE_PLACEHOLDER = 'One username per line, or separated by commas or spaces';
+
+const mocks = vi.hoisted(() => ({
+  getGroup: vi.fn(),
+  grantResourcePoolAccess: vi.fn(),
+  revokeResourcePoolAccess: vi.fn(),
+  users: [] as DetailedUser[],
+}));
+
+vi.mock('services/api', () => ({
+  getGroup: mocks.getGroup,
+  getGroups: () =>
+    Promise.resolve({
+      groups: [
+        { group: { groupId: 1, name: 'team-a' }, numMembers: 2 },
+        { group: { groupId: 2, name: 'team-b' }, numMembers: 2 },
+      ],
+      pagination: { total: 2 },
+    }),
+  getUsers: () =>
+    Promise.resolve({ pagination: { total: mocks.users.length }, users: mocks.users }),
+  grantResourcePoolAccess: mocks.grantResourcePoolAccess,
+  revokeResourcePoolAccess: mocks.revokeResourcePoolAccess,
+}));
+
+// Table and modal tests render antd components, which is slow when the whole suite runs.
+vi.setConfig({ testTimeout: 15_000 });
+
+const baseUsers: DetailedUser[] = [
+  { id: 1, isActive: true, isAdmin: false, username: 'alice' },
+  { id: 2, isActive: true, isAdmin: false, username: 'bob' },
+  { id: 3, isActive: false, isAdmin: false, username: 'carol' },
+  { id: 4, isActive: true, isAdmin: true, username: 'dave' },
+  { id: 5, isActive: true, isAdmin: false, username: 'john doe' },
+];
+
+const groupResponse = (groupId: number, usernames: string[]) => ({
+  group: {
+    groupId,
+    name: `team-${groupId}`,
+    users: usernames.map((username) => ({ active: true, admin: false, username })),
+  },
+});
+
+const allPools = resourcePoolAccessResponse.resource_pools.map(mapResourcePoolAccess);
+const poolsNamed = (...names: string[]): ResourcePoolAccess[] =>
+  allPools.filter((pool) => names.includes(pool.poolName));
+
+const accepted = ({ poolName }: { poolName: string }) =>
+  Promise.resolve(mapResourcePoolAccessChange({ exists: true, pool_name: poolName }));
+
+interface ContainerProps {
+  action: PoolAccessUsersAction;
+  onApplied: () => void;
+  pools: ResourcePoolAccess[];
+}
+
+const Container: React.FC<ContainerProps> = ({ action, onApplied, pools }) => {
+  const UsersModal = useModal(PoolAccessUsersModalComponent);
+  return (
+    <div>
+      <Button onClick={UsersModal.open}>{OPEN}</Button>
+      <UsersModal.Component
+        action={action}
+        closeModal={() => UsersModal.close('cancel')}
+        pools={pools}
+        onApplied={onApplied}
+      />
+    </div>
+  );
+};
+
+const user = userEvent.setup();
+
+const setup = async (
+  pools: ResourcePoolAccess[],
+  action: PoolAccessUsersAction = 'grant',
+  onApplied = vi.fn(),
+) => {
+  userStore.fetchUsers();
+  await waitFor(() =>
+    expect(Loadable.getOrElse([], userStore.getUsers().get())).toHaveLength(mocks.users.length),
+  );
+  render(
+    <UIProvider theme={DefaultTheme.Light}>
+      <ThemeProvider>
+        <Container action={action} pools={pools} onApplied={onApplied} />
+      </ThemeProvider>
+    </UIProvider>,
+  );
+  await user.click(screen.getByText(OPEN));
+  return onApplied;
+};
+
+const choose = async (label: string, option: string) => {
+  await user.click(screen.getByLabelText(label));
+  const options = (await screen.findAllByTitle(option)).filter(
+    (element) => !element.closest('.ant-select-dropdown-hidden'),
+  );
+  await user.click(options[options.length - 1]);
+  await user.keyboard('{Escape}');
+};
+
+const paste = (text: string) =>
+  fireEvent.change(screen.getByPlaceholderText(PASTE_PLACEHOLDER), { target: { value: text } });
+
+const preview = () => screen.getByTestId('pool-access-preview');
+
+describe('PoolAccessUsersModal', () => {
+  beforeEach(() => {
+    mocks.users = baseUsers;
+    mocks.getGroup.mockReset();
+    mocks.grantResourcePoolAccess.mockReset().mockImplementation(accepted);
+    mocks.revokeResourcePoolAccess.mockReset().mockImplementation(accepted);
+  });
+
+  it('combines users, groups, and pasted names, and refuses unknown names', async () => {
+    mocks.getGroup.mockImplementation(({ groupId }) =>
+      Promise.resolve(groupResponse(groupId, ['bob', 'alice'])),
+    );
+    const onApplied = await setup(poolsNamed('gpu-a100', 'gpu-h100'));
+
+    expect(screen.getByText(GROUP_EXPANSION_NOTE)).toBeInTheDocument();
+    expect(screen.getByTestId('pool-access-modal-pools')).toHaveTextContent(
+      'Grant access to gpu-a100, gpu-h100',
+    );
+    // gpu-h100 is public: its grants have no effect until it is restricted.
+    expect(screen.getByText(/gpu-h100 is public: the grants have no effect/)).toBeInTheDocument();
+
+    await choose('Users', 'alice');
+    await choose('Groups', 'team-b (2 members)');
+    paste('carol, alice\nzed\njohn doe\ndave');
+
+    await waitFor(() => expect(preview()).toHaveTextContent('5 users after removing duplicates'));
+    expect(preview()).toHaveTextContent('(1 picked, 2 from groups, 5 pasted), 1 inactive');
+    expect(preview()).toHaveTextContent('1 administrator, who may use every pool anyway');
+    expect(preview()).toHaveTextContent('carol (inactive)');
+    expect(preview()).toHaveTextContent('dave (admin)');
+    expect(preview()).toHaveTextContent('john doe');
+    expect(screen.getByText('1 unknown username: remove it to continue.', { exact: false }));
+    expect(screen.getByText('zed')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Grant to 5 users' })).toBeDisabled();
+
+    paste('carol, alice\njohn doe\ndave');
+    const apply = screen.getByRole('button', { name: 'Grant to 5 users' });
+    await waitFor(() => expect(apply).toBeEnabled());
+    expect(mocks.getGroup).toHaveBeenCalledTimes(1);
+    await user.click(apply);
+
+    expect(await screen.findByTestId('pool-access-results')).toHaveTextContent('Done for 2 pools.');
+    // The group is expanded again when the grant is applied.
+    expect(mocks.getGroup).toHaveBeenCalledTimes(2);
+    const usernames = ['alice', 'bob', 'carol', 'dave', 'john doe'];
+    expect(mocks.grantResourcePoolAccess).toHaveBeenCalledTimes(2);
+    expect(mocks.grantResourcePoolAccess).toHaveBeenCalledWith({ poolName: 'gpu-a100', usernames });
+    expect(mocks.grantResourcePoolAccess).toHaveBeenCalledWith({ poolName: 'gpu-h100', usernames });
+    expect(screen.getByTestId('pool-access-result-gpu-a100')).toHaveTextContent(
+      'gpu-a100: granted to 5 users',
+    );
+    expect(onApplied).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops when a group changed between the preview and applying', async () => {
+    mocks.getGroup
+      .mockImplementationOnce(({ groupId }) => Promise.resolve(groupResponse(groupId, ['alice'])))
+      .mockImplementation(({ groupId }) =>
+        Promise.resolve(groupResponse(groupId, ['alice', 'bob'])),
+      );
+    await setup(poolsNamed('gpu-a100'));
+
+    await choose('Groups', 'team-a (2 members)');
+    await waitFor(() => expect(preview()).toHaveTextContent('1 user after removing duplicates'));
+    await user.click(screen.getByRole('button', { name: 'Grant to 1 user' }));
+
+    expect(await screen.findByText(MEMBERSHIP_CHANGED_MESSAGE)).toBeInTheDocument();
+    expect(mocks.grantResourcePoolAccess).not.toHaveBeenCalled();
+    expect(preview()).toHaveTextContent('2 users after removing duplicates');
+
+    await user.click(screen.getByRole('button', { name: 'Grant to 2 users' }));
+    await screen.findByTestId('pool-access-results');
+    expect(mocks.grantResourcePoolAccess).toHaveBeenCalledWith({
+      poolName: 'gpu-a100',
+      usernames: ['alice', 'bob'],
+    });
+  });
+
+  it('splits large changes under the body limit and reports each pool', async () => {
+    const many: DetailedUser[] = Array.from({ length: 2500 }, (_, i) => ({
+      id: 100 + i,
+      isActive: true,
+      isAdmin: false,
+      username: `user-${String(i).padStart(4, '0')}-with-a-long-name`,
+    }));
+    mocks.users = many;
+    let h100Requests = 0;
+    mocks.grantResourcePoolAccess.mockImplementation(({ poolName }) => {
+      if (poolName === 'gpu-h100' && ++h100Requests === 2) {
+        return Promise.reject(
+          new DetError(new Response('', { status: 500 }), {
+            publicMessage: 'database unavailable',
+            publicSubject: 'Request grantResourcePoolAccess failed.',
+          }),
+        );
+      }
+      return accepted({ poolName });
+    });
+    await setup(poolsNamed('gpu-a100', 'gpu-h100'));
+
+    paste(many.map((u) => u.username).join('\n'));
+    const apply = await screen.findByRole('button', { name: 'Grant to 2500 users' });
+    await waitFor(() => expect(apply).toBeEnabled());
+    await user.click(apply);
+    const results = await screen.findByTestId('pool-access-results');
+
+    const a100Calls = mocks.grantResourcePoolAccess.mock.calls
+      .map(([params]) => params)
+      .filter((params) => params.poolName === 'gpu-a100');
+    expect(a100Calls.length).toBeGreaterThan(1);
+    for (const params of a100Calls) {
+      expect(usernamesBodyBytes(params.usernames)).toBeLessThanOrEqual(
+        RESOURCE_POOL_ACCESS_MAX_BODY_BYTES,
+      );
+    }
+    expect(a100Calls.flatMap((params) => params.usernames)).toEqual(
+      many.map((u) => u.username).sort((a, b) => a.localeCompare(b)),
+    );
+    // gpu-h100 stops at its failed request; nothing is retried.
+    expect(h100Requests).toBe(2);
+
+    expect(results).toHaveTextContent('1 of 2 pools failed.');
+    expect(within(results).getByTestId('pool-access-result-gpu-a100')).toHaveTextContent(
+      'gpu-a100: granted to 2500 users',
+    );
+    const firstChunk = a100Calls[0].usernames.length;
+    expect(within(results).getByTestId('pool-access-result-gpu-h100')).toHaveTextContent(
+      `gpu-h100: failed: 500 database unavailable. 1 of ${a100Calls.length} requests were ` +
+        `applied (${firstChunk} of 2500 users); nothing was retried`,
+    );
+  });
+
+  it('reports the master refusing a pool', async () => {
+    mocks.revokeResourcePoolAccess.mockImplementation(({ poolName }) =>
+      poolName === 'gpu-a100'
+        ? Promise.reject(
+            new DetError(new Response('', { status: 404 }), {
+              publicMessage: 'unknown users: bob; nothing was changed',
+            }),
+          )
+        : accepted({ poolName }),
+    );
+    await setup(poolsNamed('cpu', 'gpu-a100'), 'revoke');
+
+    expect(screen.getByText(/Revoking applies from the next request/)).toBeInTheDocument();
+    await choose('Users', 'bob');
+    await user.click(screen.getByRole('button', { name: 'Revoke from 1 user' }));
+
+    const results = await screen.findByTestId('pool-access-results');
+    expect(results).toHaveTextContent('1 of 2 pools failed.');
+    expect(within(results).getByTestId('pool-access-result-cpu')).toHaveTextContent(
+      'cpu: revoked from 1 user',
+    );
+    expect(within(results).getByTestId('pool-access-result-gpu-a100')).toHaveTextContent(
+      'gpu-a100: failed: 404 unknown users: bob; nothing was changed',
+    );
+    expect(mocks.revokeResourcePoolAccess).toHaveBeenCalledTimes(2);
+  });
+});

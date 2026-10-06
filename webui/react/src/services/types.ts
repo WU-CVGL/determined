@@ -11,6 +11,7 @@ import {
   Note,
   RawJson,
   RecordKey,
+  ResourcePoolAccessMode,
   RunState,
   SingleEntityParams,
   TrialWorkloadFilter,
@@ -25,6 +26,16 @@ export interface LoginResponse {
 export interface StoreSessionTokenParams {
   /** A session token for the master, from a page outside the web UI. */
   token: string;
+}
+
+export interface SetResourcePoolAccessModeParams {
+  mode: ResourcePoolAccessMode;
+  poolName: string;
+}
+
+export interface ChangeResourcePoolAccessUsersParams {
+  poolName: string;
+  usernames: string[];
 }
 
 export interface ApiSorter<T = string> {

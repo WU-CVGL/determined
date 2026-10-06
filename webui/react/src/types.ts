@@ -1118,6 +1118,47 @@ export interface ResourcePool extends Omit<Api.V1ResourcePool, 'slotType'> {
   slotType: ResourceType;
 }
 
+/* Resource pool access (/api/v1/resource-pool-access, Echo routes without a proto) */
+
+export const ResourcePoolAccessMode = {
+  Public: 'public',
+  Restricted: 'restricted',
+} as const;
+export type ResourcePoolAccessMode = ValueOf<typeof ResourcePoolAccessMode>;
+
+export interface ResourcePoolAccessUser {
+  active: boolean;
+  admin: boolean;
+  id: number;
+  username: string;
+}
+
+export interface ResourcePoolAccessWorkspaceDefault {
+  /** "compute" or "aux". */
+  kind: string;
+  workspace: string;
+  workspaceId: number;
+}
+
+/** The access of one pool name. A name with access records but no pool has exists false. */
+export interface ResourcePoolAccess {
+  defaultAux: boolean;
+  defaultCompute: boolean;
+  exists: boolean;
+  mode: ResourcePoolAccessMode;
+  poolName: string;
+  restrictedAt?: string;
+  restrictedBy?: string;
+  /** The users granted access, also while the pool is public. */
+  users: ResourcePoolAccessUser[];
+  workspaceDefaults: ResourcePoolAccessWorkspaceDefault[];
+}
+
+/** A pool's access after a change, with the master's warnings about what it now refuses. */
+export interface ResourcePoolAccessChange extends ResourcePoolAccess {
+  warnings: string[];
+}
+
 /* Jobs */
 
 export interface LimitedJob extends Api.V1LimitedJob {

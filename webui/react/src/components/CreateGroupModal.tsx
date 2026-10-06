@@ -75,10 +75,14 @@ const CreateGroupModalComponent: React.FC<Props> = ({ onSuccess, group, groupRol
 
       if (group) {
         const nameUpdated = !_.isEqual(formData.name, group.group?.name);
-        const rolesUpdated = !_.isEqual(
-          formData.roles,
-          (groupRoles ?? []).map((r) => r.id),
-        );
+        // Without RBAC the form has no roles field, so the roles never change.
+        const rolesUpdated =
+          rbacEnabled &&
+          canModifyPermissions &&
+          !_.isEqual(
+            formData.roles,
+            (groupRoles ?? []).map((r) => r.id),
+          );
         if (!nameUpdated && !rolesUpdated) {
           openToast({ title: 'No changes to save.' });
           return;
