@@ -346,21 +346,39 @@ def test_print_from_signal_handler_during_print() -> None:
 @responses.activate
 def test_auth_error_stops_forwarding(status: int, streams: Tuple[io.StringIO, io.StringIO]) -> None:
     out, err = streams
-    responses.post(f"{MASTER_URL}/task-logs", status=status, json={"message": "no"})
+    in_post, answer = threading.Event(), threading.Event()
+
+    def reply(request: Any) -> Tuple[int, Dict[str, str], str]:
+        in_post.set()
+        answer.wait(SCENARIO_TIMEOUT)
+        return status, {}, json.dumps({"message": "no"})
+
+    responses.add_callback(responses.POST, f"{MASTER_URL}/task-logs", callback=reply)
     session = api.Session(master=MASTER_URL, username="user", token="expired", cert=None)
     shipper = _shipper(session)
+    backlog = [f"backlog {i}\n" for i in range(10)]
 
     def scenario() -> None:
         shipper.start()
         print("first")
-        _wait_for(lambda: len(responses.calls) == 1)
+        # Output piles up while the master has yet to answer.
+        _wait_for(in_post.is_set)
+        for line in backlog:
+            sys.stdout.write(line)
+        sender = shipper._log_sender
+        assert sender._queue.qsize() == len(backlog)
+        answer.set()
+        # The sender stops before close() and lets go of the output it will never send.
+        _wait_for(lambda: not sender.is_alive())
+        assert sender._queue.empty()
+        assert sender._buf == "" and sender._msgs == []
         print("second")
         time.sleep(10 * _log_shipper.SHIPPER_FLUSH_INTERVAL)
         shipper.close()
 
     _within(SCENARIO_TIMEOUT, scenario, streams)
 
-    assert out.getvalue() == "first\nsecond\n"
+    assert out.getvalue() == "first\n" + "".join(backlog) + "second\n"
     assert len(responses.calls) == 1, "no retries with dead credentials"
     assert _count(err, "determined: stopped sending output to the master") == 1
 
