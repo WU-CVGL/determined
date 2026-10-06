@@ -1,7 +1,7 @@
 import { DeterminedPage } from 'e2e/models/common/base/BasePage';
 import { Pivot } from 'e2e/models/common/hew/Pivot';
 import { ModelRegistry } from 'e2e/models/components/ModelRegistry';
-import { TaskList } from 'e2e/models/components/TaskList';
+import { TaskDashboard } from 'e2e/models/components/TaskDashboard';
 import { TemplateList } from 'e2e/models/pages/Templates/TemplateList';
 import { ResourcePoolsBound } from 'e2e/models/pages/WorkspaceDetails/ResourcePoolsBound';
 import { WorkspaceProjects } from 'e2e/models/pages/WorkspaceDetails/WorkspaceProjects';
@@ -30,13 +30,13 @@ export class WorkspaceDetails extends DeterminedPage {
 
   readonly pivot = new Pivot({ parent: this });
   readonly projectsTab = this.pivot.tab('projects');
-  readonly tasksTab = this.pivot.tab('tasks');
+  readonly jobsTab = this.pivot.tab('jobs');
   readonly modelRegistryTab = this.pivot.tab('models');
   readonly resourcePoolsTab = this.pivot.tab('pools');
   readonly workspaceProjects = new WorkspaceProjects({
     parent: this.pivot.tabContent,
   });
-  readonly taskList = new TaskList({
+  readonly taskDashboard = new TaskDashboard({
     parent: this.pivot.tabContent,
   });
   readonly modelRegistry = new ModelRegistry({
