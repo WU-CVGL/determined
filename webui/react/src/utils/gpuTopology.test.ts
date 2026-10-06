@@ -5,6 +5,7 @@ import { V1GpuHealth, V1GpuInfo } from 'services/api-ts-sdk';
 import { Resource, ResourceState, ResourceType, SlotState } from 'types';
 
 import {
+  agentOffLabel,
   gpuHealthSummary,
   gpuHealthWord,
   gpuSlotCountText,
@@ -17,6 +18,7 @@ import {
   slotFillColor,
   slotFillOnColor,
   slotFillState,
+  slotOffLabel,
   switchGroups,
 } from './gpuTopology';
 
@@ -118,6 +120,41 @@ describe('gpuTopology', () => {
       );
       expect(gpuSlotCountText(topo.gpus, (g) => (g.excluded ? undefined : resource()))).toBe(
         '7 slots: 0 running, 0 pending, 7 unoccupied (7 allocatable); 1 excluded',
+      );
+    });
+
+    it('reads the agent state: draining first, a missing enabled counts as enabled', () => {
+      expect(agentOffLabel({})).toBeUndefined();
+      expect(agentOffLabel({ enabled: true })).toBeUndefined();
+      expect(agentOffLabel({ enabled: false })).toBe('disabled');
+      expect(agentOffLabel({ draining: true, enabled: false })).toBe('draining');
+    });
+
+    it('takes no new work on a slot that is off or whose agent is off, draining first', () => {
+      const disabled = { ...resource(), enabled: false };
+      expect(slotOffLabel(resource())).toBeUndefined();
+      expect(slotOffLabel(disabled)).toBe('disabled');
+      expect(slotOffLabel({ ...disabled, draining: true })).toBe('draining');
+      expect(slotOffLabel(resource(), 'disabled')).toBe('disabled');
+      expect(slotOffLabel(resource(), 'draining')).toBe('draining');
+      expect(slotOffLabel(disabled, 'draining')).toBe('draining');
+      expect(slotOffLabel({ ...disabled, draining: true }, 'disabled')).toBe('draining');
+    });
+
+    it('counts no slot of a disabled or draining agent as allocatable', () => {
+      // `det slot enable` on a slot of a disabled agent leaves the slot enabled, but the scheduler
+      // gives the agent no new work.
+      const topo = gpuTopologyCase('node02');
+      const running = resource({ id: 'c', state: ResourceState.Running });
+      const resourceOf = (g: V1GpuInfo) => (g.deviceId === 0 ? running : resource());
+      expect(gpuSlotCountText(topo.gpus, resourceOf, agentOffLabel({ enabled: false }))).toBe(
+        '8 slots: 1 running, 0 pending, 7 unoccupied (0 allocatable, 7 disabled)',
+      );
+      expect(
+        gpuSlotCountText(topo.gpus, resourceOf, agentOffLabel({ draining: true, enabled: false })),
+      ).toBe('8 slots: 1 running, 0 pending, 7 unoccupied (0 allocatable, 7 draining)');
+      expect(gpuSlotCountText(topo.gpus, resourceOf, agentOffLabel({ enabled: true }))).toBe(
+        '8 slots: 1 running, 0 pending, 7 unoccupied (7 allocatable)',
       );
     });
   });

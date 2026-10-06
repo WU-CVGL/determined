@@ -25,6 +25,7 @@ const agentOf = (
   id: string,
   gpuTopology: V1GpuTopology | undefined,
   overrides: Record<number, Partial<Resource>> = {},
+  agentOverrides: Partial<Agent> = {},
 ): Agent => ({
   gpuTopology,
   id,
@@ -34,6 +35,7 @@ const agentOf = (
     .filter((g) => !g.excluded)
     .map((g) => slot(g.deviceId, overrides[g.deviceId])),
   slotStats: { brandStats: {}, typeStats: {} },
+  ...agentOverrides,
 });
 
 const setup = (children: React.ReactNode) =>
@@ -204,6 +206,45 @@ describe('GpuTopology', () => {
     ).toBeInTheDocument();
     // The stripes still mark the running slot as disabled.
     expect(tile('Slot 0')).toHaveClass('striped');
+  });
+
+  it('counts no slot of a disabled or draining agent as allocatable and stripes its tiles', () => {
+    // `det slot enable` on a slot of a disabled agent leaves the slot enabled, but the scheduler
+    // gives the agent no new work.
+    const agent = agentOf(
+      'node02',
+      gpuTopologyCase('node02'),
+      { 0: { container: { id: 'c0', state: ResourceState.Running } } },
+      { enabled: false },
+    );
+    const { unmount } = setup(<GpuTopology agent={agent} />);
+    expect(
+      screen.getByText('8 slots: 1 running, 0 pending, 7 unoccupied (0 allocatable, 7 disabled)'),
+    ).toBeInTheDocument();
+    expect(tile('Slot 0').getAttribute('aria-label')).toBe('Slot 0, Running, disabled');
+    expect(tile('Slot 3').getAttribute('aria-label')).toBe('Slot 3, Free, disabled');
+    expect(tile('Slot 3')).toHaveClass('striped');
+    unmount();
+
+    setup(<GpuTopology agent={{ ...agent, draining: true }} />);
+    expect(
+      screen.getByText('8 slots: 1 running, 0 pending, 7 unoccupied (0 allocatable, 7 draining)'),
+    ).toBeInTheDocument();
+    expect(within(tile('Slot 3')).getByText('draining')).toBeInTheDocument();
+  });
+
+  it('names a slot without a slot record unknown, as the count line does', async () => {
+    const base = agentOf('node02', gpuTopologyCase('node02'));
+    setup(
+      <GpuTopology agent={{ ...base, resources: base.resources.filter((r) => r.id !== '7') }} />,
+    );
+    expect(
+      screen.getByText('8 slots: 0 running, 0 pending, 7 unoccupied (7 allocatable), 1 unknown'),
+    ).toBeInTheDocument();
+    expect(tile('Slot 7').getAttribute('aria-label')).toBe('Slot 7, Unknown');
+    expect(within(tile('Slot 7')).getByText('Unknown')).toBeInTheDocument();
+    await userEvent.hover(within(tile('Slot 7')).getByRole('button'));
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('StateUnknown (no slot record)');
   });
 
   it('shows the details on focus, hides the tooltip while pinned, and unpins on Escape', async () => {

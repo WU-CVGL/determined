@@ -9,7 +9,7 @@ import {
   V1GpuP2pStatus,
   V1GpuTopology,
 } from 'services/api-ts-sdk';
-import { Resource, ResourceState, SlotState } from 'types';
+import { Agent, Resource, ResourceState, SlotState } from 'types';
 
 /**
  * Pure helpers of the GPU topology panel. The summary strings are the ones of `det agent list`
@@ -277,24 +277,42 @@ export const slotFillState = (resource?: Resource): SlotState => {
   return SlotState.Pending;
 };
 
-/** Why a slot takes no new work, as its stripe label: draining before disabled. */
-export const slotOffLabel = (resource?: Resource): 'draining' | 'disabled' | undefined => {
-  if (resource?.draining) return 'draining';
-  if (resource && !resource.enabled) return 'disabled';
+/** Why a slot or an agent takes no new work. */
+export type OffLabel = 'draining' | 'disabled';
+
+/**
+ * Why the whole agent takes no new work: a drain also disables it, so draining comes first. An
+ * agent without the fields counts as enabled, as the master's summary defaults to.
+ */
+export const agentOffLabel = (agent: Pick<Agent, 'draining' | 'enabled'>): OffLabel | undefined => {
+  if (agent.draining) return 'draining';
+  if (agent.enabled === false) return 'disabled';
+  return undefined;
+};
+
+/**
+ * Why a slot takes no new work, as its stripe label: draining before disabled. The agent's state
+ * counts too: the scheduler gives a disabled or draining agent no new work, also when a slot of it
+ * was enabled again on its own (`det slot enable`).
+ */
+export const slotOffLabel = (resource?: Resource, agentOff?: OffLabel): OffLabel | undefined => {
+  if (resource?.draining || agentOff === 'draining') return 'draining';
+  if ((resource && !resource.enabled) || agentOff === 'disabled') return 'disabled';
   return undefined;
 };
 
 /**
  * The count line of an agent's panel. Every slot counts once, by its fill: running, pending or
- * unoccupied, or unknown without a slot record. The unoccupied slots split into allocatable (enabled
- * and not draining: they can take new work), disabled and draining. A running or pending slot counts
- * as running or pending also when it is disabled or draining; its stripes show that. Excluded GPUs
- * are not slots and come last, for example
+ * unoccupied, or unknown without a slot record. The unoccupied slots split into allocatable (they
+ * can take new work), disabled and draining, by slotOffLabel, so a slot of a disabled or draining
+ * agent is never allocatable. A running or pending slot counts as running or pending also when it is
+ * disabled or draining; its stripes show that. Excluded GPUs are not slots and come last, for example
  * "7 slots: 1 running, 1 pending, 5 unoccupied (3 allocatable, 1 disabled, 1 draining); 1 excluded".
  */
 export const gpuSlotCountText = (
   gpus: V1GpuInfo[],
   resourceOf: (gpu: V1GpuInfo) => Resource | undefined,
+  agentOff?: OffLabel,
 ): string => {
   const slots = gpus.filter((g) => !g.excluded);
   const n = { allocatable: 0, disabled: 0, draining: 0, pending: 0, running: 0, unknown: 0 };
@@ -304,7 +322,7 @@ export const gpuSlotCountText = (
     if (fill === SlotState.Running) n.running += 1;
     else if (fill === SlotState.Pending) n.pending += 1;
     else if (!resource) n.unknown += 1;
-    else n[slotOffLabel(resource) ?? 'allocatable'] += 1;
+    else n[slotOffLabel(resource, agentOff) ?? 'allocatable'] += 1;
   });
   const unoccupied = n.allocatable + n.disabled + n.draining;
   const off = (['disabled', 'draining'] as const)

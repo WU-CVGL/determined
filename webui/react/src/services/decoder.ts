@@ -172,6 +172,7 @@ export const jsonToAgents = (agents: Array<Sdk.V1Agent>): types.Agent[] => {
     });
 
     return {
+      draining: agent.draining,
       enabled: agent.enabled,
       gpuTopology: agent.gpuTopology,
       id: agent.id,

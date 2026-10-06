@@ -11,6 +11,7 @@ import { V1GpuInfo, V1GpuP2p, V1GpuTopology } from 'services/api-ts-sdk';
 import { Agent, Resource, SlotState } from 'types';
 import { DEFAULT_DATETIME_FORMAT } from 'utils/datetime';
 import {
+  agentOffLabel,
   firstNotOkStatus,
   GPU_EXCLUDED_TEXT,
   GPU_HEALTH_LABELS,
@@ -29,6 +30,7 @@ import {
   linkLevelName,
   numaGroups,
   nvmlErrorsText,
+  OffLabel,
   pairLevels,
   shortPciBusId,
   slotFillColor,
@@ -52,6 +54,8 @@ interface Props {
 
 interface GpuProps {
   agentId: string;
+  /** Why the whole agent takes no new work, if it does not. */
+  agentOff?: OffLabel;
   gpu: V1GpuInfo;
   resource?: Resource;
   topo: V1GpuTopology;
@@ -71,16 +75,24 @@ const gpuName = (gpu: V1GpuInfo): string =>
   gpu.excluded ? `Excluded GPU ${gpuLabel(gpu)}` : `Slot ${gpu.deviceId}`;
 
 /** The label of a striped tile: a slot that takes no new work, or an excluded GPU. */
-const offLabel = (gpu: V1GpuInfo, resource?: Resource): string | undefined =>
-  gpu.excluded ? 'excluded' : slotOffLabel(resource);
+const offLabel = (gpu: V1GpuInfo, resource?: Resource, agentOff?: OffLabel): string | undefined =>
+  gpu.excluded ? 'excluded' : slotOffLabel(resource, agentOff);
 
-const stateText = (gpu: V1GpuInfo, resource?: Resource): string => {
+/**
+ * The fill label of a slot. A slot without a slot record is unknown, as the count line and
+ * `det agent describe` say; its tile keeps the Free colour, which is the neutral one.
+ */
+const fillLabel = (resource?: Resource): string =>
+  resource ? slotStateToLabel[slotFillState(resource)] : 'Unknown';
+
+const stateText = (gpu: V1GpuInfo, resource?: Resource, agentOff?: OffLabel): string => {
   if (gpu.excluded) return 'Excluded';
-  const fill = slotFillState(resource);
-  let text = slotStateToLabel[fill];
+  let text = resource ? fillLabel(resource) : 'Unknown (no slot record)';
   const containerState = resource?.container?.state;
-  if (fill === SlotState.Pending && containerState) text += ` (${containerState.toLowerCase()})`;
-  const off = offLabel(gpu, resource);
+  if (slotFillState(resource) === SlotState.Pending && containerState) {
+    text += ` (${containerState.toLowerCase()})`;
+  }
+  const off = offLabel(gpu, resource, agentOff);
   return off ? `${text}, ${off}` : text;
 };
 
@@ -102,7 +114,7 @@ export const HealthDot: React.FC<{ word: GpuHealthWord; decorative?: boolean }> 
  * The GPU's identity and the four facts of its health (link and NVML errors at agent start, recent
  * critical XIDs, collection time): the content of the tooltip and the popover.
  */
-export const GpuDetails: React.FC<GpuProps> = ({ agentId, gpu, resource, topo }) => {
+export const GpuDetails: React.FC<GpuProps> = ({ agentId, agentOff, gpu, resource, topo }) => {
   const word = gpuHealthWord(gpu.health);
   const collectedAt = topo.collectedAt
     ? `${dayjs(topo.collectedAt).format(DEFAULT_DATETIME_FORMAT)} (agent clock, at agent start)`
@@ -117,7 +129,7 @@ export const GpuDetails: React.FC<GpuProps> = ({ agentId, gpu, resource, topo })
         <dt>Slot</dt>
         <dd>{gpu.excluded ? 'none' : gpu.deviceId}</dd>
         <dt>State</dt>
-        <dd>{stateText(gpu, resource)}</dd>
+        <dd>{stateText(gpu, resource, agentOff)}</dd>
         <dt>UUID</dt>
         <dd>
           <code>{gpu.uuid}</code>
@@ -235,15 +247,15 @@ const GpuInfoButton: React.FC<GpuProps> = (props) => {
 };
 
 const GpuTile: React.FC<GpuProps> = (props) => {
-  const { gpu, resource } = props;
+  const { agentOff, gpu, resource } = props;
   const fill = gpu.excluded ? SlotState.Free : slotFillState(resource);
-  const off = offLabel(gpu, resource);
+  const off = offLabel(gpu, resource, agentOff);
   const word = gpuHealthWord(gpu.health);
   // The fill state, then the stripe label: a draining slot can still run work. An excluded GPU
   // has the Free fill only for its colour, so its name leaves the fill out.
   const name = gpu.excluded
     ? `${gpuName(gpu)}, excluded`
-    : `${gpuName(gpu)}, ${slotStateToLabel[fill]}${off ? `, ${off}` : ''}`;
+    : `${gpuName(gpu)}, ${fillLabel(resource)}${off ? `, ${off}` : ''}`;
   const classes = [css.tile];
   if (off) classes.push(css.striped);
   return (
@@ -261,7 +273,7 @@ const GpuTile: React.FC<GpuProps> = (props) => {
       {off ? (
         <span className={css.flag}>{off}</span>
       ) : (
-        <span className={css.state}>{slotStateToLabel[fill]}</span>
+        <span className={css.state}>{fillLabel(resource)}</span>
       )}
     </div>
   );
@@ -373,10 +385,18 @@ const GpuTopology: React.FC<Props> = ({ agent }) => {
   if (!topo) return null;
 
   const gpus = gpuDisplayOrder(topo);
+  const agentOff = agentOffLabel(agent);
   const resourceOf = (gpu: V1GpuInfo) =>
     gpu.excluded ? undefined : resources.get(String(gpu.deviceId));
   const tile = (gpu: V1GpuInfo) => (
-    <GpuTile agentId={agent.id} gpu={gpu} key={gpu.uuid} resource={resourceOf(gpu)} topo={topo} />
+    <GpuTile
+      agentId={agent.id}
+      agentOff={agentOff}
+      gpu={gpu}
+      key={gpu.uuid}
+      resource={resourceOf(gpu)}
+      topo={topo}
+    />
   );
 
   let body: React.ReactNode;
@@ -425,7 +445,7 @@ const GpuTopology: React.FC<Props> = ({ agent }) => {
     <article aria-label={`GPU topology of agent ${agent.id}`} className={css.agent}>
       <div className={css.agentHead}>
         <h3>{agent.id}</h3>
-        <span className={css.counts}>{gpuSlotCountText(gpus, resourceOf)}</span>
+        <span className={css.counts}>{gpuSlotCountText(gpus, resourceOf, agentOff)}</span>
       </div>
       <dl className={css.summary}>
         <div>
