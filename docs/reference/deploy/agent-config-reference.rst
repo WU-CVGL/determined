@@ -365,10 +365,11 @@ in the pairwise matrix. A tile's colour is the slot state, its dot is the GPU's 
 disabled, draining and excluded GPUs, and the details of a GPU show on hover or focus and stay open
 after a click. Each agent's slot count splits its slots into running, pending and unoccupied, and
 the unoccupied slots into allocatable (enabled and not draining, so they can take new work),
-disabled and draining. A slot of a disabled or draining agent counts and is striped as disabled or
-draining whatever its own state, since the scheduler gives such an agent no new work. A running or
-pending slot counts as running or pending also when it is disabled or draining, and a slot of the
-topology without a matching slot record counts and shows as unknown.
+disabled and draining. A slot of a disabled or draining agent is never allocatable, whatever its own
+state, since the scheduler gives such an agent no new work: it is striped as disabled or draining,
+and counts so when unoccupied. A running or pending slot counts as running or pending also when it
+is disabled or draining, and a slot of the topology without a matching slot record counts and shows
+as unknown.
 
 Coverage
 ========
