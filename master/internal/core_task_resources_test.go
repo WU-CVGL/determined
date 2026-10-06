@@ -212,30 +212,13 @@ func TestTaskResourceAllocationsResponseShape(t *testing.T) {
 				{AllocationID: "task.1.3"},
 			}, nil
 		},
-		collectDelay: 5 * time.Minute,
 	})
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.JSONEq(t, `{"allocations":[
-		{"allocation_id":"task.1.1","container_start":"2026-10-01T08:00:00Z","end":"2026-10-01T09:00:00Z",
-		 "collect_from":"2026-10-01T08:05:00Z"},
-		{"allocation_id":"task.1.2","container_start":"2026-10-01T09:00:00Z","end":null,
-		 "collect_from":"2026-10-01T09:05:00Z"},
-		{"allocation_id":"task.1.3","container_start":null,"end":null,"collect_from":null}
-	]}`, rec.Body.String())
-
-	// Without a delay, collection begins at the container start.
-	c, rec = taskResourceAllocationsContext(t, "")
-	err = serveTaskResourceAllocations(c, taskResourceDependencies{
-		authorize: func(context.Context, model.User, string) error { return nil },
-		allocations: func(context.Context, string) ([]taskResourceAllocation, error) {
-			return []taskResourceAllocation{{AllocationID: "task.1.1", ContainerStart: &started}}, nil
-		},
-	})
-	require.NoError(t, err)
-	require.JSONEq(t, `{"allocations":[
-		{"allocation_id":"task.1.1","container_start":"2026-10-01T08:00:00Z","end":null,
-		 "collect_from":"2026-10-01T08:00:00Z"}
+		{"allocation_id":"task.1.1","container_start":"2026-10-01T08:00:00Z","end":"2026-10-01T09:00:00Z"},
+		{"allocation_id":"task.1.2","container_start":"2026-10-01T09:00:00Z","end":null},
+		{"allocation_id":"task.1.3","container_start":null,"end":null}
 	]}`, rec.Body.String())
 }
 

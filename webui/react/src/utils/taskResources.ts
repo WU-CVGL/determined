@@ -54,8 +54,6 @@ export interface ResourceAllocation {
   allocationId: string;
   // When the allocation got its resources, in Unix seconds; absent while it is queued.
   containerStart?: number;
-  // When its metrics can begin, in Unix seconds. Older masters omit it.
-  collectFrom?: number;
   // When the allocation released its resources; absent while it still holds them.
   end?: number;
 }
@@ -74,13 +72,11 @@ export const parseResourceAllocations = (data: unknown): ResourceAllocation[] | 
   for (const item of items as {
     allocation_id?: unknown;
     container_start?: unknown;
-    collect_from?: unknown;
     end?: unknown;
   }[]) {
     if (typeof item?.allocation_id !== 'string') return undefined;
     allocations.push({
       allocationId: item.allocation_id,
-      collectFrom: unixSeconds(item.collect_from),
       containerStart: unixSeconds(item.container_start),
       end: unixSeconds(item.end),
     });
@@ -95,13 +91,8 @@ export interface SinceStartBounds {
   noContainerStart?: boolean;
 }
 
-// Where an allocation's metrics can begin: when the master says, otherwise its container start.
-const metricsStart = (item: ResourceAllocation): number | undefined =>
-  item.containerStart === undefined ? undefined : item.collectFrom ?? item.containerStart;
-
-// "Since start" covers all allocations from the earliest start of their metrics, or one
-// allocation from the start of its metrics to its end. Without an allocation list it begins at
-// the task start.
+// "Since start" covers the earliest container start of all allocations, or one allocation from
+// its container start to its end. Without an allocation list it begins at the task start.
 export const sinceStartBounds = (
   allocations: ResourceAllocation[] | null,
   allocationId: string,
@@ -110,7 +101,7 @@ export const sinceStartBounds = (
   if (!allocations) return { start: taskStart };
   if (!allocationId) {
     const starts = allocations
-      .map(metricsStart)
+      .map((item) => item.containerStart)
       .filter((start): start is number => start !== undefined);
     return starts.length
       ? { start: Math.min(...starts) }
@@ -118,9 +109,8 @@ export const sinceStartBounds = (
   }
   const item = allocations.find((candidate) => candidate.allocationId === allocationId);
   if (!item) return { start: taskStart };
-  const start = metricsStart(item);
-  if (start === undefined) return { noContainerStart: true, start: taskStart };
-  return { end: item.end, start };
+  if (item.containerStart === undefined) return { noContainerStart: true, start: taskStart };
+  return { end: item.end, start: item.containerStart };
 };
 
 // Limits a "Since start" range to the most recent RESOURCE_MAX_SPAN seconds before `now`.
