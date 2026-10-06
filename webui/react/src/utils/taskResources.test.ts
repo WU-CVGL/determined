@@ -98,7 +98,8 @@ describe('since start', () => {
     const list = [
       { allocationId: 'b', containerStart: 300 },
       { allocationId: 'a', containerStart: 200, end: 250 },
-      { allocationId: 'c' },
+      // Closed without getting resources: its end does not move the earliest start.
+      { allocationId: 'c', end: 150 },
     ];
     expect(sinceStartBounds(list, '', 100)).toEqual({ start: 200 });
     expect(sinceStartBounds(list, 'a', 100)).toEqual({ end: 250, start: 200 });

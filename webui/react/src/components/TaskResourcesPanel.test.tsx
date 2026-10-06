@@ -243,7 +243,28 @@ it('begins at the task start and says so while no allocation has a container sta
   vi.stubGlobal('fetch', fetchMock);
   render(page('task', undefined, iso(now - HOUR)));
   expect((await firstSeriesRange(fetchMock)).start).toBe(now - HOUR);
-  expect(await screen.findByText(/No container start is recorded/)).toBeInTheDocument();
+  expect(await screen.findByText(/No container start is recorded yet,/)).toBeInTheDocument();
+});
+
+it('begins at the task start of an ended task whose allocations never got resources', async () => {
+  const now = nowSeconds();
+  const fetchMock = routedFetch(() =>
+    Promise.resolve(
+      allocationsReply([{ allocation_id: 'task.1', container_start: null, end: now - HOUR }]),
+    ),
+  );
+  vi.stubGlobal('fetch', fetchMock);
+  render(
+    <UIProvider theme={DefaultTheme.Light}>
+      <TaskResourcesPanel endTime={iso(now - HOUR)} startTime={iso(now - 2 * HOUR)} taskId="task" />
+    </UIProvider>,
+  );
+  expect(await firstSeriesRange(fetchMock)).toEqual({
+    end: now - HOUR,
+    start: now - 2 * HOUR,
+    step: 15,
+  });
+  expect(await screen.findByText(/No container start is recorded,/)).toBeInTheDocument();
 });
 
 it('keeps the other ranges relative to now and the task start', async () => {

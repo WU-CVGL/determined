@@ -68,10 +68,12 @@ type taskResourceResponse struct {
 
 // taskResourceAllocation is one allocation of a task with the times its resources were held.
 // ContainerStart is when the allocation got its resources: the end of its first QUEUED
-// task_stats row (a restored allocation records another QUEUED row when the master restarts),
-// else allocations.start_time (set when the first container starts pulling or running). It is
-// null while the allocation is still queued. Image pulling comes after it on purpose, since the
-// devices are held while pulling. End is null while the allocation has not been released.
+// task_stats row (a restored allocation records another QUEUED row when the master restarts).
+// Every allocation writes that row before it can start, so ContainerStart is null for one that
+// never got resources. allocations.start_time is not used: on master start, CloseOpenAllocations
+// sets it to the last cluster heartbeat for every allocation that is still queued. Image pulling
+// comes after ContainerStart on purpose, since the devices are held while pulling. End is null
+// while the allocation has not been released.
 type taskResourceAllocation struct {
 	AllocationID   string     `json:"allocation_id" bun:"allocation_id"`
 	ContainerStart *time.Time `json:"container_start" bun:"container_start"`
@@ -149,7 +151,7 @@ type taskResourceDependencies struct {
 func queryTaskResourceAllocations(ctx context.Context, taskID string) ([]taskResourceAllocation, error) {
 	allocations := []taskResourceAllocation{}
 	err := db.Bun().NewRaw(`
-SELECT a.allocation_id, COALESCE(q.queued_end, a.start_time) AS container_start, a.end_time
+SELECT a.allocation_id, q.queued_end AS container_start, a.end_time
 FROM allocations a
 LEFT JOIN (
 	SELECT ts.allocation_id, min(ts.end_time) AS queued_end

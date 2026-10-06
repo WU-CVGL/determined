@@ -267,7 +267,8 @@ const TaskResourcesPanel: React.FC<Props> = ({
       )}
       {period === SINCE_START && bounds?.noContainerStart && (
         <p className={css.explanation}>
-          No container start is recorded yet, so the range begins when the task was submitted.
+          No container start is recorded{endTime ? '' : ' yet'}, so the range begins when the task
+          was submitted.
         </p>
       )}
       <p className={css.explanation}>
