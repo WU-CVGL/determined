@@ -332,8 +332,8 @@ over 64 KiB `413`.
 
 ## CLI
 
-`det resource-pool access`, or `det rp access`, manages access. The WebUI has
-no page for it.
+`det resource-pool access`, or `det rp access`, manages access, as does the
+WebUI (see "WebUI" below).
 
 ```sh
 det resource-pool access list
@@ -350,3 +350,41 @@ and the `Users` granted access, marking inactive users and administrators.
 `--json` prints the API response. `set`, `grant`, and `revoke` print the
 master's warnings to standard error. `set` changes each pool in turn, continues
 past a pool that fails, and exits with status 1 if any failed.
+
+## WebUI
+
+The **Pool Access** tab of **Admin Settings** (`/admin/pool-access`) is shown
+to the users who may change access: administrators with basic authorization,
+and with RBAC the users who may update the master configuration. The
+**Admin Settings** link is shown only to users who may administer users, so
+other users open the address directly.
+
+The tab lists the same names as `det rp access list`: each pool's mode, its
+number of granted users, marking the inactive ones, the workspaces that use it
+as a default, and a name with records but no pool as "no pool". The warnings
+column shows the warnings that the master gives when the pool is changed. A row
+expands to the pool's granted users, which can be revoked together, its
+workspace defaults, and its warnings.
+
+**Grant…**, **Revoke…**, **Restrict**, and **Make public** change the selected
+pools, one pool after another, and show what the master answered for each
+pool, with its warnings. Restrict and Make public first say what the change
+means for each selected pool.
+
+Grant and revoke take users, user groups, and pasted usernames together, and
+show the resulting usernames without duplicates before anything is sent:
+
+- A group is expanded to its members when the change is applied, and each
+  member gets a grant of their own. Later changes to the group's membership
+  change no grant. When the members changed since the preview, nothing is sent
+  and the new list is shown.
+- Every pasted username must be a known user; one per line, or separated by
+  commas or spaces. A username that contains a space goes on a line of its own.
+- The usernames go to each pool in requests below the 64 KiB body limit. A
+  failed request ends that pool, while the requests before it stay applied, and
+  nothing is retried; the other pools go on. Changes are idempotent, so applying
+  the same change again is safe.
+
+Administrators manage user groups on the **Groups** tab of **Admin Settings**,
+also with basic authorization. A group grants nothing by itself. The CLI's
+`det user-group` still requires RBAC.
