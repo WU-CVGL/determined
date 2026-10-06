@@ -23,6 +23,7 @@ import (
 	detContext "github.com/determined-ai/determined/master/internal/context"
 	"github.com/determined-ai/determined/master/internal/db"
 	expauth "github.com/determined-ai/determined/master/internal/experiment"
+	"github.com/determined-ai/determined/master/internal/grpcutil"
 	"github.com/determined-ai/determined/master/internal/poolaccess"
 	"github.com/determined-ai/determined/master/internal/project"
 	"github.com/determined-ai/determined/master/internal/rm"
@@ -380,7 +381,7 @@ func (m *Master) parseCreateExperiment(ctx context.Context, req *apiv1.CreateExp
 
 	config = *configWithInvariantOverrides
 	if !req.GetUnmanaged() {
-		if config, err = m.admitExperimentConfigPool(ctx, config, workspaceID, owner); err != nil {
+		if config, err = m.admitExperimentConfigPool(ctx, config, workspaceID); err != nil {
 			return nil, nil, config, nil, nil, err
 		}
 	}
@@ -446,14 +447,21 @@ func (m *Master) parseCreateExperiment(ctx context.Context, req *apiv1.CreateExp
 }
 
 // admitExperimentConfigPool resolves the pool of a managed experiment's final config, the config
-// after invariant config policies, which can set resources.resource_pool. It checks that user may
-// use that pool and writes the resolved name back. newExperiment resolves the pool again; an
-// explicit name resolves to itself or fails, so the checked pool is the pool that is saved.
+// after invariant config policies, which can set resources.resource_pool. It checks that the user
+// who makes the request may use that pool and writes the resolved name back. newExperiment resolves
+// the pool again; an explicit name resolves to itself or fails, so the checked pool is the pool
+// that is saved.
+//
+// The user is read from ctx rather than passed in, so the check is always for the user who makes
+// the request, whichever user the experiment's tasks run as: a user who continues another user's
+// experiment needs access to its pool themselves.
 func (m *Master) admitExperimentConfigPool(
-	ctx context.Context, config expconf.ExperimentConfig, workspaceID int, user *model.User,
+	ctx context.Context, config expconf.ExperimentConfig, workspaceID int,
 ) (expconf.ExperimentConfig, error) {
-	if user == nil {
-		return config, status.Error(codes.Internal, "resource pool access checked without a user")
+	user, _, err := grpcutil.GetUser(ctx)
+	if err != nil {
+		return config, status.Errorf(codes.Internal,
+			"resource pool access checked without a user: %s", err)
 	}
 	resources := config.Resources()
 	pool, err := m.rm.ResolveResourcePool(

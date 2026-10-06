@@ -3033,6 +3033,51 @@ func TestContinueAndActivateCheckPool(t *testing.T) {
 	require.Equal(t, model.ActiveState, experimentStateForAccessTest(adminCtx, t, endedAgain))
 }
 
+// TestContinueChecksTheContinuersPool covers a user who may edit another user's experiment, as
+// RBAC allows: continuing it checks the continuer's access to its pool, never the owner's. Today
+// the continuer is also the user whose identity the continued experiment runs with; the test keeps
+// the check on the continuer when the experiment keeps running as its owner instead.
+func TestContinueChecksTheContinuersPool(t *testing.T) {
+	mockRM := MockRM()
+	mockRM.On("SmallerValueIsHigherPriority", mock.Anything).Return(true, nil)
+	mockRM.On("Release", mock.Anything).Return()
+	api, authZExp, projectAuthZ, admin, adminCtx := setupExpAuthTest(t, nil, mockRM)
+	owner := db.RequireMockUser(t, api.m.db)
+	continuer := db.RequireMockUser(t, api.m.db)
+	continuerCtx := ntscUserCtx(t, continuer)
+
+	// The mocks are shared with other tests; these expectations match only the continuer, who may
+	// read and edit every experiment and see every project.
+	isContinuer := mock.MatchedBy(func(u model.User) bool { return u.ID == continuer.ID })
+	authZExp.On("CanGetExperiment", mock.Anything, isContinuer, mock.Anything).Return(nil)
+	authZExp.On("CanEditExperiment", mock.Anything, isContinuer, mock.Anything).Return(nil)
+	authZExp.On("CanGetExperimentArtifacts", mock.Anything, isContinuer, mock.Anything).Return(nil)
+	projectAuthZ.On("CanGetProject", mock.Anything, isContinuer, mock.Anything).Return(nil)
+
+	// The owner holds a grant on the pool and the continuer does not: the continue is refused,
+	// naming the continuer, and changes nothing.
+	ownersPool := accessTestPool(t, "owners", admin, true, owner)
+	ended := endedExperimentInPool(adminCtx, t, api, owner, ownersPool)
+	before := experimentRecordForAccessTest(adminCtx, t, ended)
+	ownerSessions := countUserSessions(adminCtx, t, owner.ID)
+	continuerSessions := countUserSessions(adminCtx, t, continuer.ID)
+	_, err := api.ContinueExperiment(continuerCtx, &apiv1.ContinueExperimentRequest{Id: ended})
+	requirePoolDenied(t, err, continuer, ownersPool)
+	require.NotContains(t, status.Convert(err).Message(), owner.Username)
+	require.Equal(t, before, experimentRecordForAccessTest(adminCtx, t, ended))
+	require.Equal(t, ownerSessions, countUserSessions(adminCtx, t, owner.ID),
+		"a refused continue must not start a task session")
+	require.Equal(t, continuerSessions, countUserSessions(adminCtx, t, continuer.ID),
+		"a refused continue must not start a task session")
+
+	// The continuer holds a grant on the pool and the owner does not: the continue is admitted.
+	continuersPool := accessTestPool(t, "continuers", admin, true, continuer)
+	ended = endedExperimentInPool(adminCtx, t, api, owner, continuersPool)
+	_, err = api.ContinueExperiment(continuerCtx, &apiv1.ContinueExperimentRequest{Id: ended})
+	require.NoError(t, err)
+	require.Equal(t, model.ActiveState, experimentStateForAccessTest(adminCtx, t, ended))
+}
+
 func TestActivateOnCreateAndContinueReadsAccessOnce(t *testing.T) {
 	mockRM := MockRM()
 	mockRM.On("SmallerValueIsHigherPriority", mock.Anything).Return(true, nil)
