@@ -1174,6 +1174,12 @@ export interface V1Agent {
      * @memberof V1Agent
      */
     slotStats: V1SlotStats;
+    /**
+     * The GPU topology, P2P status, PCIe links and NVML errors the agent measured at its last start. It is unset for agents with neither CUDA slots nor GPUs left out by the agent's exclude list.
+     * @type {V1GpuTopology}
+     * @memberof V1Agent
+     */
+    gpuTopology?: V1GpuTopology;
 }
 /**
  * AgentUserGroup represents a username and primary group for a user on an agent host machine.
@@ -5495,6 +5501,249 @@ export interface V1GetWorkspacesWithDefaultNamespaceBindingsResponse {
      * @memberof V1GetWorkspacesWithDefaultNamespaceBindingsResponse
      */
     workspaceIds?: Array<number>;
+}
+/**
+ * GpuHealth is a GPU's health from what the agent measured at its last start.   - GPU_HEALTH_UNSPECIFIED: Unknown: no report, NVML did not run, or the link width is unknown.  - GPU_HEALTH_OK: No NVML error, and the link width was at its maximum at agent start.  - GPU_HEALTH_LINK_BELOW_MAX: The link width was below its maximum at agent start.  - GPU_HEALTH_ERROR: An NVML health call failed at agent start.
+ * @export
+ * @enum {string}
+ */
+export const V1GpuHealth = {
+    UNSPECIFIED: 'GPU_HEALTH_UNSPECIFIED',
+    OK: 'GPU_HEALTH_OK',
+    LINKBELOWMAX: 'GPU_HEALTH_LINK_BELOW_MAX',
+    ERROR: 'GPU_HEALTH_ERROR',
+} as const
+export type V1GpuHealth = ValueOf<typeof V1GpuHealth>
+/**
+ * GpuInfo describes one GPU of an agent: a slot, or a GPU left out by the agent's exclude list.
+ * @export
+ * @interface V1GpuInfo
+ */
+export interface V1GpuInfo {
+    /**
+     * The slot's device id, or -1 for an excluded GPU.
+     * @type {number}
+     * @memberof V1GpuInfo
+     */
+    deviceId: number;
+    /**
+     * The GPU's UUID.
+     * @type {string}
+     * @memberof V1GpuInfo
+     */
+    uuid: string;
+    /**
+     * The PCI bus id in sysfs form, for example "0000:41:00.0", or empty when unknown.
+     * @type {string}
+     * @memberof V1GpuInfo
+     */
+    pciBusId: string;
+    /**
+     * The NUMA node of the GPU's PCI device, or -1 when unknown.
+     * @type {number}
+     * @memberof V1GpuInfo
+     */
+    numaNode: number;
+    /**
+     * The PCIe link width at agent start, or 0 when unknown.
+     * @type {number}
+     * @memberof V1GpuInfo
+     */
+    pcieLinkWidth: number;
+    /**
+     * The maximum PCIe link width of the device and the system, or 0 when unknown.
+     * @type {number}
+     * @memberof V1GpuInfo
+     */
+    pcieLinkWidthMax: number;
+    /**
+     * The PCIe link generation at agent start, or 0 when unknown.
+     * @type {number}
+     * @memberof V1GpuInfo
+     */
+    pcieLinkGen: number;
+    /**
+     * The maximum PCIe link generation of the device and the system, or 0 when unknown.
+     * @type {number}
+     * @memberof V1GpuInfo
+     */
+    pcieLinkGenMax: number;
+    /**
+     * The NVML health calls that failed at agent start, each as "<call>: <NAME> (<code>)", or empty.
+     * @type {string}
+     * @memberof V1GpuInfo
+     */
+    nvmlError: string;
+    /**
+     * The GPU's health, derived from the fields above.
+     * @type {V1GpuHealth}
+     * @memberof V1GpuInfo
+     */
+    health: V1GpuHealth;
+    /**
+     * Whether the agent's exclude list left the GPU out. It is then not a slot.
+     * @type {boolean}
+     * @memberof V1GpuInfo
+     */
+    excluded: boolean;
+}
+/**
+ * GpuLink describes one pair of GPUs of an agent.
+ * @export
+ * @interface V1GpuLink
+ */
+export interface V1GpuLink {
+    /**
+     * The device id of end A, or -1 for an excluded GPU. For two slots, device_a < device_b; a link with an excluded end has uuid_a < uuid_b.
+     * @type {number}
+     * @memberof V1GpuLink
+     */
+    deviceA: number;
+    /**
+     * The device id of end B, or -1 for an excluded GPU.
+     * @type {number}
+     * @memberof V1GpuLink
+     */
+    deviceB: number;
+    /**
+     * The UUID of end A.
+     * @type {string}
+     * @memberof V1GpuLink
+     */
+    uuidA: string;
+    /**
+     * The UUID of end B.
+     * @type {string}
+     * @memberof V1GpuLink
+     */
+    uuidB: string;
+    /**
+     * The closest common ancestor of the two GPUs.
+     * @type {V1GpuLinkLevel}
+     * @memberof V1GpuLink
+     */
+    level: V1GpuLinkLevel;
+    /**
+     * The number of active NVLinks between the two GPUs.
+     * @type {number}
+     * @memberof V1GpuLink
+     */
+    nvlinks: number;
+    /**
+     * The raw P2P statuses from A to B.
+     * @type {V1GpuP2pCaps}
+     * @memberof V1GpuLink
+     */
+    p2pAToB: V1GpuP2pCaps;
+    /**
+     * The raw P2P statuses from B to A.
+     * @type {V1GpuP2pCaps}
+     * @memberof V1GpuLink
+     */
+    p2pBToA: V1GpuP2pCaps;
+    /**
+     * Whether P2P is usable: READ and WRITE are OK in both directions.
+     * @type {V1GpuP2p}
+     * @memberof V1GpuLink
+     */
+    p2p: V1GpuP2p;
+}
+/**
+ * GpuLinkLevel is the closest common ancestor of two GPUs, as NVML reports it.   - GPU_LINK_LEVEL_UNSPECIFIED: Unknown.  - GPU_LINK_LEVEL_INTERNAL: The same board.  - GPU_LINK_LEVEL_PIX: A single PCIe switch.  - GPU_LINK_LEVEL_PXB: Multiple PCIe switches, without the host bridge.  - GPU_LINK_LEVEL_PHB: A PCIe host bridge.  - GPU_LINK_LEVEL_NODE: The same NUMA node, across host bridges.  - GPU_LINK_LEVEL_SYS: Across NUMA nodes.
+ * @export
+ * @enum {string}
+ */
+export const V1GpuLinkLevel = {
+    UNSPECIFIED: 'GPU_LINK_LEVEL_UNSPECIFIED',
+    INTERNAL: 'GPU_LINK_LEVEL_INTERNAL',
+    PIX: 'GPU_LINK_LEVEL_PIX',
+    PXB: 'GPU_LINK_LEVEL_PXB',
+    PHB: 'GPU_LINK_LEVEL_PHB',
+    NODE: 'GPU_LINK_LEVEL_NODE',
+    SYS: 'GPU_LINK_LEVEL_SYS',
+} as const
+export type V1GpuLinkLevel = ValueOf<typeof V1GpuLinkLevel>
+/**
+ * GpuP2p is the P2P state of a pair, derived from its four raw statuses.   - GPU_P2P_UNSPECIFIED: Unknown: no status is a known non-OK one, and at least one is unknown.  - GPU_P2P_USABLE: READ and WRITE are OK in both directions.  - GPU_P2P_NOT_USABLE: At least one status is a known status other than OK.
+ * @export
+ * @enum {string}
+ */
+export const V1GpuP2p = {
+    UNSPECIFIED: 'GPU_P2P_UNSPECIFIED',
+    USABLE: 'GPU_P2P_USABLE',
+    NOTUSABLE: 'GPU_P2P_NOT_USABLE',
+} as const
+export type V1GpuP2p = ValueOf<typeof V1GpuP2p>
+/**
+ * GpuP2pCaps holds the raw NVML P2P statuses of one direction of a pair.
+ * @export
+ * @interface V1GpuP2pCaps
+ */
+export interface V1GpuP2pCaps {
+    /**
+     * The P2P READ status.
+     * @type {V1GpuP2pStatus}
+     * @memberof V1GpuP2pCaps
+     */
+    read: V1GpuP2pStatus;
+    /**
+     * The P2P WRITE status.
+     * @type {V1GpuP2pStatus}
+     * @memberof V1GpuP2pCaps
+     */
+    write: V1GpuP2pStatus;
+}
+/**
+ * GpuP2pStatus is one raw NVML P2P status.   - GPU_P2P_STATUS_UNSPECIFIED: Unknown: the query failed or NVML did not know.  - GPU_P2P_STATUS_OK: P2P is supported.  - GPU_P2P_STATUS_CHIPSET_NOT_SUPPORTED: The chipset does not support P2P.  - GPU_P2P_STATUS_GPU_NOT_SUPPORTED: The GPU does not support P2P.  - GPU_P2P_STATUS_TOPOLOGY_NOT_SUPPORTED: The topology does not support P2P.  - GPU_P2P_STATUS_DISABLED_BY_REGKEY: P2P is disabled by a registry key.  - GPU_P2P_STATUS_NOT_SUPPORTED: P2P is not supported.
+ * @export
+ * @enum {string}
+ */
+export const V1GpuP2pStatus = {
+    UNSPECIFIED: 'GPU_P2P_STATUS_UNSPECIFIED',
+    OK: 'GPU_P2P_STATUS_OK',
+    CHIPSETNOTSUPPORTED: 'GPU_P2P_STATUS_CHIPSET_NOT_SUPPORTED',
+    GPUNOTSUPPORTED: 'GPU_P2P_STATUS_GPU_NOT_SUPPORTED',
+    TOPOLOGYNOTSUPPORTED: 'GPU_P2P_STATUS_TOPOLOGY_NOT_SUPPORTED',
+    DISABLEDBYREGKEY: 'GPU_P2P_STATUS_DISABLED_BY_REGKEY',
+    NOTSUPPORTED: 'GPU_P2P_STATUS_NOT_SUPPORTED',
+} as const
+export type V1GpuP2pStatus = ValueOf<typeof V1GpuP2pStatus>
+/**
+ * GpuTopology is what an agent measured with NVML when it started.
+ * @export
+ * @interface V1GpuTopology
+ */
+export interface V1GpuTopology {
+    /**
+     * Why the topology is unknown, or empty when it is known. When it is set, gpus holds the slots and excluded GPUs without measurements, and links is empty.
+     * @type {string}
+     * @memberof V1GpuTopology
+     */
+    unknownReason: string;
+    /**
+     * When the agent measured, by the agent's clock, at agent start.
+     * @type {Date | DateString}
+     * @memberof V1GpuTopology
+     */
+    collectedAt?: Date | DateString;
+    /**
+     * The NVIDIA driver version NVML reported.
+     * @type {string}
+     * @memberof V1GpuTopology
+     */
+    driverVersion: string;
+    /**
+     * The slots by device_id, then the excluded GPUs by pci_bus_id, then uuid (an empty bus id first).
+     * @type {Array<V1GpuInfo>}
+     * @memberof V1GpuTopology
+     */
+    gpus: Array<V1GpuInfo>;
+    /**
+     * The pairs of GPUs.
+     * @type {Array<V1GpuLink>}
+     * @memberof V1GpuTopology
+     */
+    links: Array<V1GpuLink>;
 }
 /**
  * 

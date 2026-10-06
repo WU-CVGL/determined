@@ -1803,6 +1803,12 @@ func TestAuthZGetExperimentAndCanDoActions(t *testing.T) {
 			})
 			return err
 		}},
+		{"CanEditExperiment", func(id int) error {
+			_, err := api.DeleteTensorboardFiles(ctx, &apiv1.DeleteTensorboardFilesRequest{
+				ExperimentId: int32(id),
+			})
+			return err
+		}},
 		{"CanGetExperimentArtifacts", func(id int) error {
 			_, err := api.GetExperimentValidationHistory(ctx,
 				&apiv1.GetExperimentValidationHistoryRequest{ExperimentId: int32(id)})

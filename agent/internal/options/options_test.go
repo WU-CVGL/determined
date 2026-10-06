@@ -90,6 +90,7 @@ container_master_host: docker_localhost
 container_master_port: 2000
 slot_type: gpu_slot_type
 visible_gpus: 3
+exclude_gpus: GPU-a,GPU-b
 security:
     tls:
         enabled: true
@@ -126,6 +127,7 @@ container_runtime: docker_runtime_env
 				ContainerMasterPort: 2000,
 				SlotType:            "gpu_slot_type",
 				VisibleGPUs:         "3",
+				ExcludeGPUs:         "GPU-a,GPU-b",
 				Security: SecurityOptions{
 					TLS: TLSOptions{
 						Enabled:        true,
