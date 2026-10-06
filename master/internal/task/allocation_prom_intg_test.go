@@ -297,10 +297,10 @@ func TestRestoredAllocationIsMappedAfterTheRestOfTheDelay(t *testing.T) {
 	require.False(t, ok, "a restored allocation younger than the delay is mapped at once")
 	list[0].requireMapped(t, false)
 
-	require.True(t, waitForCondition(5*time.Second, func() bool {
-		_, ok := allocationTaskValue(t, a)
-		return ok
-	}), "the restored allocation is not mapped after the rest of the delay")
+	// The rest of the delay is 500ms; requireTimerReturns waits at most 5s.
+	requireTimerReturns(t, a)
+	_, ok = allocationTaskValue(t, a)
+	require.True(t, ok, "the restored allocation is not mapped after the rest of the delay")
 	list[0].requireMapped(t, true)
 
 	rm.On("Release", mock.Anything, mock.Anything).Return(nil)
