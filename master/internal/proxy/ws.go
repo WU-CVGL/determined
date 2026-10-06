@@ -95,11 +95,7 @@ func newSingleHostReverseWebSocketProxy(c echo.Context, t *url.URL) http.Handler
 
 		copyReqErr := asyncCopy(out, in)
 		copyResErr := asyncCopy(in, out)
-		if cerr := <-copyReqErr; cerr != nil {
-			c.Logger().Errorf("error copying request body for %v: %v", t, cerr)
-		}
-		if cerr := <-copyResErr; cerr != nil {
-			c.Logger().Errorf("error copying response body for %v: %v", t, cerr)
-		}
+		logCopyError(c, "request", t, <-copyReqErr)
+		logCopyError(c, "response", t, <-copyResErr)
 	})
 }
