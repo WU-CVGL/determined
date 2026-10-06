@@ -656,6 +656,19 @@ when the container exits.
 
 .. warning::
 
+   Checkpoint garbage collection tasks do not inherit ``bind_mounts`` or ``pod_spec`` from their
+   experiments either. They use the ``task_container_defaults`` of the default auxiliary resource
+   pool, where they run. If an experiment mounts its ``type: directory`` storage itself with
+   ``bind_mounts`` or ``pod_spec``, the master refuses to start a checkpoint GC task for it unless
+   ``task_container_defaults.bind_mounts`` mounts ``container_path`` or a pod spec is set for the
+   task (``checkpoint_gc_pod_spec``, ``cpu_pod_spec`` or ``gpu_pod_spec``). Until then, deleting the
+   experiment fails and leaves it in ``DELETE_FAILED``, which can be retried once the mount is set.
+   Deleting its TensorBoard files fails too. Deleting its checkpoints or their files leaves them in
+   place, and checkpoints beyond the ``save_*`` settings are kept when the experiment ends; the
+   master log gives the reason. Storage that the experiment does not mount is collected as before.
+
+.. warning::
+
    When downloading checkpoints (e.g., using ``det checkpoint download``), Determined assumes the
    same directory is present locally at the same ``container_path``.
 

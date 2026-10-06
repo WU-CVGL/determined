@@ -277,11 +277,13 @@ Example ``expconf.yaml``
 *******************************
 
 Determined also provides a way to configure CheckpointGC pod specs. This configuration is done using
-the ``task_container_defaults.checkpointGcPodSpec`` field within your ``value.yaml`` file. User can
-create a custom pod specification for CheckpointGC, it will override the default experiment's pod
-spec settings. Determined by default uses the experiment's pod spec, but by providing custom pod
-spec users have the flexibility to customize and configure the pod spec directly in this field. User
-can tailor the garbage collection settings according to the specific GC needs.
+the ``task_container_defaults.checkpointGcPodSpec`` field within your ``value.yaml`` file. A
+CheckpointGC task never uses the experiment's pod spec. Without ``checkpointGcPodSpec``, it uses the
+resource pool's ``cpuPodSpec``. Either one is merged over the ``gpuPodSpec`` by Kubernetes strategic
+merge, so with only a ``gpuPodSpec`` set, the task uses that one. By providing a custom pod spec in
+this field, administrators can tailor the garbage collection settings to the specific GC needs, for
+example to mount the volume of ``directory`` checkpoint storage that experiments mount with their
+own pod specs.
 
 Example of configuring custom CheckpointGC pod specs in ``values.yaml``:
 
