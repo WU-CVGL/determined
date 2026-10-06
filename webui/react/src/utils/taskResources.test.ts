@@ -4,8 +4,10 @@ import {
   alignResourceSeries,
   parseResourceAllocations,
   RESOURCE_MAX_SPAN,
+  resourceLegend,
   resourceRange,
   ResourceSeries,
+  ResourceSeriesLabels,
   sinceStartBounds,
   sinceStartWindow,
 } from './taskResources';
@@ -141,5 +143,124 @@ describe('since start', () => {
       end: now,
       start: now - 1,
     });
+  });
+});
+
+describe('resource legend', () => {
+  const UUID0 = 'GPU-1a2b3c4d-0000-1111-2222-333344445555';
+  const UUID1 = 'GPU-9f8e7d6c-0000-1111-2222-333344445555';
+  const gpu = (labels: ResourceSeriesLabels): ResourceSeries => ({
+    labels,
+    metric: 'gpu_utilization_percent',
+    samples: [],
+  });
+  const cpu = (labels: ResourceSeriesLabels): ResourceSeries => ({
+    labels,
+    metric: 'cpu_cores',
+    samples: [],
+  });
+  const labels = (series: ResourceSeries[]) => resourceLegend(series).map((entry) => entry.label);
+  const node02 = 'cvgl-node02.lan';
+  const node05 = 'cvgl-node05.lan';
+
+  it('numbers GPUs as nvidia-smi in the task does, without node or allocation for one of each', () => {
+    expect(
+      labels([
+        gpu({ allocation_id: 'task.1', gpu_index: 0, gpu_uuid: UUID1, node: node02 }),
+        gpu({ allocation_id: 'task.1', gpu_index: 1, gpu_uuid: UUID0, node: node02 }),
+      ]),
+    ).toEqual(['GPU 0', 'GPU 1']);
+  });
+
+  it('adds the short node name when the GPUs span several nodes', () => {
+    expect(
+      labels([
+        gpu({ allocation_id: 'task.1', gpu_index: 0, gpu_uuid: UUID0, node: node02 }),
+        gpu({ allocation_id: 'task.1', gpu_index: 0, gpu_uuid: UUID1, node: node05 }),
+      ]),
+    ).toEqual(['cvgl-node02 · GPU 0', 'cvgl-node05 · GPU 0']);
+  });
+
+  it('adds the run number when the GPUs span several allocations', () => {
+    expect(
+      labels([
+        gpu({ allocation_id: 'exp.trial.1', gpu_index: 0, gpu_uuid: UUID0, node: node02 }),
+        gpu({ allocation_id: 'exp.trial.2', gpu_index: 0, gpu_uuid: UUID0, node: node02 }),
+        gpu({ allocation_id: 'exp.trial.2', gpu_index: 1, gpu_uuid: UUID1, node: node05 }),
+      ]),
+    ).toEqual(['#1 · cvgl-node02 · GPU 0', '#2 · cvgl-node02 · GPU 0', '#2 · cvgl-node05 · GPU 1']);
+  });
+
+  it('falls back to the start of the UUID without an index, as from an older master', () => {
+    expect(
+      labels([
+        gpu({ allocation_id: 'task.1', gpu_uuid: UUID0, node: node02 }),
+        gpu({ allocation_id: 'task.1', gpu_uuid: UUID1, node: node02 }),
+      ]),
+    ).toEqual(['GPU 1a2b3c4d', 'GPU 9f8e7d6c']);
+  });
+
+  it('shows everything that identifies a GPU on hover', () => {
+    const [entry] = resourceLegend([
+      gpu({
+        allocation_id: 'task.1',
+        gpu_index: 0,
+        gpu_uuid: UUID0,
+        host_gpu_index: '3',
+        model_name: 'NVIDIA GeForce RTX 4090',
+        node: node02,
+        pci_bus_id: '00000000:41:00.0',
+      }),
+    ]);
+    expect(entry.details.split('\n')).toEqual([
+      `GPU UUID: ${UUID0}`,
+      `Host: ${node02}`,
+      'Allocation: task.1',
+      'PCI bus ID: 00000000:41:00.0',
+      'Host GPU index: 3 (nvidia-smi on the node)',
+      'Model: NVIDIA GeForce RTX 4090',
+    ]);
+    const [older] = resourceLegend([
+      gpu({ allocation_id: 'task.1', gpu_uuid: UUID0, node: node02 }),
+    ]);
+    expect(older.details.split('\n')).toEqual([
+      `GPU UUID: ${UUID0}`,
+      `Host: ${node02}`,
+      'Allocation: task.1',
+    ]);
+  });
+
+  it('applies the same rule to CPU and memory series', () => {
+    expect(labels([cpu({ allocation_id: 'task.1', node: node02 })])).toEqual(['Task']);
+    expect(
+      labels([
+        cpu({ allocation_id: 'task.1', node: node02 }),
+        cpu({ allocation_id: 'task.1', node: node05 }),
+      ]),
+    ).toEqual(['cvgl-node02', 'cvgl-node05']);
+    expect(
+      labels([
+        cpu({ allocation_id: 'task.1', node: node02 }),
+        cpu({ allocation_id: 'task.2', node: node02 }),
+      ]),
+    ).toEqual(['#1', '#2']);
+    expect(resourceLegend([cpu({ allocation_id: 'task.1', node: node02 })])[0].details).toBe(
+      `Host: ${node02}\nAllocation: task.1`,
+    );
+  });
+
+  it('keeps whole node names that would collide or are addresses', () => {
+    expect(
+      labels([
+        cpu({ allocation_id: 'task.1', node: 'node.lab-a' }),
+        cpu({ allocation_id: 'task.1', node: 'node.lab-b' }),
+      ]),
+    ).toEqual(['node.lab-a', 'node.lab-b']);
+    expect(
+      labels([
+        cpu({ allocation_id: 'task.1', node: '10.0.0.2' }),
+        cpu({ allocation_id: 'task.1', node: '10.0.0.3:9400' }),
+      ]),
+    ).toEqual(['10.0.0.2', '10.0.0.3:9400']);
   });
 });

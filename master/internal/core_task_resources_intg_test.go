@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	detcontext "github.com/determined-ai/determined/master/internal/context"
 	"github.com/determined-ai/determined/master/internal/db"
 	expauth "github.com/determined-ai/determined/master/internal/experiment"
+	taskPkg "github.com/determined-ai/determined/master/internal/task"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
@@ -267,4 +269,92 @@ func TestTaskResourceAllocationsUseTaskRBACBeforeReading(t *testing.T) {
 	require.NotNil(t, resp.Allocations[0].ContainerStart)
 	require.True(t, started.Equal(*resp.Allocations[0].ContainerStart))
 	require.Nil(t, resp.Allocations[0].End)
+}
+
+func TestTaskResourceGPUSets(t *testing.T) {
+	api, curUser, ctx := setupAPITest(t, nil)
+	_, trialTask := createTestTrial(t, api, curUser)
+	_, otherTask := createTestTrial(t, api, curUser)
+	taskID := trialTask.TaskID
+	add := func(task model.TaskID, run int) string {
+		aID := model.AllocationID(fmt.Sprintf("%s.%d", task, run))
+		require.NoError(t, db.AddAllocation(ctx, &model.Allocation{
+			AllocationID: aID, TaskID: task, Slots: 2, ResourcePool: "default",
+			Ports: map[string]int{},
+		}))
+		return string(aID)
+	}
+	record := func(aID, container, agent string, uuids ...string) {
+		require.NoError(t, taskPkg.AddAllocationAcceleratorData(ctx, model.AcceleratorData{
+			ContainerID: container, AllocationID: model.AllocationID(aID), NodeName: agent,
+			AcceleratorType: "cuda", AcceleratorUuids: uuids,
+		}))
+	}
+	first, second, cpuOnly := add(taskID, 1), add(taskID, 2), add(taskID, 3)
+	other := add(otherTask.TaskID, 1)
+	// A two-node allocation records one row per container, in nvidia-smi order inside it.
+	record(first, "c1", "agent-a", "GPU-b", "GPU-a")
+	record(first, "c2", "agent-b", "GPU-c")
+	record(second, "c3", "agent-a", "GPU-a")
+	record(cpuOnly, "c4", "agent-a")
+	record(other, "c5", "agent-a", "GPU-z")
+
+	// Only the requested allocations of this task; another task's allocation is never read.
+	got, err := queryTaskResourceGPUSets(ctx, string(taskID), []string{first, cpuOnly, other})
+	require.NoError(t, err)
+	require.Len(t, got, 3)
+	require.Equal(t, model.AllocationID(first), got[0].AllocationID)
+	require.Equal(t, "c1", got[0].ContainerID)
+	require.Equal(t, []string{"GPU-b", "GPU-a"}, got[0].AcceleratorUuids)
+	require.Equal(t, []string{"GPU-c"}, got[1].AcceleratorUuids)
+	require.Equal(t, model.AllocationID(cpuOnly), got[2].AllocationID)
+	require.Empty(t, got[2].AcceleratorUuids)
+
+	none, err := queryTaskResourceGPUSets(ctx, string(otherTask.TaskID), []string{first})
+	require.NoError(t, err)
+	require.Empty(t, none)
+
+	// The endpoint numbers each container's GPUs from the recorded sets.
+	now := time.Now().Unix()
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet,
+		fmt.Sprintf("/ui/task-resources/%s?start=%d&end=%d&step=15", taskID, now-60, now), nil)
+	c := &detcontext.DetContext{Context: e.NewContext(req, rec)}
+	c.SetUser(curUser)
+	c.SetParamNames("task_id")
+	c.SetParamValues(string(taskID))
+	gpu := func(aID, node, uuid, busID string) prometheusTaskSeries {
+		return prometheusTaskSeries{Metric: map[string]string{
+			"det_cluster": "cvgl", "task_id": string(taskID), "allocation_id": aID, "node": node,
+			"gpu_uuid": uuid, "pci_bus_id": busID,
+		}, Samples: [][2]interface{}{{float64(now), float64(1)}}}
+	}
+	err = serveTaskResources(c, config.TaskResourcesConfig{DetCluster: "cvgl"}, taskResourceDependencies{
+		authorize:         func(context.Context, model.User, string) error { return nil },
+		allocationBelongs: func(context.Context, string, string) (bool, error) { return true, nil },
+		query: func(_ context.Context, expr string, _ taskResourceRange) ([]prometheusTaskSeries, error) {
+			if !strings.Contains(expr, "DCGM_FI_DEV_GPU_UTIL") || strings.HasPrefix(expr, "group by") {
+				return nil, nil
+			}
+			return []prometheusTaskSeries{
+				gpu(first, "node-a", "GPU-a", "00000000:81:00.0"),
+				gpu(first, "node-a", "GPU-b", "00000000:25:00.0"),
+				gpu(first, "node-b", "GPU-c", "00000000:C1:00.0"),
+				gpu(second, "node-a", "GPU-a", "00000000:81:00.0"),
+			}, nil
+		},
+		gpuSets: queryTaskResourceGPUSets,
+	})
+	require.NoError(t, err)
+	var resp taskResourceResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	indexes := map[string]int{}
+	for _, s := range resp.Series {
+		require.NotNil(t, s.Labels.GPUIndex, "%s/%s", s.Labels.AllocationID, s.Labels.GPUUUID)
+		indexes[s.Labels.AllocationID+"/"+s.Labels.GPUUUID] = *s.Labels.GPUIndex
+	}
+	require.Equal(t, map[string]int{
+		first + "/GPU-b": 0, first + "/GPU-a": 1, first + "/GPU-c": 0, second + "/GPU-a": 0,
+	}, indexes)
 }

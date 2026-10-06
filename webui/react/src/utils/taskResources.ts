@@ -12,9 +12,21 @@ export const RESOURCE_METRICS = [
 ] as const;
 
 export type ResourceMetric = (typeof RESOURCE_METRICS)[number];
+export interface ResourceSeriesLabels {
+  allocation_id?: string;
+  node?: string;
+  gpu_uuid?: string;
+  // The GPU's number in nvidia-smi inside the task's container. Older masters omit it, and
+  // a master omits it when it cannot be sure of it.
+  gpu_index?: number;
+  pci_bus_id?: string;
+  // The GPU's number in nvidia-smi on the node.
+  host_gpu_index?: string;
+  model_name?: string;
+}
 export interface ResourceSeries {
   metric: ResourceMetric['key'];
-  labels: { allocation_id?: string; node?: string; gpu_uuid?: string };
+  labels: ResourceSeriesLabels;
   samples: [number, number | null][];
 }
 export interface TaskResourcesResponse {
@@ -135,5 +147,68 @@ export const alignResourceSeries = (
   ];
 };
 
-export const resourceSeriesName = ({ labels }: ResourceSeries): string =>
-  [labels.allocation_id, labels.node, labels.gpu_uuid].filter(Boolean).join(' · ') || 'Task';
+export interface ResourceLegendEntry {
+  label: string;
+  // Shown on hover: everything that identifies the series.
+  details: string;
+}
+
+const distinct = (values: (string | undefined)[]): string[] =>
+  Array.from(new Set(values.filter((value): value is string => !!value)));
+
+// Short forms of distinct values, or the values themselves when the short forms would collide.
+const shortForms = (values: string[], short: (value: string) => string): Map<string, string> => {
+  const forms = values.map(short);
+  const unique = new Set(forms).size === forms.length;
+  return new Map(values.map((value, i) => [value, unique ? forms[i] : value]));
+};
+
+// The host name without its domain; an address or a name with a port stays as it is.
+const shortNode = (node: string): string =>
+  /^[\d.]+$/.test(node) || node.includes(':') ? node : node.split('.')[0] || node;
+
+// "#<run>" from an allocation ID such as "<task>.3".
+const allocationTag = (id: string): string => {
+  const run = /\.(\d+)$/.exec(id)?.[1];
+  return run === undefined ? id : `#${run}`;
+};
+
+const gpuName = (labels: ResourceSeriesLabels): string | undefined => {
+  if (Number.isInteger(labels.gpu_index) && (labels.gpu_index as number) >= 0)
+    return `GPU ${labels.gpu_index}`;
+  if (!labels.gpu_uuid) return undefined;
+  const hex = labels.gpu_uuid.replace(/^(GPU|MIG)-/i, '').replace(/[^0-9a-f]/gi, '');
+  return `GPU ${hex.slice(0, 8) || labels.gpu_uuid}`;
+};
+
+export const resourceSeriesDetails = (labels: ResourceSeriesLabels): string => {
+  const hostIndex = labels.host_gpu_index == null ? '' : String(labels.host_gpu_index);
+  return [
+    labels.gpu_uuid && `GPU UUID: ${labels.gpu_uuid}`,
+    labels.node && `Host: ${labels.node}`,
+    labels.allocation_id && `Allocation: ${labels.allocation_id}`,
+    labels.pci_bus_id && `PCI bus ID: ${labels.pci_bus_id}`,
+    hostIndex && `Host GPU index: ${hostIndex} (nvidia-smi on the node)`,
+    labels.model_name && `Model: ${labels.model_name}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+};
+
+// Legend labels show only what tells the given series apart: GPUs as nvidia-smi inside the
+// task numbers them, the node only when the series span several nodes, and the allocation
+// only when they span several allocations.
+export const resourceLegend = (series: ResourceSeries[]): ResourceLegendEntry[] => {
+  const nodes = distinct(series.map(({ labels }) => labels.node));
+  const allocations = distinct(series.map(({ labels }) => labels.allocation_id));
+  const nodeNames = shortForms(nodes, shortNode);
+  const allocationTags = shortForms(allocations, allocationTag);
+  return series.map(({ labels }) => {
+    const parts = [
+      allocations.length > 1 && labels.allocation_id && allocationTags.get(labels.allocation_id),
+      nodes.length > 1 && labels.node && nodeNames.get(labels.node),
+      gpuName(labels),
+    ].filter((part): part is string => !!part);
+    return { details: resourceSeriesDetails(labels), label: parts.join(' · ') || 'Task' };
+  });
+};

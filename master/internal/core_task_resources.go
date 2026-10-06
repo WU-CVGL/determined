@@ -47,6 +47,13 @@ type taskResourceLabels struct {
 	AllocationID string `json:"allocation_id,omitempty"`
 	Node         string `json:"node,omitempty"`
 	GPUUUID      string `json:"gpu_uuid,omitempty"`
+	// GPUIndex is the GPU's number in nvidia-smi inside the task's container. It is omitted
+	// unless the container's complete GPU set and every bus ID in it are known.
+	GPUIndex *int `json:"gpu_index,omitempty"`
+	// DCGM's labels: the PCI bus ID, the host's NVML index (nvidia-smi on the node) and model.
+	PCIBusID     string `json:"pci_bus_id,omitempty"`
+	HostGPUIndex string `json:"host_gpu_index,omitempty"`
+	ModelName    string `json:"model_name,omitempty"`
 }
 
 type taskResourceSeries struct {
@@ -137,6 +144,7 @@ func (m *Master) taskResourceDependencies() taskResourceDependencies {
 			return queryTaskPrometheus(ctx, conf.PrometheusURL, expr, r)
 		},
 		allocations: queryTaskResourceAllocations,
+		gpuSets:     queryTaskResourceGPUSets,
 	}
 }
 
@@ -145,6 +153,8 @@ type taskResourceDependencies struct {
 	allocationBelongs func(context.Context, string, string) (bool, error)
 	query             func(context.Context, string, taskResourceRange) ([]prometheusTaskSeries, error)
 	allocations       func(context.Context, string) ([]taskResourceAllocation, error)
+	// gpuSets reads the recorded GPU sets of a task's allocations; nil skips GPU numbering.
+	gpuSets func(context.Context, string, []string) ([]model.AcceleratorData, error)
 }
 
 // queryTaskResourceAllocations reads a task's allocations and their container start in one query.
@@ -230,6 +240,7 @@ func collectTaskResources(ctx context.Context, user model.User, taskID string, p
 
 	resp := taskResourceResponse{Enabled: true, Series: []taskResourceSeries{},
 		Warnings: []taskResourceWarning{}}
+	gpus := map[string]taskResourceGPUInfo{}
 	for _, q := range taskResourceQueries(conf.DetCluster, taskID, allocationID) {
 		results, err := deps.query(ctx, q.Expr, r)
 		if err != nil {
@@ -248,16 +259,44 @@ func collectTaskResources(ctx context.Context, user model.User, taskID string, p
 				AllocationID: result.Metric["allocation_id"], Node: result.Metric["node"],
 				GPUUUID: result.Metric["gpu_uuid"],
 			}, Samples: result.Samples}
+			if strings.HasPrefix(q.Metric, "gpu_") {
+				// The GPU queries keep DCGM's own labels from the left-hand side of the join.
+				series.Labels.PCIBusID = result.Metric["pci_bus_id"]
+				series.Labels.HostGPUIndex = result.Metric["gpu"]
+				series.Labels.ModelName = result.Metric["modelName"]
+				addTaskResourceGPUInfo(gpus, result.Metric)
+			}
 			resp.Series = append(resp.Series, series)
 		}
 	}
-	sort.Slice(resp.Series, func(i, j int) bool {
-		a, b := resp.Series[i], resp.Series[j]
-		return a.Metric+"/"+a.Labels.AllocationID+"/"+a.Labels.Node+"/"+a.Labels.GPUUUID <
-			b.Metric+"/"+b.Labels.AllocationID+"/"+b.Labels.Node+"/"+b.Labels.GPUUUID
+	setTaskResourceGPUIndexes(ctx, conf.DetCluster, taskID, r, resp.Series, gpus, deps)
+	sort.SliceStable(resp.Series, func(i, j int) bool {
+		return taskResourceSeriesLess(resp.Series[i], resp.Series[j])
 	})
 	resp.Warnings = taskResourceWarnings(resp.Series)
 	return resp, nil
+}
+
+// taskResourceSeriesLess orders series by metric, allocation, node and then GPUs as numbered
+// in the container, so that a legend lists GPU 0, GPU 1 and so on.
+func taskResourceSeriesLess(a, b taskResourceSeries) bool {
+	if a.Metric != b.Metric {
+		return a.Metric < b.Metric
+	}
+	if a.Labels.AllocationID != b.Labels.AllocationID {
+		return a.Labels.AllocationID < b.Labels.AllocationID
+	}
+	if a.Labels.Node != b.Labels.Node {
+		return a.Labels.Node < b.Labels.Node
+	}
+	ai, bi := a.Labels.GPUIndex, b.Labels.GPUIndex
+	if (ai == nil) != (bi == nil) {
+		return ai != nil
+	}
+	if ai != nil && *ai != *bi {
+		return *ai < *bi
+	}
+	return a.Labels.GPUUUID < b.Labels.GPUUUID
 }
 
 func authorizeTaskResources(ctx context.Context, user model.User, taskID string,

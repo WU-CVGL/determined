@@ -6,10 +6,10 @@ import { glasbeyColor } from 'utils/color';
 import { humanReadableBytes } from 'utils/string';
 import {
   alignResourceSeries,
+  resourceLegend,
   ResourceMetric,
   ResourceRange,
   ResourceSeries,
-  resourceSeriesName,
 } from 'utils/taskResources';
 
 import css from './TaskResourceChart.module.scss';
@@ -30,16 +30,34 @@ const TaskResourceChart: React.FC<Props> = ({ metric, range, series }) => {
       metric.unit === 'bytes'
         ? humanReadableBytes(value)
         : `${Number(value.toFixed(2))} ${metric.unit}`;
+    const legend = resourceLegend(series);
     return {
       axes: [{}, { size: 85, values: (_plot, values) => values.map(format) }],
       cursor: { drag: { x: true, y: false } },
       height: 260,
       legend: { live: true, show: true },
+      // uPlot builds the legend itself; each entry shows the series' details on hover. A plugin
+      // keeps the chart sync's own hooks.
+      plugins: [
+        {
+          hooks: {
+            init: (plot) => {
+              const rows = plot.root.querySelectorAll<HTMLElement>('.u-legend .u-series');
+              // The live legend has a leading row for the time.
+              const offset = rows.length - legend.length;
+              legend.forEach(({ details }, index) => {
+                const row = rows[index + offset];
+                if (row && details) row.title = details;
+              });
+            },
+          },
+        },
+      ],
       scales: { x: { max: range.end, min: range.start, time: true } },
       series: [
         { label: 'Time', value: (_plot, value) => new Date(value * 1000).toLocaleString() },
-        ...series.map((item, index) => ({
-          label: resourceSeriesName(item),
+        ...legend.map(({ label }, index) => ({
+          label,
           points: { show: false },
           spanGaps: false,
           stroke: glasbeyColor(index),

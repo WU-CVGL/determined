@@ -37,9 +37,9 @@ The integration expects the agent-cluster recording rules and exporter labels pr
 `cluster-setup <https://github.com/WU-CVGL/cluster-setup>`__. In particular, Prometheus must have
 ``det:allocation_task:info``, ``det:runtime_task:info``, and ``det:gpu_task:info`` ownership rules,
 cAdvisor metrics with ``det_cluster``, ``container_runtime_id``, and ``node`` labels, and DCGM
-metrics with ``det_cluster`` and ``gpu_uuid`` labels. The configured cluster must match the
-``det_cluster`` label. The existing Kubernetes dashboard's pod-label schema alone does not
-satisfy this contract.
+metrics with ``det_cluster`` and ``gpu_uuid`` labels (and ``pci_bus_id`` for the GPU numbers in
+the chart legends). The configured cluster must match the ``det_cluster`` label. The existing
+Kubernetes dashboard's pod-label schema alone does not satisfy this contract.
 
 The master runs a fixed set of queries after checking access to the task. It does not expose a
 general PromQL proxy. An optional allocation selector is checked against the task's allocations.
@@ -57,6 +57,12 @@ It shows at most the most recent 7 days. The other presets count back from now, 
 an ended task. Running tasks refresh every 30 seconds while the page is visible.
 Drag across a chart to zoom the shared timeline. Empty periods remain gaps rather than zeros.
 If a refresh fails, retained charts are explicitly marked as the last successful response.
+
+The GPU legends number GPUs as ``nvidia-smi`` inside the task's container shows them; hover over a
+legend entry for the GPU UUID, host, allocation, PCI bus ID, GPU index on the host, and model. A
+legend names the node or the allocation run only when its chart spans more than one. Commands,
+generic tasks, and TensorBoards do not record their GPUs, so their legends show the start of the
+GPU UUID instead.
 
 GPU values describe the entire assigned device and may include other processes. Shared-device
 ownership conflicts are omitted by the recording rules. Child tasks are not aggregated. An
