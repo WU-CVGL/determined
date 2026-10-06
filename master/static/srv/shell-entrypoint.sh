@@ -82,7 +82,26 @@ sed -e "s/^/$options /" "$unmodified" >"$modified"
 # Ensure permissions are restrictive enough for ssh
 chmod 600 "$modified"
 
+# sshd runs as the task's user, so it cannot write the login records (utmp/wtmp) of sessions with a
+# terminal and logs this line when each such session starts and ends. No sshd_config option turns
+# it off, and a higher LogLevel would also hide the line that the readiness check waits for. Drop
+# exactly that line and pass every other line through unchanged, one at a time as it arrives. sshd
+# ends its log lines with "\r\n". Plain bash, so that it works in any image.
+drop_login_records_message() {
+    local message="Attempt to write login records by non-root user (aborting)"
+    local line
+    while IFS= read -r line; do
+        if [[ ${line%$'\r'} != "$message" ]]; then
+            printf '%s\n' "$line"
+        fi
+    done
+    # A last line without a newline.
+    if [[ -n $line && ${line%$'\r'} != "$message" ]]; then
+        printf '%s' "$line"
+    fi
+}
+
 READINESS_REGEX="Server listening on"
 
 /usr/sbin/sshd "$@" \
-    2> >(tee -p >("$DET_PYTHON_EXECUTABLE" /run/determined/check_ready_logs.py --ready-regex "$READINESS_REGEX") >&2)
+    2> >(drop_login_records_message | tee -p >("$DET_PYTHON_EXECUTABLE" /run/determined/check_ready_logs.py --ready-regex "$READINESS_REGEX") >&2)
