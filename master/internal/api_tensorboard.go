@@ -405,7 +405,14 @@ func (a *apiServer) LaunchTensorboard(
 
 	launchReq.Spec.Base.ExtraEnvVars = uniqEnvVars
 
-	if !model.UsingCustomImage(req) {
+	// The TensorBoard runs as its launcher, with the launcher's session token and agent user. The
+	// experiment's image is code chosen by the experiment's owner, and its image pull secrets and
+	// registry_auth are the owner's credentials. So inherit them only from the launcher's own
+	// experiment. A TensorBoard on another user's experiment, an admin's included, keeps the image
+	// and credentials it was launched with.
+	ownsExperiment := exp.OwnerID != nil && *exp.OwnerID == user.ID
+
+	if ownsExperiment && !model.UsingCustomImage(req) {
 		launchReq.Spec.Config.Environment.Image = model.RuntimeItem{
 			CPU:  exp.Config.Environment.Image().CPU(),
 			CUDA: exp.Config.Environment.Image().CUDA(),
@@ -432,7 +439,7 @@ func (a *apiServer) LaunchTensorboard(
 		}
 	}
 	// Prefer RegistryAuth already present over the one from inferred from the experiment.
-	if launchReq.Spec.Config.Environment.RegistryAuth == nil {
+	if ownsExperiment && launchReq.Spec.Config.Environment.RegistryAuth == nil {
 		launchReq.Spec.Config.Environment.RegistryAuth = exp.Config.Environment.RegistryAuth()
 	}
 
