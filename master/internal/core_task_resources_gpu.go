@@ -169,25 +169,29 @@ func setTaskResourceGPUIndexes(ctx context.Context, cluster, taskID string, r ta
 }
 
 // taskResourceGPUIndexes numbers GPUs the way nvidia-smi inside the task's container does:
-// by PCI bus ID among all GPUs of that container, which is one recorded GPU set. Every GPU
-// series of an allocation on one node must belong to the same set, and every GPU of that set
-// needs a known bus ID; otherwise none of that allocation's GPUs on that node is numbered.
+// by PCI bus ID among all GPUs of that container, which is one recorded GPU set. The container
+// recorded its GPUs in nvidia-smi index order, so the bus-ID order must agree with the recorded
+// order. Every GPU series of an allocation on one node must belong to the same set, and every
+// GPU of that set needs a known bus ID; otherwise none of that allocation's GPUs on that node
+// is numbered.
 func taskResourceGPUIndexes(series []taskResourceSeries, sets []model.AcceleratorData,
 	gpus map[string]taskResourceGPUInfo,
 ) map[taskResourceGPUKey]int {
 	const ambiguous = -1
 	// The set each GPU belongs to; a GPU listed in two different sets of one allocation is
-	// ambiguous. Identical rows of one container are the same set.
+	// ambiguous. Identical rows of one container are the same set; rows that list the same GPUs
+	// in different orders are different sets.
 	owner := map[taskResourceGPUKey]int{}
 	members := [][]string{}
 	signatures := map[string]int{}
 	for _, set := range sets {
 		allocationID := string(set.AllocationID)
-		uuids := append([]string(nil), set.AcceleratorUuids...)
-		sort.Strings(uuids)
+		uuids := set.AcceleratorUuids
+		listed := make(map[string]bool, len(uuids))
 		duplicate := false
-		for i := 1; i < len(uuids); i++ {
-			duplicate = duplicate || uuids[i] == uuids[i-1]
+		for _, uuid := range uuids {
+			duplicate = duplicate || listed[uuid]
+			listed[uuid] = true
 		}
 		if duplicate {
 			for _, uuid := range uuids {
@@ -212,7 +216,8 @@ func taskResourceGPUIndexes(series []taskResourceSeries, sets []model.Accelerato
 		}
 	}
 
-	// Ranks within each set, when every member has one distinct bus ID on one node.
+	// Ranks within each set, when every member has one distinct bus ID on one node and the bus-ID
+	// order is the recorded order.
 	ranks := make([]map[string]int, len(members))
 	nodes := make([]string, len(members))
 	for i, uuids := range members {
@@ -240,6 +245,12 @@ func taskResourceGPUIndexes(series []taskResourceSeries, sets []model.Accelerato
 				break
 			}
 			rank[uuid] = j
+		}
+		for j, uuid := range uuids {
+			if rank == nil || rank[uuid] != j {
+				rank = nil
+				break
+			}
 		}
 		ranks[i] = rank
 	}

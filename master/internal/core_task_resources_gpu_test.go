@@ -103,16 +103,24 @@ func TestTaskResourceGPUIndexes(t *testing.T) {
 		want   map[string]int
 	}{
 		{
-			name:   "ranked by PCI bus ID, not by UUID or recorded order",
+			name:   "ranked by PCI bus ID, not by UUID, when the recorded order agrees",
 			series: gpuSeries("t.1", "node-a", "GPU-a", "GPU-b", "GPU-c"),
-			sets:   []model.AcceleratorData{gpuSet("t.1", "GPU-c", "GPU-a", "GPU-b")},
+			sets:   []model.AcceleratorData{gpuSet("t.1", "GPU-b", "GPU-a", "GPU-c")},
 			gpus:   nodeA,
 			want:   map[string]int{"t.1/GPU-b": 0, "t.1/GPU-a": 1, "t.1/GPU-c": 2},
 		},
 		{
+			// The container recorded GPU-c as its GPU 0, but GPU-c has the highest bus ID.
+			name:   "a recorded order that disagrees with the bus-ID order leaves the node unnumbered",
+			series: gpuSeries("t.1", "node-a", "GPU-a", "GPU-b", "GPU-c"),
+			sets:   []model.AcceleratorData{gpuSet("t.1", "GPU-c", "GPU-a", "GPU-b")},
+			gpus:   nodeA,
+			want:   map[string]int{},
+		},
+		{
 			name:   "case and domain width do not change the order",
 			series: gpuSeries("t.1", "node-a", "GPU-x", "GPU-y", "GPU-z"),
-			sets:   []model.AcceleratorData{gpuSet("t.1", "GPU-x", "GPU-y", "GPU-z")},
+			sets:   []model.AcceleratorData{gpuSet("t.1", "GPU-z", "GPU-y", "GPU-x")},
 			gpus: gpuInfos("node-a", map[string]string{
 				"GPU-x": "00000000:0B:00.0", "GPU-y": "0000:0a:00.0", "GPU-z": "00000000:09:00.0",
 			}),
@@ -123,7 +131,7 @@ func TestTaskResourceGPUIndexes(t *testing.T) {
 			series: append(gpuSeries("t.1", "node-a", "GPU-a", "GPU-b"),
 				gpuSeries("t.1", "node-b", "GPU-e", "GPU-f")...),
 			sets: []model.AcceleratorData{
-				gpuSet("t.1", "GPU-a", "GPU-b"), gpuSet("t.1", "GPU-e", "GPU-f"),
+				gpuSet("t.1", "GPU-b", "GPU-a"), gpuSet("t.1", "GPU-f", "GPU-e"),
 			},
 			gpus: mergeGPUInfos(nodeA, nodeB),
 			want: map[string]int{"t.1/GPU-b": 0, "t.1/GPU-a": 1, "t.1/GPU-f": 0, "t.1/GPU-e": 1},
@@ -133,7 +141,7 @@ func TestTaskResourceGPUIndexes(t *testing.T) {
 			series: append(gpuSeries("t.1", "node-a", "GPU-a", "GPU-b"),
 				gpuSeries("t.2", "node-a", "GPU-a", "GPU-c")...),
 			sets: []model.AcceleratorData{
-				gpuSet("t.1", "GPU-a", "GPU-b"), gpuSet("t.2", "GPU-a", "GPU-c"),
+				gpuSet("t.1", "GPU-b", "GPU-a"), gpuSet("t.2", "GPU-a", "GPU-c"),
 			},
 			gpus: nodeA,
 			want: map[string]int{"t.1/GPU-b": 0, "t.1/GPU-a": 1, "t.2/GPU-a": 0, "t.2/GPU-c": 1},
@@ -141,7 +149,7 @@ func TestTaskResourceGPUIndexes(t *testing.T) {
 		{
 			name:   "a GPU of the set without a bus ID leaves the node unnumbered",
 			series: gpuSeries("t.1", "node-a", "GPU-a", "GPU-b"),
-			sets:   []model.AcceleratorData{gpuSet("t.1", "GPU-a", "GPU-b")},
+			sets:   []model.AcceleratorData{gpuSet("t.1", "GPU-b", "GPU-a")},
 			gpus: mergeGPUInfos(nodeA, gpuInfos("node-a", map[string]string{
 				"GPU-b": "",
 			})),
@@ -150,14 +158,14 @@ func TestTaskResourceGPUIndexes(t *testing.T) {
 		{
 			name:   "a GPU of the set without any DCGM labels leaves the node unnumbered",
 			series: gpuSeries("t.1", "node-a", "GPU-a", "GPU-b"),
-			sets:   []model.AcceleratorData{gpuSet("t.1", "GPU-a", "GPU-b", "GPU-unseen")},
+			sets:   []model.AcceleratorData{gpuSet("t.1", "GPU-b", "GPU-a", "GPU-unseen")},
 			gpus:   nodeA,
 			want:   map[string]int{},
 		},
 		{
 			name:   "GPUs of the set without a series still count",
 			series: gpuSeries("t.1", "node-a", "GPU-a", "GPU-c"),
-			sets:   []model.AcceleratorData{gpuSet("t.1", "GPU-a", "GPU-b", "GPU-c", "GPU-d")},
+			sets:   []model.AcceleratorData{gpuSet("t.1", "GPU-b", "GPU-a", "GPU-d", "GPU-c")},
 			gpus:   nodeA,
 			want:   map[string]int{"t.1/GPU-a": 1, "t.1/GPU-c": 3},
 		},
@@ -171,14 +179,14 @@ func TestTaskResourceGPUIndexes(t *testing.T) {
 		{
 			name:   "a series GPU missing from the recorded set leaves the node unnumbered",
 			series: gpuSeries("t.1", "node-a", "GPU-a", "GPU-b", "GPU-c"),
-			sets:   []model.AcceleratorData{gpuSet("t.1", "GPU-a", "GPU-b")},
+			sets:   []model.AcceleratorData{gpuSet("t.1", "GPU-b", "GPU-a")},
 			gpus:   nodeA,
 			want:   map[string]int{},
 		},
 		{
 			name:   "another allocation's set does not number this allocation",
 			series: gpuSeries("t.2", "node-a", "GPU-a", "GPU-b"),
-			sets:   []model.AcceleratorData{gpuSet("t.1", "GPU-a", "GPU-b")},
+			sets:   []model.AcceleratorData{gpuSet("t.1", "GPU-b", "GPU-a")},
 			gpus:   nodeA,
 			want:   map[string]int{},
 		},
@@ -186,7 +194,7 @@ func TestTaskResourceGPUIndexes(t *testing.T) {
 			name:   "a GPU in two different sets of one allocation is ambiguous",
 			series: gpuSeries("t.1", "node-a", "GPU-a", "GPU-b"),
 			sets: []model.AcceleratorData{
-				gpuSet("t.1", "GPU-a", "GPU-b"), gpuSet("t.1", "GPU-a", "GPU-c"),
+				gpuSet("t.1", "GPU-b", "GPU-a"), gpuSet("t.1", "GPU-a", "GPU-c"),
 			},
 			gpus: nodeA,
 			want: map[string]int{},
@@ -195,10 +203,26 @@ func TestTaskResourceGPUIndexes(t *testing.T) {
 			name:   "repeated identical rows of one container are one set",
 			series: gpuSeries("t.1", "node-a", "GPU-a", "GPU-b"),
 			sets: []model.AcceleratorData{
-				gpuSet("t.1", "GPU-a", "GPU-b"), gpuSet("t.1", "GPU-b", "GPU-a"),
+				gpuSet("t.1", "GPU-b", "GPU-a"), gpuSet("t.1", "GPU-b", "GPU-a"),
 			},
 			gpus: nodeA,
 			want: map[string]int{"t.1/GPU-b": 0, "t.1/GPU-a": 1},
+		},
+		{
+			name:   "rows of one allocation with the same GPUs in different orders contradict each other",
+			series: gpuSeries("t.1", "node-a", "GPU-a", "GPU-b"),
+			sets: []model.AcceleratorData{
+				gpuSet("t.1", "GPU-b", "GPU-a"), gpuSet("t.1", "GPU-a", "GPU-b"),
+			},
+			gpus: nodeA,
+			want: map[string]int{},
+		},
+		{
+			name:   "a row that lists a GPU twice is not numbered",
+			series: gpuSeries("t.1", "node-a", "GPU-a", "GPU-b"),
+			sets:   []model.AcceleratorData{gpuSet("t.1", "GPU-b", "GPU-a", "GPU-a")},
+			gpus:   nodeA,
+			want:   map[string]int{},
 		},
 		{
 			name:   "a set spanning two nodes is not numbered",
@@ -219,7 +243,7 @@ func TestTaskResourceGPUIndexes(t *testing.T) {
 		{
 			name:   "a GPU reported with two bus IDs is not numbered",
 			series: gpuSeries("t.1", "node-a", "GPU-a", "GPU-b"),
-			sets:   []model.AcceleratorData{gpuSet("t.1", "GPU-a", "GPU-b")},
+			sets:   []model.AcceleratorData{gpuSet("t.1", "GPU-b", "GPU-a")},
 			gpus: mergeGPUInfos(nodeA, map[string]taskResourceGPUInfo{
 				"GPU-a": {busID: "00000000:25:00.0", node: "node-a", conflict: true},
 			}),
