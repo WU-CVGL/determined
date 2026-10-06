@@ -323,15 +323,21 @@ row wins.
 The link generation never changes the state. Green means that there was no NVML error and the link
 width was at its maximum at agent start; it does not mean that the GPU is verified to be healthy.
 
-The link width and generation are observations at agent start, not confirmed faults. A GPU can
-reduce its link generation and width while it is idle, and a link can train to a different width
-after a reboot. A lower link width lowers the bandwidth cap of the GPU's link; the actual collective
-throughput depends on the workload.
+The link width is an observation at agent start, not a confirmed fault. A GPU can reduce its link
+width while it is idle, and a link can train to a different width after a reboot. A lower link width
+lowers the bandwidth cap of the GPU's link; the actual collective throughput depends on the
+workload.
 
 The details of each GPU (``det agent describe`` and the WebUI's details) list three facts
-separately: ``PCIe link``, the link width and generation at agent start; ``NVML errors``, the NVML
-health calls that failed at agent start; and ``Collected at``, the time of the measurement by the
-agent's clock. XID errors are not collected.
+separately: ``PCIe link``, the current and maximum link width at agent start and the highest link
+generation that the GPU and its slot support, for example ``x8 of x16, Gen4``; ``NVML errors``, the
+NVML health calls that failed at agent start; and ``Collected at``, the time of the measurement by
+the agent's clock. XID errors are not collected.
+
+The current link generation is not shown: a GPU lowers it while it is idle, often to Gen1, so its
+value at agent start says little about the link under load. The highest generation says what the GPU
+and its slot support, not what the link runs at: a link that trains to a lower generation under load
+still shows it. The agent API reports both, as ``pcie_link_gen`` and ``pcie_link_gen_max``.
 
 CLI and WebUI
 =============
@@ -355,14 +361,14 @@ Both count only the GPUs that are slots, and leave out excluded GPUs, except whe
 
 ``det agent describe AGENT_ID`` lists each slot and excluded GPU with its state (``FREE``, the ID of
 the container that uses it or ``OCCUPIED``, ``DISABLED``, ``DRAINING`` or ``EXCLUDED``), health,
-UUID, bus ID, NUMA node, link width and generation, and the three facts of its health. As in the
-WebUI, a slot of a disabled or draining agent shows as disabled or draining, and a slot that is
-disabled or draining while a task still uses it shows both: the container ID or ``OCCUPIED``,
-followed by ``(DISABLED)`` or ``(DRAINING)``. A GPU without a matching slot record shows ``?``,
-followed by ``(DISABLED)`` or ``(DRAINING)`` when the agent is disabled or draining. When the
-topology is known, it then prints the link levels between all GPUs and, when P2P is not usable for
-every pair, the ``READ`` and ``WRITE`` statuses in each direction. ``--json`` prints the agent's
-``gpu_topology``.
+UUID, bus ID, NUMA node, current and maximum link width, highest link generation, and the three
+facts of its health. As in the WebUI, a slot of a disabled or draining agent shows as disabled or
+draining, and a slot that is disabled or draining while a task still uses it shows both: the
+container ID or ``OCCUPIED``, followed by ``(DISABLED)`` or ``(DRAINING)``. A GPU without a matching
+slot record shows ``?``, followed by ``(DISABLED)`` or ``(DRAINING)`` when the agent is disabled or
+draining. When the topology is known, it then prints the link levels between all GPUs and, when P2P
+is not usable for every pair, the ``READ`` and ``WRITE`` statuses in each direction. ``--json``
+prints the agent's ``gpu_topology``.
 
 The WebUI's resource pool page groups each agent's GPUs by NUMA node and PCIe switch. A switch group
 holds GPUs whose pairs are ``PIX``, one switch between them; ``PXB`` and the other levels show only
