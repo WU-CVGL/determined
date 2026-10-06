@@ -78,9 +78,27 @@ func (m *mapping) dec(values ...string) {
 	m.vec.DeleteLabelValues(values...)
 }
 
+// set sets the count of the label set to n > 0. The caller holds mappingsMu.
+func (m *mapping) set(n int, values ...string) {
+	m.counts[mappingKey(values)] = &mappingCount{values: values, n: n}
+	m.vec.WithLabelValues(values...).Set(float64(n))
+}
+
 // has reports whether the label set has an association. The caller holds mappingsMu.
 func (m *mapping) has(values ...string) bool {
 	return m.counts[mappingKey(values)] != nil
+}
+
+// countWhere returns the associations of the label sets whose value at index i is value. The
+// caller holds mappingsMu.
+func (m *mapping) countWhere(i int, value string) int {
+	n := 0
+	for _, c := range m.counts {
+		if c.values[i] == value {
+			n += c.n
+		}
+	}
+	return n
 }
 
 // deleteWhere deletes every label set whose value at index i is value. The caller holds
@@ -197,7 +215,7 @@ func AssociateJobExperiment(jID model.JobID, eID string, labels expconf.Labels) 
 }
 
 // DisassociateJobExperiment disassociates a job ID with experiment info. When the experiment has
-// no association left, all its labels are removed, including those added by AssociateExperimentIDLabels
+// no association left, all its labels are removed, including those set by SetExperimentIDLabels
 // when its labels were edited.
 func DisassociateJobExperiment(jID model.JobID, eID string, labels expconf.Labels) {
 	mappingsMu.Lock()
@@ -279,12 +297,21 @@ func DisassociateAllocationContainer(aID model.AllocationID, cID cproto.ID) {
 	containerIDToAllocationID.dec(cID.String(), aID.String())
 }
 
-// AssociateExperimentIDLabels associates experiment ID with a list of labels.
-func AssociateExperimentIDLabels(eID string, labels []string) {
+// SetExperimentIDLabels replaces the labels of an experiment when they are edited. Like
+// AssociateJobExperiment, it exports them only while a trial of the experiment has an allocation:
+// otherwise nothing would remove them. Each label counts the experiment's job associations, so
+// that the first of several trial allocations to exit does not remove a label that the others
+// still have; DisassociateJobExperiment removes the rest with the last one.
+func SetExperimentIDLabels(eID string, labels []string) {
 	mappingsMu.Lock()
 	defer mappingsMu.Unlock()
-	for i := range labels {
-		experimentIDToLabels.inc(eID, labels[i])
+	n := jobIDToExperimentID.countWhere(1, eID)
+	if n == 0 {
+		return
+	}
+	experimentIDToLabels.deleteWhere(0, eID)
+	for _, l := range labels {
+		experimentIDToLabels.set(n, eID, l)
 	}
 }
 

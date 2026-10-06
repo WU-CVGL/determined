@@ -124,22 +124,34 @@ func TestJobExperimentLabelsEndWithTheLastTrial(t *testing.T) {
 	AssociateJobExperiment(jID, eID, labels)
 	require.Equal(t, []float64{2}, stateSeries(t, "det_job_id_experiment_id", experiment))
 	require.Equal(t, []float64{2, 2}, stateSeries(t, "det_experiment_id_label", experiment))
-	// Editing the experiment's labels associates them without a matching removal.
-	AssociateExperimentIDLabels(eID, []string{"edited"})
+	// Editing the experiment's labels replaces them, and both trials keep the edited labels.
+	SetExperimentIDLabels(eID, []string{"a", "edited"})
+	require.Equal(t, []float64{2, 2}, stateSeries(t, "det_experiment_id_label", experiment))
+	require.Empty(t, stateSeries(t, "det_experiment_id_label", map[string]string{
+		"experiment_id": eID, "label": "b,c",
+	}))
 
 	DisassociateJobExperiment(jID, eID, labels)
 	require.Equal(t, []float64{1}, stateSeries(t, "det_job_id_experiment_id", experiment))
-	require.ElementsMatch(t, []float64{1, 1, 1}, stateSeries(t, "det_experiment_id_label", experiment))
+	require.ElementsMatch(t, []float64{1, 2}, stateSeries(t, "det_experiment_id_label", experiment))
 
 	DisassociateJobExperiment(jID, eID, labels)
 	require.Empty(t, stateSeries(t, "det_job_id_experiment_id", experiment))
 	require.Empty(t, stateSeries(t, "det_experiment_id_label", experiment))
 
-	// A trial allocation restored after a master restart is not associated, but its end is.
+	// A removal without an association changes nothing.
 	DisassociateJobExperiment(jID, eID, labels)
 	require.Empty(t, stateSeries(t, "det_job_id_experiment_id", experiment))
 	require.Empty(t, stateSeries(t, "det_experiment_id_label", experiment))
 	requireNoZeroSeries(t)
+}
+
+// Labels edited while no trial of the experiment has an allocation are not exported, since
+// nothing would remove them.
+func TestLabelsEditedWithoutTrialsAreNotExported(t *testing.T) {
+	eID := uuid.NewString()
+	SetExperimentIDLabels(eID, []string{"edited"})
+	require.Empty(t, stateSeries(t, "det_experiment_id_label", map[string]string{"experiment_id": eID}))
 }
 
 func TestMappingsConcurrently(t *testing.T) {
