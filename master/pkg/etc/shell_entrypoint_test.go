@@ -26,6 +26,10 @@ const (
 // filterDefinition matches the first line of the filter's definition, in any of bash's forms.
 var filterDefinition = regexp.MustCompile(`(?m)^[ \t]*(?:function[ \t]+)?` + filterFunc + `\b`)
 
+// sshdLine matches the start of the line that runs sshd, with or without exec, but not a comment
+// that names it.
+var sshdLine = regexp.MustCompile(`(?m)^[ \t]*(?:exec[ \t]+)?` + regexp.QuoteMeta(sshdPath) + `\b`)
+
 // shellEntrypointTail returns the end of shell-entrypoint.sh, from the definition of the sshd log
 // filter on, split at the start of the line that runs sshd: the filter and the readiness regex, then
 // the sshd command to the end of the script. It assumes only that order, not how the code is laid out.
@@ -40,10 +44,9 @@ func shellEntrypointTail(t *testing.T) (defs, sshdCommand string) {
 	start := filterDefinition.FindStringIndex(script)
 	require.NotNil(t, start, "shell-entrypoint.sh defines %s", filterFunc)
 	tail := script[start[0]:]
-	require.Equal(t, 1, strings.Count(tail, sshdPath), "%s appears once after the filter", sshdPath)
-	sshd := strings.Index(tail, sshdPath)
-	line := strings.LastIndex(tail[:sshd], "\n") + 1
-	return tail[:line], tail[line:]
+	sshd := sshdLine.FindAllStringIndex(tail, -1)
+	require.Len(t, sshd, 1, "one line after the filter runs %s", sshdPath)
+	return tail[:sshd[0][0]], tail[sshd[0][0]:]
 }
 
 // filterCommand runs the sshd log filter from shell-entrypoint.sh with the shell options that the
