@@ -64,6 +64,15 @@ Version 0.41.0
    pool page, with **Kill** and **Delete** in red and confirmations for **Kill**, **Delete**, and
    **Stop**.
 
+-  WebUI: Open a task's resource charts on **Since start**, from when the task got its resources,
+   instead of the last hour.
+
+-  WebUI: Number GPUs in the resource chart legends as ``nvidia-smi`` in the container does, with the
+   UUID, host, and PCI bus ID on hover.
+
+-  Proxy: Log ordinary ends and abrupt disconnects of proxied shell, JupyterLab, and TensorBoard
+   connections at debug level instead of as errors.
+
 **Bug Fixes**
 
 -  Resource pools: Apply the master's ``scheduler`` and ``task_container_defaults`` to dynamic
@@ -87,6 +96,10 @@ Version 0.41.0
 
 -  Experiments: Refuse to continue an experiment whose owner is deactivated, and stop leaving a
    session open when a continue fails before the experiment starts.
+
+-  Experiments: Continue an experiment in its own project and workspace, not the ones its config
+   names. A running experiment moved to a workspace that enforces a different weight now fails its
+   weight check when the master restarts.
 
 -  Generic tasks: Fix pausing, killing, and scheduling of generic task trees.
 
