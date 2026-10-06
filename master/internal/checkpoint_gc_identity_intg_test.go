@@ -14,6 +14,7 @@ import (
 
 	"github.com/docker/docker/api/types/mount"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/metadata"
@@ -76,7 +77,8 @@ func userContext(t *testing.T, u model.User) context.Context {
 
 // createGCTestExperiment creates a completed experiment of owner, with gcTestExperimentEnv, a bind
 // mount and shared_fs checkpoint storage at gcTestHostPath, and one checkpoint, whose UUID it
-// returns.
+// returns. The experiment is in a project of its own, so that tests that delete every experiment
+// of a project leave it alone. ctx is an administrator's.
 //
 // nolint: exhaustruct
 func createGCTestExperiment(
@@ -107,7 +109,8 @@ func createGCTestExperimentWithStorage(
 		}},
 		RawCheckpointStorage: storage,
 	}
-	exp := createTestExpWithActiveConfig(t, api, owner, 1,
+	_, projectID := createProjectAndWorkspace(ctx, t, api)
+	exp := createTestExpWithActiveConfig(t, api, owner, projectID,
 		schemas.WithDefaults(schemas.Merge(conf, minExpConfig)))
 	require.Equal(t, storage.RawSharedFSConfig != nil,
 		exp.Config.CheckpointStorage.RawSharedFSConfig != nil)
@@ -186,41 +189,49 @@ func nextGCSpec(t *testing.T, specs chan tasks.GCCkptSpec) tasks.GCCkptSpec {
 
 // requireGCRunsAsOwner checks that a checkpoint GC task of the experiment runs as its owner, with
 // no user session, and with none of the experiment's environment variables or bind mounts, but
-// with its checkpoint storage.
+// with its checkpoint storage. It reports every check that fails, then stops the test.
 func requireGCRunsAsOwner(t *testing.T, spec tasks.GCCkptSpec, owner model.User, expID int) {
 	t.Helper()
 	require.Equal(t, expID, spec.ExperimentID)
 	require.NotNil(t, spec.Base.Owner)
-	require.Equal(t, owner.ID, spec.Base.Owner.ID, "GC must run as the experiment's owner")
-	require.Equal(t, owner.Username, spec.Base.Owner.Username)
 	require.NotNil(t, spec.Base.AgentUserGroup)
-	require.Equal(t, gcTestOwnerAUG.UID, spec.Base.AgentUserGroup.UID)
-	require.Equal(t, gcTestOwnerAUG.GID, spec.Base.AgentUserGroup.GID)
-	require.Equal(t, gcTestOwnerAUG.User, spec.Base.AgentUserGroup.User)
-	require.Equal(t, gcTestOwnerAUG.Group, spec.Base.AgentUserGroup.Group)
-	require.Empty(t, spec.Base.UserSessionToken, "GC must get no user session")
-	require.Equal(t, gcTestHostPath, spec.LegacyConfig.CheckpointStorage.RawSharedFSConfig.HostPath())
+	failed := t.Failed()
 
+	// Identity.
+	assert.Equal(t, owner.ID, spec.Base.Owner.ID, "GC must run as the experiment's owner")
+	assert.Equal(t, owner.Username, spec.Base.Owner.Username)
+	assert.Equal(t, gcTestOwnerAUG.UID, spec.Base.AgentUserGroup.UID, "agent uid")
+	assert.Equal(t, gcTestOwnerAUG.GID, spec.Base.AgentUserGroup.GID, "agent gid")
+	assert.Equal(t, gcTestOwnerAUG.User, spec.Base.AgentUserGroup.User)
+	assert.Equal(t, gcTestOwnerAUG.Group, spec.Base.AgentUserGroup.Group)
+	assert.Empty(t, spec.Base.UserSessionToken, "GC must get no user session")
+
+	// Environment.
 	ts := spec.ToTaskSpec()
-	require.Equal(t, owner.ID, ts.Owner.ID)
-	require.NotContains(t, ts.EnvVars(), "DET_USER_TOKEN")
+	assert.NotContains(t, ts.EnvVars(), "DET_USER_TOKEN")
 	for _, d := range []device.Type{device.CPU, device.CUDA, device.ROCM} {
 		for _, v := range ts.Environment.EnvironmentVariables().For(d) {
 			for _, name := range []string{"BASH_ENV", "LD_PRELOAD", "PYTHONPATH"} {
-				require.False(t, strings.HasPrefix(v, name+"="),
-					"GC takes %q from the experiment's environment", v)
+				assert.False(t, strings.HasPrefix(v, name+"="),
+					"GC takes %q from the experiment's environment for %s", v, d)
 			}
 		}
 	}
 	for _, m := range ts.Mounts {
-		require.NotEqual(t, "/hooks", m.Target, "GC takes the experiment's bind mount %+v", m)
+		assert.NotEqual(t, "/hooks", m.Target, "GC takes the experiment's bind mount %+v", m)
 	}
-	require.Contains(t, ts.Mounts, mount.Mount{
+
+	// Storage.
+	assert.Equal(t, gcTestHostPath, spec.LegacyConfig.CheckpointStorage.RawSharedFSConfig.HostPath())
+	assert.Contains(t, ts.Mounts, mount.Mount{
 		Type:        mount.TypeBind,
 		Source:      gcTestHostPath,
 		Target:      expconf.DefaultSharedFSContainerPath,
 		BindOptions: &mount.BindOptions{Propagation: expconf.DefaultSharedFSPropagation},
 	})
+	if !failed && t.Failed() {
+		t.FailNow()
+	}
 }
 
 func waitForExperimentDeleted(ctx context.Context, t *testing.T, api *apiServer, expID int) {
@@ -274,7 +285,7 @@ func TestCheckpointGCRunsAsExperimentOwner(t *testing.T) {
 	t.Run("an admin deletes the owner's experiment", func(t *testing.T) {
 		exp, ckpt := createGCTestExperiment(adminCtx, t, api, owner)
 		_, err := api.DeleteExperiments(adminCtx, &apiv1.DeleteExperimentsRequest{
-			ProjectId:     1,
+			ProjectId:     int32(exp.ProjectID),
 			ExperimentIds: []int32{int32(exp.ID)},
 		})
 		require.NoError(t, err)
