@@ -143,6 +143,15 @@ func TestTaskResourceGPUIndexes(t *testing.T) {
 			want: map[string]int{},
 		},
 		{
+			// GPU-a counts twice, so the lists add up to the slots with only three GPUs.
+			name:   "a GPU in the lists of two containers leaves the other GPUs unnumbered",
+			series: gpuSeries("t.1", "node-a", "GPU-b"),
+			sets: []taskResourceGPUSet{
+				gpuSet("t.1", "c1", 4, "GPU-b", "GPU-a"), gpuSet("t.1", "c2", 4, "GPU-a", "GPU-c"),
+			},
+			want: map[string]int{},
+		},
+		{
 			name:   "series of one node from the lists of two containers are not numbered",
 			series: gpuSeries("t.1", "node-a", "GPU-a", "GPU-b", "GPU-c", "GPU-d"),
 			sets: []taskResourceGPUSet{

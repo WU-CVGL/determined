@@ -91,50 +91,39 @@ func setTaskResourceGPUIndexes(ctx context.Context, taskID string, series []task
 // taskResourceGPUIndexes numbers GPUs as nvidia-smi inside the task's container does: by their
 // position in the list that container recorded. A list can be partial (nvidia-smi lines that
 // fail to parse are skipped), so an allocation's GPUs are numbered only when its containers'
-// lists add up to the allocation's slots and none of them names a GPU twice or differs from
-// another row of its container. An allocation's GPUs on one node are also left unnumbered when
-// a GPU series is not in exactly one list, when the series come from more than one list, or
-// when a GPU of that list is reported on another node.
+// lists add up to the allocation's slots, no GPU is named twice in them (in one list or by two
+// containers), and no container has rows with different lists. An allocation's GPUs on one node
+// are also left unnumbered when a GPU series is not in a list, when the series come from more
+// than one list, or when a GPU of that list is reported on another node.
 func taskResourceGPUIndexes(series []taskResourceSeries, sets []taskResourceGPUSet,
 ) map[taskResourceGPUKey]int {
 	type container struct{ allocationID, containerID string }
 	lists := map[container][]string{}
-	invalid := map[container]bool{}
 	slots := map[string]int{}
+	// A broken recording leaves its allocation's count unreliable, so it voids the allocation.
+	broken := map[string]bool{}
 	for _, set := range sets {
 		c := container{set.AllocationID, set.ContainerID}
 		slots[set.AllocationID] = set.Slots
 		if prev, ok := lists[c]; ok {
-			invalid[c] = invalid[c] || !slices.Equal(prev, set.UUIDs)
+			broken[c.allocationID] = broken[c.allocationID] || !slices.Equal(prev, set.UUIDs)
 			continue
 		}
 		lists[c] = set.UUIDs
-		sorted := slices.Clone(set.UUIDs)
-		slices.Sort(sorted)
-		invalid[c] = len(slices.Compact(sorted)) != len(set.UUIDs)
-	}
-	// A broken list leaves its allocation's count unreliable, so it voids the whole allocation.
-	recorded := map[string]int{}
-	broken := map[string]bool{}
-	for c, uuids := range lists {
-		recorded[c.allocationID] += len(uuids)
-		broken[c.allocationID] = broken[c.allocationID] || invalid[c]
 	}
 
-	// The list and the position of each GPU of an allocation.
-	const ambiguous = -1
+	// The count, and the list and position of each GPU, of an allocation.
+	recorded := map[string]int{}
 	owner := map[taskResourceGPUKey]container{}
 	position := map[taskResourceGPUKey]int{}
 	for c, uuids := range lists {
-		usable := !broken[c.allocationID] && recorded[c.allocationID] == slots[c.allocationID]
+		recorded[c.allocationID] += len(uuids)
 		for i, uuid := range uuids {
 			key := taskResourceGPUKey{c.allocationID, uuid}
-			if _, listed := owner[key]; listed || !usable {
-				position[key] = ambiguous
-			} else {
-				position[key] = i
+			if _, named := owner[key]; named {
+				broken[c.allocationID] = true
 			}
-			owner[key] = c
+			owner[key], position[key] = c, i
 		}
 	}
 
@@ -164,7 +153,7 @@ func taskResourceGPUIndexes(series []taskResourceSeries, sets []taskResourceGPUS
 		g := group{s.Labels.AllocationID, s.Labels.Node}
 		key := taskResourceGPUKey{g.allocationID, s.Labels.GPUUUID}
 		c, listed := owner[key]
-		ok := listed && position[key] != ambiguous
+		ok := listed && !broken[g.allocationID] && recorded[g.allocationID] == slots[g.allocationID]
 		for _, uuid := range lists[c] {
 			if node, seen := nodes[uuid]; seen && (node != g.node || conflicts[uuid]) {
 				ok = false
