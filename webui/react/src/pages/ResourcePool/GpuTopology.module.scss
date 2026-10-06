@@ -1,5 +1,6 @@
 // GPU topology panel of the resource pool page. Tile fill = slot state (the SlotAllocationBar
-// palette, set inline as --gpu-tile-fill), health = a separate LED dot, stripes = no new work.
+// palette, set inline as --gpu-tile-fill; Running and Pending also set --gpu-tile-edge), health = a
+// separate LED dot, stripes = no new work.
 
 .agent {
   display: grid;
@@ -98,7 +99,7 @@
 .tile {
   align-content: start;
   background-color: var(--gpu-tile-fill, var(--theme-stage-strong));
-  border: 1px solid var(--theme-surface-border);
+  border: 1px solid var(--gpu-tile-edge, var(--theme-surface-border));
   border-radius: var(--theme-border-radius, 4px);
   color: var(--gpu-tile-on, var(--theme-surface-on));
   display: grid;
@@ -213,10 +214,6 @@
 
 // Tooltip and popover content
 
-.dialog:focus {
-  // The pinned popover takes focus from the keyboard; its links show their own focus rings.
-  outline: none;
-}
 .details {
   font-size: 12.5px;
   line-height: 1.45;
@@ -242,6 +239,46 @@
   font-weight: 600;
   gap: 8px;
   margin: 0 0 6px;
+}
+
+// The pinned popover: the details and a close button.
+
+.dialog {
+  position: relative;
+
+  &:focus {
+    // The pinned popover takes focus from the keyboard; its links show their own focus rings.
+    outline: none;
+  }
+  .detailsTitle {
+    // Room for the close button.
+    padding-right: 28px;
+  }
+}
+.close {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--theme-border-radius, 4px);
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: -4px;
+  top: -4px;
+  width: 24px;
+
+  &:hover {
+    // stylelint-disable-next-line declaration-property-value-no-unknown -- css-tree 2.3 predates color-mix()
+    background-color: color-mix(in srgb, currentcolor 15%, transparent);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--theme-ix-on-active, currentcolor);
+    outline-offset: 1px;
+  }
 }
 
 // Pairwise matrix
@@ -332,7 +369,7 @@
 }
 .swatch {
   background-color: var(--gpu-tile-fill, var(--theme-stage-strong));
-  border: 1px solid var(--theme-surface-border);
+  border: 1px solid var(--gpu-tile-edge, var(--theme-surface-border));
   border-radius: var(--theme-border-radius-weak, 2px);
   display: inline-block;
   height: 12px;

@@ -31,6 +31,7 @@ import {
   pairLevels,
   shortPciBusId,
   slotFillColor,
+  slotFillEdgeColor,
   slotFillOnColor,
   slotFillState,
   switchGroups,
@@ -53,6 +54,16 @@ interface GpuProps {
   resource?: Resource;
   topo: V1GpuTopology;
 }
+
+/** The colours of a tile or legend swatch with the given fill. */
+const fillStyle = (fill: SlotState): CSSProperties => {
+  const edge = slotFillEdgeColor(fill);
+  return {
+    '--gpu-tile-fill': slotFillColor(fill),
+    '--gpu-tile-on': slotFillOnColor(fill),
+    ...(edge ? { '--gpu-tile-edge': edge } : {}),
+  } as CSSProperties;
+};
 
 const gpuName = (gpu: V1GpuInfo): string =>
   gpu.excluded ? `Excluded GPU ${gpuLabel(gpu)}` : `Slot ${gpu.deviceId}`;
@@ -138,9 +149,9 @@ export const GpuDetails: React.FC<GpuProps> = ({ agentId, gpu, resource, topo })
 };
 
 /**
- * Hover or focus shows the details in a tooltip; a click pins them in a popover. The popover is
- * portalled to the end of the page, so a pin from the keyboard moves focus into it, and closing it
- * with focus inside gives focus back to the button.
+ * Hover or focus shows the details in a tooltip; a click pins them in a popover with a close button.
+ * The popover is portalled to the end of the page, so a pin from the keyboard moves focus into it,
+ * and closing it with focus inside gives focus back to the button.
  */
 const GpuInfoButton: React.FC<GpuProps> = (props) => {
   const [pinned, setPinned] = useState(false);
@@ -194,6 +205,13 @@ const GpuInfoButton: React.FC<GpuProps> = (props) => {
           role="dialog"
           tabIndex={-1}
           onKeyDown={onKeyDown}>
+          <button
+            aria-label="Close details"
+            className={css.close}
+            type="button"
+            onClick={() => onOpenChange(false)}>
+            <Icon decorative name="close" size="small" />
+          </button>
           {content}
         </div>
       }
@@ -227,17 +245,13 @@ const GpuTile: React.FC<GpuProps> = (props) => {
     : `${gpuName(gpu)}, ${slotStateToLabel[fill]}${off ? `, ${off}` : ''}`;
   const classes = [css.tile];
   if (off) classes.push(css.striped);
-  const style = {
-    '--gpu-tile-fill': slotFillColor(fill),
-    '--gpu-tile-on': slotFillOnColor(fill),
-  } as CSSProperties;
   return (
     <div
       aria-label={name}
       className={classes.join(' ')}
       data-fill={fill}
       role="group"
-      style={style}>
+      style={fillStyle(fill)}>
       {/* An excluded GPU is not a slot: it has no slot id, as in `det agent describe`. */}
       <span className={css.tileName}>{gpu.excluded ? '\u2013' : gpu.deviceId}</span>
       <GpuInfoButton {...props} />
@@ -322,11 +336,7 @@ export const GpuTopologyLegend: React.FC = () => (
       <b>Fill</b>
       {[SlotState.Free, SlotState.Pending, SlotState.Running].map((state) => (
         <span className={css.legendItem} key={state}>
-          <span
-            aria-hidden
-            className={css.swatch}
-            style={{ '--gpu-tile-fill': slotFillColor(state) } as CSSProperties}
-          />
+          <span aria-hidden className={css.swatch} style={fillStyle(state)} />
           {slotStateToLabel[state]}
         </span>
       ))}
@@ -373,15 +383,20 @@ const GpuTopology: React.FC<Props> = ({ agent }) => {
   );
 
   const counts = { [SlotState.Free]: 0, [SlotState.Pending]: 0, [SlotState.Running]: 0 };
-  let excluded = 0;
+  const offCounts = { disabled: 0, draining: 0, excluded: 0 };
   gpus.forEach((g) => {
-    if (g.excluded) excluded += 1;
-    else counts[slotFillState(resources.get(String(g.deviceId))) as keyof typeof counts] += 1;
+    const resource = g.excluded ? undefined : resources.get(String(g.deviceId));
+    const off = offLabel(g, resource) as keyof typeof offCounts | undefined;
+    if (off) offCounts[off] += 1;
+    if (!g.excluded) counts[slotFillState(resource) as keyof typeof counts] += 1;
   });
+  // The fill states, then the slots that take no new work, then the excluded GPUs.
   const countText =
-    `${gpus.length - excluded} slots: ${counts[SlotState.Running]} running, ` +
+    `${gpus.length - offCounts.excluded} slots: ${counts[SlotState.Running]} running, ` +
     `${counts[SlotState.Pending]} pending, ${counts[SlotState.Free]} free` +
-    (excluded > 0 ? `; ${excluded} excluded` : '');
+    (offCounts.disabled > 0 ? `, ${offCounts.disabled} disabled` : '') +
+    (offCounts.draining > 0 ? `, ${offCounts.draining} draining` : '') +
+    (offCounts.excluded > 0 ? `; ${offCounts.excluded} excluded` : '');
 
   let body: React.ReactNode;
   if (topo.unknownReason) {

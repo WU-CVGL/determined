@@ -287,6 +287,13 @@ export const slotFillColor = (state: SlotState): string =>
     ? 'var(--theme-status-free, var(--theme-stage-strong))'
     : getStateColorCssVar(state);
 
+/**
+ * The tile edge: Running and Pending take their fill colour, as in the approved preview; a Free tile
+ * keeps the surface border (undefined).
+ */
+export const slotFillEdgeColor = (state: SlotState): string | undefined =>
+  state === SlotState.Free ? undefined : slotFillColor(state);
+
 /** The text colour on a tile fill. */
 export const slotFillOnColor = (state: SlotState): string =>
   state === SlotState.Free ? 'var(--theme-surface-on)' : getStateColorCssVar(state, { isOn: true });

@@ -60,8 +60,9 @@ describe('GpuTopology', () => {
     expect(
       screen.getByText('narrow: 3,5 (x8 of x16 at start); excluded: 81:00.0'),
     ).toBeInTheDocument();
+    // The fill states, then the slots that take no new work, then the excluded GPUs.
     expect(
-      screen.getByText('7 slots: 1 running, 1 pending, 5 free; 1 excluded'),
+      screen.getByText('7 slots: 1 running, 1 pending, 5 free, 1 disabled, 1 draining; 1 excluded'),
     ).toBeInTheDocument();
 
     // One dot per GPU, labelled for screen readers: amber on the x8 slots, green elsewhere.
@@ -81,6 +82,15 @@ describe('GpuTopology', () => {
     expect(tile('Slot 0').style.getPropertyValue('--gpu-tile-fill')).toBe(
       'var(--theme-status-active)',
     );
+    // Running and Pending tiles take their fill as the edge; a Free tile keeps the surface border.
+    expect(tile('Slot 0').style.getPropertyValue('--gpu-tile-edge')).toBe(
+      'var(--theme-status-active)',
+    );
+    expect(tile('Slot 1').style.getPropertyValue('--gpu-tile-edge')).toBe(
+      tile('Slot 1').style.getPropertyValue('--gpu-tile-fill'),
+    );
+    expect(tile('Slot 1').style.getPropertyValue('--gpu-tile-edge')).not.toBe('');
+    expect(tile('Slot 2').style.getPropertyValue('--gpu-tile-edge')).toBe('');
 
     // Disabled and draining slots are striped and labelled, never a fill colour.
     expect(tile('Slot 5')).toHaveClass('striped');
@@ -166,6 +176,30 @@ describe('GpuTopology', () => {
     expect(button).toHaveAttribute('aria-expanded', 'false');
   });
 
+  it('closes the pinned details with their close button and gives focus back', async () => {
+    const agent = agentOf('node01', gpuTopologyCase('node01 with the exclude list'));
+    setup(<GpuTopology agent={agent} />);
+    const button = within(tile('Slot 3')).getByRole('button');
+
+    await userEvent.click(button);
+    const dialog = await screen.findByRole('dialog', { name: 'Details for slot 3 on node01' });
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Close details' }));
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    expect(button).toHaveFocus();
+  });
+
+  it('counts the disabled and draining slots of an agent', () => {
+    const agent = agentOf('node02', gpuTopologyCase('node02'), {
+      0: { container: { id: 'c0', state: ResourceState.Running }, enabled: false },
+      5: { enabled: false },
+    });
+    setup(<GpuTopology agent={agent} />);
+    expect(
+      screen.getByText('8 slots: 1 running, 0 pending, 7 free, 2 disabled'),
+    ).toBeInTheDocument();
+  });
+
   it('shows the details on focus, hides the tooltip while pinned, and unpins on Escape', async () => {
     const agent = agentOf('node01', gpuTopologyCase('node01 with the exclude list'));
     setup(<GpuTopology agent={agent} />);
@@ -193,11 +227,14 @@ describe('GpuTopology', () => {
     const button = within(tile('Slot 3')).getByRole('button');
     act(() => button.focus());
 
-    // The popover is portalled to the end of the page: Tab must reach its docs link next.
+    // The popover is portalled to the end of the page: Tab must reach its close button and its docs
+    // link next.
     await userEvent.keyboard('{Enter}');
     const dialog = await screen.findByRole('dialog', { name: 'Details for slot 3 on node01' });
     expect(button).toHaveAttribute('aria-expanded', 'true');
     await waitFor(() => expect(dialog).toHaveFocus());
+    await userEvent.tab();
+    expect(within(dialog).getByRole('button', { name: 'Close details' })).toHaveFocus();
     await userEvent.tab();
     expect(within(dialog).getByRole('link', { name: 'GPU topology and health' })).toHaveFocus();
 
