@@ -186,6 +186,31 @@ func (a *apiServer) canUpdateAgents(ctx context.Context) error {
 	return nil
 }
 
+// gpuTopologyForUser prepares the GPU topology of an agent enable or disable response. Updating
+// agents and viewing sensitive agent information are separate permissions, and GPU UUIDs and bus
+// ids are sensitive (authz.ObfuscateAgent): a user without that permission gets no topology, as
+// from GetAgents and GetAgent. Otherwise the health is classified. The rest of these responses is
+// left as it was.
+func (a *apiServer) gpuTopologyForUser(ctx context.Context, agent *agentv1.Agent) error {
+	if agent.GetGpuTopology() == nil {
+		return nil
+	}
+	user, _, err := grpcutil.GetUser(ctx)
+	if err != nil {
+		return err
+	}
+	permErr, err := cluster.AuthZProvider.Get().CanGetSensitiveAgentInfo(ctx, user)
+	switch {
+	case err != nil:
+		return err
+	case permErr != nil:
+		agent.GpuTopology = nil
+	default:
+		classifyGPUHealth(agent.GpuTopology)
+	}
+	return nil
+}
+
 func (a *apiServer) EnableAgent(
 	ctx context.Context, req *apiv1.EnableAgentRequest,
 ) (resp *apiv1.EnableAgentResponse, err error) {
@@ -193,10 +218,13 @@ func (a *apiServer) EnableAgent(
 		return nil, err
 	}
 	resp, err = a.m.rm.EnableAgent(req)
-	if err == nil {
-		classifyGPUHealth(resp.GetAgent().GetGpuTopology())
+	if err != nil {
+		return resp, err
 	}
-	return resp, err
+	if err := a.gpuTopologyForUser(ctx, resp.GetAgent()); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (a *apiServer) DisableAgent(
@@ -206,10 +234,13 @@ func (a *apiServer) DisableAgent(
 		return nil, err
 	}
 	resp, err = a.m.rm.DisableAgent(req)
-	if err == nil {
-		classifyGPUHealth(resp.GetAgent().GetGpuTopology())
+	if err != nil {
+		return resp, err
 	}
-	return resp, err
+	if err := a.gpuTopologyForUser(ctx, resp.GetAgent()); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (a *apiServer) EnableSlot(

@@ -4,12 +4,18 @@
 package internal
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/determined-ai/determined/master/internal/cluster"
+	"github.com/determined-ai/determined/master/internal/config"
+	"github.com/determined-ai/determined/master/internal/grpcutil"
 	"github.com/determined-ai/determined/master/internal/mocks"
+	"github.com/determined-ai/determined/master/pkg/model"
+	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/proto/pkg/agentv1"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 )
@@ -93,4 +99,75 @@ func TestEnableDisableAgentClassifiesGPUHealth(t *testing.T) {
 	disabled, err := api.DisableAgent(ctx, &apiv1.DisableAgentRequest{AgentId: "node01"})
 	require.NoError(t, err)
 	require.Equal(t, agentv1.GpuHealth_GPU_HEALTH_OK, disabled.Agent.GpuTopology.Gpus[0].Health)
+}
+
+// denySensitiveAgentInfo is the basic cluster authz, except that it denies viewing sensitive agent
+// information: under RBAC, updating agents and viewing sensitive agent information are separate
+// permissions.
+type denySensitiveAgentInfo struct {
+	cluster.MiscAuthZBasic
+}
+
+func (*denySensitiveAgentInfo) CanGetSensitiveAgentInfo(
+	context.Context, *model.User,
+) (permErr error, err error) {
+	return grpcutil.ErrPermissionDenied, nil
+}
+
+const denySensitiveAgentInfoAuthZ = "deny-sensitive-agent-info"
+
+var denySensitiveAgentInfoRegistered bool
+
+// Users without the sensitive agent information permission get no GPU topology from any agent API,
+// including the responses of agent enable and disable, which need only the update permission.
+func TestGPUTopologyHiddenWithoutSensitiveAgentInfo(t *testing.T) {
+	var mockRM mocks.ResourceManager
+	api, _, ctx := setupAPITest(t, nil, &mockRM)
+	if !denySensitiveAgentInfoRegistered {
+		cluster.AuthZProvider.RegisterOverride(denySensitiveAgentInfoAuthZ, &denySensitiveAgentInfo{})
+		denySensitiveAgentInfoRegistered = true
+	}
+	// Every other module falls back to the basic authz.
+	config.GetMasterConfig().Security.AuthZ = config.AuthZConfig{
+		Type: denySensitiveAgentInfoAuthZ, FallbackType: ptrs.Ptr(config.BasicAuthZType),
+	}
+	t.Cleanup(func() {
+		config.GetMasterConfig().Security.AuthZ = config.AuthZConfig{Type: config.BasicAuthZType}
+	})
+
+	mockRM.On("GetAgents").Return(
+		func() *apiv1.GetAgentsResponse {
+			return &apiv1.GetAgentsResponse{Agents: []*agentv1.Agent{node01WithExcludeList()}}
+		}, nil)
+	mockRM.On("GetAgent", mock.Anything).Return(
+		func(*apiv1.GetAgentRequest) *apiv1.GetAgentResponse {
+			return &apiv1.GetAgentResponse{Agent: node01WithExcludeList()}
+		}, nil)
+	mockRM.On("EnableAgent", mock.Anything).Return(
+		func(*apiv1.EnableAgentRequest) *apiv1.EnableAgentResponse {
+			return &apiv1.EnableAgentResponse{Agent: node01WithExcludeList()}
+		}, nil)
+	mockRM.On("DisableAgent", mock.Anything).Return(
+		func(*apiv1.DisableAgentRequest) *apiv1.DisableAgentResponse {
+			return &apiv1.DisableAgentResponse{Agent: node01WithExcludeList()}
+		}, nil)
+
+	all, err := api.GetAgents(ctx, &apiv1.GetAgentsRequest{})
+	require.NoError(t, err)
+	require.Len(t, all.Agents, 1)
+	require.Nil(t, all.Agents[0].GpuTopology)
+
+	one, err := api.GetAgent(ctx, &apiv1.GetAgentRequest{AgentId: "node01"})
+	require.NoError(t, err)
+	require.Nil(t, one.Agent.GpuTopology)
+
+	enabled, err := api.EnableAgent(ctx, &apiv1.EnableAgentRequest{AgentId: "node01"})
+	require.NoError(t, err)
+	require.Equal(t, "node01", enabled.Agent.Id)
+	require.Nil(t, enabled.Agent.GpuTopology)
+
+	disabled, err := api.DisableAgent(ctx, &apiv1.DisableAgentRequest{AgentId: "node01"})
+	require.NoError(t, err)
+	require.Equal(t, "node01", disabled.Agent.Id)
+	require.Nil(t, disabled.Agent.GpuTopology)
 }
