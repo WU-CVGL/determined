@@ -518,6 +518,59 @@ describe('TaskDashboard', () => {
     expect(await slots('eval-sweep')).toHaveTextContent(/^1$/);
   });
 
+  describe('with widths stored before the Slots column', () => {
+    /* The width of each stored column: the table binds the stored widths to the columns by place. */
+    const storedWidths = () => {
+      const { columns, columnWidths } = stored() as { columns: string[]; columnWidths: number[] };
+      expect(columnWidths).toHaveLength(columns.length);
+      return Object.fromEntries(columns.map((col, i) => [col, columnWidths[i]]));
+    };
+
+    /** The width of each column the table shows, by its title. */
+    const shownWidths = () => {
+      const table = screen.getAllByRole('table')[0];
+      const titles = within(table)
+        .getAllByRole('columnheader')
+        .map((th) => th.textContent?.trim());
+      const widths = [...table.querySelectorAll('colgroup > col')].map(
+        (col) => (col as HTMLElement).style.width,
+      );
+      expect(widths).toHaveLength(titles.length);
+      return Object.fromEntries(titles.map((title, i) => [title, widths[i]]));
+    };
+
+    it.each([
+      ['only the widths, as a resize stores them', { columnWidths: OLD_WIDTHS }],
+      ['the columns and their widths', { columns: OLD_COLUMNS, columnWidths: OLD_WIDTHS }],
+    ])('gives each column its own width when they were %s', async (_, settings) => {
+      storeBeforeLoad(settings);
+      setup();
+      expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+
+      await waitFor(() => expect(stored().columnWidths).toHaveLength(10));
+      expect(storedWidths()).toEqual({
+        endTime: 309,
+        id: 302,
+        kind: 301,
+        location: 306,
+        name: 303,
+        resourcePool: 307,
+        slots: 72,
+        startTime: 308,
+        state: 304,
+        user: 305,
+      });
+      // ID, User, Location, Resource Pool and Ended are hidden below the md breakpoint, as in tests.
+      await waitFor(() => expect(shownWidths()).toMatchObject({ Slots: '72px' }));
+      expect(shownWidths()).toMatchObject({
+        Kind: '301px',
+        Name: '303px',
+        Started: '308px',
+        State: '304px',
+      });
+    });
+  });
+
   it('keeps the filters of the Jobs page and of the tasks-only view apart', async () => {
     const jobs = setup();
     expect(await screen.findByText('bert-finetune')).toBeInTheDocument();

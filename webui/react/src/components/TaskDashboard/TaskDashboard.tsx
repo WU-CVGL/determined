@@ -86,9 +86,9 @@ import settingsConfig, {
   DEFAULT_PAGE_SIZE,
   FILTER_KEYS,
   MAX_PAGE_SIZE,
+  normalizedLayout,
   Owner,
   Settings,
-  withSlotsColumn,
 } from './TaskDashboard.settings';
 
 interface Props {
@@ -250,9 +250,13 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
     updateSettings({ tableOffset: 0, type: urlKinds });
   }, [isLoading, settings.type, updateSettings, urlKinds]);
 
+  // Stored columns and widths, also from before the Slots column, get one width for each column.
   useEffect(() => {
     if (isLoading) return;
-    const update = withSlotsColumn(settings.columns, settings.columnWidths);
+    const update = normalizedLayout({
+      columns: settings.columns,
+      columnWidths: settings.columnWidths,
+    });
     if (update) updateSettings(update);
   }, [isLoading, settings.columns, settings.columnWidths, updateSettings]);
 
