@@ -44,6 +44,7 @@ import { isDangerMenuItem, isDisabledMenuItem, menuLabels, openMenuItem } from '
 
 import { fetchRunPage } from './fetchRuns';
 import TaskDashboard from './TaskDashboard';
+import { MIN_COLUMN_WIDTH } from './TaskDashboard.settings';
 
 // The menu and bulk Kill tests take many steps, which can outlast 5 s when the whole suite runs.
 vi.setConfig({ testTimeout: 15_000 });
@@ -737,6 +738,57 @@ describe('TaskDashboard', () => {
     );
     expect(saved('columns')).toEqual(NEW_COLUMNS);
     expect(storedWidths()).toMatchObject({ kind: 64, name: 450, slots: 72 });
+  });
+
+  it('resizes a column narrower than its default width, down to the minimum', async () => {
+    setup();
+    expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+    await settingsLoaded();
+
+    await resize('Name', 120);
+    await waitFor(() => expect(storedWidths()).toMatchObject({ name: 120 }));
+    expect(shownWidths()).toMatchObject({ Name: '120px' });
+
+    await resize('Name', 10);
+    await waitFor(() => expect(storedWidths()).toMatchObject({ name: MIN_COLUMN_WIDTH }));
+    expect(shownWidths()).toMatchObject({ Name: `${MIN_COLUMN_WIDTH}px` });
+  });
+
+  it('shows a stored width narrower than the default', async () => {
+    storeBeforeLoad({
+      columns: NEW_COLUMNS,
+      columnWidths: [...NEW_WIDTHS.slice(0, 2), 90, ...NEW_WIDTHS.slice(3)],
+    });
+    setup();
+    expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+    await waitFor(() => expect(shownWidths()).toMatchObject({ Kind: '301px' }), AFTER_LOAD);
+    expect(shownWidths()).toMatchObject({ Name: '90px' });
+  });
+
+  it('cuts a long name short in its cell, with the whole name in a title or tooltip', async () => {
+    setup();
+    expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+
+    // A definite table width keeps the columns at their own widths, which 'max-content' would
+    // widen to their longest content.
+    expect(screen.getAllByRole('table')[0].style.width).toBe('100%');
+    const names = ['bert-finetune', 'eval-sweep', 'gpu-shell', 'cpu-notebook'];
+    for (const name of names) {
+      expect(screen.getByText(name).closest('td')).toHaveClass('ant-table-cell-ellipsis');
+    }
+    // The experiment's name shows its own tooltip when cut short, so it has no title.
+    expect(screen.getByText('bert-finetune').closest('a')).toHaveAttribute(
+      'href',
+      '/experiments/42',
+    );
+    expect(screen.getByText('bert-finetune').closest('[title]')).toBeNull();
+    expect(screen.getByText('eval-sweep').closest('a')).toHaveAttribute(
+      'href',
+      '/generic-tasks/task-1',
+    );
+    for (const name of names.slice(1)) {
+      expect(screen.getByText(name).closest('[title]')).toHaveAttribute('title', name);
+    }
   });
 
   it('keeps the filters of the Jobs page and of the tasks-only view apart', async () => {

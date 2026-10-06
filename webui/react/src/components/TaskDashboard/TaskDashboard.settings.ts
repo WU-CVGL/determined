@@ -47,6 +47,9 @@ export const DEFAULT_COLUMN_WIDTHS: Record<TaskDashboardColumnName, number> = {
   user: 85,
 };
 
+/** The narrowest a column can be resized to, below its default width. */
+export const MIN_COLUMN_WIDTH = 60;
+
 /**
  * The widths of the default columns, which the settings give when none were stored: a new array
  * each time, as the table changes the widths it was given in place while a column is resized.
