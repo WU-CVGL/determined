@@ -711,6 +711,20 @@ describe('TaskDashboard', () => {
     }, 30_000);
   });
 
+  it('shows the rows once the stored settings have loaded', async () => {
+    let load: (response: { settings: [] }) => void = () => undefined;
+    userSettings.reset();
+    vi.mocked(getUserSetting).mockReturnValueOnce(new Promise((resolve) => (load = resolve)));
+    setup();
+    await waitFor(() => expect(getExperiments).toHaveBeenCalled());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+    // The table mounts again once they have, which would replace a row being clicked.
+    expect(screen.queryByText('bert-finetune')).not.toBeInTheDocument();
+
+    load({ settings: [] });
+    expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+  });
+
   it('stores the columns with the widths of a resize', async () => {
     setup();
     expect(await screen.findByText('bert-finetune')).toBeInTheDocument();

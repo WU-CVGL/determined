@@ -264,7 +264,8 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
   /*
    * The table takes the widths it mounts with, and later ones only when their count changes. It
    * mounts again once the stored layout has loaded and has one width for each column, so that it
-   * shows (and a resize keeps) the stored widths, not the default ones.
+   * shows (and a resize keeps) the stored widths, not the default ones. It shows no rows before,
+   * as a click on one could land on a row about to be replaced.
    */
   const layoutReady = !isLoading && !layoutUpdate;
   /*
@@ -852,7 +853,7 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
             dataSource={page?.rows}
             defaultColumns={DEFAULT_COLUMNS}
             key={layoutReady ? 'layout-ready' : 'layout-pending'}
-            loading={page === undefined}
+            loading={page === undefined || !layoutReady}
             pagination={{
               ...getFullPaginationConfig({ limit, offset }, page?.total ?? 0),
               pageSizeOptions: PAGE_SIZE_OPTIONS,
