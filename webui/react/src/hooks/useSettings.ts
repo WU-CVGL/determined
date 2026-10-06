@@ -285,6 +285,20 @@ const useSettings = <T>(config: SettingsConfig<T>): UseSettingsReturn<T> => {
             ) {
               return;
             }
+            /*
+             * An update of settings that the URL leaves out, such as a table's columns and widths,
+             * leaves the URL alone. The store takes an update only after this call, so a URL built
+             * here from the store would undo the URL settings of an update just before this one,
+             * such as the filters of the URL itself on a first load.
+             */
+            if (
+              Object.keys(updates).every(
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (key) => !!(config.settings as any)[key]?.skipUrlEncoding,
+              )
+            ) {
+              return;
+            }
             const mappedSettings = settingsToQuery(config, newSettings);
             const url = mappedSettings ? `?${mappedSettings}` : '';
             navigate(url, { replace: true });

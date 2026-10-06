@@ -6,7 +6,7 @@ import { Loadable } from 'hew/utils/loadable';
 import React, { useEffect } from 'react';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
-import { MemoryRouter } from 'react-router-dom';
+import { BrowserRouter, MemoryRouter } from 'react-router-dom';
 
 import { ThemeProvider } from 'components/ThemeProvider';
 import { SettingsProvider } from 'hooks/useSettingsProvider';
@@ -16,6 +16,7 @@ import {
   getJupyterLabs,
   getShells,
   getTensorBoards,
+  getUserSetting,
   killExperiment,
   killGenericTask,
   killTask,
@@ -139,7 +140,7 @@ vi.mock('services/api', () => ({
   getShells: vi.fn(),
   getTensorBoards: vi.fn(() => Promise.resolve([])),
   getUsers: () => Promise.resolve({ users: [] }),
-  getUserSetting: () => Promise.resolve({ settings: [] }),
+  getUserSetting: vi.fn(() => Promise.resolve({ settings: [] })),
   getWorkspaceProjects: () => Promise.resolve({ pagination: { total: 0 }, projects: [] }),
   getWorkspaces: () => Promise.resolve({ pagination: { total: 0 }, workspaces: [] }),
   killExperiment: vi.fn(() => Promise.resolve()),
@@ -199,22 +200,69 @@ const Container: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return <SettingsProvider>{children}</SettingsProvider>;
 };
 
-const setup = (props: React.ComponentProps<typeof TaskDashboard> = {}, url = '/jobs') =>
-  render(
+/** With `browser`, at this URL of the browser itself, which the settings read on the first load. */
+const setup = (
+  props: React.ComponentProps<typeof TaskDashboard> = {},
+  url = '/jobs',
+  { browser = false } = {},
+) => {
+  const page = (
+    <Container>
+      <ConfirmationProvider>
+        <TaskDashboard {...props} />
+      </ConfirmationProvider>
+    </Container>
+  );
+  if (browser) window.history.replaceState(null, '', url);
+  return render(
     <UIProvider theme={DefaultTheme.Light}>
       <ThemeProvider>
         <DndProvider backend={HTML5Backend}>
-          <MemoryRouter initialEntries={[url]}>
-            <Container>
-              <ConfirmationProvider>
-                <TaskDashboard {...props} />
-              </ConfirmationProvider>
-            </Container>
-          </MemoryRouter>
+          {browser ? (
+            <BrowserRouter>{page}</BrowserRouter>
+          ) : (
+            <MemoryRouter initialEntries={[url]}>{page}</MemoryRouter>
+          )}
         </DndProvider>
       </ThemeProvider>
     </UIProvider>,
   );
+};
+
+const JOBS_SETTINGS = 'jobs-dashboard-global';
+
+/** Settings stored before the page loads, which the settings store then reads from the master. */
+const storeBeforeLoad = (settings: Record<string, unknown>, storagePath = JOBS_SETTINGS) => {
+  userSettings.reset();
+  vi.mocked(getUserSetting).mockResolvedValueOnce({
+    settings: Object.entries(settings).map(([key, value]) => ({
+      key,
+      storagePath,
+      value: JSON.stringify(value),
+    })),
+  });
+};
+
+/** The settings in the store, as the page last updated them. */
+const stored = (storagePath = JOBS_SETTINGS): Record<string, unknown> =>
+  (Loadable.getOrElse(undefined, userSettings.getAll().get())?.get(storagePath) ?? {}) as Record<
+    string,
+    unknown
+  >;
+
+/* The columns and widths the Jobs page stored before its Slots column. */
+const OLD_COLUMNS = [
+  'kind',
+  'id',
+  'name',
+  'state',
+  'user',
+  'location',
+  'resourcePool',
+  'startTime',
+  'endTime',
+];
+const OLD_WIDTHS = [301, 302, 303, 304, 305, 306, 307, 308, 309];
 
 const user = userEvent.setup();
 
@@ -270,6 +318,7 @@ describe('TaskDashboard', () => {
     // The settings store outlives a test; each test starts from the default filters.
     await userSettings.clear();
     vi.clearAllMocks();
+    window.history.replaceState(null, '', '/');
   });
 
   it('lists every kind on the Jobs page, newest first, with the launch buttons', async () => {
@@ -358,6 +407,22 @@ describe('TaskDashboard', () => {
     );
     await waitFor(() => expect(screen.queryByText('gpu-shell')).not.toBeInTheDocument());
     expect(screen.queryByText('cpu-notebook')).not.toBeInTheDocument();
+  });
+
+  it("keeps the URL's kinds over the stored ones while it moves the stored columns", async () => {
+    storeBeforeLoad({ columns: OLD_COLUMNS, columnWidths: OLD_WIDTHS, type: ['experiment'] });
+    setup({}, '/jobs?type=shell', { browser: true });
+
+    await waitFor(() => expect(stored().columns).toContain('slots'));
+    await waitFor(() => expect(stored().type).toEqual(['shell']));
+    // Long enough for the URL and the settings to undo each other, as they did.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+    expect(new URLSearchParams(window.location.search).getAll('type')).toEqual(['shell']);
+    expect(stored().type).toEqual(['shell']);
+    expect(screen.getByTestId('kind-shell')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('kind-experiment')).toHaveAttribute('aria-pressed', 'false');
+    await waitFor(() => expect(screen.queryByText('bert-finetune')).not.toBeInTheDocument());
+    expect(screen.getByText('gpu-shell')).toBeInTheDocument();
   });
 
   it('keeps old ?type values of the task list working', async () => {
