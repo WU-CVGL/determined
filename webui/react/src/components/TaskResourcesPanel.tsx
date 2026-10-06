@@ -111,8 +111,8 @@ const TaskResourcesPanel: React.FC<Props> = ({
 
   useEffect(() => setPayload(undefined), [taskId]);
 
-  // The list is refreshed with a running task, whose allocations may still get resources.
-  const listRefresh = endTime ? 0 : refresh;
+  // Every refresh, manual or the 30-second one of a running task, reads the list again: a queued
+  // allocation gets its container start later, and an earlier read may have failed.
   useEffect(() => {
     if (!enabled || !taskId) return;
     const controller = new AbortController();
@@ -136,7 +136,7 @@ const TaskResourcesPanel: React.FC<Props> = ({
         );
       });
     return () => controller.abort();
-  }, [enabled, listRefresh, taskId]);
+  }, [enabled, refresh, taskId]);
 
   useEffect(() => {
     if (!enabled || !range || !taskId) return;

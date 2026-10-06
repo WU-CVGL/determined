@@ -8,8 +8,16 @@ vi.mock('hooks/useTaskResourcesEnabled', () => ({
   default: () => true,
 }));
 vi.mock('components/TaskResourceChart', () => ({
-  default: ({ series }: { series: { labels: { allocation_id: string } }[] }) => (
-    <div>{series.map((item) => item.labels.allocation_id).join(',')}</div>
+  default: ({
+    range,
+    series,
+  }: {
+    range: { start: number };
+    series: { labels: { allocation_id: string } }[];
+  }) => (
+    <div data-range-start={range.start}>
+      {series.map((item) => item.labels.allocation_id).join(',')}
+    </div>
   ),
 }));
 
@@ -67,6 +75,12 @@ const seriesRange = (fetchMock: FetchCalls, index: number) => {
     step: Number(params.get('step')),
   };
 };
+const lastSeriesRange = (fetchMock: FetchCalls) =>
+  seriesRange(fetchMock, seriesCalls(fetchMock).length - 1);
+const listCalls = (fetchMock: FetchCalls) =>
+  fetchMock.mock.calls.filter(([url]) => isAllocationsUrl(url));
+// The start of the range the charts were given.
+const chartStart = () => Number(screen.getAllByText('allocation')[0].dataset.rangeStart);
 const firstSeriesRange = async (fetchMock: FetchCalls) => {
   await waitFor(() => expect(seriesCalls(fetchMock).length).toBeGreaterThan(0));
   return seriesRange(fetchMock, 0);
@@ -291,4 +305,73 @@ it('keeps the other ranges relative to now and the task start', async () => {
   await waitFor(() => expect(seriesCalls(fetchMock)).toHaveLength(3));
   expect(seriesRange(fetchMock, 2).start).toBe(now - 3 * HOUR);
   expect(screen.queryByText(CLAMP_CAPTION)).not.toBeInTheDocument();
+});
+
+it('reads the allocation list again on Refresh of an ended task whose first read failed', async () => {
+  const now = nowSeconds();
+  const list = vi
+    .fn()
+    .mockResolvedValueOnce({ ok: false, status: 503 })
+    .mockResolvedValue(
+      allocationsReply([
+        { allocation_id: 'task.1', container_start: now - 2 * HOUR, end: now - HOUR },
+      ]),
+    );
+  const fetchMock = routedFetch(list);
+  vi.stubGlobal('fetch', fetchMock);
+  render(
+    <UIProvider theme={DefaultTheme.Light}>
+      <TaskResourcesPanel endTime={iso(now - HOUR)} startTime={iso(now - 3 * HOUR)} taskId="task" />
+    </UIProvider>,
+  );
+  // Without a list the range begins at the task start.
+  expect((await firstSeriesRange(fetchMock)).start).toBe(now - 3 * HOUR);
+  expect(await screen.findByText('allocation')).toBeInTheDocument();
+  expect(chartStart()).toBe(now - 3 * HOUR);
+
+  const refresh = screen.getByRole('button', { name: 'Refresh' });
+  await waitFor(() => expect(refresh).toBeEnabled());
+  await userEvent.click(refresh);
+  await waitFor(() => expect(listCalls(fetchMock)).toHaveLength(2));
+  await waitFor(() =>
+    expect(lastSeriesRange(fetchMock)).toEqual({
+      end: now - HOUR,
+      start: now - 2 * HOUR,
+      step: 15,
+    }),
+  );
+  await waitFor(() => expect(chartStart()).toBe(now - 2 * HOUR));
+});
+
+it('moves the start of a running task once a 30-second refresh finds its container start', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  try {
+    const now = nowSeconds();
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce(
+        allocationsReply([{ allocation_id: 'task.1', container_start: null, end: null }]),
+      )
+      .mockResolvedValue(
+        allocationsReply([{ allocation_id: 'task.1', container_start: now - 60, end: null }]),
+      );
+    const fetchMock = routedFetch(list);
+    vi.stubGlobal('fetch', fetchMock);
+    render(page('task', undefined, iso(now - HOUR)));
+    // Still queued: the range begins at the task start.
+    expect((await firstSeriesRange(fetchMock)).start).toBe(now - HOUR);
+    expect(await screen.findByText(/No container start is recorded yet,/)).toBeInTheDocument();
+    expect(await screen.findByText('allocation')).toBeInTheDocument();
+    expect(chartStart()).toBe(now - HOUR);
+
+    act(() => {
+      vi.advanceTimersByTime(30000);
+    });
+    await waitFor(() => expect(listCalls(fetchMock)).toHaveLength(2));
+    await waitFor(() => expect(lastSeriesRange(fetchMock).start).toBe(now - 60));
+    await waitFor(() => expect(chartStart()).toBe(now - 60));
+    expect(screen.queryByText(/No container start is recorded/)).not.toBeInTheDocument();
+  } finally {
+    vi.useRealTimers();
+  }
 });
