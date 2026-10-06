@@ -41,6 +41,10 @@ metrics with ``det_cluster`` and ``gpu_uuid`` labels. The configured cluster mus
 ``det_cluster`` label. The existing Kubernetes dashboard's pod-label schema alone does not
 satisfy this contract.
 
+A task's metrics begin once its allocation has run for :ref:`observability.task_mapping_delay
+<master-config-observability>` (5 minutes by default); the master does not attribute metrics to
+allocations that end sooner, so their charts stay empty.
+
 The master runs a fixed set of queries after checking access to the task. It does not expose a
 general PromQL proxy. An optional allocation selector is checked against the task's allocations.
 Queries are limited to seven days, 1,440 points per series, a minimum 15-second step, and a shared
@@ -50,10 +54,11 @@ Reading the Charts
 ==================
 
 Select a preset or a custom time range and optionally one allocation. The default range,
-**Since start**, begins when the task's first allocation got its resources, so time spent queued
-is not shown; with one allocation selected, it runs from that allocation's start to its end, or to
-now while it runs. If no allocation has got its resources, or the master cannot list the
-allocations within 10 seconds, it begins when the task was submitted.
+**Since start**, begins when the metrics of the task's first allocation begin, the mapping delay
+above after the allocation got its resources, so time spent queued is not shown. With one
+allocation selected, it runs from the start of that allocation's metrics to its end, or to now
+while it runs. If no allocation has got its resources, or the master cannot list the allocations
+within 10 seconds, it begins when the task was submitted.
 It shows at most the most recent 7 days. The other presets count back from now, or from the end of
 an ended task. Running tasks refresh every 30 seconds while the page is visible.
 Drag across a chart to zoom the shared timeline. Empty periods remain gaps rather than zeros.

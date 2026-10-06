@@ -1669,17 +1669,28 @@ Whether OpenTelemetry is enabled. Defaults to ``false``.
 
 OpenTelemetry endpoint to use. Defaults to ``localhost:4317``.
 
+.. _master-config-observability:
+
 *******************
  ``observability``
 *******************
 
-Specifies whether Determined enables Prometheus monitoring routes. See :ref:`Prometheus
-<prometheus>` for details.
+Configures the Prometheus monitoring routes. See :ref:`Prometheus <prometheus>` for details.
 
 ``enable_prometheus``
 =====================
 
 Whether Prometheus endpoints are present. Defaults to ``true``.
+
+``task_mapping_delay``
+======================
+
+How long an allocation runs before the master exports its task mappings on
+``/prom/det-state-metrics``: allocation to task, container to allocation, container to runtime
+container ID, and GPU to container. The time counts from when the allocation's containers start,
+including image pulls, and a master restart does not reset it. Prometheus attributes no metrics to
+an allocation that ends sooner. The mappings are removed when the allocation stops. Write ``0s`` to
+export them from the start. Defaults to ``5m``.
 
 .. _master-config-shell-terminal:
 

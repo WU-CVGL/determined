@@ -77,7 +77,9 @@ This enables the following two Prometheus API endpoints on the instance.
 
    The ``det-state-metrics`` endpoint includes various machine-level label mappings to internal
    Determined entities, such as GPU UUIDs and container IDs to task, allocation, and experiment
-   labels, which are used by PromQL to join vectors.
+   labels, which are used by PromQL to join vectors. A task's mappings appear once its allocation
+   has run for ``observability.task_mapping_delay`` (5 minutes by default) and are removed when it
+   stops.
 
 -  ``{$DET_MASTER_ADDR}/prom/det-http-sd-config``:
 
