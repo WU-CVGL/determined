@@ -198,7 +198,10 @@
 
   &:hover,
   &[aria-expanded='true'] {
-    background: var(--theme-surface-weak, rgb(0 0 0 / 10%));
+    // A tint of the icon's own colour, so the icon stays visible on every fill: on the Running and
+    // Pending fills the icon has the light on-colour, which a light surface colour would hide.
+    // stylelint-disable-next-line declaration-property-value-no-unknown -- css-tree 2.3 predates color-mix()
+    background-color: color-mix(in srgb, currentcolor 15%, transparent);
   }
   &:focus-visible {
     // Two colours, so the ring shows on every fill: the Running fill is the ix-on-active blue.
