@@ -108,8 +108,9 @@ func orderByUUID(gpus []aproto.GPUInfo, i, j int) (a, b int) {
 }
 
 // collectGPU runs the health calls for one GPU and returns its handle, or nil if the handle lookup
-// failed. N1: SUCCESS uses the value; ERROR_NOT_SUPPORTED leaves the field unknown with no error;
-// any other return leaves the field unknown and appends "<call>: <NAME> (<code>)" to NVMLError.
+// failed. SUCCESS uses the value; ERROR_NOT_SUPPORTED leaves the field unknown with no error, as
+// the GPU simply lacks it; any other return leaves the field unknown and appends
+// "<call>: <NAME> (<code>)" to NVMLError.
 func collectGPU(lib nvml.Interface, g *aproto.GPUInfo, numa func(bdf string) *int) nvml.Device {
 	var errs []string
 	ok := func(call string, ret nvml.Return) bool {
@@ -150,9 +151,11 @@ func collectGPU(lib nvml.Interface, g *aproto.GPUInfo, numa func(bdf string) *in
 	return dev
 }
 
-// countNVLinks is the NVLink probe (N2). It never sets an error: NVML answers only for the links
-// a device has, so it stops at the first non-SUCCESS return. It counts the enabled links of GPU i
-// whose remote end is GPU j, by ordered pair (i, j).
+// countNVLinks is the NVLink probe. It never sets an error: NVML answers only for the links a
+// device has, and rejects the first one it lacks (ERROR_NOT_SUPPORTED for link 0 on a GPU without
+// NVLink, ERROR_INVALID_ARGUMENT for link 4 on an RTX 3090), which would otherwise mark such GPUs
+// red. So it stops at the first non-SUCCESS return. It counts the enabled links of GPU i whose
+// remote end is GPU j, by ordered pair (i, j).
 func countNVLinks(handles []nvml.Device, gpus []aproto.GPUInfo) map[[2]int]int {
 	byBusID := map[string]int{}
 	for i, g := range gpus {
@@ -204,7 +207,8 @@ func collectLink(a, b nvml.Device, uuidA, uuidB string, nvlinks int) aproto.GPUL
 	return link
 }
 
-// p2pCaps queries READ and WRITE for one direction (N3).
+// p2pCaps queries READ and WRITE for one direction: P2P needs both OK in both directions, as NCCL
+// requires.
 func p2pCaps(from, to nvml.Device, uuidFrom, uuidTo string) aproto.GPUP2PCaps {
 	query := func(index nvml.GpuP2PCapsIndex, name string) aproto.GPUP2PStatus {
 		status, ret := from.GetP2PStatus(to, index)
@@ -320,7 +324,7 @@ func numaNodeReader(pciRoot, nodesOnline string) func(bdf string) *int {
 
 // nvmlReturnNames is the symbolic name of every Return constant of go-nvml
 // (pkg/nvml/const.go). go-nvml's built-in table lacks 27-29, and once the library is loaded,
-// Return.String() and Error() return NVML's prose instead (N4).
+// Return.String() and Error() return NVML's prose instead, which is not a stable identifier.
 var nvmlReturnNames = map[nvml.Return]string{
 	nvml.SUCCESS:                         "SUCCESS",
 	nvml.ERROR_UNINITIALIZED:             "ERROR_UNINITIALIZED",

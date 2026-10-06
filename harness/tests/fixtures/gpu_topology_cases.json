@@ -1,5 +1,5 @@
 {
-  "description": "Agent GPU topologies as the master's API returns them, with the det agent list summary strings they give (design/gpu-topology.md section 5.3). Shared by harness/tests/cli/test_agent.py and webui/react/src/utils/gpuTopology.test.ts, so the CLI and the WebUI show the same strings.",
+  "description": "Agent GPU topologies as the master's API returns them, with the summary strings they give in the GPU Topology and GPU Health columns of det agent list. Shared by harness/tests/cli/test_agent.py and webui/react/src/utils/gpuTopology.test.ts, so the CLI and the WebUI show the same strings.",
   "cases": [
     {
       "name": "node02: 8 GPUs, P2P usable everywhere",
@@ -320,7 +320,7 @@
       }
     },
     {
-      "name": "N6: 7 slots and 1 excluded GPU, NVML init failed",
+      "name": "NVML init failed: 7 slots and 1 excluded GPU stay listed",
       "topology": "unknown: NVML init: ERROR_LIBRARY_NOT_FOUND (12)",
       "health": "unknown; excluded: GPU-0c000000-0000-0000-0000-000000000007 (unknown)",
       "gpuTopology": {
@@ -340,7 +340,7 @@
       }
     },
     {
-      "name": "N6: all 8 GPUs excluded",
+      "name": "all 8 GPUs excluded: no slots, every GPU listed",
       "topology": "no slots",
       "health": "excluded: 01:00.0, 25:00.0, 41:00.0, 61:00.0, 81:00.0, a1:00.0, c1:00.0, e1:00.0",
       "gpuTopology": {

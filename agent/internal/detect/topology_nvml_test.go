@@ -110,8 +110,8 @@ func (f *fakeNode) lib() *mock.Interface {
 			GetNvLinkRemotePciInfoFunc: func(link int) (nvml.PciInfo, nvml.Return) {
 				require.NotNil(f.t, g.nvlink, "remote PCI info of a GPU without NVLink")
 				state, _, remote, r := g.nvlink(link)
-				// N2 queries the remote end only of an enabled link. Non-fatal: the collector may
-				// run on its own goroutine.
+				// The probe queries the remote end only of an enabled link. Non-fatal: the
+				// collector may run on its own goroutine.
 				if state != nvml.FEATURE_ENABLED {
 					f.t.Errorf("remote PCI info of GPU %s link %d, which is not FEATURE_ENABLED",
 						g.uuid, link)

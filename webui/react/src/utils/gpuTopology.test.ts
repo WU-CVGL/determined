@@ -29,7 +29,7 @@ const resource = (container?: Resource['container']): Resource => ({
 
 describe('gpuTopology', () => {
   describe('summaries match the CLI (shared fixture)', () => {
-    it('has the cases of the design tables', () => {
+    it('has every shared case', () => {
       expect(GPU_TOPOLOGY_CASES.length).toBeGreaterThanOrEqual(15);
     });
 
@@ -153,7 +153,7 @@ describe('gpuTopology', () => {
       );
       expect(nvmlErrorsText(topo, topo.gpus[0])).toBe('GetPciInfo: ERROR_GPU_IS_LOST (15)');
       expect(nvmlErrorsText(topo, topo.gpus[1])).toBe('none');
-      const unknown = gpuTopologyCase('N6: 7 slots');
+      const unknown = gpuTopologyCase('NVML init failed');
       expect(nvmlErrorsText(unknown, unknown.gpus[0])).toBe('not collected');
     });
 

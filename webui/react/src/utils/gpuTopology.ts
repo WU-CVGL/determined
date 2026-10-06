@@ -37,7 +37,7 @@ export const GPU_P2P_STATUS_LEGEND =
   'CNS chipset not supported, GNS GPU not supported, TNS topology not supported, ' +
   'DIS disabled by registry key, NS not supported, ? unknown';
 
-/** A GPU's health as the master classified it (H1), in the words of the CLI. */
+/** A GPU's health as the master classified it, in the words of the CLI. */
 export type GpuHealthWord = 'ok' | 'narrow' | 'error' | 'unknown';
 
 /** The words of the health dot and the legend. */
@@ -48,7 +48,7 @@ export const GPU_HEALTH_LABELS: Record<GpuHealthWord, string> = {
   unknown: 'unknown',
 };
 
-/** Section 3.2 of the GPU topology design: the width is an observation at agent start. */
+/** The width is an observation at agent start, not a confirmed fault. */
 export const GPU_NARROW_LINK_TEXT =
   "A lower link width lowers this link's bandwidth cap. " +
   'Actual collective throughput depends on the workload.';
@@ -304,7 +304,7 @@ export const linkValueText = (cur: number, max: number, prefix: string): string 
   return `${value(cur)} of ${value(max)}`;
 };
 
-/** Fact 1 of H1: the link at agent start, an observation. */
+/** The first fact of a GPU's health: the link at agent start, an observation. */
 export const linkAtStartText = (gpu: V1GpuInfo): string => {
   const { pcieLinkWidth, pcieLinkWidthMax, pcieLinkGen, pcieLinkGenMax } = gpu;
   if (!pcieLinkWidth && !pcieLinkWidthMax && !pcieLinkGen && !pcieLinkGenMax) return 'unknown';
@@ -314,7 +314,7 @@ export const linkAtStartText = (gpu: V1GpuInfo): string => {
   );
 };
 
-/** Fact 2 of H1: the NVML errors at agent start. */
+/** The second fact of a GPU's health: the NVML errors at agent start. */
 export const nvmlErrorsText = (topo: V1GpuTopology, gpu: V1GpuInfo): string => {
   if (topo.unknownReason) return 'not collected';
   return gpu.nvmlError || 'none';

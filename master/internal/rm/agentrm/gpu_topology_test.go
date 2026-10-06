@@ -102,7 +102,7 @@ func TestGPUTopologyKeepsExcludedForDisplay(t *testing.T) {
 		})
 	}
 
-	// Also when the report is unknown (N6).
+	// Also when the report is unknown: the agent still lists every GPU.
 	unknown := &aproto.GPUTopology{UnknownReason: "NVML did not finish within 60s"}
 	for _, d := range devices {
 		unknown.GPUs = append(unknown.GPUs, aproto.GPUInfo{UUID: d.UUID})
@@ -143,7 +143,7 @@ func TestAgentStateGPUTopologyStaysOutOfCopies(t *testing.T) {
 	require.Nil(t, state.deepCopy().gpuTopology)
 }
 
-// The API reads the topology through summarize (section 5.2).
+// The API reads the topology through summarize.
 func TestSummarizeReportsGPUTopology(t *testing.T) {
 	devices := cudaSlots("GPU-a", "GPU-b")
 	a := &agent{id: "agent", agentState: stateWithSlots(devices)}
@@ -203,7 +203,8 @@ func TestGPUTopologyProtoShapeWhenUnknown(t *testing.T) {
 	require.Nil(t, cpu.gpuTopologyProto())
 }
 
-// N6 at the master: 8 GPUs detected, 1 excluded, NVML unknown; and all 8 excluded.
+// Every slot and excluded GPU stays listed without telemetry: 8 GPUs detected, 1 excluded, NVML
+// unknown; and all 8 excluded.
 func TestGPUTopologyProtoInventoryWithoutTelemetry(t *testing.T) {
 	var devices []device.Device
 	wire := &aproto.GPUTopology{UnknownReason: "NVML init: ERROR_LIBRARY_NOT_FOUND (12)"}

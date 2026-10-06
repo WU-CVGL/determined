@@ -78,7 +78,7 @@ func (g *gpuTopologyTestAgent) waitFor(what string, cond func(a *agent) bool) {
 }
 
 // TestAgentStartedRefreshesGPUTopology: every AgentStarted replaces the topology, on a fresh
-// registration and on a reconnect with the same devices (section 4.2).
+// registration and on a reconnect with the same devices, so an agent restart refreshes it.
 func TestAgentStartedRefreshesGPUTopology(t *testing.T) {
 	g := newGPUTopologyTestAgent(t)
 	devices := []device.Device{
@@ -117,8 +117,7 @@ func TestAgentStartedRefreshesGPUTopology(t *testing.T) {
 	require.Len(t, topo.excluded, 1)
 	g.a.mu.Unlock()
 
-	// The API sees it: Summarize fills gpu_topology from the agent state (section 5.2). It takes
-	// a.mu itself.
+	// The API sees it: Summarize fills gpu_topology from the agent state. It takes a.mu itself.
 	api := g.a.Summarize().GPUTopology
 	require.NotNil(t, api)
 	require.Empty(t, api.UnknownReason)

@@ -28,7 +28,8 @@ var defaultGPUTopologyDeps = gpuTopologyDeps{
 	collect: detect.CollectGPUs,
 }
 
-// gpuTopologyLink is a link with the pair's P2P state derived by the N3 rule.
+// gpuTopologyLink is a link with the pair's P2P state: usable only when READ and WRITE are OK in
+// both directions.
 type gpuTopologyLink struct {
 	aproto.GPULink
 	P2P aproto.GPUP2PUsability `json:"p2p"`

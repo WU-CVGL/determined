@@ -89,7 +89,7 @@ func (a *apiServer) GetAgent(
 	return resp, nil
 }
 
-// classifyGPUHealth sets the health of every GPU of an agent (H1). The first matching row wins:
+// classifyGPUHealth sets the health of every GPU of an agent. The first matching row wins:
 //   - ERROR: an NVML health call failed at the agent's last start;
 //   - LINK_BELOW_MAX: at agent start, the current and maximum link widths were both known and
 //     current < max;

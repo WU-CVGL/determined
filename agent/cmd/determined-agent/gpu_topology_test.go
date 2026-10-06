@@ -190,7 +190,8 @@ func optionsFromViper(t *testing.T) options.Options {
 	return opts
 }
 
-// X1: the config key and the flag set exclude_gpus; DET_EXCLUDE_GPUS does not.
+// The config key and the flag set exclude_gpus; DET_EXCLUDE_GPUS does not, because an older agent
+// would ignore the variable and run tasks on the GPU.
 func TestExcludeGPUsOption(t *testing.T) {
 	t.Setenv("DET_EXCLUDE_GPUS", "GPU-from-env")
 	t.Setenv("DET_VISIBLE_GPUS", "0,1") // control: the environment works for other options

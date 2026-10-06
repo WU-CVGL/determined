@@ -11,7 +11,8 @@ import (
 	"github.com/determined-ai/determined/master/pkg/device"
 )
 
-// The stub build (CGO_ENABLED=0, or not Linux) reports the inventory as unknown (N6, D21).
+// The stub build (CGO_ENABLED=0, or not Linux) still reports every slot and excluded GPU, as
+// unknown.
 func TestDetectGPUTopologyStub(t *testing.T) {
 	devices := cudaDevices("GPU-0", "GPU-1", "GPU-2", "GPU-3", "GPU-5", "GPU-6", "GPU-7")
 	excluded := []device.Device{{ID: 4, UUID: "GPU-4", Type: device.CUDA}}

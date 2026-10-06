@@ -12,7 +12,7 @@ from tests.cli import util
 MASTER = "http://localhost:8080"
 
 # Shared with webui/react/src/utils/gpuTopology.test.ts, so the CLI and the WebUI show the same
-# summary strings (GPU topology design, sections 5.3 and 5.4).
+# summary strings.
 FIXTURE = pathlib.Path(__file__).resolve().parents[1] / "fixtures" / "gpu_topology_cases.json"
 CASES: List[Dict[str, Any]] = json.loads(FIXTURE.read_text(encoding="utf-8"))["cases"]
 
@@ -224,7 +224,7 @@ def test_describe_agent_p2p_matrix(capsys: pytest.CaptureFixture) -> None:
 
 
 def test_describe_agent_unknown_topology(capsys: pytest.CaptureFixture) -> None:
-    topology = topology_case("N6: 7 slots and 1 excluded GPU")
+    topology = topology_case("NVML init failed")
     assert topology is not None
     excluded_uuid = topology["gpus"][-1]["uuid"]
     with util.standard_cli_rsps() as rsps:

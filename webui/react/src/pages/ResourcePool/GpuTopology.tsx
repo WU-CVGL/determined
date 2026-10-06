@@ -39,7 +39,7 @@ import {
 
 import css from './GpuTopology.module.scss';
 
-/** The agent docs section that explains the GPU topology and health (docs section 7.1). */
+/** The agent docs section that explains the GPU topology and health. */
 export const GPU_TOPOLOGY_DOCS_PATH = paths.docs(
   '/reference/deploy/agent-config-reference.html#agent-gpu-topology',
 );
@@ -100,7 +100,10 @@ export const HealthDot: React.FC<{ word: GpuHealthWord; decorative?: boolean }> 
     />
   );
 
-/** The four facts of H1 and the GPU's identity: the content of the tooltip and the popover. */
+/**
+ * The GPU's identity and the four facts of its health (link and NVML errors at agent start, recent
+ * critical XIDs, collection time): the content of the tooltip and the popover.
+ */
 export const GpuDetails: React.FC<GpuProps> = ({ agentId, gpu, resource, topo }) => {
   const word = gpuHealthWord(gpu.health);
   const collectedAt = topo.collectedAt

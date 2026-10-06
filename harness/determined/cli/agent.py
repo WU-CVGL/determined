@@ -39,7 +39,7 @@ GPU_HEALTH_WORDS = {
     bindings.v1GpuHealth.ERROR: "error",
 }
 
-# Section 3.2 of the GPU topology design: the width is an observation at agent start.
+# The width is an observation at agent start, not a confirmed fault.
 GPU_NARROW_LINK_TEXT = (
     "A lower link width lowers this link's bandwidth cap. "
     "Actual collective throughput depends on the workload."
@@ -378,7 +378,11 @@ def _cur_max(cur: int, cur_max: int, prefix: str) -> str:
 def _gpu_details(
     gpu: bindings.v1GpuInfo, topo: bindings.v1GpuTopology, collected_at: str
 ) -> List[str]:
-    """The four facts of a GPU's health (design H1), each on its own line."""
+    """The four facts of a GPU's health, each on its own line.
+
+    The link at agent start, the NVML errors at agent start, recent critical XIDs (not collected
+    yet) and the collection time.
+    """
     known = not topo.unknownReason
     lines = []
     if gpu.excluded:

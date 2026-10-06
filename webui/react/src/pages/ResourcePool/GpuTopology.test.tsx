@@ -255,7 +255,7 @@ describe('GpuTopology', () => {
   });
 
   it('keeps the inventory when the topology is unknown', () => {
-    const topo = gpuTopologyCase('N6: 7 slots');
+    const topo = gpuTopologyCase('NVML init failed');
     setup(<GpuTopology agent={agentOf('a', topo)} />);
     expect(
       screen.getByText('GPU topology unknown: NVML init: ERROR_LIBRARY_NOT_FOUND (12)'),
@@ -276,7 +276,7 @@ describe('GpuTopology', () => {
   });
 
   it('shows all GPUs excluded', () => {
-    setup(<GpuTopology agent={agentOf('a', gpuTopologyCase('N6: all 8 GPUs excluded'))} />);
+    setup(<GpuTopology agent={agentOf('a', gpuTopologyCase('all 8 GPUs excluded'))} />);
     expect(screen.getByText('no slots')).toBeInTheDocument();
     expect(screen.getAllByRole('group', { name: /^Excluded GPU / })).toHaveLength(8);
   });
