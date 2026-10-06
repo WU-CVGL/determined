@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/ghodss/yaml"
@@ -25,30 +26,32 @@ func gpus(n int) []device.Device {
 	return devices
 }
 
-// recordingDeps records the order of the subcommand's steps.
-func recordingDeps(calls *[]string, status detect.NVMLInitStatus, detected []device.Device) gpuTopologyDeps {
+// recordingDeps records the order of the subcommand's steps. Its collection has the inventory it
+// is given, unmeasured, with the init status c.
+func recordingDeps(calls *[]string, c detect.GPUCollection, detected []device.Device) gpuTopologyDeps {
 	return gpuTopologyDeps{
-		probe: func() detect.NVMLInitStatus {
-			*calls = append(*calls, "probe")
-			return status
-		},
 		detect: func(slotType, visibleGPUs string) ([]device.Device, error) {
 			*calls = append(*calls, "detect "+slotType+" "+visibleGPUs)
 			return detected, nil
 		},
-		topology: func(devices, excluded []device.Device) *aproto.GPUTopology {
-			*calls = append(*calls, "topology")
-			topo := &aproto.GPUTopology{UnknownReason: "NVML init: ERROR_LIBRARY_NOT_FOUND (12)"}
+		collect: func(devices, excluded []device.Device) detect.GPUCollection {
+			*calls = append(*calls, fmt.Sprintf("collect %d+%d", len(devices), len(excluded)))
+			if len(devices)+len(excluded) == 0 {
+				return c
+			}
+			c.Topology = &aproto.GPUTopology{UnknownReason: "NVML init: ERROR_LIBRARY_NOT_FOUND (12)"}
 			for _, d := range devices {
-				topo.GPUs = append(topo.GPUs, aproto.GPUInfo{UUID: d.UUID})
+				c.Topology.GPUs = append(c.Topology.GPUs, aproto.GPUInfo{UUID: d.UUID})
 			}
 			for _, d := range excluded {
-				topo.GPUs = append(topo.GPUs, aproto.GPUInfo{UUID: d.UUID, Excluded: true})
+				c.Topology.GPUs = append(c.Topology.GPUs, aproto.GPUInfo{UUID: d.UUID, Excluded: true})
 			}
-			return topo
+			return c
 		},
 	}
 }
+
+var libraryNotFound = detect.GPUCollection{NVMLInit: "ERROR_LIBRARY_NOT_FOUND", NVMLInitCode: 12}
 
 func encodeOutput(t *testing.T, out gpuTopologyOutput) map[string]any {
 	var buf bytes.Buffer
@@ -58,12 +61,12 @@ func encodeOutput(t *testing.T, out gpuTopologyOutput) map[string]any {
 	return decoded
 }
 
-func TestGPUTopologySubcommandInitsFirst(t *testing.T) {
+func TestGPUTopologySubcommandOneCollection(t *testing.T) {
 	var calls []string
-	deps := recordingDeps(&calls, detect.NVMLInitStatus{Name: "ERROR_LIBRARY_NOT_FOUND", Code: 12}, gpus(2))
+	deps := recordingDeps(&calls, libraryNotFound, gpus(2))
 	out := runGPUTopology(deps, "auto", "0,1", "")
 
-	require.Equal(t, []string{"probe", "detect auto 0,1", "topology"}, calls)
+	require.Equal(t, []string{"detect auto 0,1", "collect 2+0"}, calls)
 	decoded := encodeOutput(t, out)
 	require.Equal(t, "ERROR_LIBRARY_NOT_FOUND", decoded["nvml_init"])
 	require.InDelta(t, 12, decoded["nvml_init_code"], 0)
@@ -78,33 +81,47 @@ func TestGPUTopologySubcommandInitsFirst(t *testing.T) {
 	// SUCCESS adds the driver version.
 	calls = nil
 	deps = recordingDeps(&calls,
-		detect.NVMLInitStatus{Name: "SUCCESS", Code: 0, DriverVersion: "610.57.04"}, gpus(1))
+		detect.GPUCollection{NVMLInit: "SUCCESS", DriverVersion: "610.57.04"}, gpus(1))
 	decoded = encodeOutput(t, runGPUTopology(deps, "auto", "", ""))
 	require.Equal(t, "SUCCESS", decoded["nvml_init"])
 	require.InDelta(t, 0, decoded["nvml_init_code"], 0)
 	require.Equal(t, "610.57.04", decoded["driver_version"])
 
-	// The stub's answer reaches the output unchanged.
-	calls = nil
-	deps = recordingDeps(&calls, detect.NVMLInitStatus{Name: "NOT_BUILT", Code: -1}, gpus(1))
-	decoded = encodeOutput(t, runGPUTopology(deps, "auto", "", ""))
-	require.Equal(t, "NOT_BUILT", decoded["nvml_init"])
-	require.InDelta(t, -1, decoded["nvml_init_code"], 0)
+	// The statuses without an NVML return reach the output unchanged.
+	for _, c := range []detect.GPUCollection{
+		{NVMLInit: "NOT_BUILT", NVMLInitCode: -1},
+		{NVMLInit: "TIMEOUT", NVMLInitCode: -2},
+	} {
+		calls = nil
+		decoded = encodeOutput(t, runGPUTopology(recordingDeps(&calls, c, gpus(1)), "auto", "", ""))
+		require.Equal(t, c.NVMLInit, decoded["nvml_init"])
+		require.InDelta(t, c.NVMLInitCode, decoded["nvml_init_code"], 0)
+	}
 
-	// A detection failure is reported, not fatal.
+	// Without GPUs, NVML is still loaded: the release check reads nvml_init in a GPU-less image.
 	calls = nil
-	deps = recordingDeps(&calls, detect.NVMLInitStatus{Name: "SUCCESS"}, nil)
+	decoded = encodeOutput(t, runGPUTopology(recordingDeps(&calls, libraryNotFound, nil), "auto", "", ""))
+	require.Equal(t, []string{"detect auto ", "collect 0+0"}, calls)
+	require.Equal(t, "ERROR_LIBRARY_NOT_FOUND", decoded["nvml_init"])
+	require.Nil(t, decoded["topology"])
+
+	// A detection failure is reported, not fatal, and NVML is still loaded.
+	calls = nil
+	deps = recordingDeps(&calls, libraryNotFound, nil)
 	deps.detect = func(string, string) ([]device.Device, error) {
 		return nil, errors.New("error parsing output of nvidia-smi")
 	}
-	decoded = encodeOutput(t, runGPUTopology(deps, "auto", "", ""))
+	decoded = encodeOutput(t, runGPUTopology(deps, "auto", "", "GPU-a"))
+	require.Equal(t, []string{"collect 0+0"}, calls)
 	require.Equal(t, "error parsing output of nvidia-smi", decoded["detect_error"])
+	require.NotContains(t, decoded, "exclude_error")
+	require.Equal(t, "ERROR_LIBRARY_NOT_FOUND", decoded["nvml_init"])
 	require.Nil(t, decoded["topology"])
 }
 
 func TestGPUTopologySubcommandExcludeGPUs(t *testing.T) {
 	var calls []string
-	deps := recordingDeps(&calls, detect.NVMLInitStatus{Name: "SUCCESS"}, gpus(4))
+	deps := recordingDeps(&calls, detect.GPUCollection{NVMLInit: "SUCCESS"}, gpus(4))
 
 	out := runGPUTopology(deps, "auto", "", "GPU-c")
 	require.Empty(t, out.ExcludeError)
@@ -129,16 +146,15 @@ func TestGPUTopologySubcommandExcludeGPUs(t *testing.T) {
 func TestGPUTopologySubcommandLinks(t *testing.T) {
 	ok := aproto.GPUP2PCaps{Read: aproto.GPUP2PStatusOK, Write: aproto.GPUP2PStatusOK}
 	deps := gpuTopologyDeps{
-		probe:  func() detect.NVMLInitStatus { return detect.NVMLInitStatus{Name: "SUCCESS"} },
 		detect: func(string, string) ([]device.Device, error) { return gpus(2), nil },
-		topology: func(devices, excluded []device.Device) *aproto.GPUTopology {
-			return &aproto.GPUTopology{
+		collect: func(devices, excluded []device.Device) detect.GPUCollection {
+			return detect.GPUCollection{NVMLInit: "SUCCESS", Topology: &aproto.GPUTopology{
 				GPUs: []aproto.GPUInfo{{UUID: "GPU-a"}, {UUID: "GPU-b"}},
 				Links: []aproto.GPULink{{
 					UUIDA: "GPU-a", UUIDB: "GPU-b", Level: aproto.GPULinkLevelNode,
 					P2PAToB: ok, P2PBToA: aproto.GPUP2PCaps{Read: aproto.GPUP2PStatusOK},
 				}},
-			}
+			}}
 		},
 	}
 	decoded := encodeOutput(t, runGPUTopology(deps, "auto", "", ""))

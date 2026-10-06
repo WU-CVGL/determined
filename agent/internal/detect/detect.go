@@ -33,6 +33,8 @@ var defaultDetectors = detectors{cuda: detectCudaGPUs, rocm: detectRocmGPUs, cpu
 // offered as slots. With slot type auto they count as found CUDA GPUs, so an agent whose GPUs are
 // all excluded has no slots rather than ROCm or CPU slots. An entry that matches no detected CUDA
 // GPU is an error, so that a typo never hands an excluded GPU to tasks.
+//
+// It runs nvidia-smi and rocm-smi without a timeout: a hanging nvidia-smi blocks agent start.
 func Detect(
 	slotType, agentID, visibleGPUs string, exclude []string, artificialSlots int,
 ) (devices, excluded []device.Device, err error) {

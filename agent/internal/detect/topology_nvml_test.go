@@ -29,6 +29,8 @@ type fakeGPU struct {
 	// nvlink answers GetNvLinkState and GetNvLinkRemotePciInfo for one link. nil means a GPU
 	// without NVLink: ERROR_NOT_SUPPORTED for link 0.
 	nvlink func(link int) (nvml.EnableState, nvml.Return, string, nvml.Return)
+	// panics makes GetPciInfo panic, like a bug in the measurement.
+	panics bool
 }
 
 type p2pCall struct {
@@ -41,7 +43,9 @@ type fakeNode struct {
 	t       *testing.T
 	gpus    []*fakeGPU
 	initRet nvml.Return
-	driver  string
+	// initBlock, when set, blocks Init until it is closed: an NVML that hangs.
+	initBlock chan struct{}
+	driver    string
 	// level and p2p answer the pairwise calls by GPU index; nil gives NODE within a group of four
 	// and SYS across, and P2P OK.
 	level func(a, b int) (nvml.GpuTopologyLevel, nvml.Return)
@@ -51,6 +55,7 @@ type fakeNode struct {
 	handleRequests []string
 	p2pCalls       []p2pCall
 	nvlinkCalls    map[int][]int
+	inits          int
 	shutdowns      int
 }
 
@@ -75,6 +80,9 @@ func (f *fakeNode) lib() *mock.Interface {
 		}
 		devs[i] = &mock.Device{
 			GetPciInfoFunc: func() (nvml.PciInfo, nvml.Return) {
+				if g.panics {
+					panic("index out of range")
+				}
 				return pciInfo(g.busID), ret("GetPciInfo")
 			},
 			GetCurrPcieLinkWidthFunc: func() (int, nvml.Return) {
@@ -139,9 +147,16 @@ func (f *fakeNode) lib() *mock.Interface {
 	for i, g := range f.gpus {
 		byUUID[g.uuid] = i
 	}
-	initRet := f.initRet
 	return &mock.Interface{
-		InitFunc: func() nvml.Return { return initRet },
+		InitFunc: func() nvml.Return {
+			f.mu.Lock()
+			f.inits++
+			f.mu.Unlock()
+			if f.initBlock != nil {
+				<-f.initBlock
+			}
+			return f.initRet
+		},
 		ShutdownFunc: func() nvml.Return {
 			f.mu.Lock()
 			defer f.mu.Unlock()
@@ -207,8 +222,38 @@ func numaByBus(bdf string) *int {
 
 var fixedNow = time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 
+// session is the NVML session over the fake library.
+func (f *fakeNode) session() nvmlSession {
+	return func(inv []aproto.GPUInfo) GPUCollection {
+		return collect(f.lib(), inv, numaByBus, func() time.Time { return fixedNow })
+	}
+}
+
+func (f *fakeNode) counts() (inits, shutdowns int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.inits, f.shutdowns
+}
+
 func collectFake(f *fakeNode, inv []aproto.GPUInfo) *aproto.GPUTopology {
-	return collect(f.lib(), inv, numaByBus, func() time.Time { return fixedNow })
+	return f.session()(inv).Topology
+}
+
+// slotsAndExcluded splits a fake node's GPUs into CUDA slots and the excluded GPUs, by index.
+func slotsAndExcluded(gpus []*fakeGPU, excluded ...int) (devices, excl []device.Device) {
+	isExcluded := map[int]bool{}
+	for _, i := range excluded {
+		isExcluded[i] = true
+	}
+	for i, g := range gpus {
+		d := device.Device{ID: device.ID(i), UUID: g.uuid, Type: device.CUDA}
+		if isExcluded[i] {
+			excl = append(excl, d)
+		} else {
+			devices = append(devices, d)
+		}
+	}
+	return devices, excl
 }
 
 func findLink(t *testing.T, topo *aproto.GPUTopology, u1, u2 string) aproto.GPULink {
@@ -431,9 +476,7 @@ func TestCollectOnlyDetectedUUIDs(t *testing.T) {
 	}
 	excluded := []device.Device{{ID: 7, UUID: gpus[7].uuid, Type: device.CUDA}}
 
-	topo := detectGPUTopology(devices, excluded, func(inv []aproto.GPUInfo) *aproto.GPUTopology {
-		return collectFake(f, inv)
-	}, time.Minute)
+	topo := collectGPUs(devices, excluded, false, f.session(), time.Minute).Topology
 
 	want := []string{gpus[0].uuid, gpus[1].uuid, gpus[2].uuid, gpus[3].uuid, gpus[4].uuid, gpus[5].uuid, gpus[7].uuid}
 	got := append([]string(nil), f.handleRequests...)
@@ -457,9 +500,7 @@ func TestCollectExcludedGPUs(t *testing.T) {
 	}
 	excluded := []device.Device{{ID: 4, UUID: gpus[4].uuid, Type: device.CUDA}}
 
-	topo := detectGPUTopology(devices, excluded, func(inv []aproto.GPUInfo) *aproto.GPUTopology {
-		return collectFake(f, inv)
-	}, time.Minute)
+	topo := collectGPUs(devices, excluded, false, f.session(), time.Minute).Topology
 
 	require.Len(t, topo.GPUs, 8)
 	for i, g := range topo.GPUs {
@@ -483,9 +524,7 @@ func TestCollectAllExcludedKeepsTelemetry(t *testing.T) {
 	for i, g := range gpus {
 		excluded = append(excluded, device.Device{ID: device.ID(i), UUID: g.uuid, Type: device.CUDA})
 	}
-	topo := detectGPUTopology(nil, excluded, func(inv []aproto.GPUInfo) *aproto.GPUTopology {
-		return collectFake(f, inv)
-	}, time.Minute)
+	topo := collectGPUs(nil, excluded, false, f.session(), time.Minute).Topology
 	require.NotNil(t, topo)
 	require.Empty(t, topo.UnknownReason)
 	require.Len(t, topo.GPUs, 8)
@@ -504,9 +543,7 @@ func TestCollectLibraryNotFound(t *testing.T) {
 		devices = append(devices, device.Device{ID: device.ID(i), UUID: gpus[i].uuid, Type: device.CUDA})
 	}
 	excluded := []device.Device{{ID: 7, UUID: gpus[7].uuid, Type: device.CUDA}}
-	topo := detectGPUTopology(devices, excluded, func(inv []aproto.GPUInfo) *aproto.GPUTopology {
-		return collectFake(f, inv)
-	}, time.Minute)
+	topo := collectGPUs(devices, excluded, false, f.session(), time.Minute).Topology
 
 	require.Equal(t, "NVML init: ERROR_LIBRARY_NOT_FOUND (12)", topo.UnknownReason)
 	require.Equal(t, inventoryOf(gpus, 7), topo.GPUs, "the inventory, with no telemetry")
@@ -635,15 +672,88 @@ func TestCollectErrorsIgnoreNVMLProse(t *testing.T) {
 	require.Equal(t, "NVML init: ERROR_GPU_NOT_FOUND (28)", topo.UnknownReason)
 }
 
-func TestProbeNVMLInit(t *testing.T) {
-	f := &fakeNode{t: t, initRet: nvml.ERROR_LIBRARY_NOT_FOUND}
-	require.Equal(t, NVMLInitStatus{Name: "ERROR_LIBRARY_NOT_FOUND", Code: 12}, probeNVMLInit(f.lib()))
-	require.Zero(t, f.shutdowns)
+func TestCollectGPUsInitsOnce(t *testing.T) {
+	gpus := eightGPUs()
+	devices, excluded := slotsAndExcluded(gpus, 7)
+	for _, probe := range []bool{false, true} {
+		f := &fakeNode{t: t, gpus: gpus, driver: "610.57.04"}
+		c := collectGPUs(devices, excluded, probe, f.session(), time.Minute)
 
-	f = &fakeNode{t: t, initRet: nvml.SUCCESS, driver: "610.57.04"}
-	require.Equal(t,
-		NVMLInitStatus{Name: "SUCCESS", Code: 0, DriverVersion: "610.57.04"}, probeNVMLInit(f.lib()))
-	require.Equal(t, 1, f.shutdowns)
+		require.Equal(t, "SUCCESS", c.NVMLInit)
+		require.Zero(t, c.NVMLInitCode)
+		require.Equal(t, "610.57.04", c.DriverVersion)
+		require.Empty(t, c.Topology.UnknownReason)
+		require.Equal(t, "610.57.04", c.Topology.DriverVersion)
+		require.Len(t, c.Topology.GPUs, 8)
+		require.Len(t, c.Topology.Links, 28)
+		inits, shutdowns := f.counts()
+		require.Equal(t, 1, inits, "one Init for the driver version and the measurement")
+		require.Equal(t, 1, shutdowns)
+	}
+}
+
+func TestCollectGPUsWithoutGPUsReportsLibrary(t *testing.T) {
+	// The subcommand in a GPU-less image: NVML is loaded with no GPU to measure.
+	f := &fakeNode{t: t, initRet: nvml.ERROR_LIBRARY_NOT_FOUND}
+	require.Equal(t, GPUCollection{NVMLInit: "ERROR_LIBRARY_NOT_FOUND", NVMLInitCode: 12},
+		collectGPUs(nil, nil, true, f.session(), time.Minute))
+	inits, shutdowns := f.counts()
+	require.Equal(t, 1, inits)
+	require.Zero(t, shutdowns)
+
+	f = &fakeNode{t: t, driver: "610.57.04"}
+	require.Equal(t, GPUCollection{NVMLInit: "SUCCESS", DriverVersion: "610.57.04"},
+		collectGPUs(nil, nil, true, f.session(), time.Minute))
+	inits, shutdowns = f.counts()
+	require.Equal(t, 1, inits)
+	require.Equal(t, 1, shutdowns)
+	require.Empty(t, f.handleRequests)
+}
+
+func TestCollectGPUsBlockingInit(t *testing.T) {
+	gpus := eightGPUs()
+	devices, excluded := slotsAndExcluded(gpus, 7)
+	f := &fakeNode{t: t, gpus: gpus, initBlock: make(chan struct{})}
+	t.Cleanup(func() {
+		close(f.initBlock)
+		waitSessionDone()
+		inits, _ := f.counts()
+		require.Equal(t, 1, inits, "Init ran once, also after it returned")
+	})
+
+	start := time.Now()
+	c := collectGPUs(devices, excluded, true, f.session(), 50*time.Millisecond)
+	require.Less(t, time.Since(start), 10*time.Second)
+	require.Equal(t, "TIMEOUT", c.NVMLInit)
+	require.Equal(t, -2, c.NVMLInitCode)
+	require.Empty(t, c.DriverVersion)
+	require.Equal(t, "NVML did not finish within 0.05s", c.Topology.UnknownReason)
+	require.Equal(t, inventoryOf(gpus, 7), c.Topology.GPUs, "the slots and the excluded GPU, unmeasured")
+
+	// The first Init is still blocked: a second collection must not start another one.
+	c = collectGPUs(devices, excluded, true, f.session(), time.Minute)
+	require.Equal(t, "TIMEOUT", c.NVMLInit)
+	require.Equal(t, "an earlier NVML session has not finished", c.Topology.UnknownReason)
+	require.Equal(t, inventoryOf(gpus, 7), c.Topology.GPUs)
+	require.Eventually(t, func() bool {
+		inits, _ := f.counts()
+		return inits == 1
+	}, 10*time.Second, time.Millisecond)
+}
+
+func TestCollectPanicKeepsInventory(t *testing.T) {
+	gpus := eightGPUs()[:3]
+	gpus[1].panics = true
+	devices, excluded := slotsAndExcluded(gpus, 2)
+	f := &fakeNode{t: t, gpus: gpus, driver: "610.57.04"}
+	c := collectGPUs(devices, excluded, false, f.session(), time.Minute)
+	require.Equal(t, "SUCCESS", c.NVMLInit)
+	require.Equal(t, &aproto.GPUTopology{
+		UnknownReason: "NVML collection failed",
+		GPUs:          inventoryOf(gpus, 2),
+	}, c.Topology, "the inventory without the telemetry measured before the panic")
+	_, shutdowns := f.counts()
+	require.Equal(t, 1, shutdowns)
 }
 
 func TestNormalizeBusIDAndNUMA(t *testing.T) {
@@ -671,29 +781,25 @@ func TestNormalizeBusIDAndNUMA(t *testing.T) {
 	require.Nil(t, readNUMANode(root, "../etc"))
 }
 
-func TestDetectGPUTopologyInventoryWithoutTelemetry(t *testing.T) {
-	// N6: 8 GPUs detected, 1 excluded; NVML init fails or collection times out.
+func TestCollectGPUsInventoryWithoutTelemetry(t *testing.T) {
+	// 8 GPUs detected, 1 excluded; NVML init fails or does not return.
 	gpus := eightGPUs()
-	var devices []device.Device
-	for i := 0; i < 7; i++ {
-		devices = append(devices, device.Device{ID: device.ID(i), UUID: gpus[i].uuid, Type: device.CUDA})
-	}
-	excluded := []device.Device{{ID: 7, UUID: gpus[7].uuid, Type: device.CUDA}}
+	devices, excluded := slotsAndExcluded(gpus, 7)
 	want := inventoryOf(gpus, 7)
 
 	f := &fakeNode{t: t, gpus: gpus, initRet: nvml.ERROR_DRIVER_NOT_LOADED}
-	topo := detectGPUTopology(devices, excluded, func(inv []aproto.GPUInfo) *aproto.GPUTopology {
-		return collectFake(f, inv)
-	}, time.Minute)
-	require.Equal(t, "NVML init: ERROR_DRIVER_NOT_LOADED (9)", topo.UnknownReason)
-	require.Equal(t, want, topo.GPUs)
+	c := collectGPUs(devices, excluded, false, f.session(), time.Minute)
+	require.Equal(t, "ERROR_DRIVER_NOT_LOADED", c.NVMLInit)
+	require.Equal(t, 9, c.NVMLInitCode)
+	require.Equal(t, "NVML init: ERROR_DRIVER_NOT_LOADED (9)", c.Topology.UnknownReason)
+	require.Equal(t, want, c.Topology.GPUs)
 
-	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
-	topo = detectGPUTopology(devices, excluded, func(inv []aproto.GPUInfo) *aproto.GPUTopology {
-		<-release
-		return collectFake(&fakeNode{t: t, gpus: gpus}, inv)
-	}, 20*time.Millisecond)
-	require.Equal(t, "NVML collection did not finish within 0.02s", topo.UnknownReason)
-	require.Equal(t, want, topo.GPUs)
+	f = &fakeNode{t: t, gpus: gpus, initBlock: make(chan struct{})}
+	t.Cleanup(func() {
+		close(f.initBlock)
+		waitSessionDone()
+	})
+	c = collectGPUs(devices, excluded, false, f.session(), 20*time.Millisecond)
+	require.Equal(t, "NVML did not finish within 0.02s", c.Topology.UnknownReason)
+	require.Equal(t, want, c.Topology.GPUs)
 }

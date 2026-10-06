@@ -1,9 +1,11 @@
 package detect
 
 import (
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/determined-ai/determined/master/pkg/aproto"
@@ -18,73 +20,120 @@ func cudaDevices(uuids ...string) []device.Device {
 	return devices
 }
 
-func mustNotCollect(t *testing.T) topologyCollector {
-	return func([]aproto.GPUInfo) *aproto.GPUTopology {
-		require.Fail(t, "the collector must not run")
-		return nil
+// sessionCalls records the inventories a fake NVML session was given. The session runs on its
+// own goroutine, so it reports failures with t.Errorf.
+type sessionCalls struct {
+	mu          sync.Mutex
+	inventories [][]aproto.GPUInfo
+}
+
+func (s *sessionCalls) session(result func([]aproto.GPUInfo) GPUCollection) nvmlSession {
+	return func(inv []aproto.GPUInfo) GPUCollection {
+		s.mu.Lock()
+		s.inventories = append(s.inventories, inv)
+		s.mu.Unlock()
+		return result(inv)
 	}
 }
 
-func TestDetectGPUTopologyNoCUDA(t *testing.T) {
-	require.Nil(t, detectGPUTopology(nil, nil, mustNotCollect(t), time.Minute))
+func (s *sessionCalls) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.inventories)
+}
+
+func mustNotRun(t *testing.T) nvmlSession {
+	return func([]aproto.GPUInfo) GPUCollection {
+		t.Errorf("NVML must not be loaded")
+		return GPUCollection{}
+	}
+}
+
+// waitSessionDone waits until no NVML session runs.
+func waitSessionDone() {
+	nvmlRunning <- struct{}{}
+	<-nvmlRunning
+}
+
+var libraryNotFound = GPUCollection{NVMLInit: "ERROR_LIBRARY_NOT_FOUND", NVMLInitCode: 12}
+
+func TestCollectGPUsWithoutGPUs(t *testing.T) {
+	// The agent loads NVML only when it has a GPU to report.
 	cpu := []device.Device{{ID: 0, Brand: "cpu", UUID: "cpu", Type: device.CPU}}
-	require.Nil(t, detectGPUTopology(cpu, nil, mustNotCollect(t), time.Minute))
 	rocm := []device.Device{{ID: 0, Brand: "amd", UUID: "0x7e", Type: device.ROCM}}
-	require.Nil(t, detectGPUTopology(rocm, nil, mustNotCollect(t), time.Minute))
+	for _, devices := range [][]device.Device{nil, cpu, rocm} {
+		require.Equal(t, GPUCollection{}, collectGPUs(devices, nil, false, mustNotRun(t), time.Minute))
+	}
+
+	// The subcommand loads it anyway, so that it can tell whether the library loads.
+	var calls sessionCalls
+	c := collectGPUs(cpu, nil, true, calls.session(func(inv []aproto.GPUInfo) GPUCollection {
+		assert.Empty(t, inv)
+		return libraryNotFound
+	}), time.Minute)
+	require.Equal(t, libraryNotFound, c)
+	require.Equal(t, 1, calls.count())
 
 	// An agent whose GPUs are all excluded still reports them.
-	collected := false
-	topo := detectGPUTopology(nil, cudaDevices("GPU-a"),
-		func(inv []aproto.GPUInfo) *aproto.GPUTopology {
-			collected = true
-			return &aproto.GPUTopology{GPUs: inv}
-		}, time.Minute)
-	require.True(t, collected)
-	require.Equal(t, []aproto.GPUInfo{{UUID: "GPU-a", Excluded: true}}, topo.GPUs)
+	c = collectGPUs(nil, cudaDevices("GPU-a"), false, calls.session(func(inv []aproto.GPUInfo) GPUCollection {
+		return GPUCollection{NVMLInit: "SUCCESS", Topology: &aproto.GPUTopology{GPUs: inv}}
+	}), time.Minute)
+	require.Equal(t, []aproto.GPUInfo{{UUID: "GPU-a", Excluded: true}}, c.Topology.GPUs)
 }
 
-func TestDetectGPUTopologyMIG(t *testing.T) {
+func TestCollectGPUsMIG(t *testing.T) {
 	devices := cudaDevices("MIG-1111", "MIG-2222")
-	topo := detectGPUTopology(devices, nil, mustNotCollect(t), time.Minute)
-	require.Equal(t, &aproto.GPUTopology{
+	want := &aproto.GPUTopology{
 		UnknownReason: "MIG instances: GPU topology not collected",
 		GPUs:          []aproto.GPUInfo{{UUID: "MIG-1111"}, {UUID: "MIG-2222"}},
-	}, topo)
+	}
+	require.Equal(t, GPUCollection{Topology: want},
+		collectGPUs(devices, nil, false, mustNotRun(t), time.Minute))
+
+	// The subcommand still initializes NVML, but measures no MIG instance.
+	var calls sessionCalls
+	c := collectGPUs(devices, nil, true, calls.session(func(inv []aproto.GPUInfo) GPUCollection {
+		assert.Empty(t, inv)
+		return GPUCollection{NVMLInit: "SUCCESS", DriverVersion: "610.57.04"}
+	}), time.Minute)
+	require.Equal(t, GPUCollection{NVMLInit: "SUCCESS", DriverVersion: "610.57.04", Topology: want}, c)
 }
 
-func TestCollectTimeout(t *testing.T) {
+func TestCollectGPUsTimeout(t *testing.T) {
 	devices := cudaDevices("GPU-a", "GPU-b")
 	excluded := []device.Device{{ID: 2, UUID: "GPU-c", Type: device.CUDA}}
+	wantGPUs := []aproto.GPUInfo{{UUID: "GPU-a"}, {UUID: "GPU-b"}, {UUID: "GPU-c", Excluded: true}}
 	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
+	t.Cleanup(func() {
+		close(release)
+		waitSessionDone()
+	})
 
-	var given []aproto.GPUInfo
+	var calls sessionCalls
 	started := make(chan struct{})
-	topo := detectGPUTopology(devices, excluded, func(inv []aproto.GPUInfo) *aproto.GPUTopology {
-		given = inv
+	blocking := calls.session(func(inv []aproto.GPUInfo) GPUCollection {
 		close(started)
 		<-release // a cgo call that never returns
 		inv[0].PCIBusID = "written after the timeout"
-		return &aproto.GPUTopology{GPUs: inv}
-	}, 50*time.Millisecond)
+		return GPUCollection{NVMLInit: "SUCCESS", Topology: &aproto.GPUTopology{GPUs: inv}}
+	})
+	c := collectGPUs(devices, excluded, true, blocking, 50*time.Millisecond)
 	<-started
+	require.Equal(t, GPUCollection{
+		NVMLInit:     "TIMEOUT",
+		NVMLInitCode: -2,
+		Topology:     &aproto.GPUTopology{UnknownReason: "NVML did not finish within 0.05s", GPUs: wantGPUs},
+	}, c)
+	require.NotSame(t, &calls.inventories[0][0], &c.Topology.GPUs[0], "the session works on its own copy")
 
-	require.Equal(t, "NVML collection did not finish within 0.05s", topo.UnknownReason)
-	require.Equal(t, []aproto.GPUInfo{
-		{UUID: "GPU-a"}, {UUID: "GPU-b"}, {UUID: "GPU-c", Excluded: true},
-	}, topo.GPUs)
-	require.NotSame(t, &given[0], &topo.GPUs[0], "the collector works on its own copy")
+	// While the first session may still be blocked, no second session starts.
+	c = collectGPUs(devices, excluded, true, blocking, time.Minute)
+	require.Equal(t, "TIMEOUT", c.NVMLInit)
+	require.Equal(t, "an earlier NVML session has not finished", c.Topology.UnknownReason)
+	require.Equal(t, wantGPUs, c.Topology.GPUs)
+	require.Equal(t, 1, calls.count())
 
-	require.Equal(t, "NVML collection did not finish within 60s", timeoutReason(gpuTopologyTimeout))
-}
-
-func TestCollectPanicKeepsInventory(t *testing.T) {
-	topo := detectGPUTopology(cudaDevices("GPU-a"), nil, func([]aproto.GPUInfo) *aproto.GPUTopology {
-		panic("index out of range")
-	}, time.Minute)
-	require.Equal(t, &aproto.GPUTopology{
-		UnknownReason: "NVML collection failed", GPUs: []aproto.GPUInfo{{UUID: "GPU-a"}},
-	}, topo)
+	require.Equal(t, "NVML did not finish within 60s", timeoutReason(nvmlTimeout))
 }
 
 func TestGPUTopologySummary(t *testing.T) {

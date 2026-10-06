@@ -103,7 +103,7 @@ func TestGPUTopologyKeepsExcludedForDisplay(t *testing.T) {
 	}
 
 	// Also when the report is unknown (N6).
-	unknown := &aproto.GPUTopology{UnknownReason: "NVML collection did not finish within 60s"}
+	unknown := &aproto.GPUTopology{UnknownReason: "NVML did not finish within 60s"}
 	for _, d := range devices {
 		unknown.GPUs = append(unknown.GPUs, aproto.GPUInfo{UUID: d.UUID})
 	}

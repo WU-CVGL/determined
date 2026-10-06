@@ -14,20 +14,18 @@ import (
 	"github.com/determined-ai/determined/master/pkg/device"
 )
 
-// gpuTopologyDeps are the steps of the gpu-topology subcommand; tests replace them.
+// gpuTopologyDeps are the two steps of the gpu-topology subcommand; tests replace them.
 type gpuTopologyDeps struct {
-	probe    func() detect.NVMLInitStatus
-	detect   func(slotType, visibleGPUs string) ([]device.Device, error)
-	topology func(devices, excluded []device.Device) *aproto.GPUTopology
+	detect  func(slotType, visibleGPUs string) ([]device.Device, error)
+	collect func(devices, excluded []device.Device) detect.GPUCollection
 }
 
 var defaultGPUTopologyDeps = gpuTopologyDeps{
-	probe: detect.ProbeNVMLInit,
 	detect: func(slotType, visibleGPUs string) ([]device.Device, error) {
 		devices, _, err := detect.Detect(slotType, "", visibleGPUs, nil, 0)
 		return devices, err
 	},
-	topology: detect.DetectGPUTopology,
+	collect: detect.CollectGPUs,
 }
 
 // gpuTopologyLink is a link with the pair's P2P state derived by the N3 rule.
@@ -64,8 +62,10 @@ func newGPUTopologyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "gpu-topology",
 		Short: "print the GPU topology, P2P status, PCIe links and NVML errors the agent would report",
-		Long: "Initialize NVML on its own, then run the agent's device detection, exclude list and " +
-			"GPU topology collection, and print the result as JSON. It exits 0 even without NVML.",
+		Long: "Run the agent's device detection and exclude list, then the agent's NVML session " +
+			"(one Init and the GPU topology collection, within 60 s), and print the result as " +
+			"JSON. NVML is loaded also without GPUs. Device detection runs nvidia-smi without a " +
+			"timeout. It exits 0 even without NVML.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := check.In(slotType, []string{"gpu", "cuda", "rocm", "cpu", "auto", "none"}); err != nil {
@@ -83,25 +83,17 @@ func newGPUTopologyCmd() *cobra.Command {
 }
 
 func runGPUTopology(deps gpuTopologyDeps, slotType, visibleGPUs, excludeGPUs string) gpuTopologyOutput {
-	// NVML first, independent of detection: the release check reads nvml_init in a GPU-less image.
-	status := deps.probe()
-	out := gpuTopologyOutput{
-		NVMLInit:      status.Name,
-		NVMLInitCode:  status.Code,
-		DriverVersion: status.DriverVersion,
-		Devices:       []device.Device{},
-		Excluded:      []device.Device{},
-	}
-
+	out := gpuTopologyOutput{Devices: []device.Device{}, Excluded: []device.Device{}}
+	var devices, excluded []device.Device
 	detected, err := deps.detect(slotType, visibleGPUs)
 	if err != nil {
 		out.DetectError = err.Error()
-		return out
-	}
-	devices, excluded, err := detect.SplitExcluded(detected, detect.ParseExcludeGPUs(excludeGPUs))
-	if err != nil {
-		out.ExcludeError = err.Error()
-		devices, excluded = detected, nil
+	} else {
+		devices, excluded, err = detect.SplitExcluded(detected, detect.ParseExcludeGPUs(excludeGPUs))
+		if err != nil {
+			out.ExcludeError = err.Error()
+			devices, excluded = detected, nil
+		}
 	}
 	if devices != nil {
 		out.Devices = devices
@@ -110,7 +102,10 @@ func runGPUTopology(deps gpuTopologyDeps, slotType, visibleGPUs, excludeGPUs str
 		out.Excluded = excluded
 	}
 
-	if topo := deps.topology(devices, excluded); topo != nil {
+	// Also after a detection error: the release check reads nvml_init in a GPU-less image.
+	c := deps.collect(devices, excluded)
+	out.NVMLInit, out.NVMLInitCode, out.DriverVersion = c.NVMLInit, c.NVMLInitCode, c.DriverVersion
+	if topo := c.Topology; topo != nil {
 		report := &gpuTopologyReport{GPUTopology: *topo, Links: []gpuTopologyLink{}}
 		for _, l := range topo.Links {
 			report.Links = append(report.Links, gpuTopologyLink{GPULink: l, P2P: aproto.P2PUsability(l)})

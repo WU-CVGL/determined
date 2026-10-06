@@ -239,6 +239,11 @@ Container Toolkit mounts it into the agent container with the ``utility`` driver
 containers started with ``--gpus`` get by default. An agent built without cgo, or for an operating
 system other than Linux, has no NVML support and reports the topology as unknown.
 
+The agent initializes NVML once per start, after device detection, and waits at most 60 seconds for
+loading the library, initialization and the measurement together. After that it starts without the
+measurement. Device detection itself runs ``nvidia-smi`` without a timeout, so a hanging
+``nvidia-smi`` still blocks agent start.
+
 What the agent measures
 =======================
 
@@ -261,12 +266,12 @@ known status other than ``OK``, and unknown otherwise. NVLinks do not count with
 NVML results appear as their symbolic name and number, for example ``ERROR_GPU_IS_LOST (15)``.
 
 The topology is unknown, with the reason shown, when NVML cannot be loaded or initialized (for
-example ``NVML init: ERROR_LIBRARY_NOT_FOUND (12)``), when the measurement does not finish within 60
-seconds, for MIG instances, for an agent built without NVML support, for agents of earlier versions,
-and for a few seconds after the master restarts, until each agent reconnects. The slots are still
-listed, without measurements. So are excluded GPUs, except after a master restart: the master does
-not keep the agent's report, so its excluded GPUs appear when the agent reconnects, and until then
-an agent whose GPUs are all excluded shows no GPU topology.
+example ``NVML init: ERROR_LIBRARY_NOT_FOUND (12)``), when NVML does not finish within 60 seconds,
+for MIG instances, for an agent built without NVML support, for agents of earlier versions, and for
+a few seconds after the master restarts, until each agent reconnects. The slots are still listed,
+without measurements. So are excluded GPUs, except after a master restart: the master does not keep
+the agent's report, so its excluded GPUs appear when the agent reconnects, and until then an agent
+whose GPUs are all excluded shows no GPU topology.
 
 Health
 ======
@@ -327,11 +332,14 @@ cluster's GPU monitoring for these cases.
 ``determined-agent gpu-topology``
 =================================
 
-The ``gpu-topology`` subcommand of the agent binary initializes NVML, runs the agent's device
-detection, exclude list and measurement, and prints the result as JSON, with the raw P2P statuses
-and the derived P2P state of each pair. It accepts ``--visible-gpus``, ``--slot-type`` and
-``--exclude-gpus``. It exits with 0 also when NVML is missing; ``nvml_init`` then shows the reason.
-An ``--exclude-gpus`` entry that matches no GPU appears as ``exclude_error`` instead of stopping the
+The ``gpu-topology`` subcommand of the agent binary runs the agent's device detection and exclude
+list, then the agent's NVML initialization and measurement, and prints the result as JSON, with the
+raw P2P statuses and the derived P2P state of each pair. It accepts ``--visible-gpus``,
+``--slot-type`` and ``--exclude-gpus``. It loads NVML also when it detects no GPU, and exits with 0
+also when NVML is missing. ``nvml_init`` and ``nvml_init_code`` show the result of NVML's
+initialization, for example ``ERROR_LIBRARY_NOT_FOUND`` and 12; ``NOT_BUILT`` and -1 for an agent
+built without NVML support; and ``TIMEOUT`` and -2 when NVML does not finish within 60 seconds. An
+``--exclude-gpus`` entry that matches no GPU appears as ``exclude_error`` instead of stopping the
 command. For example, to check what an agent image would report on a host:
 
 .. code:: bash

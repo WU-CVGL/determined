@@ -19,29 +19,10 @@ import (
 
 const sysfsPCIDevices = "/sys/bus/pci/devices"
 
-// collectGPUTopology measures the inventory with the NVML library that the NVIDIA container
-// toolkit injects into the agent container (libnvidia-ml.so.1).
-func collectGPUTopology(inventory []aproto.GPUInfo) *aproto.GPUTopology {
+// runNVMLSession measures the inventory with the NVML library that the NVIDIA container toolkit
+// mounts into the agent container (libnvidia-ml.so.1).
+func runNVMLSession(inventory []aproto.GPUInfo) GPUCollection {
 	return collect(nvml.New(), inventory, sysfsNUMANode, time.Now)
-}
-
-// ProbeNVMLInit initializes NVML on its own, independent of device detection, and reports the
-// result and, on success, the driver version. The diagnostic subcommand prints it.
-func ProbeNVMLInit() NVMLInitStatus {
-	return probeNVMLInit(nvml.New())
-}
-
-func probeNVMLInit(lib nvml.Interface) NVMLInitStatus {
-	ret := lib.Init()
-	status := NVMLInitStatus{Name: nvmlReturnName(ret), Code: int(ret)}
-	if ret != nvml.SUCCESS {
-		return status
-	}
-	defer shutdownNVML(lib)
-	if v, ret := lib.SystemGetDriverVersion(); ret == nvml.SUCCESS {
-		status.DriverVersion = v
-	}
-	return status
 }
 
 func shutdownNVML(lib nvml.Interface) {
@@ -50,28 +31,42 @@ func shutdownNVML(lib nvml.Interface) {
 	}
 }
 
-// collect fills the telemetry of each inventory entry as far as its NVML calls succeed (N1), and
-// measures every pair of them. It queries exactly the inventory's UUIDs, never another GPU, and
-// never adds or drops an entry (N6).
+// collect is one NVML session: Init, the driver version, the measurement of the inventory and
+// Shutdown. With an empty inventory it stops after the driver version. It fills the telemetry of
+// each inventory entry as far as its NVML calls succeed, and measures every pair of them. It
+// queries exactly the inventory's UUIDs, never another GPU, and never adds or drops an entry.
 func collect(
 	lib nvml.Interface,
 	inventory []aproto.GPUInfo,
 	numa func(bdf string) *int,
 	now func() time.Time,
-) *aproto.GPUTopology {
-	topo := &aproto.GPUTopology{GPUs: inventory}
-	if ret := lib.Init(); ret != nvml.SUCCESS {
-		topo.UnknownReason = "NVML init: " + nvmlReturnString(ret)
-		return topo
+) (c GPUCollection) {
+	ret := lib.Init()
+	c.NVMLInit, c.NVMLInitCode = nvmlReturnName(ret), int(ret)
+	if ret != nvml.SUCCESS {
+		c.Topology = unmeasured(inventory, "NVML init: "+nvmlReturnString(ret))
+		return c
 	}
 	defer shutdownNVML(lib)
+	if v, ret := lib.SystemGetDriverVersion(); ret == nvml.SUCCESS {
+		c.DriverVersion = v
+	}
+	if len(inventory) == 0 {
+		return c
+	}
+	defer func() {
+		// A Go panic in the measurement never fails agent start; a crash inside the C library
+		// still does.
+		if r := recover(); r != nil {
+			log.Errorf("GPU topology collection panicked: %v", r)
+			c.Topology = unmeasured(inventory, "NVML collection failed")
+		}
+	}()
 
 	collectedAt := now()
-	topo.CollectedAt = &collectedAt
-	if v, ret := lib.SystemGetDriverVersion(); ret == nvml.SUCCESS {
-		topo.DriverVersion = v
+	topo := &aproto.GPUTopology{
+		CollectedAt: &collectedAt, DriverVersion: c.DriverVersion, GPUs: inventory,
 	}
-
 	handles := make([]nvml.Device, len(topo.GPUs))
 	for i := range topo.GPUs {
 		handles[i] = collectGPU(lib, &topo.GPUs[i], numa)
@@ -96,7 +91,8 @@ func collect(
 		}
 		return topo.Links[i].UUIDB < topo.Links[j].UUIDB
 	})
-	return topo
+	c.Topology = topo
+	return c
 }
 
 // orderByUUID returns the indexes of two GPUs as (A, B) with UUIDA < UUIDB.

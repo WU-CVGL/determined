@@ -32,5 +32,10 @@ func TestDetectGPUTopologyStub(t *testing.T) {
 	require.Nil(t, topo.CollectedAt)
 
 	require.Nil(t, DetectGPUTopology(nil, nil))
-	require.Equal(t, NVMLInitStatus{Name: "NOT_BUILT", Code: -1}, ProbeNVMLInit())
+
+	c := CollectGPUs(devices, excluded)
+	require.Equal(t, "NOT_BUILT", c.NVMLInit)
+	require.Equal(t, -1, c.NVMLInitCode)
+	require.Equal(t, topo, c.Topology)
+	require.Equal(t, GPUCollection{NVMLInit: "NOT_BUILT", NVMLInitCode: -1}, CollectGPUs(nil, nil))
 }
