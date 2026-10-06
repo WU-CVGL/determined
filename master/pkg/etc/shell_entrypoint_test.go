@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -19,11 +20,16 @@ const (
 	sshdAccepted        = "Accepted publickey for det from 10.0.0.1 port 51234 ssh2: ED25519 SHA256:abc"
 	sshdDisconnect      = "Received disconnect from 10.0.0.1 port 51234:11: disconnected by user"
 	filterFunc          = "drop_login_records_message"
+	sshdPath            = "/usr/sbin/sshd"
 )
 
-// shellEntrypointTail returns shell-entrypoint.sh from the definition of the sshd log filter to the
-// end: the filter, the readiness check and sshd.
-func shellEntrypointTail(t *testing.T) string {
+// filterDefinition matches the first line of the filter's definition, in any of bash's forms.
+var filterDefinition = regexp.MustCompile(`(?m)^[ \t]*(?:function[ \t]+)?` + filterFunc + `\b`)
+
+// shellEntrypointTail returns the end of shell-entrypoint.sh, from the definition of the sshd log
+// filter on, split at the start of the line that runs sshd: the filter and the readiness regex, then
+// the sshd command to the end of the script. It assumes only that order, not how the code is laid out.
+func shellEntrypointTail(t *testing.T) (defs, sshdCommand string) {
 	t.Helper()
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash is not installed")
@@ -31,23 +37,21 @@ func shellEntrypointTail(t *testing.T) string {
 	require.NoError(t, SetRootPath("../../static/srv"))
 	script := string(MustStaticFile(ShellEntrypointResource))
 
-	start := strings.Index(script, "\n"+filterFunc+"() {\n")
-	require.NotEqual(t, -1, start, "shell-entrypoint.sh defines %s", filterFunc)
-	tail := script[start+1:]
-	// sshd's log goes through the filter before tee and the readiness check.
-	require.Regexp(t, `(?m)^/usr/sbin/sshd "\$@" \\\n\s+2> >\(`+filterFunc+` > >\(tee -p >\("\$DET_PYTHON_EXECUTABLE" `+
-		`/run/determined/check_ready_logs.py --ready-regex "\$READINESS_REGEX"\) >&2\)\)\n$`, tail)
-	return tail
+	start := filterDefinition.FindStringIndex(script)
+	require.NotNil(t, start, "shell-entrypoint.sh defines %s", filterFunc)
+	tail := script[start[0]:]
+	require.Equal(t, 1, strings.Count(tail, sshdPath), "%s appears once after the filter", sshdPath)
+	sshd := strings.Index(tail, sshdPath)
+	line := strings.LastIndex(tail[:sshd], "\n") + 1
+	return tail[:line], tail[line:]
 }
 
 // filterCommand runs the sshd log filter from shell-entrypoint.sh with the shell options that the
 // script sets.
 func filterCommand(t *testing.T) *exec.Cmd {
 	t.Helper()
-	tail := shellEntrypointTail(t)
-	end := strings.Index(tail, "\n}\n")
-	require.NotEqual(t, -1, end)
-	return exec.Command("bash", "-c", "set -e\nshopt -s extglob\n"+tail[:end+3]+filterFunc) //nolint:gosec
+	defs, _ := shellEntrypointTail(t)
+	return exec.Command("bash", "-c", "set -e\nshopt -s extglob\n"+defs+filterFunc) //nolint:gosec
 }
 
 func TestShellEntrypointDropsLoginRecordsMessage(t *testing.T) {
@@ -172,7 +176,14 @@ func writeScript(t *testing.T, path, body string) {
 // script's arguments, the readiness check sees "Server listening on" while sshd runs, the task log
 // gets every line but the login records message, and the script exits with sshd's exit status.
 func TestShellEntrypointSSHDLogs(t *testing.T) {
-	tail := shellEntrypointTail(t)
+	defs, sshdCommand := shellEntrypointTail(t)
+	// The only check on how the end of the script is written: sshd's command has no pipe. A command
+	// in a pipeline, such as tee in "filter | tee -p >(check) >&2", is forked before its words are
+	// expanded, so the readiness check in its arguments becomes tee's child, which tee never reaps.
+	// On bash 5.1 the exited check then stays a zombie under tee; with the filter writing into tee's
+	// process substitution instead, as sshd did in the stock script, it does not. The stand-ins
+	// below cannot see that difference, so the test looks for the pipe instead.
+	require.NotContains(t, sshdCommand, "|", "sshd's log must not go through a pipe")
 	if err := exec.Command("tee", "-p").Run(); err != nil {
 		t.Skip("tee does not support -p (GNU coreutils 8.24 or later)")
 	}
@@ -206,9 +217,7 @@ printf '%s\r\n' "$ACCEPTED" "$MESSAGE" "$DISCONNECT" "$MESSAGE" >&2
 exit 3
 `)
 
-	const sshdCommand = `/usr/sbin/sshd "$@"`
-	require.Equal(t, 1, strings.Count(tail, sshdCommand))
-	tail = strings.Replace(tail, sshdCommand, sshd+` "$@"`, 1)
+	tail := defs + strings.Replace(sshdCommand, sshdPath, sshd, 1)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
