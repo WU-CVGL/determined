@@ -302,17 +302,41 @@ const shownWidths = () => {
   return Object.fromEntries(titles.map((title, i) => [title, widths[i]]));
 };
 
+const header = (title: string) =>
+  screen.getAllByRole('columnheader').find((th) => th.textContent?.trim() === title) as HTMLElement;
+
 /** Drags the right edge of the column with this title to x, as a user resizes it. */
 const resize = async (title: string, x: number) => {
-  const header = screen
-    .getAllByRole('columnheader')
-    .find((th) => th.textContent?.trim() === title) as HTMLElement;
-  const edge = header.querySelector('[class*="columnResizeHandle"]') as HTMLElement;
+  const edge = header(title).querySelector('[class*="columnResizeHandle"]') as HTMLElement;
   fireEvent.mouseDown(edge, { button: 0, clientX: 0 });
   fireEvent.mouseMove(document, { clientX: x });
   // The table takes a new width after a short throttle.
   await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
   fireEvent.mouseUp(document, { clientX: x });
+};
+
+/** Drags the column with this title onto the next one to its right, as a user moves it. */
+const moveRight = async (title: string, onto: string) => {
+  const data: Record<string, string> = {};
+  const dataTransfer = {
+    dropEffect: 'move',
+    effectAllowed: 'all',
+    files: [],
+    getData: (key: string) => data[key],
+    items: [],
+    setData: (key: string, value: string) => (data[key] = value),
+    setDragImage: () => undefined,
+    types: [],
+  };
+  const source = header(title).querySelector('[draggable="true"]') as HTMLElement;
+  const target = header(onto).querySelector('[class*="dropTarget"]') as HTMLElement;
+  fireEvent.dragStart(source, { clientX: 100, dataTransfer });
+  // The drag starts a tick after its event.
+  await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  for (const drag of [fireEvent.dragEnter, fireEvent.dragOver, fireEvent.drop]) {
+    drag(target, { clientX: 300, dataTransfer });
+  }
+  fireEvent.dragEnd(source, { clientX: 300, dataTransfer });
 };
 
 const user = userEvent.setup();
@@ -663,6 +687,27 @@ describe('TaskDashboard', () => {
         expect(saved('columnWidths')).toEqual([301, 302, 450, 304, 305, 306, 307, 72, 308, 309]),
       );
       expect(shownWidths()).toMatchObject({ Kind: '301px', Name: '450px' });
+    }, 30_000);
+
+    it('stores a resize after a column move', async () => {
+      storeBeforeLoad({ columns: NEW_COLUMNS, columnWidths: NEW_WIDTHS });
+      setup();
+      expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+      await waitFor(() => expect(shownWidths()).toMatchObject({ Kind: '301px' }), AFTER_LOAD);
+
+      await moveRight('Name', 'State');
+      await waitFor(() =>
+        expect(saved('columns')).toEqual(['kind', 'id', 'state', 'name', ...NEW_COLUMNS.slice(4)]),
+      );
+      expect(saved('columnWidths')).toEqual([301, 302, 304, 303, 305, 306, 307, 72, 308, 309]);
+
+      // The move gives the table and the settings one array of widths; the resize changes the
+      // table's own.
+      await resize('Kind', 500);
+      await waitFor(() =>
+        expect(saved('columnWidths')).toEqual([500, 302, 304, 303, 305, 306, 307, 72, 308, 309]),
+      );
+      expect(shownWidths()).toMatchObject({ Kind: '500px', Name: '303px', State: '304px' });
     }, 30_000);
   });
 
