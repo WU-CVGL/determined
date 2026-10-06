@@ -29,7 +29,8 @@ import (
 // checkpoints' own shared_fs storage (tasks.GCMounts and tasks.GCPodSpec). Where the two differ,
 // the task finds no checkpoint directories, the harness takes a missing directory as already
 // deleted, and the checkpoints would be recorded as deleted while their files remain. So the task
-// runs only when the master can confirm that it sees the same place.
+// runs only when the master finds the same place for it (a host path of trials that are not pinned
+// to a node is assumed to be the same on every node).
 //
 // The place of a path is decided by the longest mount that covers it, as in Docker: a bind mount,
 // by its host path, or a volumeMount of the pod spec's determined-container, by its hostPath,

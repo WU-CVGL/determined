@@ -24,7 +24,7 @@ type GCCkptSpec struct {
 	ExperimentID int
 	// CheckpointStorage is the storage of the checkpoints. It is all that the task takes from the
 	// experiment's config: the experiment's environment, bind mounts and pod spec have no place
-	// here. The master checks before that the task sees the storage.
+	// here. The master checks directory storage before (checkpointGCSeesStorage).
 	CheckpointStorage expconf.CheckpointStorageConfig
 	ToDelete          string
 	// If len(CheckpointGlobs) == 0 then we won't delete any checkpoint files

@@ -11,13 +11,14 @@ import (
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 )
 
-// Directory checkpoint storage is collected only where the master can confirm that a GC task sees
-// it at the same place as the experiment's trials did: the same host path of a bind mount, or the
+// Directory checkpoint storage is collected only where the master finds that a GC task sees it at
+// the same place as the experiment's trials did: the same host path of a bind mount, or the
 // same hostPath, persistentVolumeClaim or nfs volume and subPath of a pod spec volumeMount, with the
 // same path below the mount point, at the storage directory and at every mount point below it. A
 // host path, of a hostPath volume or a bind mount, must also be on the node that the trials' pod
-// spec pins them to, if it pins them to one. Where the trials had no mount, or an emptyDir volume,
-// the check does not apply and the existing handling is kept.
+// spec pins them to, if it pins them to one; a host path of trials that are not pinned to a node is
+// assumed to be the same on every node. Where the trials had no mount, or an emptyDir volume, the
+// check does not apply and the existing handling is kept.
 //
 //nolint:exhaustruct
 func TestCheckpointGCSeesStorage(t *testing.T) {
