@@ -89,6 +89,7 @@ import settingsConfig, {
   MAX_PAGE_SIZE,
   Owner,
   Settings,
+  withSlotsColumn,
 } from './TaskDashboard.settings';
 
 interface Props {
@@ -249,6 +250,12 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
     if (isLoading || urlKinds.length === 0 || _.isEqual(urlKinds, settings.type)) return;
     updateSettings({ tableOffset: 0, type: urlKinds });
   }, [isLoading, settings.type, updateSettings, urlKinds]);
+
+  useEffect(() => {
+    if (isLoading) return;
+    const update = withSlotsColumn(settings.columns, settings.columnWidths);
+    if (update) updateSettings(update);
+  }, [isLoading, settings.columns, settings.columnWidths, updateSettings]);
 
   const selectedKinds = useMemo(
     () => (settings.type ?? []).filter((kind) => pageKinds.includes(kind)),
@@ -668,6 +675,19 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         key: 'resourcePool',
         responsive: ['md'],
         title: 'Resource Pool',
+      },
+      {
+        align: 'right',
+        dataIndex: 'slots',
+        defaultWidth: DEFAULT_COLUMN_WIDTHS.slots,
+        key: 'slots',
+        onCell: () => ({ 'data-testid': 'slots-cell' }),
+        render: (_: unknown, row: RunRow) => {
+          if (row.slots === undefined) return '—';
+          if (row.kind !== RunKind.Experiment) return row.slots;
+          return <span title="Slots per trial">{row.slots}</span>;
+        },
+        title: 'Slots',
       },
       {
         dataIndex: 'startTime',

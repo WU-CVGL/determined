@@ -14,6 +14,7 @@ export type TaskDashboardColumnName =
   | 'location'
   | 'name'
   | 'resourcePool'
+  | 'slots'
   | 'startTime'
   | 'state'
   | 'user';
@@ -26,6 +27,7 @@ export const DEFAULT_COLUMNS: TaskDashboardColumnName[] = [
   'user',
   'location',
   'resourcePool',
+  'slots',
   'startTime',
   'endTime',
 ];
@@ -38,9 +40,31 @@ export const DEFAULT_COLUMN_WIDTHS: Record<TaskDashboardColumnName, number> = {
   location: 180,
   name: 220,
   resourcePool: 128,
+  slots: 72,
   startTime: 117,
   state: 120,
   user: 85,
+};
+
+/**
+ * Columns stored before the Slots column existed, with Slots after Resource Pool (else last) and its
+ * default width at the same place; undefined when Slots is already there. The table would otherwise
+ * add it at the end.
+ */
+export const withSlotsColumn = (
+  columns: TaskDashboardColumnName[],
+  columnWidths: number[] = [],
+): { columnWidths: number[]; columns: TaskDashboardColumnName[] } | undefined => {
+  if (columns.includes('slots')) return undefined;
+  const at = columns.includes('resourcePool')
+    ? columns.indexOf('resourcePool') + 1
+    : columns.length;
+  const widths = [...columnWidths];
+  if (widths.length >= at) widths.splice(at, 0, DEFAULT_COLUMN_WIDTHS.slots);
+  return {
+    columns: [...columns.slice(0, at), 'slots', ...columns.slice(at)],
+    columnWidths: widths,
+  };
 };
 
 /** The page size, by default and at most: each experiment row carries its whole config. */
@@ -106,6 +130,7 @@ const settingsConfig = (scope: DashboardScope, experiments: boolean): SettingsCo
           literal('location'),
           literal('name'),
           literal('resourcePool'),
+          literal('slots'),
           literal('startTime'),
           literal('state'),
           literal('user'),

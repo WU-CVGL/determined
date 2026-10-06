@@ -417,6 +417,38 @@ describe('TaskDashboard', () => {
     );
   });
 
+  it('shows the slots each run asks for between Resource Pool and Started', async () => {
+    const configOf = (config: unknown) => config as BulkExperimentItem['config'];
+    vi.mocked(getShells).mockResolvedValue([
+      SHELL,
+      { ...SHELL, id: 'shell-2', name: 'old-shell', slots: undefined },
+    ]);
+    vi.mocked(getExperiments).mockImplementation(() =>
+      Promise.resolve({
+        experiments: [
+          { ...EXPERIMENT, config: configOf({ resources: { slots_per_trial: 4 } }) },
+          { ...STALE_EXPERIMENT, config: configOf({ resources: {} }) },
+        ],
+        pagination: { limit: 0, offset: 0, total: 2 },
+      }),
+    );
+    setup();
+    expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+
+    // Resource Pool is hidden below the md breakpoint, as in tests; Slots shows at every width.
+    const headers = screen.getAllByRole('columnheader').map((h) => h.textContent?.trim());
+    expect(headers.indexOf('Slots')).toBe(headers.indexOf('Started') - 1);
+
+    const slots = async (name: string) => within(await row(name)).getByTestId('slots-cell');
+    expect(await slots('bert-finetune')).toHaveTextContent(/^4$/);
+    expect(within(await slots('bert-finetune')).getByTitle('Slots per trial')).toBeInTheDocument();
+    expect(await slots('stale-run')).toHaveTextContent(/^1$/);
+    expect(await slots('gpu-shell')).toHaveTextContent(/^1$/);
+    expect(await slots('old-shell')).toHaveTextContent(/^—$/);
+    expect(await slots('cpu-notebook')).toHaveTextContent(/^0$/);
+    expect(await slots('eval-sweep')).toHaveTextContent(/^1$/);
+  });
+
   it('keeps the filters of the Jobs page and of the tasks-only view apart', async () => {
     const jobs = setup();
     expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
