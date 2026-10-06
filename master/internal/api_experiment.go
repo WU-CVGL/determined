@@ -3060,7 +3060,8 @@ func (a *apiServer) DeleteTensorboardFiles(
 		return nil, err
 	}
 
-	exp, err := db.ExperimentByID(ctx, int(req.ExperimentId))
+	exp, _, err := a.getExperimentAndCheckCanDoActions(ctx, int(req.ExperimentId),
+		experiment.AuthZProvider.Get().CanEditExperiment)
 	if err != nil {
 		return nil, err
 	}
