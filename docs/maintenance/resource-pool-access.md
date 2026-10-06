@@ -45,14 +45,15 @@ pool:
   generic task.
 - Creating an experiment, including a fork, a clone, `validate_only`, and a
   pool that a template or an invariant config policy sets; continuing an
-  experiment; activating an experiment, one at a time or in bulk; and resuming
-  runs.
+  experiment, also another user's, whose trials run as its owner; activating
+  an experiment, one at a time or in bulk; and resuming runs.
 - Moving a job to another pool in the job queue. A move must name its target
   pool.
 - Setting a new default compute or aux pool of a workspace.
 
 Requests that code in a task makes, such as a submission from inside a running
-experiment, are checked as the user who launched the task.
+experiment, are checked as the user the task runs as: the user who launched it,
+or, for a continued experiment, the experiment's owner.
 
 `GET /api/v1/resource-pools` lists only the pools that the user may use, so the
 WebUI's pool pickers and cluster pages, the CLI, and the SDK show only those.
@@ -181,8 +182,10 @@ session. You do this on purpose when you:
 - launch with another user's template that sets the container image.
 
 Continuing another user's experiment, as an administrator or, with RBAC, as a
-user allowed to update it, also runs the experiment owner's code with the
-session and the agent user and group of the user who continues it.
+user allowed to update it, does not lend your session: its trials run as the
+experiment's owner, with the owner's session and agent user and group, and you
+may change only the fields that bound its training, so its pool stays the one
+the owner chose. You still need access to that pool.
 
 Deleting another user's checkpoints or TensorBoard files starts checkpoint
 garbage collection with your session and with that experiment's environment
