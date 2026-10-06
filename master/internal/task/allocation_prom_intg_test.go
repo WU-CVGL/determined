@@ -140,11 +140,14 @@ func TestRestoredAllocationRebuildsResourceMetricsOnce(t *testing.T) {
 			ResourcesState:   sproto.Terminated,
 			ResourcesStopped: &sproto.ResourcesStopped{}})
 		value, ok = allocationMetricValue(t, allocationMetric, allocationLabels)
-		require.True(t, ok)
-		require.Equal(t, float64(1-i), value)
-		value, ok = allocationMetricValue(t, "det_container_id_allocation_id", containerLabels)
-		require.True(t, ok)
-		require.Zero(t, value)
+		if i == 0 {
+			require.True(t, ok)
+			require.Equal(t, float64(1), value)
+		} else {
+			require.False(t, ok, "an ended allocation must not stay exported as 0")
+		}
+		_, ok = allocationMetricValue(t, "det_container_id_allocation_id", containerLabels)
+		require.False(t, ok, "a stopped container must not stay exported as 0")
 		_, ok = allocationMetricValue(t, "det_container_id_runtime_container_id", runtimeLabels)
 		require.False(t, ok)
 		_, ok = allocationMetricValue(t, "det_gpu_uuid_container_id", gpuLabels)
