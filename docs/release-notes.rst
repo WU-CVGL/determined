@@ -13,7 +13,7 @@
 Version 0.41.0
 ==============
 
-**Release Date:** October 5, 2026
+**Release Date:** October 7, 2026
 
 **New Features**
 
@@ -23,8 +23,8 @@ Version 0.41.0
    task, an earlier config, or a template, and launch a task again from its row.
 
 -  WebUI: Add a Jobs page that lists experiments, generic tasks, notebooks, shells, commands, and
-   TensorBoards together, with filters including GPU or CPU-only and bulk kill, and Jobs tabs in
-   workspaces and projects.
+   TensorBoards together, with a Slots column, filters including GPU or CPU-only, bulk kill, and
+   Jobs tabs in workspaces and projects.
 
 -  WebUI: Open a generic task's detail page to pause, unpause, or kill it and to see its tree,
    allocations, config, and logs.
