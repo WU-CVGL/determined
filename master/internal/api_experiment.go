@@ -40,7 +40,6 @@ import (
 	"github.com/determined-ai/determined/master/internal/rm"
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/internal/trials"
-	"github.com/determined-ai/determined/master/internal/user"
 	"github.com/determined-ai/determined/master/internal/workspace"
 	"github.com/determined-ai/determined/master/pkg/command"
 	"github.com/determined-ai/determined/master/pkg/model"
@@ -300,7 +299,7 @@ func (a *apiServer) GetExperiment(
 func (a *apiServer) DeleteExperiment(
 	ctx context.Context, req *apiv1.DeleteExperimentRequest,
 ) (*apiv1.DeleteExperimentResponse, error) {
-	e, curUser, err := a.getExperimentAndCheckCanDoActions(ctx, int(req.ExperimentId),
+	e, _, err := a.getExperimentAndCheckCanDoActions(ctx, int(req.ExperimentId),
 		experiment.AuthZProvider.Get().CanDeleteExperiment)
 	if err != nil {
 		return nil, err
@@ -326,7 +325,7 @@ func (a *apiServer) DeleteExperiment(
 	}
 
 	go func() {
-		if err := a.deleteExperiments([]*model.Experiment{e}, &curUser); err != nil {
+		if err := a.deleteExperiments([]*model.Experiment{e}); err != nil {
 			log.WithError(err).Errorf("deleting experiment %d", e.ID)
 			e.State = model.DeleteFailedState
 			if err := a.m.db.SaveExperimentState(e); err != nil {
@@ -343,8 +342,7 @@ func (a *apiServer) DeleteExperiment(
 func (a *apiServer) DeleteExperiments(
 	ctx context.Context, req *apiv1.DeleteExperimentsRequest,
 ) (*apiv1.DeleteExperimentsResponse, error) {
-	curUser, _, err := grpcutil.GetUser(ctx)
-	if err != nil {
+	if _, _, err := grpcutil.GetUser(ctx); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get the user: %s", err)
 	}
 
@@ -354,7 +352,7 @@ func (a *apiServer) DeleteExperiments(
 	}
 
 	go func() {
-		err := a.deleteExperiments(experiments, curUser)
+		err := a.deleteExperiments(experiments)
 		if err != nil {
 			// set experiment state to DeleteFailed
 			for _, id := range req.ExperimentIds {
@@ -384,31 +382,22 @@ func (a *apiServer) DeleteExperiments(
 // deleteExperiments synchronously tries to delete all artifacts associated with the provided experiments. An error
 // indicates all the experiments were not successfully deleted. Since all artifacts cannot be delete transactionally the
 // experiments may be in a partially deleted state, but the experiment at least row will still exist. This can be
-// safetly retried as many times as it takes to successfully delete the experiments.
-func (a *apiServer) deleteExperiments(exps []*model.Experiment, userModel *model.User) error {
+// safetly retried as many times as it takes to successfully delete the experiments. The checkpoint
+// GC of each experiment runs as its owner, whoever deletes it.
+func (a *apiServer) deleteExperiments(exps []*model.Experiment) error {
 	taskSpec := *a.m.taskSpec
 
 	var expIDs []int
 	for _, e := range exps {
 		expIDs = append(expIDs, e.ID)
 	}
-	workspaceIDs, err := workspace.WorkspacesIDsByExperimentIDs(context.TODO(), expIDs)
-	if err != nil {
-		return err
-	}
 
 	sema := make(chan struct{}, maxConcurrentDeletes)
 	g, _ := errgroup.WithContext(context.Background())
-	for i, exp := range exps {
+	for _, exp := range exps {
 		g.Go(func() error {
 			sema <- struct{}{}
 			defer func() { <-sema }()
-
-			agentUserGroup, err := user.GetAgentUserGroup(context.TODO(), *exp.OwnerID, workspaceIDs[i])
-			if err != nil {
-				log.WithError(err).Errorf("failed to delete experiment: %d", exp.ID)
-				return err
-			}
 
 			checkpoints, err := experiment.ExperimentCheckpointsToGCRaw(context.TODO(), exp.ID, 0, 0, 0)
 			if err != nil {
@@ -421,7 +410,7 @@ func (a *apiServer) deleteExperiments(exps []*model.Experiment, userModel *model
 			if err := runCheckpointGCForCheckpoints(
 				a.m.rm, a.m.db, exp.JobID, exp.StartTime,
 				&taskSpec, exp.ID, exp.Config, checkpoints,
-				[]string{fullDeleteGlob}, true, agentUserGroup, userModel, nil,
+				[]string{fullDeleteGlob}, true, nil,
 			); err != nil {
 				log.WithError(err).Errorf("failed to gc checkpoints for experiment: %d", exp.ID)
 				return err
@@ -443,7 +432,7 @@ func (a *apiServer) deleteExperiments(exps []*model.Experiment, userModel *model
 		})
 	}
 
-	err = g.Wait()
+	err := g.Wait()
 	if err != nil {
 		return errors.Wrapf(err, "failed to checkpoint gc")
 	}
@@ -1213,31 +1202,12 @@ func (a *apiServer) PatchExperiment(
 				return nil, err
 			}
 
-			workspaceID, err := workspace.WorkspacesIDsByExperimentIDs(ctx, []int{modelExp.ID})
-			if err != nil {
-				return nil, err
-			}
-			agentUserGroup, err := user.GetAgentUserGroup(context.TODO(), *modelExp.OwnerID, workspaceID[0])
-			if err != nil {
-				return nil, err
-			}
-
-			ownerFullUser, err := user.ByID(ctx, *modelExp.OwnerID)
-			if err != nil {
-				return nil, errors.Errorf("cannot find user %v who owns experiment", modelExp.OwnerID)
-			}
-
 			taskSpec := *a.m.taskSpec
-			user := &model.User{
-				ID:       ownerFullUser.ID,
-				Username: ownerFullUser.Username,
-			}
-
 			go func() {
 				if err := runCheckpointGCForCheckpoints(
 					a.m.rm, a.m.db, modelExp.JobID, modelExp.StartTime,
 					&taskSpec, modelExp.ID, modelExp.Config, checkpoints,
-					[]string{fullDeleteGlob}, true, agentUserGroup, user, nil,
+					[]string{fullDeleteGlob}, true, nil,
 				); err != nil {
 					log.WithError(err).Error("failed to GC checkpoints in patch experiment")
 				}
@@ -3036,8 +3006,7 @@ func (a *apiServer) DeleteExperimentLabel(ctx context.Context,
 func (a *apiServer) DeleteTensorboardFiles(
 	ctx context.Context, req *apiv1.DeleteTensorboardFilesRequest,
 ) (resp *apiv1.DeleteTensorboardFilesResponse, err error) {
-	curUser, _, err := grpcutil.GetUser(ctx)
-	if err != nil {
+	if _, _, err := grpcutil.GetUser(ctx); err != nil {
 		return nil, err
 	}
 
@@ -3046,20 +3015,11 @@ func (a *apiServer) DeleteTensorboardFiles(
 		return nil, err
 	}
 
-	workspaceID, err := workspace.WorkspacesIDsByExperimentIDs(ctx, []int{exp.ID})
-	if err != nil {
-		return nil, err
-	}
-	agentUserGroup, err := user.GetAgentUserGroup(ctx, *exp.OwnerID, workspaceID[0])
-	if err != nil {
-		return nil, err
-	}
-
+	// The GC task runs as the experiment's owner, whoever asks.
 	var uuidList []uuid.UUID
 	err = runCheckpointGCTask(
 		a.m.rm, a.m.db, model.NewTaskID(), exp.JobID, exp.StartTime, *a.m.taskSpec, exp.ID,
-		exp.Config, nil, uuidList, nil, true, agentUserGroup, curUser,
-		nil,
+		exp.Config, nil, uuidList, nil, true, nil,
 	)
 	if err != nil {
 		log.WithError(err).Errorf("failed to gc tensorboard for experiment: %d", exp.ID)

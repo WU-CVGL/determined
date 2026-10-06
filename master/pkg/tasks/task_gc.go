@@ -31,26 +31,31 @@ type GCCkptSpec struct {
 }
 
 // ToTaskSpec generates a TaskSpec.
+//
+// The GC task runs a fixed entrypoint in a fixed environment: the task container defaults of its
+// resource pool, which the administrator sets, and what the checkpoint storage needs, which is its
+// configuration and, for shared_fs, the mount of its host path. It takes no environment variables,
+// bind mounts, pod spec or image from the experiment. Those are for the experiment's own containers,
+// and some, such as BASH_ENV, PYTHONPATH or LD_PRELOAD, would run code of the owner's choice in the
+// GC container before the GC itself.
 func (g GCCkptSpec) ToTaskSpec() TaskSpec {
 	res := g.Base
+	tcd := g.Base.TaskContainerDefaults
 
-	// Set Environment.
-	// Keep only the EnvironmentVariables provided by the experiment's config.
-	envVars := g.LegacyConfig.Environment.EnvironmentVariables()
-
-	podSpec := g.LegacyConfig.Environment.PodSpec()
-	if g.Base.TaskContainerDefaults.CheckpointGCPodSpec != nil {
-		podSpec = (*expconf.PodSpec)(g.Base.TaskContainerDefaults.CheckpointGCPodSpec)
+	// The task uses no slots, so it takes the CPU pod spec unless one is set for checkpoint GC.
+	podSpec := tcd.CPUPodSpec
+	if tcd.CheckpointGCPodSpec != nil {
+		podSpec = tcd.CheckpointGCPodSpec
 	}
 
 	//nolint:exhaustruct // This has caused an issue before, but is valid as a partial struct.
 	env := expconf.EnvironmentConfig{
-		RawEnvironmentVariables: &envVars,
-		RawPodSpec:              podSpec,
+		RawPodSpec: (*expconf.PodSpec)(podSpec),
 	}
-	// Fill the rest of the environment with default values.
+	// Fill the rest of the environment, environment variables and image included, from the task
+	// container defaults.
 	var defaultConfig expconf.ExperimentConfig
-	g.Base.TaskContainerDefaults.MergeIntoExpConfig(&defaultConfig)
+	tcd.MergeIntoExpConfig(&defaultConfig)
 	if defaultConfig.RawEnvironment != nil {
 		env = schemas.Merge(env, *defaultConfig.RawEnvironment)
 	}
@@ -123,7 +128,7 @@ func (g GCCkptSpec) ToTaskSpec() TaskSpec {
 		res.Entrypoint = append(res.Entrypoint, "--delete-tensorboards")
 	}
 
-	res.Mounts = ToDockerMounts(g.LegacyConfig.BindMounts, res.WorkDir)
+	res.Mounts = ToDockerMounts(tcd.BindMounts.ToExpconf(), res.WorkDir)
 	if fs := g.LegacyConfig.CheckpointStorage.RawSharedFSConfig; fs != nil {
 		res.Mounts = append(res.Mounts, mount.Mount{
 			Type:   mount.TypeBind,
