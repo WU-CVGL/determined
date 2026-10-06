@@ -7,5 +7,5 @@
 
 **Bug Fixes**
 
--  Resources: Remove ended allocations from ``/prom/det-state-metrics`` instead of exporting them as
-   zero until the master restarts.
+-  Resources: Remove ended allocations and experiments from ``/prom/det-state-metrics`` instead of
+   keeping them until the master restarts.
