@@ -23,6 +23,7 @@ import {
   gpuHealthWord,
   gpuLabel,
   gpuLinkLookup,
+  gpuSlotCountText,
   gpuTopologySummary,
   linkAtStartText,
   linkLevelName,
@@ -34,6 +35,7 @@ import {
   slotFillEdgeColor,
   slotFillOnColor,
   slotFillState,
+  slotOffLabel,
   switchGroups,
 } from 'utils/gpuTopology';
 
@@ -69,12 +71,8 @@ const gpuName = (gpu: V1GpuInfo): string =>
   gpu.excluded ? `Excluded GPU ${gpuLabel(gpu)}` : `Slot ${gpu.deviceId}`;
 
 /** The label of a striped tile: a slot that takes no new work, or an excluded GPU. */
-const offLabel = (gpu: V1GpuInfo, resource?: Resource): string | undefined => {
-  if (gpu.excluded) return 'excluded';
-  if (resource?.draining) return 'draining';
-  if (resource && !resource.enabled) return 'disabled';
-  return undefined;
-};
+const offLabel = (gpu: V1GpuInfo, resource?: Resource): string | undefined =>
+  gpu.excluded ? 'excluded' : slotOffLabel(resource);
 
 const stateText = (gpu: V1GpuInfo, resource?: Resource): string => {
   if (gpu.excluded) return 'Excluded';
@@ -375,31 +373,11 @@ const GpuTopology: React.FC<Props> = ({ agent }) => {
   if (!topo) return null;
 
   const gpus = gpuDisplayOrder(topo);
+  const resourceOf = (gpu: V1GpuInfo) =>
+    gpu.excluded ? undefined : resources.get(String(gpu.deviceId));
   const tile = (gpu: V1GpuInfo) => (
-    <GpuTile
-      agentId={agent.id}
-      gpu={gpu}
-      key={gpu.uuid}
-      resource={gpu.excluded ? undefined : resources.get(String(gpu.deviceId))}
-      topo={topo}
-    />
+    <GpuTile agentId={agent.id} gpu={gpu} key={gpu.uuid} resource={resourceOf(gpu)} topo={topo} />
   );
-
-  const counts = { [SlotState.Free]: 0, [SlotState.Pending]: 0, [SlotState.Running]: 0 };
-  const offCounts = { disabled: 0, draining: 0, excluded: 0 };
-  gpus.forEach((g) => {
-    const resource = g.excluded ? undefined : resources.get(String(g.deviceId));
-    const off = offLabel(g, resource) as keyof typeof offCounts | undefined;
-    if (off) offCounts[off] += 1;
-    if (!g.excluded) counts[slotFillState(resource) as keyof typeof counts] += 1;
-  });
-  // The fill states, then the slots that take no new work, then the excluded GPUs.
-  const countText =
-    `${gpus.length - offCounts.excluded} slots: ${counts[SlotState.Running]} running, ` +
-    `${counts[SlotState.Pending]} pending, ${counts[SlotState.Free]} free` +
-    (offCounts.disabled > 0 ? `, ${offCounts.disabled} disabled` : '') +
-    (offCounts.draining > 0 ? `, ${offCounts.draining} draining` : '') +
-    (offCounts.excluded > 0 ? `; ${offCounts.excluded} excluded` : '');
 
   let body: React.ReactNode;
   if (topo.unknownReason) {
@@ -447,7 +425,7 @@ const GpuTopology: React.FC<Props> = ({ agent }) => {
     <article aria-label={`GPU topology of agent ${agent.id}`} className={css.agent}>
       <div className={css.agentHead}>
         <h3>{agent.id}</h3>
-        <span className={css.counts}>{countText}</span>
+        <span className={css.counts}>{gpuSlotCountText(gpus, resourceOf)}</span>
       </div>
       <dl className={css.summary}>
         <div>

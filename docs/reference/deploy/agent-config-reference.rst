@@ -363,7 +363,10 @@ The WebUI's resource pool page groups each agent's GPUs by NUMA node and PCIe sw
 holds GPUs whose pairs are ``PIX``, one switch between them; ``PXB`` and the other levels show only
 in the pairwise matrix. A tile's colour is the slot state, its dot is the GPU's health, stripes mark
 disabled, draining and excluded GPUs, and the details of a GPU show on hover or focus and stay open
-after a click.
+after a click. Each agent's slot count splits its slots into running, pending and unoccupied, and
+the unoccupied slots into allocatable (enabled and not draining, so they can take new work),
+disabled and draining. A running or pending slot counts as running or pending also when it is
+disabled or draining.
 
 Coverage
 ========

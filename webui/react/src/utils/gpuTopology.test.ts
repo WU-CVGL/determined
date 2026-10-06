@@ -1,12 +1,13 @@
 import { getStateColorCssVar } from 'hew/Theme';
 
 import { GPU_TOPOLOGY_CASES, GpuTopologyCase, gpuTopologyCase } from 'fixtures/gpuTopologyCases';
-import { V1GpuHealth } from 'services/api-ts-sdk';
+import { V1GpuHealth, V1GpuInfo } from 'services/api-ts-sdk';
 import { Resource, ResourceState, ResourceType, SlotState } from 'types';
 
 import {
   gpuHealthSummary,
   gpuHealthWord,
+  gpuSlotCountText,
   gpuTopologySummary,
   linkAtStartText,
   numaGroups,
@@ -94,6 +95,30 @@ describe('gpuTopology', () => {
       );
       expect(slotFillOnColor(SlotState.Running)).toBe('var(--theme-status-active-on)');
       expect(slotFillOnColor(SlotState.Free)).toBe('var(--theme-surface-on)');
+    });
+  });
+
+  describe('slot counts', () => {
+    it('counts each slot once; only enabled, not draining unoccupied slots are allocatable', () => {
+      const topo = gpuTopologyCase('node01 with the exclude list');
+      const running = { id: 'c', state: ResourceState.Running };
+      const resources: Record<number, Resource | undefined> = {
+        0: { ...resource(running), draining: true, enabled: false },
+        1: { ...resource({ id: 'c', state: ResourceState.Pulling }), enabled: false },
+        2: resource({ id: 'c', state: ResourceState.Terminated }),
+        3: resource(),
+        5: { ...resource(), enabled: false },
+        6: { ...resource(), draining: true, enabled: false },
+        7: undefined,
+      };
+      const resourceOf = (g: V1GpuInfo) => (g.excluded ? undefined : resources[g.deviceId]);
+      expect(gpuSlotCountText(topo.gpus, resourceOf)).toBe(
+        '7 slots: 1 running, 1 pending, 4 unoccupied (2 allocatable, 1 disabled, 1 draining), ' +
+          '1 unknown; 1 excluded',
+      );
+      expect(gpuSlotCountText(topo.gpus, (g) => (g.excluded ? undefined : resource()))).toBe(
+        '7 slots: 0 running, 0 pending, 7 unoccupied (7 allocatable); 1 excluded',
+      );
     });
   });
 

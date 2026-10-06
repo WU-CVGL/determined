@@ -277,6 +277,49 @@ export const slotFillState = (resource?: Resource): SlotState => {
   return SlotState.Pending;
 };
 
+/** Why a slot takes no new work, as its stripe label: draining before disabled. */
+export const slotOffLabel = (resource?: Resource): 'draining' | 'disabled' | undefined => {
+  if (resource?.draining) return 'draining';
+  if (resource && !resource.enabled) return 'disabled';
+  return undefined;
+};
+
+/**
+ * The count line of an agent's panel. Every slot counts once, by its fill: running, pending or
+ * unoccupied, or unknown without a slot record. The unoccupied slots split into allocatable (enabled
+ * and not draining: they can take new work), disabled and draining. A running or pending slot counts
+ * as running or pending also when it is disabled or draining; its stripes show that. Excluded GPUs
+ * are not slots and come last, for example
+ * "7 slots: 1 running, 1 pending, 5 unoccupied (3 allocatable, 1 disabled, 1 draining); 1 excluded".
+ */
+export const gpuSlotCountText = (
+  gpus: V1GpuInfo[],
+  resourceOf: (gpu: V1GpuInfo) => Resource | undefined,
+): string => {
+  const slots = gpus.filter((g) => !g.excluded);
+  const n = { allocatable: 0, disabled: 0, draining: 0, pending: 0, running: 0, unknown: 0 };
+  slots.forEach((g) => {
+    const resource = resourceOf(g);
+    const fill = slotFillState(resource);
+    if (fill === SlotState.Running) n.running += 1;
+    else if (fill === SlotState.Pending) n.pending += 1;
+    else if (!resource) n.unknown += 1;
+    else n[slotOffLabel(resource) ?? 'allocatable'] += 1;
+  });
+  const unoccupied = n.allocatable + n.disabled + n.draining;
+  const off = (['disabled', 'draining'] as const)
+    .filter((k) => n[k] > 0)
+    .map((k) => `, ${n[k]} ${k}`)
+    .join('');
+  const excluded = gpus.length - slots.length;
+  return (
+    `${slots.length} slots: ${n.running} running, ${n.pending} pending, ` +
+    `${unoccupied} unoccupied (${n.allocatable} allocatable${off})` +
+    (n.unknown > 0 ? `, ${n.unknown} unknown` : '') +
+    (excluded > 0 ? `; ${excluded} excluded` : '')
+  );
+};
+
 /**
  * The tile fill colour: the palette of SlotAllocationBar (the slot-state colours of the design
  * kit). The kit has no colour for a free slot, so Free falls back to the bar's track colour.
