@@ -617,12 +617,13 @@ hosts (e.g., by using a distributed or network file system such as `GlusterFS
    Checkpoint garbage collection tasks mount ``host_path`` at ``/determined_shared_fs`` and take no
    ``bind_mounts`` or ``pod_spec`` from the experiment. They also do not follow a node that the
    experiment's ``pod_spec`` pins its trials to, so ``host_path`` must be the same storage on every
-   node. If an experiment bind-mounts another host path over the checkpoint path under
-   ``/determined_shared_fs``, for example its own ``/srv/alice`` at ``/determined_shared_fs/sub``
-   with ``host_path: /srv/shared`` and ``storage_path: sub``, its trials write to ``/srv/alice``,
-   while a checkpoint GC task sees ``/srv/shared/sub``. The master does not detect this: checkpoint
-   garbage collection records those checkpoints as deleted and leaves their files in ``/srv/alice``.
-   Do not overlay the checkpoint path with a bind mount.
+   node. If an experiment bind mount, or on Kubernetes a ``pod_spec`` volume mount, overlays the
+   checkpoint path under ``/determined_shared_fs``, for example a bind mount of the experiment's own
+   ``/srv/alice`` at ``/determined_shared_fs/sub`` with ``host_path: /srv/shared`` and
+   ``storage_path: sub``, its trials write to ``/srv/alice``, while a checkpoint GC task sees
+   ``/srv/shared/sub``. The master does not detect this: checkpoint garbage collection records those
+   checkpoints as deleted and leaves their files in ``/srv/alice``. Do not overlay the checkpoint
+   path with another mount.
 
 ``host_path``
 -------------
@@ -682,15 +683,17 @@ when the container exits.
    the node where the pod runs. If the experiment's ``pod_spec`` pins its trials to a node by
    ``nodeName``, a ``kubernetes.io/hostname`` ``nodeSelector``, or a required node affinity of one
    term with one ``kubernetes.io/hostname`` value, the task's pod spec must also pin it to that node
-   in one of these ways, for example through ``checkpoint_gc_pod_spec``. Otherwise, deleting the
-   experiment fails and leaves it in ``DELETE_FAILED``, which can be retried once that is set.
-   Deleting its TensorBoard files fails too. Deleting its checkpoints or their files leaves them in
-   place, and checkpoints beyond the ``save_*`` settings are kept when the experiment ends; the
-   master log gives the reason. Storage on other kinds of volumes, such as ``csi`` or ``ephemeral``
-   volumes, or on a volume mount with a ``subPathExpr``, is never collected, whatever the task
-   mounts, so such an experiment stays in ``DELETE_FAILED``. For storage that the trials did not
-   have on a mount, or had on an ``emptyDir`` volume, the existing handling is kept: the task runs
-   and records the checkpoints as deleted.
+   in one of these ways, for example through ``checkpoint_gc_pod_spec``. The master reads the
+   experiment's ``pod_spec`` on every resource manager, so its volume mounts and node pins also
+   count where pod specs are ignored, such as the agent resource manager. Otherwise, deleting the
+   experiment fails and leaves it in ``DELETE_FAILED``, which can be retried once the task has the
+   same storage and node. Deleting its TensorBoard files fails too. Deleting its checkpoints or
+   their files leaves them in place, and checkpoints beyond the ``save_*`` settings are kept when
+   the experiment ends; the master log gives the reason. Storage on other kinds of volumes, such as
+   ``csi`` or ``ephemeral`` volumes, or on a volume mount with a ``subPathExpr``, is never
+   collected, whatever the task mounts, so such an experiment stays in ``DELETE_FAILED``. For
+   storage that the trials did not have on a mount, or had on an ``emptyDir`` volume, the existing
+   handling is kept: the task runs and records the checkpoints as deleted.
 
    What the master does not confirm: a ``nodeName`` and a ``kubernetes.io/hostname`` value are taken
    to name the same node when they are equal. Other placement, such as other node labels, several
