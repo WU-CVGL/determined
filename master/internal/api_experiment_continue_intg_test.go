@@ -500,6 +500,36 @@ func TestContinueExperimentKeepsItsProject(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEqual(t, 3, active.MaxRestarts(), "the other workspace's invariant config")
 	})
+
+	// The start-time weight check reads the same workspace as the invariant merge; otherwise the
+	// continue fails and leaves the experiment in ERROR.
+	t.Run("moved between workspaces that enforce different weights", func(t *testing.T) {
+		weightProject := func(weight int) (int, string, string) {
+			wsID, wsName := db.RequireMockWorkspaceID(t, api.m.db, "")
+			require.NoError(t, configpolicy.SetTaskConfigPolicies(ctx, &model.TaskConfigPolicies{
+				WorkspaceID: &wsID, WorkloadType: model.ExperimentType, LastUpdatedBy: owner.ID,
+				InvariantConfig: ptrs.Ptr(fmt.Sprintf(`{"resources": {"weight": %d}}`, weight)),
+			}))
+			projID, projName := db.RequireMockProjectID(t, api.m.db, wsID, false)
+			return projID, wsName, projName
+		}
+		_, fromWS, fromProj := weightProject(2)
+		toProjID, toWS, toProj := weightProject(3)
+
+		expID := endedTestExpInProject(t, api, owner, toProjID,
+			fmt.Sprintf("{workspace: %q, project: %q, resources: {weight: 2}}", fromWS, fromProj))
+		_, err := api.ContinueExperiment(owner.ctx, &apiv1.ContinueExperimentRequest{
+			Id: int32(expID),
+		})
+		require.NoError(t, err)
+		requireInProject(t, expID, toProjID, toWS, toProj)
+		stored, err := db.ExperimentByID(ctx, expID)
+		require.NoError(t, err)
+		require.Equal(t, model.ActiveState, stored.State)
+		active, err := api.m.db.ActiveExperimentConfig(expID)
+		require.NoError(t, err)
+		require.InDelta(t, 3.0, active.Resources().Weight(), 0, "the workspace's invariant weight")
+	})
 }
 
 // A user who may continue another user's experiment, under RBAC or as an administrator, may change
