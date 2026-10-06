@@ -328,9 +328,10 @@ reduce its link generation and width while it is idle, and a link can train to a
 after a reboot. A lower link width lowers the bandwidth cap of the GPU's link; the actual collective
 throughput depends on the workload.
 
-The details of each GPU (``det agent describe`` and the WebUI's details) list four facts separately:
-the link at agent start, the NVML errors at agent start, recent critical XIDs (``not collected``),
-and the time of the measurement.
+The details of each GPU (``det agent describe`` and the WebUI's details) list three facts
+separately: ``PCIe link``, the link width and generation at agent start; ``NVML errors``, the NVML
+health calls that failed at agent start; and ``Collected at``, the time of the measurement by the
+agent's clock. XID errors are not collected.
 
 CLI and WebUI
 =============
@@ -350,11 +351,11 @@ Both count only the GPUs that are slots, and leave out excluded GPUs, except whe
 -  GPU Health: ``ok`` when every GPU is ok and none is excluded. Otherwise the slots that are not
    ok, grouped as ``error``, ``narrow`` (with the widths at agent start) and ``unknown``, then the
    excluded GPUs by bus ID (by UUID when the bus ID is unknown), each with its state when it is not
-   ok, for example ``narrow: 3,5 (x8 of x16 at start); excluded: 81:00.0``.
+   ok, for example ``narrow: 3,5 (x8 of x16); excluded: 81:00.0``.
 
 ``det agent describe AGENT_ID`` lists each slot and excluded GPU with its state (``FREE``, the ID of
 the container that uses it or ``OCCUPIED``, ``DISABLED``, ``DRAINING`` or ``EXCLUDED``), health,
-UUID, bus ID, NUMA node, link width and generation, and the four facts of its health. As in the
+UUID, bus ID, NUMA node, link width and generation, and the three facts of its health. As in the
 WebUI, a slot of a disabled or draining agent shows as disabled or draining, and a slot that is
 disabled or draining while a task still uses it shows both: the container ID or ``OCCUPIED``,
 followed by ``(DISABLED)`` or ``(DRAINING)``. A GPU without a matching slot record shows ``?``,

@@ -26,8 +26,8 @@ import {
   gpuLinkLookup,
   gpuSlotCountText,
   gpuTopologySummary,
-  linkAtStartText,
   linkLevelName,
+  linkText,
   numaGroups,
   nvmlErrorsText,
   OffLabel,
@@ -111,13 +111,13 @@ export const HealthDot: React.FC<{ word: GpuHealthWord; decorative?: boolean }> 
   );
 
 /**
- * The GPU's identity and the four facts of its health (link and NVML errors at agent start, recent
- * critical XIDs, collection time): the content of the tooltip and the popover.
+ * The GPU's identity and the facts of its health: the PCIe link and the NVML errors, both measured
+ * at agent start, and the collection time (the agent's clock).
  */
 export const GpuDetails: React.FC<GpuProps> = ({ agentId, agentOff, gpu, resource, topo }) => {
   const word = gpuHealthWord(gpu.health);
   const collectedAt = topo.collectedAt
-    ? `${dayjs(topo.collectedAt).format(DEFAULT_DATETIME_FORMAT)} (agent clock, at agent start)`
+    ? dayjs(topo.collectedAt).format(DEFAULT_DATETIME_FORMAT)
     : 'unknown';
   return (
     <div className={css.details}>
@@ -138,12 +138,10 @@ export const GpuDetails: React.FC<GpuProps> = ({ agentId, agentOff, gpu, resourc
         <dd>{gpu.pciBusId ? <code>{gpu.pciBusId}</code> : 'unknown'}</dd>
         <dt>NUMA</dt>
         <dd>{gpu.numaNode >= 0 ? gpu.numaNode : 'unknown'}</dd>
-        <dt>Link at agent start</dt>
-        <dd>{linkAtStartText(gpu)}</dd>
-        <dt>NVML errors at agent start</dt>
+        <dt>PCIe link</dt>
+        <dd>{linkText(gpu)}</dd>
+        <dt>NVML errors</dt>
         <dd>{nvmlErrorsText(topo, gpu)}</dd>
-        <dt>Recent critical XIDs</dt>
-        <dd>not collected</dd>
         <dt>Collected at</dt>
         <dd>{collectedAt}</dd>
       </dl>

@@ -59,9 +59,7 @@ describe('GpuTopology', () => {
     setup(<GpuTopology agent={agent} />);
 
     expect(screen.getByText('4+3 NODE/SYS p2p')).toBeInTheDocument();
-    expect(
-      screen.getByText('narrow: 3,5 (x8 of x16 at start); excluded: 81:00.0'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('narrow: 3,5 (x8 of x16); excluded: 81:00.0')).toBeInTheDocument();
     // Running, pending and unoccupied slots; only the enabled, not draining unoccupied slots are
     // allocatable. Then the excluded GPUs.
     expect(
@@ -72,12 +70,10 @@ describe('GpuTopology', () => {
     ).toBeInTheDocument();
 
     // One dot per GPU, labelled for screen readers: amber on the x8 slots, green elsewhere.
-    expect(
-      screen.getAllByRole('img', { name: 'GPU health: link below max at start' }),
-    ).toHaveLength(2);
+    expect(screen.getAllByRole('img', { name: 'GPU health: link below max' })).toHaveLength(2);
     expect(screen.getAllByRole('img', { name: 'GPU health: ok' })).toHaveLength(6);
     expect(within(tile('Slot 3')).getByRole('img').getAttribute('aria-label')).toBe(
-      'GPU health: link below max at start',
+      'GPU health: link below max',
     );
 
     // The fill is the slot state; health never changes it.
@@ -157,16 +153,18 @@ describe('GpuTopology', () => {
 
     await userEvent.hover(button);
     const tooltip = await screen.findByRole('tooltip');
-    expect(tooltip).toHaveTextContent('Slot 3 on node01: link below max at start');
+    expect(tooltip).toHaveTextContent('Slot 3 on node01: link below max');
     expect(tooltip).toHaveTextContent('UUID');
     expect(tooltip).toHaveTextContent('0000:61:00.0');
+    expect(tooltip).toHaveTextContent(/PCIe linkx8 of x16, Gen4 of Gen4NVML errors/);
+    // Only the time: the details end with it, before the narrow link text.
     expect(tooltip).toHaveTextContent(
-      'Link at agent startx8 of x16, Gen4 of Gen4 (an observation, not a confirmed fault)',
+      /NVML errorsnoneCollected at\d{4}-\d{2}-\d{2}, \d{2}:\d{2}:\d{2}A lower link width/,
     );
-    expect(tooltip).toHaveTextContent('NVML errors at agent startnone');
-    expect(tooltip).toHaveTextContent('Recent critical XIDsnot collected');
-    expect(tooltip).toHaveTextContent('(agent clock, at agent start)');
-    expect(tooltip).toHaveTextContent(GPU_NARROW_LINK_TEXT);
+    expect(tooltip).toHaveTextContent("A lower link width lowers this link's bandwidth cap.");
+    expect(tooltip).not.toHaveTextContent(
+      /XID|agent start|agent clock|observation|confirmed|collective/,
+    );
     await userEvent.unhover(button);
 
     await userEvent.click(button);
@@ -254,7 +252,7 @@ describe('GpuTopology', () => {
 
     act(() => button.focus());
     const tooltip = await screen.findByRole('tooltip');
-    expect(tooltip).toHaveTextContent('Slot 3 on node01: link below max at start');
+    expect(tooltip).toHaveTextContent('Slot 3 on node01: link below max');
     expect(tooltip).toHaveTextContent(GPU_NARROW_LINK_TEXT);
 
     // Pinned, the popover replaces the tooltip, although the pointer rests on the button. (antd
@@ -376,7 +374,7 @@ describe('GpuTopology', () => {
   it('has a text legend', () => {
     setup(<GpuTopologyLegend />);
     const legend = screen.getByRole('note', { name: 'GPU topology legend' });
-    expect(legend).toHaveTextContent('Healthoklink below max at starterrorunknown');
+    expect(legend).toHaveTextContent('Healthoklink below maxerrorunknown');
     expect(legend).toHaveTextContent('striped = disabled, draining or excluded');
     expect(legend).toHaveTextContent('FillFreePendingRunning');
   });

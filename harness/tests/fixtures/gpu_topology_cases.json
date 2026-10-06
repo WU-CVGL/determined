@@ -54,7 +54,7 @@
     {
       "name": "node01 today: 7 slots, slots 3 and 4 at x8",
       "topology": "4+3 NODE/SYS p2p",
-      "health": "narrow: 3,4 (x8 of x16 at start)",
+      "health": "narrow: 3,4 (x8 of x16)",
       "gpuTopology": {
         "unknownReason": "",
         "collectedAt": "2026-10-05T08:00:00Z",
@@ -96,7 +96,7 @@
     {
       "name": "node01 with the exclude list: 81:00.0 excluded",
       "topology": "4+3 NODE/SYS p2p",
-      "health": "narrow: 3,5 (x8 of x16 at start); excluded: 81:00.0",
+      "health": "narrow: 3,5 (x8 of x16); excluded: 81:00.0",
       "gpuTopology": {
         "unknownReason": "",
         "collectedAt": "2026-10-05T08:00:00Z",
@@ -432,7 +432,7 @@
     {
       "name": "every pair unknown; error, two narrow widths and unknown width",
       "topology": "5 PXB p2p?",
-      "health": "error: 0; narrow: 1,4 (x8 of x16 at start), 2 (x4 of x16 at start); unknown: 3",
+      "health": "error: 0; narrow: 1,4 (x8 of x16), 2 (x4 of x16); unknown: 3",
       "gpuTopology": {
         "unknownReason": "",
         "collectedAt": "2026-10-05T08:00:00Z",

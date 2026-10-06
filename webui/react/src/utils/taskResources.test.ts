@@ -217,7 +217,7 @@ describe('resource legend', () => {
       `Host: ${node02}`,
       'Allocation: task.1',
       'PCI bus ID: 00000000:41:00.0',
-      'Host GPU index: 3 (nvidia-smi on the node)',
+      'Host GPU index: 3',
       'Model: NVIDIA GeForce RTX 4090',
     ]);
     const [older] = resourceLegend([
