@@ -612,6 +612,18 @@ hosts (e.g., by using a distributed or network file system such as `GlusterFS
    When downloading checkpoints from a shared file system (e.g., using ``det checkpoint download``),
    we assume the same shared file system is mounted locally at the same ``host_path``.
 
+.. warning::
+
+   Checkpoint garbage collection tasks mount ``host_path`` at ``/determined_shared_fs`` and take no
+   ``bind_mounts`` or ``pod_spec`` from the experiment. They also do not follow a node that the
+   experiment's ``pod_spec`` pins its trials to, so ``host_path`` must be the same storage on every
+   node. If an experiment bind-mounts another host path over the checkpoint path under
+   ``/determined_shared_fs``, for example its own ``/srv/alice`` at ``/determined_shared_fs/sub``
+   with ``host_path: /srv/shared`` and ``storage_path: sub``, its trials write to ``/srv/alice``,
+   while a checkpoint GC task sees ``/srv/shared/sub``. The master does not detect this: checkpoint
+   garbage collection records those checkpoints as deleted and leaves their files in ``/srv/alice``.
+   Do not overlay the checkpoint path with a bind mount.
+
 ``host_path``
 -------------
 
@@ -665,15 +677,27 @@ when the container exits.
    only if the task has the same storage at ``container_path`` and below it: a
    ``task_container_defaults.bind_mounts`` entry of the same host path, or, on Kubernetes, a
    ``checkpoint_gc_pod_spec`` (else ``cpu_pod_spec``, merged over ``gpu_pod_spec``) volume mount of
-   the same ``persistentVolumeClaim``, ``hostPath`` or ``nfs`` volume and ``subPath``. Otherwise,
-   deleting the experiment fails and leaves it in ``DELETE_FAILED``, which can be retried once the
-   mount is set. Deleting its TensorBoard files fails too. Deleting its checkpoints or their files
-   leaves them in place, and checkpoints beyond the ``save_*`` settings are kept when the experiment
-   ends; the master log gives the reason. Storage on other kinds of volumes, such as ``csi`` or
-   ``ephemeral`` volumes, or on a volume mount with a ``subPathExpr``, is never collected, whatever
-   the task mounts, so such an experiment stays in ``DELETE_FAILED``. Storage that the trials did
-   not have on a mount, or had on an ``emptyDir`` volume, went with their containers and is
-   collected as before.
+   the same ``persistentVolumeClaim``, ``hostPath`` or ``nfs`` volume and ``subPath``. A host path,
+   of a ``hostPath`` volume or of a bind mount, which Kubernetes makes a ``hostPath`` volume, is on
+   the node where the pod runs. If the experiment's ``pod_spec`` pins its trials to a node by
+   ``nodeName``, a ``kubernetes.io/hostname`` ``nodeSelector``, or a required node affinity of one
+   term with one ``kubernetes.io/hostname`` value, the task's pod spec must also pin it to that node
+   in one of these ways, for example through ``checkpoint_gc_pod_spec``. Otherwise, deleting the
+   experiment fails and leaves it in ``DELETE_FAILED``, which can be retried once that is set.
+   Deleting its TensorBoard files fails too. Deleting its checkpoints or their files leaves them in
+   place, and checkpoints beyond the ``save_*`` settings are kept when the experiment ends; the
+   master log gives the reason. Storage on other kinds of volumes, such as ``csi`` or ``ephemeral``
+   volumes, or on a volume mount with a ``subPathExpr``, is never collected, whatever the task
+   mounts, so such an experiment stays in ``DELETE_FAILED``. For storage that the trials did not
+   have on a mount, or had on an ``emptyDir`` volume, the existing handling is kept: the task runs
+   and records the checkpoints as deleted.
+
+   What the master does not confirm: a ``nodeName`` and a ``kubernetes.io/hostname`` value are taken
+   to name the same node when they are equal. Other placement, such as other node labels, several
+   hostnames, preferred affinity or taints, is not read. Trials placed only that way, or not at all,
+   count as not pinned, and their host paths are taken to be the same storage on every node where a
+   checkpoint GC task may run, as on the agent resource manager, where these tasks run on any agent
+   of their resource pool, as before. Nothing checks that such a host path is a shared file system.
 
 .. warning::
 

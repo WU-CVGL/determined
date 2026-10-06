@@ -286,7 +286,12 @@ example to mount the volume of ``directory`` checkpoint storage that experiments
 own pod specs. The master starts a CheckpointGC task for such storage only if this pod spec mounts
 the same ``persistentVolumeClaim``, ``hostPath`` or ``nfs`` volume, with the same ``subPath``, at
 the same place in the ``determined-container``. Storage on other kinds of volumes, except
-``emptyDir``, is never collected.
+``emptyDir``, is never collected. For storage on a host path, a ``hostPath`` volume or a bind mount,
+whose files are on the node where the pod runs, the experiment's pod spec may pin its pods to a node
+by ``nodeName``, a ``kubernetes.io/hostname`` ``nodeSelector``, or a required node affinity of one
+term with one ``kubernetes.io/hostname`` value. This pod spec must then pin the CheckpointGC pod to
+the same node in one of these ways. Other placement of the experiment's pods is not read, and a host
+path of pods that are not pinned this way is taken to be the same storage on every node.
 
 Example of configuring custom CheckpointGC pod specs in ``values.yaml``:
 
