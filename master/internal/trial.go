@@ -435,11 +435,15 @@ func (t *trial) maybeAllocateTask() error {
 		t.syslog.
 			WithField("allocation-id", ar.AllocationID).
 			Infof("starting restored trial allocation")
+		// The master restarted with an empty registry, so the restored allocation associates
+		// the job with the experiment as a new one does; its exit removes the association.
+		prom.AssociateJobExperiment(t.jobID, strconv.Itoa(t.experimentID), t.config.Labels())
 		err = task.DefaultService.StartAllocation(
 			t.logCtx, ar, t.db, t.rm, specifier,
 			t.AllocationExitedCallback,
 		)
 		if err != nil {
+			prom.DisassociateJobExperiment(t.jobID, strconv.Itoa(t.experimentID), t.config.Labels())
 			return err
 		}
 
@@ -484,6 +488,8 @@ func (t *trial) maybeAllocateTask() error {
 		WithField("allocation-id", ar.AllocationID).
 		Debugf("starting new trial allocation")
 
+	// The association lasts until the allocation exits (handleAllocationExit), or is removed
+	// here if the allocation does not start, since then it never exits.
 	prom.AssociateJobExperiment(t.jobID, strconv.Itoa(t.experimentID), t.config.Labels())
 
 	// persist the allocation workspace/experiment record, in the event of moves or deletions
@@ -493,6 +499,7 @@ func (t *trial) maybeAllocateTask() error {
 		ar.AllocationID,
 	)
 	if err != nil {
+		prom.DisassociateJobExperiment(t.jobID, strconv.Itoa(t.experimentID), t.config.Labels())
 		return fmt.Errorf(
 			"failure while attempting to persist workspace information for trial (%d) allocation: %w",
 			t.id,
@@ -504,6 +511,7 @@ func (t *trial) maybeAllocateTask() error {
 		t.AllocationExitedCallback,
 	)
 	if err != nil {
+		prom.DisassociateJobExperiment(t.jobID, strconv.Itoa(t.experimentID), t.config.Labels())
 		return err
 	}
 
