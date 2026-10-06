@@ -518,15 +518,6 @@ def describe_agent(args: argparse.Namespace) -> None:
             slots[int(local_id(slot.id or ""))] = slot
         except ValueError:
             continue
-    allocations: Dict[str, str] = {}
-    if any(s.container for s in slots.values()):
-        summaries = bindings.get_GetTasks(sess).allocationIdToSummary or {}
-        allocations = {
-            r.containerId: a.allocationId
-            for a in summaries.values()
-            for r in (a.resources or [])
-            if r.containerId and a.allocationId
-        }
 
     def state(gpu: bindings.v1GpuInfo) -> str:
         if gpu.excluded:
@@ -539,7 +530,9 @@ def describe_agent(args: argparse.Namespace) -> None:
         if not slot.enabled:
             return "DISABLED"
         if slot.container:
-            return allocations.get(slot.container.id, "OCCUPIED")
+            if slot.container.id and not slot.container.permissionDenied:
+                return slot.container.id
+            return "OCCUPIED"
         return "FREE"
 
     gpus = _gpu_slots(topo) + [g for g in topo.gpus if g.excluded]

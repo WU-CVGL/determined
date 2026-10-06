@@ -144,24 +144,14 @@ def test_describe_agent(capsys: pytest.CaptureFixture) -> None:
     slots[0] = slot_json(0, container_id="container-a")
     slots[1] = slot_json(1, enabled=False)
     slots[2] = slot_json(2, enabled=False, draining=True, container_id="container-b")
-    tasks = {
-        "allocationIdToSummary": {
-            "alloc-a": {
-                "allocationId": "1490.abc.1",
-                "taskId": "1490.abc",
-                "name": "trial",
-                "resourcePool": "pool",
-                "resources": [{"containerId": "container-a"}],
-            }
-        }
-    }
+    slots[3] = slot_json(3, container_id="")
+    # Only GetAgent is mocked: the mock fails on any other request, such as GetTasks.
     with util.standard_cli_rsps() as rsps:
         rsps.get(
             f"{MASTER}/api/v1/agents/node01",
             status=200,
             json={"agent": agent_json("node01", topology, slots=slots)},
         )
-        rsps.get(f"{MASTER}/api/v1/tasks", status=200, json=tasks)
         cli.main(["agent", "describe", "node01"])
     out = capsys.readouterr().out
     lines = out.splitlines()
@@ -181,10 +171,11 @@ def test_describe_agent(capsys: pytest.CaptureFixture) -> None:
         assert found, first
         return found[0]
 
-    assert row("0")[1:3] == ["1490.abc.1", "ok"]
+    assert row("0")[1:4] == ["container-a", "ok", topology["gpus"][0]["uuid"]]
     assert row("1")[1] == "DISABLED"
     assert row("2")[1] == "DRAINING"
-    assert row("3")[1:3] == ["FREE", "narrow"]
+    assert row("3")[1:3] == ["OCCUPIED", "narrow"]
+    assert row("5")[1] == "FREE"
     assert row("3")[4:] == ["0000:61:00.0", "0", "x8/x16", "Gen4/Gen4"]
     excluded = row("-")
     assert excluded[1:5] == ["EXCLUDED", "ok", topology["gpus"][-1]["uuid"], "0000:81:00.0"]
