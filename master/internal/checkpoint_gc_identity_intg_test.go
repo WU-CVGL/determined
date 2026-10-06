@@ -495,8 +495,8 @@ func TestCheckpointGCRefusesUnmountedDirectoryStorage(t *testing.T) {
 	})
 	err = deleteTensorboards()
 	require.ErrorContains(t, err, "checkpoint storage is the directory /mnt/ckpts/run")
-	require.ErrorContains(t, err, "at host path /data/owner-ckpts/run")
-	require.ErrorContains(t, err, "would have a different host path there")
+	require.ErrorContains(t, err, "on a bind mount of host path /data/owner-ckpts/run,")
+	require.NotContains(t, err.Error(), "/data/ckpts")
 	requireNoGCTask(t, specs)
 
 	// The same host path.
@@ -576,8 +576,8 @@ func TestCheckpointGCOfDirectoryStorageOnATaskContainerDefaultMount(t *testing.T
 		ExperimentId: int32(ownMount.ID),
 	})
 	require.ErrorContains(t, err, "checkpoint storage is the directory /mnt/ckpts/run")
-	require.ErrorContains(t, err, "at host path /srv/alice/run")
-	require.ErrorContains(t, err, "would have a different host path there")
+	require.ErrorContains(t, err, "on a bind mount of host path /srv/alice/run,")
+	require.NotContains(t, err.Error(), "/srv/default")
 	requireNoGCTask(t, specs)
 
 	_, err = api.DeleteTensorboardFiles(adminCtx, &apiv1.DeleteTensorboardFilesRequest{
@@ -630,8 +630,8 @@ func TestCheckpointGCConfirmsThePodSpecVolumeOfDirectoryStorage(t *testing.T) {
 	})
 	err := deleteTensorboards()
 	require.ErrorContains(t, err, "checkpoint storage is the directory /mnt/ckpts/run")
-	require.ErrorContains(t, err, "on the persistentVolumeClaim owner-ckpts")
-	require.ErrorContains(t, err, "would have no mount there")
+	require.ErrorContains(t, err, "on path /run of the persistentVolumeClaim owner-ckpts,")
+	require.ErrorContains(t, err, "kept until checkpoint_gc_pod_spec")
 	requireNoGCTask(t, specs)
 
 	gcPodSpec := &k8sV1.Pod{Spec: k8sV1.PodSpec{
@@ -656,6 +656,71 @@ func TestCheckpointGCConfirmsThePodSpecVolumeOfDirectoryStorage(t *testing.T) {
 	require.Equal(t, owner.ID, spec.Base.Owner.ID)
 	require.Equal(t, gcPodSpec.Spec, spec.ToTaskSpec().Environment.PodSpec().Spec)
 	require.Empty(t, spec.ToTaskSpec().Mounts)
+}
+
+// A hostPath volume is on the node where the pod runs. The experiment's pod spec pins its trials
+// to node-a and mounts its directory storage from host path /data/ckpts there. A cpu_pod_spec that
+// mounts the same host path on node-b does not see it, and GC is refused, without naming node-b. A
+// checkpoint_gc_pod_spec that mounts it on node-a does.
+//
+//nolint:exhaustruct
+func TestCheckpointGCOfAHostPathOnTheTrialsNode(t *testing.T) {
+	api, _, adminCtx := setupAPITest(t, nil)
+	owner := addGCTestOwner(t)
+	specs := captureCheckpointGC(t)
+
+	exp := createGCTestExperimentFromYAML(adminCtx, t, api, owner, `environment:
+  pod_spec:
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: node-a
+      volumes:
+        - name: ckpts
+          hostPath:
+            path: /data/ckpts
+      containers:
+        - name: determined-container
+          volumeMounts:
+            - name: ckpts
+              mountPath: /mnt/ckpts
+`)
+	deleteTensorboards := func() error {
+		_, err := api.DeleteTensorboardFiles(adminCtx, &apiv1.DeleteTensorboardFilesRequest{
+			ExperimentId: int32(exp.ID),
+		})
+		return err
+	}
+	onNode := func(node string) *k8sV1.Pod {
+		return &k8sV1.Pod{Spec: k8sV1.PodSpec{
+			NodeSelector: map[string]string{"kubernetes.io/hostname": node},
+			Volumes: []k8sV1.Volume{{
+				Name: "ckpts",
+				VolumeSource: k8sV1.VolumeSource{
+					HostPath: &k8sV1.HostPathVolumeSource{Path: "/data/ckpts"},
+				},
+			}},
+			Containers: []k8sV1.Container{{
+				Name:         model.DeterminedK8ContainerName,
+				VolumeMounts: []k8sV1.VolumeMount{{Name: "ckpts", MountPath: "/mnt/ckpts"}},
+			}},
+		}}
+	}
+
+	useGCTaskContainerDefaults(api, model.TaskContainerDefaultsConfig{CPUPodSpec: onNode("node-b")})
+	err := deleteTensorboards()
+	require.ErrorContains(t, err, "on a hostPath volume of host path /data/ckpts/run on node node-a,")
+	require.ErrorContains(t, err, "kept until checkpoint_gc_pod_spec pins the pod to node node-a")
+	require.NotContains(t, err.Error(), "node-b")
+	requireNoGCTask(t, specs)
+
+	gcPodSpec := onNode("node-a")
+	useGCTaskContainerDefaults(api, model.TaskContainerDefaultsConfig{
+		CPUPodSpec: onNode("node-b"), CheckpointGCPodSpec: gcPodSpec,
+	})
+	require.NoError(t, deleteTensorboards())
+	spec := nextGCSpec(t, specs)
+	require.Equal(t, owner.ID, spec.Base.Owner.ID)
+	require.Equal(t, gcPodSpec.Spec, spec.ToTaskSpec().Environment.PodSpec().Spec)
 }
 
 // Control: for directory checkpoint storage that the experiment does not mount, the check does not
