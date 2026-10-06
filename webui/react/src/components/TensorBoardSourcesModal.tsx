@@ -4,8 +4,9 @@ import React from 'react';
 
 import Grid from 'components/Grid';
 import Link from 'components/Link';
+import { pluralizer } from 'utils/string';
 
-import css from './TaskListModalComponent.module.scss';
+import css from './TensorBoardSourcesModal.module.scss';
 
 export interface TensorBoardSource {
   id: number;
@@ -13,19 +14,13 @@ export interface TensorBoardSource {
   type: string;
 }
 
-export interface SourceInfo {
-  path: string;
-  plural: string;
+interface Props {
+  onClose: () => void;
   sources: TensorBoardSource[];
 }
 
-interface Props {
-  title: string;
-  sourcesModal?: SourceInfo;
-  onClose: () => void;
-}
-
-const TaskListModalComponent: React.FC<Props> = ({ onClose, sourcesModal, title }: Props) => {
+/** Links to the experiments and trials that a TensorBoard shows. */
+const TensorBoardSourcesModal: React.FC<Props> = ({ onClose, sources }: Props) => {
   return (
     <Modal
       size="medium"
@@ -34,12 +29,12 @@ const TaskListModalComponent: React.FC<Props> = ({ onClose, sourcesModal, title 
         handler: onClose,
         text: 'Close',
       }}
-      title={title}
+      title={`${sources.length} TensorBoard ${pluralizer(sources.length, 'Source')}`}
       onClose={onClose}>
       <div className={css.sourceLinks}>
         <Grid gap={ShirtSize.Medium} minItemWidth={120}>
-          {sourcesModal?.sources.map((source) => (
-            <Link key={source.id} path={source.path}>
+          {sources.map((source) => (
+            <Link key={`${source.type}-${source.id}`} path={source.path}>
               {source.type} {source.id}
             </Link>
           ))}
@@ -49,4 +44,4 @@ const TaskListModalComponent: React.FC<Props> = ({ onClose, sourcesModal, title 
   );
 };
 
-export default TaskListModalComponent;
+export default TensorBoardSourcesModal;

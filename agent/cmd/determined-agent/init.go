@@ -39,6 +39,14 @@ func registerString(flags *pflag.FlagSet, name optionsKey, value string, usage s
 	v.SetDefault(name.AccessPath(), value)
 }
 
+// registerStringNoEnv registers an option set only by its flag and its config key. Unlike
+// registerString, it binds no DET_<FLAG> environment variable.
+func registerStringNoEnv(flags *pflag.FlagSet, name optionsKey, value string, usage string) {
+	flags.String(name.FlagName(), value, usage)
+	_ = v.BindPFlag(name.AccessPath(), flags.Lookup(name.FlagName()))
+	v.SetDefault(name.AccessPath(), value)
+}
+
 func registerBool(flags *pflag.FlagSet, name optionsKey, value bool, usage string) {
 	flags.Bool(name.FlagName(), value, usage)
 	_ = v.BindEnv(name.AccessPath(), name.EnvName())
@@ -101,6 +109,9 @@ func registerAgentConfig() {
 	// Device flags.
 	registerString(flags, name("slot-type"), defaults.SlotType, "slot type to expose")
 	registerString(flags, name("visible-gpus"), defaults.VisibleGPUs, "GPUs to expose as slots")
+	// No environment variable: an older agent would ignore it and offer the GPUs as slots.
+	registerStringNoEnv(flags, name("exclude-gpus"), defaults.ExcludeGPUs,
+		"comma-separated UUIDs of GPUs to report but never offer as slots")
 
 	// Security flags.
 	registerBool(flags, name("security", "tls", "enabled"), defaults.Security.TLS.Enabled,

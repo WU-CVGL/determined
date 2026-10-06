@@ -54,12 +54,12 @@ test.describe('Launch form Start from', () => {
       });
 
       const workspaceDetails = new WorkspaceDetails(authedPage);
-      const launchModal = workspaceDetails.taskList.launchModal;
+      const launchModal = workspaceDetails.taskDashboard.launchModal;
 
       await test.step('Open Launch Shell with the last template selected', async () => {
         await workspaceDetails.gotoWorkspace(workspaceId);
-        await workspaceDetails.tasksTab.pwLocator.click();
-        await workspaceDetails.taskList.shellButton.pwLocator.click();
+        await workspaceDetails.jobsTab.pwLocator.click();
+        await workspaceDetails.taskDashboard.shellButton.pwLocator.click();
         await launchModal.pwLocator.waitFor();
         await expect(launchModal.startFrom.selectionItem.pwLocator).toHaveText(lastTemplate);
       });

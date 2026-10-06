@@ -102,6 +102,15 @@ describe('GenericTaskDetails', () => {
     );
   });
 
+  it('is under Jobs in the breadcrumb', async () => {
+    vi.mocked(getTask).mockResolvedValue(taskItem(GenericTaskState.Active));
+    setup();
+    await screen.findByTestId('generic-task-name');
+    expect(screen.getByRole('link', { name: 'Jobs' })).toHaveAttribute('href', '/jobs');
+    expect(screen.queryByRole('link', { name: 'Tasks' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Generic Tasks' })).not.toBeInTheDocument();
+  });
+
   it('keeps polling an active task', async () => {
     vi.mocked(getTask).mockResolvedValue(taskItem(GenericTaskState.Active));
     setup();

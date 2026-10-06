@@ -235,22 +235,35 @@ func (a *apiServer) GetCommands(
 func (a *apiServer) GetCommand(
 	ctx context.Context, req *apiv1.GetCommandRequest,
 ) (*apiv1.GetCommandResponse, error) {
+	resp, curUser, err := a.getCommand(ctx, req.CommandId)
+	if err != nil {
+		return nil, err
+	}
+	redactTaskConfig(*curUser, resp.Command.UserId, req.CommandId, resp.Config)
+	return resp, nil
+}
+
+// getCommand returns a command, with its full config, if the current user may see it.
+func (a *apiServer) getCommand(
+	ctx context.Context, commandID string,
+) (*apiv1.GetCommandResponse, *model.User, error) {
 	curUser, _, err := grpcutil.GetUser(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	resp, err := command.DefaultCmdService.GetCommand(req)
+	resp, err := command.DefaultCmdService.GetCommand(
+		&apiv1.GetCommandRequest{CommandId: commandID})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	ctx = audit.SupplyEntityID(ctx, req.CommandId)
+	ctx = audit.SupplyEntityID(ctx, commandID)
 	if err := command.AuthZProvider.Get().CanGetNSC(
 		ctx, *curUser, model.AccessScopeID(resp.Command.WorkspaceId)); err != nil {
-		return nil, authz.SubIfUnauthorized(err, api.NotFoundErrs("command", req.CommandId, true))
+		return nil, nil, authz.SubIfUnauthorized(err, api.NotFoundErrs("command", commandID, true))
 	}
-	return resp, nil
+	return resp, curUser, nil
 }
 
 func (a *apiServer) KillCommand(
@@ -262,11 +275,7 @@ func (a *apiServer) KillCommand(
 		}
 	}()
 
-	targetCmd, err := a.GetCommand(ctx, &apiv1.GetCommandRequest{CommandId: req.CommandId})
-	if err != nil {
-		return nil, err
-	}
-	curUser, _, err := grpcutil.GetUser(ctx)
+	targetCmd, curUser, err := a.getCommand(ctx, req.CommandId)
 	if err != nil {
 		return nil, err
 	}
@@ -298,11 +307,7 @@ func (a *apiServer) SetCommandPriority(
 			err = apiutils.MapAndFilterErrors(err, nil, nil)
 		}
 	}()
-	targetCmd, err := a.GetCommand(ctx, &apiv1.GetCommandRequest{CommandId: req.CommandId})
-	if err != nil {
-		return nil, err
-	}
-	curUser, _, err := grpcutil.GetUser(ctx)
+	targetCmd, curUser, err := a.getCommand(ctx, req.CommandId)
 	if err != nil {
 		return nil, err
 	}

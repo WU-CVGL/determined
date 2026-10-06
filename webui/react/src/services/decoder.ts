@@ -162,6 +162,7 @@ export const jsonToAgents = (agents: Array<Sdk.V1Agent>): types.Agent[] => {
 
       return {
         container: resourceContainer,
+        draining: slot.draining,
         enabled: slot.enabled,
         id: slot.id,
         name: slot.device?.brand,
@@ -171,7 +172,9 @@ export const jsonToAgents = (agents: Array<Sdk.V1Agent>): types.Agent[] => {
     });
 
     return {
+      draining: agent.draining,
       enabled: agent.enabled,
+      gpuTopology: agent.gpuTopology,
       id: agent.id,
       registeredTime: dayjs(agent.registeredTime).unix(),
       resourcePools: agent.resourcePools,
@@ -205,6 +208,7 @@ const mapCommonV1Task = (
     id: task.id,
     name: task.description,
     resourcePool: task.resourcePool,
+    slots: task.slots,
     startTime: task.startTime as unknown as string,
     state: mapV1TaskState(task.state),
     type,
@@ -591,9 +595,11 @@ export function mapV1Experiment(
     name: data.name,
     notes: data.notes,
     numTrials: data.numTrials || 0,
+    parentArchived: data.parentArchived,
     progress: data.progress != null ? data.progress : undefined,
     projectId: data.projectId,
     projectName: data.projectName,
+    projectOwnerId: data.projectOwnerId,
     resourcePool: data.resourcePool || '',
     searcherMetric: data.searcherMetric,
     searcherMetricValue: data.bestTrialSearcherMetric,

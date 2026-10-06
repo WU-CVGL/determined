@@ -208,7 +208,7 @@ const NavigationTabbar: React.FC = () => {
           <ToolbarItem icon="home" label="Home" path={paths.dashboard()} />
           <ToolbarItem icon="experiment" label="Uncategorized" path={paths.uncategorized()} />
           <ToolbarItem icon="model" label="Model Registry" path={paths.modelList()} />
-          <ToolbarItem icon="tasks" label="Tasks" path={paths.taskList()} />
+          <ToolbarItem icon="tasks" label="Jobs" path={paths.jobs()} />
           <ToolbarItem
             icon="cluster"
             label="Cluster"
