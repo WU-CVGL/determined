@@ -36,11 +36,7 @@ func TestIsConnectionClosed(t *testing.T) {
 	// io.Copy wraps what the WebSocket returns in the *net.OpError of the TCP side: "readfrom"
 	// when it copies into a TCP connection, "writeto" when it copies out of one.
 	normal := opError("readfrom", &websocket.CloseError{Code: websocket.CloseNormalClosure, Text: "goodbye"})
-	require.Equal(t, "readfrom tcp 10.0.0.1:8080->10.0.0.2:51432: websocket: close 1000 (normal): goodbye",
-		normal.Error())
 	brokenPipe := opError("writeto", opError("write", os.NewSyscallError("write", syscall.EPIPE)))
-	require.Equal(t, "writeto tcp 10.0.0.1:8080->10.0.0.2:51432: write tcp 10.0.0.1:8080->10.0.0.2:51432: "+
-		"write: broken pipe", brokenPipe.Error())
 
 	cases := []struct {
 		name   string
@@ -84,6 +80,8 @@ func TestIsConnectionClosed(t *testing.T) {
 			false,
 		},
 		{"websocket close 1002", &websocket.CloseError{Code: websocket.CloseProtocolError}, false},
+		// gorilla/websocket returns a protocol error that it found as a plain error.
+		{"websocket protocol error", opError("readfrom", errors.New("websocket: bad MASK")), false},
 		{"TLS error", tls.RecordHeaderError{Msg: "first record does not look like a TLS handshake"}, false},
 		{"timeout", opError("read", os.ErrDeadlineExceeded), false},
 		{"connection refused", opError("dial", os.NewSyscallError("connect", syscall.ECONNREFUSED)), false},
@@ -120,21 +118,33 @@ func copyErrorEntries(hook *logrustest.Hook, addr string) []logrus.Entry {
 	return found
 }
 
-// requireOnlyDebugCopyError waits for the proxy to log the end of the connection to addr, and
-// requires that it logged it at debug level, with a message that contains want.
-func requireOnlyDebugCopyError(t *testing.T, hook *logrustest.Hook, addr, want string) {
-	require.Eventually(t, func() bool {
-		return len(copyErrorEntries(hook, addr)) > 0
-	}, 5*time.Second, 10*time.Millisecond, "the proxy logged no copy error")
-	// The proxy logs the request side first; give it a moment to log the response side too.
-	time.Sleep(100 * time.Millisecond)
-	entries := copyErrorEntries(hook, addr)
-	found := false
-	for _, e := range entries {
-		require.Equal(t, logrus.DebugLevel, e.Level, e.Message)
-		found = found || strings.Contains(e.Message, want)
+// requireCopyErrors waits until the proxy has logged, for the connection to addr, a copy error
+// that contains each key of want, then requires that each was logged at the level in want and that
+// no other copy error was logged.
+func requireCopyErrors(t *testing.T, hook *logrustest.Hook, addr string, want map[string]logrus.Level) {
+	t.Helper()
+	matches := func(e logrus.Entry) (string, bool) {
+		for msg := range want {
+			if strings.Contains(e.Message, msg) {
+				return msg, true
+			}
+		}
+		return "", false
 	}
-	require.True(t, found, "no entry contains %q: %v", want, entries)
+	require.Eventually(t, func() bool {
+		seen := map[string]bool{}
+		for _, e := range copyErrorEntries(hook, addr) {
+			if msg, ok := matches(e); ok {
+				seen[msg] = true
+			}
+		}
+		return len(seen) == len(want)
+	}, 5*time.Second, 10*time.Millisecond, "the proxy did not log each of %v", want)
+	for _, e := range copyErrorEntries(hook, addr) {
+		msg, ok := matches(e)
+		require.True(t, ok, "unexpected copy error: %s", e.Message)
+		require.Equal(t, want[msg].String(), e.Level.String(), e.Message)
+	}
 }
 
 func listenUpstream(t *testing.T) (net.Listener, <-chan net.Conn) {
@@ -198,7 +208,10 @@ func TestTCPProxyLogsNormalCloseAtDebug(t *testing.T) {
 	require.True(t, websocket.IsCloseError(err, websocket.CloseNormalClosure), err)
 	require.NoError(t, upstream.Close())
 
-	requireOnlyDebugCopyError(t, hook, addr, "websocket: close 1000 (normal): goodbye")
+	// The service's hang-up ends the other direction without an error.
+	requireCopyErrors(t, hook, addr, map[string]logrus.Level{
+		"websocket: close 1000 (normal): goodbye": logrus.DebugLevel,
+	})
 }
 
 // The service can still write after the client closed its WebSocket and the proxy replied to the
@@ -229,7 +242,43 @@ func TestTCPProxyLogsWriteAfterCloseAtDebug(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, upstream.Close())
 
-	requireOnlyDebugCopyError(t, hook, addr, "websocket: close sent")
+	requireCopyErrors(t, hook, addr, map[string]logrus.Level{
+		"websocket: close 1000 (normal): goodbye": logrus.DebugLevel,
+		"websocket: close sent":                   logrus.DebugLevel,
+	})
+}
+
+// A client that breaks the WebSocket protocol, here with an unmasked frame, makes gorilla/websocket
+// send a close 1002 itself; the service's next write then fails with websocket.ErrCloseSent. The
+// protocol error stays an error, the secondary ErrCloseSent is logged at debug level.
+func TestTCPProxyLogsProtocolErrorAsError(t *testing.T) {
+	hook := captureLogs(t)
+	var sawAuthCookie string
+	p, base := newTestProxy(t, &sawAuthCookie)
+	ln, conns := listenUpstream(t)
+	addr := ln.Addr().String()
+	p.Register("svc", &url.URL{Scheme: "http", Host: addr}, true, true)
+
+	dialer := websocket.Dialer{HandshakeTimeout: 5 * time.Second}
+	ws, resp, err := dialer.Dial("ws"+strings.TrimPrefix(base, "http")+"/proxy/svc/", nil)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	defer func() { _ = ws.Close() }()
+	upstream := acceptUpstream(t, conns)
+
+	// A final binary frame with one byte of payload and no mask, which a client must set.
+	_, err = ws.UnderlyingConn().Write([]byte{0x82, 0x01, 'x'})
+	require.NoError(t, err)
+	_, _, err = ws.ReadMessage()
+	require.True(t, websocket.IsCloseError(err, websocket.CloseProtocolError), err)
+	_, err = upstream.Write([]byte("late data"))
+	require.NoError(t, err)
+	require.NoError(t, upstream.Close())
+
+	requireCopyErrors(t, hook, addr, map[string]logrus.Level{
+		"websocket: bad MASK":   logrus.ErrorLevel,
+		"websocket: close sent": logrus.DebugLevel,
+	})
 }
 
 // A browser that goes away can reset its connection to a proxied JupyterLab or TensorBoard.
@@ -265,6 +314,8 @@ func TestWebSocketProxyLogsResetAtDebug(t *testing.T) {
 	require.True(t, ok)
 	require.NoError(t, tcpConn.SetLinger(0))
 	require.NoError(t, conn.Close())
-	requireOnlyDebugCopyError(t, hook, addr, "connection reset by peer")
+	requireCopyErrors(t, hook, addr, map[string]logrus.Level{
+		"connection reset by peer": logrus.DebugLevel,
+	})
 	require.NoError(t, upstream.Close())
 }
