@@ -67,8 +67,8 @@ Version 0.41.0
 -  WebUI: Open a task's resource charts on **Since start**, from when the task got its resources,
    instead of the last hour.
 
--  WebUI: Number GPUs in the resource chart legends as ``nvidia-smi`` in the container does, with the
-   UUID, host, and PCI bus ID on hover.
+-  WebUI: Number GPUs in the resource chart legends as ``nvidia-smi`` in the container does, with
+   the UUID, host, and PCI bus ID on hover.
 
 -  Proxy: Log ordinary ends and abrupt disconnects of proxied shell, JupyterLab, and TensorBoard
    connections at debug level instead of as errors.
