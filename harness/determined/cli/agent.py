@@ -536,15 +536,17 @@ def describe_agent(args: argparse.Namespace) -> None:
     def state(gpu: bindings.v1GpuInfo) -> str:
         if gpu.excluded:
             return "EXCLUDED"
+        # As in the WebUI: the scheduler gives a disabled or draining agent no new work, also when
+        # a slot of it is enabled on its own or has no slot record. An agent without the fields
+        # counts as enabled.
+        agent_off = "DRAINING" if agent.draining else "DISABLED" if agent.enabled is False else ""
         slot = slots.get(gpu.deviceId)
         if slot is None:
-            return "?"
-        # As in the WebUI: the scheduler gives a disabled or draining agent no new work, also when
-        # a slot of it is enabled on its own. An agent without the fields counts as enabled.
+            return f"? ({agent_off})" if agent_off else "?"
         off = ""
-        if slot.draining or agent.draining:
+        if slot.draining or agent_off == "DRAINING":
             off = "DRAINING"
-        elif not slot.enabled or agent.enabled is False:
+        elif not slot.enabled or agent_off == "DISABLED":
             off = "DISABLED"
         if slot.container:
             # A disabled or draining slot can still run a task: show both.

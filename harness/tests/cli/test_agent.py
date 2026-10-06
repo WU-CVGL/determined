@@ -259,6 +259,20 @@ def test_describe_agent_disabled_agent_enabled_slot(capsys: pytest.CaptureFixtur
     assert states and set(states.values()) == {"DISABLED"}
 
 
+def test_describe_agent_disabled_agent_missing_slot_record(capsys: pytest.CaptureFixture) -> None:
+    # A GPU of the topology without a slot record stays unknown, with the agent's off state.
+    topology = topology_case("g292 today")
+    assert topology is not None
+    slots = {g["deviceId"]: slot_json(g["deviceId"]) for g in topology["gpus"]}
+    del slots[1]
+    states = describe_slot_states(capsys, agent_json("g292", topology, slots=slots, enabled=False))
+    assert states.pop("1") == "? (DISABLED)"
+    assert states and set(states.values()) == {"DISABLED"}
+    states = describe_slot_states(capsys, agent_json("g292", topology, slots=slots))
+    assert states.pop("1") == "?"
+    assert states and set(states.values()) == {"FREE"}
+
+
 def test_describe_agent_draining_agent_occupied_slot(capsys: pytest.CaptureFixture) -> None:
     topology = topology_case("g292 today")
     assert topology is not None
