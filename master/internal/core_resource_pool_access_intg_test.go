@@ -451,4 +451,15 @@ func TestResourcePoolAccessRoutes(t *testing.T) {
 		require.Equal(t, resourcePoolModeRestricted, item.Mode)
 		require.Equal(t, []string{carol.Username}, usernamesOf(item.Users))
 	})
+
+	t.Run("a write answers with the pool's list item", func(t *testing.T) {
+		// A write reads only its pool; the list reads every pool. Both show the same item: a
+		// default pool, a workspace default, a dynamic pool, a name with a dormant grant only.
+		for _, pool := range []string{compute, aux, known, shared, dynamic, missing, slashed} {
+			written := routes.write(admin, http.MethodPost, poolAccessPath(pool, "grant"),
+				fmt.Sprintf(`{"usernames":[%q]}`, bob.Username))
+			require.Contains(t, usernamesOf(written.Users), bob.Username, pool)
+			require.Equal(t, routes.list(admin)[pool], written.resourcePoolAccessItem, pool)
+		}
+	})
 }

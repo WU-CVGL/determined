@@ -210,20 +210,23 @@ RETURNING user_id`, pool, bun.In(userIDs)).Scan(ctx, &removed); err != nil {
 	return removed, nil
 }
 
-// List returns every restriction and every grant, ordered by pool name and then username.
-func List(ctx context.Context) ([]RestrictionRecord, []GrantRecord, error) {
+// List returns the restriction and the grants of pool or, when pool is "", every restriction and
+// every grant, ordered by pool name and then username.
+func List(ctx context.Context, pool string) ([]RestrictionRecord, []GrantRecord, error) {
 	restrictions := []RestrictionRecord{}
 	if err := db.Bun().NewRaw(`
 SELECT r.pool_name, r.restricted_by, u.username AS restricted_by_username, r.restricted_at
 FROM resource_pool_restrictions r LEFT JOIN users u ON u.id = r.restricted_by
-ORDER BY r.pool_name`).Scan(ctx, &restrictions); err != nil {
+WHERE ? = '' OR r.pool_name = ?
+ORDER BY r.pool_name`, pool, pool).Scan(ctx, &restrictions); err != nil {
 		return nil, nil, fmt.Errorf("listing resource pool restrictions: %w", err)
 	}
 	grants := []GrantRecord{}
 	if err := db.Bun().NewRaw(`
 SELECT g.pool_name, g.user_id, u.username, u.active, u.admin, g.granted_by, g.granted_at
 FROM resource_pool_grants g JOIN users u ON u.id = g.user_id
-ORDER BY g.pool_name, u.username`).Scan(ctx, &grants); err != nil {
+WHERE ? = '' OR g.pool_name = ?
+ORDER BY g.pool_name, u.username`, pool, pool).Scan(ctx, &grants); err != nil {
 		return nil, nil, fmt.Errorf("listing resource pool grants: %w", err)
 	}
 	return restrictions, grants, nil

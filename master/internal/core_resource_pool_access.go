@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -101,16 +102,20 @@ func (m *Master) registerResourcePoolAccessRoutes() {
 // listResourcePoolAccess lists every pool name that is a known pool or has access records:
 // known pools without records are public, and names with records but no pool are orphans.
 func (m *Master) listResourcePoolAccess(c echo.Context) error {
-	state, err := m.readResourcePoolAccess(c.Request().Context())
+	items, err := m.readResourcePoolAccess(c.Request().Context(), "")
 	if err != nil {
 		return err
 	}
-	names := state.names()
-	items := make([]resourcePoolAccessItem, 0, len(names))
-	for _, name := range names {
-		items = append(items, state.item(name))
+	names := make([]string, 0, len(items))
+	for name := range items {
+		names = append(names, name)
 	}
-	return c.JSON(http.StatusOK, resourcePoolAccessListResponse{ResourcePools: items})
+	sort.Strings(names)
+	list := make([]resourcePoolAccessItem, 0, len(names))
+	for _, name := range names {
+		list = append(list, *items[name])
+	}
+	return c.JSON(http.StatusOK, resourcePoolAccessListResponse{ResourcePools: list})
 }
 
 // setResourcePoolAccess restricts a pool or makes it public. Making a pool public keeps its
@@ -207,14 +212,15 @@ func logResourcePoolAccessWrite(admin model.User, action string, changed bool) {
 	log.Infof("resource pool access: %q %s", admin.Username, action)
 }
 
-// resourcePoolAccessWritten answers a write with the pool's access as it is now. Every write is
-// idempotent, so a client that gets an error here can repeat the request.
+// resourcePoolAccessWritten answers a write with the pool's access, read after the write and
+// for that pool only. Every write is idempotent, so a client that gets an error here can repeat
+// the request.
 func (m *Master) resourcePoolAccessWritten(c echo.Context, pool string) error {
-	state, err := m.readResourcePoolAccess(c.Request().Context())
+	items, err := m.readResourcePoolAccess(c.Request().Context(), pool)
 	if err != nil {
 		return err
 	}
-	item := state.item(pool)
+	item := *items[pool]
 	return c.JSON(http.StatusOK, resourcePoolAccessWriteResponse{
 		resourcePoolAccessItem: item,
 		Warnings:               resourcePoolAccessWarnings(item),
@@ -258,116 +264,113 @@ func resourcePoolAccessWarnings(item resourcePoolAccessItem) []string {
 	return warnings
 }
 
-// resourcePoolAccessState is everything that the items of the admin API show.
-type resourcePoolAccessState struct {
-	known             map[string]bool
-	defaultCompute    map[string]bool
-	defaultAux        map[string]bool
-	workspaceDefaults map[string][]resourcePoolAccessWorkspaceDefault
-	restrictions      map[string]poolaccess.RestrictionRecord
-	users             map[string][]resourcePoolAccessUser
+// resourcePoolAccessItems holds the items of the admin API by pool name.
+type resourcePoolAccessItems map[string]*resourcePoolAccessItem
+
+// add returns the item of pool, and adds a public item without records when there is none.
+func (items resourcePoolAccessItems) add(pool string) *resourcePoolAccessItem {
+	item, ok := items[pool]
+	if !ok {
+		item = &resourcePoolAccessItem{
+			PoolName:          pool,
+			Mode:              resourcePoolModePublic,
+			WorkspaceDefaults: []resourcePoolAccessWorkspaceDefault{},
+			Users:             []resourcePoolAccessUser{},
+		}
+		items[pool] = item
+	}
+	return item
 }
 
-func (m *Master) readResourcePoolAccess(ctx context.Context) (*resourcePoolAccessState, error) {
-	restrictions, grants, err := poolaccess.List(ctx)
+// readResourcePoolAccess reads the item of pool or, when pool is "", the items of every name that
+// is a known pool or has access records. Default pools fill in those items and add none.
+func (m *Master) readResourcePoolAccess(
+	ctx context.Context, pool string,
+) (resourcePoolAccessItems, error) {
+	restrictions, grants, err := poolaccess.List(ctx, pool)
 	if err != nil {
 		return nil, err
 	}
-	// The resource managers list Ready pools only, so dynamic pools are read from their records.
-	dynamicPools, err := m.db.ListDynamicResourcePools(ctx, "")
+	dynamicPools, err := m.dynamicResourcePoolNames(ctx, pool)
 	if err != nil {
 		return nil, err
 	}
-	workspaceDefaults, err := listWorkspaceDefaultPools(ctx)
+	workspaceDefaults, err := listWorkspaceDefaultPools(ctx, pool)
 	if err != nil {
 		return nil, err
 	}
 
-	state := &resourcePoolAccessState{
-		known:             map[string]bool{},
-		defaultCompute:    map[string]bool{},
-		defaultAux:        map[string]bool{},
-		workspaceDefaults: map[string][]resourcePoolAccessWorkspaceDefault{},
-		restrictions:      map[string]poolaccess.RestrictionRecord{},
-		users:             map[string][]resourcePoolAccessUser{},
+	items := resourcePoolAccessItems{}
+	if pool != "" {
+		items.add(pool)
 	}
 	// The configuration holds the pool named default when master.yaml omits resource_pools.
 	for _, rmConfig := range m.config.ResourceManagers() {
-		for _, pool := range rmConfig.ResourcePools {
-			state.known[pool.PoolName] = true
-		}
-		compute, aux := resourceManagerDefaultPools(rmConfig.ResourceManager)
-		if compute != "" {
-			state.defaultCompute[compute] = true
-		}
-		if aux != "" {
-			state.defaultAux[aux] = true
+		for _, configured := range rmConfig.ResourcePools {
+			if pool == "" || configured.PoolName == pool {
+				items.add(configured.PoolName).Exists = true
+			}
 		}
 	}
-	for _, record := range dynamicPools {
-		state.known[record.PoolName] = true
-	}
-	for _, row := range workspaceDefaults {
-		state.workspaceDefaults[row.PoolName] = append(
-			state.workspaceDefaults[row.PoolName], resourcePoolAccessWorkspaceDefault{
-				WorkspaceID: row.WorkspaceID, Workspace: row.Workspace, Kind: row.Kind,
-			},
-		)
+	for _, name := range dynamicPools {
+		items.add(name).Exists = true
 	}
 	for _, restriction := range restrictions {
-		state.restrictions[restriction.PoolName] = restriction
-	}
-	for _, grant := range grants {
-		state.users[grant.PoolName] = append(state.users[grant.PoolName], resourcePoolAccessUser{
-			ID: grant.UserID, Username: grant.Username, Active: grant.Active, Admin: grant.Admin,
-		})
-	}
-	return state, nil
-}
-
-// names returns, sorted, the known pools and the names that have access records.
-func (s *resourcePoolAccessState) names() []string {
-	set := map[string]bool{}
-	for name := range s.known {
-		set[name] = true
-	}
-	for name := range s.restrictions {
-		set[name] = true
-	}
-	for name := range s.users {
-		set[name] = true
-	}
-	names := make([]string, 0, len(set))
-	for name := range set {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
-func (s *resourcePoolAccessState) item(pool string) resourcePoolAccessItem {
-	item := resourcePoolAccessItem{
-		PoolName:          pool,
-		Mode:              resourcePoolModePublic,
-		Exists:            s.known[pool],
-		DefaultCompute:    s.defaultCompute[pool],
-		DefaultAux:        s.defaultAux[pool],
-		WorkspaceDefaults: s.workspaceDefaults[pool],
-		Users:             s.users[pool],
-	}
-	if item.WorkspaceDefaults == nil {
-		item.WorkspaceDefaults = []resourcePoolAccessWorkspaceDefault{}
-	}
-	if item.Users == nil {
-		item.Users = []resourcePoolAccessUser{}
-	}
-	if restriction, ok := s.restrictions[pool]; ok {
+		item := items.add(restriction.PoolName)
 		item.Mode = resourcePoolModeRestricted
 		restrictedAt := restriction.RestrictedAt
 		item.RestrictedAt = &restrictedAt
 		item.RestrictedBy = restriction.RestrictedByUsername
 	}
-	return item
+	for _, grant := range grants {
+		item := items.add(grant.PoolName)
+		item.Users = append(item.Users, resourcePoolAccessUser{
+			ID: grant.UserID, Username: grant.Username, Active: grant.Active, Admin: grant.Admin,
+		})
+	}
+
+	for _, rmConfig := range m.config.ResourceManagers() {
+		compute, aux := resourceManagerDefaultPools(rmConfig.ResourceManager)
+		if item, ok := items[compute]; ok {
+			item.DefaultCompute = true
+		}
+		if item, ok := items[aux]; ok {
+			item.DefaultAux = true
+		}
+	}
+	for _, row := range workspaceDefaults {
+		if item, ok := items[row.PoolName]; ok {
+			item.WorkspaceDefaults = append(item.WorkspaceDefaults, resourcePoolAccessWorkspaceDefault{
+				WorkspaceID: row.WorkspaceID, Workspace: row.Workspace, Kind: row.Kind,
+			})
+		}
+	}
+	return items, nil
+}
+
+// dynamicResourcePoolNames returns the names of the saved dynamic pools in any state, or only
+// pool when it is saved and not "". The resource managers list Ready pools only, so dynamic pools
+// are read from their records.
+func (m *Master) dynamicResourcePoolNames(ctx context.Context, pool string) ([]string, error) {
+	if pool != "" {
+		_, err := m.db.DynamicResourcePoolByName(ctx, pool)
+		switch {
+		case errors.Is(err, db.ErrDynamicResourcePoolNotFound):
+			return nil, nil
+		case err != nil:
+			return nil, err
+		}
+		return []string{pool}, nil
+	}
+	records, err := m.db.ListDynamicResourcePools(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(records))
+	for _, record := range records {
+		names = append(names, record.PoolName)
+	}
+	return names, nil
 }
 
 // resourceManagerDefaultPools returns the global default pools of a resource manager, the
@@ -406,17 +409,20 @@ type workspaceDefaultPoolRow struct {
 }
 
 // listWorkspaceDefaultPools returns the default compute and aux pools of every workspace that
-// sets them, ordered by workspace.
-func listWorkspaceDefaultPools(ctx context.Context) ([]workspaceDefaultPoolRow, error) {
+// sets them, or only the defaults that are pool when it is not "", ordered by workspace.
+func listWorkspaceDefaultPools(ctx context.Context, pool string) ([]workspaceDefaultPoolRow, error) {
 	rows := []workspaceDefaultPoolRow{}
 	if err := db.Bun().NewRaw(`
-SELECT default_compute_pool AS pool_name, id AS workspace_id, name AS workspace, ? AS kind
-FROM workspaces WHERE COALESCE(default_compute_pool, '') <> ''
-UNION ALL
-SELECT default_aux_pool AS pool_name, id AS workspace_id, name AS workspace, ? AS kind
-FROM workspaces WHERE COALESCE(default_aux_pool, '') <> ''
+SELECT * FROM (
+	SELECT default_compute_pool AS pool_name, id AS workspace_id, name AS workspace, ? AS kind
+	FROM workspaces WHERE COALESCE(default_compute_pool, '') <> ''
+	UNION ALL
+	SELECT default_aux_pool AS pool_name, id AS workspace_id, name AS workspace, ? AS kind
+	FROM workspaces WHERE COALESCE(default_aux_pool, '') <> ''
+) AS defaults
+WHERE ? = '' OR pool_name = ?
 ORDER BY workspace, workspace_id, kind DESC`,
-		resourcePoolDefaultCompute, resourcePoolDefaultAux,
+		resourcePoolDefaultCompute, resourcePoolDefaultAux, pool, pool,
 	).Scan(ctx, &rows); err != nil {
 		return nil, fmt.Errorf("listing workspace default resource pools: %w", err)
 	}

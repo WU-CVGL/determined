@@ -97,7 +97,8 @@ func TestPoolAccessStore(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, restricted)
 
-	restrictions, grants, err := List(ctx)
+	// Listing every pool includes the pool's records, and listing the pool returns only those.
+	restrictions, grants, err := List(ctx, "")
 	require.NoError(t, err)
 	var found []RestrictionRecord
 	for _, r := range restrictions {
@@ -105,22 +106,30 @@ func TestPoolAccessStore(t *testing.T) {
 			found = append(found, r)
 		}
 	}
-	require.Len(t, found, 1)
-	require.Equal(t, admin.ID, *found[0].RestrictedBy)
-	require.Equal(t, admin.Username, *found[0].RestrictedByUsername)
-	require.False(t, found[0].RestrictedAt.IsZero())
 	var foundGrants []GrantRecord
 	for _, g := range grants {
 		if g.PoolName == pool {
 			foundGrants = append(foundGrants, g)
 		}
 	}
+	restrictions, grants, err = List(ctx, pool)
+	require.NoError(t, err)
+	require.Equal(t, found, restrictions)
+	require.Equal(t, foundGrants, grants)
+	require.Len(t, found, 1)
+	require.Equal(t, admin.ID, *found[0].RestrictedBy)
+	require.Equal(t, admin.Username, *found[0].RestrictedByUsername)
+	require.False(t, found[0].RestrictedAt.IsZero())
 	require.Len(t, foundGrants, 1)
 	require.Equal(t, u1.ID, foundGrants[0].UserID)
 	require.Equal(t, u1.Username, foundGrants[0].Username)
 	require.True(t, foundGrants[0].Active)
 	require.False(t, foundGrants[0].Admin)
 	require.Equal(t, admin.ID, *foundGrants[0].GrantedBy)
+	restrictions, grants, err = List(ctx, other)
+	require.NoError(t, err)
+	require.Empty(t, restrictions)
+	require.Empty(t, grants)
 
 	// Making the pool public keeps its grants.
 	changed, err = MakePublic(ctx, pool)
