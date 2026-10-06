@@ -7,6 +7,7 @@ import { humanReadableBytes } from 'utils/string';
 import {
   alignResourceSeries,
   resourceLegend,
+  ResourceLegendEntry,
   ResourceMetric,
   ResourceRange,
   ResourceSeries,
@@ -25,12 +26,15 @@ const TaskResourceChart: React.FC<Props> = ({ metric, range, series }) => {
   const hasData = series.some((item) =>
     item.samples.some(([, value]) => value != null && Number.isFinite(value)),
   );
+  // The options depend only on the labels, so a re-render with new series arrays but the same
+  // labels keeps the chart and only updates its data.
+  const legendKey = JSON.stringify(resourceLegend(series));
+  const legend = useMemo(() => JSON.parse(legendKey) as ResourceLegendEntry[], [legendKey]);
   const options = useMemo<Options>(() => {
     const format = (value: number): string =>
       metric.unit === 'bytes'
         ? humanReadableBytes(value)
         : `${Number(value.toFixed(2))} ${metric.unit}`;
-    const legend = resourceLegend(series);
     return {
       axes: [{}, { size: 85, values: (_plot, values) => values.map(format) }],
       cursor: { drag: { x: true, y: false } },
@@ -66,7 +70,7 @@ const TaskResourceChart: React.FC<Props> = ({ metric, range, series }) => {
         })),
       ],
     };
-  }, [metric, range, series]);
+  }, [legend, metric, range]);
 
   return (
     <Section bodyBorder title={metric.title}>

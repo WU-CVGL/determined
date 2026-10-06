@@ -39,22 +39,25 @@ const gpu = (index: number, uuid: string): ResourceSeries => ({
   ],
 });
 
-it('renders the live legend with GPU numbers and details on hover', async () => {
-  const metric = RESOURCE_METRICS.find((item) => item.key === 'gpu_utilization_percent');
+const metric = RESOURCE_METRICS.find((item) => item.key === 'gpu_utilization_percent');
+const range = { end: 115, start: 100, step: 15 };
+const chart = (series: ResourceSeries[]) => {
   if (!metric) throw new Error('missing metric');
-  const view = render(
+  return (
     <UIProvider theme={DefaultTheme.Light}>
       <ThemeProvider>
         <SyncProvider>
-          <TaskResourceChart
-            metric={metric}
-            range={{ end: 115, start: 100, step: 15 }}
-            series={[gpu(0, UUID), gpu(1, 'GPU-9f8e7d6c-0000-1111-2222-333344445555')]}
-          />
+          <TaskResourceChart metric={metric} range={range} series={series} />
         </SyncProvider>
       </ThemeProvider>
-    </UIProvider>,
+    </UIProvider>
   );
+};
+const legendLabels = (container: HTMLElement) =>
+  Array.from(container.querySelectorAll('.u-legend .u-label')).map((label) => label.textContent);
+
+it('renders the live legend with GPU numbers and details on hover', async () => {
+  const view = render(chart([gpu(0, UUID), gpu(1, 'GPU-9f8e7d6c-0000-1111-2222-333344445555')]));
   await waitFor(() =>
     expect(view.container.querySelectorAll('.u-legend .u-series')).toHaveLength(3),
   );
@@ -76,4 +79,26 @@ it('renders the live legend with GPU numbers and details on hover', async () => 
     'Model: NVIDIA GeForce RTX 4090',
   ]);
   expect(rows[2].title).toContain('PCI bus ID: 00000000:42:00.0');
+});
+
+it('keeps the chart when it re-renders with the same labels', async () => {
+  const series = [gpu(0, UUID), gpu(1, 'GPU-9f8e7d6c-0000-1111-2222-333344445555')];
+  const view = render(chart(series));
+  await waitFor(() => expect(legendLabels(view.container)).toEqual(['Time', 'GPU 0', 'GPU 1']));
+  const legend = view.container.querySelector('.u-legend');
+
+  // A refresh hands over new arrays with the same labels: the chart and its legend stay.
+  view.rerender(chart(series.map((item) => ({ ...item, samples: [...item.samples] }))));
+  expect(view.container.querySelector('.u-legend')).toBe(legend);
+  expect(view.container.querySelectorAll<HTMLElement>('.u-legend .u-series')[1].title).toContain(
+    UUID,
+  );
+
+  // New labels rebuild the legend.
+  view.rerender(
+    chart([{ ...series[0], labels: { ...series[0].labels, gpu_index: undefined } }, series[1]]),
+  );
+  await waitFor(() =>
+    expect(legendLabels(view.container)).toEqual(['Time', 'GPU 1a2b3c4d', 'GPU 1']),
+  );
 });
