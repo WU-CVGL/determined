@@ -12,8 +12,7 @@ interface Props {
   content: React.ReactNode;
   danger?: boolean;
   okText: string;
-  /** Called after the changes were sent, whatever the master answered. */
-  onApplied?: () => void;
+  /** Sends the change. It goes on, and its results are kept, when the modal is closed. */
   run: () => Promise<PoolAccessResult[]>;
   title: string;
 }
@@ -28,7 +27,6 @@ const PoolAccessConfirmModalComponent: React.FC<Props> = ({
   content,
   danger,
   okText,
-  onApplied,
   run,
   title,
 }: Props) => {
@@ -39,11 +37,10 @@ const PoolAccessConfirmModalComponent: React.FC<Props> = ({
     setIsApplying(true);
     try {
       setResults(await run());
-      onApplied?.();
     } finally {
       setIsApplying(false);
     }
-  }, [onApplied, run]);
+  }, [run]);
 
   const footer = results ? (
     <Row>

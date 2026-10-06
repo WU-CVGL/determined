@@ -370,7 +370,9 @@ workspace defaults, and its warnings.
 **Grant…**, **Revoke…**, **Restrict**, and **Make public** change the selected
 pools, one pool after another, and show what the master answered for each
 pool, with its warnings. Restrict and Make public first say what the change
-means for each selected pool.
+means for each selected pool. Closing the dialog does not stop a change that is
+being sent: its results then show on the tab, and when you leave the tab before
+it ends, a notification names the pools that failed.
 
 Grant and revoke take users, user groups, and pasted usernames together, and
 show the resulting usernames without duplicates before anything is sent:

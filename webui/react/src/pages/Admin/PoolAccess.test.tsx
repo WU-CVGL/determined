@@ -13,10 +13,16 @@ import { mapResourcePoolAccess, mapResourcePoolAccessChange } from 'services/dec
 import { ResourcePoolAccessChange } from 'types';
 import { DetError } from 'utils/error';
 
-import PoolAccess, { PUBLIC_INTRO, RESTRICT_INTRO, RESTRICT_RUNNING_NOTE } from './PoolAccess';
+import PoolAccess, {
+  PENDING_DISMISSED_NOTE,
+  PUBLIC_INTRO,
+  RESTRICT_INTRO,
+  RESTRICT_RUNNING_NOTE,
+} from './PoolAccess';
 
 const mocks = vi.hoisted(() => ({
   getResourcePoolAccess: vi.fn(),
+  handleError: vi.fn(),
   revokeResourcePoolAccess: vi.fn(),
   setResourcePoolAccessMode: vi.fn(),
 }));
@@ -31,6 +37,11 @@ vi.mock('services/api', () => ({
   setResourcePoolAccessMode: mocks.setResourcePoolAccessMode,
 }));
 
+vi.mock('utils/error', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('utils/error')>()),
+  default: mocks.handleError,
+}));
+
 // Table and modal tests render antd components, which is slow when the whole suite runs.
 vi.setConfig({ testTimeout: 15_000 });
 
@@ -41,6 +52,15 @@ const changeOf = (poolName: string, warnings: string[] = []): ResourcePoolAccess
     ...resourcePoolAccessResponse.resource_pools.find((pool) => pool.pool_name === poolName),
     warnings,
   });
+
+/** A promise that the test settles. */
+function deferred<T>() {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
 
 const user = userEvent.setup();
 
@@ -77,6 +97,7 @@ const selectPools = async (...poolNames: string[]) => {
 describe('PoolAccess', () => {
   beforeEach(() => {
     mocks.getResourcePoolAccess.mockReset().mockImplementation(() => Promise.resolve(pools()));
+    mocks.handleError.mockReset();
     mocks.setResourcePoolAccessMode.mockReset();
     mocks.revokeResourcePoolAccess.mockReset();
   });
@@ -227,6 +248,78 @@ describe('PoolAccess', () => {
       poolName: 'gpu-a100',
       usernames: ['carol'],
     });
+  });
+
+  it('shows the results on the tab when the dialog is closed during a change', async () => {
+    const cpu = deferred<ResourcePoolAccessChange>();
+    mocks.setResourcePoolAccessMode.mockImplementation(({ poolName }) =>
+      poolName === 'cpu'
+        ? cpu.promise
+        : Promise.reject(
+            new DetError(undefined, { publicMessage: 'database down', publicSubject: 'x' }),
+          ),
+    );
+    setup();
+    await selectPools('cpu', 'gpu-a100');
+    await user.click(screen.getByRole('button', { name: 'Restrict' }));
+    await user.click(await screen.findByRole('button', { name: 'Restrict 2 pools' }));
+    await waitFor(() => expect(mocks.setResourcePoolAccessMode).toHaveBeenCalledTimes(1));
+
+    // The close icon dismisses the dialog while the first request waits.
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    await waitFor(() =>
+      expect(screen.queryByTestId('pool-access-restrict-confirm')).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText(PENDING_DISMISSED_NOTE)).toBeInTheDocument();
+
+    cpu.resolve(changeOf('cpu'));
+    const dismissed = await screen.findByTestId('pool-access-dismissed-results');
+    expect(mocks.setResourcePoolAccessMode).toHaveBeenCalledTimes(2);
+    expect(dismissed).toHaveTextContent('Restrict: finished after its dialog was closed');
+    expect(dismissed).toHaveTextContent('1 of 2 pools failed.');
+    expect(within(dismissed).getByTestId('pool-access-result-cpu')).toHaveTextContent(
+      'cpu: restricted',
+    );
+    expect(within(dismissed).getByTestId('pool-access-result-gpu-a100')).toHaveTextContent(
+      'gpu-a100: failed: database down',
+    );
+    expect(screen.queryByText(PENDING_DISMISSED_NOTE)).not.toBeInTheDocument();
+    // The list is read again after the change.
+    await waitFor(() => expect(mocks.getResourcePoolAccess).toHaveBeenCalledTimes(2));
+    expect(mocks.handleError).not.toHaveBeenCalled();
+
+    await user.click(within(dismissed).getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByTestId('pool-access-dismissed-results')).not.toBeInTheDocument();
+  });
+
+  it('names the failed pools in a notification when the tab is left during a change', async () => {
+    const cpu = deferred<ResourcePoolAccessChange>();
+    mocks.setResourcePoolAccessMode.mockImplementation(({ poolName }) =>
+      poolName === 'cpu'
+        ? cpu.promise
+        : Promise.reject(
+            new DetError(undefined, { publicMessage: 'database down', publicSubject: 'x' }),
+          ),
+    );
+    const { unmount } = setup();
+    await selectPools('cpu', 'gpu-a100');
+    await user.click(screen.getByRole('button', { name: 'Restrict' }));
+    await user.click(await screen.findByRole('button', { name: 'Restrict 2 pools' }));
+    await waitFor(() => expect(mocks.setResourcePoolAccessMode).toHaveBeenCalledTimes(1));
+
+    // Admin Settings unmounts the tab when another tab is chosen.
+    unmount();
+    cpu.resolve(changeOf('cpu'));
+    await waitFor(() => expect(mocks.handleError).toHaveBeenCalledTimes(1));
+    expect(mocks.setResourcePoolAccessMode).toHaveBeenCalledTimes(2);
+    expect(mocks.handleError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({
+        publicMessage: 'gpu-a100: failed: database down',
+        publicSubject: 'Pool access: Restrict failed for 1 of 2 pools',
+        silent: false,
+      }),
+    );
   });
 
   it('shows why the list could not be loaded', async () => {

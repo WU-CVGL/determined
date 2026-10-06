@@ -11,7 +11,11 @@ import { Loadable, Loaded, NotLoaded } from 'hew/utils/loadable';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import PoolAccessConfirmModalComponent from 'components/PoolAccessConfirmModal';
-import { PoolAccessResultAction } from 'components/PoolAccessResults';
+import PoolAccessResults, {
+  PoolAccessResultAction,
+  poolAccessResultText,
+  PoolAccessRunner,
+} from 'components/PoolAccessResults';
 import PoolAccessUsersModalComponent from 'components/PoolAccessUsersModal';
 import Section from 'components/Section';
 import InteractiveTable, { onRightClickableCell } from 'components/Table/InteractiveTable';
@@ -50,9 +54,18 @@ export const RESTRICT_RUNNING_NOTE =
   'without a grant can no longer submit, activate, unpause, continue, fork, or clone work into ' +
   'them, move a job into them, or make them a workspace default.';
 export const PUBLIC_INTRO = 'Every user can start work in a public pool.';
+export const PENDING_DISMISSED_NOTE =
+  'A change whose dialog was closed is still being applied. Its results will show here.';
 export const REVOKE_RUNNING_NOTE =
   'Revoking applies from the next request: work that already runs or is queued in the pool is ' +
   'not stopped.';
+
+const ACTION_TITLES: Record<PoolAccessResultAction, string> = {
+  grant: 'Grant',
+  public: 'Make public',
+  restrict: 'Restrict',
+  revoke: 'Revoke',
+};
 
 const modeLabel = (mode: ResourcePoolAccess['mode']): string =>
   mode === ResourcePoolAccessMode.Restricted ? 'Restricted' : 'Public';
@@ -172,6 +185,34 @@ const PoolAccessDetail: React.FC<DetailProps> = ({ onRevoke, pool }: DetailProps
   );
 };
 
+/** A change sent from a dialog. */
+interface ChangeRun {
+  /** The dialog was closed before the master answered. */
+  dismissed: boolean;
+}
+
+/** The results of a change whose dialog was closed before the master answered. */
+interface DismissedResults {
+  action: PoolAccessResultAction;
+  id: number;
+  results: PoolAccessResult[];
+}
+
+/** Tells about the failed pools of a change that finished after the tab was left. */
+const notifyFailures = (action: PoolAccessResultAction, results: PoolAccessResult[]): void => {
+  const failed = results.filter((result) => !result.ok);
+  if (failed.length === 0) return;
+  handleError(new Error(`${failed.length} ${pluralizer(failed.length, 'pool')} failed`), {
+    publicMessage: failed
+      .map((result) => `${result.poolName}: ${poolAccessResultText(action, result)}`)
+      .join('; '),
+    publicSubject: `Pool access: ${ACTION_TITLES[action]} failed for ${failed.length} of ${
+      results.length
+    } ${pluralizer(results.length, 'pool')}`,
+    silent: false,
+  });
+};
+
 interface ConfirmConfig {
   action: PoolAccessResultAction;
   content: React.ReactNode;
@@ -193,6 +234,13 @@ const PoolAccess: React.FC = () => {
   // The modals are mounted only while open, so they load their data when they open.
   const [usersAction, setUsersAction] = useState<PoolAccessUsersAction>();
   const [confirm, setConfirm] = useState<ConfirmConfig>();
+  // The changes in flight. A change goes on when its dialog is closed or the tab is left.
+  const runs = useRef(new Set<ChangeRun>());
+  const [dismissed, setDismissed] = useState<DismissedResults[]>([]);
+  const dismissedId = useRef(0);
+  /** The changes whose dialog was closed and whose results have not come back yet. */
+  const [pendingDismissed, setPendingDismissed] = useState(0);
+  const isMounted = useRef(true);
   const pageRef = useRef<HTMLElement>(null);
   const canceler = useRef(new AbortController());
   const { settings, updateSettings } = useSettings(settingsConfig);
@@ -219,8 +267,52 @@ const PoolAccess: React.FC = () => {
   }, [fetchPools]);
 
   useEffect(() => {
+    isMounted.current = true;
     const current = canceler.current;
-    return () => current.abort();
+    return () => {
+      isMounted.current = false;
+      current.abort();
+    };
+  }, []);
+
+  /**
+   * Sends a change for a dialog and answers with its results. When the dialog was closed before
+   * the master answered, the results show on the tab; when the tab was left, a notification names
+   * the failed pools.
+   */
+  const runChange: PoolAccessRunner = useCallback(
+    async (action, run) => {
+      const current: ChangeRun = { dismissed: false };
+      runs.current.add(current);
+      try {
+        const results = await run();
+        if (!isMounted.current) {
+          notifyFailures(action, results);
+        } else if (current.dismissed) {
+          const id = ++dismissedId.current;
+          setDismissed((prev) => [...prev, { action, id, results }]);
+        }
+        return results;
+      } finally {
+        runs.current.delete(current);
+        if (isMounted.current) {
+          if (current.dismissed) setPendingDismissed((n) => n - 1);
+          fetchPools();
+        }
+      }
+    },
+    [fetchPools],
+  );
+
+  /** Marks the changes in flight as dismissed, when their dialog is closed. */
+  const dismissRuns = useCallback(() => {
+    let count = 0;
+    runs.current.forEach((run) => {
+      if (run.dismissed) return;
+      run.dismissed = true;
+      count += 1;
+    });
+    if (count > 0) setPendingDismissed((n) => n + count);
   }, []);
 
   const allPools = useMemo(() => Loadable.getOrElse([], pools), [pools]);
@@ -259,14 +351,16 @@ const PoolAccess: React.FC = () => {
   );
 
   const closeUsersModal = useCallback(() => {
+    dismissRuns();
     UsersModal.close('cancel');
     setUsersAction(undefined);
-  }, [UsersModal]);
+  }, [UsersModal, dismissRuns]);
 
   const closeConfirm = useCallback(() => {
+    dismissRuns();
     ConfirmModal.close('cancel');
     setConfirm(undefined);
-  }, [ConfirmModal]);
+  }, [ConfirmModal, dismissRuns]);
 
   const openConfirm = useCallback(
     (config: ConfirmConfig) => {
@@ -508,6 +602,27 @@ const PoolAccess: React.FC = () => {
           </Row>
         </div>
         {loadError && <Alert message={loadError} type="error" />}
+        {pendingDismissed > 0 && (
+          <div className={css.notice}>
+            <Alert message={PENDING_DISMISSED_NOTE} type="info" />
+          </div>
+        )}
+        {dismissed.map(({ action, id, results }) => (
+          <div className={css.notice} data-testid="pool-access-dismissed-results" key={id}>
+            <Alert
+              action={
+                <Button
+                  size="small"
+                  onClick={() => setDismissed((prev) => prev.filter((item) => item.id !== id))}>
+                  Dismiss
+                </Button>
+              }
+              description={<PoolAccessResults action={action} results={results} />}
+              message={`${ACTION_TITLES[action]}: finished after its dialog was closed`}
+              type={results.every((result) => result.ok) ? 'success' : 'error'}
+            />
+          </div>
+        ))}
         {settings ? (
           <InteractiveTable<ResourcePoolAccess>
             columns={columns}
@@ -545,7 +660,7 @@ const PoolAccess: React.FC = () => {
           action={usersAction}
           closeModal={closeUsersModal}
           pools={selectedPools}
-          onApplied={fetchPools}
+          runChange={runChange}
         />
       )}
       {confirm && (
@@ -555,9 +670,8 @@ const PoolAccess: React.FC = () => {
           content={confirm.content}
           danger={confirm.danger}
           okText={confirm.okText}
-          run={confirm.run}
+          run={() => runChange(confirm.action, confirm.run)}
           title={confirm.title}
-          onApplied={fetchPools}
         />
       )}
     </>

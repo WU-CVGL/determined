@@ -7,7 +7,7 @@ import Select, { Option } from 'hew/Select';
 import { Loadable } from 'hew/utils/loadable';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import PoolAccessResults from 'components/PoolAccessResults';
+import PoolAccessResults, { PoolAccessRunner } from 'components/PoolAccessResults';
 import {
   getGroup,
   getGroups,
@@ -48,9 +48,9 @@ export const MEMBERSHIP_CHANGED_MESSAGE =
 interface Props {
   action: PoolAccessUsersAction;
   closeModal: () => void;
-  /** Called after the changes were sent, whatever the master answered. */
-  onApplied?: () => void;
   pools: ResourcePoolAccess[];
+  /** Sends the change, which goes on and keeps its results when the modal is closed. */
+  runChange: PoolAccessRunner;
 }
 
 const fetchAllGroups = async (signal: AbortSignal): Promise<V1GroupSearchResult[]> => {
@@ -90,8 +90,8 @@ const fetchMembersOf = async (
 const PoolAccessUsersModalComponent: React.FC<Props> = ({
   action,
   closeModal,
-  onApplied,
   pools,
+  runChange,
 }: Props) => {
   const isGrant = action === 'grant';
   const users = Loadable.getOrElse([], useObservable(userStore.getUsers()));
@@ -108,6 +108,15 @@ const PoolAccessUsersModalComponent: React.FC<Props> = ({
   const [isApplying, setIsApplying] = useState(false);
   const [results, setResults] = useState<PoolAccessResult[]>();
   const membersRequest = useRef(0);
+  /** Set when the modal is closed: a change that was not sent yet is then not sent. */
+  const closed = useRef(false);
+
+  useEffect(() => {
+    closed.current = false;
+    return () => {
+      closed.current = true;
+    };
+  }, []);
 
   useEffect(() => {
     const canceler = new AbortController();
@@ -163,6 +172,8 @@ const PoolAccessUsersModalComponent: React.FC<Props> = ({
         setMembersError(poolAccessErrorMessage(e));
         return;
       }
+      // Closing the modal before anything was sent cancels the change.
+      if (closed.current) return;
       const applied = resolveUsernames(
         users,
         pickedUserIds,
@@ -176,18 +187,29 @@ const PoolAccessUsersModalComponent: React.FC<Props> = ({
       }
       if (applied.unknown.length > 0 || applied.usernames.length === 0) return;
       setResults(
-        await changeUsersInPools(
-          poolNames,
-          applied.usernames,
-          isGrant ? grantResourcePoolAccess : revokeResourcePoolAccess,
-          RESOURCE_POOL_ACCESS_BODY_BUDGET,
+        await runChange(action, () =>
+          changeUsersInPools(
+            poolNames,
+            applied.usernames,
+            isGrant ? grantResourcePoolAccess : revokeResourcePoolAccess,
+            RESOURCE_POOL_ACCESS_BODY_BUDGET,
+          ),
         ),
       );
-      onApplied?.();
     } finally {
       setIsApplying(false);
     }
-  }, [isGrant, onApplied, pasted, pickedGroupIds, pickedUserIds, poolNames, resolved, users]);
+  }, [
+    action,
+    isGrant,
+    pasted,
+    pickedGroupIds,
+    pickedUserIds,
+    poolNames,
+    resolved,
+    runChange,
+    users,
+  ]);
 
   const verb = isGrant ? 'Grant' : 'Revoke';
   const title = `${verb} access to ${pools.length} ${pluralizer(pools.length, 'pool')}`;
@@ -260,6 +282,7 @@ const PoolAccessUsersModalComponent: React.FC<Props> = ({
         <div className={css.field}>
           <label htmlFor="pool-access-users">Users</label>
           <Select
+            disabled={isApplying}
             id="pool-access-users"
             mode="multiple"
             placeholder="Find and select users"
@@ -283,6 +306,7 @@ const PoolAccessUsersModalComponent: React.FC<Props> = ({
         <div className={css.field}>
           <label htmlFor="pool-access-groups">Groups</label>
           <Select
+            disabled={isApplying}
             id="pool-access-groups"
             mode="multiple"
             placeholder="Select user groups"
@@ -310,6 +334,7 @@ const PoolAccessUsersModalComponent: React.FC<Props> = ({
         <label className={css.field}>
           <span>Paste usernames</span>
           <Input.TextArea
+            disabled={isApplying}
             placeholder="One username per line, or separated by commas or spaces"
             rows={3}
             value={pasted}

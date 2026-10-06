@@ -8,6 +8,15 @@ import css from './PoolAccessResults.module.scss';
 
 export type PoolAccessResultAction = 'grant' | 'revoke' | 'restrict' | 'public';
 
+/**
+ * Sends a change and answers with its results. The Pool Access tab passes it to its dialogs, so
+ * that a change keeps its results when its dialog is closed before the master answered.
+ */
+export type PoolAccessRunner = (
+  action: PoolAccessResultAction,
+  run: () => Promise<PoolAccessResult[]>,
+) => Promise<PoolAccessResult[]>;
+
 const usernames = (count: number): string => `${count} ${pluralizer(count, 'username')}`;
 
 /**
@@ -36,6 +45,12 @@ const failedText = (result: PoolAccessResult): string => {
   );
 };
 
+/** What the master answered for one pool, as the results list it. */
+export const poolAccessResultText = (
+  action: PoolAccessResultAction,
+  result: PoolAccessResult,
+): string => (result.ok ? doneText(action, result) : failedText(result));
+
 interface Props {
   action: PoolAccessResultAction;
   results: PoolAccessResult[];
@@ -62,8 +77,7 @@ const PoolAccessResults: React.FC<Props> = ({ action, results }: Props) => {
                 title={result.ok ? 'Succeeded' : 'Failed'}
               />
               <span>
-                <strong>{result.poolName}</strong>:{' '}
-                {result.ok ? doneText(action, result) : failedText(result)}
+                <strong>{result.poolName}</strong>: {poolAccessResultText(action, result)}
               </span>
             </div>
             {result.warnings.length > 0 && (

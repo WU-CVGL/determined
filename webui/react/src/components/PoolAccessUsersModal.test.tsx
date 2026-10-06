@@ -6,6 +6,7 @@ import { DefaultTheme, UIProvider } from 'hew/Theme';
 import { Loadable } from 'hew/utils/loadable';
 import React from 'react';
 
+import { PoolAccessRunner } from 'components/PoolAccessResults';
 import { ThemeProvider } from 'components/ThemeProvider';
 import { resourcePoolAccessResponse } from 'fixtures/resourcePoolAccess';
 import { mapResourcePoolAccess, mapResourcePoolAccessChange } from 'services/decoder';
@@ -77,11 +78,11 @@ const accepted = ({ poolName }: { poolName: string }) =>
 
 interface ContainerProps {
   action: PoolAccessUsersAction;
-  onApplied: () => void;
   pools: ResourcePoolAccess[];
+  runChange: PoolAccessRunner;
 }
 
-const Container: React.FC<ContainerProps> = ({ action, onApplied, pools }) => {
+const Container: React.FC<ContainerProps> = ({ action, pools, runChange }) => {
   const UsersModal = useModal(PoolAccessUsersModalComponent);
   return (
     <div>
@@ -90,32 +91,40 @@ const Container: React.FC<ContainerProps> = ({ action, onApplied, pools }) => {
         action={action}
         closeModal={() => UsersModal.close('cancel')}
         pools={pools}
-        onApplied={onApplied}
+        runChange={runChange}
       />
     </div>
   );
 };
 
+/** A promise that the test settles. */
+function deferred<T>() {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 const user = userEvent.setup();
 
-const setup = async (
-  pools: ResourcePoolAccess[],
-  action: PoolAccessUsersAction = 'grant',
-  onApplied = vi.fn(),
-) => {
+const setup = async (pools: ResourcePoolAccess[], action: PoolAccessUsersAction = 'grant') => {
+  const runChange = vi.fn<Parameters<PoolAccessRunner>, ReturnType<PoolAccessRunner>>(
+    (_action, run) => run(),
+  );
   userStore.fetchUsers();
   await waitFor(() =>
     expect(Loadable.getOrElse([], userStore.getUsers().get())).toHaveLength(mocks.users.length),
   );
-  render(
+  const view = render(
     <UIProvider theme={DefaultTheme.Light}>
       <ThemeProvider>
-        <Container action={action} pools={pools} onApplied={onApplied} />
+        <Container action={action} pools={pools} runChange={runChange} />
       </ThemeProvider>
     </UIProvider>,
   );
   await user.click(screen.getByText(OPEN));
-  return onApplied;
+  return { runChange, unmount: view.unmount };
 };
 
 const choose = async (label: string, option: string) => {
@@ -144,7 +153,7 @@ describe('PoolAccessUsersModal', () => {
     mocks.getGroup.mockImplementation(({ groupId }) =>
       Promise.resolve(groupResponse(groupId, ['bob', 'alice'])),
     );
-    const onApplied = await setup(poolsNamed('gpu-a100', 'gpu-h100'));
+    const { runChange } = await setup(poolsNamed('gpu-a100', 'gpu-h100'));
 
     expect(screen.getByText(GRANT_GROUP_NOTE)).toBeInTheDocument();
     expect(screen.queryByText(REVOKE_GROUP_NOTE)).not.toBeInTheDocument();
@@ -188,7 +197,9 @@ describe('PoolAccessUsersModal', () => {
     expect(screen.getByTestId('pool-access-results')).toHaveTextContent(
       'A user who already had a grant, or had none to revoke, is counted but unchanged.',
     );
-    expect(onApplied).toHaveBeenCalledTimes(1);
+    // The change goes through the tab's runner, which keeps its results if the modal is closed.
+    expect(runChange).toHaveBeenCalledTimes(1);
+    expect(runChange).toHaveBeenCalledWith('grant', expect.any(Function));
   });
 
   it('stops when a group changed between the preview and applying', async () => {
@@ -267,6 +278,43 @@ describe('PoolAccessUsersModal', () => {
       `gpu-h100: failed: 500 database unavailable. 1 of ${a100Calls.length} requests were ` +
         `applied (${firstChunk} of 2500 usernames); nothing was retried`,
     );
+  });
+
+  it('locks the picker while a change is applied', async () => {
+    const grant = deferred<ReturnType<typeof mapResourcePoolAccessChange>>();
+    mocks.grantResourcePoolAccess.mockImplementation(() => grant.promise);
+    await setup(poolsNamed('gpu-a100'));
+
+    await choose('Users', 'alice');
+    paste('bob');
+    await user.click(screen.getByRole('button', { name: 'Grant to 2 users' }));
+    await waitFor(() => expect(mocks.grantResourcePoolAccess).toHaveBeenCalledTimes(1));
+    // Edits made now would change the preview but not the change being sent.
+    expect(screen.getByLabelText('Users')).toBeDisabled();
+    expect(screen.getByLabelText('Groups')).toBeDisabled();
+    expect(screen.getByLabelText('Paste usernames')).toBeDisabled();
+
+    grant.resolve(mapResourcePoolAccessChange({ exists: true, pool_name: 'gpu-a100' }));
+    expect(await screen.findByTestId('pool-access-results')).toHaveTextContent('Done for 1 pool.');
+  });
+
+  it('sends nothing when closed while the groups are expanded for applying', async () => {
+    const second = deferred<ReturnType<typeof groupResponse>>();
+    mocks.getGroup
+      .mockImplementationOnce(({ groupId }) => Promise.resolve(groupResponse(groupId, ['alice'])))
+      .mockImplementationOnce(() => second.promise);
+    const { unmount } = await setup(poolsNamed('gpu-a100'));
+
+    await choose('Groups', 'team-a (2 members)');
+    await waitFor(() => expect(preview()).toHaveTextContent('1 user after removing duplicates'));
+    await user.click(screen.getByRole('button', { name: 'Grant to 1 user' }));
+    await waitFor(() => expect(mocks.getGroup).toHaveBeenCalledTimes(2));
+
+    // The Pool Access tab unmounts the modal when it is closed.
+    unmount();
+    second.resolve(groupResponse(1, ['alice']));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mocks.grantResourcePoolAccess).not.toHaveBeenCalled();
   });
 
   it('reports the master refusing a pool', async () => {
