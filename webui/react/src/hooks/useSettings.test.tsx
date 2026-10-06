@@ -6,6 +6,7 @@ import React, { useEffect } from 'react';
 import { BrowserRouter } from 'react-router-dom';
 
 import { ThemeProvider } from 'components/ThemeProvider';
+import { getUserSetting } from 'services/api';
 import authStore from 'stores/auth';
 import userStore from 'stores/users';
 import userSettings from 'stores/userSettings';
@@ -16,7 +17,7 @@ import { SettingsProvider } from './useSettingsProvider';
 const CURRENT_USER = { id: 1, isActive: true, isAdmin: false, username: 'bunny' };
 
 vi.mock('services/api', () => ({
-  getUserSetting: () => Promise.resolve({ settings: [] }),
+  getUserSetting: vi.fn(() => Promise.resolve({ settings: [] })),
   updateUserSetting: () => Promise.resolve(),
 }));
 
@@ -244,5 +245,125 @@ describe('useSettings', () => {
         ),
       );
     }
+  });
+});
+
+describe('useSettings and the URL', () => {
+  interface PageSettings {
+    columns: string[];
+    columnWidths: number[];
+    state?: string[];
+    type?: string[];
+  }
+
+  /* A table's layout, which the URL leaves out, and two filters, which it shows. */
+  const pageConfig: hook.SettingsConfig<PageSettings> = {
+    settings: {
+      columns: {
+        defaultValue: ['name', 'state'],
+        skipUrlEncoding: true,
+        storageKey: 'columns',
+        type: array(string),
+      },
+      columnWidths: {
+        defaultValue: [200, 100],
+        skipUrlEncoding: true,
+        storageKey: 'columnWidths',
+        type: array(number),
+      },
+      state: {
+        defaultValue: undefined,
+        storageKey: 'state',
+        type: union([undefinedType, array(string)]),
+      },
+      type: {
+        defaultValue: undefined,
+        storageKey: 'type',
+        type: union([undefinedType, array(string)]),
+      },
+    },
+    storagePath: 'settings-url',
+  };
+
+  const layout = { columns: ['state', 'name', 'id'], columnWidths: [100, 200, 50] };
+
+  /** The hook on a page without a query, once it has read these stored settings. */
+  const setupWithStored = async (stored: Partial<PageSettings>) => {
+    userSettings.reset();
+    vi.mocked(getUserSetting).mockResolvedValueOnce({
+      settings: Object.entries(stored).map(([key, value]) => ({
+        key,
+        storagePath: pageConfig.storagePath,
+        value: JSON.stringify(value),
+      })),
+    });
+    const Wrapper: React.FC<{ children: JSX.Element }> = ({ children }) => (
+      <UIProvider theme={DefaultTheme.Light}>
+        <ThemeProvider>
+          <Container>{children}</Container>
+        </ThemeProvider>
+      </UIProvider>
+    );
+    const { result } = renderHook(() => hook.useSettings<PageSettings>(pageConfig), {
+      wrapper: Wrapper,
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    for (const [key, value] of Object.entries(stored)) {
+      await waitFor(() =>
+        expect(result.current.settings[key as keyof PageSettings]).toStrictEqual(value),
+      );
+    }
+    return result;
+  };
+
+  const query = () => new URLSearchParams(window.location.search);
+
+  beforeEach(() => window.history.replaceState(null, '', '/'));
+  afterEach(() => window.history.replaceState(null, '', '/'));
+
+  it('leaves the URL alone on an update of only columns and widths', async () => {
+    // The stored filter is not in the URL, which only an update of a URL setting writes.
+    const result = await setupWithStored({ type: ['shell'] });
+
+    act(() => result.current.updateSettings(layout));
+
+    await waitFor(() => expect(result.current.settings.columnWidths).toStrictEqual([100, 200, 50]));
+    expect(result.current.settings.columns).toStrictEqual(['state', 'name', 'id']);
+    expect(window.location.search).toBe('');
+  });
+
+  it('writes an update of a filter to the URL', async () => {
+    const result = await setupWithStored({ type: ['shell'] });
+
+    act(() => result.current.updateSettings({ type: ['experiment'] }));
+
+    await waitFor(() => expect(query().getAll('type')).toStrictEqual(['experiment']));
+    await waitFor(() => expect(result.current.settings.type).toStrictEqual(['experiment']));
+  });
+
+  it('writes the filters of an update of columns and filters together, not the columns', async () => {
+    const result = await setupWithStored({ type: ['shell'] });
+
+    act(() => result.current.updateSettings({ ...layout, state: ['active'] }));
+
+    await waitFor(() => expect(query().getAll('state')).toStrictEqual(['active']));
+    expect(query().getAll('type')).toStrictEqual(['shell']);
+    expect(query().has('columns')).toBe(false);
+    expect(query().has('columnWidths')).toBe(false);
+    await waitFor(() => expect(result.current.settings.columns).toStrictEqual(layout.columns));
+  });
+
+  it('keeps the kinds of an update in the URL when an update of columns follows at once', async () => {
+    // As on a first load: the URL's kinds replace the stored ones, then stored columns are moved.
+    const result = await setupWithStored({ columns: ['name'], columnWidths: [200], type: ['a'] });
+
+    act(() => {
+      result.current.updateSettings({ type: ['b'] });
+      result.current.updateSettings(layout);
+    });
+
+    await waitFor(() => expect(result.current.settings.columns).toStrictEqual(layout.columns));
+    expect(result.current.settings.type).toStrictEqual(['b']);
+    expect(query().getAll('type')).toStrictEqual(['b']);
   });
 });

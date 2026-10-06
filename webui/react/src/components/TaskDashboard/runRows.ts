@@ -7,6 +7,7 @@ import {
   GenericTask,
   GenericTaskState,
   ProjectExperiment,
+  RawJson,
   RunState,
   ValueOf,
 } from 'types';
@@ -184,6 +185,18 @@ export const toApiSlotsFilter = (filter?: SlotsFilter): V1SlotsFilter | undefine
 };
 
 /**
+ * The slots each trial of an experiment asks for: `resources.slots_per_trial`, 1 when the config
+ * leaves it out, as the master's slot filter counts it. Unknown without a config.
+ */
+export const experimentSlots = (item: BulkExperimentItem): number | undefined => {
+  // The list API returns the stored config as is, with the master's snake_case keys.
+  const config = item.config as RawJson | undefined;
+  if (!config) return undefined;
+  const slots = config.resources?.slots_per_trial;
+  return typeof slots === 'number' ? slots : 1;
+};
+
+/**
  * Whether a run that asks for these slots passes the filter: GPU is one slot or more, CPU-only no
  * slots. A run whose slots are unknown passes neither.
  */
@@ -203,6 +216,8 @@ interface RunRowBase {
   key: string;
   name: string;
   resourcePool: string;
+  /** The slots the run asks for, per trial for an experiment; unset if unknown. */
+  slots?: number;
   startTime: string;
   userId: number;
   workspaceId: number;
@@ -228,6 +243,7 @@ export const commandRow = (task: CommandTask): CommandRunRow => ({
   kind: task.type,
   name: task.name,
   resourcePool: task.resourcePool,
+  slots: task.slots,
   startTime: task.startTime,
   task,
   userId: task.userId,
@@ -241,6 +257,7 @@ export const genericTaskRow = (task: GenericTask): GenericTaskRunRow => ({
   kind: RunKind.GenericTask,
   name: task.name,
   resourcePool: task.resourcePool,
+  slots: task.slots,
   startTime: task.startTime,
   task,
   userId: task.userId,
@@ -265,6 +282,7 @@ export const experimentRow = (item: BulkExperimentItem): ExperimentRunRow => {
     kind: RunKind.Experiment,
     name: item.name,
     resourcePool: item.resourcePool,
+    slots: experimentSlots(item),
     startTime: item.startTime,
     userId: item.userId,
     workspaceId: experiment.workspaceId,

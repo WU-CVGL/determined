@@ -86,6 +86,7 @@ import settingsConfig, {
   DEFAULT_PAGE_SIZE,
   FILTER_KEYS,
   MAX_PAGE_SIZE,
+  normalizedLayout,
   Owner,
   Settings,
 } from './TaskDashboard.settings';
@@ -248,6 +249,38 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
     if (isLoading || urlKinds.length === 0 || _.isEqual(urlKinds, settings.type)) return;
     updateSettings({ tableOffset: 0, type: urlKinds });
   }, [isLoading, settings.type, updateSettings, urlKinds]);
+
+  // Stored columns and widths, also from before the Slots column, get one width for each column.
+  const layoutUpdate = useMemo(
+    () =>
+      isLoading
+        ? undefined
+        : normalizedLayout({ columns: settings.columns, columnWidths: settings.columnWidths }),
+    [isLoading, settings.columns, settings.columnWidths],
+  );
+  useEffect(() => {
+    if (layoutUpdate) updateSettings(layoutUpdate);
+  }, [layoutUpdate, updateSettings]);
+  /*
+   * The table takes the widths it mounts with, and later ones only when their count changes. It
+   * mounts again once the stored layout has loaded and has one width for each column, so that it
+   * shows (and a resize keeps) the stored widths, not the default ones. It shows no rows before,
+   * as a click on one could land on a row about to be replaced.
+   */
+  const layoutReady = !isLoading && !layoutUpdate;
+  /*
+   * The table stores only the widths on a resize. The columns they belong to are stored with them,
+   * so that the widths still find their columns once the default columns change.
+   */
+  const updateTableSettings = useCallback(
+    (update: Partial<Settings>) =>
+      updateSettings(
+        update.columnWidths && !update.columns
+          ? { ...update, columns: [...settings.columns] }
+          : update,
+      ),
+    [settings.columns, updateSettings],
+  );
 
   const selectedKinds = useMemo(
     () => (settings.type ?? []).filter((kind) => pageKinds.includes(kind)),
@@ -669,6 +702,19 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         title: 'Resource Pool',
       },
       {
+        align: 'right',
+        dataIndex: 'slots',
+        defaultWidth: DEFAULT_COLUMN_WIDTHS.slots,
+        key: 'slots',
+        onCell: () => ({ 'data-testid': 'slots-cell' }),
+        render: (_: unknown, row: RunRow) => {
+          if (row.slots === undefined) return '—';
+          if (row.kind !== RunKind.Experiment) return row.slots;
+          return <span title="Slots per trial">{row.slots}</span>;
+        },
+        title: 'Slots',
+      },
+      {
         dataIndex: 'startTime',
         defaultWidth: DEFAULT_COLUMN_WIDTHS.startTime,
         key: 'startTime',
@@ -806,7 +852,8 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
             ContextMenu={RowContextMenu}
             dataSource={page?.rows}
             defaultColumns={DEFAULT_COLUMNS}
-            loading={page === undefined}
+            key={layoutReady ? 'layout-ready' : 'layout-pending'}
+            loading={page === undefined || !layoutReady}
             pagination={{
               ...getFullPaginationConfig({ limit, offset }, page?.total ?? 0),
               pageSizeOptions: PAGE_SIZE_OPTIONS,
@@ -822,7 +869,7 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
             settings={settings}
             showSorterTooltip={false}
             size="small"
-            updateSettings={updateSettings}
+            updateSettings={updateTableSettings}
           />
         </GenericTaskActionStateContext.Provider>
       </div>
