@@ -254,8 +254,7 @@ const GenericTaskDetails: React.FC = () => {
   return (
     <Page
       breadcrumb={[
-        { breadcrumbName: 'Tasks', path: paths.taskList() },
-        { breadcrumbName: 'Generic Tasks', path: paths.genericTaskList() },
+        { breadcrumbName: 'Jobs', path: paths.jobs() },
         { breadcrumbName: name, path: paths.genericTaskDetails(taskId) },
       ]}
       headerComponent={

@@ -150,6 +150,13 @@ const routes: RouteConfig[] = [
   },
   {
     icon: 'tasks',
+    id: 'jobs',
+    needAuth: true,
+    path: '/jobs',
+    title: 'Jobs',
+  },
+  {
+    icon: 'tasks',
     id: 'taskList',
     needAuth: true,
     path: '/tasks/:tab',
@@ -280,13 +287,6 @@ const routes: RouteConfig[] = [
     needAuth: false,
     path: '/reload',
     title: 'Reload',
-  },
-  {
-    id: 'jobs',
-    needAuth: true,
-    path: '/jobs',
-    redirect: '/clusters',
-    title: 'Job Queue',
   },
   {
     id: 'admin',

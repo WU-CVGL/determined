@@ -239,6 +239,9 @@ func (a *apiServer) getExperimentTx(
 	if err = authz.ObfuscateExperiments(exp); err != nil {
 		return nil, err
 	}
+	if err = redactExperimentRegistryAuth(curUser, exp); err != nil {
+		return nil, err
+	}
 
 	return exp, nil
 }
@@ -669,6 +672,11 @@ func (a *apiServer) GetExperiments(
 
 	if err = a.enrichExperimentState(resp.Experiments...); err != nil {
 		return nil, err
+	}
+	for _, exp := range resp.Experiments {
+		if err = redactExperimentRegistryAuth(*curUser, exp); err != nil {
+			return nil, err
+		}
 	}
 
 	return resp, nil
@@ -2764,6 +2772,11 @@ func (a *apiServer) SearchExperiments(
 
 	if err = a.enrichExperimentState(experiments...); err != nil {
 		return nil, err
+	}
+	for _, exp := range experiments {
+		if err = redactExperimentRegistryAuth(*curUser, exp); err != nil {
+			return nil, err
+		}
 	}
 
 	// get the best trial associated with the experiment.

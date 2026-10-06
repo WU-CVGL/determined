@@ -194,76 +194,6 @@ export const isTaskKillable = (
   );
 };
 
-const matchesSearch = <T extends Type.AnyTask | Type.FullExperimentItem>(
-  task: T,
-  search = '',
-): boolean => {
-  if (!search) return true;
-  return task.id.toString().indexOf(search) !== -1 || task.name.indexOf(search) !== -1;
-};
-
-const matchesState = <T extends Type.AnyTask | Type.FullExperimentItem>(
-  task: T,
-  states: string[],
-): boolean => {
-  if (!Array.isArray(states) || states.length === 0 || states[0] === Type.ALL_VALUE) return true;
-  return states.includes(task.state as string);
-};
-
-const matchesUser = <T extends Type.AnyTask | Type.FullExperimentItem>(
-  task: T,
-  users?: string[],
-): boolean => {
-  if (!Array.isArray(users) || users.length === 0 || users[0] === Type.ALL_VALUE) return true;
-  return users.findIndex((user) => task.userId === parseInt(user)) !== -1;
-};
-
-const matchesWorkspace = <T extends Type.AnyTask | Type.FullExperimentItem>(
-  task: T,
-  workspaces?: string[],
-): boolean => {
-  if (!Array.isArray(workspaces) || workspaces.length === 0 || workspaces[0] === Type.ALL_VALUE)
-    return true;
-  return workspaces.findIndex((workspace) => task.workspaceId === parseInt(workspace)) !== -1;
-};
-
-export const filterTasks = <
-  T extends Type.CommandType | Type.TaskType = Type.TaskType,
-  A extends Type.CommandTask | Type.AnyTask = Type.AnyTask,
->(
-  tasks: A[],
-  filters: Type.TaskFilters<T>,
-  _users: Type.User[],
-  search = '',
-): A[] => {
-  return tasks
-    .filter((task) => {
-      const isExperiment = isExperimentTask(task);
-      const type = isExperiment ? Type.TaskType.Experiment : (task as Type.CommandTask).type;
-      return (
-        (!Array.isArray(filters.types) || filters.types.includes(type as T)) &&
-        matchesUser<A>(task, filters.users) &&
-        matchesWorkspace<A>(task, filters.workspaces) &&
-        matchesState<A>(task, filters.states || []) &&
-        matchesSearch<A>(task, search) &&
-        (!isExperiment || !(task as Type.ExperimentTask).archived)
-      );
-    })
-    .filter((task) => matchesSearch<A>(task, search));
-};
-
-/* Conversions to Tasks */
-
-export const taskFromCommandTask = (command: Type.CommandTask): Type.RecentCommandTask => {
-  return {
-    ...command,
-    lastEvent: {
-      date: command.startTime,
-      name: 'requested',
-    },
-  };
-};
-
 // Checks whether tensorboard source matches a given source list.
 export const tensorBoardMatchesSource = (
   tensorBoard: Type.CommandTask,
@@ -302,10 +232,6 @@ const commandStateSortOrder: CommandState[] = [
 const commandStateSortValues: Map<CommandState, number> = new Map(
   commandStateSortOrder.map((state, idx) => [state, idx]),
 );
-
-export const commandStateSorter = (a: CommandState, b: CommandState): number => {
-  return (commandStateSortValues.get(a) || 0) - (commandStateSortValues.get(b) || 0);
-};
 
 export const taskStateSorter = (a: State, b: State): number => {
   // FIXME this is O(n) we can do it in constant time.

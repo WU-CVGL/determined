@@ -656,7 +656,7 @@ const ExperimentDetailsHeader: React.FC<Props> = ({
       rows.push({
         label: 'Job info',
         value: (
-          <Link path={paths.jobs()}>
+          <Link path={paths.clusters()}>
             {jobInfoLinkText}
           </Link>
         ),

@@ -165,7 +165,7 @@ const NavigationSideBar: React.FC = () => {
     const topItems: MenuItemProps[] = [
       ...dashboardTopNav.concat(topNav),
       { icon: 'model', label: 'Model Registry', path: paths.modelList() },
-      { icon: 'tasks', label: 'Tasks', path: paths.taskList() },
+      { icon: 'tasks', label: 'Jobs', path: paths.jobs() },
       { icon: 'cluster', label: 'Cluster', path: paths.clusters() },
     ];
     if (templatesOn) {

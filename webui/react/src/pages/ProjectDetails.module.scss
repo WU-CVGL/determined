@@ -9,6 +9,12 @@
   flex-direction: column;
   height: 100%;
 }
+
+/* The page does not scroll, so the Jobs tab scrolls itself. */
+
+.jobs {
+  overflow-y: auto;
+}
 :global(.ant-spin-container) {
   display: flex;
   flex-direction: column;

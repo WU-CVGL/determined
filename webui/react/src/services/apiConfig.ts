@@ -651,7 +651,7 @@ export const getExperiments: DetApi<
       params.archived,
       params.states,
       undefined,
-      getUserIds(params.users),
+      params.userIds ?? getUserIds(params.users),
       params.projectId ?? 0,
       undefined,
       undefined,
@@ -660,8 +660,8 @@ export const getExperiments: DetApi<
       params.experimentIdFilter?.incl,
       params.experimentIdFilter?.notIn,
       true,
-      undefined,
-      undefined,
+      params.workspaceId,
+      params.slotsFilter,
       options,
     );
   },
@@ -1321,9 +1321,9 @@ export const getGenericTasks: DetApi<
       params.states?.map(decoder.encodeGenericTaskState),
       params.parentId,
       params.taskIds,
-      undefined,
-      undefined,
-      undefined,
+      params.projectId,
+      params.search,
+      params.slotsFilter,
       options,
     ),
 };
@@ -1994,7 +1994,7 @@ export const getCommands: DetApi<
   name: 'getCommands',
   postProcess: (response) =>
     (response.commands || []).map((command) => decoder.mapV1Command(command)),
-  request: (params: Service.GetCommandsParams) =>
+  request: (params: Service.GetCommandsParams, options) =>
     detApi.Commands.getCommands(
       params.sortBy,
       params.orderBy,
@@ -2003,6 +2003,7 @@ export const getCommands: DetApi<
       undefined,
       getUserIds(params.users),
       params.workspaceId,
+      options ?? { signal: params.signal },
     ),
 };
 
@@ -2014,7 +2015,7 @@ export const getJupyterLabs: DetApi<
   name: 'getJupyterLabs',
   postProcess: (response) =>
     (response.notebooks || []).map((jupyterLab) => decoder.mapV1Notebook(jupyterLab)),
-  request: (params: Service.GetJupyterLabsParams) =>
+  request: (params: Service.GetJupyterLabsParams, options) =>
     detApi.Notebooks.getNotebooks(
       params.sortBy,
       params.orderBy,
@@ -2023,6 +2024,7 @@ export const getJupyterLabs: DetApi<
       undefined,
       getUserIds(params.users),
       params.workspaceId,
+      options ?? { signal: params.signal },
     ),
 };
 
@@ -2033,7 +2035,7 @@ export const getShells: DetApi<
 > = {
   name: 'getShells',
   postProcess: (response) => (response.shells || []).map((shell) => decoder.mapV1Shell(shell)),
-  request: (params: Service.GetShellsParams) =>
+  request: (params: Service.GetShellsParams, options) =>
     detApi.Shells.getShells(
       params.sortBy,
       params.orderBy,
@@ -2042,6 +2044,7 @@ export const getShells: DetApi<
       undefined,
       getUserIds(params.users),
       params.workspaceId,
+      options ?? { signal: params.signal },
     ),
 };
 
@@ -2053,7 +2056,7 @@ export const getTensorBoards: DetApi<
   name: 'getTensorBoards',
   postProcess: (response) =>
     (response.tensorboards || []).map((tensorboard) => decoder.mapV1TensorBoard(tensorboard)),
-  request: (params: Service.GetTensorBoardsParams) =>
+  request: (params: Service.GetTensorBoardsParams, options) =>
     detApi.TensorBoards.getTensorboards(
       params.sortBy,
       params.orderBy,
@@ -2062,6 +2065,7 @@ export const getTensorBoards: DetApi<
       undefined,
       getUserIds(params.users),
       params.workspaceId,
+      options ?? { signal: params.signal },
     ),
 };
 

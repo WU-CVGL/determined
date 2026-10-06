@@ -11,6 +11,7 @@ import Page, { BreadCrumbRoute } from 'components/Page';
 import PageNotFound from 'components/PageNotFound';
 import { useProjectActionMenu } from 'components/ProjectActionDropdown';
 import Searches from 'components/Searches/Searches';
+import TaskDashboard from 'components/TaskDashboard/TaskDashboard';
 import useFeature from 'hooks/useFeature';
 import usePermissions from 'hooks/usePermissions';
 import usePolling from 'hooks/usePolling';
@@ -115,7 +116,7 @@ const ProjectDetails: React.FC = () => {
           </div>
         ),
         key: 'experiments',
-        label: id === 1 ? '' : 'Experiments',
+        label: 'Experiments',
       });
     }
 
@@ -133,6 +134,19 @@ const ProjectDetails: React.FC = () => {
       });
     }
 
+    // The project's experiments and generic tasks in one list, also in Uncategorized (project 1).
+    items.push({
+      children: (
+        <div className={css.tabPane}>
+          <div className={`${css.base} ${css.jobs}`}>
+            <TaskDashboard projectId={project.id} />
+          </div>
+        </div>
+      ),
+      key: 'jobs',
+      label: 'Jobs',
+    });
+
     if ((f_flat_runs || !project.immutable) && projectId) {
       items.push({
         children: (
@@ -148,7 +162,7 @@ const ProjectDetails: React.FC = () => {
     }
 
     return items;
-  }, [fetchProject, id, project, projectId, f_explist, f_flat_runs]);
+  }, [fetchProject, project, projectId, f_explist, f_flat_runs]);
 
   usePolling(fetchProject, { rerunOnNewFn: true });
 

@@ -1,0 +1,73 @@
+.base {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+}
+.kinds,
+.filters {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.count {
+  color: var(--theme-surface-on-weak);
+  font-variant-numeric: tabular-nums;
+  margin-left: 6px;
+}
+
+/* The table scrolls sideways in its own box (its scroll.x), never the page. */
+
+.table {
+  max-width: 100%;
+  min-width: 0;
+}
+.kind {
+  align-items: center;
+  display: flex;
+}
+.location {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.separator {
+  color: var(--theme-surface-on-weak);
+  margin: 0 4px;
+}
+.note {
+  color: var(--theme-surface-on-weak);
+  font-size: 12px;
+  margin: 0;
+}
+.sourceName {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+
+  span {
+    margin-right: 4px;
+  }
+  button {
+    background-color: var(--theme-colors-monochrome-17);
+    border: solid var(--theme-stroke-width) var(--theme-colors-monochrome-11);
+    border-radius: var(--theme-border-radius);
+    cursor: pointer;
+    font-size: 12px;
+    outline: 0;
+  }
+  button:hover {
+    border-color: var(--theme-status-active);
+  }
+  button:focus {
+    box-shadow: var(--theme-outline);
+  }
+}
