@@ -366,7 +366,7 @@ disabled, draining and excluded GPUs, and the details of a GPU show on hover or 
 after a click. Each agent's slot count splits its slots into running, pending and unoccupied, and
 the unoccupied slots into allocatable (enabled and not draining, so they can take new work),
 disabled and draining. A running or pending slot counts as running or pending also when it is
-disabled or draining.
+disabled or draining, and a slot of the topology without a matching slot record counts as unknown.
 
 Coverage
 ========
