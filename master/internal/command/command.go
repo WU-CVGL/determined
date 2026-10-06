@@ -344,6 +344,7 @@ func (c *Command) ToV1Command() *commandv1.Command {
 		ExitStatus:   c.exitStatus.String(),
 		JobId:        c.jobID.String(),
 		WorkspaceId:  int32(c.GenericCommandSpec.Metadata.WorkspaceID),
+		Slots:        int32(c.Config.Resources.Slots),
 	}
 }
 
@@ -367,6 +368,7 @@ func (c *Command) ToV1Notebook() *notebookv1.Notebook {
 		ExitStatus:     c.exitStatus.String(),
 		JobId:          c.jobID.String(),
 		WorkspaceId:    int32(c.GenericCommandSpec.Metadata.WorkspaceID),
+		Slots:          int32(c.Config.Resources.Slots),
 	}
 }
 
@@ -408,6 +410,7 @@ func (c *Command) ToV1Shell() *shellv1.Shell {
 		AgentUserGroup: protoutils.ToStruct(c.Base.AgentUserGroup),
 		JobId:          c.jobID.String(),
 		WorkspaceId:    int32(c.GenericCommandSpec.Metadata.WorkspaceID),
+		Slots:          int32(c.Config.Resources.Slots),
 	}
 }
 
@@ -446,6 +449,7 @@ func (c *Command) ToV1Tensorboard() *tensorboardv1.Tensorboard {
 		ExitStatus:     c.exitStatus.String(),
 		JobId:          c.jobID.String(),
 		WorkspaceId:    int32(c.GenericCommandSpec.Metadata.WorkspaceID),
+		Slots:          int32(c.Config.Resources.Slots),
 	}
 }
 

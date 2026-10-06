@@ -33,6 +33,11 @@ func (s slotEnabled) enabled() bool {
 	return s.agentEnabled && s.userEnabled
 }
 
+// allocatable reports whether the slot takes new work: it is enabled and not draining.
+func (s slotEnabled) allocatable() bool {
+	return s.enabled() && !s.draining
+}
+
 type slot struct {
 	device      device.Device
 	enabled     slotEnabled
@@ -190,8 +195,19 @@ func (a *agentState) deallocateContainer(id cproto.ID) {
 	delete(a.containerState, id)
 	for d, cid := range a.Devices {
 		if cid != nil && *cid == id {
-			a.Devices[d] = nil
+			a.freeDevice(d)
 		}
+	}
+}
+
+// freeDevice marks d free. If its slot no longer takes new work (it was drained while d was in
+// use), d leaves Devices, as the device of a disabled slot does at once. This also runs on the
+// scheduler's copies, so it must not log: a copy has no syslog.
+func (a *agentState) freeDevice(d device.Device) {
+	a.Devices[d] = nil
+	if s, ok := a.slotStates[d.ID]; ok && !s.enabled.allocatable() {
+		s.enabled.deviceAdded = false
+		delete(a.Devices, d)
 	}
 }
 
@@ -205,9 +221,14 @@ func (a *agentState) deepCopy() *agentState {
 		enabled:               a.enabled,
 		draining:              a.draining,
 		containerState:        maps.Clone(a.containerState),
-		// TODO(ilia): Deepcopy of `slotStates` may be necessary one day.
-		slotStates:       a.slotStates,
+		// The scheduler's simulation frees devices on its copies (freeDevice), which updates
+		// slot states, so a copy needs its own.
+		slotStates:       make(map[device.ID]*slot, len(a.slotStates)),
 		resourcePoolName: a.resourcePoolName,
+	}
+	for id, s := range a.slotStates {
+		copied := *s
+		copiedAgent.slotStates[id] = &copied
 	}
 
 	return copiedAgent
@@ -320,9 +341,19 @@ func (a *agentState) containerStateChanged(msg aproto.ContainerStateChanged) {
 		}
 	}
 
-	a.containerState[msg.Container.ID] = &msg.Container
+	// containerState holds the containers the pool has not released: allocateFreeDevices,
+	// startContainer and the restore from a snapshot add them, and deallocateContainer and the
+	// Terminated report remove them. A report updates a container held there but does not add one.
+	// The pool releases a container without waiting for it to terminate, so the agent can still
+	// report it, for example Running, after the release. Holding it again would bring its device
+	// back in use when its slot is enabled, and nothing would free the device after that.
+	// One exception remains: a StartTaskContainer buffered while the agent was disconnected is
+	// replayed on reconnect through startContainer, which adds its container again even if the pool
+	// released it in the meantime. That container then stays here until its Terminated report.
 	if msg.Container.State == cproto.Terminated {
 		delete(a.containerState, msg.Container.ID)
+	} else if _, ok := a.containerState[msg.Container.ID]; ok {
+		a.containerState[msg.Container.ID] = &msg.Container
 	}
 
 	if err := a.persist(); err != nil {
@@ -411,12 +442,28 @@ func (a *agentState) updateSlotDeviceView(deviceID device.ID) {
 	}
 
 	// TODO(ilia): Don't materialize `Devices` view on slots.
-	if s.enabled.enabled() && !s.enabled.deviceAdded {
+	// Devices holds the slots that take new work and the devices still in use. A draining slot
+	// keeps its device while a container holds it, and the device leaves once it is free, here or
+	// in freeDevice. So the free entries of Devices, which every allocation path counts and takes
+	// from, are exactly the enabled, not draining, free slots.
+	if s.enabled.allocatable() && !s.enabled.deviceAdded {
 		s.enabled.deviceAdded = true
 
-		a.addDevice(s.device, s.containerID)
-	} else if !s.enabled.enabled() {
-		if !s.enabled.draining && s.enabled.deviceAdded {
+		// The device comes back in use only while the pool still holds its container. Once the
+		// pool has released it (deallocateContainer) or it terminated, the device is free:
+		// slot.containerID can outlive the release until the agent reports the container
+		// terminated, and nothing would free the device after that. A report that arrives after
+		// the release does not put the container back in containerState (containerStateChanged,
+		// which also notes the one path that still does).
+		cid := s.containerID
+		if cid != nil {
+			if _, ok := a.containerState[*cid]; !ok {
+				cid = nil
+			}
+		}
+		a.addDevice(s.device, cid)
+	} else if !s.enabled.allocatable() {
+		if s.enabled.deviceAdded && (!s.enabled.draining || a.Devices[s.device] == nil) {
 			s.enabled.deviceAdded = false
 			a.removeDevice(s.device)
 		}
@@ -437,6 +484,10 @@ func (a *agentState) patchSlotStateInner(
 ) model.SlotSummary {
 	if msg.enabled != nil {
 		slotState.enabled.userEnabled = *msg.enabled
+		if *msg.enabled {
+			// Enabling a slot ends its drain.
+			slotState.enabled.draining = false
+		}
 	}
 	if msg.drain != nil {
 		slotState.enabled.draining = *msg.drain
@@ -527,8 +578,8 @@ func (a *agentState) clearUnlessRecovered(
 		if cID := a.Devices[d]; cID != nil {
 			_, ok := recovered[*cID]
 			if !ok {
-				a.Devices[d] = nil
 				a.slotStates[d.ID].containerID = nil
+				a.freeDevice(d)
 				updated = true
 			}
 		}

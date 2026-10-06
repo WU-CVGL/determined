@@ -2674,3 +2674,122 @@ invariant_config:
 		require.NoError(t, err)
 	})
 }
+
+func TestGetExperimentsFiltersByWorkspaceAndSlots(t *testing.T) {
+	api, curUser, ctx := setupAPITest(t, nil)
+	workspaceID, projectID := createProjectAndWorkspace(ctx, t, api)
+	_, otherProjectID := createProjectAndWorkspace(ctx, t, api)
+	sameWorkspaceProject, err := api.PostProject(ctx, &apiv1.PostProjectRequest{
+		Name: uuid.NewString(), WorkspaceId: int32(workspaceID),
+	})
+	require.NoError(t, err)
+
+	withSlotsPerTrial := func(slots int) expconf.ExperimentConfig {
+		return schemas.WithDefaults(schemas.Merge(expconf.ExperimentConfig{
+			RawName:      expconf.Name{RawString: ptrs.Ptr("slots")},
+			RawResources: &expconf.ResourcesConfig{RawSlotsPerTrial: ptrs.Ptr(slots)},
+		}, minExpConfig))
+	}
+	twoSlots := createTestExpWithActiveConfig(t, api, curUser, projectID, withSlotsPerTrial(2))
+	zeroSlots := createTestExpWithActiveConfig(
+		t, api, curUser, int(sameWorkspaceProject.Project.Id), withSlotsPerTrial(0))
+	// A config without resources.slots_per_trial has the default of 1, so it has slots.
+	unsetSlots := createTestExpWithProjectID(t, api, curUser, projectID)
+	_, err = db.Bun().NewRaw(
+		"UPDATE experiments SET config = config #- '{resources,slots_per_trial}' WHERE id = ?",
+		unsetSlots.ID).Exec(ctx)
+	require.NoError(t, err)
+	var hasSlots bool
+	require.NoError(t, db.Bun().NewRaw(
+		"SELECT jsonb_exists(config->'resources', 'slots_per_trial') FROM experiments WHERE id = ?",
+		unsetSlots.ID).Scan(ctx, &hasSlots))
+	require.False(t, hasSlots)
+	createTestExpWithProjectID(t, api, curUser, otherProjectID)
+
+	list := func(req *apiv1.GetExperimentsRequest) []int32 {
+		t.Helper()
+		resp, err := api.GetExperiments(ctx, req)
+		require.NoError(t, err)
+		out := []int32{}
+		for _, exp := range resp.Experiments {
+			out = append(out, exp.Id)
+		}
+		return out
+	}
+	ids := func(exps ...*model.Experiment) []int32 {
+		out := []int32{}
+		for _, exp := range exps {
+			out = append(out, int32(exp.ID))
+		}
+		return out
+	}
+
+	// Workspace: every project in it, no other workspace.
+	wid := int32(workspaceID)
+	require.ElementsMatch(t, ids(twoSlots, zeroSlots, unsetSlots),
+		list(&apiv1.GetExperimentsRequest{WorkspaceId: wid}))
+	require.Equal(t, ids(zeroSlots), list(&apiv1.GetExperimentsRequest{
+		WorkspaceId: wid, ProjectId: sameWorkspaceProject.Project.Id,
+	}))
+	require.Empty(t, list(&apiv1.GetExperimentsRequest{
+		WorkspaceId: wid, ProjectId: int32(otherProjectID),
+	}))
+	_, err = api.GetExperiments(ctx, &apiv1.GetExperimentsRequest{WorkspaceId: 1 << 30})
+	require.Equal(t, apiPkg.NotFoundErrs("workspace", strconv.Itoa(1<<30), true).Error(), err.Error())
+
+	// Slot count per trial: HAS_SLOTS is above 0, the unset default of 1 included; ZERO_SLOTS is 0.
+	require.ElementsMatch(t, ids(twoSlots, unsetSlots), list(&apiv1.GetExperimentsRequest{
+		WorkspaceId: wid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_HAS_SLOTS,
+	}))
+	require.Equal(t, ids(zeroSlots), list(&apiv1.GetExperimentsRequest{
+		WorkspaceId: wid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_ZERO_SLOTS,
+	}))
+	require.Equal(t, ids(zeroSlots), list(&apiv1.GetExperimentsRequest{
+		ExperimentIdFilter: &commonv1.Int32FieldFilter{Incl: ids(twoSlots, zeroSlots, unsetSlots)},
+		SlotsFilter:        apiv1.SlotsFilter_SLOTS_FILTER_ZERO_SLOTS,
+	}))
+
+	// Paging counts only the matching experiments.
+	resp, err := api.GetExperiments(ctx, &apiv1.GetExperimentsRequest{
+		WorkspaceId: wid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_HAS_SLOTS, Limit: 1,
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Experiments, 1)
+	require.Equal(t, int32(2), resp.Pagination.Total)
+
+	_, err = api.GetExperiments(ctx, &apiv1.GetExperimentsRequest{SlotsFilter: 99})
+	require.Equal(t, codes.InvalidArgument, status.Code(err), "%v", err)
+}
+
+func TestAuthZGetExperimentsInWorkspace(t *testing.T) {
+	api, authZExp, _, curUser, ctx := setupExpAuthTest(t, nil)
+	workspaceID, projectID := createProjectAndWorkspace(ctx, t, api)
+	exp := createTestExpWithProjectID(t, api, curUser, projectID)
+	_, otherProjectID := createProjectAndWorkspace(ctx, t, api)
+	createTestExpWithProjectID(t, api, curUser, otherProjectID)
+
+	mockUserArg := mock.MatchedBy(func(u model.User) bool {
+		return u.ID == curUser.ID
+	})
+
+	// Can't view the workspace gets a 404.
+	wAuthZ.On("CanGetWorkspace", mock.Anything, mockUserArg, mock.Anything).
+		Return(authz2.PermissionDeniedError{}).Once()
+	_, err := api.GetExperiments(ctx, &apiv1.GetExperimentsRequest{WorkspaceId: int32(workspaceID)})
+	require.Equal(t, apiPkg.NotFoundErrs("workspace", strconv.Itoa(workspaceID), true).Error(),
+		err.Error())
+
+	// Otherwise the experiments of the workspace, through the experiment filter.
+	wAuthZ.On("CanGetWorkspace", mock.Anything, mockUserArg, mock.Anything).
+		Return(nil).Once()
+	resQuery := &bun.SelectQuery{}
+	authZExp.On("FilterExperimentsQuery", mock.Anything, mockUserArg, mock.Anything, mock.Anything,
+		[]rbacv1.PermissionType{rbacv1.PermissionType_PERMISSION_TYPE_VIEW_EXPERIMENT_METADATA}).
+		Return(resQuery, nil).Once().Run(func(args mock.Arguments) {
+		*resQuery = *args.Get(3).(*bun.SelectQuery)
+	})
+	res, err := api.GetExperiments(ctx, &apiv1.GetExperimentsRequest{WorkspaceId: int32(workspaceID)})
+	require.NoError(t, err)
+	require.Len(t, res.Experiments, 1)
+	require.Equal(t, exp.ID, int(res.Experiments[0].Id))
+}

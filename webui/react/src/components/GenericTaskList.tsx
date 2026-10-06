@@ -7,6 +7,7 @@ import _ from 'lodash';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import FilterCounter from 'components/FilterCounter';
+import GenericTaskActionDropdown from 'components/GenericTaskActionDropdown';
 import GenericTaskIdLink from 'components/GenericTaskIdLink';
 import settingsConfig, {
   DEFAULT_COLUMN_WIDTHS,
@@ -15,7 +16,11 @@ import settingsConfig, {
 } from 'components/GenericTaskList.settings';
 import GenericTaskStateBadge from 'components/GenericTaskStateBadge';
 import Link from 'components/Link';
-import InteractiveTable, { ColumnDef } from 'components/Table/InteractiveTable';
+import InteractiveTable, {
+  ColumnDef,
+  ContextMenuProps,
+  onRightClickableCell,
+} from 'components/Table/InteractiveTable';
 import {
   checkmarkRenderer,
   defaultRowClassName,
@@ -24,6 +29,10 @@ import {
   userRenderer,
 } from 'components/Table/Table';
 import TableFilterDropdown from 'components/Table/TableFilterDropdown';
+import {
+  GenericTaskActionStateContext,
+  useGenericTaskActionState,
+} from 'hooks/useGenericTaskActions';
 import usePolling from 'hooks/usePolling';
 import { useSettings } from 'hooks/useSettings';
 import { paths } from 'routes/utils';
@@ -60,6 +69,11 @@ const GenericTaskList: React.FC<Props> = ({ workspaceId }: Props) => {
   const currentUser = Loadable.getOrElse(undefined, loadableCurrentUser);
   const users = Loadable.getOrElse([], useObservable(userStore.getUsers()));
   const [response, setResponse] = useState<GenericTaskPagination>();
+  /*
+   * Each row has two menus, in the actions column and on a right click; they share the running
+   * actions and failed unpauses of the row's task, so that both offer the same.
+   */
+  const actionState = useGenericTaskActionState();
   const pageRef = useRef<HTMLElement>(null);
   const canceler = useRef(new AbortController());
   const stgsConfig = useMemo(() => settingsConfig(workspaceId), [workspaceId]);
@@ -236,9 +250,32 @@ const GenericTaskList: React.FC<Props> = ({ workspaceId }: Props) => {
         render: (_: unknown, record: GenericTask) => timeRenderer(record.endTime),
         title: 'Ended',
       },
+      {
+        align: 'right',
+        className: 'fullCell',
+        dataIndex: 'action',
+        defaultWidth: DEFAULT_COLUMN_WIDTHS['action'],
+        fixed: 'right',
+        key: 'action',
+        onCell: () => ({ ...onRightClickableCell(), 'data-testid': 'actions' }),
+        render: (_: unknown, record: GenericTask) => (
+          <GenericTaskActionDropdown task={record} onComplete={fetchTasks} />
+        ),
+        title: '',
+      },
     ];
     return cols;
-  }, [stateFilterDropdown, users]);
+  }, [fetchTasks, stateFilterDropdown, users]);
+
+  // The same menu on a right click on the row.
+  const GenericTaskActionDropdownCM = useCallback(
+    ({ record, children }: ContextMenuProps<GenericTask>) => (
+      <GenericTaskActionDropdown task={record} onComplete={fetchTasks}>
+        {children}
+      </GenericTaskActionDropdown>
+    ),
+    [fetchTasks],
+  );
 
   const handleTableChange = useCallback(
     (tablePagination: TablePaginationConfig) => {
@@ -268,27 +305,30 @@ const GenericTaskList: React.FC<Props> = ({ workspaceId }: Props) => {
         </Row>
       </div>
       <div className={css.base}>
-        <InteractiveTable<GenericTask, Settings>
-          columns={columns}
-          containerRef={pageRef}
-          dataSource={response?.tasks}
-          defaultColumns={stgsConfig.settings.columns.defaultValue}
-          loading={response === undefined}
-          pagination={getFullPaginationConfig(
-            {
-              limit: settings.tableLimit,
-              offset: settings.tableOffset,
-            },
-            response?.pagination.total ?? 0,
-          )}
-          rowClassName={defaultRowClassName({ clickable: false })}
-          rowKey="taskId"
-          settings={settings}
-          showSorterTooltip={false}
-          size="small"
-          updateSettings={updateSettings}
-          onChange={handleTableChange}
-        />
+        <GenericTaskActionStateContext.Provider value={actionState}>
+          <InteractiveTable<GenericTask, Settings>
+            columns={columns}
+            containerRef={pageRef}
+            ContextMenu={GenericTaskActionDropdownCM}
+            dataSource={response?.tasks}
+            defaultColumns={stgsConfig.settings.columns.defaultValue}
+            loading={response === undefined}
+            pagination={getFullPaginationConfig(
+              {
+                limit: settings.tableLimit,
+                offset: settings.tableOffset,
+              },
+              response?.pagination.total ?? 0,
+            )}
+            rowClassName={defaultRowClassName({ clickable: false })}
+            rowKey="taskId"
+            settings={settings}
+            showSorterTooltip={false}
+            size="small"
+            updateSettings={updateSettings}
+            onChange={handleTableChange}
+          />
+        </GenericTaskActionStateContext.Provider>
       </div>
     </>
   );

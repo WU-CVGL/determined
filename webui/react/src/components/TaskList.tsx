@@ -15,10 +15,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Badge, { BadgeType } from 'components/Badge';
 import FilterCounter from 'components/FilterCounter';
 import JupyterLabButton from 'components/JupyterLabButton';
-import JupyterLabModalComponent from 'components/JupyterLabModal';
 import ShellButton from 'components/ShellButton';
-import ShellLaunchedModalComponent from 'components/ShellLaunchedModal';
-import ShellModalComponent from 'components/ShellModal';
 import InteractiveTable, {
   ColumnDef,
   onRightClickableCell,
@@ -47,6 +44,7 @@ import settingsConfig, {
 } from 'components/TaskList.settings';
 import { commandTypeToLabel } from 'constants/states';
 import useFeature from 'hooks/useFeature';
+import { useLaunchAgain } from 'hooks/useLaunchAgain';
 import usePermissions from 'hooks/usePermissions';
 import usePolling from 'hooks/usePolling';
 import { useSettings } from 'hooks/useSettings';
@@ -56,7 +54,6 @@ import userStore from 'stores/users';
 import workspaceStore from 'stores/workspaces';
 import {
   ExperimentAction as Action,
-  CommandResponse,
   CommandState,
   CommandTask,
   CommandType,
@@ -90,7 +87,6 @@ interface Props {
 const filterKeys: Array<keyof Settings> = ['search', 'state', 'type', 'user', 'workspace'];
 
 const TaskList: React.FC<Props> = ({ workspace }: Props) => {
-  const currentUser = Loadable.getOrElse(undefined, useObservable(userStore.currentUser));
   const users = Loadable.getOrElse([], useObservable(userStore.getUsers()));
   const workspaces = Loadable.getOrElse([], useObservable(workspaceStore.workspaces));
   const [tasks, setTasks] = useState<CommandTask[] | undefined>(undefined);
@@ -108,14 +104,6 @@ const TaskList: React.FC<Props> = ({ workspace }: Props) => {
   const entityCopyMap = f_flat_runs ? RunEntityCopyMap : ExperimentEntityCopyMap;
 
   const BatchActionConfirmModal = useModal(BatchActionConfirmModalComponent);
-  const JupyterLabAgainModal = useModal(JupyterLabModalComponent);
-  const ShellAgainModal = useModal(ShellModalComponent);
-  const ShellLaunchedModal = useModal(ShellLaunchedModalComponent);
-  const [launchAgainTask, setLaunchAgainTask] = useState<CommandTask>();
-  const [launchedShell, setLaunchedShell] = useState<CommandResponse>();
-  const openJupyterLabAgain = JupyterLabAgainModal.open;
-  const openShellAgain = ShellAgainModal.open;
-  const openShellLaunched = ShellLaunchedModal.open;
 
   useEffect(() => {
     if (sourcesModal) {
@@ -214,23 +202,10 @@ const TaskList: React.FC<Props> = ({ workspace }: Props) => {
 
   const handleActionComplete = useCallback(() => fetchTasks(), [fetchTasks]);
 
-  const handleLaunchAgain = useCallback(
-    (task: CommandTask) => {
-      setLaunchAgainTask(task);
-      if (task.type === CommandType.Shell) openShellAgain();
-      else if (task.type === CommandType.JupyterLab) openJupyterLabAgain();
-    },
-    [openJupyterLabAgain, openShellAgain],
-  );
-
-  const handleShellLaunched = useCallback(
-    (response: CommandResponse) => {
-      setLaunchedShell(response);
-      openShellLaunched();
-      fetchTasks();
-    },
-    [fetchTasks, openShellLaunched],
-  );
+  const { launchAgain: handleLaunchAgain, launchAgainModals } = useLaunchAgain({
+    onLaunched: handleActionComplete,
+    workspace,
+  });
 
   const tableSearchIcon = useCallback(() => <Icon name="search" size="tiny" title="Search" />, []);
 
@@ -414,7 +389,6 @@ const TaskList: React.FC<Props> = ({ workspace }: Props) => {
 
     const actionRenderer: TaskRenderer = (_, record) => (
       <TaskActionDropdown
-        curUser={currentUser}
         task={record}
         onComplete={handleActionComplete}
         onLaunchAgain={handleLaunchAgain}
@@ -550,7 +524,6 @@ const TaskList: React.FC<Props> = ({ workspace }: Props) => {
 
     return cols;
   }, [
-    currentUser,
     entityCopyMap,
     handleActionComplete,
     handleLaunchAgain,
@@ -650,7 +623,6 @@ const TaskList: React.FC<Props> = ({ workspace }: Props) => {
       record: CommandTask;
     }) => (
       <TaskActionDropdown
-        curUser={currentUser}
         task={record}
         onComplete={handleActionComplete}
         onLaunchAgain={handleLaunchAgain}
@@ -658,7 +630,7 @@ const TaskList: React.FC<Props> = ({ workspace }: Props) => {
         {children}
       </TaskActionDropdown>
     ),
-    [currentUser, handleActionComplete, handleLaunchAgain],
+    [handleActionComplete, handleLaunchAgain],
   );
 
   return (
@@ -726,22 +698,7 @@ const TaskList: React.FC<Props> = ({ workspace }: Props) => {
         `}
         onClose={handleSourceDismiss}
       />
-      {launchAgainTask?.type === CommandType.JupyterLab && (
-        <JupyterLabAgainModal.Component
-          initialTask={launchAgainTask}
-          key={launchAgainTask.id}
-          workspace={workspace}
-        />
-      )}
-      {launchAgainTask?.type === CommandType.Shell && (
-        <ShellAgainModal.Component
-          initialTask={launchAgainTask}
-          key={launchAgainTask.id}
-          workspace={workspace}
-          onLaunched={handleShellLaunched}
-        />
-      )}
-      {launchedShell && <ShellLaunchedModal.Component response={launchedShell} />}
+      {launchAgainModals}
     </>
   );
 };

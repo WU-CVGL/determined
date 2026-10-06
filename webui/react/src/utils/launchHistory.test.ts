@@ -1,8 +1,10 @@
 import { CommandType } from 'types';
 
 import {
+  clearAllLaunchHistory,
   clearLaunchHistory,
   LAUNCH_HISTORY_LIMIT,
+  listAllLaunchHistory,
   listLaunchHistory,
   recordLaunch,
   removeLaunchHistoryEntry,
@@ -128,6 +130,40 @@ describe('launchHistory', () => {
     clearLaunchHistory(1, SHELL);
     expect(listLaunchHistory(1, SHELL)).toEqual([]);
     expect(window.localStorage.getItem('u:1/launch-history/shell')).toBeNull();
+  });
+
+  it('lists the history of both types together, newest first, with each entry’s type', () => {
+    const now = vi.spyOn(Date, 'now');
+    now.mockReturnValue(1000);
+    recordLaunch(1, SHELL, { config: launchConfig('old shell'), workspaceId: 1 });
+    now.mockReturnValue(2000);
+    recordLaunch(1, JUPYTER, { config: launchConfig('notebook'), workspaceId: 1 });
+    now.mockReturnValue(3000);
+    recordLaunch(1, SHELL, { config: launchConfig('new shell'), workspaceId: 1 });
+
+    expect(listAllLaunchHistory(1).map((entry) => [entry.type, entry.config.description])).toEqual([
+      [SHELL, 'new shell'],
+      [JUPYTER, 'notebook'],
+      [SHELL, 'old shell'],
+    ]);
+    expect(listAllLaunchHistory(undefined)).toEqual([]);
+
+    clearAllLaunchHistory(1);
+    expect(listAllLaunchHistory(1)).toEqual([]);
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it('reads entries stored before the form listed both types', () => {
+    // An entry as earlier versions stored it: under the type's key, without a type field.
+    const entry = {
+      config: { description: 'kept' },
+      id: 'abc',
+      savedAt: 5,
+      v: 1,
+      workspaceId: 2,
+    };
+    window.localStorage.setItem('u:1/launch-history/jupyter-lab', JSON.stringify([entry]));
+    expect(listAllLaunchHistory(1)).toEqual([{ ...entry, type: JUPYTER }]);
   });
 
   describe('storage failures', () => {

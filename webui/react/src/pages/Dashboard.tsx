@@ -2,6 +2,7 @@ import Breadcrumb from 'hew/Breadcrumb';
 import Card from 'hew/Card';
 import Icon from 'hew/Icon';
 import Message from 'hew/Message';
+import Row from 'hew/Row';
 import Spinner from 'hew/Spinner';
 import { Loadable } from 'hew/utils/loadable';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -12,6 +13,7 @@ import Link from 'components/Link';
 import Page, { BreadCrumbRoute } from 'components/Page';
 import ProjectCard from 'components/ProjectCard';
 import Section from 'components/Section';
+import ShellButton from 'components/ShellButton';
 import ResponsiveTable from 'components/Table/ResponsiveTable';
 import {
   experimentNameRenderer,
@@ -182,7 +184,12 @@ const Dashboard: React.FC = () => {
   return (
     <Page
       breadcrumb={pageBreadCrumb}
-      options={<JupyterLabButton enabled={canCreateNSC} />}
+      options={
+        <Row>
+          <JupyterLabButton enabled={canCreateNSC} />
+          <ShellButton enabled={canCreateNSC} />
+        </Row>
+      }
       title="Home">
       {projectsLoading ? (
         <Section>

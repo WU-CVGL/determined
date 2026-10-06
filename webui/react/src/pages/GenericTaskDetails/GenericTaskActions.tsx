@@ -1,20 +1,11 @@
 import Button from 'hew/Button';
 import Row from 'hew/Row';
-import useConfirm from 'hew/useConfirm';
-import React, { useCallback, useState } from 'react';
+import React from 'react';
 
-import { killGenericTask, pauseGenericTask, unpauseGenericTask } from 'services/api';
+import useGenericTaskActions, { GenericTaskActionTarget } from 'hooks/useGenericTaskActions';
 import { GenericTaskState } from 'types';
-import handleError, { ErrorLevel, ErrorType } from 'utils/error';
-import { canKillGenericTask, canPauseGenericTask, canUnpauseGenericTask } from 'utils/task';
 
-export interface GenericTaskActionTarget {
-  name: string;
-  noPause?: boolean;
-  parentId?: string;
-  state?: GenericTaskState;
-  taskId: string;
-}
+export type { GenericTaskActionTarget } from 'hooks/useGenericTaskActions';
 
 interface Props {
   canControl: boolean;
@@ -25,30 +16,12 @@ interface Props {
 const NO_PERMISSION = 'You need to own this task or be an admin to control it.';
 
 /*
- * Shows the master's reason (for example the HTTP 400 or 409 message) instead of the generic
- * message that the confirmation modal would set.
+ * The task page's actions. The confirmations and what each action does are shared with the generic
+ * task menu (useGenericTaskActions).
  */
-const handleActionError = (subject: string) => (e: unknown) =>
-  handleError(e, {
-    level: ErrorLevel.Error,
-    publicSubject: subject,
-    silent: false,
-    type: ErrorType.Server,
-  });
-
 const GenericTaskActions: React.FC<Props> = ({ canControl, onComplete, task }: Props) => {
-  const confirm = useConfirm();
-  const [isBusy, setIsBusy] = useState(false);
-  /*
-   * The task whose last unpause from this page failed. Its retry stays offered, also once the
-   * task reads active, until an unpause or kill of it succeeds or the page is left.
-   */
-  const [failedUnpauseTaskId, setFailedUnpauseTaskId] = useState<string>();
-  const isUnpauseRetry = failedUnpauseTaskId === task.taskId;
-
-  const canPause = canPauseGenericTask(task, canControl);
-  const canUnpause = canUnpauseGenericTask(task, canControl, isUnpauseRetry);
-  const canKill = canKillGenericTask(task, canControl);
+  const { canKill, canPause, canUnpause, isBusy, isUnpauseRetry, kill, killTree, pause, unpause } =
+    useGenericTaskActions({ canControl, onComplete, task });
 
   const pauseTooltip = !canControl
     ? NO_PERMISSION
@@ -57,88 +30,6 @@ const GenericTaskActions: React.FC<Props> = ({ canControl, onComplete, task }: P
       : task.state !== GenericTaskState.Active
         ? 'Only an active task can be paused.'
         : 'Stops this task and its pausable descendants.';
-
-  const run = useCallback(
-    async (action: () => Promise<void>) => {
-      setIsBusy(true);
-      try {
-        await action();
-      } finally {
-        setIsBusy(false);
-        onComplete?.();
-      }
-    },
-    [onComplete],
-  );
-
-  const handlePause = useCallback(() => {
-    confirm({
-      content:
-        'Pause this task and its pausable descendants? Their containers are stopped; ' +
-        'unpausing runs their entrypoints again from the start.',
-      okText: 'Pause',
-      onConfirm: () => run(() => pauseGenericTask({ taskId: task.taskId })),
-      onError: handleActionError('Unable to pause task'),
-      title: `Pause ${task.name}`,
-    });
-  }, [confirm, run, task.name, task.taskId]);
-
-  const handleUnpause = useCallback(() => {
-    const taskId = task.taskId;
-    confirm({
-      content: isUnpauseRetry
-        ? 'Retry the unpause of this task? The master resumes the members of its tree that ' +
-          'the failed unpause did not start, or refuses if there is nothing left to resume.'
-        : 'Unpause this task and its paused descendants? Their entrypoints run again from the ' +
-          'start in new containers.',
-      okText: isUnpauseRetry ? 'Retry Unpause' : 'Unpause',
-      onConfirm: () =>
-        run(async () => {
-          try {
-            await unpauseGenericTask({ taskId });
-          } catch (e) {
-            setFailedUnpauseTaskId(taskId);
-            throw e;
-          }
-          setFailedUnpauseTaskId(undefined);
-        }),
-      onError: handleActionError('Unable to unpause task'),
-      title: `${isUnpauseRetry ? 'Retry unpause of' : 'Unpause'} ${task.name}`,
-    });
-  }, [confirm, isUnpauseRetry, run, task.name, task.taskId]);
-
-  const kill = useCallback(
-    async (killFromRoot: boolean) => {
-      await killGenericTask({ killFromRoot, taskId: task.taskId });
-      // A kill ends any unpause of the tree that is still pending.
-      setFailedUnpauseTaskId(undefined);
-    },
-    [task.taskId],
-  );
-
-  const handleKill = useCallback(() => {
-    confirm({
-      content: 'Kill this task and all its descendants?',
-      danger: true,
-      okText: 'Kill',
-      onConfirm: () => run(() => kill(false)),
-      onError: handleActionError('Unable to kill task'),
-      title: `Kill ${task.name}`,
-    });
-  }, [confirm, kill, run, task.name]);
-
-  const handleKillTree = useCallback(() => {
-    confirm({
-      content:
-        'Kill the whole tree of this task, from its root task down, including tasks that ' +
-        'are not descendants of this one?',
-      danger: true,
-      okText: 'Kill Tree',
-      onConfirm: () => run(() => kill(true)),
-      onError: handleActionError('Unable to kill task tree'),
-      title: `Kill the tree of ${task.name}`,
-    });
-  }, [confirm, kill, run, task.name]);
 
   const unpauseTooltip = !canControl
     ? NO_PERMISSION
@@ -152,14 +43,14 @@ const GenericTaskActions: React.FC<Props> = ({ canControl, onComplete, task }: P
         data-testid="generic-task-pause"
         disabled={!canPause || isBusy}
         tooltip={pauseTooltip}
-        onClick={handlePause}>
+        onClick={pause}>
         Pause
       </Button>
       <Button
         data-testid="generic-task-unpause"
         disabled={!canUnpause || isBusy}
         tooltip={unpauseTooltip}
-        onClick={handleUnpause}>
+        onClick={unpause}>
         {isUnpauseRetry ? 'Retry Unpause' : 'Unpause'}
       </Button>
       <Button
@@ -167,7 +58,7 @@ const GenericTaskActions: React.FC<Props> = ({ canControl, onComplete, task }: P
         data-testid="generic-task-kill"
         disabled={!canKill || isBusy}
         tooltip={canControl ? undefined : NO_PERMISSION}
-        onClick={handleKill}>
+        onClick={kill}>
         Kill
       </Button>
       {task.parentId && (
@@ -176,7 +67,7 @@ const GenericTaskActions: React.FC<Props> = ({ canControl, onComplete, task }: P
           data-testid="generic-task-kill-tree"
           disabled={!canControl || isBusy}
           tooltip={canControl ? 'Kills the whole tree from its root task.' : NO_PERMISSION}
-          onClick={handleKillTree}>
+          onClick={killTree}>
           Kill Tree
         </Button>
       )}

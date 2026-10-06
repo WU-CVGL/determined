@@ -51,4 +51,7 @@ message Notebook {
   string job_id = 14;
   // Workspace ID.
   int32 workspace_id = 17;
+  // The slot count the notebook requests (resources.slots), 0 when it
+  // requests none.
+  int32 slots = 100;
 }

@@ -64,6 +64,7 @@ export class Select extends BaseComponent {
   }
 
   menuItem = this._menu.menuItem.bind(this._menu);
+  menuItemStartingWith = this._menu.menuItemStartingWith.bind(this._menu);
 
   /**
    * Selects a menu item with the specified title.
@@ -105,6 +106,18 @@ class SelectMenu extends BaseOverlay {
     return new BaseComponent({
       parent: this,
       selector: `div.ant-select-item[title="${title}"]`,
+    });
+  }
+
+  /**
+   * Returns the menu item whose title starts with the given text, for items whose title ends
+   * with something the test cannot know, such as a time
+   * @param {string} prefix - the start of the menu item's title
+   */
+  menuItemStartingWith(prefix: string): BaseComponent {
+    return new BaseComponent({
+      parent: this,
+      selector: `div.ant-select-item[title^="${prefix}"]`,
     });
   }
 

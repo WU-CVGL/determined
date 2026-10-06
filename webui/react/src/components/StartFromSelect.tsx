@@ -11,16 +11,21 @@ import {
   getShells,
   getTaskTemplates,
 } from 'services/api';
+import { GetShellsParams } from 'services/types';
 import userStore from 'stores/users';
 import { CommandTask, CommandType, RawJson, Template } from 'types';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
-import { clearLaunchHistory, LaunchHistoryEntry, listLaunchHistory } from 'utils/launchHistory';
-import { formFieldsFromConfig, NtscLaunchType } from 'utils/ntscConfig';
+import {
+  clearAllLaunchHistory,
+  listAllLaunchHistory,
+  TypedLaunchHistoryEntry,
+} from 'utils/launchHistory';
+import { formFieldsFromConfig, isNtscLaunchType, NTSC_LAUNCH_TYPE_LABELS } from 'utils/ntscConfig';
 import { useObservable } from 'utils/observable';
 import { isNotFound } from 'utils/service';
 import { capitalize } from 'utils/string';
 
-/** How many of the user's recent tasks the master is asked for. */
+/** How many of the user's recent tasks of each type the master is asked for, and how many are listed. */
 export const RECENT_TASK_LIMIT = 20;
 
 /** What the launch form starts from once a "Start from" item is picked. */
@@ -43,12 +48,21 @@ export const templateNameFromStartFrom = (value?: string): string | undefined =>
 
 const formatTime = (time: number | string): string => dayjs(time).format('MMM D, HH:mm');
 
-const taskLabel = (task: CommandTask): string =>
-  [task.name, capitalize(task.state.toLowerCase()), formatTime(task.startTime)].join(' · ');
+const typeLabel = (type: CommandType): string =>
+  isNtscLaunchType(type) ? NTSC_LAUNCH_TYPE_LABELS[type] : capitalize(type);
 
-const localLabel = (entry: LaunchHistoryEntry): string => {
+const taskLabel = (task: CommandTask): string =>
+  [
+    typeLabel(task.type),
+    task.name,
+    capitalize(task.state.toLowerCase()),
+    formatTime(task.startTime),
+  ].join(' · ');
+
+const localLabel = (entry: TypedLaunchHistoryEntry): string => {
   const { name, pool, slots = 1 } = formFieldsFromConfig(entry.config);
   return [
+    typeLabel(entry.type),
     name || 'Unnamed',
     `${pool ?? 'default pool'}, ${slots} slot${slots === 1 ? '' : 's'}`,
     formatTime(entry.savedAt),
@@ -82,17 +96,46 @@ interface Props {
   onChange?: (value?: string) => void;
   onLoadingTaskChange: (taskId?: string) => void;
   onResolve: (start: StartFrom) => void;
-  type: NtscLaunchType;
   value?: string;
 }
 
+/** One "Start from" item as the dropdown lists it. */
+interface StartFromItem {
+  disabled?: boolean;
+  label: string;
+  value: string;
+}
+
+interface StartFromGroup {
+  items: StartFromItem[];
+  key: string;
+  label: string;
+}
+
+const renderOption = (item: StartFromItem): React.ReactNode => (
+  <Option disabled={item.disabled} key={item.value} value={item.value}>
+    {item.label}
+  </Option>
+);
+
+const byStartTimeDesc = (a: CommandTask, b: CommandTask): number =>
+  Date.parse(b.startTime) - Date.parse(a.startTime);
+
 /**
- * The launch form's "Start from" picker. It offers, for the same task type:
- * - Recent on cluster: the user's own shells or JupyterLabs that the master
+ * The launch form's "Start from" picker. Shells and JupyterLabs share one config
+ * format, so it offers both types, each item labelled with its type, whichever
+ * type the form launches:
+ * - Recent on cluster: the user's own shells and JupyterLabs that the master
  *   still knows (running, or ended in about the last 24 hours and not lost in a
- *   master restart). Their config is fetched only when one is picked.
- * - Recently launched in this browser: utils/launchHistory.
+ *   master restart), newest first. A config is fetched, from the API of the
+ *   task's own type, only when the task is picked.
+ * - Recently launched in this browser: utils/launchHistory, newest first.
  * - Templates.
+ * The current item, whichever group it comes from, is listed alone in a
+ * "Selected" group above them and left out of its own group. The dropdown
+ * scrolls to the selected row when it opens; as the first row it keeps the list
+ * at the top, with the recent tasks and the history right below, even when the
+ * item is a template far down the list.
  */
 const StartFromSelect: React.FC<Props> = ({
   allowedWorkspaceIds,
@@ -106,7 +149,6 @@ const StartFromSelect: React.FC<Props> = ({
   onChange,
   onLoadingTaskChange,
   onResolve,
-  type,
   value,
 }: Props) => {
   const currentUser = Loadable.getOrElse(undefined, useObservable(userStore.currentUser));
@@ -117,10 +159,10 @@ const StartFromSelect: React.FC<Props> = ({
   const pendingTaskId = useRef<string>();
 
   const localEntries = useMemo(
-    () => listLaunchHistory(userId, type),
+    () => listAllLaunchHistory(userId),
     // historyVersion re-reads the history after it was cleared.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [userId, type, historyVersion],
+    [userId, historyVersion],
   );
 
   const taskOptions = useMemo(() => {
@@ -152,33 +194,44 @@ const StartFromSelect: React.FC<Props> = ({
   useEffect(() => {
     if (userId === undefined) return;
     let active = true;
-    const getTasks = type === CommandType.Shell ? getShells : getJupyterLabs;
-    getTasks({
+    const params: GetShellsParams = {
       limit: RECENT_TASK_LIMIT,
       orderBy: 'ORDER_BY_DESC',
       sortBy: 'SORT_BY_START_TIME',
       users: [String(userId)],
       workspaceId: lockedWorkspaceId,
-    })
-      .then((tasks) => active && setRecentTasks(tasks.filter((task) => task.userId === userId)))
-      .catch((e) =>
-        handleError(e, {
-          publicSubject: 'Unable to fetch recent tasks.',
-          silent: true,
-          type: ErrorType.Api,
-        }),
-      );
+    };
+    // One type failing to load leaves the other listed.
+    Promise.allSettled([getShells(params), getJupyterLabs(params)]).then((results) => {
+      results.forEach((result) => {
+        if (result.status === 'rejected') {
+          handleError(result.reason, {
+            publicSubject: 'Unable to fetch recent tasks.',
+            silent: true,
+            type: ErrorType.Api,
+          });
+        }
+      });
+      if (!active) return;
+      const tasks = results
+        .flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
+        .filter((task) => task.userId === userId)
+        .sort(byStartTimeDesc)
+        .slice(0, RECENT_TASK_LIMIT);
+      setRecentTasks(tasks);
+    });
     return () => {
       active = false;
     };
-  }, [lockedWorkspaceId, type, userId]);
+  }, [lockedWorkspaceId, userId]);
 
   const resolveTask = useCallback(
     async (task: CommandTask) => {
       pendingTaskId.current = task.id;
       onLoadingTaskChange(task.id);
       try {
-        const getConfig = type === CommandType.Shell ? getShellConfig : getJupyterLabConfig;
+        // The task's own type, not the type the form launches.
+        const getConfig = task.type === CommandType.Shell ? getShellConfig : getJupyterLabConfig;
         const config = await getConfig({ commandId: task.id });
         if (pendingTaskId.current !== task.id) return;
         onResolve({ config, kind: 'config', redactedEnv: [], workspaceId: task.workspaceId });
@@ -204,7 +257,7 @@ const StartFromSelect: React.FC<Props> = ({
         }
       }
     },
-    [onChange, onLoadingTaskChange, onResolve, type],
+    [onChange, onLoadingTaskChange, onResolve],
   );
 
   const resolve = useCallback(
@@ -243,11 +296,51 @@ const StartFromSelect: React.FC<Props> = ({
     [onChange, resolve],
   );
 
+  const groups = useMemo(
+    (): StartFromGroup[] => [
+      {
+        items: taskOptions.map((task) => ({
+          disabled: !isAllowed(task.workspaceId),
+          label: taskLabel(task),
+          value: startFromTaskValue(task.id),
+        })),
+        key: 'recent',
+        label: 'Recent on cluster',
+      },
+      {
+        items: localEntries.map((entry) => ({
+          disabled: !isAllowed(entry.workspaceId),
+          label: localLabel(entry),
+          value: startFromLocalValue(entry.id),
+        })),
+        key: 'local',
+        label: 'Recently launched in this browser',
+      },
+      {
+        items: (templates ?? []).map((template) => ({
+          label: template.name,
+          value: startFromTemplateValue(template.name),
+        })),
+        key: 'templates',
+        label: 'Templates',
+      },
+    ],
+    [isAllowed, localEntries, taskOptions, templates],
+  );
+
+  const selectedItem = useMemo(
+    () =>
+      !value
+        ? undefined
+        : groups.flatMap((group) => group.items).find((item) => item.value === value),
+    [groups, value],
+  );
+
   const handleClearHistory = useCallback(() => {
-    clearLaunchHistory(userId, type);
+    clearAllLaunchHistory(userId);
     setHistoryVersion((version) => version + 1);
     if (value?.startsWith(LOCAL_PREFIX)) handleChange(undefined);
-  }, [handleChange, type, userId, value]);
+  }, [handleChange, userId, value]);
 
   // "Launch Again": start from the given task right away.
   useEffect(() => {
@@ -271,7 +364,7 @@ const StartFromSelect: React.FC<Props> = ({
   }, [autoSelect, defaultTemplate, initialTask, onAutoSelected, onChange, templates, value]);
 
   return (
-    <div>
+    <div data-test-component="start-from-select">
       <Select
         allowClear
         id={id}
@@ -279,41 +372,21 @@ const StartFromSelect: React.FC<Props> = ({
         placeholder="Blank: cluster defaults (optional)"
         value={value}
         onChange={handleChange}>
-        {taskOptions.length > 0 && (
-          <OptGroup key="recent" label="Recent on cluster">
-            {taskOptions.map((task) => (
-              <Option
-                disabled={!isAllowed(task.workspaceId)}
-                key={startFromTaskValue(task.id)}
-                value={startFromTaskValue(task.id)}>
-                {taskLabel(task)}
-              </Option>
-            ))}
+        {selectedItem && (
+          <OptGroup key="selected" label="Selected">
+            {renderOption(selectedItem)}
           </OptGroup>
         )}
-        {localEntries.length > 0 && (
-          <OptGroup key="local" label="Recently launched in this browser">
-            {localEntries.map((entry) => (
-              <Option
-                disabled={!isAllowed(entry.workspaceId)}
-                key={startFromLocalValue(entry.id)}
-                value={startFromLocalValue(entry.id)}>
-                {localLabel(entry)}
-              </Option>
-            ))}
-          </OptGroup>
-        )}
-        {(templates ?? []).length > 0 && (
-          <OptGroup key="templates" label="Templates">
-            {(templates ?? []).map((template) => (
-              <Option
-                key={startFromTemplateValue(template.name)}
-                value={startFromTemplateValue(template.name)}>
-                {template.name}
-              </Option>
-            ))}
-          </OptGroup>
-        )}
+        {groups.map((group) => {
+          const items = group.items.filter((item) => item !== selectedItem);
+          return (
+            items.length > 0 && (
+              <OptGroup key={group.key} label={group.label}>
+                {items.map(renderOption)}
+              </OptGroup>
+            )
+          );
+        })}
       </Select>
       {localEntries.length > 0 && (
         <Button size="small" type="text" onClick={handleClearHistory}>
