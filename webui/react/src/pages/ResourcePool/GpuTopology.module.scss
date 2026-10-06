@@ -212,7 +212,7 @@
   }
 }
 
-// Tooltip and popover content
+// Details popup content
 
 .details {
   font-size: 12.5px;
@@ -241,17 +241,19 @@
   margin: 0 0 6px;
 }
 
-// The pinned popover: the details and a close button.
+// The details popup, the same box on hover, on focus and pinned. It has the popover's padding
+// itself (the popover's inner padding is 0), so a click anywhere in the box is a click in it.
 
-.dialog {
+.popup {
+  padding: 12px;
   position: relative;
 
   &:focus {
-    // The pinned popover takes focus from the keyboard; its links show their own focus rings.
+    // The pinned popup takes focus from the keyboard; its links show their own focus rings.
     outline: none;
   }
   .detailsTitle {
-    // Room for the close button.
+    // Room for the close button of the pinned popup, also before a pin, so a pin moves nothing.
     padding-right: 28px;
   }
 }
@@ -267,8 +269,8 @@
   justify-content: center;
   padding: 0;
   position: absolute;
-  right: -4px;
-  top: -4px;
+  right: 8px;
+  top: 8px;
   width: 24px;
 
   &:hover {

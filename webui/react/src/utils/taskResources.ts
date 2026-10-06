@@ -188,7 +188,7 @@ export const resourceSeriesDetails = (labels: ResourceSeriesLabels): string => {
     labels.node && `Host: ${labels.node}`,
     labels.allocation_id && `Allocation: ${labels.allocation_id}`,
     labels.pci_bus_id && `PCI bus ID: ${labels.pci_bus_id}`,
-    hostIndex && `Host GPU index: ${hostIndex} (nvidia-smi on the node)`,
+    hostIndex && `Host GPU index: ${hostIndex}`,
     labels.model_name && `Model: ${labels.model_name}`,
   ]
     .filter(Boolean)

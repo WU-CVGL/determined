@@ -1,8 +1,16 @@
+import { Popover } from 'antd';
 import dayjs from 'dayjs';
-import Dropdown from 'hew/Dropdown';
 import Icon from 'hew/Icon';
-import Tooltip from 'hew/Tooltip';
-import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTheme } from 'hew/Theme';
+import React, {
+  CSSProperties,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import Link from 'components/Link';
 import { slotStateToLabel } from 'constants/states';
@@ -26,8 +34,8 @@ import {
   gpuLinkLookup,
   gpuSlotCountText,
   gpuTopologySummary,
-  linkAtStartText,
   linkLevelName,
+  linkText,
   numaGroups,
   nvmlErrorsText,
   OffLabel,
@@ -111,13 +119,13 @@ export const HealthDot: React.FC<{ word: GpuHealthWord; decorative?: boolean }> 
   );
 
 /**
- * The GPU's identity and the four facts of its health (link and NVML errors at agent start, recent
- * critical XIDs, collection time): the content of the tooltip and the popover.
+ * The GPU's identity and the facts of its health: the PCIe link and the NVML errors, both measured
+ * at agent start, and the collection time (the agent's clock).
  */
 export const GpuDetails: React.FC<GpuProps> = ({ agentId, agentOff, gpu, resource, topo }) => {
   const word = gpuHealthWord(gpu.health);
   const collectedAt = topo.collectedAt
-    ? `${dayjs(topo.collectedAt).format(DEFAULT_DATETIME_FORMAT)} (agent clock, at agent start)`
+    ? dayjs(topo.collectedAt).format(DEFAULT_DATETIME_FORMAT)
     : 'unknown';
   return (
     <div className={css.details}>
@@ -138,12 +146,10 @@ export const GpuDetails: React.FC<GpuProps> = ({ agentId, agentOff, gpu, resourc
         <dd>{gpu.pciBusId ? <code>{gpu.pciBusId}</code> : 'unknown'}</dd>
         <dt>NUMA</dt>
         <dd>{gpu.numaNode >= 0 ? gpu.numaNode : 'unknown'}</dd>
-        <dt>Link at agent start</dt>
-        <dd>{linkAtStartText(gpu)}</dd>
-        <dt>NVML errors at agent start</dt>
+        <dt>PCIe link</dt>
+        <dd>{linkText(gpu)}</dd>
+        <dt>NVML errors</dt>
         <dd>{nvmlErrorsText(topo, gpu)}</dd>
-        <dt>Recent critical XIDs</dt>
-        <dd>not collected</dd>
         <dt>Collected at</dt>
         <dd>{collectedAt}</dd>
       </dl>
@@ -161,44 +167,101 @@ export const GpuDetails: React.FC<GpuProps> = ({ agentId, agentOff, gpu, resourc
   );
 };
 
+/** How long the pointer rests on the button before the details show, as antd's tooltips wait. */
+const HOVER_DELAY_MS = 100;
+
 /**
- * Hover or focus shows the details in a tooltip; a click pins them in a popover with a close button.
- * The popover is portalled to the end of the page, so a pin from the keyboard moves focus into it,
- * and closing it with focus inside gives focus back to the button.
+ * The details of a GPU in one popup below its button, for hover, focus and pin alike, so that a
+ * pin keeps the popup where it is. Hover or focus shows it as a tooltip that takes no pointer
+ * events, so it never covers a click on the tiles under it; leaving the button or a blur hides it.
+ * A click pins it as a dialog with a close button. Escape, the close button, a click outside or a
+ * second click on the button close it. The popup is portalled to the end of the page, so a pin
+ * from the keyboard moves focus into it, and closing it with focus inside gives focus back to the
+ * button.
+ *
+ * The popup takes no trigger of antd: with a click trigger, antd would toggle the open state on the
+ * click that pins a popup that hover already opened, and close it.
  */
 const GpuInfoButton: React.FC<GpuProps> = (props) => {
+  const {
+    themeSettings: { className: themeClass },
+  } = useTheme();
   const [pinned, setPinned] = useState(false);
+  // Shown by hover or focus, until the pointer or focus leaves the button or the popup closes.
+  const [peeking, setPeeking] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const dialogRef = useRef<HTMLDivElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
+  const hoverTimer = useRef<number>();
   const pinnedFromKeyboard = useRef(false);
+  const tooltipId = useId();
   const { gpu } = props;
   const what = gpu.excluded ? `excluded GPU ${gpuLabel(gpu)}` : `slot ${gpu.deviceId}`;
   const label = `Details for ${what} on ${props.agentId}`;
-  const content = <GpuDetails {...props} />;
 
-  const onOpenChange = useCallback((open: boolean) => {
-    if (!open && dialogRef.current?.contains(document.activeElement)) buttonRef.current?.focus();
-    setPinned(open);
-  }, []);
+  const stopHoverTimer = useCallback(() => window.clearTimeout(hoverTimer.current), []);
+  const peek = useCallback(() => setPeeking(true), []);
+  const unpeek = useCallback(() => {
+    stopHoverTimer();
+    setPeeking(false);
+  }, [stopHoverTimer]);
+  const onMouseEnter = useCallback(() => {
+    stopHoverTimer();
+    hoverTimer.current = window.setTimeout(peek, HOVER_DELAY_MS);
+  }, [peek, stopHoverTimer]);
+  const close = useCallback(() => {
+    if (popupRef.current?.contains(document.activeElement)) buttonRef.current?.focus();
+    // After the focus moves: focus on the button would show the details again.
+    setPinned(false);
+    unpeek();
+  }, [unpeek]);
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === 'Escape') onOpenChange(false);
+      if (e.key === 'Escape') close();
     },
-    [onOpenChange],
+    [close],
   );
   // Enter and Space click a button with detail 0; a pointer click has detail 1 or more.
-  const onClick = useCallback((e: React.MouseEvent) => {
-    pinnedFromKeyboard.current = e.detail === 0;
-  }, []);
+  const onClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (pinned) {
+        close();
+        return;
+      }
+      pinnedFromKeyboard.current = e.detail === 0;
+      setPinned(true);
+    },
+    [close, pinned],
+  );
+  // antd still closes a popup on a touch outside it.
+  const onOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open) close();
+    },
+    [close],
+  );
+
+  // No hover timer outlives the button.
+  useEffect(() => stopHoverTimer, [stopHoverTimer]);
+
+  // A pinned popup closes on a press outside it and its button.
+  useEffect(() => {
+    if (!pinned) return;
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (!buttonRef.current?.contains(target) && !popupRef.current?.contains(target)) close();
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, [close, pinned]);
 
   useEffect(() => {
     if (!pinned || !pinnedFromKeyboard.current) return;
     pinnedFromKeyboard.current = false;
-    // The popover may still be hidden for a frame or two while it appears.
+    // The popup may still be hidden for a frame or two while it appears.
     let frame = 0;
     let tries = 0;
     const focusDialog = () => {
-      const dialog = dialogRef.current;
+      const dialog = popupRef.current;
       dialog?.focus();
       if (document.activeElement !== dialog && tries++ < 10) {
         frame = requestAnimationFrame(focusDialog);
@@ -209,40 +272,49 @@ const GpuInfoButton: React.FC<GpuProps> = (props) => {
   }, [pinned]);
 
   return (
-    <Dropdown
+    <Popover
       content={
         <div
-          aria-label={label}
-          className={css.dialog}
-          ref={dialogRef}
-          role="dialog"
-          tabIndex={-1}
+          aria-label={pinned ? label : undefined}
+          className={css.popup}
+          ref={popupRef}
+          role={pinned ? 'dialog' : undefined}
+          tabIndex={pinned ? -1 : undefined}
           onKeyDown={onKeyDown}>
-          <button
-            aria-label="Close details"
-            className={css.close}
-            type="button"
-            onClick={() => onOpenChange(false)}>
-            <Icon decorative name="close" size="small" />
-          </button>
-          {content}
+          {pinned && (
+            <button aria-label="Close details" className={css.close} type="button" onClick={close}>
+              <Icon decorative name="close" size="small" />
+            </button>
+          )}
+          <GpuDetails {...props} />
         </div>
       }
-      open={pinned}
+      id={tooltipId}
+      open={pinned || peeking}
+      overlayClassName={themeClass}
+      // The popup has the padding, so a click anywhere in the box is a click in the popup.
+      overlayInnerStyle={{ padding: 0 }}
+      overlayStyle={pinned ? undefined : { pointerEvents: 'none' }}
+      placement="bottomLeft"
+      showArrow={false}
+      trigger={[]}
       onOpenChange={onOpenChange}>
-      <Tooltip content={content} open={pinned ? false : undefined} trigger={['hover', 'focus']}>
-        <button
-          aria-expanded={pinned}
-          aria-label={label}
-          className={css.info}
-          ref={buttonRef}
-          type="button"
-          onClick={onClick}
-          onKeyDown={onKeyDown}>
-          <Icon decorative name="info" size="small" />
-        </button>
-      </Tooltip>
-    </Dropdown>
+      <button
+        aria-describedby={peeking && !pinned ? tooltipId : undefined}
+        aria-expanded={pinned}
+        aria-label={label}
+        className={css.info}
+        ref={buttonRef}
+        type="button"
+        onBlur={unpeek}
+        onClick={onClick}
+        onFocus={peek}
+        onKeyDown={onKeyDown}
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={unpeek}>
+        <Icon decorative name="info" size="small" />
+      </button>
+    </Popover>
   );
 };
 

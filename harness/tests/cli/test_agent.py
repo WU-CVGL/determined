@@ -157,7 +157,7 @@ def test_list_agents_gpu_columns(capsys: pytest.CaptureFixture) -> None:
     assert "| 4+4 NODE/SYS p2p" in rows["node02"]
     assert "| ok " in rows["node02"]
     assert "| 4+3 NODE/SYS p2p" in rows["node01"]
-    assert "| narrow: 3,5 (x8 of x16 at start); excluded: 81:00.0 |" in rows["node01"]
+    assert "| narrow: 3,5 (x8 of x16); excluded: 81:00.0 |" in rows["node01"]
     cpu_columns = [c.strip() for c in rows["cpu-agent"].split("|")]
     assert cpu_columns[4:6] == ["", ""]
 
@@ -167,7 +167,7 @@ def test_list_agents_gpu_columns(capsys: pytest.CaptureFixture) -> None:
     listed = {a["id"]: a for a in json.loads(capsys.readouterr().out)}
     assert listed["node02"]["gpu_topology"] == "4+4 NODE/SYS p2p"
     assert listed["node02"]["gpu_health"] == "ok"
-    assert listed["node01"]["gpu_health"] == "narrow: 3,5 (x8 of x16 at start); excluded: 81:00.0"
+    assert listed["node01"]["gpu_health"] == "narrow: 3,5 (x8 of x16); excluded: 81:00.0"
     assert listed["cpu-agent"]["gpu_topology"] == ""
     assert listed["cpu-agent"]["gpu_health"] == ""
 
@@ -193,9 +193,9 @@ def test_describe_agent(capsys: pytest.CaptureFixture) -> None:
 
     assert "Agent ID:        node01" in lines
     assert "Driver Version:  610.57.04" in lines
-    assert "Collected At:    2026-10-05 08:00:00+0000 (agent clock, at agent start)" in lines
+    assert "Collected At:    2026-10-05 08:00:00+0000" in lines
     assert "GPU Topology:    4+3 NODE/SYS p2p" in lines
-    assert "GPU Health:      narrow: 3,5 (x8 of x16 at start); excluded: 81:00.0" in lines
+    assert "GPU Health:      narrow: 3,5 (x8 of x16); excluded: 81:00.0" in lines
 
     def row(first: str) -> List[str]:
         found = [
@@ -219,13 +219,14 @@ def test_describe_agent(capsys: pytest.CaptureFixture) -> None:
     assert "  Slot 3 (narrow):" in lines
     details = lines[lines.index("  Slot 3 (narrow):") + 1 :][:5]
     assert details == [
-        "    Link at agent start: x8 of x16, Gen4 of Gen4"
-        " (an observation, not a confirmed fault)",
-        "    " + agent.GPU_NARROW_LINK_TEXT,
-        "    NVML errors at agent start: none",
-        "    Recent critical XIDs: not collected",
-        "    Collected at: 2026-10-05 08:00:00+0000 (agent clock, at agent start)",
+        "    PCIe link: x8 of x16, Gen4 of Gen4",
+        "    A lower link width lowers this link's bandwidth cap.",
+        "    NVML errors: none",
+        "    Collected at: 2026-10-05 08:00:00+0000",
+        "  Slot 5 (narrow):",
     ]
+    # Critical XIDs are not collected yet: the details leave them out.
+    assert "XID" not in out
     excluded_details = lines.index("  Excluded GPU 0000:81:00.0 (ok):")
     assert lines[excluded_details + 1] == "    " + agent.GPU_EXCLUDED_TEXT
 
@@ -322,10 +323,10 @@ def test_describe_agent_unknown_topology(capsys: pytest.CaptureFixture) -> None:
     assert "Collected At:    unknown" in lines
     details = lines[lines.index("  Slot 0 (unknown):") + 1 :][:4]
     assert details == [
-        "    Link at agent start: unknown",
-        "    NVML errors at agent start: not collected",
-        "    Recent critical XIDs: not collected",
+        "    PCIe link: unknown",
+        "    NVML errors: not collected",
         "    Collected at: unknown",
+        "  Slot 1 (unknown):",
     ]
     assert f"  Excluded GPU {excluded_uuid} (unknown):" in lines
     assert not any(line.startswith("Link levels") for line in lines)

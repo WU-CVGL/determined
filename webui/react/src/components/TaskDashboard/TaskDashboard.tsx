@@ -5,7 +5,6 @@ import Icon, { IconName } from 'hew/Icon';
 import Input from 'hew/Input';
 import { useModal } from 'hew/Modal';
 import Select, { Option, SelectValue } from 'hew/Select';
-import Tooltip from 'hew/Tooltip';
 import { Loadable } from 'hew/utils/loadable';
 import _ from 'lodash';
 import { useObservable } from 'micro-observables';
@@ -781,20 +780,18 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
               </Option>
             ))}
           </Select>
-          <Tooltip content={SLOTS_TOOLTIP}>
-            <div>
-              <Select
-                data-testid="slots"
-                searchable={false}
-                value={settings.slots ?? ANY_SLOTS}
-                width={150}
-                onChange={handleSlotsChange}>
-                <Option value={ANY_SLOTS}>GPU and CPU</Option>
-                <Option value={SlotsFilter.Gpu}>{slotsFilterLabel[SlotsFilter.Gpu]}</Option>
-                <Option value={SlotsFilter.CpuOnly}>{slotsFilterLabel[SlotsFilter.CpuOnly]}</Option>
-              </Select>
-            </div>
-          </Tooltip>
+          <Select
+            data-testid="slots"
+            searchable={false}
+            value={settings.slots ?? ANY_SLOTS}
+            width={150}
+            onChange={handleSlotsChange}>
+            <Option value={ANY_SLOTS}>GPU and CPU</Option>
+            <Option value={SlotsFilter.Gpu}>{slotsFilterLabel[SlotsFilter.Gpu]}</Option>
+            <Option value={SlotsFilter.CpuOnly}>{slotsFilterLabel[SlotsFilter.CpuOnly]}</Option>
+          </Select>
+          {/* On an icon, not around the select: a tooltip there covered the open options. */}
+          <Icon name="info" showTooltip title={SLOTS_TOOLTIP} />
           <FilterCounter activeFilterCount={filterCount} onReset={resetFilters} />
           {showLaunch && (
             <>
