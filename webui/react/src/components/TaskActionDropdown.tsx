@@ -32,7 +32,6 @@ interface Props {
   onLaunchAgain?: (task: CommandTask) => void;
   /** Offers "Manage Job" (the job queue's priority, weight and pool) when given. */
   onManageJob?: () => void;
-  onVisibleChange?: (visible: boolean) => void;
   task: CommandTask;
 }
 

@@ -9,6 +9,8 @@ interface Props {
   batchAction: ExperimentAction;
   itemName?: string;
   isUnmanagedIncluded?: boolean;
+  /** A sentence after the question, about what the action does beyond the selected items. */
+  note?: string;
   onConfirm: () => Promise<void>;
   onClose?: () => void;
 }
@@ -23,6 +25,7 @@ const BatchActionConfirmModalComponent: React.FC<Props> = ({
   batchAction,
   itemName = 'experiment',
   isUnmanagedIncluded,
+  note,
   onConfirm,
   onClose,
 }: Props) => {
@@ -44,6 +47,7 @@ const BatchActionConfirmModalComponent: React.FC<Props> = ({
       <div>
         Are you sure you want to <b>{batchAction.toLocaleLowerCase()}</b> all selected {itemName}s?
       </div>
+      {note && <div>{note}</div>}
       {isUnmanagedIncluded && (
         <div>
           <small>{UNMANAGED_EXPERIMENT_ANNOTATION_MESSAGE}</small>

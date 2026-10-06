@@ -74,6 +74,9 @@ The following configuration settings are supported:
       -  ``server`` (optional)
       -  ``email`` (optional)
 
+      The master returns a task's ``registry_auth`` only to the user who started the task and to
+      administrators. Other users get the task's configuration without it.
+
    -  ``add_capabilities``: A list of Linux capabilities to grant to task containers. Each entry in
       the list is equivalent to a ``--cap-add CAP`` command-line argument to ``docker run``.
       ``add_capabilities`` is honored by resource managers of type ``agent`` but is ignored by

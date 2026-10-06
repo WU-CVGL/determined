@@ -37,9 +37,9 @@ export class NavigationSideBar extends BaseReactFragment {
     parent: this.#nav,
     selector: `a[aria-label="${'Model Registry'}"]`,
   });
-  readonly tasks = new BaseComponent({
+  readonly jobs = new BaseComponent({
     parent: this.#nav,
-    selector: `a[aria-label="${'Tasks'}"]`,
+    selector: `a[aria-label="${'Jobs'}"]`,
   });
   readonly webhooks = new BaseComponent({
     parent: this.#nav,
