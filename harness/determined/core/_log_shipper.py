@@ -85,8 +85,9 @@ SHIPPER_CLOSE_TIMEOUT = 10
 LOG_BATCH_MAX_SIZE = 1000
 # Characters of output without a newline held back before they are shipped as one line.
 LOG_LINE_MAX_SIZE = 16 * 1024
-# Writes waiting for the sender. The remote copy of further writes is dropped.
-SHIP_QUEUE_MAX_SIZE = 3 * LOG_BATCH_MAX_SIZE
+# Writes waiting for the sender; print() makes at least two writes per line. While this many
+# wait, the copy for the master leaves further writes out.
+SHIP_QUEUE_MAX_SIZE = 30 * LOG_BATCH_MAX_SIZE
 
 
 # (time of the write, data), or None, which only wakes the sender up to close.
@@ -99,19 +100,22 @@ class _LogSender(threading.Thread):
 
     The copy is best effort, so that local output continues and the program can exit whatever
     the master does. Writers never wait: a write that finds the queue full is left out of the copy.
-    A failed POST drops its batch, and 401 or 403 (expired session, revoked permission) ends the
-    copy for the rest of the run. Each kind of problem is reported once on the original stderr,
-    which the interceptors do not capture.
+    Writers also take no Python-level lock, so a write that interrupts another one (from a signal
+    handler or a destructor) or runs in a forked child cannot deadlock. A failed POST drops its
+    batch; 401 or 403 (expired session, lost edit permission) also ends the copy for the rest of the
+    run. Other errors, including the 404 for a task the user may no longer view, drop only their
+    batch. Each kind of problem is reported once on the original stderr, which the interceptors do
+    not capture.
     """
 
     def __init__(self, session: api.Session, logs_metadata: Dict, warnings_io: TextIO) -> None:
-        self._queue = queue.Queue(maxsize=SHIP_QUEUE_MAX_SIZE)  # type: queue.Queue[_QueueElement]
+        # SimpleQueue.put is implemented in C and is reentrant; queue.Queue.put takes a lock.
+        self._queue = queue.SimpleQueue()  # type: queue.SimpleQueue[_QueueElement]
         self._session = session
         self._logs_metadata = logs_metadata
         self._warnings_io = warnings_io
         self._closing = threading.Event()
         self._disabled = threading.Event()
-        self._dropped_lock = threading.Lock()
         self._dropped_writes = 0
         self._dropped_lines = 0
         self._warned = set()  # type: Set[str]
@@ -124,19 +128,18 @@ class _LogSender(threading.Thread):
     def write(self, data: str) -> None:
         if not data or self._closing.is_set() or self._disabled.is_set():
             return
-        try:
-            self._queue.put_nowait((time.time(), data))
-        except queue.Full:
-            with self._dropped_lock:
-                self._dropped_writes += 1
-                self._dropped_lines += data.count("\n")
+        if self._queue.qsize() < SHIP_QUEUE_MAX_SIZE:
+            self._queue.put((time.time(), data))
+        else:
+            # Without a lock: a lost increment only makes the warning's count a little low.
+            self._dropped_writes += 1
+            self._dropped_lines += data.count("\n")
 
     def close(self) -> None:
+        if self._closing.is_set():
+            return
         self._closing.set()
-        try:
-            self._queue.put_nowait(None)
-        except queue.Full:
-            pass  # The sender finds the queue non-empty and sees _closing soon anyway.
+        self._queue.put(None)  # Wakes the sender up.
         # The only wait for the sender: a POST that hangs must not keep the program from exiting.
         self.join(SHIPPER_CLOSE_TIMEOUT)
         if self.is_alive():

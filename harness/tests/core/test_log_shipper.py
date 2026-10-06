@@ -1,17 +1,22 @@
 import datetime
 import io
 import json
+import os
 import re
+import signal
+import subprocess
 import sys
+import textwrap
 import threading
 import time
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from unittest import mock
 
 import pytest
 import responses
 from responses import matchers
 
+import determined
 from determined import core
 from determined.common import api
 from determined.common.api import errors
@@ -164,7 +169,7 @@ def test_post_error_with_full_queue(
         _wait_for(lambda: session.post.call_count == 1)
         for i in range(100):
             print(f"line {i}")
-        assert shipper._log_sender._queue.full()
+        assert shipper._log_sender._queue.qsize() >= _log_shipper.SHIP_QUEUE_MAX_SIZE
         release.set()
         shipper.close()
 
@@ -179,9 +184,10 @@ def test_post_error_with_full_queue(
     assert len(dropped) == 1 and 0 < int(dropped[0]) <= 100
     # The warnings went to the original stderr only, never into the copy for the master.
     assert not any("determined:" in log for log in _shipped_logs(session))
-    assert not any(
-        "determined:" in item[1] for item in list(shipper._log_sender._queue.queue) if item
-    )
+    left = []  # type: List[Optional[Tuple[float, str]]]
+    while not shipper._log_sender._queue.empty():
+        left.append(shipper._log_sender._queue.get_nowait())
+    assert not any("determined:" in item[1] for item in left if item)
 
 
 def test_post_that_never_returns(
@@ -214,6 +220,126 @@ def test_post_that_never_returns(
     # The request itself has a finite timeout.
     timeout = session.post.call_args.kwargs["timeout"]
     assert timeout == _log_shipper.SHIPPER_POST_TIMEOUT and 0 < timeout < 600
+
+
+def test_close_twice(
+    streams: Tuple[io.StringIO, io.StringIO], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, err = streams
+    monkeypatch.setattr(_log_shipper, "SHIPPER_CLOSE_TIMEOUT", 0.2)
+    monkeypatch.setattr(_log_shipper, "SHIP_QUEUE_MAX_SIZE", 10)
+    hang = threading.Event()
+    session = _fake_session()
+    session.post.side_effect = lambda *args, **kwargs: hang.wait()
+    shipper = _shipper(session)
+
+    def scenario() -> None:
+        shipper.start()
+        print("first")
+        _wait_for(lambda: session.post.call_count == 1)
+        for i in range(100):
+            print(f"line {i}")
+        shipper.close()
+        start = time.monotonic()
+        shipper.close()
+        # The second close neither waits for the sender again nor repeats the warnings.
+        assert time.monotonic() - start < 0.1
+
+    try:
+        _within(SCENARIO_TIMEOUT, scenario, streams)
+    finally:
+        hang.set()
+
+    assert _count(err, "determined: gave up after") == 1
+    assert _count(err, "determined: sending fell behind") == 1
+
+
+def test_burst_to_healthy_master_ships_every_line(streams: Tuple[io.StringIO, io.StringIO]) -> None:
+    out, err = streams
+    session = _fake_session()
+    # A master that answers quickly; the program prints faster than one batch is sent.
+    session.post.side_effect = lambda *args, **kwargs: time.sleep(0.01)
+    shipper = _shipper(session)
+    lines = [f"layers.{i}.weight (1024, 1024)\n" for i in range(5000)]
+
+    def scenario() -> None:
+        shipper.start()
+        for i in range(5000):
+            print(f"layers.{i}.weight", (1024, 1024))
+        shipper.close()
+
+    _within(SCENARIO_TIMEOUT, scenario, streams)
+
+    assert out.getvalue() == "".join(lines)
+    assert _shipped_logs(session) == lines
+    assert err.getvalue() == ""
+
+
+@pytest.mark.skipif(not hasattr(signal, "SIGUSR1"), reason="needs SIGUSR1")
+def test_print_from_signal_handler_during_print() -> None:
+    # Signal handlers run in the main thread between two bytecodes, so Determined's SIGUSR1
+    # stack-trace handler can print while the main thread is in the middle of a write. That
+    # write must not hold a lock the handler's write needs. The main thread is needed, so the
+    # scenario runs in a subprocess.
+    script = textwrap.dedent(
+        """
+        import os, signal, sys, threading, time
+        from unittest import mock
+
+        from determined import core
+        from determined.common import api
+
+        sys.stdout = open(os.devnull, "w")
+        sys.stderr = open(os.devnull, "w")
+        handled = [0]
+
+        def count(signum, frame):
+            handled[0] += 1
+
+        signal.signal(signal.SIGUSR1, count)
+        session = mock.Mock(spec=api.Session)
+        shipper = core._UnmanagedTrialLogShipper(session=session, trial_id=1, task_id="1.task")
+        shipper.start()
+        # Prints the stack to sys.stderr, then calls count().
+        core._install_stacktrace_on_sigusr1()
+        stop = threading.Event()
+
+        def kick():
+            # One signal at a time: the next one only after the handler finished.
+            while not stop.is_set():
+                before = handled[0]
+                os.kill(os.getpid(), signal.SIGUSR1)
+                while handled[0] == before:
+                    time.sleep(0.001)
+
+        kicker = threading.Thread(target=kick)
+        kicker.start()
+        end = time.monotonic() + 1.5
+        while time.monotonic() < end:
+            print("step")
+        stop.set()
+        kicker.join()
+        shipper.close()
+        sys.__stdout__.write(f"signals handled: {handled[0]}\\n")
+        """
+    )
+    harness = os.path.dirname(os.path.dirname(determined.__file__))
+    pythonpath = [harness] + [p for p in os.environ.get("PYTHONPATH", "").split(os.pathsep) if p]
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join(pythonpath))
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            timeout=SCENARIO_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(f"printing from a signal handler hung for {SCENARIO_TIMEOUT}s")
+    assert result.returncode == 0, result.stderr
+    handled = re.fullmatch(r"signals handled: (\d+)\n", result.stdout)
+    assert handled and int(handled.group(1)) > 0, result.stdout
 
 
 @pytest.mark.parametrize("status", [401, 403])
