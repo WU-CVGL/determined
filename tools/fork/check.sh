@@ -9,7 +9,7 @@ cd "${repo_root}"
 
 mode=${1:-quick}
 (($# <= 1)) || {
-    echo "usage: tools/fork/check.sh [quick|security|progress|pools|integration-pools|integration-tasks]" >&2
+    echo "usage: tools/fork/check.sh [quick|security|progress|topology|pools|integration-pools|integration-tasks]" >&2
     exit 2
 }
 
@@ -54,7 +54,13 @@ quick() {
     if [[ -f harness/tests/cli/test_resource_pool.py ]]; then
         tests+=(harness/tests/cli/test_resource_pool.py)
     fi
+    if [[ -f harness/tests/cli/test_agent.py ]]; then
+        tests+=(harness/tests/cli/test_agent.py)
+    fi
     run_python_tests "${tests[@]}"
+    if [[ -f agent/internal/detect/topology.go ]]; then
+        topology
+    fi
 }
 
 security() {
@@ -80,6 +86,33 @@ find_go() {
         "Go was not found; set GO to an existing Go 1.22-compatible executable"
     [[ $("${go_bin}" env CGO_ENABLED) == 1 ]] || die \
         "race tests require CGO; select a CGO-enabled Go toolchain"
+}
+
+# GPU topology: the agent builds without cgo (the NVML stub), the stub tests, and the NVML mock,
+# agent and master tests with cgo.
+topology() {
+    find_go
+    command -v "${CC:-gcc}" >/dev/null 2>&1 || die \
+        "the GPU topology tests need a C compiler for cgo; set CC or install gcc"
+    local out
+    out=$(mktemp -d)
+    printf '\n==> Agent builds without cgo: linux/amd64 and darwin/arm64 (the NVML stub)\n'
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 "${go_bin}" build -o "${out}/agent-linux-amd64" \
+        ./agent/cmd/determined-agent
+    CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 "${go_bin}" build -o "${out}/agent-darwin-arm64" \
+        ./agent/cmd/determined-agent
+    rm -rf "${out}"
+    printf '\n==> GPU topology stub tests (CGO_ENABLED=0)\n'
+    CGO_ENABLED=0 "${go_bin}" test -count=1 ./agent/internal/detect/ ./agent/internal/options/ \
+        ./agent/cmd/determined-agent/
+    printf '\n==> GPU topology NVML mock and agent tests with cgo (%s)\n' "$("${go_bin}" version)"
+    CGO_ENABLED=1 "${go_bin}" test -race -count=1 ./agent/internal/detect/ \
+        ./agent/internal/options/ ./agent/cmd/determined-agent/
+    printf '\n==> GPU topology wire and agentrm tests\n'
+    "${go_bin}" test -race -count=1 ./master/pkg/aproto/ \
+        -run '^(TestAgentStartedWireCompat|TestGPUTopologyWireJSON|TestP2PUsability|TestGPUEnumsKnown)$'
+    "${go_bin}" test -race -count=1 ./master/internal/rm/agentrm \
+        -run '^(TestNewGPUTopology.*|TestGPUTopology.*|TestAgentStateGPUTopologyStaysOutOfCopies|TestSummarizeReportsGPUTopology)$'
 }
 
 require_dynamic_pool_sources() {
@@ -132,6 +165,7 @@ case ${mode} in
     quick) quick ;;
     security) security ;;
     progress) progress ;;
+    topology) topology ;;
     pools) pools ;;
     integration | integration-pools) integration_pools ;;
     integration-tasks) integration_tasks ;;
@@ -139,9 +173,12 @@ case ${mode} in
         cat <<'EOF'
 Usage: tools/fork/check.sh [MODE]
 
-  quick              Required archive regression and pool CLI tests if present (default)
+  quick              Required archive regression, pool and agent CLI tests if present, and
+                     topology when the checkout has it (default)
   security           Focused Python archive-safety regressions
   progress           Focused Python progress/metrics reporting regressions
+  topology           GPU topology: agent builds without cgo (linux/amd64, darwin/arm64), stub
+                     tests, and the cgo NVML mock, agent and agentrm tests (needs Go and gcc)
   pools              Dynamic resource-pool Go tests with the race detector
   integration-pools  Pool persistence/reconciliation race tests using an existing PostgreSQL database
   integration-tasks  Generic Task lifecycle/authorization race tests using PostgreSQL

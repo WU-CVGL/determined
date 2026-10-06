@@ -56,9 +56,16 @@ clean:
 get-deps:
 	./get-deps.sh
 
+# The agent reads the GPU topology with NVML through cgo (go-nvml), so builds need a C compiler.
+# AGENT_CGO_ENABLED=0 builds the stub, which reports the GPU topology as unknown. netgo and
+# osusergo keep net and os/user pure Go, so the cgo build links only glibc.
+AGENT_CGO_ENABLED ?= 1
+AGENT_BUILD_TAGS ?= netgo,osusergo
+
 .PHONY: build
 build:
-	CGO_ENABLED=0 go build \
+	CGO_ENABLED=$(AGENT_CGO_ENABLED) go build \
+		-tags $(AGENT_BUILD_TAGS) \
 		-ldflags "-X main.version=$(VERSION)" \
 		-o build/determined-agent \
 		./cmd/determined-agent

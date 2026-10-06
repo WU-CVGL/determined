@@ -16,7 +16,7 @@ func newRootCmd() *cobra.Command {
 		Version: version,
 	}
 
-	cmd.AddCommand(newCompletionCmd(), newVersionCmd(), runCmd)
+	cmd.AddCommand(newCompletionCmd(), newVersionCmd(), newGPUTopologyCmd(), runCmd)
 
 	return cmd
 }

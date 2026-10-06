@@ -64,6 +64,10 @@ message Agent {
   repeated string resource_pools = 6;
   // The slot stats for this agent.
   SlotStats slot_stats = 11;
+  // The GPU topology, P2P status, PCIe links and NVML errors the agent measured
+  // at its last start. It is unset for agents with neither CUDA slots nor
+  // GPUs left out by the agent's exclude list.
+  GpuTopology gpu_topology = 12;
 }
 
 // Slot wraps a single device on the agent.
@@ -80,4 +84,181 @@ message Slot {
   // Flag notifying if this slot is in the draining mode: current containers
   // will be allowed to finish but no new ones will be scheduled.
   bool draining = 5;
+}
+
+// GpuTopology is what an agent measured with NVML when it started.
+message GpuTopology {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: {
+      required: [ "unknown_reason", "driver_version", "gpus", "links" ]
+    }
+  };
+  // Why the topology is unknown, or empty when it is known. When it is set,
+  // gpus holds the slots and excluded GPUs without measurements, and links is
+  // empty.
+  string unknown_reason = 1;
+  // When the agent measured, by the agent's clock, at agent start.
+  google.protobuf.Timestamp collected_at = 2;
+  // The NVIDIA driver version NVML reported.
+  string driver_version = 3;
+  // The slots by device_id, then the excluded GPUs by pci_bus_id, then uuid
+  // (an empty bus id first).
+  repeated GpuInfo gpus = 4;
+  // The pairs of GPUs.
+  repeated GpuLink links = 5;
+}
+
+// GpuInfo describes one GPU of an agent: a slot, or a GPU left out by the
+// agent's exclude list.
+message GpuInfo {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: {
+      required: [
+        "device_id",
+        "uuid",
+        "pci_bus_id",
+        "numa_node",
+        "pcie_link_width",
+        "pcie_link_width_max",
+        "pcie_link_gen",
+        "pcie_link_gen_max",
+        "nvml_error",
+        "health",
+        "excluded"
+      ]
+    }
+  };
+  // The slot's device id, or -1 for an excluded GPU.
+  int32 device_id = 1;
+  // The GPU's UUID.
+  string uuid = 2;
+  // The PCI bus id in sysfs form, for example "0000:41:00.0", or empty when
+  // unknown.
+  string pci_bus_id = 3;
+  // The NUMA node of the GPU's PCI device, or -1 when unknown.
+  int32 numa_node = 4;
+  // The PCIe link width at agent start, or 0 when unknown.
+  int32 pcie_link_width = 5;
+  // The maximum PCIe link width of the device and the system, or 0 when
+  // unknown.
+  int32 pcie_link_width_max = 6;
+  // The PCIe link generation at agent start, or 0 when unknown.
+  int32 pcie_link_gen = 7;
+  // The maximum PCIe link generation of the device and the system, or 0 when
+  // unknown.
+  int32 pcie_link_gen_max = 8;
+  // The NVML health calls that failed at agent start, each as
+  // "<call>: <NAME> (<code>)", or empty.
+  string nvml_error = 9;
+  // The GPU's health, derived from the fields above.
+  GpuHealth health = 10;
+  // Whether the agent's exclude list left the GPU out. It is then not a slot.
+  bool excluded = 11;
+}
+
+// GpuP2pCaps holds the raw NVML P2P statuses of one direction of a pair.
+message GpuP2pCaps {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: { required: [ "read", "write" ] }
+  };
+  // The P2P READ status.
+  GpuP2pStatus read = 1;
+  // The P2P WRITE status.
+  GpuP2pStatus write = 2;
+}
+
+// GpuLink describes one pair of GPUs of an agent.
+message GpuLink {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: {
+      required: [
+        "device_a",
+        "device_b",
+        "uuid_a",
+        "uuid_b",
+        "level",
+        "nvlinks",
+        "p2p_a_to_b",
+        "p2p_b_to_a",
+        "p2p"
+      ]
+    }
+  };
+  // The device id of end A, or -1 for an excluded GPU. For two slots,
+  // device_a < device_b; a link with an excluded end has uuid_a < uuid_b.
+  int32 device_a = 1;
+  // The device id of end B, or -1 for an excluded GPU.
+  int32 device_b = 2;
+  // The UUID of end A.
+  string uuid_a = 3;
+  // The UUID of end B.
+  string uuid_b = 4;
+  // The closest common ancestor of the two GPUs.
+  GpuLinkLevel level = 5;
+  // The number of active NVLinks between the two GPUs.
+  int32 nvlinks = 6;
+  // The raw P2P statuses from A to B.
+  GpuP2pCaps p2p_a_to_b = 7;
+  // The raw P2P statuses from B to A.
+  GpuP2pCaps p2p_b_to_a = 8;
+  // Whether P2P is usable: READ and WRITE are OK in both directions.
+  GpuP2p p2p = 9;
+}
+
+// GpuLinkLevel is the closest common ancestor of two GPUs, as NVML reports it.
+enum GpuLinkLevel {
+  // Unknown.
+  GPU_LINK_LEVEL_UNSPECIFIED = 0;
+  // The same board.
+  GPU_LINK_LEVEL_INTERNAL = 1;
+  // A single PCIe switch.
+  GPU_LINK_LEVEL_PIX = 2;
+  // Multiple PCIe switches, without the host bridge.
+  GPU_LINK_LEVEL_PXB = 3;
+  // A PCIe host bridge.
+  GPU_LINK_LEVEL_PHB = 4;
+  // The same NUMA node, across host bridges.
+  GPU_LINK_LEVEL_NODE = 5;
+  // Across NUMA nodes.
+  GPU_LINK_LEVEL_SYS = 6;
+}
+
+// GpuP2pStatus is one raw NVML P2P status.
+enum GpuP2pStatus {
+  // Unknown: the query failed or NVML did not know.
+  GPU_P2P_STATUS_UNSPECIFIED = 0;
+  // P2P is supported.
+  GPU_P2P_STATUS_OK = 1;
+  // The chipset does not support P2P.
+  GPU_P2P_STATUS_CHIPSET_NOT_SUPPORTED = 2;
+  // The GPU does not support P2P.
+  GPU_P2P_STATUS_GPU_NOT_SUPPORTED = 3;
+  // The topology does not support P2P.
+  GPU_P2P_STATUS_TOPOLOGY_NOT_SUPPORTED = 4;
+  // P2P is disabled by a registry key.
+  GPU_P2P_STATUS_DISABLED_BY_REGKEY = 5;
+  // P2P is not supported.
+  GPU_P2P_STATUS_NOT_SUPPORTED = 6;
+}
+
+// GpuP2p is the P2P state of a pair, derived from its four raw statuses.
+enum GpuP2p {
+  // Unknown: no status is a known non-OK one, and at least one is unknown.
+  GPU_P2P_UNSPECIFIED = 0;
+  // READ and WRITE are OK in both directions.
+  GPU_P2P_USABLE = 1;
+  // At least one status is a known status other than OK.
+  GPU_P2P_NOT_USABLE = 2;
+}
+
+// GpuHealth is a GPU's health from what the agent measured at its last start.
+enum GpuHealth {
+  // Unknown: no report, NVML did not run, or the link width is unknown.
+  GPU_HEALTH_UNSPECIFIED = 0;
+  // No NVML error, and the link width was at its maximum at agent start.
+  GPU_HEALTH_OK = 1;
+  // The link width was below its maximum at agent start.
+  GPU_HEALTH_LINK_BELOW_MAX = 2;
+  // An NVML health call failed at agent start.
+  GPU_HEALTH_ERROR = 3;
 }

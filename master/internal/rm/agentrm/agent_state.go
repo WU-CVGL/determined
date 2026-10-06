@@ -62,6 +62,11 @@ type agentState struct {
 	slotStates          map[device.ID]*slot
 	containerAllocation map[cproto.ID]model.AllocationID
 	containerState      map[cproto.ID]*cproto.Container
+
+	// gpuTopology is what the agent reported at its last start. It is nil after a restore from the
+	// snapshot until the agent's AgentStarted arrives. It is never mutated, only replaced
+	// (setGPUTopology), and it stays out of device.Device, deepCopy and the snapshot.
+	gpuTopology *gpuTopology
 }
 
 // newAgentState returns a new agent empty agent state backed by the handler.
@@ -211,7 +216,9 @@ func (a *agentState) freeDevice(d device.Device) {
 	}
 }
 
-// deepCopy returns a copy of agentState for scheduler internals.
+// deepCopy returns a copy of agentState for scheduler internals. Each copy gets its own slot
+// states, since the scheduler's simulation frees devices on it. It leaves out gpuTopology: the
+// copies feed the scheduler's fit and the pool's count queries, which use counts only.
 func (a *agentState) deepCopy() *agentState {
 	copiedAgent := &agentState{
 		id:                    a.id,
@@ -277,6 +284,11 @@ func (a *agentState) agentStarted(agentStarted *aproto.AgentStarted) {
 	if err := a.persist(); err != nil {
 		a.syslog.Warnf("agentStarted persist failure")
 	}
+}
+
+// setGPUTopology replaces the agent's GPU topology with the one from its latest AgentStarted.
+func (a *agentState) setGPUTopology(g *gpuTopology) {
+	a.gpuTopology = g
 }
 
 func (a *agentState) checkAgentStartedDevicesMatch(

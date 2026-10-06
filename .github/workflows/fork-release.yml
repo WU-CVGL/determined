@@ -26,6 +26,9 @@ concurrency:
 jobs:
   release:
     if: github.repository == 'WU-CVGL/determined'
+    # The agent is built with cgo on this runner (NVML for the GPU topology), so it links the
+    # runner's glibc dynamically. Keep this runner's Ubuntu no newer than BASE_IMAGE: the agent
+    # binary check fails when the agent needs a newer glibc than BASE_IMAGE has.
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     defaults:
@@ -33,6 +36,8 @@ jobs:
         shell: bash
     env:
       REGISTRY: ghcr.io
+      # Base of the master and agent images. Its glibc must be at least as new as the one the
+      # agent was linked against on the runner (see runs-on).
       BASE_IMAGE: ubuntu:22.04
     steps:
       - uses: actions/checkout@v4
@@ -67,7 +72,7 @@ jobs:
             [[ "$source_sha" == "$(git rev-parse "refs/tags/${tag}^{commit}")" ]] || { echo 'Checkout does not match release tag' >&2; exit 1; }
             git merge-base --is-ancestor "$source_sha" origin/main || { echo 'Release tag is not on main' >&2; exit 1; }
           fi
-          for tool in gh jq docker; do command -v "$tool" >/dev/null || { echo "Missing hosted-runner tool: $tool" >&2; exit 1; }; done
+          for tool in gh jq docker gcc readelf objdump; do command -v "$tool" >/dev/null || { echo "Missing hosted-runner tool: $tool" >&2; exit 1; }; done
           docker info >/dev/null
 
           # A published final release is immutable. Candidate retries must use the same source.
@@ -212,14 +217,21 @@ jobs:
 
       - name: Build Linux binaries
         env:
-          CGO_ENABLED: '0'
           GOARCH: amd64
           GOOS: linux
         run: |
+          set -euo pipefail
           mkdir -p .fork-build/bin
-          go build -trimpath -ldflags "-X github.com/determined-ai/determined/master/version.Version=${VERSION}" -o .fork-build/bin/determined-master ./master/cmd/determined-master
-          go build -trimpath -ldflags "-X main.version=${VERSION}" -o .fork-build/bin/determined-agent ./agent/cmd/determined-agent
-          go build -trimpath -o .fork-build/bin/determined-gotmpl ./master/cmd/determined-gotmpl
+          CGO_ENABLED=0 go build -trimpath -ldflags "-X github.com/determined-ai/determined/master/version.Version=${VERSION}" -o .fork-build/bin/determined-master ./master/cmd/determined-master
+          # The agent needs cgo for NVML (GPU topology); netgo and osusergo keep net and os/user
+          # pure Go, so it links only glibc.
+          CGO_ENABLED=1 go build -trimpath -tags netgo,osusergo -ldflags "-X main.version=${VERSION}" -o .fork-build/bin/determined-agent ./agent/cmd/determined-agent
+          CGO_ENABLED=0 go build -trimpath -o .fork-build/bin/determined-gotmpl ./master/cmd/determined-gotmpl
+
+      - name: Check the agent binary
+        run: >-
+          tools/fork/check-agent-build.sh binary .fork-build/bin/determined-agent
+          .fork-build/bin/determined-master "$BASE_IMAGE"
 
       - name: Build official images with a minimal context
         run: |
@@ -241,6 +253,9 @@ jobs:
           docker build --build-arg "BASE_IMAGE=${BASE_IMAGE}" --build-arg "FORK_COMMIT=${SOURCE_SHA}" --build-arg "FORK_VERSION=${VERSION}" --build-arg "SOURCE_REPOSITORY=https://github.com/${GITHUB_REPOSITORY}" -f "$context/tools/fork/Dockerfile.agent" -t "$AGENT_IMAGE" "$context"
           [[ $(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$MASTER_IMAGE") == "$SOURCE_SHA" ]]
           [[ $(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$AGENT_IMAGE") == "$SOURCE_SHA" ]]
+
+      - name: Check the agent image
+        run: tools/fork/check-agent-build.sh image "$AGENT_IMAGE"
 
       - name: Push GHCR images
         run: |
