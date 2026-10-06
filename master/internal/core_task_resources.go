@@ -25,6 +25,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/db"
 	expauth "github.com/determined-ai/determined/master/internal/experiment"
 	"github.com/determined-ai/determined/master/pkg/model"
+	"github.com/determined-ai/determined/master/pkg/ptrs"
 )
 
 const (
@@ -83,10 +84,16 @@ type taskResourceResponse struct {
 // sets it to the last cluster heartbeat for every allocation that is still queued. Image pulling
 // comes after ContainerStart on purpose, since the devices are held while pulling. End is null
 // while the allocation has not been released.
+//
+// CollectFrom is ContainerStart plus observability.task_mapping_delay: the master exports the
+// allocation's task mappings that long after allocations.start_time (its first Pulling or
+// Running), which is never before ContainerStart, so the allocation's metrics never begin before
+// CollectFrom. It is null when ContainerStart is.
 type taskResourceAllocation struct {
 	AllocationID   string     `json:"allocation_id" bun:"allocation_id"`
 	ContainerStart *time.Time `json:"container_start" bun:"container_start"`
 	End            *time.Time `json:"end" bun:"end_time"`
+	CollectFrom    *time.Time `json:"collect_from" bun:"-"`
 }
 
 type taskResourceAllocationsResponse struct {
@@ -145,8 +152,9 @@ func (m *Master) taskResourceDependencies() taskResourceDependencies {
 		query: func(ctx context.Context, expr string, r taskResourceRange) ([]prometheusTaskSeries, error) {
 			return queryTaskPrometheus(ctx, conf.PrometheusURL, expr, r)
 		},
-		allocations: queryTaskResourceAllocations,
-		gpuSets:     queryTaskResourceGPUSets,
+		allocations:  queryTaskResourceAllocations,
+		gpuSets:      queryTaskResourceGPUSets,
+		collectDelay: time.Duration(m.config.Observability.TaskMappingDelay),
 	}
 }
 
@@ -157,6 +165,8 @@ type taskResourceDependencies struct {
 	allocations       func(context.Context, string) ([]taskResourceAllocation, error)
 	// gpuSets reads the recorded GPU sets of a task's allocations; nil skips GPU numbering.
 	gpuSets func(context.Context, string, []string) ([]taskResourceGPUSet, error)
+	// collectDelay is observability.task_mapping_delay.
+	collectDelay time.Duration
 }
 
 // queryTaskResourceAllocations reads a task's allocations and their container start in one query.
@@ -201,6 +211,11 @@ func serveTaskResourceAllocations(c echo.Context, deps taskResourceDependencies)
 	if err != nil {
 		log.WithError(err).Warn("task resources: the allocation list is unavailable")
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "task resource allocations are unavailable")
+	}
+	for i := range allocations {
+		if start := allocations[i].ContainerStart; start != nil {
+			allocations[i].CollectFrom = ptrs.Ptr(start.Add(deps.collectDelay))
+		}
 	}
 	return c.JSON(http.StatusOK, taskResourceAllocationsResponse{Allocations: allocations})
 }

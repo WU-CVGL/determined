@@ -91,6 +91,22 @@ describe('since start', () => {
       { allocationId: 'b', containerStart: undefined, end: undefined },
       { allocationId: 'c', containerStart: undefined, end: 1790845200 },
     ]);
+    expect(
+      parseResourceAllocations({
+        allocations: [
+          {
+            allocation_id: 'a',
+            collect_from: '2026-10-01T08:05:00Z',
+            container_start: '2026-10-01T08:00:00Z',
+            end: null,
+          },
+          { allocation_id: 'b', collect_from: null, container_start: null, end: null },
+        ],
+      }),
+    ).toEqual([
+      { allocationId: 'a', collectFrom: 1790841900, containerStart: 1790841600, end: undefined },
+      { allocationId: 'b', collectFrom: undefined, containerStart: undefined, end: undefined },
+    ]);
     expect(parseResourceAllocations({ allocations: [] })).toEqual([]);
     for (const invalid of [undefined, null, '<html>', {}, { allocations: [{}] }])
       expect(parseResourceAllocations(invalid)).toBeUndefined();
@@ -113,6 +129,22 @@ describe('since start', () => {
     });
     expect(sinceStartBounds(list, 'unknown', 100)).toEqual({ start: 100 });
     expect(sinceStartBounds(null, 'a', 100)).toEqual({ start: 100 });
+  });
+
+  it('starts where the master begins collecting metrics', () => {
+    const list = [
+      { allocationId: 'b', collectFrom: 600, containerStart: 300 },
+      { allocationId: 'a', collectFrom: 500, containerStart: 200, end: 450 },
+      { allocationId: 'c', end: 150 },
+    ];
+    expect(sinceStartBounds(list, '', 100)).toEqual({ start: 500 });
+    expect(sinceStartBounds(list, 'b', 100)).toEqual({ end: undefined, start: 600 });
+    expect(sinceStartBounds(list, 'c', 100)).toEqual({ noContainerStart: true, start: 100 });
+    // An allocation that ended before collection began gets the shortest range, which has no
+    // samples, and no NaN.
+    const bounds = sinceStartBounds(list, 'a', 100);
+    expect(bounds).toEqual({ end: 450, start: 500 });
+    expect(sinceStartWindow(bounds, 1000)).toEqual({ clamped: false, end: 450, start: 449 });
   });
 
   it('ends at the allocation end or now and keeps the most recent 7 days', () => {
