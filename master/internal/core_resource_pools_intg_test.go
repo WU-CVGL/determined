@@ -38,6 +38,9 @@ func newDynamicPoolRouteTest(
 	t.Cleanup(func() {
 		dynamicPoolRequestUser = originalUser
 		authorizeDynamicPoolRequest = originalAuthorize
+		// The test's own database replaced the shared one in Bun and is dropped when the test
+		// ends, so the next setupAPITest must connect to the shared database again.
+		thePgDB = nil
 	})
 	dynamicPoolRequestUser = func(*http.Request) (*model.User, *model.UserSession, error) {
 		return &model.User{Active: true, Admin: true}, &model.UserSession{}, nil
