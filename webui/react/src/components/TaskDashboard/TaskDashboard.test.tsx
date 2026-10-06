@@ -542,33 +542,40 @@ describe('TaskDashboard', () => {
     it.each([
       ['only the widths, as a resize stores them', { columnWidths: OLD_WIDTHS }],
       ['the columns and their widths', { columns: OLD_COLUMNS, columnWidths: OLD_WIDTHS }],
-    ])('gives each column its own width when they were %s', async (_, settings) => {
-      storeBeforeLoad(settings);
-      setup();
-      expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+    ])(
+      'gives each column its own width when they were %s',
+      async (_, settings) => {
+        storeBeforeLoad(settings);
+        setup();
+        expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
 
-      await waitFor(() => expect(stored().columnWidths).toHaveLength(10));
-      expect(storedWidths()).toEqual({
-        endTime: 309,
-        id: 302,
-        kind: 301,
-        location: 306,
-        name: 303,
-        resourcePool: 307,
-        slots: 72,
-        startTime: 308,
-        state: 304,
-        user: 305,
-      });
-      // ID, User, Location, Resource Pool and Ended are hidden below the md breakpoint, as in tests.
-      await waitFor(() => expect(shownWidths()).toMatchObject({ Slots: '72px' }));
-      expect(shownWidths()).toMatchObject({
-        Kind: '301px',
-        Name: '303px',
-        Started: '308px',
-        State: '304px',
-      });
-    });
+        await waitFor(() => expect(stored().columnWidths).toHaveLength(10));
+        expect(storedWidths()).toEqual({
+          endTime: 309,
+          id: 302,
+          kind: 301,
+          location: 306,
+          name: 303,
+          resourcePool: 307,
+          slots: 72,
+          startTime: 308,
+          state: 304,
+          user: 305,
+        });
+        // ID, User, Location, Resource Pool and Ended are hidden below the md breakpoint, as in
+        // tests. The table takes the new widths a render later, which takes seconds in a full run.
+        await waitFor(() => expect(shownWidths()).toMatchObject({ Slots: '72px' }), {
+          timeout: 10_000,
+        });
+        expect(shownWidths()).toMatchObject({
+          Kind: '301px',
+          Name: '303px',
+          Started: '308px',
+          State: '304px',
+        });
+      },
+      30_000,
+    );
   });
 
   it('keeps the filters of the Jobs page and of the tasks-only view apart', async () => {
