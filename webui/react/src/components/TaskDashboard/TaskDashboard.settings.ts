@@ -1,4 +1,5 @@
 import { array, boolean, literal, number, string, undefined as undefinedType, union } from 'io-ts';
+import _ from 'lodash';
 
 import { InteractiveTableSettings } from 'components/Table/InteractiveTable';
 import { SettingsConfig } from 'hooks/useSettings';
@@ -14,6 +15,7 @@ export type TaskDashboardColumnName =
   | 'location'
   | 'name'
   | 'resourcePool'
+  | 'slots'
   | 'startTime'
   | 'state'
   | 'user';
@@ -26,6 +28,7 @@ export const DEFAULT_COLUMNS: TaskDashboardColumnName[] = [
   'user',
   'location',
   'resourcePool',
+  'slots',
   'startTime',
   'endTime',
 ];
@@ -38,9 +41,61 @@ export const DEFAULT_COLUMN_WIDTHS: Record<TaskDashboardColumnName, number> = {
   location: 180,
   name: 220,
   resourcePool: 128,
+  slots: 72,
   startTime: 117,
   state: 120,
   user: 85,
+};
+
+/**
+ * The widths of the default columns, which the settings give when none were stored: a new array
+ * each time, as the table changes the widths it was given in place while a column is resized.
+ */
+export const defaultWidths = (): number[] =>
+  DEFAULT_COLUMNS.map((col) => DEFAULT_COLUMN_WIDTHS[col]);
+
+export interface ColumnLayout {
+  columns: TaskDashboardColumnName[];
+  columnWidths: number[];
+}
+
+const withSlotsAt = <T>(items: T[], at: number, slots: T): T[] => [
+  ...items.slice(0, at),
+  slots,
+  ...items.slice(at),
+];
+
+/**
+ * The stored columns of a dashboard with one width for each, as the table binds them by place, or
+ * undefined when they already are. It reads them as the settings give them, with the default for
+ * either one that was never stored:
+ * - Columns stored before the Slots column get it after Resource Pool (else last) at its default
+ *   width, and each keeps its own width. The table would add Slots at the end.
+ * - Widths stored without columns, as a resize stores them, are those of the default columns before
+ *   Slots; the settings give the default columns of now, Slots included, so Slots gets its default
+ *   width at its place.
+ * - The default widths are those of the default columns: columns in another order get their own.
+ * - A missing width is its column's default; widths past the last column are dropped.
+ */
+export const normalizedLayout = ({
+  columns,
+  columnWidths,
+}: ColumnLayout): ColumnLayout | undefined => {
+  let cols = columns.length > 0 ? columns : DEFAULT_COLUMNS;
+  let widths = _.isEqual(columnWidths, defaultWidths())
+    ? cols.map((col) => DEFAULT_COLUMN_WIDTHS[col])
+    : columnWidths;
+  if (!cols.includes('slots')) {
+    const at = cols.includes('resourcePool') ? cols.indexOf('resourcePool') + 1 : cols.length;
+    const own = cols.map((col, i) => widths[i] ?? DEFAULT_COLUMN_WIDTHS[col]);
+    cols = withSlotsAt(cols, at, 'slots');
+    widths = withSlotsAt(own, at, DEFAULT_COLUMN_WIDTHS.slots);
+  } else if (widths.length === cols.length - 1) {
+    widths = withSlotsAt(widths, cols.indexOf('slots'), DEFAULT_COLUMN_WIDTHS.slots);
+  }
+  widths = cols.map((col, i) => widths[i] ?? DEFAULT_COLUMN_WIDTHS[col]);
+  if (_.isEqual(cols, columns) && _.isEqual(widths, columnWidths)) return undefined;
+  return { columns: cols, columnWidths: widths };
 };
 
 /** The page size, by default and at most: each experiment row carries its whole config. */
@@ -106,6 +161,7 @@ const settingsConfig = (scope: DashboardScope, experiments: boolean): SettingsCo
           literal('location'),
           literal('name'),
           literal('resourcePool'),
+          literal('slots'),
           literal('startTime'),
           literal('state'),
           literal('user'),
@@ -113,7 +169,7 @@ const settingsConfig = (scope: DashboardScope, experiments: boolean): SettingsCo
       ),
     },
     columnWidths: {
-      defaultValue: DEFAULT_COLUMNS.map((col) => DEFAULT_COLUMN_WIDTHS[col]),
+      defaultValue: defaultWidths(),
       skipUrlEncoding: true,
       storageKey: 'columnWidths',
       type: array(number),

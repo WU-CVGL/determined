@@ -40,15 +40,16 @@ export type GpuHealthWord = 'ok' | 'narrow' | 'error' | 'unknown';
 /** The words of the health dot and the legend. */
 export const GPU_HEALTH_LABELS: Record<GpuHealthWord, string> = {
   error: 'error',
-  narrow: 'link below max at start',
+  narrow: 'link below max',
   ok: 'ok',
   unknown: 'unknown',
 };
 
-/** The width is an observation at agent start, not a confirmed fault. */
-export const GPU_NARROW_LINK_TEXT =
-  "A lower link width lowers this link's bandwidth cap. " +
-  'Actual collective throughput depends on the workload.';
+/**
+ * Shown with a narrow link. The width is the one measured at agent start; the agent docs explain
+ * what it does and does not mean.
+ */
+export const GPU_NARROW_LINK_TEXT = "A lower link width lowers this link's bandwidth cap.";
 export const GPU_EXCLUDED_TEXT = "Left out by the agent's exclude list. No task runs on this GPU.";
 
 export const gpuHealthWord = (health?: V1GpuHealth): GpuHealthWord => {
@@ -189,7 +190,7 @@ export const gpuTopologySummary = (topo?: V1GpuTopology): string => {
  * The GPU Health column of `det agent list`: "ok" when every GPU is ok and none is excluded.
  * Otherwise the slots that are not ok, grouped as error, narrow and unknown, then the excluded
  * GPUs with their state when it is not ok, for example
- * "narrow: 3,5 (x8 of x16 at start); excluded: 81:00.0".
+ * "narrow: 3,5 (x8 of x16); excluded: 81:00.0". The widths are the ones measured at agent start.
  */
 export const gpuHealthSummary = (topo?: V1GpuTopology): string => {
   if (!topo) return '';
@@ -205,7 +206,7 @@ export const gpuHealthSummary = (topo?: V1GpuTopology): string => {
   slots
     .filter((g) => word(g) === 'narrow')
     .forEach((g) => {
-      const width = `x${g.pcieLinkWidth} of x${g.pcieLinkWidthMax} at start`;
+      const width = `x${g.pcieLinkWidth} of x${g.pcieLinkWidthMax}`;
       narrow.set(width, [...(narrow.get(width) ?? []), g.deviceId]);
     });
   if (narrow.size > 0) {
@@ -358,23 +359,25 @@ export const slotFillEdgeColor = (state: SlotState): string | undefined =>
 export const slotFillOnColor = (state: SlotState): string =>
   state === SlotState.Free ? 'var(--theme-surface-on)' : getStateColorCssVar(state, { isOn: true });
 
-/** "<cur> of <max>" for a link width or generation, with ? for an unknown value (0). */
+/** "<cur> of <max>" for a link width, with ? for an unknown value (0). */
 export const linkValueText = (cur: number, max: number, prefix: string): string => {
   const value = (v: number) => (v > 0 ? `${prefix}${v}` : `${prefix}?`);
   return `${value(cur)} of ${value(max)}`;
 };
 
-/** The first fact of a GPU's health: the link at agent start, an observation. */
-export const linkAtStartText = (gpu: V1GpuInfo): string => {
-  const { pcieLinkWidth, pcieLinkWidthMax, pcieLinkGen, pcieLinkGenMax } = gpu;
-  if (!pcieLinkWidth && !pcieLinkWidthMax && !pcieLinkGen && !pcieLinkGenMax) return 'unknown';
-  return (
-    `${linkValueText(pcieLinkWidth, pcieLinkWidthMax, 'x')}, ` +
-    `${linkValueText(pcieLinkGen, pcieLinkGenMax, 'Gen')} (an observation, not a confirmed fault)`
-  );
+/**
+ * The first fact of a GPU's health: its PCIe link, as measured at agent start. The width as current
+ * of max, and the generation as the highest that the GPU and its slot support: the current
+ * generation drops while a GPU is idle, so it is left out, as in `det agent describe`.
+ */
+export const linkText = (gpu: V1GpuInfo): string => {
+  const { pcieLinkWidth, pcieLinkWidthMax, pcieLinkGenMax } = gpu;
+  if (!pcieLinkWidth && !pcieLinkWidthMax && !pcieLinkGenMax) return 'unknown';
+  const gen = pcieLinkGenMax > 0 ? `Gen${pcieLinkGenMax}` : 'Gen?';
+  return `${linkValueText(pcieLinkWidth, pcieLinkWidthMax, 'x')}, ${gen}`;
 };
 
-/** The second fact of a GPU's health: the NVML errors at agent start. */
+/** The second fact of a GPU's health: its NVML errors, as measured at agent start. */
 export const nvmlErrorsText = (topo: V1GpuTopology, gpu: V1GpuInfo): string => {
   if (topo.unknownReason) return 'not collected';
   return gpu.nvmlError || 'none';

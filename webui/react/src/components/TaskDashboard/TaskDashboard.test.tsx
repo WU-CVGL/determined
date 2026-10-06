@@ -6,7 +6,7 @@ import { Loadable } from 'hew/utils/loadable';
 import React, { useEffect } from 'react';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
-import { MemoryRouter } from 'react-router-dom';
+import { BrowserRouter, MemoryRouter } from 'react-router-dom';
 
 import { ThemeProvider } from 'components/ThemeProvider';
 import { SettingsProvider } from 'hooks/useSettingsProvider';
@@ -16,10 +16,12 @@ import {
   getJupyterLabs,
   getShells,
   getTensorBoards,
+  getUserSetting,
   killExperiment,
   killGenericTask,
   killTask,
   unpauseGenericTask,
+  updateUserSetting,
 } from 'services/api';
 import { V1SlotsFilter } from 'services/api-ts-sdk';
 import authStore from 'stores/auth';
@@ -139,7 +141,7 @@ vi.mock('services/api', () => ({
   getShells: vi.fn(),
   getTensorBoards: vi.fn(() => Promise.resolve([])),
   getUsers: () => Promise.resolve({ users: [] }),
-  getUserSetting: () => Promise.resolve({ settings: [] }),
+  getUserSetting: vi.fn(() => Promise.resolve({ settings: [] })),
   getWorkspaceProjects: () => Promise.resolve({ pagination: { total: 0 }, projects: [] }),
   getWorkspaces: () => Promise.resolve({ pagination: { total: 0 }, workspaces: [] }),
   killExperiment: vi.fn(() => Promise.resolve()),
@@ -148,7 +150,7 @@ vi.mock('services/api', () => ({
   pauseGenericTask: vi.fn(() => Promise.resolve()),
   resetUserSetting: () => Promise.resolve(),
   unpauseGenericTask: vi.fn(() => Promise.resolve()),
-  updateUserSetting: () => Promise.resolve(),
+  updateUserSetting: vi.fn(() => Promise.resolve()),
 }));
 
 // Every permission granted, unless a test limits it: the menus' own rules are tested with each menu.
@@ -199,22 +201,143 @@ const Container: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return <SettingsProvider>{children}</SettingsProvider>;
 };
 
-const setup = (props: React.ComponentProps<typeof TaskDashboard> = {}, url = '/jobs') =>
-  render(
+/** With `browser`, at this URL of the browser itself, which the settings read on the first load. */
+const setup = (
+  props: React.ComponentProps<typeof TaskDashboard> = {},
+  url = '/jobs',
+  { browser = false } = {},
+) => {
+  const page = (
+    <Container>
+      <ConfirmationProvider>
+        <TaskDashboard {...props} />
+      </ConfirmationProvider>
+    </Container>
+  );
+  if (browser) window.history.replaceState(null, '', url);
+  return render(
     <UIProvider theme={DefaultTheme.Light}>
       <ThemeProvider>
         <DndProvider backend={HTML5Backend}>
-          <MemoryRouter initialEntries={[url]}>
-            <Container>
-              <ConfirmationProvider>
-                <TaskDashboard {...props} />
-              </ConfirmationProvider>
-            </Container>
-          </MemoryRouter>
+          {browser ? (
+            <BrowserRouter>{page}</BrowserRouter>
+          ) : (
+            <MemoryRouter initialEntries={[url]}>{page}</MemoryRouter>
+          )}
         </DndProvider>
       </ThemeProvider>
     </UIProvider>,
   );
+};
+
+const JOBS_SETTINGS = 'jobs-dashboard-global';
+
+/** Settings stored before the page loads, which the settings store then reads from the master. */
+const storeBeforeLoad = (settings: Record<string, unknown>, storagePath = JOBS_SETTINGS) => {
+  userSettings.reset();
+  vi.mocked(getUserSetting).mockResolvedValueOnce({
+    settings: Object.entries(settings).map(([key, value]) => ({
+      key,
+      storagePath,
+      value: JSON.stringify(value),
+    })),
+  });
+};
+
+/* For a page that first loads stored settings, which takes seconds in a full test run. */
+const AFTER_LOAD = { timeout: 10_000 };
+
+/** The settings in the store, as the page last updated them. */
+const stored = (storagePath = JOBS_SETTINGS): Record<string, unknown> =>
+  (Loadable.getOrElse(undefined, userSettings.getAll().get())?.get(storagePath) ?? {}) as Record<
+    string,
+    unknown
+  >;
+
+/** The last value of this Jobs page setting that the page sent to the master. */
+const saved = (key: string): unknown => {
+  const value = vi
+    .mocked(updateUserSetting)
+    .mock.calls.flatMap(([params]) => params.settings ?? [])
+    .filter((setting) => setting.storagePath === JOBS_SETTINGS && setting.key === key)
+    .at(-1)?.value;
+  return value === undefined ? undefined : JSON.parse(value);
+};
+
+/* The columns and widths the Jobs page stored before its Slots column. */
+const OLD_COLUMNS = [
+  'kind',
+  'id',
+  'name',
+  'state',
+  'user',
+  'location',
+  'resourcePool',
+  'startTime',
+  'endTime',
+];
+const OLD_WIDTHS = [301, 302, 303, 304, 305, 306, 307, 308, 309];
+
+/* The same with the Slots column, as this version stores them. */
+const NEW_COLUMNS = [...OLD_COLUMNS.slice(0, 7), 'slots', ...OLD_COLUMNS.slice(7)];
+const NEW_WIDTHS = [...OLD_WIDTHS.slice(0, 7), 72, ...OLD_WIDTHS.slice(7)];
+
+/* The width of each stored column: the table binds the stored widths to the columns by place. */
+const storedWidths = () => {
+  const { columns, columnWidths } = stored() as { columns: string[]; columnWidths: number[] };
+  expect(columnWidths).toHaveLength(columns.length);
+  return Object.fromEntries(columns.map((col, i) => [col, columnWidths[i]]));
+};
+
+/** The width of each column the table shows, by its title. */
+const shownWidths = () => {
+  const table = screen.getAllByRole('table')[0];
+  const titles = within(table)
+    .getAllByRole('columnheader')
+    .map((th) => th.textContent?.trim());
+  const widths = [...table.querySelectorAll('colgroup > col')].map(
+    (col) => (col as HTMLElement).style.width,
+  );
+  expect(widths).toHaveLength(titles.length);
+  return Object.fromEntries(titles.map((title, i) => [title, widths[i]]));
+};
+
+const header = (title: string) =>
+  screen.getAllByRole('columnheader').find((th) => th.textContent?.trim() === title) as HTMLElement;
+
+/** Drags the right edge of the column with this title to x, as a user resizes it. */
+const resize = async (title: string, x: number) => {
+  const edge = header(title).querySelector('[class*="columnResizeHandle"]') as HTMLElement;
+  fireEvent.mouseDown(edge, { button: 0, clientX: 0 });
+  fireEvent.mouseMove(document, { clientX: x });
+  // The table takes a new width after a short throttle.
+  await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
+  fireEvent.mouseUp(document, { clientX: x });
+};
+
+/** Drags the column with this title onto the next one to its right, as a user moves it. */
+const moveRight = async (title: string, onto: string) => {
+  const data: Record<string, string> = {};
+  const dataTransfer = {
+    dropEffect: 'move',
+    effectAllowed: 'all',
+    files: [],
+    getData: (key: string) => data[key],
+    items: [],
+    setData: (key: string, value: string) => (data[key] = value),
+    setDragImage: () => undefined,
+    types: [],
+  };
+  const source = header(title).querySelector('[draggable="true"]') as HTMLElement;
+  const target = header(onto).querySelector('[class*="dropTarget"]') as HTMLElement;
+  fireEvent.dragStart(source, { clientX: 100, dataTransfer });
+  // The drag starts a tick after its event.
+  await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  for (const drag of [fireEvent.dragEnter, fireEvent.dragOver, fireEvent.drop]) {
+    drag(target, { clientX: 300, dataTransfer });
+  }
+  fireEvent.dragEnd(source, { clientX: 300, dataTransfer });
+};
 
 const user = userEvent.setup();
 
@@ -270,6 +393,7 @@ describe('TaskDashboard', () => {
     // The settings store outlives a test; each test starts from the default filters.
     await userSettings.clear();
     vi.clearAllMocks();
+    window.history.replaceState(null, '', '/');
   });
 
   it('lists every kind on the Jobs page, newest first, with the launch buttons', async () => {
@@ -360,6 +484,25 @@ describe('TaskDashboard', () => {
     expect(screen.queryByText('cpu-notebook')).not.toBeInTheDocument();
   });
 
+  it("keeps the URL's kinds over the stored ones while it moves the stored columns", async () => {
+    storeBeforeLoad({ columns: OLD_COLUMNS, columnWidths: OLD_WIDTHS, type: ['experiment'] });
+    setup({}, '/jobs?type=shell', { browser: true });
+
+    await waitFor(() => expect(stored().columns).toContain('slots'), AFTER_LOAD);
+    await waitFor(() => expect(stored().type).toEqual(['shell']), AFTER_LOAD);
+    // Long enough for the URL and the settings to undo each other, as they did.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+    expect(new URLSearchParams(window.location.search).getAll('type')).toEqual(['shell']);
+    expect(stored().type).toEqual(['shell']);
+    expect(screen.getByTestId('kind-shell')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('kind-experiment')).toHaveAttribute('aria-pressed', 'false');
+    await waitFor(
+      () => expect(screen.queryByText('bert-finetune')).not.toBeInTheDocument(),
+      AFTER_LOAD,
+    );
+    expect(screen.getByText('gpu-shell')).toBeInTheDocument();
+  }, 30_000);
+
   it('keeps old ?type values of the task list working', async () => {
     setup({ tasksOnly: true }, '/tasks?type=jupyter-lab');
 
@@ -406,15 +549,194 @@ describe('TaskDashboard', () => {
     expect(screen.getByText('cpu-notebook')).toBeInTheDocument();
   });
 
-  it('explains GPU and CPU-only in a tooltip', async () => {
+  it('explains GPU and CPU-only in a tooltip on an icon, never over the open options', async () => {
+    const hint = 'GPU: asks for at least one slot. CPU-only: asks for none.';
     setup();
     expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
 
-    await user.hover(screen.getByTestId('slots'));
+    await user.click(within(screen.getByTestId('slots')).getByRole('combobox'));
+    expect((await screen.findAllByTitle('CPU-only')).length).toBeGreaterThan(0);
+    // Longer than the tooltip's 0.1 s open delay.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
 
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(
-      'GPU: asks for at least one slot. CPU-only: asks for none.',
+    await user.hover(screen.getByLabelText(hint));
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(hint);
+  });
+
+  it('shows the slots each run asks for between Resource Pool and Started', async () => {
+    const configOf = (config: unknown) => config as BulkExperimentItem['config'];
+    vi.mocked(getShells).mockResolvedValue([
+      SHELL,
+      { ...SHELL, id: 'shell-2', name: 'old-shell', slots: undefined },
+    ]);
+    vi.mocked(getExperiments).mockImplementation(() =>
+      Promise.resolve({
+        experiments: [
+          { ...EXPERIMENT, config: configOf({ resources: { slots_per_trial: 4 } }) },
+          { ...STALE_EXPERIMENT, config: configOf({ resources: {} }) },
+        ],
+        pagination: { limit: 0, offset: 0, total: 2 },
+      }),
     );
+    setup();
+    expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+
+    // Resource Pool is hidden below the md breakpoint, as in tests; Slots shows at every width.
+    const headers = screen.getAllByRole('columnheader').map((h) => h.textContent?.trim());
+    expect(headers.indexOf('Slots')).toBe(headers.indexOf('Started') - 1);
+
+    const slots = async (name: string) => within(await row(name)).getByTestId('slots-cell');
+    expect(await slots('bert-finetune')).toHaveTextContent(/^4$/);
+    expect(within(await slots('bert-finetune')).getByTitle('Slots per trial')).toBeInTheDocument();
+    expect(await slots('stale-run')).toHaveTextContent(/^1$/);
+    expect(await slots('gpu-shell')).toHaveTextContent(/^1$/);
+    expect(await slots('old-shell')).toHaveTextContent(/^—$/);
+    expect(await slots('cpu-notebook')).toHaveTextContent(/^0$/);
+    expect(await slots('eval-sweep')).toHaveTextContent(/^1$/);
+  });
+
+  describe('with widths stored before the Slots column', () => {
+    it.each([
+      ['only the widths, as a resize stores them', { columnWidths: OLD_WIDTHS }],
+      ['the columns and their widths', { columns: OLD_COLUMNS, columnWidths: OLD_WIDTHS }],
+    ])(
+      'gives each column its own width when they were %s',
+      async (_, settings) => {
+        storeBeforeLoad(settings);
+        setup();
+        expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+
+        await waitFor(() => expect(stored().columnWidths).toHaveLength(10), AFTER_LOAD);
+        expect(storedWidths()).toEqual({
+          endTime: 309,
+          id: 302,
+          kind: 301,
+          location: 306,
+          name: 303,
+          resourcePool: 307,
+          slots: 72,
+          startTime: 308,
+          state: 304,
+          user: 305,
+        });
+        // ID, User, Location, Resource Pool and Ended are hidden below the md breakpoint, as in
+        // tests. The table takes the new widths a render later, which takes seconds in a full run.
+        await waitFor(() => expect(shownWidths()).toMatchObject({ Slots: '72px' }), AFTER_LOAD);
+        expect(shownWidths()).toMatchObject({
+          Kind: '301px',
+          Name: '303px',
+          Started: '308px',
+          State: '304px',
+        });
+      },
+      30_000,
+    );
+
+    it('gives columns stored in another order without their widths their own widths', async () => {
+      const reordered = [
+        'name',
+        'kind',
+        ...OLD_COLUMNS.filter((c) => !['name', 'kind'].includes(c)),
+      ];
+      storeBeforeLoad({ columns: reordered });
+      setup();
+      expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+
+      await waitFor(() => expect(stored().columns).toContain('slots'), AFTER_LOAD);
+      expect(storedWidths()).toMatchObject({ id: 100, kind: 64, name: 220, slots: 72 });
+      // The widths keep their count, which the table alone would not take up.
+      await waitFor(() => expect(shownWidths()).toMatchObject({ Kind: '64px' }), AFTER_LOAD);
+      expect(shownWidths()).toMatchObject({ Name: '220px', Slots: '72px', State: '120px' });
+    }, 30_000);
+  });
+
+  describe('with the columns and widths of this version stored', () => {
+    it.each([
+      ['the columns and their widths', { columns: NEW_COLUMNS, columnWidths: NEW_WIDTHS }],
+      ['only the widths, as a resize stores them', { columnWidths: NEW_WIDTHS }],
+    ])(
+      'shows each column at its stored width on a first load when they were %s',
+      async (_, settings) => {
+        storeBeforeLoad(settings);
+        setup();
+        expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+
+        // The table mounted while the settings loaded; it mounts again once they have.
+        await waitFor(() => expect(shownWidths()).toMatchObject({ Kind: '301px' }), AFTER_LOAD);
+        expect(shownWidths()).toMatchObject({
+          Name: '303px',
+          Slots: '72px',
+          Started: '308px',
+          State: '304px',
+        });
+      },
+      30_000,
+    );
+
+    it('stores a resize after a first load', async () => {
+      storeBeforeLoad({ columns: NEW_COLUMNS, columnWidths: NEW_WIDTHS });
+      setup();
+      expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+      await waitFor(() => expect(shownWidths()).toMatchObject({ Kind: '301px' }), AFTER_LOAD);
+
+      await resize('Name', 450);
+      // The resize changes the table's own widths in place, not the stored ones it started from,
+      // so the settings see a change and store it.
+      await waitFor(() =>
+        expect(saved('columnWidths')).toEqual([301, 302, 450, 304, 305, 306, 307, 72, 308, 309]),
+      );
+      expect(shownWidths()).toMatchObject({ Kind: '301px', Name: '450px' });
+    }, 30_000);
+
+    it('stores a resize after a column move', async () => {
+      storeBeforeLoad({ columns: NEW_COLUMNS, columnWidths: NEW_WIDTHS });
+      setup();
+      expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+      await waitFor(() => expect(shownWidths()).toMatchObject({ Kind: '301px' }), AFTER_LOAD);
+
+      await moveRight('Name', 'State');
+      await waitFor(() =>
+        expect(saved('columns')).toEqual(['kind', 'id', 'state', 'name', ...NEW_COLUMNS.slice(4)]),
+      );
+      expect(saved('columnWidths')).toEqual([301, 302, 304, 303, 305, 306, 307, 72, 308, 309]);
+
+      // The move gives the table and the settings one array of widths; the resize changes the
+      // table's own.
+      await resize('Kind', 500);
+      await waitFor(() =>
+        expect(saved('columnWidths')).toEqual([500, 302, 304, 303, 305, 306, 307, 72, 308, 309]),
+      );
+      expect(shownWidths()).toMatchObject({ Kind: '500px', Name: '303px', State: '304px' });
+    }, 30_000);
+  });
+
+  it('shows the rows once the stored settings have loaded', async () => {
+    let load: (response: { settings: [] }) => void = () => undefined;
+    userSettings.reset();
+    vi.mocked(getUserSetting).mockReturnValueOnce(new Promise((resolve) => (load = resolve)));
+    setup();
+    await waitFor(() => expect(getExperiments).toHaveBeenCalled());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+    // The table mounts again once they have, which would replace a row being clicked.
+    expect(screen.queryByText('bert-finetune')).not.toBeInTheDocument();
+
+    load({ settings: [] });
+    expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+  });
+
+  it('stores the columns with the widths of a resize', async () => {
+    setup();
+    expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+    await settingsLoaded();
+
+    await resize('Name', 450);
+    // Widths stored alone would be bound by place to the default columns of a later version.
+    await waitFor(() =>
+      expect(saved('columnWidths')).toEqual([64, 100, 450, 120, 85, 180, 128, 72, 117, 117]),
+    );
+    expect(saved('columns')).toEqual(NEW_COLUMNS);
+    expect(storedWidths()).toMatchObject({ kind: 64, name: 450, slots: 72 });
   });
 
   it('keeps the filters of the Jobs page and of the tasks-only view apart', async () => {
