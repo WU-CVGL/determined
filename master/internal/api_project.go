@@ -908,15 +908,14 @@ func (a *apiServer) deleteProject(ctx context.Context, projectID int32,
 	expList []*model.Experiment,
 ) (err error) {
 	holder := &projectv1.Project{}
-	user, _, err := grpcutil.GetUser(ctx)
-	if err != nil {
+	if _, _, err = grpcutil.GetUser(ctx); err != nil {
 		log.WithError(err).Errorf("failed to access user and delete project %d", projectID)
 		_ = a.m.db.QueryProto("delete_fail_project", holder, projectID, err.Error())
 		return err
 	}
 
 	log.Debugf("deleting project %d experiments", projectID)
-	if err = a.deleteExperiments(expList, user); err != nil {
+	if err = a.deleteExperiments(expList); err != nil {
 		log.WithError(err).Errorf("failed to delete experiments")
 		_ = a.m.db.QueryProto("delete_fail_project", holder, projectID, err.Error())
 		return err
