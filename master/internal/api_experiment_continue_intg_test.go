@@ -106,7 +106,16 @@ bind_mounts:
 // endedCodeTestExp is endedTestExp with codeTestConfig.
 func endedCodeTestExp(t *testing.T, api *apiServer, owner continueTestUser) int {
 	t.Helper()
-	cfg, err := expconf.ParseAnyExperimentConfigYAML([]byte(codeTestConfig))
+	return endedTestExpWithConfig(t, api, owner, codeTestConfig)
+}
+
+// endedTestExpWithConfig is endedTestExp with config, a YAML experiment config, merged into
+// minExpConfig.
+func endedTestExpWithConfig(
+	t *testing.T, api *apiServer, owner continueTestUser, config string,
+) int {
+	t.Helper()
+	cfg, err := expconf.ParseAnyExperimentConfigYAML([]byte(config))
 	require.NoError(t, err)
 	activeConfig := schemas.WithDefaults(schemas.Merge(cfg, minExpConfig))
 	return endTestExp(t, createTestExpWithActiveConfig(t, api, owner.User, 1, activeConfig).ID)
@@ -548,4 +557,35 @@ checkpoint_storage: {type: shared_fs, host_path: /, save_trial_latest: 3}
 		require.Equal(t, 7, active.MaxRestarts())
 		require.Equal(t, 3, active.CheckpointStorage().SaveTrialLatest())
 	})
+
+	// GetExperiment shows every value under data.secrets as "********" to everyone
+	// (authz.ObfuscateExperiments), so Resume Current Trial sends the placeholder back, which is a
+	// change to data. A continue without an override config, as det experiment continue sends it
+	// without --config, keeps the secrets.
+	t.Run("data.secrets: Resume Current Trial is refused, a continue without a config is not",
+		func(t *testing.T) {
+			expID := endedTestExpWithConfig(t, api, owner,
+				"data: {url: https://example.com/owner.tar, secrets: {token: owner-token}}")
+			sessions := sessionCount(t, owner)
+			override := resumeOverride(actor.ctx, t, api, expID)
+			require.NotContains(t, override, "owner-token")
+			_, err := api.ContinueExperiment(actor.ctx, &apiv1.ContinueExperimentRequest{
+				Id:             int32(expID),
+				OverrideConfig: override,
+			})
+			require.Equal(t, codes.PermissionDenied, status.Code(err), err)
+			require.ErrorContains(t, err, "only they may change data when")
+			requireNotContinued(t, expID)
+			require.Equal(t, sessions, sessionCount(t, owner))
+
+			_, err = api.ContinueExperiment(actor.ctx, &apiv1.ContinueExperimentRequest{
+				Id:             int32(expID),
+				OverrideConfig: "{}\n",
+			})
+			require.NoError(t, err)
+			requireRunsAs(t, expID, owner)
+			active, err := api.m.db.ActiveExperimentConfig(expID)
+			require.NoError(t, err)
+			require.Equal(t, map[string]any{"token": "owner-token"}, active.Data()["secrets"])
+		})
 }

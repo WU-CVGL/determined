@@ -1475,12 +1475,20 @@ func (a *apiServer) parseAndMergeContinueConfig(expID int, overrideConfig string
 // owner may change when they continue it. Its trials run as the owner, so every other field stays as
 // the owner set it: the ones that choose the code, the image, the mounts, the environment, the
 // storage location, the resource pool, the launcher's arguments, and the hyperparameters and data
-// that the code reads. These only name the experiment or bound the training it already does:
-//   - name, description and labels are metadata, which PatchExperiment also changes. Resume
-//     Current Trial in the WebUI prefixes the description with "Fork of".
+// that the code reads. These name the experiment or bound the training it already does:
+//   - name, description and labels, which PatchExperiment also writes into the config, for
+//     anyone with CanEditExperimentsMetadata (UPDATE_EXPERIMENT_METADATA under RBAC, which is
+//     weaker than continue), and a continue without an override then uses. Resume Current Trial
+//     in the WebUI prefixes the description with "Fork of". Labels also reach the launcher: when
+//     its job_project_source is "label" or "label:<prefix>", they set the Slurm --wckey and the
+//     PBS -P project that the owner's job is accounted to (jobAndProjectLabels in pkg/tasks), each
+//     one quoted argument. They do not choose the code, and refusing them here would not stop
+//     PatchExperiment.
 //   - max_restarts is how many times a failed trial is restarted.
-//   - searcher.max_length is how long the trial trains; extending it is what continue is for.
-//     Only a single-trial experiment takes an override config.
+//   - searcher.max_length is how long the trial trains, for code that still reads it: legacy
+//     Trial classes, and Trainer.fit without max_length. It is deprecated; where the code sets
+//     the length itself, from the entrypoint or the hyperparameters, only the owner can extend
+//     it. Only a single-trial experiment takes an override config.
 //   - checkpoint_storage.save_* are how many checkpoints are kept, which PatchExperiment also
 //     changes. Where they are stored does not change.
 //
