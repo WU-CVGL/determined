@@ -246,7 +246,7 @@ The agent measures once, at start, for every slot and every :ref:`excluded <agen
 GPU, and for nothing else. A restart measures again, for example after a driver change.
 
 -  For each GPU: its PCI bus ID, its NUMA node (read from sysfs), the current and maximum PCIe link
-   width and generation, and the NVML calls that failed.
+   width and generation, and which of its NVML health calls failed.
 
 -  For each pair of GPUs: the closest common ancestor (``INTERNAL``, ``PIX``, ``PXB``, ``PHB``,
    ``NODE`` or ``SYS``, as in ``nvidia-smi topo -m``), the number of active NVLinks between them,
@@ -283,7 +283,8 @@ row wins.
       -  CLI
 
    -  -  error
-      -  An NVML call for the GPU failed at agent start.
+      -  One of the GPU's NVML health calls (handle, PCI info, link width or generation) failed at
+         agent start. A failed query for a pair of GPUs makes only that pair's value unknown.
       -  red
       -  ``error``
 

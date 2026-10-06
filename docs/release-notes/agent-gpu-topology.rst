@@ -11,10 +11,10 @@
 
 -  Agents: Each agent measures its NVIDIA GPUs with NVML when it starts: the PCIe topology between
    GPUs, the P2P ``READ`` and ``WRITE`` statuses in both directions, the NVLinks, each GPU's NUMA
-   node, its PCIe link width and generation at agent start, and the NVML calls that failed. The
-   agent API returns them as ``gpu_topology``, with a health state for each GPU: ok, link below max
-   at agent start, error, or unknown. Masters of earlier versions ignore the report, and agents of
-   earlier versions show as unknown. See :ref:`agent-gpu-topology`.
+   node, its PCIe link width and generation at agent start, and which of its NVML health calls
+   failed. The agent API returns them as ``gpu_topology``, with a health state for each GPU: ok,
+   link below max at agent start, error, or unknown. Masters of earlier versions ignore the report,
+   and agents of earlier versions show as unknown. See :ref:`agent-gpu-topology`.
 
 -  CLI: ``det agent list`` shows a GPU Topology column (NUMA groups, link levels and P2P state, for
    example ``4+4 NODE/SYS p2p``) and a GPU Health column, also in ``--json``. The new ``det agent
