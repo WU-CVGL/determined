@@ -12,6 +12,7 @@ import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
 import { serverAddress } from 'routes/utils';
 import {
   parseResourceAllocations,
+  RESOURCE_MAX_SPAN,
   RESOURCE_METRICS,
   ResourceAllocation,
   ResourceRange,
@@ -39,7 +40,7 @@ const PERIODS = [
   { label: 'Last hour', value: 3600 },
   { label: 'Last 6 hours', value: 21600 },
   { label: 'Last 24 hours', value: 86400 },
-  { label: 'Last 7 days', value: 604800 },
+  { label: 'Last 7 days', value: RESOURCE_MAX_SPAN },
   { label: 'Custom range', value: 0 },
 ];
 
@@ -78,7 +79,7 @@ const TaskResourcesPanel: React.FC<Props> = ({
   }>();
   const customValid =
     customEnd.isAfter(customStart) &&
-    customEnd.diff(customStart, 'second') <= 604800 &&
+    customEnd.diff(customStart, 'second') <= RESOURCE_MAX_SPAN &&
     customEnd.valueOf() <= Date.now();
 
   const taskStart = Math.floor(Date.parse(startTime) / 1000);
