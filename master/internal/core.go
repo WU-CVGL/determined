@@ -1073,8 +1073,9 @@ func (m *Master) checkIfRMDefaultsAreUnbound(rmConfig *config.ResourceManagerCon
 }
 
 // postTaskLogs serves POST /task-logs, which unmanaged trials ship their output to with the
-// session of the user who runs them. It applies the rules of PostTaskLogs: the user must be signed
-// in, and the batch must be for a single task that the user may edit.
+// session of the user who runs them. The user must be signed in, and the batch goes through the
+// same checks as PostTaskLogs (see addTaskLogsForUser): edit permission for a trial's experiment,
+// only view permission (none for checkpoint GC) for other tasks.
 func (m *Master) postTaskLogs(c echo.Context) (interface{}, error) {
 	var logs []*model.TaskLog
 	if err := json.NewDecoder(c.Request().Body).Decode(&logs); err != nil {

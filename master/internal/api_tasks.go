@@ -549,8 +549,10 @@ func (a *apiServer) monitor(ctx context.Context, taskID model.TaskID, logs []*mo
 
 // addTaskLogsForUser writes a batch of task logs that curUser posts. PostTaskLogs and the legacy
 // POST /task-logs route share it, so both apply the same rules before anything is written: at
-// least one log, no log with an ID, a single task for the whole batch, and curUser may edit that
-// task (canDoActionsOnTaskForUser with CanEditExperiment). It returns the task's workspace and,
+// least one log, no log with an ID, a single task for the whole batch, and that task passes
+// canDoActionsOnTaskForUser with CanEditExperiment. That means edit permission for a trial's
+// experiment, but only view permission (CanGetNSC) for commands, notebooks, shells, TensorBoards
+// and generic tasks, and none for checkpoint GC tasks. It returns the task's workspace and,
 // for a trial, its experiment ID.
 func (a *apiServer) addTaskLogsForUser(
 	ctx context.Context, curUser model.User, logs []*model.TaskLog,
