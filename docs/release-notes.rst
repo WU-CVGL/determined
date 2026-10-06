@@ -40,6 +40,13 @@ Version 0.41.0
 -  Resource pools: Update dynamic pools and adopt ``master.yaml`` pools as dynamic pools, so that
    every pool can be dynamic.
 
+-  Agents: Measure each NVIDIA GPU's topology, P2P status, NUMA node, PCIe link, and health with
+   NVML when the agent starts, and show them in ``det agent list``, the new ``det agent describe``,
+   and the resource pool page. The agent binary now needs glibc 2.35 or newer.
+
+-  Agents: Report a faulty GPU but never offer it as a slot with the ``exclude_gpus`` option. Remove
+   the option before rolling an agent back to an earlier version.
+
 **Improvements**
 
 -  Generic tasks: Schedule generic tasks as job queue entries whose priority and weight persist
@@ -122,8 +129,9 @@ Version 0.41.0
    ``POST /api/v1/task/logs``.
 
 See :ref:`generic tasks <generic-tasks>`, :ref:`browser terminals <shell-web-terminal>`,
-:doc:`dynamic resource pools <maintenance/dynamic-pools>`, and :doc:`upgrade with running tasks
-<maintenance/hot-upgrade>` for setup and usage.
+:doc:`dynamic resource pools <maintenance/dynamic-pools>`, :ref:`GPU topology and health
+<agent-gpu-topology>`, and :doc:`upgrade with running tasks <maintenance/hot-upgrade>` for setup and
+usage.
 
 **************
  Version 0.40
