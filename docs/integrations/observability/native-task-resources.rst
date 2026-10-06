@@ -59,10 +59,9 @@ Drag across a chart to zoom the shared timeline. Empty periods remain gaps rathe
 If a refresh fails, retained charts are explicitly marked as the last successful response.
 
 The GPU legends number GPUs as ``nvidia-smi`` inside the task's container shows them; hover over a
-legend entry for the GPU UUID, host, allocation, PCI bus ID, GPU index on the host, and model. A
-legend names the node or the allocation run only when its chart spans more than one. Commands,
-generic tasks, and TensorBoards do not record their GPUs, so their legends show the start of the
-GPU UUID instead.
+legend entry for the GPU UUID, host, allocation, PCI bus ID, GPU index on the host, and model.
+Commands, generic tasks, and TensorBoards do not record their GPUs, so their legends show the start
+of the GPU UUID instead.
 
 GPU values describe the entire assigned device and may include other processes. Shared-device
 ownership conflicts are omitted by the recording rules. Child tasks are not aggregated. An
