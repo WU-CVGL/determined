@@ -2226,17 +2226,6 @@ func TestWorkspaceDefaultPools(t *testing.T) {
 	require.NoError(t, patch(ownerCtx, w, &unset, &unset))
 	requireDefaults(w, "", "")
 
-	// A failed read refuses the change.
-	readRestrictions := poolaccess.ReadRestrictions
-	t.Cleanup(func() { poolaccess.ReadRestrictions = readRestrictions })
-	poolaccess.ReadRestrictions = func(context.Context, model.UserID, []string) (map[string]bool, error) {
-		return nil, fmt.Errorf("the database went away")
-	}
-	err = patch(ownerCtx, w, &public, nil)
-	poolaccess.ReadRestrictions = readRestrictions
-	require.Equal(t, codes.Unavailable, status.Code(err), "%v", err)
-	requireDefaults(w, "", "")
-
 	// A new workspace's default pools are checked for its creator.
 	refused := uuid.NewString()
 	requirePoolDenied(t, post(otherCtx, refused, restricted), other, restricted)
@@ -2252,4 +2241,12 @@ func TestWorkspaceDefaultPools(t *testing.T) {
 		require.NoError(t, post(ctx, name, restricted))
 		requireDefaults(name, restricted, "")
 	}
+
+	// A failed read refuses the change.
+	poolaccess.SetReaderForTest(t, func(context.Context, model.UserID, []string) (map[string]bool, error) {
+		return nil, fmt.Errorf("the database went away")
+	})
+	err = patch(ownerCtx, w, &public, nil)
+	require.Equal(t, codes.Unavailable, status.Code(err), "%v", err)
+	requireDefaults(w, "", "")
 }

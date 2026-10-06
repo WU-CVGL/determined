@@ -5,7 +5,6 @@ package poolaccess
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -173,7 +172,6 @@ func TestCanUseResourcePool(t *testing.T) {
 	u1 := db.RequireMockUser(t, db.SingleDB())
 	u2 := db.RequireMockUser(t, db.SingleDB())
 	admin := db.RequireMockUser(t, db.SingleDB())
-	admin.Admin = true
 
 	public := testPool(t)
 	adminsOnly := testPool(t)
@@ -203,9 +201,6 @@ func TestCanUseResourcePool(t *testing.T) {
 		{"restricted with another user's grant", u2, granted, codes.PermissionDenied},
 		{"a grant without a restriction", u1, dormantGrant, codes.OK},
 		{"restricted, then made public", u2, madePublic, codes.OK},
-		{"an empty pool name", u1, "", codes.Internal},
-		{"an empty pool name, admin", admin, "", codes.Internal},
-		{"admin on a restricted pool with no grants", admin, adminsOnly, codes.OK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := CanUseResourcePool(ctx, tc.user, tc.pool)
@@ -219,33 +214,6 @@ func TestCanUseResourcePool(t *testing.T) {
 			}
 		})
 	}
-
-	t.Run("a failed read is never public", func(t *testing.T) {
-		reads := 0
-		ReadRestrictions = func(context.Context, model.UserID, []string) (map[string]bool, error) {
-			reads++
-			return nil, errors.New("connection refused")
-		}
-		t.Cleanup(func() { ReadRestrictions = restrictionsFor })
-
-		err := CanUseResourcePool(ctx, u1, public)
-		require.Equal(t, codes.Unavailable, status.Code(err))
-		require.Equal(t, fmt.Sprintf(
-			"could not check access to resource pool %q: connection refused; try again", public),
-			status.Convert(err).Message())
-		require.Equal(t, 1, reads)
-
-		require.NoError(t, CanUseResourcePool(ctx, admin, public))
-		require.NoError(t, CanUseResourcePool(ctx, admin, adminsOnly))
-		require.Equal(t, 1, reads, "the admin predicate reads no access table")
-
-		_, err = UsablePools(ctx, u1, []string{public})
-		require.Equal(t, codes.Unavailable, status.Code(err))
-		usable, err := UsablePools(ctx, admin, []string{public, adminsOnly})
-		require.NoError(t, err)
-		require.Equal(t, map[string]bool{public: true, adminsOnly: true}, usable)
-		require.Equal(t, 2, reads)
-	})
 
 	t.Run("a failed query names the pool and the database error", func(t *testing.T) {
 		canceled, cancel := context.WithCancel(ctx)

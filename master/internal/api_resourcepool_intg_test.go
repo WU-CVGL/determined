@@ -424,11 +424,9 @@ func TestGetResourcePoolsFiltersByAccess(t *testing.T) {
 	require.Equal(t, int32(1), resp.Pagination.Total)
 
 	// A failed read never returns the unfiltered list.
-	readRestrictions := poolaccess.ReadRestrictions
-	poolaccess.ReadRestrictions = func(context.Context, model.UserID, []string) (map[string]bool, error) {
+	poolaccess.SetReaderForTest(t, func(context.Context, model.UserID, []string) (map[string]bool, error) {
 		return nil, fmt.Errorf("the database went away")
-	}
-	t.Cleanup(func() { poolaccess.ReadRestrictions = readRestrictions })
+	})
 	_, err = api.GetResourcePools(u2Ctx, &apiv1.GetResourcePoolsRequest{})
 	require.Equal(t, codes.Unavailable, status.Code(err))
 	resp, err = api.GetResourcePools(adminCtx, &apiv1.GetResourcePoolsRequest{})

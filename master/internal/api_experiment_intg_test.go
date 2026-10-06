@@ -2887,14 +2887,13 @@ func TestCreateExperimentWritesBackCheckedPool(t *testing.T) {
 	notReady = accessTestPool(t, "auxnotready", admin, false)
 
 	var checked []string
-	readRestrictions := poolaccess.ReadRestrictions
-	poolaccess.ReadRestrictions = func(
+	var readRestrictions poolaccess.RestrictionReader
+	readRestrictions = poolaccess.SetReaderForTest(t, func(
 		ctx context.Context, userID model.UserID, pools []string,
 	) (map[string]bool, error) {
 		checked = append(checked, pools...)
 		return readRestrictions(ctx, userID, pools)
-	}
-	t.Cleanup(func() { poolaccess.ReadRestrictions = readRestrictions })
+	})
 
 	resp, err := createExperimentForAccessTest(ownerCtx, t, api,
 		&apiv1.CreateExperimentRequest{Config: accessTestExperimentConfig("")})
@@ -3089,8 +3088,8 @@ func TestActivateOnCreateAndContinueReadsAccessOnce(t *testing.T) {
 
 	// Only the first read of a request succeeds: a second decision would refuse it.
 	reads := 0
-	readRestrictions := poolaccess.ReadRestrictions
-	poolaccess.ReadRestrictions = func(
+	var readRestrictions poolaccess.RestrictionReader
+	readRestrictions = poolaccess.SetReaderForTest(t, func(
 		ctx context.Context, userID model.UserID, pools []string,
 	) (map[string]bool, error) {
 		reads++
@@ -3098,8 +3097,7 @@ func TestActivateOnCreateAndContinueReadsAccessOnce(t *testing.T) {
 			return nil, fmt.Errorf("the database went away")
 		}
 		return readRestrictions(ctx, userID, pools)
-	}
-	t.Cleanup(func() { poolaccess.ReadRestrictions = readRestrictions })
+	})
 
 	resp, err := createExperimentForAccessTest(ownerCtx, t, api, &apiv1.CreateExperimentRequest{
 		Config: accessTestExperimentConfig(pool), Activate: true,

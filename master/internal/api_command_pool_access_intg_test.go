@@ -91,8 +91,7 @@ func resolveOmittedPoolTo(aux, compute *string) func(
 func restrictEveryPoolForTest(t *testing.T) func() int {
 	var mu sync.Mutex
 	reads := 0
-	readRestrictions := poolaccess.ReadRestrictions
-	poolaccess.ReadRestrictions = func(
+	poolaccess.SetReaderForTest(t, func(
 		_ context.Context, _ model.UserID, pools []string,
 	) (map[string]bool, error) {
 		mu.Lock()
@@ -103,8 +102,7 @@ func restrictEveryPoolForTest(t *testing.T) func() int {
 			restricted[pool] = false
 		}
 		return restricted, nil
-	}
-	t.Cleanup(func() { poolaccess.ReadRestrictions = readRestrictions })
+	})
 	return func() int {
 		mu.Lock()
 		defer mu.Unlock()

@@ -36,15 +36,40 @@ import (
 	"github.com/determined-ai/determined/master/pkg/model"
 )
 
-// ReadRestrictions reads, for the given pools, the ones that are restricted and whether userID has
-// a grant on each. It is a variable only so that tests can make the read fail or count it; nothing
-// else may replace it.
-var ReadRestrictions = restrictionsFor
+// RestrictionReader returns the restricted pools among pools, each mapped to whether userID has a
+// grant on it. A pool that is absent from the map is public. An error never comes with a map.
+type RestrictionReader func(
+	ctx context.Context, userID model.UserID, pools []string,
+) (map[string]bool, error)
+
+// Checker decides access from the restrictions that its reader returns.
+type Checker struct {
+	read RestrictionReader
+}
+
+// NewChecker returns a Checker that reads restrictions with read.
+func NewChecker(read RestrictionReader) *Checker {
+	return &Checker{read: read}
+}
+
+// defaultChecker reads the access tables. CanUseResourcePool and UsablePools use it, so that the
+// check sites need no checker of their own.
+var defaultChecker = NewChecker(restrictionsFor)
+
+// CanUseResourcePool checks access with the access tables; see Checker.CanUseResourcePool.
+func CanUseResourcePool(ctx context.Context, user model.User, pool string) error {
+	return defaultChecker.CanUseResourcePool(ctx, user, pool)
+}
+
+// UsablePools reads access from the access tables; see Checker.UsablePools.
+func UsablePools(ctx context.Context, user model.User, pools []string) (map[string]bool, error) {
+	return defaultChecker.UsablePools(ctx, user, pools)
+}
 
 // CanUseResourcePool returns nil when user may start new work in pool, PermissionDenied when
 // not, and Unavailable or Internal when access could not be decided. pool must be the final,
 // resolved name.
-func CanUseResourcePool(ctx context.Context, user model.User, pool string) error {
+func (c *Checker) CanUseResourcePool(ctx context.Context, user model.User, pool string) error {
 	if pool == "" {
 		return status.Error(codes.Internal,
 			"resource pool access checked before the pool was resolved")
@@ -56,7 +81,7 @@ func CanUseResourcePool(ctx context.Context, user model.User, pool string) error
 	if admin {
 		return nil
 	}
-	restricted, err := ReadRestrictions(ctx, user.ID, []string{pool})
+	restricted, err := c.read(ctx, user.ID, []string{pool})
 	if err != nil {
 		return status.Errorf(codes.Unavailable,
 			"could not check access to resource pool %q: %s; try again", pool, err)
@@ -72,8 +97,10 @@ func CanUseResourcePool(ctx context.Context, user model.User, pool string) error
 }
 
 // UsablePools returns, for each name, whether user may use it (admins: all true, no read).
-// One query, no cache; an error is returned, never a partial answer.
-func UsablePools(ctx context.Context, user model.User, pools []string) (map[string]bool, error) {
+// One read, no cache; an error is returned, never a partial answer.
+func (c *Checker) UsablePools(
+	ctx context.Context, user model.User, pools []string,
+) (map[string]bool, error) {
 	admin, err := isAdmin(ctx, user)
 	if err != nil {
 		return nil, err
@@ -85,7 +112,7 @@ func UsablePools(ctx context.Context, user model.User, pools []string) (map[stri
 		}
 		return usable, nil
 	}
-	restricted, err := ReadRestrictions(ctx, user.ID, pools)
+	restricted, err := c.read(ctx, user.ID, pools)
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable,
 			"could not check access to resource pools: %s; try again", err)
@@ -107,9 +134,8 @@ func isAdmin(ctx context.Context, user model.User) (bool, error) {
 	return permErr == nil, nil
 }
 
-// restrictionsFor returns the restricted pools among pools, each mapped to whether userID has a
-// grant on it. A pool that is absent from the map is public. A query error is returned as it is,
-// never as an empty map; the callers' Unavailable errors already name the operation.
+// restrictionsFor is the RestrictionReader of the access tables. A query error is returned as it
+// is; the checker's Unavailable errors already name the operation.
 func restrictionsFor(
 	ctx context.Context, userID model.UserID, pools []string,
 ) (map[string]bool, error) {
