@@ -1059,8 +1059,7 @@ func (a *apiServer) PatchExperiment(
 		if strings.Join(exp.Labels, ",") != reqLabels {
 			madeChanges = true
 			exp.Labels = reqLabelList
-			prom.AssociateExperimentIDLabels(strconv.Itoa(int(req.Experiment.Id)),
-				exp.Labels)
+			prom.SetExperimentIDLabels(strconv.Itoa(int(req.Experiment.Id)), exp.Labels)
 		}
 	}
 

@@ -116,6 +116,16 @@ type allocation struct {
 	// container/runtime/GPU mappings. Track registrations across duplicate RM
 	// notifications so restore and termination keep the gauge counts balanced.
 	metricsRegistered map[sproto.ResourcesID]bool
+	// The mappings are exported only after the allocation has run for metricsDelay
+	// (observability.task_mapping_delay), counted from model.StartTime, so allocations that end
+	// sooner are never attributed. metricsDue is set once that time has passed, metricsStopTimer
+	// stops the pending timer, and metricsClosed is set when the allocation finalizes, after
+	// which nothing is exported. metricsTimerDone is closed when the timer's goroutine returns.
+	metricsDelay     time.Duration
+	metricsDue       bool
+	metricsStopTimer func()
+	metricsTimerDone chan struct{}
+	metricsClosed    bool
 	// Separates the existence of resources from us having started them.
 	resourcesStarted bool
 	// Tracks the initial container exit, unless we caused the failure by killed the trial.
@@ -183,6 +193,7 @@ func newAllocation(
 
 		resources:         resourcesList{},
 		metricsRegistered: make(map[sproto.ResourcesID]bool),
+		metricsDelay:      prom.TaskMappingDelay(),
 
 		logCtx: req.LogContext,
 	}
@@ -694,7 +705,9 @@ func (a *allocation) resourcesAllocated(msg *sproto.ResourcesAllocated) error {
 		}
 		// The master process has a fresh Prometheus registry after a restart.
 		// Restored resources already have Started set, so a repeated Running
-		// notification is ignored below and cannot rebuild these mappings.
+		// notification is ignored below and cannot rebuild these mappings. The
+		// delay counts from the persisted start time, so an allocation that has
+		// run for longer is exported at once and a younger one when it is due.
 		for id, r := range a.resources {
 			if r.Started != nil && r.Exited == nil {
 				a.registerResourceMetrics(id)
@@ -865,14 +878,18 @@ func (a *allocation) resourcesStateChanged(msg *sproto.ResourcesStateChanged) {
 	}
 }
 
-// registerResourceMetrics records one contribution per started resource. The
-// allocation actor holds a.mu while processing RM events and restore.
+// registerResourceMetrics records one contribution per started resource once the
+// allocation's mappings are due. The allocation actor holds a.mu while processing RM
+// events and restore.
 func (a *allocation) registerResourceMetrics(id sproto.ResourcesID) {
-	if a.metricsRegistered[id] {
+	if a.metricsClosed || a.metricsRegistered[id] {
 		return
 	}
 	r := a.resources[id]
 	if r == nil || r.Started == nil || r.Exited != nil {
+		return
+	}
+	if !a.armResourceMetrics() {
 		return
 	}
 	if a.metricsRegistered == nil {
@@ -893,7 +910,67 @@ func (a *allocation) unregisterResourceMetrics(id sproto.ResourcesID) {
 	delete(a.metricsRegistered, id)
 }
 
+// armResourceMetrics reports whether the allocation's mappings are due. If they are not, it
+// starts the allocation's one timer, which exports the mappings of all running resources when
+// they are. The caller holds a.mu.
+func (a *allocation) armResourceMetrics() bool {
+	if a.metricsDue {
+		return true
+	}
+	if a.metricsStopTimer != nil {
+		return false
+	}
+	wait := a.metricsDelay
+	if start := a.model.StartTime; start != nil {
+		// A start time ahead of the clock does not make the wait longer than the delay.
+		wait = min(time.Until(start.Add(a.metricsDelay)), a.metricsDelay)
+	}
+	if wait <= 0 {
+		a.metricsDue = true
+		return true
+	}
+	stop, done := make(chan struct{}), make(chan struct{})
+	a.metricsStopTimer = func() { close(stop) }
+	a.metricsTimerDone = done
+	a.wg.Go(func(ctx context.Context) {
+		defer close(done)
+		t := time.NewTimer(wait)
+		defer t.Stop()
+		select {
+		case <-t.C:
+			a.resourceMetricsDue()
+		case <-stop:
+		case <-ctx.Done():
+		}
+	})
+	return false
+}
+
+// resourceMetricsDue exports the mappings of the running resources when the timer fires. A
+// timer that fires while the allocation finalizes waits for a.mu and then exports nothing.
+func (a *allocation) resourceMetricsDue() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.metricsClosed || a.exited != nil {
+		return
+	}
+	a.stopResourceMetricsTimer()
+	a.metricsDue = true
+	for id := range a.resources {
+		a.registerResourceMetrics(id)
+	}
+}
+
+func (a *allocation) stopResourceMetricsTimer() {
+	if a.metricsStopTimer != nil {
+		a.metricsStopTimer()
+		a.metricsStopTimer = nil
+	}
+}
+
 func (a *allocation) clearResourceMetrics() {
+	a.metricsClosed = true
+	a.stopResourceMetricsTimer()
 	for id := range a.metricsRegistered {
 		a.unregisterResourceMetrics(id)
 	}
