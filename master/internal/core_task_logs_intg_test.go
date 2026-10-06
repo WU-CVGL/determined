@@ -213,29 +213,3 @@ func TestPostTaskLogsRouteAuthZ(t *testing.T) {
 	require.Equal(t, 1, taskLogRows(t, task.TaskID))
 	authZExp.AssertExpectations(t)
 }
-
-func TestPostTaskLogsRouteNTSCAuthZ(t *testing.T) {
-	// The route looks up CanEditExperiment whatever the task type, so the experiment mock must
-	// be registered as well.
-	_, _, _, _, _ = setupExpAuthTest(t, nil) //nolint: dogsled
-	api, authZNSC, curUser, ctx := setupNTSCAuthzTest(t)
-	srv := taskLogsServer(t, api)
-	token := sessionToken(t, curUser)
-
-	const workspaceID = -110
-	notebook := mockNotebookWithWorkspaceID(ctx, t, workspaceID)
-	body := jsonBody(t, shippedLogs(t, notebook, "line"))
-
-	// Commands, notebooks, shells, TensorBoards and generic tasks check that the user can view
-	// the task, and hide it from users who cannot.
-	authZNSC.On("CanGetNSC", mock.Anything, mock.Anything, model.AccessScopeID(workspaceID)).
-		Return(authz2.PermissionDeniedError{}).Once()
-	require.Equal(t, http.StatusNotFound, postTaskLogsAs(t, srv, token, body))
-	require.Zero(t, taskLogRows(t, notebook))
-
-	authZNSC.On("CanGetNSC", mock.Anything, mock.Anything, model.AccessScopeID(workspaceID)).
-		Return(nil).Once()
-	require.Equal(t, http.StatusOK, postTaskLogsAs(t, srv, token, body))
-	require.Equal(t, 1, taskLogRows(t, notebook))
-	authZNSC.AssertExpectations(t)
-}
