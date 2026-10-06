@@ -35,8 +35,8 @@ func shellEntrypointTail(t *testing.T) string {
 	require.NotEqual(t, -1, start, "shell-entrypoint.sh defines %s", filterFunc)
 	tail := script[start+1:]
 	// sshd's log goes through the filter before tee and the readiness check.
-	require.Regexp(t, `(?m)^/usr/sbin/sshd "\$@" \\\n\s+2> >\(`+filterFunc+` \| tee -p >\("\$DET_PYTHON_EXECUTABLE" `+
-		`/run/determined/check_ready_logs.py --ready-regex "\$READINESS_REGEX"\) >&2\)\n$`, tail)
+	require.Regexp(t, `(?m)^/usr/sbin/sshd "\$@" \\\n\s+2> >\(`+filterFunc+` > >\(tee -p >\("\$DET_PYTHON_EXECUTABLE" `+
+		`/run/determined/check_ready_logs.py --ready-regex "\$READINESS_REGEX"\) >&2\)\)\n$`, tail)
 	return tail
 }
 

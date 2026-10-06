@@ -103,5 +103,7 @@ drop_login_records_message() {
 
 READINESS_REGEX="Server listening on"
 
+# sshd's log goes through the filter, then to tee, which copies it to the task log and to the
+# readiness check.
 /usr/sbin/sshd "$@" \
-    2> >(drop_login_records_message | tee -p >("$DET_PYTHON_EXECUTABLE" /run/determined/check_ready_logs.py --ready-regex "$READINESS_REGEX") >&2)
+    2> >(drop_login_records_message > >(tee -p >("$DET_PYTHON_EXECUTABLE" /run/determined/check_ready_logs.py --ready-regex "$READINESS_REGEX") >&2))
