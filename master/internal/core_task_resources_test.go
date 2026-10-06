@@ -261,8 +261,9 @@ func TestTaskResourceAllocationsReadTimesOut(t *testing.T) {
 	require.NotContains(t, fmt.Sprint(he.Message), "reading")
 }
 
-// The WebUI derives the step as max(15, ceil(span / 1439)) for every span up to 7 days.
-func TestTaskResourcesUIStepFitsEverySpanUpToSevenDays(t *testing.T) {
+// The WebUI derives the step as max(15, ceil(span / 1439)) for spans up to 7 days; the vitest
+// for resourceRange checks that rule for every span.
+func TestTaskResourcesUIStepFitsSpansUpToSevenDays(t *testing.T) {
 	end := int64(2000000000)
 	now := time.Unix(end, 0)
 	maxSpan := int64(taskResourceMaxRange.Seconds())
@@ -273,7 +274,13 @@ func TestTaskResourcesUIStepFitsEverySpanUpToSevenDays(t *testing.T) {
 		}
 		return step
 	}
-	for span := int64(1); span <= maxSpan; span++ {
+	// The ends of the range, the end of the minimum step, and both sides of a few points where
+	// the step grows by one.
+	spans := []int64{1, 14, 15, 16, 3600, 86400, 3 * 86400, maxSpan - 1, maxSpan}
+	for _, k := range []int64{15, 16, 100, 420} {
+		spans = append(spans, 1439*k-1, 1439*k, 1439*k+1)
+	}
+	for _, span := range spans {
 		step := uiStep(span)
 		_, _, err := parseTaskResourceRange(url.Values{
 			"start": {strconv.FormatInt(end-span, 10)},
