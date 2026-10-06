@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	k8sV1 "k8s.io/api/core/v1"
 
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/experiment"
@@ -20,6 +21,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/task"
 	"github.com/determined-ai/determined/master/internal/user"
 	"github.com/determined-ai/determined/master/pkg/model"
+	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/master/pkg/schemas"
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/master/pkg/tasks"
@@ -247,4 +249,50 @@ func TestEndOfExperimentCheckpointGCRunsAsOwner(t *testing.T) {
 	require.Equal(t, ckpt, spec.ToDelete)
 	require.Equal(t, []string{fullDeleteGlob}, spec.CheckpointGlobs)
 	require.False(t, spec.DeleteTensorboards)
+}
+
+//nolint:exhaustruct
+func TestCheckpointGCSeesStorage(t *testing.T) {
+	dir := func(p string) expconf.CheckpointStorageConfig {
+		return expconf.CheckpointStorageConfig{
+			RawDirectoryConfig: &expconf.DirectoryConfig{RawContainerPath: &p},
+		}
+	}
+	mounts := func(paths ...string) model.TaskContainerDefaultsConfig {
+		var tcd model.TaskContainerDefaultsConfig
+		for _, p := range paths {
+			tcd.BindMounts = append(tcd.BindMounts, model.BindMount{HostPath: "/h", ContainerPath: p})
+		}
+		return tcd
+	}
+	gcPodSpec := model.TaskContainerDefaultsConfig{CheckpointGCPodSpec: &k8sV1.Pod{}}
+	sharedFS := expconf.CheckpointStorageConfig{
+		RawSharedFSConfig: &expconf.SharedFSConfig{RawHostPath: ptrs.Ptr("/srv")},
+	}
+
+	for _, tc := range []struct {
+		name    string
+		storage expconf.CheckpointStorageConfig
+		tcd     model.TaskContainerDefaultsConfig
+		sees    bool
+	}{
+		{"shared_fs is always mounted", sharedFS, mounts(), true},
+		{"unmounted directory", dir("/mnt/ckpts/run"), mounts(), false},
+		{"directory mounted at its path", dir("/mnt/ckpts/run"), mounts("/mnt/ckpts/run/"), true},
+		{"directory under a mount", dir("/mnt/ckpts/run"), mounts("/opt", "/mnt/ckpts"), true},
+		{"a mount that only shares a prefix", dir("/mnt/ckpts/run"), mounts("/mnt/ck"), false},
+		{"a mount under the directory", dir("/mnt/ckpts"), mounts("/mnt/ckpts/run"), false},
+		{"relative paths are in the work dir", dir("ckpts/run"), mounts("ckpts"), true},
+		{"the root", dir("/mnt/ckpts"), mounts("/"), true},
+		{"a pod spec may mount it", dir("/mnt/ckpts"), gcPodSpec, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkpointGCSeesStorage(tc.storage, tc.tcd)
+			if tc.sees {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, "checkpoint_gc_pod_spec")
+			}
+		})
+	}
 }

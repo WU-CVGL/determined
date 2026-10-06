@@ -82,6 +82,18 @@ func userContext(t *testing.T, u model.User) context.Context {
 func createGCTestExperiment(
 	ctx context.Context, t *testing.T, api *apiServer, owner model.User,
 ) (*model.Experiment, string) {
+	return createGCTestExperimentWithStorage(ctx, t, api, owner, &expconf.CheckpointStorageConfig{
+		RawSharedFSConfig: &expconf.SharedFSConfig{RawHostPath: ptrs.Ptr(gcTestHostPath)},
+	})
+}
+
+// createGCTestExperimentWithStorage is createGCTestExperiment with other checkpoint storage.
+//
+// nolint: exhaustruct
+func createGCTestExperimentWithStorage(
+	ctx context.Context, t *testing.T, api *apiServer, owner model.User,
+	storage *expconf.CheckpointStorageConfig,
+) (*model.Experiment, string) {
 	env := gcTestExperimentEnv
 	conf := expconf.ExperimentConfig{
 		RawEnvironment: &expconf.EnvironmentConfigV0{
@@ -93,12 +105,12 @@ func createGCTestExperiment(
 			RawHostPath:      "/home/gc-owner/hooks",
 			RawContainerPath: "/hooks",
 		}},
-		RawCheckpointStorage: &expconf.CheckpointStorageConfig{
-			RawSharedFSConfig: &expconf.SharedFSConfig{RawHostPath: ptrs.Ptr(gcTestHostPath)},
-		},
+		RawCheckpointStorage: storage,
 	}
 	exp := createTestExpWithActiveConfig(t, api, owner, 1,
 		schemas.WithDefaults(schemas.Merge(conf, minExpConfig)))
+	require.Equal(t, storage.RawSharedFSConfig != nil,
+		exp.Config.CheckpointStorage.RawSharedFSConfig != nil)
 	require.Equal(t, gcTestExperimentEnv,
 		exp.Config.Environment.EnvironmentVariables().For(device.CPU))
 	require.Len(t, exp.Config.BindMounts, 1)
@@ -401,4 +413,55 @@ func TestCheckpointGCOfDeactivatedOwner(t *testing.T) {
 	require.NoError(t, err)
 	_, _, state := getCheckpointSizeResourcesState(adminCtx, t, ckpt)
 	require.Equal(t, model.DeletedState, state)
+}
+
+// Directory checkpoint storage is a path that the experiment mounts in its containers. A GC task
+// takes no bind mounts from the experiment, so the master refuses to start one that would not
+// see the storage, rather than let it record the checkpoints as deleted while their files remain.
+// A task container default that mounts the path makes it work.
+func TestCheckpointGCRefusesUnmountedDirectoryStorage(t *testing.T) {
+	api, _, adminCtx := setupAPITest(t, nil)
+	owner := addGCTestOwner(t)
+	specs := captureCheckpointGC(t)
+
+	//nolint:exhaustruct
+	exp, _ := createGCTestExperimentWithStorage(adminCtx, t, api, owner,
+		&expconf.CheckpointStorageConfig{
+			RawDirectoryConfig: &expconf.DirectoryConfig{RawContainerPath: ptrs.Ptr("/mnt/ckpts/run")},
+		})
+	require.Equal(t, "/mnt/ckpts/run",
+		exp.Config.CheckpointStorage.RawDirectoryConfig.ContainerPath())
+
+	_, err := api.DeleteTensorboardFiles(adminCtx, &apiv1.DeleteTensorboardFilesRequest{
+		ExperimentId: int32(exp.ID),
+	})
+	require.ErrorContains(t, err, "checkpoint storage is the directory /mnt/ckpts/run")
+	select {
+	case spec := <-specs:
+		t.Fatalf("a checkpoint GC task was started for experiment %d", spec.ExperimentID)
+	default:
+	}
+
+	//nolint:exhaustruct
+	tcd := model.TaskContainerDefaultsConfig{
+		BindMounts: model.BindMountsConfig{{
+			HostPath: "/data/ckpts", ContainerPath: "/mnt/ckpts", Propagation: "rprivate",
+		}},
+	}
+	var gcRM mocks.ResourceManager
+	gcRM.On("ResolveResourcePool", mock.Anything, mock.Anything, mock.Anything).
+		Return(rm.ResourcePoolName("aux"), nil)
+	gcRM.On("TaskContainerDefaults", rm.ResourcePoolName("aux"), mock.Anything).Return(tcd, nil)
+	api.m.rm = &gcRM
+
+	_, err = api.DeleteTensorboardFiles(adminCtx, &apiv1.DeleteTensorboardFilesRequest{
+		ExperimentId: int32(exp.ID),
+	})
+	require.NoError(t, err)
+	spec := nextGCSpec(t, specs)
+	require.Equal(t, owner.ID, spec.Base.Owner.ID)
+	require.Equal(t, []mount.Mount{{
+		Type: mount.TypeBind, Source: "/data/ckpts", Target: "/mnt/ckpts",
+		BindOptions: &mount.BindOptions{Propagation: "rprivate"},
+	}}, spec.ToTaskSpec().Mounts)
 }

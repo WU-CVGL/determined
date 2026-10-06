@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -106,6 +107,40 @@ func checkpointGCIdentity(
 	return ptrs.Ptr(owner.ToUser()), agentUserGroup, nil
 }
 
+// checkpointGCSeesStorage returns an error for directory checkpoint storage that a GC task with
+// these task container defaults would not see. That storage is a path in the container where the
+// experiment mounts it, but a GC task takes no bind mounts or pod spec from the experiment, so only
+// the task container defaults can mount it there. Without them the task would find no files and
+// record the checkpoints as deleted while their files remain.
+func checkpointGCSeesStorage(
+	storage expconf.CheckpointStorageConfig, tcd model.TaskContainerDefaultsConfig,
+) error {
+	dir := storage.RawDirectoryConfig
+	if dir == nil || dir.RawContainerPath == nil {
+		return nil
+	}
+	if tcd.CheckpointGCPodSpec != nil || tcd.CPUPodSpec != nil || tcd.GPUPodSpec != nil {
+		return nil // A pod spec may mount it; it is the administrator's to get right.
+	}
+	inContainer := func(p string) string {
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(tasks.DefaultWorkDir, p)
+		}
+		return filepath.Clean(p)
+	}
+	storagePath := inContainer(dir.ContainerPath())
+	for _, m := range tcd.BindMounts {
+		mountPath := inContainer(m.ContainerPath)
+		if mountPath == "/" || storagePath == mountPath ||
+			strings.HasPrefix(storagePath, mountPath+"/") {
+			return nil
+		}
+	}
+	return fmt.Errorf("its checkpoint storage is the directory %s, which checkpoint GC tasks do not "+
+		"mount: they take no bind mounts or pod spec from the experiment. Mount it with "+
+		"task_container_defaults.bind_mounts or checkpoint_gc_pod_spec", storagePath)
+}
+
 func runCheckpointGCTask(
 	rm rm.ResourceManager,
 	pgDB *db.PgDB,
@@ -172,6 +207,9 @@ func runCheckpointGCTask(
 			return fmt.Errorf("getting storage id %d in create gc task: %w", *storageID, err)
 		}
 		gcSpec.LegacyConfig.CheckpointStorage = checkpointStorage
+	}
+	if err := checkpointGCSeesStorage(gcSpec.LegacyConfig.CheckpointStorage, tcd); err != nil {
+		return fmt.Errorf("checkpoint GC of experiment %d: %w", expID, err)
 	}
 
 	logCtx = logger.MergeContexts(logCtx, logger.Context{

@@ -15,4 +15,7 @@
    ``checkpoint_gc_pod_spec`` or else its ``cpu_pod_spec``, and the experiment's checkpoint storage
    settings, including the ``shared_fs`` mount. Credentials or proxies that checkpoint GC needs and
    that only an experiment's ``environment_variables`` or ``bind_mounts`` provided belong in the
-   checkpoint storage settings or in ``task_container_defaults``.
+   checkpoint storage settings or in ``task_container_defaults``. For ``directory`` checkpoint
+   storage, the master now refuses to start a GC task when no task container default bind mount or
+   pod spec mounts the directory, rather than let the task record the checkpoints as deleted while
+   their files remain.
