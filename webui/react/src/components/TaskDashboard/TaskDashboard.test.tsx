@@ -40,6 +40,7 @@ import {
 import handleError from 'utils/error';
 import { isDangerMenuItem, isDisabledMenuItem, menuLabels, openMenuItem } from 'utils/tests/menu';
 
+import { fetchRunPage } from './fetchRuns';
 import TaskDashboard from './TaskDashboard';
 
 // The menu and bulk Kill tests take many steps, which can outlast 5 s when the whole suite runs.
@@ -52,6 +53,9 @@ const listed = vi.hoisted(() => ({ experimentState: 'ACTIVE', genericState: 'ACT
 
 /* With a user ID, the user may control only their own notebooks, shells, commands and TensorBoards. */
 const access = vi.hoisted(() => ({ onlyOwnRunsOf: undefined as number | undefined }));
+
+/* The real fetchRunPage, which a test may replace for some queries. */
+const real = vi.hoisted(() => ({ fetchRunPage: undefined as unknown as typeof fetchRunPage }));
 
 const SHELL: CommandTask = {
   id: 'shell-1',
@@ -164,6 +168,11 @@ vi.mock('hooks/usePermissions', () => ({
       },
     ),
 }));
+vi.mock('./fetchRuns', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./fetchRuns')>();
+  real.fetchRunPage = actual.fetchRunPage;
+  return { ...actual, fetchRunPage: vi.fn(actual.fetchRunPage) };
+});
 vi.mock('hooks/useTaskResourcesEnabled', () => ({ default: () => true }));
 vi.mock('components/JupyterLabButton', () => ({
   default: () => <div data-testid="jupyter-lab-button" />,
@@ -238,6 +247,7 @@ const choose = async (testId: string, label: string) => {
 describe('TaskDashboard', () => {
   beforeEach(() => {
     access.onlyOwnRunsOf = undefined;
+    vi.mocked(fetchRunPage).mockImplementation(real.fetchRunPage);
     listed.experimentState = RunState.Running;
     listed.genericState = GenericTaskState.Active;
     vi.mocked(getShells).mockResolvedValue([SHELL]);
@@ -457,6 +467,31 @@ describe('TaskDashboard', () => {
     expect(screen.queryByText('stale-run')).not.toBeInTheDocument();
     expect(screen.getByText('bert-finetune')).toBeInTheDocument();
     expect(screen.queryByText(/Unable to load/)).not.toBeInTheDocument();
+  });
+
+  it('reports no error for a fetch that fails after a newer one replaced it', async () => {
+    // Everyone's runs are held until the list of the user's own (Mine) is shown, then fail.
+    const held: { fail: () => void; signal?: AbortSignal }[] = [];
+    vi.mocked(fetchRunPage).mockImplementation((query, signal) => {
+      if (query.userId !== undefined) return real.fetchRunPage(query, signal);
+      return new Promise((_resolve, reject) =>
+        held.push({ fail: () => reject(new Error('late failure')), signal }),
+      );
+    });
+    setup();
+    await waitFor(() => expect(held.length).toBeGreaterThan(0));
+    await settingsLoaded();
+
+    await choose('owner', 'Mine');
+
+    expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+    expect(held.every(({ signal }) => signal?.aborted)).toBe(true);
+    await act(async () => {
+      held.forEach(({ fail }) => fail());
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(handleError).not.toHaveBeenCalled();
+    expect(screen.getByText('bert-finetune')).toBeInTheDocument();
   });
 
   it('shows the sources of a TensorBoard: with flat runs, its searches and runs', async () => {
