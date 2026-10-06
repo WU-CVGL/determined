@@ -371,6 +371,8 @@ def test_auth_error_stops_forwarding(status: int, streams: Tuple[io.StringIO, io
         # The sender stops before close() and lets go of the output it will never send.
         _wait_for(lambda: not sender.is_alive())
         assert sender._queue.empty()
+        # Only the end state: on this path the sender's final flush leaves _buf and _msgs empty
+        # anyway, so the queue check above is the one that fails without the release.
         assert sender._buf == "" and sender._msgs == []
         print("second")
         time.sleep(10 * _log_shipper.SHIPPER_FLUSH_INTERVAL)
