@@ -17,12 +17,16 @@ import (
 	"github.com/determined-ai/determined/master/pkg/aproto"
 )
 
-const sysfsPCIDevices = "/sys/bus/pci/devices"
+const (
+	sysfsPCIDevices = "/sys/bus/pci/devices"
+	// sysfsNodesOnline lists the online NUMA nodes, for example "0" or "0-1".
+	sysfsNodesOnline = "/sys/devices/system/node/online"
+)
 
 // runNVMLSession measures the inventory with the NVML library that the NVIDIA container toolkit
 // mounts into the agent container (libnvidia-ml.so.1).
 func runNVMLSession(inventory []aproto.GPUInfo) GPUCollection {
-	return collect(nvml.New(), inventory, sysfsNUMANode, time.Now)
+	return collect(nvml.New(), inventory, numaNodeReader(sysfsPCIDevices, sysfsNodesOnline), time.Now)
 }
 
 func shutdownNVML(lib nvml.Interface) {
@@ -285,25 +289,33 @@ func normalizeBusID(s string) string {
 	return fmt.Sprintf("%04x:%s", d, rest)
 }
 
-// sysfsNUMANode reads a PCI device's NUMA node. -1 or a read error is unknown (nil), with no
-// error. DeviceGetNumaNodeId is not used: the cluster's nodes do not support it.
-func sysfsNUMANode(bdf string) *int {
-	return readNUMANode(sysfsPCIDevices, bdf)
-}
-
-func readNUMANode(root, bdf string) *int {
-	if bdf == "" || strings.ContainsAny(bdf, `/\`) {
-		return nil
+// numaNodeReader reads a PCI device's NUMA node from sysfs (pciRoot/<bdf>/numa_node). The
+// kernel reports -1 when the firmware assigns the device no node: on a host whose only online
+// NUMA node is 0 (nodesOnline reads "0") that is node 0; otherwise it is unknown (nil), as is a
+// read error, with no error. DeviceGetNumaNodeId is not used: the cluster's nodes do not
+// support it.
+func numaNodeReader(pciRoot, nodesOnline string) func(bdf string) *int {
+	b, err := os.ReadFile(nodesOnline) // #nosec G304
+	singleNode := err == nil && strings.TrimSpace(string(b)) == "0"
+	return func(bdf string) *int {
+		if bdf == "" || strings.ContainsAny(bdf, `/\`) {
+			return nil
+		}
+		b, err := os.ReadFile(filepath.Join(pciRoot, bdf, "numa_node")) // #nosec G304
+		if err != nil {
+			return nil
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(string(b)))
+		switch {
+		case err != nil:
+			return nil
+		case n == -1 && singleNode:
+			n = 0
+		case n < 0:
+			return nil
+		}
+		return &n
 	}
-	b, err := os.ReadFile(filepath.Join(root, bdf, "numa_node")) // #nosec G304
-	if err != nil {
-		return nil
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(string(b)))
-	if err != nil || n < 0 {
-		return nil
-	}
-	return &n
 }
 
 // nvmlReturnNames is the symbolic name of every Return constant of go-nvml

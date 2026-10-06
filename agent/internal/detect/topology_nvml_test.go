@@ -756,29 +756,52 @@ func TestCollectPanicKeepsInventory(t *testing.T) {
 	require.Equal(t, 1, shutdowns)
 }
 
-func TestNormalizeBusIDAndNUMA(t *testing.T) {
+func TestNormalizeBusID(t *testing.T) {
 	require.Equal(t, "0000:a1:00.0", normalizeBusID("00000000:A1:00.0"))
 	require.Equal(t, "0000:01:00.0", normalizeBusID("0000:01:00.0"))
 	require.Equal(t, "0001:c1:00.0", normalizeBusID("00000001:C1:00.0"))
 	require.Equal(t, "garbage", normalizeBusID("GARBAGE"))
 	info := pciInfo("00000000:41:00.0")
 	require.Equal(t, "00000000:41:00.0", busIDString(info.BusId[:]))
+}
 
+func TestNUMANodeReader(t *testing.T) {
 	root := t.TempDir()
-	write := func(bdf, content string) {
-		require.NoError(t, os.MkdirAll(filepath.Join(root, bdf), 0o750))
-		require.NoError(t, os.WriteFile(filepath.Join(root, bdf, "numa_node"), []byte(content), 0o600))
+	write := func(path, content string) {
+		require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(root, path)), 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(root, path), []byte(content), 0o600))
 	}
-	write("0000:41:00.0", "0\n")
-	write("0000:c1:00.0", "1\n")
-	write("0000:01:00.0", "-1\n")
-	n := readNUMANode(root, "0000:c1:00.0")
-	require.NotNil(t, n)
-	require.Equal(t, 1, *n)
-	require.Equal(t, 0, *readNUMANode(root, "0000:41:00.0"))
-	require.Nil(t, readNUMANode(root, "0000:01:00.0"), "-1 is unknown")
-	require.Nil(t, readNUMANode(root, "0000:02:00.0"), "a read error is unknown")
-	require.Nil(t, readNUMANode(root, "../etc"))
+	pci := filepath.Join(root, "bus/pci/devices")
+	write("bus/pci/devices/0000:41:00.0/numa_node", "0\n")
+	write("bus/pci/devices/0000:c1:00.0/numa_node", "1\n")
+	write("bus/pci/devices/0000:01:00.0/numa_node", "-1\n")
+	write("single/online", "0\n")
+	write("dual/online", "0-1\n")
+	node := func(numa func(string) *int, bdf string) any {
+		if n := numa(bdf); n != nil {
+			return *n
+		}
+		return nil
+	}
+
+	cases := []struct {
+		online    string
+		minusOne  any // what numa_node -1 becomes
+		rationale string
+	}{
+		{"single/online", 0, "one NUMA node online: -1 is node 0"},
+		{"dual/online", nil, "several NUMA nodes online: -1 stays unknown"},
+		{"missing/online", nil, "the online nodes are unreadable: -1 stays unknown"},
+	}
+	for _, c := range cases {
+		numa := numaNodeReader(pci, filepath.Join(root, c.online))
+		require.Equal(t, c.minusOne, node(numa, "0000:01:00.0"), c.rationale)
+		require.Equal(t, 0, node(numa, "0000:41:00.0"), "0 stays 0")
+		require.Equal(t, 1, node(numa, "0000:c1:00.0"), "1 stays 1")
+		require.Nil(t, node(numa, "0000:02:00.0"), "a read error is unknown")
+		require.Nil(t, node(numa, "../etc"))
+		require.Nil(t, node(numa, ""))
+	}
 }
 
 func TestCollectGPUsInventoryWithoutTelemetry(t *testing.T) {

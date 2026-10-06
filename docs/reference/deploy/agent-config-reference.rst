@@ -250,8 +250,11 @@ What the agent measures
 The agent measures once, at start, for every slot and every :ref:`excluded <agent-exclude-gpus>`
 GPU, and for nothing else. A restart measures again, for example after a driver change.
 
--  For each GPU: its PCI bus ID, its NUMA node (read from sysfs), the current and maximum PCIe link
-   width and generation, and which of its NVML health calls failed.
+-  For each GPU: its PCI bus ID, its NUMA node, the current and maximum PCIe link width and
+   generation, and which of its NVML health calls failed. The NUMA node comes from sysfs
+   (``/sys/bus/pci/devices/<bus ID>/numa_node``). When the kernel assigns the GPU no NUMA node
+   (``-1``), it is node 0 on a host whose only online NUMA node is 0
+   (``/sys/devices/system/node/online`` reads ``0``), and unknown otherwise.
 
 -  For each pair of GPUs: the closest common ancestor (``INTERNAL``, ``PIX``, ``PXB``, ``PHB``,
    ``NODE`` or ``SYS``, as in ``nvidia-smi topo -m``), the number of active NVLinks between them,
