@@ -6,11 +6,13 @@ import { Resource, ResourceState, ResourceType, SlotState } from 'types';
 
 import {
   agentOffLabel,
+  GPU_HEALTH_LABELS,
+  GPU_NARROW_LINK_TEXT,
   gpuHealthSummary,
   gpuHealthWord,
   gpuSlotCountText,
   gpuTopologySummary,
-  linkAtStartText,
+  linkText,
   numaGroups,
   nvmlErrorsText,
   pairLevels,
@@ -214,15 +216,21 @@ describe('gpuTopology', () => {
       expect(gpuHealthWord(undefined)).toBe('unknown');
     });
 
-    it('describes the link and the NVML errors at agent start', () => {
+    it('names the health states and explains a narrow link in the words of the CLI', () => {
+      expect(GPU_HEALTH_LABELS).toEqual({
+        error: 'error',
+        narrow: 'link below max',
+        ok: 'ok',
+        unknown: 'unknown',
+      });
+      expect(GPU_NARROW_LINK_TEXT).toBe("A lower link width lowers this link's bandwidth cap.");
+    });
+
+    it('describes the PCIe link and the NVML errors', () => {
       const topo = gpuTopologyCase('every pair unknown');
-      expect(linkAtStartText(topo.gpus[1])).toBe(
-        'x8 of x16, Gen1 of Gen4 (an observation, not a confirmed fault)',
-      );
-      expect(linkAtStartText(topo.gpus[0])).toBe('unknown');
-      expect(linkAtStartText(topo.gpus[3])).toBe(
-        'x? of x16, Gen4 of Gen4 (an observation, not a confirmed fault)',
-      );
+      expect(linkText(topo.gpus[1])).toBe('x8 of x16, Gen1 of Gen4');
+      expect(linkText(topo.gpus[0])).toBe('unknown');
+      expect(linkText(topo.gpus[3])).toBe('x? of x16, Gen4 of Gen4');
       expect(nvmlErrorsText(topo, topo.gpus[0])).toBe('GetPciInfo: ERROR_GPU_IS_LOST (15)');
       expect(nvmlErrorsText(topo, topo.gpus[1])).toBe('none');
       const unknown = gpuTopologyCase('NVML init failed');

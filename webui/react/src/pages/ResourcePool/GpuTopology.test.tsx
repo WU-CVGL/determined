@@ -11,8 +11,6 @@ import { GPU_EXCLUDED_TEXT, GPU_NARROW_LINK_TEXT } from 'utils/gpuTopology';
 import ClusterTopology from './ClusterTopology';
 import GpuTopology, { GPU_TOPOLOGY_DOCS_PATH, GpuTopologyLegend } from './GpuTopology';
 
-vi.mock('hew/Tooltip');
-
 const slot = (id: number, overrides: Partial<Resource> = {}): Resource => ({
   enabled: true,
   id: String(id),
@@ -47,6 +45,20 @@ const setup = (children: React.ReactNode) =>
 
 const tile = (name: string) => screen.getByRole('group', { name: new RegExp(`^${name},`) });
 
+/** The antd popover around an element of the details popup. */
+const overlayOf = (el: HTMLElement): HTMLElement => {
+  const overlay = el.closest<HTMLElement>('.ant-popover');
+  if (!overlay) throw new Error('not in a popover');
+  return overlay;
+};
+
+/** The details popup in a tooltip: the element that a pin turns into the dialog. */
+const popupIn = (tooltip: HTMLElement): HTMLElement => {
+  const popup = tooltip.querySelector<HTMLElement>('.popup');
+  if (!popup) throw new Error('no details popup');
+  return popup;
+};
+
 describe('GpuTopology', () => {
   it('shows the CLI summaries, health dots, slot fills and stripes', () => {
     const agent = agentOf('node01', gpuTopologyCase('node01 with the exclude list'), {
@@ -59,9 +71,7 @@ describe('GpuTopology', () => {
     setup(<GpuTopology agent={agent} />);
 
     expect(screen.getByText('4+3 NODE/SYS p2p')).toBeInTheDocument();
-    expect(
-      screen.getByText('narrow: 3,5 (x8 of x16 at start); excluded: 81:00.0'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('narrow: 3,5 (x8 of x16); excluded: 81:00.0')).toBeInTheDocument();
     // Running, pending and unoccupied slots; only the enabled, not draining unoccupied slots are
     // allocatable. Then the excluded GPUs.
     expect(
@@ -72,12 +82,10 @@ describe('GpuTopology', () => {
     ).toBeInTheDocument();
 
     // One dot per GPU, labelled for screen readers: amber on the x8 slots, green elsewhere.
-    expect(
-      screen.getAllByRole('img', { name: 'GPU health: link below max at start' }),
-    ).toHaveLength(2);
+    expect(screen.getAllByRole('img', { name: 'GPU health: link below max' })).toHaveLength(2);
     expect(screen.getAllByRole('img', { name: 'GPU health: ok' })).toHaveLength(6);
     expect(within(tile('Slot 3')).getByRole('img').getAttribute('aria-label')).toBe(
-      'GPU health: link below max at start',
+      'GPU health: link below max',
     );
 
     // The fill is the slot state; health never changes it.
@@ -150,35 +158,82 @@ describe('GpuTopology', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows the details on hover and pins them on click', async () => {
+  it('shows the details on hover and pins the same popup in place on click', async () => {
     const agent = agentOf('node01', gpuTopologyCase('node01 with the exclude list'));
     setup(<GpuTopology agent={agent} />);
     const button = within(tile('Slot 3')).getByRole('button');
 
     await userEvent.hover(button);
     const tooltip = await screen.findByRole('tooltip');
-    expect(tooltip).toHaveTextContent('Slot 3 on node01: link below max at start');
+    expect(button).toHaveAttribute('aria-describedby', tooltip.id);
+    expect(tooltip).toHaveTextContent('Slot 3 on node01: link below max');
     expect(tooltip).toHaveTextContent('UUID');
     expect(tooltip).toHaveTextContent('0000:61:00.0');
+    expect(tooltip).toHaveTextContent(/PCIe linkx8 of x16, Gen4 of Gen4NVML errors/);
+    // Only the time: the details end with it, before the narrow link text.
     expect(tooltip).toHaveTextContent(
-      'Link at agent startx8 of x16, Gen4 of Gen4 (an observation, not a confirmed fault)',
+      /NVML errorsnoneCollected at\d{4}-\d{2}-\d{2}, \d{2}:\d{2}:\d{2}A lower link width/,
     );
-    expect(tooltip).toHaveTextContent('NVML errors at agent startnone');
-    expect(tooltip).toHaveTextContent('Recent critical XIDsnot collected');
-    expect(tooltip).toHaveTextContent('(agent clock, at agent start)');
-    expect(tooltip).toHaveTextContent(GPU_NARROW_LINK_TEXT);
-    await userEvent.unhover(button);
+    expect(tooltip).toHaveTextContent("A lower link width lowers this link's bandwidth cap.");
+    expect(tooltip).not.toHaveTextContent(
+      /XID|agent start|agent clock|observation|confirmed|collective/,
+    );
+    // The popup a pin keeps, without an arrow and in the theme of the page. It has no close button
+    // and takes no pointer events. (jsdom does not align popups, so antd adds no placement class.)
+    const popup = popupIn(tooltip);
+    const overlay = overlayOf(tooltip);
+    expect(overlay.querySelector('.ant-popover-arrow')).toBeNull();
+    expect(overlay.className).toMatch(/\bui-provider-/);
+    expect(overlay).toHaveStyle({ pointerEvents: 'none' });
+    expect(within(popup).queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
 
+    // A click while the popup shows pins it: the same element in the same place, now a dialog
+    // with a close button that takes pointer events.
     await userEvent.click(button);
     const dialog = await screen.findByRole('dialog', { name: 'Details for slot 3 on node01' });
+    expect(dialog).toBe(popup);
+    expect(overlayOf(dialog)).toBe(overlay);
+    expect(document.querySelectorAll('.ant-popover')).toHaveLength(1);
+    expect(overlay).not.toHaveClass('ant-popover-hidden');
+    expect(overlay).not.toHaveStyle({ pointerEvents: 'none' });
+    expect(within(dialog).getByRole('button', { name: 'Close details' })).toBeInTheDocument();
     expect(button).toHaveAttribute('aria-expanded', 'true');
+    expect(button).not.toHaveAttribute('aria-describedby');
     // A pointer pin leaves focus where the click put it.
     expect(button).toHaveFocus();
     expect(dialog).toHaveTextContent(GPU_NARROW_LINK_TEXT);
     const docs = within(dialog).getByRole('link', { name: 'GPU topology and health' });
     expect(docs.getAttribute('href')).toContain(GPU_TOPOLOGY_DOCS_PATH);
 
+    // Pinned, it stays when the pointer leaves.
+    await userEvent.unhover(button);
+    expect(screen.getByRole('dialog')).toBe(popup);
+
+    // A second click closes it.
+    await userEvent.hover(button);
     await userEvent.click(button);
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(overlay).toHaveClass('ant-popover-hidden'));
+  });
+
+  it('lets clicks through the hover popup and hides it when the pointer leaves', async () => {
+    const agent = agentOf('node01', gpuTopologyCase('node01 with the exclude list'));
+    setup(<GpuTopology agent={agent} />);
+    const button = within(tile('Slot 3')).getByRole('button');
+
+    await userEvent.hover(button);
+    const tooltip = await screen.findByRole('tooltip');
+    // The link inherits the popup's pointer-events: none, so user-event refuses to click it.
+    await expect(
+      userEvent.click(within(tooltip).getByRole('link', { name: 'GPU topology and health' })),
+    ).rejects.toThrow(/pointer-events/);
+
+    await userEvent.hover(button);
+    await userEvent.unhover(button);
+    await waitFor(() => expect(overlayOf(tooltip)).toHaveClass('ant-popover-hidden'));
+    expect(button).not.toHaveAttribute('aria-describedby');
     expect(button).toHaveAttribute('aria-expanded', 'false');
   });
 
@@ -193,6 +248,26 @@ describe('GpuTopology', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Close details' }));
     expect(button).toHaveAttribute('aria-expanded', 'false');
     expect(button).toHaveFocus();
+    // The focus back on the button does not show the details again.
+    await waitFor(() => expect(overlayOf(dialog)).toHaveClass('ant-popover-hidden'));
+    expect(button).not.toHaveAttribute('aria-describedby');
+  });
+
+  it('closes the pinned details on a click outside them, not on one inside', async () => {
+    const agent = agentOf('node01', gpuTopologyCase('node01 with the exclude list'));
+    setup(<GpuTopology agent={agent} />);
+    const button = within(tile('Slot 3')).getByRole('button');
+
+    await userEvent.click(button);
+    const dialog = await screen.findByRole('dialog', { name: 'Details for slot 3 on node01' });
+    await userEvent.click(within(dialog).getByText('UUID'));
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('dialog')).toBe(dialog);
+
+    await userEvent.click(within(tile('Slot 5')).getByText('5'));
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(overlayOf(dialog)).toHaveClass('ant-popover-hidden'));
   });
 
   it('counts a slot that is running and disabled as running, never as allocatable', () => {
@@ -247,24 +322,35 @@ describe('GpuTopology', () => {
     expect(await screen.findByRole('tooltip')).toHaveTextContent('StateUnknown (no slot record)');
   });
 
-  it('shows the details on focus, hides the tooltip while pinned, and unpins on Escape', async () => {
+  it('shows the details on focus, pins them on a click, and closes them on Escape', async () => {
     const agent = agentOf('node01', gpuTopologyCase('node01 with the exclude list'));
     setup(<GpuTopology agent={agent} />);
     const button = within(tile('Slot 3')).getByRole('button');
 
     act(() => button.focus());
     const tooltip = await screen.findByRole('tooltip');
-    expect(tooltip).toHaveTextContent('Slot 3 on node01: link below max at start');
+    expect(button).toHaveAttribute('aria-describedby', tooltip.id);
+    expect(tooltip).toHaveTextContent('Slot 3 on node01: link below max');
     expect(tooltip).toHaveTextContent(GPU_NARROW_LINK_TEXT);
+    const popup = popupIn(tooltip);
+    expect(overlayOf(tooltip)).toHaveStyle({ pointerEvents: 'none' });
 
-    // Pinned, the popover replaces the tooltip, although the pointer rests on the button. (antd
-    // gives the popover the role tooltip too, and jsdom does not apply antd's hidden class.)
+    // Pinned, the popup stays the same element.
     await userEvent.click(button);
-    expect(await screen.findByRole('dialog')).toBeInTheDocument();
-    await waitFor(() => expect(tooltip.closest('.ant-tooltip')).toHaveClass('ant-tooltip-hidden'));
+    expect(await screen.findByRole('dialog')).toBe(popup);
+    expect(document.querySelectorAll('.ant-popover')).toHaveLength(1);
 
     await userEvent.keyboard('{Escape}');
     expect(button).toHaveAttribute('aria-expanded', 'false');
+    expect(button).toHaveFocus();
+    await waitFor(() => expect(overlayOf(tooltip)).toHaveClass('ant-popover-hidden'));
+
+    // Escape also hides the details that focus shows.
+    act(() => button.blur());
+    act(() => button.focus());
+    await waitFor(() => expect(overlayOf(tooltip)).not.toHaveClass('ant-popover-hidden'));
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(overlayOf(tooltip)).toHaveClass('ant-popover-hidden'));
     expect(button).toHaveFocus();
   });
 
@@ -273,11 +359,13 @@ describe('GpuTopology', () => {
     setup(<GpuTopology agent={agent} />);
     const button = within(tile('Slot 3')).getByRole('button');
     act(() => button.focus());
+    const popup = popupIn(await screen.findByRole('tooltip'));
 
-    // The popover is portalled to the end of the page: Tab must reach its close button and its docs
+    // The popup is portalled to the end of the page: Tab must reach its close button and its docs
     // link next.
     await userEvent.keyboard('{Enter}');
     const dialog = await screen.findByRole('dialog', { name: 'Details for slot 3 on node01' });
+    expect(dialog).toBe(popup);
     expect(button).toHaveAttribute('aria-expanded', 'true');
     await waitFor(() => expect(dialog).toHaveFocus());
     await userEvent.tab();
@@ -288,6 +376,7 @@ describe('GpuTopology', () => {
     await userEvent.keyboard('{Escape}');
     expect(button).toHaveAttribute('aria-expanded', 'false');
     expect(button).toHaveFocus();
+    await waitFor(() => expect(overlayOf(dialog)).toHaveClass('ant-popover-hidden'));
   });
 
   it('explains an excluded GPU', async () => {
@@ -376,7 +465,7 @@ describe('GpuTopology', () => {
   it('has a text legend', () => {
     setup(<GpuTopologyLegend />);
     const legend = screen.getByRole('note', { name: 'GPU topology legend' });
-    expect(legend).toHaveTextContent('Healthoklink below max at starterrorunknown');
+    expect(legend).toHaveTextContent('Healthoklink below maxerrorunknown');
     expect(legend).toHaveTextContent('striped = disabled, draining or excluded');
     expect(legend).toHaveTextContent('FillFreePendingRunning');
   });

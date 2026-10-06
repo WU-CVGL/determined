@@ -75,7 +75,7 @@ it('renders the live legend with GPU numbers and details on hover', async () => 
     'Host: cvgl-node02.lan',
     'Allocation: task.1',
     'PCI bus ID: 00000000:41:00.0',
-    'Host GPU index: 4 (nvidia-smi on the node)',
+    'Host GPU index: 4',
     'Model: NVIDIA GeForce RTX 4090',
   ]);
   expect(rows[2].title).toContain('PCI bus ID: 00000000:42:00.0');
