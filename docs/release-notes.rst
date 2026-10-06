@@ -70,6 +70,9 @@ Version 0.41.0
 -  WebUI: Number GPUs in the resource chart legends as ``nvidia-smi`` in the container does, with
    the UUID, host, and PCI bus ID on hover.
 
+-  Resources: Attribute task metrics only after an allocation has run for
+   ``observability.task_mapping_delay`` (default 5 minutes).
+
 -  Proxy: Log ordinary ends and abrupt disconnects of proxied shell, JupyterLab, and TensorBoard
    connections at debug level instead of as errors.
 
@@ -110,6 +113,9 @@ Version 0.41.0
 
 -  WebUI: Serve the WebUI's index with ``Cache-Control: no-cache``, so that browsers load a new
    release's WebUI on reload.
+
+-  Resources: Remove ended allocations and experiments from ``/prom/det-state-metrics`` instead of
+   keeping them until the master restarts.
 
 **Security Fixes**
 
