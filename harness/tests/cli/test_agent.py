@@ -105,6 +105,41 @@ def test_gpu_summaries_ignore_link_order_and_direction(name_prefix: str, expecte
     assert agent.gpu_topology_summary(topo) == expected
 
 
+def test_gpu_link_lookup_direction() -> None:
+    """One UUID lookup finds a pair in either order and tells which end the first GPU is."""
+    raw = topology_case("no-p2p order:")
+    assert raw is not None
+    # Slot ids are only labels: the lookup never reads deviceA or deviceB.
+    for link in raw["links"]:
+        link["deviceA"] = link["deviceB"] = -1
+    topo = bindings.v1GpuTopology.from_json(raw)
+    g0, g1, g2 = topo.gpus
+    lookup = agent.gpu_link_lookup(topo)
+    status = bindings.v1GpuP2pStatus
+
+    # The link of 0-1 has A = 0: A->B is TOPOLOGY_NOT_SUPPORTED/NOT_SUPPORTED and B->A is
+    # CHIPSET_NOT_SUPPORTED/OK.
+    forward = lookup(g0, g1)
+    assert forward is not None and forward.first_is_a
+    assert forward.link is topo.links[0]
+    assert agent.gpu_first_not_ok_status(forward) == status.TOPOLOGY_NOT_SUPPORTED
+    to_second, _ = agent.gpu_p2p_directions(forward)
+    assert to_second.read == status.TOPOLOGY_NOT_SUPPORTED
+    assert to_second.write == status.NOT_SUPPORTED
+
+    backward = lookup(g1, g0)
+    assert backward is not None and not backward.first_is_a
+    assert backward.link is forward.link
+    assert agent.gpu_first_not_ok_status(backward) == status.CHIPSET_NOT_SUPPORTED
+    to_second, _ = agent.gpu_p2p_directions(backward)
+    assert to_second.read == status.CHIPSET_NOT_SUPPORTED
+    assert to_second.write == status.OK
+
+    # A pair the report does not have.
+    topo.links = [link for link in topo.links if {link.uuidA, link.uuidB} != {g1.uuid, g2.uuid}]
+    assert agent.gpu_link_lookup(topo)(g2, g1) is None
+
+
 def test_list_agents_gpu_columns(capsys: pytest.CaptureFixture) -> None:
     agents = [
         agent_json("node02", topology_case("node02:")),

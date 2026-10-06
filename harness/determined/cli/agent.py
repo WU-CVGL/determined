@@ -5,7 +5,7 @@ import operator
 import os
 import sys
 import typing
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
 import determined.cli.render
 from determined import cli
@@ -88,30 +88,56 @@ def _gpu_slots(topo: bindings.v1GpuTopology) -> List[bindings.v1GpuInfo]:
     return sorted((g for g in topo.gpus if not g.excluded), key=lambda g: g.deviceId)
 
 
-def _gpu_slot_links(
+class GpuPairLink(NamedTuple):
+    """The link of two GPUs, and whether the first GPU of the lookup is end A of the link."""
+
+    link: bindings.v1GpuLink
+    first_is_a: bool
+
+
+def gpu_link_lookup(
     topo: bindings.v1GpuTopology,
-) -> Dict[Tuple[int, int], bindings.v1GpuLink]:
-    """The links between slots, keyed by (lower slot id, higher slot id)."""
-    slot_ids = {g.deviceId for g in _gpu_slots(topo)}
-    links = {}
-    for link in topo.links:
-        if link.deviceA in slot_ids and link.deviceB in slot_ids and link.deviceA != link.deviceB:
-            links[(min(link.deviceA, link.deviceB), max(link.deviceA, link.deviceB))] = link
-    return links
+) -> Callable[[bindings.v1GpuInfo, bindings.v1GpuInfo], Optional[GpuPairLink]]:
+    """Looks up the link of two GPUs by UUID, in either order.
+
+    The one lookup of the summary and the matrices, slots and excluded GPUs alike; slot IDs are
+    only labels. The WebUI has the same lookup (utils/gpuTopology.ts).
+    """
+    links = {(link.uuidA, link.uuidB): link for link in topo.links}
+
+    def lookup(a: bindings.v1GpuInfo, b: bindings.v1GpuInfo) -> Optional[GpuPairLink]:
+        forward = links.get((a.uuid, b.uuid))
+        if forward is not None:
+            return GpuPairLink(forward, True)
+        backward = links.get((b.uuid, a.uuid))
+        if backward is not None:
+            return GpuPairLink(backward, False)
+        return None
+
+    return lookup
 
 
-def _first_not_ok_status(link: bindings.v1GpuLink, slot_a: int) -> str:
+def gpu_p2p_directions(
+    pair: GpuPairLink,
+) -> Tuple[bindings.v1GpuP2pCaps, bindings.v1GpuP2pCaps]:
+    """The P2P statuses from the first GPU of the lookup to the second, and back."""
+    link = pair.link
+    if pair.first_is_a:
+        return link.p2pAToB, link.p2pBToA
+    return link.p2pBToA, link.p2pAToB
+
+
+def gpu_first_not_ok_status(pair: GpuPairLink) -> Optional[bindings.v1GpuP2pStatus]:
     """The first known status other than OK.
 
-    The order is A->B READ, A->B WRITE, B->A READ, B->A WRITE, where A is the lower slot id.
+    The order is A->B READ, A->B WRITE, B->A READ, B->A WRITE, where A is the GPU the lookup
+    started from.
     """
-    forward, backward = link.p2pAToB, link.p2pBToA
-    if link.deviceA != slot_a:
-        forward, backward = backward, forward
+    forward, backward = gpu_p2p_directions(pair)
     for status in (forward.read, forward.write, backward.read, backward.write):
         if status not in (bindings.v1GpuP2pStatus.OK, bindings.v1GpuP2pStatus.UNSPECIFIED):
-            return gpu_p2p_status_name(status)
-    return "unknown"
+            return status
+    return None
 
 
 def gpu_topology_summary(topo: Optional[bindings.v1GpuTopology]) -> str:
@@ -134,9 +160,10 @@ def gpu_topology_summary(topo: Optional[bindings.v1GpuTopology]) -> str:
     numa_order = sorted(numa_sizes, key=lambda n: (n < 0, n))
     parts = ["+".join(str(numa_sizes[n]) for n in numa_order)]
 
-    links = _gpu_slot_links(topo)
-    pairs = list(itertools.combinations([g.deviceId for g in slots], 2))
-    levels = {gpu_link_level_name(links[p].level) for p in pairs if p in links}
+    lookup = gpu_link_lookup(topo)
+    # Each pair from its lower slot id, so the first status of a pair reads from that slot.
+    pairs = [lookup(a, b) for a, b in itertools.combinations(slots, 2)]
+    levels = {gpu_link_level_name(p.link.level) for p in pairs if p is not None}
     known_levels = [lv for lv in GPU_LINK_LEVELS if lv in levels]
     if known_levels:
         parts.append("/".join(known_levels))
@@ -146,14 +173,13 @@ def gpu_topology_summary(topo: Optional[bindings.v1GpuTopology]) -> str:
     usable = unknown = not_usable = 0
     first_status = ""
     for pair in pairs:
-        link = links.get(pair)
-        p2p = link.p2p if link is not None else bindings.v1GpuP2p.UNSPECIFIED
-        if p2p == bindings.v1GpuP2p.USABLE:
+        if pair is not None and pair.link.p2p == bindings.v1GpuP2p.USABLE:
             usable += 1
-        elif p2p == bindings.v1GpuP2p.NOT_USABLE and link is not None:
+        elif pair is not None and pair.link.p2p == bindings.v1GpuP2p.NOT_USABLE:
             not_usable += 1
             if not first_status:
-                first_status = _first_not_ok_status(link, pair[0])
+                status = gpu_first_not_ok_status(pair)
+                first_status = gpu_p2p_status_name(status) if status is not None else "unknown"
         else:
             unknown += 1
 
@@ -415,27 +441,11 @@ def _gpu_matrix_labels(topo: bindings.v1GpuTopology) -> List[Tuple[str, bindings
     ]
 
 
-def _gpu_links_by_uuid(
-    topo: bindings.v1GpuTopology,
-) -> Dict[Tuple[str, str], bindings.v1GpuLink]:
-    return {(link.uuidA, link.uuidB): link for link in topo.links}
-
-
 def _print_gpu_matrices(topo: bindings.v1GpuTopology) -> None:
     labels = _gpu_matrix_labels(topo)
     if len(labels) < 2:
         return
-    links = _gpu_links_by_uuid(topo)
-
-    def find(
-        a: bindings.v1GpuInfo, b: bindings.v1GpuInfo
-    ) -> Tuple[Optional[bindings.v1GpuLink], bool]:
-        """The link of a pair, and whether a is its end A."""
-        if (a.uuid, b.uuid) in links:
-            return links[(a.uuid, b.uuid)], True
-        if (b.uuid, a.uuid) in links:
-            return links[(b.uuid, a.uuid)], False
-        return None, True
+    lookup = gpu_link_lookup(topo)
 
     level_rows = []
     all_usable = True
@@ -445,13 +455,13 @@ def _print_gpu_matrices(topo: bindings.v1GpuTopology) -> None:
             if a.uuid == b.uuid:
                 row.append("X")
                 continue
-            link, _ = find(a, b)
-            level = gpu_link_level_name(link.level) if link is not None else ""
+            pair = lookup(a, b)
+            level = gpu_link_level_name(pair.link.level) if pair is not None else ""
             cell = level or "?"
-            if link is not None and link.nvlinks > 0:
-                cell += f"+NV{link.nvlinks}"
+            if pair is not None and pair.link.nvlinks > 0:
+                cell += f"+NV{pair.link.nvlinks}"
             row.append(cell)
-            if link is None or link.p2p != bindings.v1GpuP2p.USABLE:
+            if pair is None or pair.link.p2p != bindings.v1GpuP2p.USABLE:
                 all_usable = False
         level_rows.append(row)
     headers = [""] + [label for label, _ in labels]
@@ -468,11 +478,11 @@ def _print_gpu_matrices(topo: bindings.v1GpuTopology) -> None:
             if a.uuid == b.uuid:
                 row.append("X")
                 continue
-            link, a_is_a = find(a, b)
-            if link is None:
+            pair = lookup(a, b)
+            if pair is None:
                 row.append("?/?")
                 continue
-            caps = link.p2pAToB if a_is_a else link.p2pBToA
+            caps, _ = gpu_p2p_directions(pair)
             read = GPU_P2P_STATUS_CODES.get(caps.read, "?")
             write = GPU_P2P_STATUS_CODES.get(caps.write, "?")
             row.append(f"{read}/{write}")
