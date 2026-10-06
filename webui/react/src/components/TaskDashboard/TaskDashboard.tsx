@@ -39,7 +39,9 @@ import {
 import TableBatch from 'components/Table/TableBatch';
 import TableFilterDropdown from 'components/Table/TableFilterDropdown';
 import TaskActionDropdown from 'components/TaskActionDropdown';
-import TaskListModalComponent, { SourceInfo } from 'components/TaskListModalComponent';
+import TensorBoardSourcesModalComponent, {
+  TensorBoardSource,
+} from 'components/TensorBoardSourcesModal';
 import WorkspaceFilter from 'components/WorkspaceFilter';
 import useFeature from 'hooks/useFeature';
 import {
@@ -59,6 +61,7 @@ import { CommandTask, CommandType, ExperimentAction, Workspace } from 'types';
 import handleError, { ErrorLevel, ErrorType, isDetError } from 'utils/error';
 import { getActionsForExperiment } from 'utils/experiment';
 import { alphaNumericSorter, numericSorter } from 'utils/sort';
+import { pluralizer } from 'utils/string';
 import { canKillGenericTask, isTaskKillable } from 'utils/task';
 
 import { fetchRunPage, RunPage, RunQuery } from './fetchRuns';
@@ -221,8 +224,8 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
    */
   const actionState = useGenericTaskActionState();
   const BatchActionConfirmModal = useModal(BatchActionConfirmModalComponent);
-  const taskListModal = useModal(TaskListModalComponent);
-  const [sourcesModal, setSourcesModal] = useState<SourceInfo>();
+  const TensorBoardSourcesModal = useModal(TensorBoardSourcesModalComponent);
+  const [tensorBoardSources, setTensorBoardSources] = useState<TensorBoardSource[]>();
   const [page, setPage] = useState<RunPage>();
   const [selected, setSelected] = useState<ReadonlyMap<string, RunRow>>(() => new Map());
   const containerRef = useRef<HTMLDivElement>(null);
@@ -327,8 +330,8 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
   }, [page?.rows]);
 
   useEffect(() => {
-    if (sourcesModal) taskListModal.open();
-  }, [taskListModal, sourcesModal]);
+    if (tensorBoardSources) TensorBoardSourcesModal.open();
+  }, [TensorBoardSourcesModal, tensorBoardSources]);
 
   const { launchAgain, launchAgainModals } = useLaunchAgain({ onLaunched: fetchRuns, workspace });
 
@@ -545,24 +548,21 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
     const timeRenderer = (time?: string): React.ReactNode =>
       time ? relativeTimeRenderer(new Date(time)) : '—';
 
-    const tensorBoardSources = (task: CommandTask): SourceInfo => {
-      const info: SourceInfo = { path: '', plural: '', sources: [] };
-      task.misc?.experimentIds.forEach((id) => {
-        info.sources.push({
+    const sourcesOf = (task: CommandTask): TensorBoardSource[] =>
+      [
+        ...(task.misc?.experimentIds ?? []).map((id) => ({
           id,
           path: paths.experimentDetails(id),
           type: entityCopyMap.Experiment,
-        });
-      });
-      task.misc?.trialIds.forEach((id) => {
-        info.sources.push({ id, path: paths.trialDetails(id), type: entityCopyMap.Trial });
-      });
-      if (info.sources.length > 1) info.plural = 's';
-      info.sources.sort((a, b) =>
+        })),
+        ...(task.misc?.trialIds ?? []).map((id) => ({
+          id,
+          path: paths.trialDetails(id),
+          type: entityCopyMap.Trial,
+        })),
+      ].sort((a, b) =>
         a.type !== b.type ? alphaNumericSorter(a.type, b.type) : numericSorter(a.id, b.id),
       );
-      return info;
-    };
 
     const cols: Array<ColumnDef<RunRow> | false> = [
       {
@@ -608,12 +608,12 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
           }
           const name = taskNameRenderer(row.name, row.task, index);
           if (row.task.type !== CommandType.TensorBoard || !row.task.misc) return name;
-          const info = tensorBoardSources(row.task);
+          const sources = sourcesOf(row.task);
           return (
             <div className={css.sourceName}>
               {name}
-              <Button type="text" onClick={() => setSourcesModal(info)}>
-                Show {info.sources.length} Source{info.plural}
+              <Button type="text" onClick={() => setTensorBoardSources(sources)}>
+                Show {sources.length} {pluralizer(sources.length, 'Source')}
               </Button>
             </div>
           );
@@ -847,10 +847,9 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         note={killsGenericTasks ? GENERIC_TASK_KILL_NOTE : undefined}
         onConfirm={handleBatchKill}
       />
-      <taskListModal.Component
-        sourcesModal={sourcesModal}
-        title={`${sourcesModal?.sources.length} TensorBoard Source${sourcesModal?.plural}`}
-        onClose={() => setSourcesModal(undefined)}
+      <TensorBoardSourcesModal.Component
+        sources={tensorBoardSources ?? []}
+        onClose={() => setTensorBoardSources(undefined)}
       />
       {launchAgainModals}
     </div>

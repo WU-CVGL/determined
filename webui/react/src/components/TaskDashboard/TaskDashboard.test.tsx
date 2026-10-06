@@ -15,6 +15,7 @@ import {
   getGenericTasks,
   getJupyterLabs,
   getShells,
+  getTensorBoards,
   killExperiment,
   killGenericTask,
   killTask,
@@ -456,6 +457,29 @@ describe('TaskDashboard', () => {
     expect(screen.queryByText('stale-run')).not.toBeInTheDocument();
     expect(screen.getByText('bert-finetune')).toBeInTheDocument();
     expect(screen.queryByText(/Unable to load/)).not.toBeInTheDocument();
+  });
+
+  it('shows the sources of a TensorBoard: with flat runs, its searches and runs', async () => {
+    vi.mocked(getTensorBoards).mockResolvedValue([
+      {
+        ...SHELL,
+        id: 'tb-1',
+        misc: { experimentIds: [5, 2], trialIds: [7] },
+        name: 'loss-curves',
+        type: CommandType.TensorBoard,
+      },
+    ]);
+    setup();
+
+    await user.click(await screen.findByRole('button', { name: 'Show 3 Sources' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('3 TensorBoard Sources')).toBeInTheDocument();
+    expect(
+      within(dialog)
+        .getAllByRole('link')
+        .map((link) => link.textContent),
+    ).toEqual(['Run 7', 'Search 2', 'Search 5']);
   });
 
   it('searches after typing stops', async () => {
