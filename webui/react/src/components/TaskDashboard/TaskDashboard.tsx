@@ -436,25 +436,35 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
 
   const handleBatchKill = useCallback(async () => {
     const targets = selectedRows.filter(canKill);
-    const results = await Promise.allSettled(
-      targets.map((row) => {
+    const failures: Partial<Record<RunKind, number>> = {};
+    const kill = async (row: RunRow) => {
+      try {
         switch (row.kind) {
           case RunKind.Experiment:
-            return killExperiment({ experimentId: row.experiment.id });
+            await killExperiment({ experimentId: row.experiment.id });
+            break;
           case RunKind.GenericTask:
-            return killGenericTask({ taskId: row.task.taskId });
+            await killGenericTask({ taskId: row.task.taskId });
+            break;
           default:
-            return killTask(row.task);
+            await killTask(row.task);
         }
-      }),
-    );
-    const failures: Partial<Record<RunKind, number>> = {};
-    results.forEach((result, i) => {
-      if (result.status === 'rejected') {
-        const { kind } = targets[i];
-        failures[kind] = (failures[kind] ?? 0) + 1;
+      } catch {
+        failures[row.kind] = (failures[row.kind] ?? 0) + 1;
       }
-    });
+    };
+    /*
+     * The master refuses a generic task kill while another one runs (409), so the generic tasks
+     * are killed one after another, alongside the other kinds.
+     */
+    const genericTasks = targets.filter((row) => row.kind === RunKind.GenericTask);
+    const killGenericTasksInTurn = async () => {
+      for (const row of genericTasks) await kill(row);
+    };
+    await Promise.all([
+      ...targets.filter((row) => row.kind !== RunKind.GenericTask).map(kill),
+      killGenericTasksInTurn(),
+    ]);
     // The killed rows may no longer pass the filters.
     setSelected(new Map());
     fetchRuns();

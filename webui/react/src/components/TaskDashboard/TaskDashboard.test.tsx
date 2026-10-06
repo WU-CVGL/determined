@@ -630,6 +630,68 @@ describe('TaskDashboard', () => {
       expect(killGenericTask).not.toHaveBeenCalled();
     });
 
+    describe('of generic tasks', () => {
+      const OTHER_GENERIC: GenericTask = {
+        ...GENERIC,
+        jobId: 'job-2',
+        name: 'data-prep',
+        taskId: 'task-2',
+      };
+
+      beforeEach(() => {
+        vi.mocked(getGenericTasks).mockImplementation((params) =>
+          Promise.resolve({
+            pagination: { limit: 0, offset: 0, total: params.limit === 1 ? 5 : 2 },
+            tasks: [GENERIC, OTHER_GENERIC],
+          }),
+        );
+      });
+
+      const killedTaskIds = () =>
+        vi.mocked(killGenericTask).mock.calls.map(([params]) => params.taskId);
+
+      it('kills them one after another, as the master takes one kill at a time', async () => {
+        let finishFirstKill = () => {};
+        vi.mocked(killGenericTask).mockImplementationOnce(
+          () => new Promise<void>((resolve) => (finishFirstKill = resolve)),
+        );
+        setup();
+        await selectRow('eval-sweep');
+        await selectRow('data-prep');
+        await selectRow('gpu-shell');
+
+        await killSelected();
+
+        // The other kinds do not wait.
+        await waitFor(() => expect(killTask).toHaveBeenCalledTimes(1));
+        expect(killedTaskIds()).toEqual(['task-1']);
+        await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+        expect(killedTaskIds()).toEqual(['task-1']);
+
+        finishFirstKill();
+
+        await waitFor(() => expect(killedTaskIds()).toEqual(['task-1', 'task-2']));
+        await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+        expect(handleError).not.toHaveBeenCalled();
+      });
+
+      it('goes on after a kill that fails, and reports it', async () => {
+        vi.mocked(killGenericTask).mockRejectedValueOnce(new Error('in progress'));
+        setup();
+        await selectRow('eval-sweep');
+        await selectRow('data-prep');
+
+        await killSelected();
+
+        await waitFor(() => expect(handleError).toHaveBeenCalled());
+        expect(killedTaskIds()).toEqual(['task-1', 'task-2']);
+        const [, options] = vi.mocked(handleError).mock.calls[0];
+        expect(options?.publicMessage).toBe(
+          'Could not kill 1 generic task. Please try again later.',
+        );
+      });
+    });
+
     it('reports the failures by kind', async () => {
       vi.mocked(killExperiment).mockRejectedValueOnce(new Error('no'));
       vi.mocked(killTask).mockRejectedValueOnce(new Error('no'));
