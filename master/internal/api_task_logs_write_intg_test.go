@@ -184,10 +184,11 @@ func TestTaskLogWritesNeedTaskControl(t *testing.T) {
 
 // TestCheckpointGCShipsItsOwnLogs checks that a checkpoint GC task's containers, which ship their
 // output with the GC task's allocation session, may write its logs whichever user the GC runs as.
-// That user is not always the owner of the GC task's job: before PR #47, deleting another user's
-// experiment or TensorBoard files ran the GC as the user who asked, in the experiment's job; with
-// it, removing another user's checkpoint files runs the GC as the experiment's owner, in a job of
-// its own that the user who asked owns.
+// That user is not always the owner of the GC task's job. Before PR #47, deleting an experiment or
+// its TensorBoard files ran the GC as the user who asked, in the experiment's job; that user may
+// edit or delete the experiment, but under RBAC need not own it or be an admin. With PR #47,
+// removing another user's checkpoint files runs the GC as the experiment's owner, in a job of its
+// own that the user who asked, such as an admin, owns.
 func TestCheckpointGCShipsItsOwnLogs(t *testing.T) {
 	api, admin, ctx := setupAPITest(t, nil)
 	owner := db.RequireMockUser(t, api.m.db)
