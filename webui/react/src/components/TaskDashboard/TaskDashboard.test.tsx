@@ -791,6 +791,46 @@ describe('TaskDashboard', () => {
     }
   });
 
+  it('cuts a long owner, location or pool short, with the whole of it in a title', async () => {
+    // A medium screen or wider, which shows these columns.
+    vi.stubGlobal('matchMedia', (media: string) => ({
+      addEventListener: vi.fn(),
+      addListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      matches: true,
+      media,
+      onchange: null,
+      removeEventListener: vi.fn(),
+      removeListener: vi.fn(),
+    }));
+    try {
+      setup();
+      expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+      const cell = (name: string, title: string) => {
+        const at = screen
+          .getAllByRole('columnheader')
+          .findIndex((th) => th.textContent?.trim().startsWith(title));
+        expect(at).toBeGreaterThan(-1);
+        return screen.getByText(name).closest('tr')?.children[at] as HTMLElement;
+      };
+
+      for (const title of ['Owner', 'Workspace › Project', 'Resource Pool']) {
+        expect(cell('bert-finetune', title)).toHaveClass('ant-table-cell-ellipsis');
+      }
+      const location = cell('bert-finetune', 'Workspace › Project');
+      expect(within(location).getByTitle('Uncategorized › Uncategorized')).toBeInTheDocument();
+      expect(cell('eval-sweep', 'Workspace › Project').querySelector('[title]')).toHaveAttribute(
+        'title',
+        '— › Project 1',
+      );
+      expect(cell('bert-finetune', 'Resource Pool')).toHaveAttribute('title', 'default');
+      // A generic task's owner without a user record is its username.
+      expect(cell('eval-sweep', 'Owner')).toHaveAttribute('title', 'bob');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('keeps the filters of the Jobs page and of the tasks-only view apart', async () => {
     const jobs = setup();
     expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
