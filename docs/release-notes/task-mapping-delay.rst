@@ -2,11 +2,10 @@
 
 **Improvements**
 
--  Observability: The master exports a task's mappings on ``/prom/det-state-metrics`` only after its
-   allocation has run for ``observability.task_mapping_delay`` (default ``5m``), so tasks that end
-   sooner add no per-task series to Prometheus.
+-  Resources: Attribute task metrics only after an allocation has run for
+   ``observability.task_mapping_delay`` (default 5 minutes).
 
 **Bug Fixes**
 
--  Observability: Ended allocations, containers, and experiments no longer stay on
-   ``/prom/det-state-metrics`` as zero-valued series until the master restarts.
+-  Resources: Remove ended allocations from ``/prom/det-state-metrics`` instead of exporting them as
+   zero until the master restarts.

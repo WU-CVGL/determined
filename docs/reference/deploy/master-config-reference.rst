@@ -1688,8 +1688,9 @@ Whether Prometheus endpoints are present. Defaults to ``true``.
 How long an allocation runs before the master exports its task mappings on
 ``/prom/det-state-metrics``: allocation to task, container to allocation, container to runtime
 container ID, and GPU to container. The time counts from when the allocation's containers start,
-including image pulls, and a master restart does not reset it. Prometheus attributes no metrics to
-an allocation that ends sooner. The mappings are removed when the allocation stops. Write ``0s`` to
+including image pulls, and a master restart does not reset it. Metrics from an allocation's first
+``task_mapping_delay`` are not attributed to its task, in the WebUI or in Grafana, so an allocation
+that ends sooner has none. The mappings are removed when the allocation stops. Write ``0s`` to
 export them from the start. Defaults to ``5m``.
 
 .. _master-config-shell-terminal:
