@@ -170,11 +170,12 @@ det resource-pool access set gpu-a100 --mode restricted
 
 ## Running another user's code
 
-A task authenticates as the user who launched it, so the requests that its
-code makes carry that user's grants and, for an administrator, every
-administrator power, including changing pool access. When you launch a task
-that runs an image or code that another user chose, you lend that user your
-session. You do this on purpose when you:
+A task authenticates as the user it runs as: the user who launched it, or, for
+a continued experiment, the experiment's owner. The requests that its code
+makes carry that user's grants and, for an administrator, every administrator
+power, including changing pool access. When you launch a task that runs an
+image or code that another user chose, you lend that user your session. You do
+this on purpose when you:
 
 - fork or clone another user's experiment, which reuses its model definition;
 - fork another user's generic task, or create a child task that inherits its
