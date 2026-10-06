@@ -24,17 +24,19 @@ func mappingTimer(a *allocation) (bool, chan struct{}) {
 	return a.metricsStopTimer != nil, a.metricsTimerDone
 }
 
-// requireTimerReturns waits for the goroutine of a started mapping timer to return.
+// requireTimerReturns waits for the goroutine of a started mapping timer to return. When it fired,
+// it has exported the mappings by then.
 func requireTimerReturns(t *testing.T, a *allocation) {
 	t.Helper()
-	pending, done := mappingTimer(a)
-	require.False(t, pending)
+	_, done := mappingTimer(a)
 	require.NotNil(t, done)
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the mapping timer's goroutine did not return")
 	}
+	pending, _ := mappingTimer(a)
+	require.False(t, pending)
 }
 
 func startMappedAllocation(
@@ -85,10 +87,10 @@ func TestAllocationIsMappedByItsTimer(t *testing.T) {
 	runResource(a, list[0])
 	_, ok := allocationTaskValue(t, a)
 	require.False(t, ok)
-	require.True(t, waitForCondition(5*time.Second, func() bool {
-		_, ok := allocationTaskValue(t, a)
-		return ok
-	}))
+	// The timer exports all mappings at once; wait for it rather than for the first of them.
+	requireTimerReturns(t, a)
+	_, ok = allocationTaskValue(t, a)
+	require.True(t, ok)
 	list[0].requireMapped(t, true)
 
 	terminateResource(a, list[0])
