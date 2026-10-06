@@ -578,15 +578,41 @@ describe('TaskDashboard', () => {
     const selectRow = async (name: string) =>
       await user.click(within(await row(name)).getByRole('checkbox'));
 
-    const killSelected = async () => {
+    const openKillConfirmation = async () => {
       await user.click(screen.getByText('Select an action...'));
       const options = (await screen.findAllByTitle('Kill')).filter(
         (option) => !option.closest('.ant-select-dropdown-hidden'),
       );
       await user.click(options[options.length - 1]);
-      const dialog = await screen.findByRole('dialog');
+      return await screen.findByRole('dialog');
+    };
+
+    const killSelected = async () => {
+      const dialog = await openKillConfirmation();
       await user.click(within(dialog).getByRole('button', { name: 'Kill' }));
     };
+
+    const DESCENDANTS_NOTE = /generic task is killed together with all its descendants/;
+
+    it('says that generic tasks are killed with their descendants', async () => {
+      setup();
+      await selectRow('gpu-shell');
+      await selectRow('eval-sweep');
+
+      const dialog = await openKillConfirmation();
+
+      expect(within(dialog).getByText(DESCENDANTS_NOTE)).toBeInTheDocument();
+    });
+
+    it('says nothing of descendants without a generic task to kill', async () => {
+      setup();
+      await selectRow('gpu-shell');
+
+      const dialog = await openKillConfirmation();
+
+      expect(within(dialog).getByText(/Are you sure/)).toBeInTheDocument();
+      expect(within(dialog).queryByText(DESCENDANTS_NOTE)).not.toBeInTheDocument();
+    });
 
     it('kills the selected runs of every kind with their own API', async () => {
       setup();

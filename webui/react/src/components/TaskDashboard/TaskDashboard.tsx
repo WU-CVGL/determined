@@ -131,6 +131,9 @@ const errorMessage = (error: unknown): string | undefined => {
   return undefined;
 };
 
+/* A generic task's Kill kills its descendants too, as its menu says. */
+const GENERIC_TASK_KILL_NOTE = 'Each generic task is killed together with all its descendants.';
+
 const ANY_SLOTS = 'any';
 const SLOTS_TOOLTIP = 'GPU: asks for at least one slot. CPU-only: asks for none.';
 const PAGE_SIZE_OPTIONS = [10, 20, 50, MAX_PAGE_SIZE];
@@ -433,6 +436,10 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
     [page?.rows, selected],
   );
   const hasKillable = useMemo(() => selectedRows.some(canKill), [canKill, selectedRows]);
+  const killsGenericTasks = useMemo(
+    () => selectedRows.some((row) => row.kind === RunKind.GenericTask && canKill(row)),
+    [canKill, selectedRows],
+  );
 
   const handleBatchKill = useCallback(async () => {
     const targets = selectedRows.filter(canKill);
@@ -837,6 +844,7 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
       <BatchActionConfirmModal.Component
         batchAction={ExperimentAction.Kill}
         itemName={itemName}
+        note={killsGenericTasks ? GENERIC_TASK_KILL_NOTE : undefined}
         onConfirm={handleBatchKill}
       />
       <taskListModal.Component
