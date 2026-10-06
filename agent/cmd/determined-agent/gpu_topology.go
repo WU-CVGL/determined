@@ -66,10 +66,11 @@ func newGPUTopologyCmd() *cobra.Command {
 		Long: "Run the agent's device detection and exclude list, then the agent's NVML session " +
 			"(one Init and the GPU topology collection, within 60 s), and print the result as " +
 			"JSON. NVML is loaded also without GPUs. Device detection runs nvidia-smi without a " +
-			"timeout. It exits 0 even without NVML. It is a standalone probe: it starts from the " +
-			"defaults and its own flags, never from a running agent's configuration file or " +
-			"environment, also inside the agent container, so pass the agent's --slot-type, " +
-			"--visible-gpus and --exclude-gpus to reproduce what the agent reports.",
+			"timeout. It exits 0 even without NVML. It is a standalone probe: it does not load " +
+			"the agent's configuration file or DET_* variables, also inside the agent container. " +
+			"The default of --visible-gpus still follows ROCR_VISIBLE_DEVICES, else " +
+			"CUDA_VISIBLE_DEVICES, like the agent's default. Pass the agent's --slot-type, " +
+			"--visible-gpus and --exclude-gpus explicitly to reproduce what the agent reports.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := check.In(slotType, []string{"gpu", "cuda", "rocm", "cpu", "auto", "none"}); err != nil {

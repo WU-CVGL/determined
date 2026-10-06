@@ -34,5 +34,5 @@
 
 -  Agents: ``determined-agent gpu-topology`` prints what the agent would report on a host when given
    the agent's ``--slot-type``, ``--visible-gpus`` and ``--exclude-gpus``, as JSON, and exits with 0
-   also without NVML. It is a standalone probe that never reads a running agent's configuration. See
-   :ref:`agent-gpu-topology`.
+   also without NVML. It is a standalone probe that does not load the agent's configuration file or
+   ``DET_*`` variables. See :ref:`agent-gpu-topology`.

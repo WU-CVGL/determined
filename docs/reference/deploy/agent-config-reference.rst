@@ -391,10 +391,12 @@ also when NVML is missing. ``nvml_init`` and ``nvml_init_code`` show the result 
 initialization, for example ``ERROR_LIBRARY_NOT_FOUND`` and 12; ``NOT_BUILT`` and -1 for an agent
 built without NVML support; and ``TIMEOUT`` and -2 when NVML does not finish within 60 seconds. An
 ``--exclude-gpus`` entry that matches no GPU appears as ``exclude_error`` instead of stopping the
-command. It is a standalone probe: it starts from the defaults and its own flags, never from a
-running agent's configuration file or environment, also when run inside the agent container with
-``docker exec``, so pass the agent's ``--slot-type``, ``--visible-gpus`` and ``--exclude-gpus`` to
-reproduce what the agent reports. For example, to check what an agent image would report on a host:
+command. It is a standalone probe: it does not load the agent's configuration file or ``DET_*``
+variables, also when run inside the agent container with ``docker exec``. The default of
+``--visible-gpus`` still follows ``ROCR_VISIBLE_DEVICES``, else ``CUDA_VISIBLE_DEVICES``, like the
+agent's default. Pass the agent's ``--slot-type``, ``--visible-gpus`` and ``--exclude-gpus``
+explicitly to reproduce what the agent reports. For example, to check what an agent image would
+report on a host:
 
 .. code:: bash
 
