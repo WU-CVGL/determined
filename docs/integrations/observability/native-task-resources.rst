@@ -49,8 +49,12 @@ Queries are limited to seven days, 1,440 points per series, a minimum 15-second 
 Reading the Charts
 ==================
 
-Select a preset or a custom time range and optionally one allocation. Running tasks refresh
-every 30 seconds while the page is visible; ended tasks use a window preceding their end time.
+Select a preset or a custom time range and optionally one allocation. The default range,
+**Since start**, begins when the task's first allocation got its resources, so time spent queued
+is not shown; with one allocation selected, it runs from that allocation's start to its end, or to
+now while it runs. If no allocation has got its resources, it begins when the task was submitted.
+It shows at most the most recent 7 days. The other presets count back from now, or from the end of
+an ended task. Running tasks refresh every 30 seconds while the page is visible.
 Drag across a chart to zoom the shared timeline. Empty periods remain gaps rather than zeros.
 If a refresh fails, retained charts are explicitly marked as the last successful response.
 
