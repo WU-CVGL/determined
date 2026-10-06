@@ -151,7 +151,7 @@ func TestMultiContainerAllocationMappings(t *testing.T) {
 	pending, second := mappingTimer(a)
 	require.True(t, pending)
 	require.NotNil(t, first)
-	require.True(t, first == second, "one timer per allocation")
+	require.Equal(t, first, second, "one timer per allocation")
 	terminateResource(a, list[0])
 	require.Nil(t, a.exited)
 
