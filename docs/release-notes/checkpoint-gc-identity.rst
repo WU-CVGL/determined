@@ -15,7 +15,8 @@
    spec, ``checkpoint_gc_pod_spec``, else ``cpu_pod_spec``, merged over ``gpu_pod_spec`` as before)
    and the experiment's checkpoint storage settings, including the ``shared_fs`` mount. Credentials
    or proxies that only the experiment provided belong in ``checkpoint_storage`` or
-   ``task_container_defaults``. ``directory`` storage that the experiment mounts itself with
-   ``bind_mounts`` or ``pod_spec`` is not collected until a task container default bind mount or a
-   GC pod spec mounts it: deleting the experiment ends in ``DELETE_FAILED`` (retryable), and its
-   checkpoints are kept, also beyond the ``save_*`` settings, with the reason in the master log.
+   ``task_container_defaults``. ``directory`` storage that the trials had on a mount is collected
+   only if the GC task has the same storage there: a task container default bind mount of the same
+   host path, or a ``checkpoint_gc_pod_spec`` volume of the same claim or host path and ``subPath``.
+   Otherwise deleting the experiment ends in ``DELETE_FAILED`` (retryable), and its checkpoints are
+   kept, also beyond the ``save_*`` settings, with the reason in the master log.

@@ -42,28 +42,8 @@ func (g GCCkptSpec) ToTaskSpec() TaskSpec {
 	res := g.Base
 	tcd := g.Base.TaskContainerDefaults
 
-	// The task uses no slots, so it takes the CPU pod spec unless one is set for checkpoint GC, and
-	// never the experiment's. Merging the defaults below then merges the GPU pod spec under it by
-	// Kubernetes strategic merge, as it did before: for a config without resources, such as
-	// defaultConfig, MergeIntoExpConfig takes the GPU pod spec, since slots_per_trial defaults to 1.
-	// So with only a GPU pod spec set, the task gets that one.
-	podSpec := tcd.CPUPodSpec
-	if tcd.CheckpointGCPodSpec != nil {
-		podSpec = tcd.CheckpointGCPodSpec
-	}
-
-	//nolint:exhaustruct // This has caused an issue before, but is valid as a partial struct.
-	env := expconf.EnvironmentConfig{
-		RawPodSpec: (*expconf.PodSpec)(podSpec),
-	}
-	// Fill the rest of the environment, environment variables and image included, from the task
-	// container defaults.
-	var defaultConfig expconf.ExperimentConfig
-	tcd.MergeIntoExpConfig(&defaultConfig)
-	if defaultConfig.RawEnvironment != nil {
-		env = schemas.Merge(env, *defaultConfig.RawEnvironment)
-	}
-	res.Environment = schemas.WithDefaults(env)
+	env, defaultConfig := gcEnvironment(tcd)
+	res.Environment = env
 	res.ExtraEnvVars = map[string]string{"DET_TASK_TYPE": string(model.TaskTypeCheckpointGC)}
 	res.ResourcesConfig = schemas.WithDefaults(res.ResourcesConfig)
 	res.SlurmConfig = defaultConfig.SlurmConfig()
@@ -132,9 +112,57 @@ func (g GCCkptSpec) ToTaskSpec() TaskSpec {
 		res.Entrypoint = append(res.Entrypoint, "--delete-tensorboards")
 	}
 
-	res.Mounts = ToDockerMounts(tcd.BindMounts.ToExpconf(), res.WorkDir)
-	if fs := g.LegacyConfig.CheckpointStorage.RawSharedFSConfig; fs != nil {
-		res.Mounts = append(res.Mounts, mount.Mount{
+	res.Mounts = GCMounts(tcd, g.LegacyConfig.CheckpointStorage)
+	res.TaskType = model.TaskTypeCheckpointGC
+
+	return res
+}
+
+// gcEnvironment returns the environment of a checkpoint GC task with these task container defaults,
+// and the defaults as an experiment config, for the Slurm and PBS settings.
+func gcEnvironment(
+	tcd model.TaskContainerDefaultsConfig,
+) (expconf.EnvironmentConfig, expconf.ExperimentConfig) {
+	// The task uses no slots, so it takes the CPU pod spec unless one is set for checkpoint GC, and
+	// never the experiment's. Merging the defaults below then merges the GPU pod spec under it by
+	// Kubernetes strategic merge, as it did before: for a config without resources, such as
+	// defaultConfig, MergeIntoExpConfig takes the GPU pod spec, since slots_per_trial defaults to 1.
+	// So with only a GPU pod spec set, the task gets that one.
+	podSpec := tcd.CPUPodSpec
+	if tcd.CheckpointGCPodSpec != nil {
+		podSpec = tcd.CheckpointGCPodSpec
+	}
+
+	//nolint:exhaustruct // This has caused an issue before, but is valid as a partial struct.
+	env := expconf.EnvironmentConfig{
+		RawPodSpec: (*expconf.PodSpec)(podSpec),
+	}
+	// Fill the rest of the environment, environment variables and image included, from the task
+	// container defaults.
+	var defaultConfig expconf.ExperimentConfig
+	tcd.MergeIntoExpConfig(&defaultConfig)
+	if defaultConfig.RawEnvironment != nil {
+		env = schemas.Merge(env, *defaultConfig.RawEnvironment)
+	}
+	return schemas.WithDefaults(env), defaultConfig
+}
+
+// GCPodSpec returns the pod spec of a checkpoint GC task with these task container defaults, nil if
+// it has none. It is the pod spec that ToTaskSpec gives the task.
+func GCPodSpec(tcd model.TaskContainerDefaultsConfig) *expconf.PodSpec {
+	env, _ := gcEnvironment(tcd)
+	return env.PodSpec()
+}
+
+// GCMounts returns the bind mounts of a checkpoint GC task with these task container defaults and
+// this checkpoint storage: those of the task container defaults and, for shared_fs, the mount of
+// its host path. They are the mounts that ToTaskSpec gives the task.
+func GCMounts(
+	tcd model.TaskContainerDefaultsConfig, storage expconf.CheckpointStorageConfig,
+) []mount.Mount {
+	mounts := ToDockerMounts(tcd.BindMounts.ToExpconf(), DefaultWorkDir)
+	if fs := storage.RawSharedFSConfig; fs != nil {
+		mounts = append(mounts, mount.Mount{
 			Type:   mount.TypeBind,
 			Source: fs.HostPath(),
 			Target: expconf.DefaultSharedFSContainerPath,
@@ -143,7 +171,5 @@ func (g GCCkptSpec) ToTaskSpec() TaskSpec {
 			},
 		})
 	}
-	res.TaskType = model.TaskTypeCheckpointGC
-
-	return res
+	return mounts
 }

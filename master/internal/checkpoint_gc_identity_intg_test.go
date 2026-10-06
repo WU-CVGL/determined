@@ -36,6 +36,7 @@ import (
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 	"github.com/determined-ai/determined/proto/pkg/checkpointv1"
+	"github.com/determined-ai/determined/proto/pkg/utilv1"
 )
 
 const gcTestHostPath = "/srv/gc-test-checkpoints"
@@ -427,11 +428,32 @@ func TestCheckpointGCOfDeactivatedOwner(t *testing.T) {
 	require.Equal(t, model.DeletedState, state)
 }
 
+// useGCTaskContainerDefaults makes the GC tasks that api starts run in a pool with these task
+// container defaults. The experiments that a test creates through the API must exist before.
+func useGCTaskContainerDefaults(api *apiServer, tcd model.TaskContainerDefaultsConfig) {
+	var gcRM mocks.ResourceManager
+	gcRM.On("ResolveResourcePool", mock.Anything, mock.Anything, mock.Anything).
+		Return(rm.ResourcePoolName("aux"), nil)
+	gcRM.On("TaskContainerDefaults", rm.ResourcePoolName("aux"), mock.Anything).Return(tcd, nil)
+	api.m.rm = &gcRM
+}
+
+// requireNoGCTask checks that no checkpoint GC task was started.
+func requireNoGCTask(t *testing.T, specs chan tasks.GCCkptSpec) {
+	t.Helper()
+	select {
+	case spec := <-specs:
+		t.Fatalf("a checkpoint GC task was started for experiment %d", spec.ExperimentID)
+	default:
+	}
+}
+
 // Directory checkpoint storage is a path in the container. When the experiment mounts it with a
 // bind mount of its own, its checkpoints are on that mount, which a GC task does not take from the
-// experiment. The master refuses to start a GC task that would not see the storage, rather than let
-// it record the checkpoints as deleted while their files remain. A task container default that
-// mounts the path makes it work.
+// experiment. The master refuses to start a GC task that would not see the storage where the
+// trials saw it, rather than let it record the checkpoints as deleted while their files remain.
+// A task container default bind mount of the same container path but another host path does not
+// help; one of the same host path does.
 func TestCheckpointGCRefusesUnmountedDirectoryStorage(t *testing.T) {
 	api, _, adminCtx := setupAPITest(t, nil)
 	owner := addGCTestOwner(t)
@@ -446,39 +468,188 @@ func TestCheckpointGCRefusesUnmountedDirectoryStorage(t *testing.T) {
 	)
 	require.Equal(t, "/mnt/ckpts/run",
 		exp.Config.CheckpointStorage.RawDirectoryConfig.ContainerPath())
-
-	_, err := api.DeleteTensorboardFiles(adminCtx, &apiv1.DeleteTensorboardFilesRequest{
-		ExperimentId: int32(exp.ID),
-	})
-	require.ErrorContains(t, err, "checkpoint storage is the directory /mnt/ckpts/run")
-	select {
-	case spec := <-specs:
-		t.Fatalf("a checkpoint GC task was started for experiment %d", spec.ExperimentID)
-	default:
+	deleteTensorboards := func() error {
+		_, err := api.DeleteTensorboardFiles(adminCtx, &apiv1.DeleteTensorboardFilesRequest{
+			ExperimentId: int32(exp.ID),
+		})
+		return err
 	}
 
+	err := deleteTensorboards()
+	require.ErrorContains(t, err, "checkpoint storage is the directory /mnt/ckpts/run")
+	require.ErrorContains(t, err, "checkpoints are kept")
+	requireNoGCTask(t, specs)
+
+	// The same container path from another host path.
 	//nolint:exhaustruct
-	tcd := model.TaskContainerDefaultsConfig{
+	useGCTaskContainerDefaults(api, model.TaskContainerDefaultsConfig{
 		BindMounts: model.BindMountsConfig{{
 			HostPath: "/data/ckpts", ContainerPath: "/mnt/ckpts", Propagation: "rprivate",
 		}},
-	}
-	var gcRM mocks.ResourceManager
-	gcRM.On("ResolveResourcePool", mock.Anything, mock.Anything, mock.Anything).
-		Return(rm.ResourcePoolName("aux"), nil)
-	gcRM.On("TaskContainerDefaults", rm.ResourcePoolName("aux"), mock.Anything).Return(tcd, nil)
-	api.m.rm = &gcRM
-
-	_, err = api.DeleteTensorboardFiles(adminCtx, &apiv1.DeleteTensorboardFilesRequest{
-		ExperimentId: int32(exp.ID),
 	})
-	require.NoError(t, err)
+	err = deleteTensorboards()
+	require.ErrorContains(t, err, "checkpoint storage is the directory /mnt/ckpts/run")
+	require.ErrorContains(t, err, "at host path /data/owner-ckpts/run")
+	require.ErrorContains(t, err, "would have a different host path there")
+	requireNoGCTask(t, specs)
+
+	// The same host path.
+	//nolint:exhaustruct
+	useGCTaskContainerDefaults(api, model.TaskContainerDefaultsConfig{
+		BindMounts: model.BindMountsConfig{{
+			HostPath: "/data/owner-ckpts", ContainerPath: "/mnt/ckpts", Propagation: "rprivate",
+		}},
+	})
+	require.NoError(t, deleteTensorboards())
 	spec := nextGCSpec(t, specs)
 	require.Equal(t, owner.ID, spec.Base.Owner.ID)
 	require.Equal(t, []mount.Mount{{
-		Type: mount.TypeBind, Source: "/data/ckpts", Target: "/mnt/ckpts",
+		Type: mount.TypeBind, Source: "/data/owner-ckpts", Target: "/mnt/ckpts",
 		BindOptions: &mount.BindOptions{Propagation: "rprivate"},
 	}}, spec.ToTaskSpec().Mounts)
+}
+
+// createGCTestExperimentFromYAML creates an experiment of owner as the CLI does, through the
+// master's config parsing, which merges the task container defaults of api's master config into
+// its config, with directory checkpoint storage at /mnt/ckpts/run and the rest of the config in
+// yaml. It returns the experiment as the database has it. ctx is an administrator's.
+func createGCTestExperimentFromYAML(
+	ctx context.Context, t *testing.T, api *apiServer, owner model.User, yaml string,
+) *model.Experiment {
+	_, projectID := createProjectAndWorkspace(ctx, t, api)
+	created, err := api.CreateExperiment(userContext(t, owner), &apiv1.CreateExperimentRequest{
+		ModelDefinition: []*utilv1.File{{Content: []byte{1}}},
+		Config: "entrypoint: train.py\n" +
+			"searcher:\n  name: single\n  metric: loss\n" +
+			"checkpoint_storage:\n  type: directory\n  container_path: /mnt/ckpts/run\n" + yaml,
+		ProjectId: int32(projectID),
+	})
+	require.NoError(t, err)
+	require.Equal(t, int32(owner.ID), created.Experiment.UserId)
+	exp, err := db.ExperimentByID(ctx, int(created.Experiment.Id))
+	require.NoError(t, err)
+	require.Equal(t, "/mnt/ckpts/run",
+		exp.Config.CheckpointStorage.RawDirectoryConfig.ContainerPath())
+	return exp
+}
+
+// The master merges the experiment's bind mounts over those of the task container defaults when it
+// creates the experiment, as its trials get them. Storage on a task container default bind mount
+// that GC tasks still have is collected. An experiment's own bind mount at the same container path
+// replaces the default one, and its storage is on another host path, so GC is refused although
+// the container path is mounted for the task.
+//
+//nolint:exhaustruct
+func TestCheckpointGCOfDirectoryStorageOnATaskContainerDefaultMount(t *testing.T) {
+	api, _, adminCtx := setupAPITest(t, nil)
+	owner := addGCTestOwner(t)
+	specs := captureCheckpointGC(t)
+
+	defaultMount := model.BindMount{
+		HostPath: "/srv/default", ContainerPath: "/mnt/ckpts", Propagation: "rprivate",
+	}
+	api.m.config.TaskContainerDefaults.BindMounts = model.BindMountsConfig{defaultMount}
+	onDefault := createGCTestExperimentFromYAML(adminCtx, t, api, owner, "")
+	ownMount := createGCTestExperimentFromYAML(adminCtx, t, api, owner,
+		"bind_mounts:\n  - host_path: /srv/alice\n    container_path: /mnt/ckpts\n")
+	hostPaths := func(e *model.Experiment) []string {
+		var paths []string
+		for _, m := range e.Config.BindMounts {
+			require.Equal(t, "/mnt/ckpts", m.ContainerPath())
+			paths = append(paths, m.HostPath())
+		}
+		return paths
+	}
+	require.Equal(t, []string{"/srv/default"}, hostPaths(onDefault))
+	require.Equal(t, []string{"/srv/alice"}, hostPaths(ownMount))
+
+	useGCTaskContainerDefaults(api, model.TaskContainerDefaultsConfig{
+		BindMounts: model.BindMountsConfig{defaultMount},
+	})
+	_, err := api.DeleteTensorboardFiles(adminCtx, &apiv1.DeleteTensorboardFilesRequest{
+		ExperimentId: int32(ownMount.ID),
+	})
+	require.ErrorContains(t, err, "checkpoint storage is the directory /mnt/ckpts/run")
+	require.ErrorContains(t, err, "at host path /srv/alice/run")
+	require.ErrorContains(t, err, "would have a different host path there")
+	requireNoGCTask(t, specs)
+
+	_, err = api.DeleteTensorboardFiles(adminCtx, &apiv1.DeleteTensorboardFilesRequest{
+		ExperimentId: int32(onDefault.ID),
+	})
+	require.NoError(t, err)
+	spec := nextGCSpec(t, specs)
+	require.Equal(t, onDefault.ID, spec.ExperimentID)
+	require.Equal(t, owner.ID, spec.Base.Owner.ID)
+	require.Equal(t, []mount.Mount{{
+		Type: mount.TypeBind, Source: "/srv/default", Target: "/mnt/ckpts",
+		BindOptions: &mount.BindOptions{Propagation: "rprivate"},
+	}}, spec.ToTaskSpec().Mounts)
+}
+
+// A pod spec is no evidence by itself. When the experiment's pod spec mounts its directory storage
+// from a persistent volume claim, a GC pod spec with only a nodeSelector does not see it, and GC is
+// refused. A checkpoint_gc_pod_spec that mounts the same claim, here under another volume name,
+// does.
+//
+//nolint:exhaustruct
+func TestCheckpointGCConfirmsThePodSpecVolumeOfDirectoryStorage(t *testing.T) {
+	api, _, adminCtx := setupAPITest(t, nil)
+	owner := addGCTestOwner(t)
+	specs := captureCheckpointGC(t)
+
+	exp := createGCTestExperimentFromYAML(adminCtx, t, api, owner, `environment:
+  pod_spec:
+    spec:
+      volumes:
+        - name: ckpts
+          persistentVolumeClaim:
+            claimName: owner-ckpts
+      containers:
+        - name: determined-container
+          volumeMounts:
+            - name: ckpts
+              mountPath: /mnt/ckpts
+`)
+	require.NotNil(t, exp.Config.Environment.PodSpec())
+	deleteTensorboards := func() error {
+		_, err := api.DeleteTensorboardFiles(adminCtx, &apiv1.DeleteTensorboardFilesRequest{
+			ExperimentId: int32(exp.ID),
+		})
+		return err
+	}
+
+	useGCTaskContainerDefaults(api, model.TaskContainerDefaultsConfig{
+		CPUPodSpec: &k8sV1.Pod{Spec: k8sV1.PodSpec{NodeSelector: map[string]string{"gc": "yes"}}},
+	})
+	err := deleteTensorboards()
+	require.ErrorContains(t, err, "checkpoint storage is the directory /mnt/ckpts/run")
+	require.ErrorContains(t, err, "on the persistentVolumeClaim owner-ckpts")
+	require.ErrorContains(t, err, "would have no mount there")
+	requireNoGCTask(t, specs)
+
+	gcPodSpec := &k8sV1.Pod{Spec: k8sV1.PodSpec{
+		Volumes: []k8sV1.Volume{{
+			Name: "gc-ckpts",
+			VolumeSource: k8sV1.VolumeSource{
+				PersistentVolumeClaim: &k8sV1.PersistentVolumeClaimVolumeSource{
+					ClaimName: "owner-ckpts",
+				},
+			},
+		}},
+		Containers: []k8sV1.Container{{
+			Name:         model.DeterminedK8ContainerName,
+			VolumeMounts: []k8sV1.VolumeMount{{Name: "gc-ckpts", MountPath: "/mnt/ckpts"}},
+		}},
+	}}
+	useGCTaskContainerDefaults(api, model.TaskContainerDefaultsConfig{
+		CheckpointGCPodSpec: gcPodSpec,
+	})
+	require.NoError(t, deleteTensorboards())
+	spec := nextGCSpec(t, specs)
+	require.Equal(t, owner.ID, spec.Base.Owner.ID)
+	require.Equal(t, gcPodSpec.Spec, spec.ToTaskSpec().Environment.PodSpec().Spec)
+	require.Empty(t, spec.ToTaskSpec().Mounts)
 }
 
 // Control: directory checkpoint storage that the experiment does not mount was in its own

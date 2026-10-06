@@ -658,14 +658,18 @@ when the container exits.
 
    Checkpoint garbage collection tasks do not inherit ``bind_mounts`` or ``pod_spec`` from their
    experiments either. They use the ``task_container_defaults`` of the default auxiliary resource
-   pool, where they run. If an experiment mounts its ``type: directory`` storage itself with
-   ``bind_mounts`` or ``pod_spec``, the master refuses to start a checkpoint GC task for it unless
-   ``task_container_defaults.bind_mounts`` mounts ``container_path`` or a pod spec is set for the
-   task (``checkpoint_gc_pod_spec``, ``cpu_pod_spec`` or ``gpu_pod_spec``). Until then, deleting the
+   pool, where they run. The experiment's trials had its ``bind_mounts``, over the task container
+   default bind mounts that were set when it was created, and its ``pod_spec``. If they had the
+   ``type: directory`` storage on a mount, the master starts a checkpoint GC task for it only if the
+   task has the same storage at ``container_path`` and below it: a
+   ``task_container_defaults.bind_mounts`` entry of the same host path, or, on Kubernetes, a
+   ``checkpoint_gc_pod_spec`` (else ``cpu_pod_spec``) volume mount of the same
+   ``persistentVolumeClaim`` or ``hostPath`` volume and ``subPath``. Otherwise, deleting the
    experiment fails and leaves it in ``DELETE_FAILED``, which can be retried once the mount is set.
    Deleting its TensorBoard files fails too. Deleting its checkpoints or their files leaves them in
    place, and checkpoints beyond the ``save_*`` settings are kept when the experiment ends; the
-   master log gives the reason. Storage that the experiment does not mount is collected as before.
+   master log gives the reason. Storage that the trials did not have on a mount is collected as
+   before.
 
 .. warning::
 

@@ -4,13 +4,16 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/docker/docker/api/types/mount"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
+	k8sV1 "k8s.io/api/core/v1"
 
 	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/db"
@@ -25,6 +28,7 @@ import (
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/protoutils/protoconverter"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
+	"github.com/determined-ai/determined/master/pkg/schemas"
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 )
@@ -107,23 +111,27 @@ func checkpointGCIdentity(
 	return ptrs.Ptr(owner.ToUser()), agentUserGroup, nil
 }
 
-// checkpointGCSeesStorage returns an error for directory checkpoint storage that the experiment
-// mounts itself but that a GC task with these task container defaults would not see.
+// checkpointGCSeesStorage returns an error for directory checkpoint storage that a checkpoint GC
+// task with these task container defaults would not see where the experiment's trials saw it.
 //
-// That storage is a path in the container. If the experiment mounts it with its own bind mounts or
-// pod spec, the checkpoints are on that mount. A GC task takes neither from the experiment, so only
-// the task container defaults can mount the path for it. Without them the task would find no files
-// and record the checkpoints as deleted while their files remain. If the experiment does not mount
-// it, the checkpoints were in the experiment's own container and went with it, so the task runs and
-// records them as deleted, as before; this also covers a path that the container runtime binds by
-// default (Singularity or enroot on Slurm/PBS), which the GC task gets as well.
+// That storage is a path in the container, and its files are wherever the container's mounts put
+// that path. The trials had the experiment's bind mounts and pod spec, which the master merged over
+// the task container defaults when it created the experiment, so exp has them as the trials got
+// them. A GC task takes neither from the experiment: it gets the bind mounts and the pod spec of
+// the current task container defaults (tasks.GCMounts and tasks.GCPodSpec). Where the two differ,
+// the task finds no checkpoint directories, the harness takes a missing directory as already
+// deleted, and the checkpoints would be recorded as deleted while their files remain. So the task
+// runs only when the master can confirm that it sees the same place.
 //
-// What a pod spec mounts cannot be told reliably from the spec (CSI drivers, sidecars, admission
-// webhooks), so any pod spec is taken to mount the path. An experiment's pod spec makes the check
-// refuse, since its files may be on that mount. A pod spec of the GC task makes it pass, and the
-// administrator who set it is then the one to make it mount the path. The GC task has a pod spec
-// whenever any of these three is set: tasks.GCCkptSpec gives it checkpoint_gc_pod_spec, else
-// cpu_pod_spec, merged over gpu_pod_spec.
+// The place of a path is decided by the longest mount that covers it, as in Docker: a bind mount,
+// by its host path, or a volumeMount of the pod spec's determined-container, by its hostPath or
+// persistentVolumeClaim volume and subPath, in each case with the path below the mount point. Other
+// volumes and a subPathExpr cannot be matched, and a bind mount never matches a volume. The places
+// must be the same at the storage directory and at every mount point below it, where checkpoints
+// and TensorBoard files are too, wherever the trials had a mount. Where they had none, their files
+// were in their own containers and went with them, so the task runs and records them as deleted,
+// as before; this also covers a path that the container runtime binds by default (Singularity or
+// enroot on Slurm/PBS). Pod specs are taken to apply, as on Kubernetes.
 func checkpointGCSeesStorage(
 	storage expconf.CheckpointStorageConfig,
 	exp expconf.LegacyConfig,
@@ -133,38 +141,202 @@ func checkpointGCSeesStorage(
 	if dir == nil || dir.RawContainerPath == nil {
 		return nil
 	}
-	inContainer := func(p string) string {
-		if !filepath.IsAbs(p) {
-			p = filepath.Join(tasks.DefaultWorkDir, p)
-		}
-		return filepath.Clean(p)
-	}
-	storagePath := inContainer(dir.ContainerPath())
-	covers := func(containerPath string) bool {
-		mountPath := inContainer(containerPath)
-		return mountPath == "/" || storagePath == mountPath ||
-			strings.HasPrefix(storagePath, mountPath+"/")
-	}
+	storagePath := pathInContainer(dir.ContainerPath())
 
-	experimentMountsIt := exp.Environment.PodSpec() != nil
-	for _, m := range exp.BindMounts {
-		experimentMountsIt = experimentMountsIt || covers(m.ContainerPath())
-	}
-	if !experimentMountsIt {
-		return nil
-	}
-	if tcd.CheckpointGCPodSpec != nil || tcd.CPUPodSpec != nil || tcd.GPUPodSpec != nil {
-		return nil
-	}
-	for _, m := range tcd.BindMounts {
-		if covers(m.ContainerPath) {
-			return nil
+	// The trials' bind mounts, as task_trial.go gives them.
+	trial := append(
+		bindMountsOf(tasks.ToDockerMounts(schemas.WithDefaults(exp.BindMounts), tasks.DefaultWorkDir)),
+		volumeMountsOf(exp.Environment.PodSpec())...)
+	gc := append(
+		bindMountsOf(tasks.GCMounts(tcd, storage)),
+		volumeMountsOf(tasks.GCPodSpec(tcd))...)
+
+	paths := []string{storagePath}
+	for _, m := range append(append([]containerMount{}, trial...), gc...) {
+		if m.target != storagePath && pathCovers(storagePath, m.target) {
+			paths = append(paths, m.target)
 		}
 	}
-	return fmt.Errorf("its checkpoint storage is the directory %s, which the experiment mounts "+
-		"with its own bind_mounts or pod_spec. Checkpoint GC tasks take neither from the "+
-		"experiment, so it stays unmounted for them, and its checkpoints are kept until "+
-		"task_container_defaults.bind_mounts or checkpoint_gc_pod_spec mounts it", storagePath)
+	sort.Strings(paths)
+	for _, p := range paths {
+		seen := placeOf(trial, p)
+		if seen.kind == placeContainer {
+			continue
+		}
+		gcSees := placeOf(gc, p)
+		if seen.same(gcSees) {
+			continue
+		}
+		msg := fmt.Sprintf("its checkpoint storage is the directory %s. The experiment's trials "+
+			"had %s on", storagePath, p)
+		if seen.kind == placeUnknown {
+			return fmt.Errorf("%s a volume that the master cannot match for a checkpoint GC task "+
+				"(it matches bind mounts by host path, and hostPath and persistentVolumeClaim "+
+				"volumes by source and subPath), so its checkpoints are kept", msg)
+		}
+		return fmt.Errorf("%s %s, but a checkpoint GC task would have %s, as it takes no "+
+			"bind_mounts or pod_spec from the experiment. Its checkpoints are kept until "+
+			"task_container_defaults.bind_mounts or checkpoint_gc_pod_spec mounts the same place "+
+			"at %s", msg, seen, gcSees.other(seen), p)
+	}
+	return nil
+}
+
+// pathInContainer returns the absolute, clean path in a task container of a container path, which
+// is relative to the working directory unless it is absolute.
+func pathInContainer(p string) string {
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(tasks.DefaultWorkDir, p)
+	}
+	return filepath.Clean(p)
+}
+
+// pathCovers reports whether a mount at mountPath covers p. Both are absolute and clean.
+func pathCovers(mountPath, p string) bool {
+	return mountPath == "/" || p == mountPath || strings.HasPrefix(p, mountPath+"/")
+}
+
+// The kinds of storagePlace.
+const (
+	placeContainer = "the container's own filesystem"
+	placeUnknown   = "a volume whose source the master cannot match"
+	placeBind      = "bind mount"
+	placeHostPath  = "hostPath volume"
+	placePVC       = "persistentVolumeClaim volume"
+)
+
+// storagePlace is where the files at a path in a task container are.
+type storagePlace struct {
+	kind string
+	// claim is the claim name of a persistentVolumeClaim volume.
+	claim string
+	// path is the host path of a bind mount or a hostPath volume, or the path in the volume of a
+	// persistentVolumeClaim volume.
+	path string
+}
+
+func (p storagePlace) same(o storagePlace) bool {
+	return p.kind != placeUnknown && p == o
+}
+
+func (p storagePlace) String() string {
+	switch p.kind {
+	case placeBind:
+		return "a bind mount, at host path " + p.path
+	case placeHostPath:
+		return "a hostPath volume, at host path " + p.path
+	case placePVC:
+		return "the persistentVolumeClaim " + p.claim + ", at " + p.path + " in the volume"
+	default:
+		return p.kind
+	}
+}
+
+// other describes the place that a checkpoint GC task would have where the trials had seen,
+// without naming its host path or claim, which come from the task container defaults.
+func (p storagePlace) other(seen storagePlace) string {
+	switch {
+	case p.kind == placeContainer:
+		return "no mount there"
+	case p.kind == placeBind && seen.kind == placeBind:
+		return "a different host path there"
+	case p.kind == seen.kind && p.kind != placeUnknown:
+		return "a different " + p.kind + " or path there"
+	case p.kind == placeUnknown:
+		return p.kind + " there"
+	default:
+		return "a " + p.kind + " there"
+	}
+}
+
+// containerMount is a mount of a task container: the path in the container it is mounted at, and
+// the place of its files.
+type containerMount struct {
+	target string
+	place  storagePlace
+}
+
+// placeOf returns the place of the files at path p of a container with these mounts.
+func placeOf(mounts []containerMount, p string) storagePlace {
+	var target string
+	var places []storagePlace
+	for _, m := range mounts {
+		switch {
+		case !pathCovers(m.target, p) || len(m.target) < len(target):
+		case m.target == target:
+			places = append(places, m.place)
+		default:
+			target, places = m.target, []storagePlace{m.place}
+		}
+	}
+	if len(places) == 0 {
+		return storagePlace{kind: placeContainer}
+	}
+	place := places[0]
+	for _, other := range places[1:] {
+		if other != place {
+			return storagePlace{kind: placeUnknown}
+		}
+	}
+	if place.kind == placeUnknown {
+		return place
+	}
+	rel, err := filepath.Rel(target, p)
+	if err != nil {
+		return storagePlace{kind: placeUnknown}
+	}
+	place.path = filepath.Join(place.path, rel)
+	return place
+}
+
+// bindMountsOf returns the bind mounts of a task container.
+func bindMountsOf(mounts []mount.Mount) []containerMount {
+	var out []containerMount
+	for _, m := range mounts {
+		out = append(out, containerMount{
+			target: pathInContainer(m.Target),
+			place:  storagePlace{kind: placeBind, path: filepath.Clean(m.Source)},
+		})
+	}
+	return out
+}
+
+// volumeMountsOf returns the volume mounts that a pod spec adds to the container of a task, the
+// volumeMounts of its determined-container. Only hostPath and persistentVolumeClaim volumes without
+// a subPathExpr have a known place.
+func volumeMountsOf(pod *expconf.PodSpec) []containerMount {
+	if pod == nil {
+		return nil
+	}
+	volumes := map[string]k8sV1.VolumeSource{}
+	for _, v := range pod.Spec.Volumes {
+		volumes[v.Name] = v.VolumeSource
+	}
+	var out []containerMount
+	for _, c := range pod.Spec.Containers {
+		if c.Name != model.DeterminedK8ContainerName {
+			continue
+		}
+		for _, vm := range c.VolumeMounts {
+			place := storagePlace{kind: placeUnknown}
+			v, ok := volumes[vm.Name]
+			switch {
+			case !ok || vm.SubPathExpr != "":
+			case v.HostPath != nil:
+				place = storagePlace{
+					kind: placeHostPath, path: filepath.Join(v.HostPath.Path, vm.SubPath),
+				}
+			case v.PersistentVolumeClaim != nil:
+				place = storagePlace{
+					kind:  placePVC,
+					claim: v.PersistentVolumeClaim.ClaimName,
+					path:  filepath.Join("/", vm.SubPath),
+				}
+			}
+			out = append(out, containerMount{target: pathInContainer(vm.MountPath), place: place})
+		}
+	}
+	return out
 }
 
 func runCheckpointGCTask(

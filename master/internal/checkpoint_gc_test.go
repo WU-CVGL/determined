@@ -253,9 +253,11 @@ func TestEndOfExperimentCheckpointGCRunsAsOwner(t *testing.T) {
 	require.False(t, spec.DeleteTensorboards)
 }
 
-// Directory checkpoint storage is refused only when the experiment mounts it itself, with a bind
-// mount at or above its path or a pod spec, and the GC task mounts it with neither a task container
-// default bind mount nor a pod spec. Storage that the experiment does not mount was ephemeral.
+// Directory checkpoint storage is collected only where the master can confirm that a GC task sees
+// it at the same place as the experiment's trials did: the same host path of a bind mount, or the
+// same hostPath or persistentVolumeClaim volume and subPath of a pod spec volumeMount, with the
+// same path below the mount point, at the storage directory and at every mount point below it.
+// Where the trials had no mount, their files went with their containers.
 //
 //nolint:exhaustruct
 func TestCheckpointGCSeesStorage(t *testing.T) {
@@ -267,29 +269,79 @@ func TestCheckpointGCSeesStorage(t *testing.T) {
 	sharedFS := expconf.CheckpointStorageConfig{
 		RawSharedFSConfig: &expconf.SharedFSConfig{RawHostPath: ptrs.Ptr("/srv")},
 	}
-	// The experiment's bind mounts, at these container paths.
-	exp := func(paths ...string) expconf.LegacyConfig {
+	type bind struct{ host, container string }
+	// The experiment as its trials got it: its bind mounts, which the master merged over those of
+	// the task container defaults when it created the experiment, and its pod spec.
+	exp := func(pod *k8sV1.Pod, mounts ...bind) expconf.LegacyConfig {
 		var c expconf.LegacyConfig
-		for _, p := range paths {
+		for _, m := range mounts {
 			c.BindMounts = append(c.BindMounts,
-				expconf.BindMount{RawHostPath: "/h", RawContainerPath: p})
+				expconf.BindMount{RawHostPath: m.host, RawContainerPath: m.container})
 		}
+		c.Environment.RawPodSpec = (*expconf.PodSpec)(pod)
 		return c
 	}
-	expPodSpec := expconf.LegacyConfig{
-		Environment: expconf.EnvironmentConfig{RawPodSpec: &expconf.PodSpec{}},
-	}
-	// The GC task's bind mounts from the task container defaults, at these container paths.
-	gc := func(paths ...string) model.TaskContainerDefaultsConfig {
+	// The task container defaults of the GC task.
+	gc := func(mounts ...bind) model.TaskContainerDefaultsConfig {
 		var tcd model.TaskContainerDefaultsConfig
-		for _, p := range paths {
-			tcd.BindMounts = append(tcd.BindMounts, model.BindMount{HostPath: "/h", ContainerPath: p})
+		for _, m := range mounts {
+			tcd.BindMounts = append(tcd.BindMounts,
+				model.BindMount{HostPath: m.host, ContainerPath: m.container})
 		}
 		return tcd
 	}
-	gcPodSpec := model.TaskContainerDefaultsConfig{CheckpointGCPodSpec: &k8sV1.Pod{}}
-	cpuPodSpec := model.TaskContainerDefaultsConfig{CPUPodSpec: &k8sV1.Pod{}}
-	gpuPodSpec := model.TaskContainerDefaultsConfig{GPUPodSpec: &k8sV1.Pod{}}
+	gcPod := func(pod *k8sV1.Pod) model.TaskContainerDefaultsConfig {
+		return model.TaskContainerDefaultsConfig{CheckpointGCPodSpec: pod}
+	}
+	cpuPod := func(pod *k8sV1.Pod) model.TaskContainerDefaultsConfig {
+		return model.TaskContainerDefaultsConfig{CPUPodSpec: pod}
+	}
+	gpuPod := func(pod *k8sV1.Pod) model.TaskContainerDefaultsConfig {
+		return model.TaskContainerDefaultsConfig{GPUPodSpec: pod}
+	}
+
+	// A pod spec whose container mounts a volume.
+	type volumeMount struct {
+		container, volume string
+		source            k8sV1.VolumeSource
+		mountPath         string
+		subPath           string
+		subPathExpr       string
+	}
+	pod := func(vms ...volumeMount) *k8sV1.Pod {
+		var p k8sV1.Pod
+		for _, vm := range vms {
+			if vm.container == "" {
+				vm.container = model.DeterminedK8ContainerName
+			}
+			if vm.volume == "" {
+				vm.volume = "ckpts"
+			}
+			if vm.source != (k8sV1.VolumeSource{}) {
+				p.Spec.Volumes = append(p.Spec.Volumes,
+					k8sV1.Volume{Name: vm.volume, VolumeSource: vm.source})
+			}
+			p.Spec.Containers = append(p.Spec.Containers, k8sV1.Container{
+				Name: vm.container,
+				VolumeMounts: []k8sV1.VolumeMount{{
+					Name: vm.volume, MountPath: vm.mountPath,
+					SubPath: vm.subPath, SubPathExpr: vm.subPathExpr,
+				}},
+			})
+		}
+		return &p
+	}
+	pvc := func(claim string) k8sV1.VolumeSource {
+		return k8sV1.VolumeSource{
+			PersistentVolumeClaim: &k8sV1.PersistentVolumeClaimVolumeSource{ClaimName: claim},
+		}
+	}
+	hostPath := func(p string) k8sV1.VolumeSource {
+		return k8sV1.VolumeSource{HostPath: &k8sV1.HostPathVolumeSource{Path: p}}
+	}
+	emptyDir := k8sV1.VolumeSource{EmptyDir: &k8sV1.EmptyDirVolumeSource{}}
+	alicePVC := pod(volumeMount{source: pvc("alice-ckpts"), mountPath: "/mnt/ckpts"})
+	nodeSelectorOnly := &k8sV1.Pod{Spec: k8sV1.PodSpec{NodeSelector: map[string]string{"gc": "yes"}}}
 
 	for _, tc := range []struct {
 		name    string
@@ -298,38 +350,199 @@ func TestCheckpointGCSeesStorage(t *testing.T) {
 		tcd     model.TaskContainerDefaultsConfig
 		sees    bool
 	}{
-		{"shared_fs is always mounted", sharedFS, exp("/mnt/ckpts"), gc(), true},
+		{
+			"shared_fs has its own mount", sharedFS,
+			exp(alicePVC, bind{"/srv/alice", "/mnt/ckpts"}), gc(), true,
+		},
 
-		// The experiment does not mount it: its checkpoints went with its containers.
-		{"directory the experiment does not mount", dir("/mnt/ckpts/run"), exp(), gc(), true},
-		{"an experiment mount elsewhere", dir("/mnt/ckpts/run"), exp("/hooks"), gc(), true},
-		{"an experiment mount that only shares a prefix", dir("/mnt/ckpts/run"), exp("/mnt/ck"), gc(), true},
-		{"an experiment mount under the directory", dir("/mnt/ckpts"), exp("/mnt/ckpts/run"), gc(), true},
+		// The trials had no mount there: their files went with their containers.
+		{"not mounted", dir("/mnt/ckpts/run"), exp(nil), gc(), true},
+		{"a trial mount elsewhere", dir("/mnt/ckpts/run"), exp(nil, bind{"/h", "/hooks"}), gc(), true},
+		{
+			"a trial mount that only shares a prefix", dir("/mnt/ckpts/run"),
+			exp(nil, bind{"/h", "/mnt/ck"}), gc(), true,
+		},
+		{
+			"not mounted for the trials, mounted for GC", dir("/mnt/ckpts/run"), exp(nil),
+			gc(bind{"/srv/default", "/mnt/ckpts"}), true,
+		},
+		{"a trial pod spec with a nodeSelector only", dir("/mnt/ckpts"), exp(nodeSelectorOnly), gc(), true},
+		{
+			"a trial pod spec that mounts it in a sidecar only", dir("/mnt/ckpts"),
+			exp(pod(volumeMount{container: "sidecar", source: pvc("c"), mountPath: "/mnt/ckpts"})),
+			gc(), true,
+		},
 
-		// The experiment mounts it.
-		{"experiment mount above, GC none", dir("/mnt/ckpts/run"), exp("/mnt/ckpts"), gc(), false},
-		{"experiment mount at its path, GC none", dir("/mnt/ckpts/run"), exp("/mnt/ckpts/run/"), gc(), false},
-		{"experiment mount at the root, GC none", dir("/mnt/ckpts"), exp("/"), gc(), false},
-		{"relative experiment mount, GC none", dir("ckpts/run"), exp("ckpts"), gc(), false},
-		{"experiment pod spec, GC none", dir("/mnt/ckpts/run"), expPodSpec, gc(), false},
+		// Bind mounts.
+		{"trial mount above, GC none", dir("/mnt/ckpts/run"), exp(nil, bind{"/h", "/mnt/ckpts"}), gc(), false},
+		{
+			"trial mount at its path, GC none", dir("/mnt/ckpts/run"),
+			exp(nil, bind{"/h", "/mnt/ckpts/run/"}), gc(), false,
+		},
+		{"trial mount at the root, GC none", dir("/mnt/ckpts"), exp(nil, bind{"/h", "/"}), gc(), false},
+		{"relative trial mount, GC none", dir("ckpts/run"), exp(nil, bind{"/h", "ckpts"}), gc(), false},
+		{
+			"the same mount, from the task container defaults", dir("/mnt/ckpts/run"),
+			exp(nil, bind{"/srv/default", "/mnt/ckpts"}), gc(bind{"/srv/default", "/mnt/ckpts"}), true,
+		},
+		{
+			"the same mount at its path", dir("/mnt/ckpts/run"),
+			exp(nil, bind{"/srv/a", "/mnt/ckpts/run"}), gc(bind{"/srv/a/", "/mnt/ckpts/run/"}), true,
+		},
+		{
+			"the same relative mount", dir("ckpts/run"),
+			exp(nil, bind{"/h", "ckpts"}), gc(bind{"/h", "ckpts"}), true,
+		},
+		{
+			"the same host path through another mount point", dir("/mnt/ckpts/run"),
+			exp(nil, bind{"/srv/a", "/mnt"}), gc(bind{"/opt", "/opt"}, bind{"/srv/a/ckpts", "/mnt/ckpts"}),
+			true,
+		},
+		{
+			"the same mount point, another host path", dir("/mnt/ckpts/run"),
+			exp(nil, bind{"/srv/alice", "/mnt/ckpts"}), gc(bind{"/srv/default", "/mnt/ckpts"}), false,
+		},
+		{
+			"the same host path, another mount point", dir("/mnt/ckpts/run"),
+			exp(nil, bind{"/srv/a", "/mnt"}), gc(bind{"/srv/a", "/mnt/ckpts"}), false,
+		},
+		{
+			"a GC mount at the root", dir("/mnt/ckpts"),
+			exp(nil, bind{"/srv/a", "/mnt"}), gc(bind{"/", "/"}), false,
+		},
+		{
+			"a GC mount that only shares a prefix", dir("/mnt/ckpts/run"),
+			exp(nil, bind{"/h", "/mnt/ckpts"}), gc(bind{"/h", "/mnt/ck"}), false,
+		},
+		{
+			"a GC mount under the directory only", dir("/mnt/ckpts"),
+			exp(nil, bind{"/h", "/mnt"}), gc(bind{"/h/ckpts/run", "/mnt/ckpts/run"}), false,
+		},
+		{
+			"the longest mount decides, the same", dir("/mnt/ckpts/run"),
+			exp(nil, bind{"/srv/a", "/mnt"}, bind{"/srv/b", "/mnt/ckpts"}),
+			gc(bind{"/srv/b", "/mnt/ckpts"}), true,
+		},
+		{
+			"the longest mount decides, another", dir("/mnt/ckpts/run"),
+			exp(nil, bind{"/srv/a", "/mnt"}, bind{"/srv/b", "/mnt/ckpts"}),
+			gc(bind{"/srv/a", "/mnt"}), false,
+		},
+		{
+			"a trial mount below the directory, GC none", dir("/mnt/ckpts"),
+			exp(nil, bind{"/h", "/mnt/ckpts/tb"}), gc(), false,
+		},
+		{
+			"a trial mount below the directory, the same for GC", dir("/mnt/ckpts"),
+			exp(nil, bind{"/srv/a", "/mnt/ckpts"}, bind{"/srv/tb", "/mnt/ckpts/tb"}),
+			gc(bind{"/srv/a", "/mnt/ckpts"}, bind{"/srv/tb", "/mnt/ckpts/tb"}), true,
+		},
+		{
+			"a trial mount below the directory that GC lacks", dir("/mnt/ckpts"),
+			exp(nil, bind{"/srv/a", "/mnt/ckpts"}, bind{"/srv/tb", "/mnt/ckpts/tb"}),
+			gc(bind{"/srv/a", "/mnt/ckpts"}), false,
+		},
+		{
+			"a GC mount below the directory that the trials lacked", dir("/mnt/ckpts"),
+			exp(nil, bind{"/srv/a", "/mnt/ckpts"}),
+			gc(bind{"/srv/a", "/mnt/ckpts"}, bind{"/srv/x", "/mnt/ckpts/x"}), false,
+		},
+		{
+			"a trial mount, an empty checkpoint_gc_pod_spec", dir("/mnt/ckpts"),
+			exp(nil, bind{"/h", "/mnt/ckpts"}), gcPod(&k8sV1.Pod{}), false,
+		},
+		{
+			"a trial mount, an empty cpu_pod_spec", dir("/mnt/ckpts"),
+			exp(nil, bind{"/h", "/mnt/ckpts"}), cpuPod(&k8sV1.Pod{}), false,
+		},
+		{
+			"a trial mount, an empty gpu_pod_spec", dir("/mnt/ckpts"),
+			exp(nil, bind{"/h", "/mnt/ckpts"}), gpuPod(&k8sV1.Pod{}), false,
+		},
+		{
+			"a trial mount, a GC hostPath volume of the same path", dir("/mnt/ckpts"),
+			exp(nil, bind{"/srv/a", "/mnt/ckpts"}),
+			gcPod(pod(volumeMount{source: hostPath("/srv/a"), mountPath: "/mnt/ckpts"})), false,
+		},
 
-		// The GC task mounts it as well.
-		{"GC mount at its path", dir("/mnt/ckpts/run"), exp("/mnt/ckpts"), gc("/mnt/ckpts/run/"), true},
-		{"GC mount above", dir("/mnt/ckpts/run"), exp("/mnt/ckpts"), gc("/opt", "/mnt/ckpts"), true},
-		{"GC mount at the root", dir("/mnt/ckpts"), exp("/mnt"), gc("/"), true},
-		{"relative GC mount", dir("ckpts/run"), exp("ckpts"), gc("ckpts"), true},
-		{"GC mount that only shares a prefix", dir("/mnt/ckpts/run"), exp("/mnt/ckpts"), gc("/mnt/ck"), false},
-		{"GC mount under the directory", dir("/mnt/ckpts"), exp("/mnt"), gc("/mnt/ckpts/run"), false},
-		{"checkpoint_gc_pod_spec", dir("/mnt/ckpts"), expPodSpec, gcPodSpec, true},
-		{"cpu_pod_spec", dir("/mnt/ckpts"), exp("/mnt/ckpts"), cpuPodSpec, true},
-		{"gpu_pod_spec", dir("/mnt/ckpts"), exp("/mnt/ckpts"), gpuPodSpec, true},
+		// Pod spec volumes.
+		{"a trial PVC, GC none", dir("/mnt/ckpts/run"), exp(alicePVC), gc(), false},
+		{
+			"a trial PVC, a cpu_pod_spec with a nodeSelector only", dir("/mnt/ckpts/run"),
+			exp(alicePVC), cpuPod(nodeSelectorOnly), false,
+		},
+		{
+			"a trial PVC, a gpu_pod_spec with a nodeSelector only", dir("/mnt/ckpts/run"),
+			exp(alicePVC), gpuPod(nodeSelectorOnly), false,
+		},
+		{
+			"a trial PVC, the same in checkpoint_gc_pod_spec", dir("/mnt/ckpts/run"),
+			exp(alicePVC), gcPod(alicePVC), true,
+		},
+		{"a trial PVC, the same in cpu_pod_spec", dir("/mnt/ckpts/run"), exp(alicePVC), cpuPod(alicePVC), true},
+		{"a trial PVC, the same in gpu_pod_spec", dir("/mnt/ckpts/run"), exp(alicePVC), gpuPod(alicePVC), true},
+		{
+			"a trial PVC, the same claim and path as another volume at another mount point",
+			dir("/mnt/ckpts/run"), exp(pod(volumeMount{source: pvc("alice-ckpts"), mountPath: "/mnt"})),
+			gcPod(pod(volumeMount{
+				volume: "gc", source: pvc("alice-ckpts"), mountPath: "/mnt/ckpts", subPath: "ckpts",
+			})),
+			true,
+		},
+		{
+			"a trial PVC, another claim", dir("/mnt/ckpts/run"), exp(alicePVC),
+			gcPod(pod(volumeMount{source: pvc("bob-ckpts"), mountPath: "/mnt/ckpts"})), false,
+		},
+		{
+			"a trial PVC, the same claim at another subPath", dir("/mnt/ckpts/run"),
+			exp(pod(volumeMount{source: pvc("shared"), mountPath: "/mnt/ckpts", subPath: "alice"})),
+			gcPod(pod(volumeMount{source: pvc("shared"), mountPath: "/mnt/ckpts", subPath: "bob"})),
+			false,
+		},
+		{
+			"a trial PVC with a subPathExpr", dir("/mnt/ckpts/run"),
+			exp(pod(volumeMount{source: pvc("shared"), mountPath: "/mnt/ckpts", subPathExpr: "$(U)"})),
+			gcPod(pod(volumeMount{source: pvc("shared"), mountPath: "/mnt/ckpts", subPathExpr: "$(U)"})),
+			false,
+		},
+		{
+			"a trial PVC, the same in a GC sidecar only", dir("/mnt/ckpts/run"), exp(alicePVC),
+			gcPod(pod(volumeMount{
+				container: "sidecar", source: pvc("alice-ckpts"), mountPath: "/mnt/ckpts",
+			})),
+			false,
+		},
+		{
+			"a trial PVC, a GC bind mount", dir("/mnt/ckpts/run"), exp(alicePVC),
+			gc(bind{"/srv/alice-ckpts", "/mnt/ckpts"}), false,
+		},
+		{
+			"a trial hostPath volume, the same for GC", dir("/mnt/ckpts/run"),
+			exp(pod(volumeMount{source: hostPath("/srv/a"), mountPath: "/mnt/ckpts"})),
+			gcPod(pod(volumeMount{source: hostPath("/srv/a/"), mountPath: "/mnt/ckpts"})), true,
+		},
+		{
+			"a trial hostPath volume, another path", dir("/mnt/ckpts/run"),
+			exp(pod(volumeMount{source: hostPath("/srv/a"), mountPath: "/mnt/ckpts"})),
+			gcPod(pod(volumeMount{source: hostPath("/srv/b"), mountPath: "/mnt/ckpts"})), false,
+		},
+		{
+			"a trial emptyDir volume, the same for GC", dir("/mnt/ckpts/run"),
+			exp(pod(volumeMount{source: emptyDir, mountPath: "/mnt/ckpts"})),
+			gcPod(pod(volumeMount{source: emptyDir, mountPath: "/mnt/ckpts"})), false,
+		},
+		{
+			"a trial volumeMount without its volume", dir("/mnt/ckpts/run"),
+			exp(pod(volumeMount{mountPath: "/mnt/ckpts"})), gcPod(pod(volumeMount{mountPath: "/mnt/ckpts"})),
+			false,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := checkpointGCSeesStorage(tc.storage, tc.exp, tc.tcd)
 			if tc.sees {
 				require.NoError(t, err)
 			} else {
-				require.ErrorContains(t, err, "checkpoint_gc_pod_spec")
+				require.ErrorContains(t, err, "checkpoints are kept")
 			}
 		})
 	}
