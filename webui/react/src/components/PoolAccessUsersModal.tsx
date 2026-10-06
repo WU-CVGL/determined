@@ -303,8 +303,9 @@ const PoolAccessUsersModalComponent: React.FC<Props> = ({
           {groupsError && <Alert message={`Unable to list groups: ${groupsError}`} type="error" />}
           <p className={css.hint}>{GROUP_EXPANSION_NOTE}</p>
         </div>
-        <div className={css.field}>
-          <label>Paste usernames</label>
+        {/* hew's TextArea takes no id, so the label wraps it instead of naming it. */}
+        <label className={css.field}>
+          <span>Paste usernames</span>
           <Input.TextArea
             placeholder="One username per line, or separated by commas or spaces"
             rows={3}
@@ -314,7 +315,7 @@ const PoolAccessUsersModalComponent: React.FC<Props> = ({
               setPasted(e.target.value);
             }}
           />
-        </div>
+        </label>
         {membersError && (
           <Alert
             action={

@@ -24,7 +24,6 @@ import PoolAccessUsersModalComponent, {
 } from './PoolAccessUsersModal';
 
 const OPEN = 'Open';
-const PASTE_PLACEHOLDER = 'One username per line, or separated by commas or spaces';
 
 const mocks = vi.hoisted(() => ({
   getGroup: vi.fn(),
@@ -128,7 +127,7 @@ const choose = async (label: string, option: string) => {
 };
 
 const paste = (text: string) =>
-  fireEvent.change(screen.getByPlaceholderText(PASTE_PLACEHOLDER), { target: { value: text } });
+  fireEvent.change(screen.getByLabelText('Paste usernames'), { target: { value: text } });
 
 const preview = () => screen.getByTestId('pool-access-preview');
 
