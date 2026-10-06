@@ -26,6 +26,8 @@ import (
 	"github.com/determined-ai/determined/master/internal/mocks"
 	"github.com/determined-ai/determined/master/internal/mocks/allocationmocks"
 	"github.com/determined-ai/determined/master/internal/rm"
+	"github.com/determined-ai/determined/master/internal/sproto"
+	"github.com/determined-ai/determined/master/internal/storage"
 	"github.com/determined-ai/determined/master/internal/task"
 	"github.com/determined-ai/determined/master/internal/user"
 	"github.com/determined-ai/determined/master/pkg/device"
@@ -36,6 +38,7 @@ import (
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 	"github.com/determined-ai/determined/proto/pkg/checkpointv1"
+	"github.com/determined-ai/determined/proto/pkg/experimentv1"
 	"github.com/determined-ai/determined/proto/pkg/utilv1"
 )
 
@@ -435,6 +438,9 @@ func useGCTaskContainerDefaults(api *apiServer, tcd model.TaskContainerDefaultsC
 	gcRM.On("ResolveResourcePool", mock.Anything, mock.Anything, mock.Anything).
 		Return(rm.ResourcePoolName("aux"), nil)
 	gcRM.On("TaskContainerDefaults", rm.ResourcePoolName("aux"), mock.Anything).Return(tcd, nil)
+	gcRM.On("DeleteJob", mock.Anything).Return(func(sproto.DeleteJob) sproto.DeleteJobResponse {
+		return sproto.EmptyDeleteJobResponse()
+	}, nil)
 	api.m.rm = &gcRM
 }
 
@@ -678,4 +684,69 @@ func TestCheckpointGCOfDirectoryStorageTheExperimentDoesNotMount(t *testing.T) {
 	require.Equal(t, "/mnt/ckpts/run",
 		spec.CheckpointStorage.RawDirectoryConfig.ContainerPath())
 	require.Empty(t, spec.ToTaskSpec().Mounts)
+}
+
+// A trial can save its checkpoints to other storage than the experiment's, which it reports to the
+// master (core.init's checkpoint_storage). Here the experiment's own storage is shared_fs, which its
+// trials had mounted at /determined_shared_fs, and its checkpoint is in directory storage at
+// /determined_shared_fs/mine, on that mount. A GC task of the directory storage does not get the
+// shared_fs mount, so deleting the experiment is refused and leaves it in DELETE_FAILED, with no GC
+// task, until the task container defaults mount the same host path there.
+func TestCheckpointGCOfDirectoryStorageOnTheExperimentSharedFSMount(t *testing.T) {
+	api, _, adminCtx := setupAPITest(t, nil)
+	owner := addGCTestOwner(t)
+	specs := captureCheckpointGC(t)
+
+	exp, ckpt := createGCTestExperiment(adminCtx, t, api, owner)
+	require.Equal(t, gcTestHostPath, exp.Config.CheckpointStorage.RawSharedFSConfig.HostPath())
+	//nolint:exhaustruct
+	storageID, err := storage.AddBackend(adminCtx, &expconf.CheckpointStorageConfig{
+		RawDirectoryConfig: &expconf.DirectoryConfig{
+			RawContainerPath: ptrs.Ptr("/determined_shared_fs/mine"),
+		},
+	})
+	require.NoError(t, err)
+	_, err = db.Bun().NewUpdate().Table("checkpoints_v2").
+		Set("storage_id = ?", storageID).Where("uuid = ?", ckpt).Exec(adminCtx)
+	require.NoError(t, err)
+	deleteExperiment := func() {
+		_, err := api.DeleteExperiment(adminCtx, &apiv1.DeleteExperimentRequest{
+			ExperimentId: int32(exp.ID),
+		})
+		require.NoError(t, err)
+	}
+
+	useGCTaskContainerDefaults(api, model.TaskContainerDefaultsConfig{})
+	deleteExperiment()
+	for i := 0; ; i++ {
+		e, err := api.GetExperiment(adminCtx, &apiv1.GetExperimentRequest{
+			ExperimentId: int32(exp.ID),
+		})
+		require.NoError(t, err)
+		if e.Experiment.State == experimentv1.State_STATE_DELETE_FAILED {
+			break
+		}
+		require.Less(t, i, 30, "experiment %d is %s, not DELETE_FAILED", exp.ID, e.Experiment.State)
+		time.Sleep(500 * time.Millisecond)
+	}
+	requireNoGCTask(t, specs)
+
+	//nolint:exhaustruct
+	useGCTaskContainerDefaults(api, model.TaskContainerDefaultsConfig{
+		BindMounts: model.BindMountsConfig{{
+			HostPath: gcTestHostPath, ContainerPath: "/determined_shared_fs", Propagation: "rprivate",
+		}},
+	})
+	deleteExperiment()
+	spec := nextGCSpec(t, specs)
+	require.Equal(t, exp.ID, spec.ExperimentID)
+	require.Equal(t, owner.ID, spec.Base.Owner.ID)
+	require.Equal(t, ckpt, spec.ToDelete)
+	require.Equal(t, "/determined_shared_fs/mine",
+		spec.CheckpointStorage.RawDirectoryConfig.ContainerPath())
+	require.Equal(t, []mount.Mount{{
+		Type: mount.TypeBind, Source: gcTestHostPath, Target: "/determined_shared_fs",
+		BindOptions: &mount.BindOptions{Propagation: "rprivate"},
+	}}, spec.ToTaskSpec().Mounts)
+	waitForExperimentDeleted(adminCtx, t, api, exp.ID)
 }
