@@ -386,6 +386,9 @@ show the resulting usernames without duplicates before anything is sent:
   failed request ends that pool, while the requests before it stay applied, and
   nothing is retried; the other pools go on. Changes are idempotent, so applying
   the same change again is safe.
+- Each pool's result counts the usernames sent, not the users whose access
+  changed: a user who already had a grant, or had none to revoke, is counted
+  but unchanged.
 
 Administrators manage user groups on the **Groups** tab of **Admin Settings**,
 also with basic authorization. A group grants nothing by itself. The CLI's

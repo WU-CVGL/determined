@@ -182,7 +182,11 @@ describe('PoolAccessUsersModal', () => {
     expect(mocks.grantResourcePoolAccess).toHaveBeenCalledWith({ poolName: 'gpu-a100', usernames });
     expect(mocks.grantResourcePoolAccess).toHaveBeenCalledWith({ poolName: 'gpu-h100', usernames });
     expect(screen.getByTestId('pool-access-result-gpu-a100')).toHaveTextContent(
-      'gpu-a100: granted to 5 users',
+      'gpu-a100: grant applied for 5 usernames',
+    );
+    // The counts are the usernames sent; the master does not say whose access changed.
+    expect(screen.getByTestId('pool-access-results')).toHaveTextContent(
+      'A user who already had a grant, or had none to revoke, is counted but unchanged.',
     );
     expect(onApplied).toHaveBeenCalledTimes(1);
   });
@@ -256,12 +260,12 @@ describe('PoolAccessUsersModal', () => {
 
     expect(results).toHaveTextContent('1 of 2 pools failed.');
     expect(within(results).getByTestId('pool-access-result-gpu-a100')).toHaveTextContent(
-      'gpu-a100: granted to 2500 users',
+      'gpu-a100: grant applied for 2500 usernames',
     );
     const firstChunk = a100Calls[0].usernames.length;
     expect(within(results).getByTestId('pool-access-result-gpu-h100')).toHaveTextContent(
       `gpu-h100: failed: 500 database unavailable. 1 of ${a100Calls.length} requests were ` +
-        `applied (${firstChunk} of 2500 users); nothing was retried`,
+        `applied (${firstChunk} of 2500 usernames); nothing was retried`,
     );
   });
 
@@ -286,7 +290,7 @@ describe('PoolAccessUsersModal', () => {
     const results = await screen.findByTestId('pool-access-results');
     expect(results).toHaveTextContent('1 of 2 pools failed.');
     expect(within(results).getByTestId('pool-access-result-cpu')).toHaveTextContent(
-      'cpu: revoked from 1 user',
+      'cpu: revoke applied for 1 username',
     );
     expect(within(results).getByTestId('pool-access-result-gpu-a100')).toHaveTextContent(
       'gpu-a100: failed: 404 unknown users: bob; nothing was changed',

@@ -8,13 +8,18 @@ import css from './PoolAccessResults.module.scss';
 
 export type PoolAccessResultAction = 'grant' | 'revoke' | 'restrict' | 'public';
 
+const usernames = (count: number): string => `${count} ${pluralizer(count, 'username')}`;
+
+/**
+ * A grant or revoke counts the usernames sent, not the users whose access changed: the master
+ * does not say which users already had a grant or had none to revoke.
+ */
 const doneText = (action: PoolAccessResultAction, result: PoolAccessResult): string => {
-  const users = `${result.totalUsernames} ${pluralizer(result.totalUsernames, 'user')}`;
   switch (action) {
     case 'grant':
-      return `granted to ${users}`;
+      return `grant applied for ${usernames(result.totalUsernames)}`;
     case 'revoke':
-      return `revoked from ${users}`;
+      return `revoke applied for ${usernames(result.totalUsernames)}`;
     case 'restrict':
       return 'restricted';
     case 'public':
@@ -26,7 +31,8 @@ const failedText = (result: PoolAccessResult): string => {
   if (result.requests <= 1 || result.totalUsernames === 0) return `failed: ${result.error}`;
   return (
     `failed: ${result.error}. ${result.appliedRequests} of ${result.requests} requests were ` +
-    `applied (${result.appliedUsernames} of ${result.totalUsernames} users); nothing was retried`
+    `applied (${result.appliedUsernames} of ${usernames(result.totalUsernames)}); nothing was ` +
+    'retried'
   );
 };
 
@@ -70,6 +76,11 @@ const PoolAccessResults: React.FC<Props> = ({ action, results }: Props) => {
           </li>
         ))}
       </ul>
+      {(action === 'grant' || action === 'revoke') && (
+        <p className={css.note}>
+          A user who already had a grant, or had none to revoke, is counted but unchanged.
+        </p>
+      )}
     </div>
   );
 };
