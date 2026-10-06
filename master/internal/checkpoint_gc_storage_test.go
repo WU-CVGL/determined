@@ -14,8 +14,10 @@ import (
 // Directory checkpoint storage is collected only where the master can confirm that a GC task sees
 // it at the same place as the experiment's trials did: the same host path of a bind mount, or the
 // same hostPath, persistentVolumeClaim or nfs volume and subPath of a pod spec volumeMount, with the
-// same path below the mount point, at the storage directory and at every mount point below it.
-// Where the trials had no mount, or an emptyDir volume, their files went with their containers.
+// same path below the mount point, at the storage directory and at every mount point below it. A
+// host path, of a hostPath volume or a bind mount, must also be on the node that the trials' pod
+// spec pins them to, if it pins them to one. Where the trials had no mount, or an emptyDir volume,
+// the check does not apply and the existing handling is kept.
 //
 //nolint:exhaustruct
 func TestCheckpointGCSeesStorage(t *testing.T) {
@@ -121,6 +123,39 @@ func TestCheckpointGCSeesStorage(t *testing.T) {
 	alicePVC := pod(volumeMount{source: pvc("alice-ckpts"), mountPath: "/mnt/ckpts"})
 	nodeSelectorOnly := &k8sV1.Pod{Spec: k8sV1.PodSpec{NodeSelector: map[string]string{"gc": "yes"}}}
 
+	// Pod specs pinned to a node: by a kubernetes.io/hostname nodeSelector, by nodeName, or by a
+	// required node affinity on the hostname.
+	on := func(node string, p *k8sV1.Pod) *k8sV1.Pod {
+		p = p.DeepCopy()
+		p.Spec.NodeSelector = map[string]string{"kubernetes.io/hostname": node}
+		return p
+	}
+	onNodeName := func(node string, p *k8sV1.Pod) *k8sV1.Pod {
+		p = p.DeepCopy()
+		p.Spec.NodeName = node
+		return p
+	}
+	onAffinity := func(p *k8sV1.Pod, nodes ...string) *k8sV1.Pod {
+		p = p.DeepCopy()
+		p.Spec.Affinity = &k8sV1.Affinity{NodeAffinity: &k8sV1.NodeAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: &k8sV1.NodeSelector{
+				NodeSelectorTerms: []k8sV1.NodeSelectorTerm{{
+					MatchExpressions: []k8sV1.NodeSelectorRequirement{{
+						Key: "kubernetes.io/hostname", Operator: k8sV1.NodeSelectorOpIn, Values: nodes,
+					}},
+				}},
+			},
+		}}
+		return p
+	}
+	// The task container defaults of a GC task with these bind mounts and checkpoint_gc_pod_spec.
+	gcWith := func(pod *k8sV1.Pod, mounts ...bind) model.TaskContainerDefaultsConfig {
+		tcd := gc(mounts...)
+		tcd.CheckpointGCPodSpec = pod
+		return tcd
+	}
+	dataCkpts := pod(volumeMount{source: hostPath("/data/ckpts"), mountPath: "/mnt/ckpts"})
+
 	for _, tc := range []struct {
 		name    string
 		storage expconf.CheckpointStorageConfig
@@ -137,7 +172,7 @@ func TestCheckpointGCSeesStorage(t *testing.T) {
 			onSharedFS("/srv"), gc(), true,
 		},
 
-		// The trials had no mount there: their files went with their containers.
+		// The trials had no mount there: the check does not apply.
 		{"not mounted", dir("/mnt/ckpts/run"), exp(nil), gc(), true},
 		{"a trial mount elsewhere", dir("/mnt/ckpts/run"), exp(nil, bind{"/h", "/hooks"}), gc(), true},
 		{
@@ -427,6 +462,82 @@ func TestCheckpointGCSeesStorage(t *testing.T) {
 			exp(pod(volumeMount{mountPath: "/mnt/ckpts"})), gcPod(pod(volumeMount{mountPath: "/mnt/ckpts"})),
 			false,
 		},
+
+		// A host path is on the node where the pod runs: a GC task must be pinned to the node that
+		// the trials were pinned to.
+		{
+			"a trial hostPath volume on a node, the same path on another node", dir("/mnt/ckpts"),
+			exp(on("node-a", dataCkpts)), cpuPod(on("node-b", dataCkpts)), false,
+		},
+		{
+			"a trial hostPath volume on a node, the same path on the same node", dir("/mnt/ckpts"),
+			exp(on("node-a", dataCkpts)), cpuPod(on("node-a", dataCkpts)), true,
+		},
+		{
+			"a trial hostPath volume on a node, the same path, GC not pinned", dir("/mnt/ckpts"),
+			exp(on("node-a", dataCkpts)), gcPod(dataCkpts), false,
+		},
+		{
+			"a trial hostPath volume on a node, another path on the same node", dir("/mnt/ckpts"),
+			exp(on("node-a", dataCkpts)),
+			gcPod(on("node-a", pod(volumeMount{source: hostPath("/data/other"), mountPath: "/mnt/ckpts"}))),
+			false,
+		},
+		{
+			"a trial hostPath volume by nodeName, the same path by a hostname nodeSelector",
+			dir("/mnt/ckpts"), exp(onNodeName("node-a", dataCkpts)), gcPod(on("node-a", dataCkpts)), true,
+		},
+		{
+			"a trial hostPath volume by hostname affinity, the same path on another node",
+			dir("/mnt/ckpts"), exp(onAffinity(dataCkpts, "node-a")), gcPod(onNodeName("node-b", dataCkpts)),
+			false,
+		},
+		{
+			"a trial hostPath volume by hostname affinity, the same path by the same affinity",
+			dir("/mnt/ckpts"), exp(onAffinity(dataCkpts, "node-a")), gcPod(onAffinity(dataCkpts, "node-a")),
+			true,
+		},
+		{
+			"a trial hostPath volume not pinned, the same path on a node", dir("/mnt/ckpts"),
+			exp(dataCkpts), gcPod(on("node-b", dataCkpts)), true,
+		},
+		{
+			// Not read as a pin: the master takes the host path to be the same on every node.
+			"a trial hostPath volume on one of two nodes, the same path, GC not pinned", dir("/mnt/ckpts"),
+			exp(onAffinity(dataCkpts, "node-a", "node-b")), gcPod(dataCkpts), true,
+		},
+		{
+			"a trial bind mount on a node, the same from the task container defaults, GC not pinned",
+			dir("/mnt/ckpts"), exp(on("node-a", &k8sV1.Pod{}), bind{"/data/ckpts", "/mnt/ckpts"}),
+			gc(bind{"/data/ckpts", "/mnt/ckpts"}), false,
+		},
+		{
+			"a trial bind mount on a node, the same on the same node", dir("/mnt/ckpts"),
+			exp(on("node-a", &k8sV1.Pod{}), bind{"/data/ckpts", "/mnt/ckpts"}),
+			gcWith(on("node-a", &k8sV1.Pod{}), bind{"/data/ckpts", "/mnt/ckpts"}), true,
+		},
+		{
+			"under the experiment's shared_fs mount on a node, the same host path, GC not pinned",
+			dir("/determined_shared_fs/mine"),
+			func() expconf.LegacyConfig {
+				c := onSharedFS("/srv/shared")
+				c.Environment.RawPodSpec = (*expconf.PodSpec)(on("node-a", &k8sV1.Pod{}))
+				return c
+			}(),
+			gc(bind{"/srv/shared", "/determined_shared_fs"}), false,
+		},
+		{
+			"a trial PVC on a node, the same claim, GC not pinned", dir("/mnt/ckpts/run"),
+			exp(on("node-a", alicePVC)), gcPod(alicePVC), true,
+		},
+		{
+			"a trial nfs volume on a node, the same export, GC on another node", dir("/mnt/ckpts/run"),
+			exp(on("node-a", aliceNFS)), gcPod(on("node-b", aliceNFS)), true,
+		},
+		{
+			"a trial emptyDir volume on a node, GC none", dir("/mnt/ckpts/run"),
+			exp(on("node-a", pod(volumeMount{source: emptyDir, mountPath: "/mnt/ckpts"}))), gc(), true,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := checkpointGCSeesStorage(tc.storage, tc.exp, tc.tcd)
@@ -438,9 +549,10 @@ func TestCheckpointGCSeesStorage(t *testing.T) {
 		})
 	}
 
-	// A refusal says what the trials had and what gives checkpoint GC tasks the same: a task
-	// container default bind mount for a bind mount, a GC pod spec volume for a volume, and nothing
-	// for a volume the master cannot match. It names no host path, claim or server of the GC task.
+	// A refusal names the trials' place and the setting that gives checkpoint GC tasks the same: a
+	// task container default bind mount for a bind mount, a GC pod spec volume for a volume, a GC pod
+	// spec pinned to the trials' node for a host path there, and nothing for a volume the master
+	// cannot match. It names no host path, claim, server or node of the GC task.
 	for _, tc := range []struct {
 		name    string
 		storage expconf.CheckpointStorageConfig
@@ -453,19 +565,19 @@ func TestCheckpointGCSeesStorage(t *testing.T) {
 			"a bind mount", dir("/mnt/ckpts/run"),
 			exp(nil, bind{"/srv/alice", "/mnt/ckpts"}), gc(bind{"/srv/default", "/mnt/ckpts"}),
 			[]string{
-				"had /mnt/ckpts/run on a bind mount, at host path /srv/alice/run",
-				"would have a different host path there",
-				"kept until task_container_defaults.bind_mounts mounts host path /srv/alice/run at " +
-					"/mnt/ckpts/run",
+				"its checkpoint storage is the directory /mnt/ckpts/run. The experiment's trials had " +
+					"/mnt/ckpts/run on a bind mount of host path /srv/alice/run, and a checkpoint GC task, " +
+					"which takes no bind_mounts or pod_spec from the experiment, would not have the same " +
+					"there. Its checkpoints are kept until task_container_defaults.bind_mounts mounts host " +
+					"path /srv/alice/run at /mnt/ckpts/run",
 			},
-			[]string{"pod_spec (else", "/srv/default"},
+			[]string{"pod_spec (else", "/srv/default", "node"},
 		},
 		{
 			"the experiment's shared_fs mount", dir("/determined_shared_fs/mine"),
 			onSharedFS("/srv/shared"), gc(),
 			[]string{
-				"had /determined_shared_fs/mine on a bind mount, at host path /srv/shared/mine",
-				"would have no mount there",
+				"had /determined_shared_fs/mine on a bind mount of host path /srv/shared/mine,",
 				"kept until task_container_defaults.bind_mounts mounts host path /srv/shared/mine at " +
 					"/determined_shared_fs/mine",
 			},
@@ -474,11 +586,10 @@ func TestCheckpointGCSeesStorage(t *testing.T) {
 		{
 			"a persistentVolumeClaim volume", dir("/mnt/ckpts/run"), exp(alicePVC), cpuPod(nodeSelectorOnly),
 			[]string{
-				"had /mnt/ckpts/run on the persistentVolumeClaim alice-ckpts, at /run in the volume",
-				"would have no mount there",
+				"had /mnt/ckpts/run on path /run of the persistentVolumeClaim alice-ckpts,",
 				"kept until checkpoint_gc_pod_spec (else cpu_pod_spec, merged over gpu_pod_spec) mounts " +
-					"a persistentVolumeClaim volume in determined-container so that /run in the claim " +
-					"alice-ckpts is at /mnt/ckpts/run",
+					"path /run of the persistentVolumeClaim alice-ckpts at /mnt/ckpts/run in " +
+					"determined-container",
 			},
 			[]string{"bind_mounts mounts"},
 		},
@@ -487,23 +598,48 @@ func TestCheckpointGCSeesStorage(t *testing.T) {
 			exp(pod(volumeMount{source: hostPath("/srv/a"), mountPath: "/mnt/ckpts"})),
 			gc(bind{"/srv/a", "/mnt/ckpts"}),
 			[]string{
-				"had /mnt/ckpts/run on a hostPath volume, at host path /srv/a/run",
-				"would have a bind mount there",
-				"mounts a hostPath volume in determined-container so that host path /srv/a/run is at " +
-					"/mnt/ckpts/run",
+				"had /mnt/ckpts/run on a hostPath volume of host path /srv/a/run,",
+				"kept until checkpoint_gc_pod_spec (else cpu_pod_spec, merged over gpu_pod_spec) mounts " +
+					"a hostPath volume of host path /srv/a/run at /mnt/ckpts/run in determined-container",
 			},
-			[]string{"bind_mounts mounts"},
+			[]string{"bind_mounts mounts", "node"},
 		},
 		{
 			"an nfs volume", dir("/mnt/ckpts/run"), exp(aliceNFS),
 			gcPod(pod(volumeMount{source: nfs("nfs2", "/export/alice"), mountPath: "/mnt/ckpts"})),
 			[]string{
-				"had /mnt/ckpts/run on an nfs volume of server nfs1, at /export/alice/run on the server",
-				"would have a different nfs volume or path there",
-				"mounts an nfs volume in determined-container so that /export/alice/run on the server " +
-					"nfs1 is at /mnt/ckpts/run",
+				"had /mnt/ckpts/run on path /export/alice/run of the nfs server nfs1,",
+				"mounts path /export/alice/run of the nfs server nfs1 at /mnt/ckpts/run in " +
+					"determined-container",
 			},
 			[]string{"nfs2", "bind_mounts mounts"},
+		},
+		{
+			"a hostPath volume on another node", dir("/mnt/ckpts"),
+			exp(on("node-a", dataCkpts)), cpuPod(on("node-b", dataCkpts)),
+			[]string{
+				"its checkpoint storage is the directory /mnt/ckpts. The experiment's trials had " +
+					"/mnt/ckpts on a hostPath volume of host path /data/ckpts on node node-a, where their " +
+					"pod spec pins them, and a checkpoint GC task, which takes no bind_mounts or pod_spec " +
+					"from the experiment, would not have the same there. Its checkpoints are kept until " +
+					"checkpoint_gc_pod_spec pins the pod to node node-a, by nodeName or a " +
+					"kubernetes.io/hostname nodeSelector, and mounts a hostPath volume of host path " +
+					"/data/ckpts at /mnt/ckpts in determined-container",
+			},
+			[]string{"node-b", "cpu_pod_spec"},
+		},
+		{
+			"a bind mount on a node, GC not pinned", dir("/mnt/ckpts"),
+			exp(on("node-a", &k8sV1.Pod{}), bind{"/data/ckpts", "/mnt/ckpts"}),
+			gc(bind{"/data/ckpts", "/mnt/ckpts"}),
+			[]string{
+				"had /mnt/ckpts on a bind mount of host path /data/ckpts on node node-a, where their pod " +
+					"spec pins them,",
+				"kept until checkpoint_gc_pod_spec pins the pod to node node-a, by nodeName or a " +
+					"kubernetes.io/hostname nodeSelector, and task_container_defaults.bind_mounts mounts " +
+					"host path /data/ckpts at /mnt/ckpts",
+			},
+			[]string{"hostPath volume"},
 		},
 		{
 			"a volume the master cannot match", dir("/mnt/ckpts/run"),

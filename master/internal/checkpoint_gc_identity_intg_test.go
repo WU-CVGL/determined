@@ -658,10 +658,10 @@ func TestCheckpointGCConfirmsThePodSpecVolumeOfDirectoryStorage(t *testing.T) {
 	require.Empty(t, spec.ToTaskSpec().Mounts)
 }
 
-// Control: directory checkpoint storage that the experiment does not mount was in its own
-// containers and went with them, so the GC task runs as before and records it as deleted. Only the
-// experiment's /hooks mount is there, which does not cover the storage, and it does not reach the
-// task.
+// Control: for directory checkpoint storage that the experiment does not mount, the check does not
+// apply and the existing handling is kept: the GC task runs as before and records it as deleted.
+// Only the experiment's /hooks mount is there, which does not cover the storage, and it does not
+// reach the task.
 func TestCheckpointGCOfDirectoryStorageTheExperimentDoesNotMount(t *testing.T) {
 	api, _, adminCtx := setupAPITest(t, nil)
 	owner := addGCTestOwner(t)

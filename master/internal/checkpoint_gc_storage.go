@@ -36,11 +36,19 @@ import (
 // persistentVolumeClaim or nfs volume and subPath, in each case with the path below the mount
 // point. Other volumes and a subPathExpr cannot be matched, and a bind mount never matches a volume.
 // The places must be the same at the storage directory and at every mount point below it, where
-// checkpoints and TensorBoard files are too, wherever the trials had a mount. Where they had none,
-// or an emptyDir volume, their files were in their own containers or pods and went with them, so
-// the task runs and records them as deleted, as before; this also covers a path that the container
-// runtime binds by default (Singularity or enroot on Slurm/PBS). Pod specs are taken to apply, as on
-// Kubernetes.
+// checkpoints and TensorBoard files are too, wherever the trials had a mount.
+//
+// A host path, of a hostPath volume or of a bind mount, which Kubernetes makes a hostPath volume,
+// is on the node where the pod runs. If the trials' pod spec pins them to a node (pinnedNode), the
+// GC task's pod spec must pin it to the same node. If it pins them to none that the master can
+// read, the host path is taken to be the same storage on every node, as it always was on every
+// agent of the agent resource manager, where a GC task runs on any agent of its pool; nothing
+// confirms that.
+//
+// Where the trials had no mount, or an emptyDir volume, the check does not apply and the existing
+// handling is kept: the task runs and records the checkpoints as deleted, as before. This also
+// covers a path that the container runtime binds by default (Singularity or enroot on Slurm/PBS).
+// Pod specs are taken to apply, as on Kubernetes.
 func checkpointGCSeesStorage(
 	storage expconf.CheckpointStorageConfig,
 	exp expconf.LegacyConfig,
@@ -60,10 +68,10 @@ func checkpointGCSeesStorage(
 			Type: mount.TypeBind, Source: fs.HostPath(), Target: expconf.DefaultSharedFSContainerPath,
 		})
 	}
-	trial := append(bindMountsOf(trialBinds), volumeMountsOf(exp.Environment.PodSpec())...)
-	gc := append(
-		bindMountsOf(tasks.GCMounts(tcd, storage)),
-		volumeMountsOf(tasks.GCPodSpec(tcd))...)
+	trialPod, gcPod := exp.Environment.PodSpec(), tasks.GCPodSpec(tcd)
+	trial := append(bindMountsOf(trialBinds), volumeMountsOf(trialPod)...)
+	gc := append(bindMountsOf(tasks.GCMounts(tcd, storage)), volumeMountsOf(gcPod)...)
+	trialNode, gcNode := pinnedNode(trialPod), pinnedNode(gcPod)
 
 	paths := []string{storagePath}
 	for _, m := range append(append([]containerMount{}, trial...), gc...) {
@@ -77,23 +85,99 @@ func checkpointGCSeesStorage(
 		if seen.kind == placeContainer || seen.kind == placeEmptyDir {
 			continue
 		}
-		gcSees := placeOf(gc, p)
-		if seen.same(gcSees) {
+		node := ""
+		if seen.kind == placeBind || seen.kind == placeHostPath {
+			node = trialNode
+		}
+		if seen.same(placeOf(gc, p)) && (node == "" || gcNode == node) {
 			continue
 		}
-		msg := fmt.Sprintf("its checkpoint storage is the directory %s. The experiment's trials "+
-			"had %s on", storagePath, p)
-		if seen.kind == placeUnknown {
-			return fmt.Errorf("%s a volume that the master cannot match for a checkpoint GC task "+
-				"(it matches bind mounts by host path, hostPath and persistentVolumeClaim volumes "+
-				"by source and subPath, and nfs volumes by server, path and subPath), so its "+
-				"checkpoints are kept, whatever checkpoint GC tasks mount", msg)
-		}
-		return fmt.Errorf("%s %s, but a checkpoint GC task would have %s, as it takes no "+
-			"bind_mounts or pod_spec from the experiment. Its checkpoints are kept until %s",
-			msg, seen, gcSees.other(seen), seen.remedy(p))
+		return gcStorageRefusal(storagePath, p, seen, node)
 	}
 	return nil
+}
+
+// The refusals of checkpointGCSeesStorage. Each names the storage directory, the path where a GC
+// task would not see what the trials saw, the trials' place there, which comes from the
+// experiment's config, and the setting that gives GC tasks the same place. None says what a GC
+// task has there: its host paths, claims, servers and node come from the task container defaults.
+const (
+	gcRefusal = "its checkpoint storage is the directory %[1]s. The experiment's trials had %[2]s on "
+	gcLacks   = ", and a checkpoint GC task, which takes no bind_mounts or pod_spec from the " +
+		"experiment, would not have the same there. Its checkpoints are kept until "
+	gcPin = "checkpoint_gc_pod_spec pins the pod to node %[4]s, by nodeName or a " +
+		"kubernetes.io/hostname nodeSelector, and "
+
+	gcRefusalUnknown = gcRefusal + "a volume that the master cannot match for a checkpoint GC task " +
+		"(it matches bind mounts, and hostPath, persistentVolumeClaim and nfs volumes without a " +
+		"subPathExpr), so its checkpoints are kept, whatever checkpoint GC tasks mount"
+	gcRefusalBind = gcRefusal + "a bind mount of host path %[3]s" + gcLacks +
+		"task_container_defaults.bind_mounts mounts host path %[3]s at %[2]s"
+	gcRefusalBindOnNode = gcRefusal + "a bind mount of host path %[3]s on node %[4]s, where " +
+		"their pod spec pins them" + gcLacks + gcPin +
+		"task_container_defaults.bind_mounts mounts host path %[3]s at %[2]s"
+	gcRefusalVolume = gcRefusal + "%[3]s" + gcLacks + "checkpoint_gc_pod_spec (else cpu_pod_spec, " +
+		"merged over gpu_pod_spec) mounts %[3]s at %[2]s in determined-container"
+	gcRefusalHostPathOnNode = gcRefusal + "a hostPath volume of host path %[3]s on node %[4]s, " +
+		"where their pod spec pins them" + gcLacks + gcPin +
+		"mounts a hostPath volume of host path %[3]s at %[2]s in determined-container"
+)
+
+// gcStorageRefusal returns the refusal for storage at storagePath that a GC task would not see at
+// path p, where the trials saw seen, on node if their pod spec pins them to one.
+func gcStorageRefusal(storagePath, p string, seen storagePlace, node string) error {
+	switch seen.kind {
+	case placeUnknown:
+		return fmt.Errorf(gcRefusalUnknown, storagePath, p)
+	case placeBind:
+		if node != "" {
+			return fmt.Errorf(gcRefusalBindOnNode, storagePath, p, seen.path, node)
+		}
+		return fmt.Errorf(gcRefusalBind, storagePath, p, seen.path)
+	case placeHostPath:
+		if node != "" {
+			return fmt.Errorf(gcRefusalHostPathOnNode, storagePath, p, seen.path, node)
+		}
+		return fmt.Errorf(gcRefusalVolume, storagePath, p, "a hostPath volume of host path "+seen.path)
+	case placePVC:
+		return fmt.Errorf(gcRefusalVolume, storagePath, p,
+			"path "+seen.path+" of the persistentVolumeClaim "+seen.source)
+	default: // placeNFS
+		return fmt.Errorf(gcRefusalVolume, storagePath, p,
+			"path "+seen.path+" of the nfs server "+seen.source)
+	}
+}
+
+// pinnedNode returns the node that a pod spec pins its pod to, "" if none that the master reads:
+// its nodeName, else its kubernetes.io/hostname nodeSelector, else a required node affinity of one
+// term with a kubernetes.io/hostname In expression of one value. A nodeName and a hostname are
+// taken to name the same node when they are equal. Other constraints, such as other labels, several
+// hostnames or several terms, preferred affinity, taints or the resource pool, are not read.
+func pinnedNode(pod *expconf.PodSpec) string {
+	if pod == nil {
+		return ""
+	}
+	if pod.Spec.NodeName != "" {
+		return pod.Spec.NodeName
+	}
+	if node := pod.Spec.NodeSelector[k8sV1.LabelHostname]; node != "" {
+		return node
+	}
+	affinity := pod.Spec.Affinity
+	if affinity == nil || affinity.NodeAffinity == nil ||
+		affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		return ""
+	}
+	terms := affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+	if len(terms) != 1 {
+		return ""
+	}
+	for _, e := range terms[0].MatchExpressions {
+		if e.Key == k8sV1.LabelHostname && e.Operator == k8sV1.NodeSelectorOpIn && len(e.Values) == 1 {
+			return e.Values[0]
+		}
+	}
+	return ""
 }
 
 // pathInContainer returns the absolute, clean path in a task container of a container path, which
@@ -133,69 +217,6 @@ type storagePlace struct {
 
 func (p storagePlace) same(o storagePlace) bool {
 	return p.kind != placeUnknown && p == o
-}
-
-func (p storagePlace) String() string {
-	switch p.kind {
-	case placeBind:
-		return "a bind mount, at host path " + p.path
-	case placeHostPath:
-		return "a hostPath volume, at host path " + p.path
-	case placePVC:
-		return "the persistentVolumeClaim " + p.source + ", at " + p.path + " in the volume"
-	case placeNFS:
-		return "an nfs volume of server " + p.source + ", at " + p.path + " on the server"
-	default:
-		return p.kind
-	}
-}
-
-// other describes the place that a checkpoint GC task would have where the trials had seen,
-// without naming its host path, claim or server, which come from the task container defaults.
-func (p storagePlace) other(seen storagePlace) string {
-	switch {
-	case p.kind == placeContainer:
-		return "no mount there"
-	case p.kind == placeBind && seen.kind == placeBind:
-		return "a different host path there"
-	case p.kind == seen.kind && p.kind != placeUnknown:
-		return "a different " + p.kind + " or path there"
-	case p.kind == placeUnknown || p.kind == placeEmptyDir:
-		return p.kind + " there"
-	default:
-		return p.aKind() + " there"
-	}
-}
-
-// aKind returns the kind with its indefinite article.
-func (p storagePlace) aKind() string {
-	if p.kind == placeNFS {
-		return "an " + p.kind
-	}
-	return "a " + p.kind
-}
-
-// remedy says what gives checkpoint GC tasks this place, which the trials had, at path p: a task
-// container default bind mount for a bind mount, a volumeMount of the GC pod spec for a volume. A
-// bind mount never matches a volume, nor the reverse.
-func (p storagePlace) remedy(at string) string {
-	if p.kind == placeBind {
-		return fmt.Sprintf("task_container_defaults.bind_mounts mounts host path %s at %s", p.path, at)
-	}
-	return fmt.Sprintf("checkpoint_gc_pod_spec (else cpu_pod_spec, merged over gpu_pod_spec) "+
-		"mounts %s in %s so that %s is at %s", p.aKind(), model.DeterminedK8ContainerName, p.where(), at)
-}
-
-// where names the place in its volume, for remedy.
-func (p storagePlace) where() string {
-	switch p.kind {
-	case placePVC:
-		return p.path + " in the claim " + p.source
-	case placeNFS:
-		return p.path + " on the server " + p.source
-	default:
-		return "host path " + p.path
-	}
 }
 
 // containerMount is a mount of a task container: the path in the container it is mounted at, and
