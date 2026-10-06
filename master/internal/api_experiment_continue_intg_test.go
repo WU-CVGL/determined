@@ -205,9 +205,9 @@ func requireRunsAs(t *testing.T, expID int, want continueTestUser) {
 // the master, and in the workspace and project names that its tasks get.
 func requireInProject(t *testing.T, expID, projectID int, workspaceName, projectName string) {
 	t.Helper()
-	exp, err := db.ExperimentByID(context.Background(), expID)
+	stored, err := db.ExperimentByID(context.Background(), expID)
 	require.NoError(t, err)
-	require.Equal(t, projectID, exp.ProjectID, "project in the database")
+	require.Equal(t, projectID, stored.ProjectID, "project in the database")
 
 	ref, ok := expauth.ExperimentRegistry.Load(expID)
 	require.True(t, ok, "experiment %d is not running", expID)
