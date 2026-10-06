@@ -32,5 +32,7 @@
    start with this option: before rolling an agent back, remove it and hide the GPU from the agent
    container again. See :ref:`agent-exclude-gpus`.
 
--  Agents: ``determined-agent gpu-topology`` prints what the agent would report on a host, as JSON,
-   and exits with 0 also without NVML.
+-  Agents: ``determined-agent gpu-topology`` prints what the agent would report on a host when given
+   the agent's ``--slot-type``, ``--visible-gpus`` and ``--exclude-gpus``, as JSON, and exits with 0
+   also without NVML. It is a standalone probe that never reads a running agent's configuration. See
+   :ref:`agent-gpu-topology`.

@@ -62,7 +62,7 @@ func newGPUTopologyCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "gpu-topology",
-		Short: "print the GPU topology, P2P status, PCIe links and NVML errors the agent would report",
+		Short: "probe the GPU topology, P2P, PCIe links and NVML errors as the agent would with these flags",
 		Long: "Run the agent's device detection and exclude list, then the agent's NVML session " +
 			"(one Init and the GPU topology collection, within 60 s), and print the result as " +
 			"JSON. NVML is loaded also without GPUs. Device detection runs nvidia-smi without a " +
