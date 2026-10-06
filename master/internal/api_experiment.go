@@ -3038,10 +3038,6 @@ func (a *apiServer) DeleteExperimentLabel(ctx context.Context,
 func (a *apiServer) DeleteTensorboardFiles(
 	ctx context.Context, req *apiv1.DeleteTensorboardFilesRequest,
 ) (resp *apiv1.DeleteTensorboardFilesResponse, err error) {
-	if _, _, err := grpcutil.GetUser(ctx); err != nil {
-		return nil, err
-	}
-
 	exp, _, err := a.getExperimentAndCheckCanDoActions(ctx, int(req.ExperimentId),
 		experiment.AuthZProvider.Get().CanEditExperiment)
 	if err != nil {
