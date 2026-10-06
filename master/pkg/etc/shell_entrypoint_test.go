@@ -173,6 +173,9 @@ func writeScript(t *testing.T, path, body string) {
 // gets every line but the login records message, and the script exits with sshd's exit status.
 func TestShellEntrypointSSHDLogs(t *testing.T) {
 	tail := shellEntrypointTail(t)
+	if err := exec.Command("tee", "-p").Run(); err != nil {
+		t.Skip("tee does not support -p (GNU coreutils 8.24 or later)")
+	}
 	dir := t.TempDir()
 	readyFile := filepath.Join(dir, "ready")
 	argsFile := filepath.Join(dir, "args")
