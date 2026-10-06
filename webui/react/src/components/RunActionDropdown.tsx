@@ -72,7 +72,11 @@ const RunActionDropdown: React.FC<Props> = ({
 
   const menuItems = getActionsForFlatRun(run, dropdownActions, usePermissions()).map(
     (action: FlatRunAction) => {
-      return { danger: action === Action.Delete, key: action, label: action };
+      return {
+        danger: action === Action.Kill || action === Action.Delete,
+        key: action,
+        label: action,
+      };
     },
   );
 

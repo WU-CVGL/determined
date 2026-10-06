@@ -660,6 +660,8 @@ export const getExperiments: DetApi<
       params.experimentIdFilter?.incl,
       params.experimentIdFilter?.notIn,
       true,
+      undefined,
+      undefined,
       options,
     );
   },
@@ -1319,6 +1321,9 @@ export const getGenericTasks: DetApi<
       params.states?.map(decoder.encodeGenericTaskState),
       params.parentId,
       params.taskIds,
+      undefined,
+      undefined,
+      undefined,
       options,
     ),
 };

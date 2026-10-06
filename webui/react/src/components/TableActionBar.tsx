@@ -371,7 +371,7 @@ const TableActionBar: React.FC<Props> = ({
       const isLastGroup = index === groupSize - 1;
       group.forEach((action) =>
         acc.push({
-          danger: action === ExperimentAction.Delete,
+          danger: action === ExperimentAction.Delete || action === ExperimentAction.Kill,
           disabled: !availableBatchActions.includes(action),
           icon: <Icon name={actionIcons[action]} title={action} />,
           key: action,

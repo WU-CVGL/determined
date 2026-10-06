@@ -556,6 +556,11 @@ func (a *agent) PatchSlotState(msg patchSlotState) (*model.SlotSummary, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Enabling, disabling or draining a slot changes what the pool can schedule, as for an agent.
+	// GetSlot also comes here, with an empty patch; a read does not reschedule.
+	if msg.enabled != nil || msg.drain != nil {
+		a.notifyListeners()
+	}
 	return &result, nil
 }
 
