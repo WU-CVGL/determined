@@ -2399,6 +2399,7 @@ class v1Command(Printable):
     container: "typing.Optional[v1Container]" = None
     displayName: "typing.Optional[str]" = None
     exitStatus: "typing.Optional[str]" = None
+    slots: "typing.Optional[int]" = None
     userId: "typing.Optional[int]" = None
 
     def __init__(
@@ -2415,6 +2416,7 @@ class v1Command(Printable):
         container: "typing.Union[v1Container, None, Unset]" = _unset,
         displayName: "typing.Union[str, None, Unset]" = _unset,
         exitStatus: "typing.Union[str, None, Unset]" = _unset,
+        slots: "typing.Union[int, None, Unset]" = _unset,
         userId: "typing.Union[int, None, Unset]" = _unset,
     ):
         self.description = description
@@ -2431,6 +2433,8 @@ class v1Command(Printable):
             self.displayName = displayName
         if not isinstance(exitStatus, Unset):
             self.exitStatus = exitStatus
+        if not isinstance(slots, Unset):
+            self.slots = slots
         if not isinstance(userId, Unset):
             self.userId = userId
 
@@ -2452,6 +2456,8 @@ class v1Command(Printable):
             kwargs["displayName"] = obj["displayName"]
         if "exitStatus" in obj:
             kwargs["exitStatus"] = obj["exitStatus"]
+        if "slots" in obj:
+            kwargs["slots"] = obj["slots"]
         if "userId" in obj:
             kwargs["userId"] = obj["userId"]
         return cls(**kwargs)
@@ -2473,6 +2479,8 @@ class v1Command(Printable):
             out["displayName"] = self.displayName
         if not omit_unset or "exitStatus" in vars(self):
             out["exitStatus"] = self.exitStatus
+        if not omit_unset or "slots" in vars(self):
+            out["slots"] = self.slots
         if not omit_unset or "userId" in vars(self):
             out["userId"] = self.userId
         return out
@@ -9537,6 +9545,7 @@ class v1Notebook(Printable):
     displayName: "typing.Optional[str]" = None
     exitStatus: "typing.Optional[str]" = None
     serviceAddress: "typing.Optional[str]" = None
+    slots: "typing.Optional[int]" = None
     userId: "typing.Optional[int]" = None
 
     def __init__(
@@ -9554,6 +9563,7 @@ class v1Notebook(Printable):
         displayName: "typing.Union[str, None, Unset]" = _unset,
         exitStatus: "typing.Union[str, None, Unset]" = _unset,
         serviceAddress: "typing.Union[str, None, Unset]" = _unset,
+        slots: "typing.Union[int, None, Unset]" = _unset,
         userId: "typing.Union[int, None, Unset]" = _unset,
     ):
         self.description = description
@@ -9572,6 +9582,8 @@ class v1Notebook(Printable):
             self.exitStatus = exitStatus
         if not isinstance(serviceAddress, Unset):
             self.serviceAddress = serviceAddress
+        if not isinstance(slots, Unset):
+            self.slots = slots
         if not isinstance(userId, Unset):
             self.userId = userId
 
@@ -9595,6 +9607,8 @@ class v1Notebook(Printable):
             kwargs["exitStatus"] = obj["exitStatus"]
         if "serviceAddress" in obj:
             kwargs["serviceAddress"] = obj["serviceAddress"]
+        if "slots" in obj:
+            kwargs["slots"] = obj["slots"]
         if "userId" in obj:
             kwargs["userId"] = obj["userId"]
         return cls(**kwargs)
@@ -9618,6 +9632,8 @@ class v1Notebook(Printable):
             out["exitStatus"] = self.exitStatus
         if not omit_unset or "serviceAddress" in vars(self):
             out["serviceAddress"] = self.serviceAddress
+        if not omit_unset or "slots" in vars(self):
+            out["slots"] = self.slots
         if not omit_unset or "userId" in vars(self):
             out["userId"] = self.userId
         return out
@@ -15025,6 +15041,7 @@ class v1Shell(Printable):
     exitStatus: "typing.Optional[str]" = None
     privateKey: "typing.Optional[str]" = None
     publicKey: "typing.Optional[str]" = None
+    slots: "typing.Optional[int]" = None
     userId: "typing.Optional[int]" = None
 
     def __init__(
@@ -15045,6 +15062,7 @@ class v1Shell(Printable):
         exitStatus: "typing.Union[str, None, Unset]" = _unset,
         privateKey: "typing.Union[str, None, Unset]" = _unset,
         publicKey: "typing.Union[str, None, Unset]" = _unset,
+        slots: "typing.Union[int, None, Unset]" = _unset,
         userId: "typing.Union[int, None, Unset]" = _unset,
     ):
         self.description = description
@@ -15069,6 +15087,8 @@ class v1Shell(Printable):
             self.privateKey = privateKey
         if not isinstance(publicKey, Unset):
             self.publicKey = publicKey
+        if not isinstance(slots, Unset):
+            self.slots = slots
         if not isinstance(userId, Unset):
             self.userId = userId
 
@@ -15098,6 +15118,8 @@ class v1Shell(Printable):
             kwargs["privateKey"] = obj["privateKey"]
         if "publicKey" in obj:
             kwargs["publicKey"] = obj["publicKey"]
+        if "slots" in obj:
+            kwargs["slots"] = obj["slots"]
         if "userId" in obj:
             kwargs["userId"] = obj["userId"]
         return cls(**kwargs)
@@ -15127,6 +15149,8 @@ class v1Shell(Printable):
             out["privateKey"] = self.privateKey
         if not omit_unset or "publicKey" in vars(self):
             out["publicKey"] = self.publicKey
+        if not omit_unset or "slots" in vars(self):
+            out["slots"] = self.slots
         if not omit_unset or "userId" in vars(self):
             out["userId"] = self.userId
         return out
@@ -15216,6 +15240,22 @@ class v1SlotStats(Printable):
             "typeStats": {k: v.to_json(omit_unset) for k, v in self.typeStats.items()},
         }
         return out
+
+class v1SlotsFilter(DetEnum):
+    """Filter workloads by the slot count they request: experiments by
+    resources.slots_per_trial (1 when the config leaves it out, its default),
+    generic tasks by the resources.slots stored with the task (0 when the stored
+    config has none, as the task's slots field reports it). The filter counts
+    slots of any type. A slot is a GPU only in a resource pool whose slot type
+    is cuda or rocm; in a pool whose slot type is cpu, a slot is a CPU, so a
+    workload with slots does not necessarily use a GPU.
+    - SLOTS_FILTER_UNSPECIFIED: No filter.
+    - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.
+    - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
+    """
+    UNSPECIFIED = "SLOTS_FILTER_UNSPECIFIED"
+    HAS_SLOTS = "SLOTS_FILTER_HAS_SLOTS"
+    ZERO_SLOTS = "SLOTS_FILTER_ZERO_SLOTS"
 
 class v1StartTrialRequest(Printable):
     """Start a trial."""
@@ -15828,6 +15868,7 @@ class v1Tensorboard(Printable):
     exitStatus: "typing.Optional[str]" = None
     experimentIds: "typing.Optional[typing.Sequence[int]]" = None
     serviceAddress: "typing.Optional[str]" = None
+    slots: "typing.Optional[int]" = None
     trialIds: "typing.Optional[typing.Sequence[int]]" = None
     userId: "typing.Optional[int]" = None
 
@@ -15847,6 +15888,7 @@ class v1Tensorboard(Printable):
         exitStatus: "typing.Union[str, None, Unset]" = _unset,
         experimentIds: "typing.Union[typing.Sequence[int], None, Unset]" = _unset,
         serviceAddress: "typing.Union[str, None, Unset]" = _unset,
+        slots: "typing.Union[int, None, Unset]" = _unset,
         trialIds: "typing.Union[typing.Sequence[int], None, Unset]" = _unset,
         userId: "typing.Union[int, None, Unset]" = _unset,
     ):
@@ -15868,6 +15910,8 @@ class v1Tensorboard(Printable):
             self.experimentIds = experimentIds
         if not isinstance(serviceAddress, Unset):
             self.serviceAddress = serviceAddress
+        if not isinstance(slots, Unset):
+            self.slots = slots
         if not isinstance(trialIds, Unset):
             self.trialIds = trialIds
         if not isinstance(userId, Unset):
@@ -15895,6 +15939,8 @@ class v1Tensorboard(Printable):
             kwargs["experimentIds"] = obj["experimentIds"]
         if "serviceAddress" in obj:
             kwargs["serviceAddress"] = obj["serviceAddress"]
+        if "slots" in obj:
+            kwargs["slots"] = obj["slots"]
         if "trialIds" in obj:
             kwargs["trialIds"] = obj["trialIds"]
         if "userId" in obj:
@@ -15922,6 +15968,8 @@ class v1Tensorboard(Printable):
             out["experimentIds"] = self.experimentIds
         if not omit_unset or "serviceAddress" in vars(self):
             out["serviceAddress"] = self.serviceAddress
+        if not omit_unset or "slots" in vars(self):
+            out["slots"] = self.slots
         if not omit_unset or "trialIds" in vars(self):
             out["trialIds"] = self.trialIds
         if not omit_unset or "userId" in vars(self):
@@ -19513,10 +19561,12 @@ def get_GetExperiments(
     orderBy: "typing.Optional[v1OrderBy]" = None,
     projectId: "typing.Optional[int]" = None,
     showTrialData: "typing.Optional[bool]" = None,
+    slotsFilter: "typing.Optional[v1SlotsFilter]" = None,
     sortBy: "typing.Optional[v1GetExperimentsRequestSortBy]" = None,
     states: "typing.Optional[typing.Sequence[experimentv1State]]" = None,
     userIds: "typing.Optional[typing.Sequence[int]]" = None,
     users: "typing.Optional[typing.Sequence[str]]" = None,
+    workspaceId: "typing.Optional[int]" = None,
 ) -> "v1GetExperimentsResponse":
     """Get a list of experiments.
 
@@ -19544,6 +19594,12 @@ denote number of experiments to skip from the end before returning results.
     - projectId: Limit experiments to those within a specified project, or 0 for all
 projects.
     - showTrialData: whether to surface trial specific data from the best trial.
+    - slotsFilter: Limit experiments by the slot count each trial requests
+(resources.slots_per_trial, 1 when unset): at least one slot, or none.
+
+ - SLOTS_FILTER_UNSPECIFIED: No filter.
+ - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.
+ - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
     - sortBy: Sort experiments by the given field.
 
  - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.
@@ -19590,6 +19646,8 @@ Running is a substate of the Active state.
 userIds.
     - users: Limit experiments to those that are owned by users with the specified
 usernames.
+    - workspaceId: Limit experiments to those in projects of this workspace, or 0 for all
+workspaces.
     """
     _params = {
         "archived": str(archived).lower() if archived is not None else None,
@@ -19607,10 +19665,12 @@ usernames.
         "orderBy": orderBy.value if orderBy is not None else None,
         "projectId": projectId,
         "showTrialData": str(showTrialData).lower() if showTrialData is not None else None,
+        "slotsFilter": slotsFilter.value if slotsFilter is not None else None,
         "sortBy": sortBy.value if sortBy is not None else None,
         "states": [x.value for x in states] if states is not None else None,
         "userIds": userIds,
         "users": users,
+        "workspaceId": workspaceId,
     }
     _resp = session._do_request(
         method="GET",
@@ -19658,18 +19718,30 @@ def get_GetGenericTasks(
     limit: "typing.Optional[int]" = None,
     offset: "typing.Optional[int]" = None,
     parentId: "typing.Optional[str]" = None,
+    projectId: "typing.Optional[int]" = None,
+    search: "typing.Optional[str]" = None,
+    slotsFilter: "typing.Optional[v1SlotsFilter]" = None,
     states: "typing.Optional[typing.Sequence[v1GenericTaskState]]" = None,
     taskIds: "typing.Optional[typing.Sequence[str]]" = None,
     userIds: "typing.Optional[typing.Sequence[int]]" = None,
     users: "typing.Optional[typing.Sequence[str]]" = None,
     workspaceId: "typing.Optional[int]" = None,
 ) -> "v1GetGenericTasksResponse":
-    """Get a list of generic tasks, optionally filtered by owner, workspace, state
-    or parent.
+    """Get a list of generic tasks, optionally filtered by owner, workspace,
+    project, state, parent, name or slot count.
 
     - limit: Limit the number of tasks. A value of 0 denotes no limit.
     - offset: Skip this many tasks before returning results.
     - parentId: Limit tasks to the direct children of this task.
+    - projectId: Limit tasks to this project; 0 for all projects.
+    - search: Limit tasks to those whose name or task ID contains this text, ignoring
+case.
+    - slotsFilter: Limit tasks by the slot count they request (resources.slots): at least
+one slot, or none.
+
+ - SLOTS_FILTER_UNSPECIFIED: No filter.
+ - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.
+ - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
     - states: Limit tasks to these states.
 
  - GENERIC_TASK_STATE_UNSPECIFIED: The task state unknown
@@ -19691,6 +19763,9 @@ def get_GetGenericTasks(
         "limit": limit,
         "offset": offset,
         "parentId": parentId,
+        "projectId": projectId,
+        "search": search,
+        "slotsFilter": slotsFilter.value if slotsFilter is not None else None,
         "states": [x.value for x in states] if states is not None else None,
         "taskIds": taskIds,
         "userIds": userIds,
