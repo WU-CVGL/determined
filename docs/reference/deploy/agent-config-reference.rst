@@ -226,10 +226,10 @@ information on setting up an image cache see :ref:`singularity-image-cache`. Def
 
 When it starts, an agent measures its NVIDIA GPUs with NVML and reports the result to the master.
 This is not an option: every agent with NVIDIA GPUs does it, and no configuration turns it on or
-off. The master keeps the report in memory and serves it in the agent API (``gpu_topology``), in
-``det agent list`` (the GPU Topology and GPU Health columns), in ``det agent describe AGENT_ID``,
-and on the resource pool page of the WebUI. Users without permission to view sensitive agent
-information see no topology.
+off. The master keeps the report in memory and serves it in the agent API (``gpu_topology``, left
+out of agent lists requested with ``exclude_slots``), in ``det agent list``, in ``det agent describe
+AGENT_ID``, and on the resource pool page of the WebUI. Users without permission to view sensitive
+agent information see no topology.
 
 NVML
 ====
@@ -242,7 +242,13 @@ system other than Linux, has no NVML support and reports the topology as unknown
 The agent initializes NVML once per start, after device detection, and waits at most 60 seconds for
 loading the library, initialization and the measurement together. After that it starts without the
 measurement. Device detection itself runs ``nvidia-smi`` without a timeout, so a hanging
-``nvidia-smi`` still blocks agent start.
+``nvidia-smi`` still blocks agent start. The 60 seconds cover hangs only: a crash inside
+``libnvidia-ml.so.1`` at agent start stops the agent. To recover, run the previous agent image,
+after the rollback step of :ref:`exclude_gpus <agent-exclude-gpus>` if the agent uses it.
+
+NVML support links the agent binary dynamically against glibc. A custom agent image needs glibc
+2.35, the version in ``ubuntu:22.04``, or newer; images based on musl, such as Alpine, cannot run
+the agent.
 
 What the agent measures
 =======================
@@ -322,6 +328,37 @@ throughput depends on the workload.
 The details of each GPU (``det agent describe`` and the WebUI's details) list four facts separately:
 the link at agent start, the NVML errors at agent start, recent critical XIDs (``not collected``),
 and the time of the measurement.
+
+CLI and WebUI
+=============
+
+``det agent list`` shows two columns, also in ``--json`` as ``gpu_topology`` and ``gpu_health``.
+Both count only the GPUs that are slots, and leave out excluded GPUs, except where noted.
+
+-  GPU Topology: the number of slots per NUMA node (slots with an unknown NUMA node last), the link
+   levels between slots from best to worst, and the P2P state of the pairs of slots, for example
+   ``4+4 NODE/SYS p2p``. The P2P state is ``p2p`` when every pair is usable; ``no-p2p(<status>)``
+   when no pair is usable and at least one is not, with the first status other than ``OK`` of the
+   not-usable pair with the lowest slot IDs; ``p2p?`` when every pair is unknown; and otherwise the
+   usable pairs over all pairs, for example ``p2p 12/28``. ``(<n> unknown)`` follows when some, but
+   not all, pairs are unknown. An agent with one slot shows no P2P state, an agent whose GPUs are
+   all excluded shows ``no slots``, and an unknown topology shows ``unknown: <reason>``.
+
+-  GPU Health: ``ok`` when every GPU is ok and none is excluded. Otherwise the slots that are not
+   ok, grouped as ``error``, ``narrow`` (with the widths at agent start) and ``unknown``, then the
+   excluded GPUs by bus ID (by UUID when the bus ID is unknown), each with its state when it is not
+   ok, for example ``narrow: 3,5 (x8 of x16 at start); excluded: 81:00.0``.
+
+``det agent describe AGENT_ID`` lists each slot and excluded GPU with its state (``FREE``, the ID of
+the container that uses it or ``OCCUPIED``, ``DISABLED``, ``DRAINING`` or ``EXCLUDED``), health,
+UUID, bus ID, NUMA node, link width and generation, and the four facts of its health. When the
+topology is known, it then prints the link levels between all GPUs and, when P2P is not usable for
+every pair, the ``READ`` and ``WRITE`` statuses in each direction. ``--json`` prints the agent's
+``gpu_topology``.
+
+The WebUI's resource pool page groups each agent's GPUs by NUMA node and PCIe switch. A tile's
+colour is the slot state, its dot is the GPU's health, stripes mark disabled, draining and excluded
+GPUs, and the details of a GPU show on hover or focus and stay open after a click.
 
 Coverage
 ========
