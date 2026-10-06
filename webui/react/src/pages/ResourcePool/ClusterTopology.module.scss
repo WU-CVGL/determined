@@ -5,6 +5,10 @@
   color: var(--theme-surface-on);
   padding: 30px;
   width: 100%;
+
+  @media (width <= 760px) {
+    padding: 12px;
+  }
 }
 .nodesContainer {
   display: flex;

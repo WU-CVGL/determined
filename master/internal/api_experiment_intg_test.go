@@ -589,23 +589,23 @@ func TestParseAndMergeContinueConfig(t *testing.T) {
 	api, curUser, ctx := setupAPITest(t, nil, mockRM)
 	exp := createTestExp(t, api, curUser)
 
-	_, _, err := api.parseAndMergeContinueConfig(exp.ID, ``)
+	_, err := api.parseAndMergeContinueConfig(exp.ID, ``)
 	require.NoError(t, err)
 
-	_, _, err = api.parseAndMergeContinueConfig(exp.ID, `{}`)
+	_, err = api.parseAndMergeContinueConfig(exp.ID, `{}`)
 	require.NoError(t, err)
 
-	_, _, err = api.parseAndMergeContinueConfig(exp.ID, `
+	_, err = api.parseAndMergeContinueConfig(exp.ID, `
 project: test
 `)
 	require.ErrorContains(t, err, "'project' in override config cannot be specified")
 
-	_, _, err = api.parseAndMergeContinueConfig(exp.ID, `
+	_, err = api.parseAndMergeContinueConfig(exp.ID, `
 workspace: test
 `)
 	require.ErrorContains(t, err, "'workspace' in override config cannot be specified")
 
-	_, _, err = api.parseAndMergeContinueConfig(exp.ID, `
+	_, err = api.parseAndMergeContinueConfig(exp.ID, `
 searcher:
   name: random
   metric: accuracy
@@ -639,10 +639,10 @@ resources:
 	mockRM.On("SmallerValueIsHigherPriority", mock.Anything).Return(true, nil)
 	resp, err := api.CreateExperiment(ctx, createReq)
 	require.NoError(t, err)
-	_, _, err = api.parseAndMergeContinueConfig(int(resp.Experiment.Id), `{}`)
+	_, err = api.parseAndMergeContinueConfig(int(resp.Experiment.Id), `{}`)
 	require.NoError(t, err)
 
-	_, _, err = api.parseAndMergeContinueConfig(int(resp.Experiment.Id), `
+	_, err = api.parseAndMergeContinueConfig(int(resp.Experiment.Id), `
 searcher:
   name: random
   metric: accuracy
@@ -1798,6 +1798,12 @@ func TestAuthZGetExperimentAndCanDoActions(t *testing.T) {
 		}},
 		{"CanDeleteExperiment", func(id int) error {
 			_, err := api.DeleteExperiment(ctx, &apiv1.DeleteExperimentRequest{
+				ExperimentId: int32(id),
+			})
+			return err
+		}},
+		{"CanEditExperiment", func(id int) error {
+			_, err := api.DeleteTensorboardFiles(ctx, &apiv1.DeleteTensorboardFilesRequest{
 				ExperimentId: int32(id),
 			})
 			return err

@@ -46,7 +46,7 @@ require (
 	github.com/spf13/cobra v1.7.0
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.9.0
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.10.0
 	github.com/xtgo/uuid v0.0.0-20140804021211-a0b114877d4c // indirect
 	golang.org/x/crypto v0.31.0
 	golang.org/x/net v0.26.0
@@ -220,6 +220,7 @@ require (
 
 require (
 	cloud.google.com/go/compute/metadata v0.3.0
+	github.com/NVIDIA/go-nvml v0.12.9-0
 	golang.org/x/sync v0.10.0
 	google.golang.org/genproto/googleapis/api v0.0.0-20240701130421-f6361c86f094
 	k8s.io/component-helpers v0.28.3

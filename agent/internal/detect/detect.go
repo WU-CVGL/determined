@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/rand"
+	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
@@ -14,13 +16,32 @@ import (
 	"github.com/determined-ai/determined/master/pkg/device"
 )
 
+// detectors are the device detection functions; tests replace them.
+type detectors struct {
+	cuda func(visibleGPUs string) ([]device.Device, error)
+	rocm func(visibleGPUs string) ([]device.Device, error)
+	cpu  func() ([]device.Device, error)
+}
+
+var defaultDetectors = detectors{cuda: detectCudaGPUs, rocm: detectRocmGPUs, cpu: detectCPUs}
+
 // Detect the devices available. If artificial devices are configured, prefers those, otherwise,
 // we detect cuda, rocm, cpu (or no) devices based on the configured slot type.
-func Detect(slotType, agentID, visibleGPUs string, artificialSlots int) ([]device.Device, error) {
+//
+// exclude is the agent's GPU exclude list (exclude_gpus): CUDA GPUs whose UUID is listed are
+// returned in excluded instead of devices, keep their nvidia-smi index as device ID, and are never
+// offered as slots. With slot type auto they count as found CUDA GPUs, so an agent whose GPUs are
+// all excluded has no slots rather than ROCm or CPU slots. An entry that matches no detected CUDA
+// GPU is an error, so that a typo never hands an excluded GPU to tasks.
+//
+// It runs nvidia-smi and rocm-smi without a timeout: a hanging nvidia-smi blocks agent start.
+func Detect(
+	slotType, agentID, visibleGPUs string, exclude []string, artificialSlots int,
+) (devices, excluded []device.Device, err error) {
 	// Log detected nvidia version.
 	v, err := getNvidiaVersion()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get nvidia version: %w", err)
+		return nil, nil, fmt.Errorf("failed to get nvidia version: %w", err)
 	} else if v != "" {
 		log.Infof("Nvidia driver version: %s", v)
 	}
@@ -28,12 +49,102 @@ func Detect(slotType, agentID, visibleGPUs string, artificialSlots int) ([]devic
 	// Log detected rocm version.
 	v, err = getRocmVersion()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get rocm version: %w", err)
+		return nil, nil, fmt.Errorf("failed to get rocm version: %w", err)
 	} else if v != "" {
 		log.Infof("Rocm driver version: %s", v)
 	}
 
-	// Detect devices available to the agent.
+	return detectWith(defaultDetectors, slotType, agentID, visibleGPUs, exclude, artificialSlots)
+}
+
+func detectWith(
+	d detectors, slotType, agentID, visibleGPUs string, exclude []string, artificialSlots int,
+) (devices, excluded []device.Device, err error) {
+	detected, err := detectDevices(d, slotType, agentID, visibleGPUs, artificialSlots)
+	if err != nil {
+		return nil, nil, err
+	}
+	devices, excluded, err = SplitExcluded(detected, exclude)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	log.Info("detected compute devices:")
+	for _, dev := range devices {
+		log.Infof("\t%s", dev.String())
+	}
+	for _, dev := range excluded {
+		log.Infof("\t%s %s: excluded by exclude_gpus, not a slot", dev.String(), dev.UUID)
+	}
+	return devices, excluded, nil
+}
+
+// ParseExcludeGPUs splits the exclude_gpus option, a comma-separated list of GPU UUIDs.
+func ParseExcludeGPUs(s string) []string {
+	var uuids []string
+	seen := map[string]bool{}
+	for _, u := range strings.Split(s, ",") {
+		u = strings.TrimSpace(u)
+		if u != "" && !seen[u] {
+			seen[u] = true
+			uuids = append(uuids, u)
+		}
+	}
+	return uuids
+}
+
+// SplitExcluded moves every CUDA device whose UUID is in exclude from detected to excluded. The
+// others keep their order and device IDs. It fails, naming them, when entries match no CUDA
+// device.
+func SplitExcluded(
+	detected []device.Device, exclude []string,
+) (devices, excluded []device.Device, err error) {
+	if len(exclude) == 0 {
+		return detected, nil, nil
+	}
+	listed := map[string]bool{}
+	for _, u := range exclude {
+		listed[u] = true
+	}
+	matched := map[string]bool{}
+	for _, dev := range detected {
+		if dev.Type == device.CUDA && listed[dev.UUID] {
+			matched[dev.UUID] = true
+			excluded = append(excluded, dev)
+		} else {
+			devices = append(devices, dev)
+		}
+	}
+
+	var unmatched []string
+	indices := false
+	for _, u := range exclude {
+		if !matched[u] {
+			unmatched = append(unmatched, strconv.Quote(u))
+			if _, err := strconv.Atoi(u); err == nil {
+				indices = true
+			}
+		}
+	}
+	if len(unmatched) > 0 {
+		msg := fmt.Sprintf("exclude_gpus: no detected CUDA GPU has the UUID %s",
+			strings.Join(unmatched, ", "))
+		if indices {
+			msg += " (exclude_gpus takes GPU UUIDs, not indices)"
+		}
+		return nil, nil, errors.New(msg)
+	}
+	if devices == nil {
+		devices = []device.Device{}
+	}
+	return devices, excluded, nil
+}
+
+// detectDevices runs today's detection, before the exclude list.
+func detectDevices(
+	d detectors, slotType, agentID, visibleGPUs string, artificialSlots int,
+) ([]device.Device, error) {
+	var err error
 	var detected []device.Device
 	switch {
 	case artificialSlots > 0:
@@ -58,7 +169,7 @@ func Detect(slotType, agentID, visibleGPUs string, artificialSlots int) ([]devic
 		detected = []device.Device{}
 	case slotType == "cuda" || slotType == "gpu":
 		// Support "gpu" for backwards compatibility.
-		detected, err = detectCudaGPUs(visibleGPUs)
+		detected, err = d.cuda(visibleGPUs)
 		if err != nil {
 			return nil, errors.Wrap(
 				err,
@@ -66,17 +177,17 @@ func Detect(slotType, agentID, visibleGPUs string, artificialSlots int) ([]devic
 			)
 		}
 	case slotType == "rocm":
-		detected, err = detectRocmGPUs(visibleGPUs)
+		detected, err = d.rocm(visibleGPUs)
 		if err != nil {
 			return nil, errors.Wrap(err, "error while gathering GPU info through rocm-smi command")
 		}
 	case slotType == "cpu":
-		detected, err = detectCPUs()
+		detected, err = d.cpu()
 		if err != nil {
 			return nil, err
 		}
 	case slotType == "auto":
-		detected, err = detectCudaGPUs(visibleGPUs)
+		detected, err = d.cuda(visibleGPUs)
 		if err != nil {
 			return nil, errors.Wrap(
 				err,
@@ -84,7 +195,7 @@ func Detect(slotType, agentID, visibleGPUs string, artificialSlots int) ([]devic
 			)
 		}
 		if len(detected) == 0 {
-			detected, err = detectRocmGPUs(visibleGPUs)
+			detected, err = d.rocm(visibleGPUs)
 			if err != nil {
 				return nil, errors.Wrap(
 					err,
@@ -93,18 +204,13 @@ func Detect(slotType, agentID, visibleGPUs string, artificialSlots int) ([]devic
 			}
 		}
 		if len(detected) == 0 {
-			detected, err = detectCPUs()
+			detected, err = d.cpu()
 			if err != nil {
 				return nil, err
 			}
 		}
 	default:
 		panic("unrecognized slot type")
-	}
-
-	log.Info("detected compute devices:")
-	for _, d := range detected {
-		log.Infof("\t%s", d.String())
 	}
 
 	return detected, nil

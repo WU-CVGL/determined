@@ -274,8 +274,12 @@ func invalidExperimentConfig(err error) error {
 	return status.Errorf(codes.InvalidArgument, "invalid experiment configuration: %s", err)
 }
 
+// parseCreateExperiment builds the experiment and its task spec from a request that actor sends for
+// an experiment that owner owns. Access to the template and the project is checked for actor. The
+// experiment's tasks run as owner: its session token, uid/gid and DET_USER. Creating an experiment,
+// including a fork or a clone, makes actor its owner; continuing one keeps its owner.
 func (m *Master) parseCreateExperiment(ctx context.Context, req *apiv1.CreateExperimentRequest,
-	owner *model.User) (
+	actor, owner *model.User) (
 	*model.Experiment, []byte, expconf.ExperimentConfig, *projectv1.Project, *tasks.TaskSpec, error,
 ) {
 	// Read the config as the user provided it.
@@ -292,7 +296,7 @@ func (m *Master) parseCreateExperiment(ctx context.Context, req *apiv1.CreateExp
 	// Apply the template that the user specified.
 	if req.Template != nil {
 		var tc expconf.ExperimentConfig
-		err := templates.UnmarshalTemplateConfig(ctx, *req.Template, owner, &tc, true)
+		err := templates.UnmarshalTemplateConfig(ctx, *req.Template, actor, &tc, true)
 		if err != nil {
 			return nil, nil, config, nil, nil, err
 		}
@@ -302,7 +306,7 @@ func (m *Master) parseCreateExperiment(ctx context.Context, req *apiv1.CreateExp
 	defaulted := schemas.WithDefaults(config)
 	resources := defaulted.Resources()
 
-	p, err := getCreateExperimentsProject(m, req, owner, defaulted)
+	p, err := getCreateExperimentsProject(m, req, actor, defaulted)
 	if err != nil {
 		return nil, nil, config, nil, nil, err
 	}
@@ -409,6 +413,9 @@ func (m *Master) parseCreateExperiment(ctx context.Context, req *apiv1.CreateExp
 		}
 	}
 
+	if err = checkTaskRunsAs(actor, owner); err != nil {
+		return nil, nil, config, nil, nil, err
+	}
 	token, createSessionErr := getTaskSessionToken(ctx, owner)
 	if createSessionErr != nil {
 		return nil, nil, config, nil, nil, errors.Wrapf(

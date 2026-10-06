@@ -647,6 +647,12 @@ func (a *agent) HandleIncomingWebsocketMessage(msg *aproto.MasterMessage) {
 			a.agentStarted(msg.AgentStarted)
 		}
 
+		// Every AgentStarted replaces the topology: a fresh registration, a reconnect, and an agent
+		// restart with the same devices, which measured P2P, link width and errors again.
+		a.agentState.setGPUTopology(newGPUTopology(
+			msg.AgentStarted.GPUTopology, msg.AgentStarted.Devices, msg.AgentStarted.Version, a.syslog,
+		))
+
 		a.started = true
 
 		if err := a.handleContainersReattached(msg.AgentStarted); err != nil {
@@ -767,6 +773,7 @@ func (a *agent) summarize() model.AgentSummary {
 		result.Enabled = a.agentState.enabled
 		result.Draining = a.agentState.draining
 		result.NumContainers = len(a.agentState.containerAllocation)
+		result.GPUTopology = a.agentState.gpuTopologyProto()
 	}
 
 	return result
