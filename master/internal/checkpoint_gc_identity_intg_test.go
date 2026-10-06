@@ -89,12 +89,13 @@ func createGCTestExperiment(
 	})
 }
 
-// createGCTestExperimentWithStorage is createGCTestExperiment with other checkpoint storage.
+// createGCTestExperimentWithStorage is createGCTestExperiment with other checkpoint storage, and
+// these bind mounts after the one of /hooks.
 //
 // nolint: exhaustruct
 func createGCTestExperimentWithStorage(
 	ctx context.Context, t *testing.T, api *apiServer, owner model.User,
-	storage *expconf.CheckpointStorageConfig,
+	storage *expconf.CheckpointStorageConfig, bindMounts ...expconf.BindMountV0,
 ) (*model.Experiment, string) {
 	env := gcTestExperimentEnv
 	conf := expconf.ExperimentConfig{
@@ -103,10 +104,10 @@ func createGCTestExperimentWithStorage(
 				RawCPU: env, RawCUDA: env, RawROCM: env,
 			},
 		},
-		RawBindMounts: expconf.BindMountsConfigV0{{
+		RawBindMounts: append(expconf.BindMountsConfigV0{{
 			RawHostPath:      "/home/gc-owner/hooks",
 			RawContainerPath: "/hooks",
-		}},
+		}}, bindMounts...),
 		RawCheckpointStorage: storage,
 	}
 	_, projectID := createProjectAndWorkspace(ctx, t, api)
@@ -116,7 +117,7 @@ func createGCTestExperimentWithStorage(
 		exp.Config.CheckpointStorage.RawSharedFSConfig != nil)
 	require.Equal(t, gcTestExperimentEnv,
 		exp.Config.Environment.EnvironmentVariables().For(device.CPU))
-	require.Len(t, exp.Config.BindMounts, 1)
+	require.Len(t, exp.Config.BindMounts, 1+len(bindMounts))
 
 	requestID := model.NewRequestID(rand.Reader)
 	tk := &model.Task{
@@ -426,10 +427,11 @@ func TestCheckpointGCOfDeactivatedOwner(t *testing.T) {
 	require.Equal(t, model.DeletedState, state)
 }
 
-// Directory checkpoint storage is a path that the experiment mounts in its containers. A GC task
-// takes no bind mounts from the experiment, so the master refuses to start one that would not
-// see the storage, rather than let it record the checkpoints as deleted while their files remain.
-// A task container default that mounts the path makes it work.
+// Directory checkpoint storage is a path in the container. When the experiment mounts it with a
+// bind mount of its own, its checkpoints are on that mount, which a GC task does not take from the
+// experiment. The master refuses to start a GC task that would not see the storage, rather than let
+// it record the checkpoints as deleted while their files remain. A task container default that
+// mounts the path makes it work.
 func TestCheckpointGCRefusesUnmountedDirectoryStorage(t *testing.T) {
 	api, _, adminCtx := setupAPITest(t, nil)
 	owner := addGCTestOwner(t)
@@ -439,7 +441,9 @@ func TestCheckpointGCRefusesUnmountedDirectoryStorage(t *testing.T) {
 	exp, _ := createGCTestExperimentWithStorage(adminCtx, t, api, owner,
 		&expconf.CheckpointStorageConfig{
 			RawDirectoryConfig: &expconf.DirectoryConfig{RawContainerPath: ptrs.Ptr("/mnt/ckpts/run")},
-		})
+		},
+		expconf.BindMountV0{RawHostPath: "/data/owner-ckpts", RawContainerPath: "/mnt/ckpts"},
+	)
 	require.Equal(t, "/mnt/ckpts/run",
 		exp.Config.CheckpointStorage.RawDirectoryConfig.ContainerPath())
 
@@ -475,4 +479,32 @@ func TestCheckpointGCRefusesUnmountedDirectoryStorage(t *testing.T) {
 		Type: mount.TypeBind, Source: "/data/ckpts", Target: "/mnt/ckpts",
 		BindOptions: &mount.BindOptions{Propagation: "rprivate"},
 	}}, spec.ToTaskSpec().Mounts)
+}
+
+// Control: directory checkpoint storage that the experiment does not mount was in its own
+// containers and went with them, so the GC task runs as before and records it as deleted. Only the
+// experiment's /hooks mount is there, which does not cover the storage, and it does not reach the
+// task.
+func TestCheckpointGCOfDirectoryStorageTheExperimentDoesNotMount(t *testing.T) {
+	api, _, adminCtx := setupAPITest(t, nil)
+	owner := addGCTestOwner(t)
+	specs := captureCheckpointGC(t)
+
+	//nolint:exhaustruct
+	exp, ckpt := createGCTestExperimentWithStorage(adminCtx, t, api, owner,
+		&expconf.CheckpointStorageConfig{
+			RawDirectoryConfig: &expconf.DirectoryConfig{RawContainerPath: ptrs.Ptr("/mnt/ckpts/run")},
+		})
+
+	_, err := api.DeleteCheckpoints(adminCtx, &apiv1.DeleteCheckpointsRequest{
+		CheckpointUuids: []string{ckpt},
+	})
+	require.NoError(t, err)
+	spec := nextGCSpec(t, specs)
+	require.Equal(t, exp.ID, spec.ExperimentID)
+	require.Equal(t, owner.ID, spec.Base.Owner.ID)
+	require.Equal(t, ckpt, spec.ToDelete)
+	require.Equal(t, "/mnt/ckpts/run",
+		spec.LegacyConfig.CheckpointStorage.RawDirectoryConfig.ContainerPath())
+	require.Empty(t, spec.ToTaskSpec().Mounts)
 }

@@ -107,20 +107,31 @@ func checkpointGCIdentity(
 	return ptrs.Ptr(owner.ToUser()), agentUserGroup, nil
 }
 
-// checkpointGCSeesStorage returns an error for directory checkpoint storage that a GC task with
-// these task container defaults would not see. That storage is a path in the container where the
-// experiment mounts it, but a GC task takes no bind mounts or pod spec from the experiment, so only
-// the task container defaults can mount it there. Without them the task would find no files and
-// record the checkpoints as deleted while their files remain.
+// checkpointGCSeesStorage returns an error for directory checkpoint storage that the experiment
+// mounts itself but that a GC task with these task container defaults would not see.
+//
+// That storage is a path in the container. If the experiment mounts it with its own bind mounts or
+// pod spec, the checkpoints are on that mount. A GC task takes neither from the experiment, so only
+// the task container defaults can mount the path for it. Without them the task would find no files
+// and record the checkpoints as deleted while their files remain. If the experiment does not mount
+// it, the checkpoints were in the experiment's own container and went with it, so the task runs and
+// records them as deleted, as before; this also covers a path that the container runtime binds by
+// default (Singularity or enroot on Slurm/PBS), which the GC task gets as well.
+//
+// What a pod spec mounts cannot be told reliably from the spec (CSI drivers, sidecars, admission
+// webhooks), so any pod spec is taken to mount the path. An experiment's pod spec makes the check
+// refuse, since its files may be on that mount. A pod spec of the GC task makes it pass, and the
+// administrator who set it is then the one to make it mount the path. The GC task has a pod spec
+// whenever any of these three is set: tasks.GCCkptSpec gives it checkpoint_gc_pod_spec, else
+// cpu_pod_spec, merged over gpu_pod_spec.
 func checkpointGCSeesStorage(
-	storage expconf.CheckpointStorageConfig, tcd model.TaskContainerDefaultsConfig,
+	storage expconf.CheckpointStorageConfig,
+	exp expconf.LegacyConfig,
+	tcd model.TaskContainerDefaultsConfig,
 ) error {
 	dir := storage.RawDirectoryConfig
 	if dir == nil || dir.RawContainerPath == nil {
 		return nil
-	}
-	if tcd.CheckpointGCPodSpec != nil || tcd.CPUPodSpec != nil || tcd.GPUPodSpec != nil {
-		return nil // A pod spec may mount it; it is the administrator's to get right.
 	}
 	inContainer := func(p string) string {
 		if !filepath.IsAbs(p) {
@@ -129,16 +140,31 @@ func checkpointGCSeesStorage(
 		return filepath.Clean(p)
 	}
 	storagePath := inContainer(dir.ContainerPath())
+	covers := func(containerPath string) bool {
+		mountPath := inContainer(containerPath)
+		return mountPath == "/" || storagePath == mountPath ||
+			strings.HasPrefix(storagePath, mountPath+"/")
+	}
+
+	experimentMountsIt := exp.Environment.PodSpec() != nil
+	for _, m := range exp.BindMounts {
+		experimentMountsIt = experimentMountsIt || covers(m.ContainerPath())
+	}
+	if !experimentMountsIt {
+		return nil
+	}
+	if tcd.CheckpointGCPodSpec != nil || tcd.CPUPodSpec != nil || tcd.GPUPodSpec != nil {
+		return nil
+	}
 	for _, m := range tcd.BindMounts {
-		mountPath := inContainer(m.ContainerPath)
-		if mountPath == "/" || storagePath == mountPath ||
-			strings.HasPrefix(storagePath, mountPath+"/") {
+		if covers(m.ContainerPath) {
 			return nil
 		}
 	}
-	return fmt.Errorf("its checkpoint storage is the directory %s, which checkpoint GC tasks do not "+
-		"mount: they take no bind mounts or pod spec from the experiment. Mount it with "+
-		"task_container_defaults.bind_mounts or checkpoint_gc_pod_spec", storagePath)
+	return fmt.Errorf("its checkpoint storage is the directory %s, which the experiment mounts "+
+		"with its own bind_mounts or pod_spec. Checkpoint GC tasks take neither from the "+
+		"experiment, so it stays unmounted for them, and its checkpoints are kept until "+
+		"task_container_defaults.bind_mounts or checkpoint_gc_pod_spec mounts it", storagePath)
 }
 
 func runCheckpointGCTask(
@@ -187,8 +213,9 @@ func runCheckpointGCTask(
 	taskSpec.Owner = owner
 	taskSpec.AgentUserGroup = agentUserGroup
 	// The task gets no user session. It reports to the master with its allocation session token
-	// (DET_SESSION_TOKEN), which acts as taskSpec.Owner, and needs nothing else. Drop any user token
-	// the caller's spec carries: an experiment's own token is revoked when it stops.
+	// (DET_SESSION_TOKEN), which acts as taskSpec.Owner, and needs nothing else. No session is minted
+	// for it, so drop whatever user token the caller's spec carries rather than pass it on: for the
+	// end-of-experiment GC, that is the experiment's own, which stop() revokes.
 	taskSpec.UserSessionToken = ""
 
 	gcSpec := tasks.GCCkptSpec{
@@ -208,7 +235,9 @@ func runCheckpointGCTask(
 		}
 		gcSpec.LegacyConfig.CheckpointStorage = checkpointStorage
 	}
-	if err := checkpointGCSeesStorage(gcSpec.LegacyConfig.CheckpointStorage, tcd); err != nil {
+	if err := checkpointGCSeesStorage(
+		gcSpec.LegacyConfig.CheckpointStorage, gcSpec.LegacyConfig, tcd,
+	); err != nil {
 		return fmt.Errorf("checkpoint GC of experiment %d: %w", expID, err)
 	}
 

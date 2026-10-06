@@ -144,6 +144,76 @@ func Test_GCCkptSpec_ToTaskSpec(t *testing.T) {
 	}
 }
 
+// The GC task's pod spec is checkpoint_gc_pod_spec, else cpu_pod_spec, with gpu_pod_spec merged
+// under it by Kubernetes strategic merge, as before; with only gpu_pod_spec set it is that one, and
+// with none set there is none. The experiment's pod spec is never used. checkpointGCSeesStorage
+// relies on the task having a pod spec whenever any of the three is set.
+//
+//nolint:exhaustruct
+func Test_GCCkptSpec_ToTaskSpecPodSpec(t *testing.T) {
+	require.NoError(t, etc.SetRootPath("../../static/srv/"))
+	pod := func(name string) *k8sV1.Pod {
+		return &k8sV1.Pod{Spec: k8sV1.PodSpec{Volumes: []k8sV1.Volume{{Name: name}}}}
+	}
+	legacy := expconf.LegacyConfig{
+		CheckpointStorage: schemas.WithDefaults(expconf.CheckpointStorageConfig{
+			RawSharedFSConfig: &expconf.SharedFSConfig{RawHostPath: ptrs.Ptr("/srv/gc-ckpts")},
+		}),
+		Environment: schemas.WithDefaults(expconf.EnvironmentConfig{
+			RawPodSpec: (*expconf.PodSpec)(pod("experiment")),
+		}),
+	}
+
+	for _, tc := range []struct {
+		name    string
+		tcd     model.TaskContainerDefaultsConfig
+		volumes []string // nil for no pod spec
+	}{
+		{"none", model.TaskContainerDefaultsConfig{}, nil},
+		{"gpu only", model.TaskContainerDefaultsConfig{GPUPodSpec: pod("gpu")}, []string{"gpu"}},
+		{"cpu only", model.TaskContainerDefaultsConfig{CPUPodSpec: pod("cpu")}, []string{"cpu"}},
+		{
+			"cpu and gpu",
+			model.TaskContainerDefaultsConfig{CPUPodSpec: pod("cpu"), GPUPodSpec: pod("gpu")},
+			[]string{"cpu", "gpu"},
+		},
+		{
+			"checkpoint gc only",
+			model.TaskContainerDefaultsConfig{CheckpointGCPodSpec: pod("gc")},
+			[]string{"gc"},
+		},
+		{
+			"all three",
+			model.TaskContainerDefaultsConfig{
+				CheckpointGCPodSpec: pod("gc"), CPUPodSpec: pod("cpu"), GPUPodSpec: pod("gpu"),
+			},
+			[]string{"gc", "gpu"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res := GCCkptSpec{
+				Base: TaskSpec{
+					TaskContainerDefaults: tc.tcd,
+					AgentUserGroup:        &model.AgentUserGroup{UID: 4242, GID: 4343},
+				},
+				ExperimentID: 1,
+				LegacyConfig: legacy,
+			}.ToTaskSpec()
+
+			if tc.volumes == nil {
+				require.Nil(t, res.Environment.PodSpec())
+				return
+			}
+			require.NotNil(t, res.Environment.PodSpec())
+			var volumes []string
+			for _, v := range res.Environment.PodSpec().Spec.Volumes {
+				volumes = append(volumes, v.Name)
+			}
+			require.Equal(t, tc.volumes, volumes)
+		})
+	}
+}
+
 // The GC task's environment comes from the task container defaults and the checkpoint storage, never
 // from the experiment: no environment variables, bind mounts, pod spec or image of its own.
 //

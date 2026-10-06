@@ -87,9 +87,10 @@ func TestRunCheckpointGCTask(t *testing.T) {
 						mock.Anything,
 						mock.MatchedBy(func(spec tasks.GCCkptSpec) bool {
 							ok := true
-							// It runs as the experiment's owner, without the user session of the
-							// spec it was given: the end-of-experiment GC gets a copy of the
-							// experiment's spec, whose session is revoked when the experiment stops.
+							// It runs as the experiment's owner, with no user session. None is
+							// minted for it, and the user token of the spec it was given is
+							// dropped: for the end-of-experiment GC, that spec is a copy of the
+							// experiment's, whose token stop() revokes.
 							if spec.Base.Owner == nil || spec.Base.Owner.ID != user.ID {
 								t.Errorf("GC runs as %v, not as the experiment's owner %d",
 									spec.Base.Owner, user.ID)
@@ -216,8 +217,9 @@ func TestRunCheckpointGCTask(t *testing.T) {
 	}
 }
 
-// The GC that an experiment starts when it stops runs as its owner, as before, and without the
-// experiment's user session, which stop() revokes right after starting the GC.
+// The GC that an experiment starts when it stops runs as its owner, as before, now with no user
+// session: none is minted for it, and the experiment's own token, which its spec carries and which
+// stop() revokes right after starting the GC, is dropped rather than passed on.
 func TestEndOfExperimentCheckpointGCRunsAsOwner(t *testing.T) {
 	api, _, ctx := setupAPITest(t, nil)
 	owner := addGCTestOwner(t)
@@ -251,6 +253,10 @@ func TestEndOfExperimentCheckpointGCRunsAsOwner(t *testing.T) {
 	require.False(t, spec.DeleteTensorboards)
 }
 
+// Directory checkpoint storage is refused only when the experiment mounts it itself, with a bind
+// mount at or above its path or a pod spec, and the GC task mounts it with neither a task container
+// default bind mount nor a pod spec. Storage that the experiment does not mount was ephemeral.
+//
 //nolint:exhaustruct
 func TestCheckpointGCSeesStorage(t *testing.T) {
 	dir := func(p string) expconf.CheckpointStorageConfig {
@@ -258,7 +264,23 @@ func TestCheckpointGCSeesStorage(t *testing.T) {
 			RawDirectoryConfig: &expconf.DirectoryConfig{RawContainerPath: &p},
 		}
 	}
-	mounts := func(paths ...string) model.TaskContainerDefaultsConfig {
+	sharedFS := expconf.CheckpointStorageConfig{
+		RawSharedFSConfig: &expconf.SharedFSConfig{RawHostPath: ptrs.Ptr("/srv")},
+	}
+	// The experiment's bind mounts, at these container paths.
+	exp := func(paths ...string) expconf.LegacyConfig {
+		var c expconf.LegacyConfig
+		for _, p := range paths {
+			c.BindMounts = append(c.BindMounts,
+				expconf.BindMount{RawHostPath: "/h", RawContainerPath: p})
+		}
+		return c
+	}
+	expPodSpec := expconf.LegacyConfig{
+		Environment: expconf.EnvironmentConfig{RawPodSpec: &expconf.PodSpec{}},
+	}
+	// The GC task's bind mounts from the task container defaults, at these container paths.
+	gc := func(paths ...string) model.TaskContainerDefaultsConfig {
 		var tcd model.TaskContainerDefaultsConfig
 		for _, p := range paths {
 			tcd.BindMounts = append(tcd.BindMounts, model.BindMount{HostPath: "/h", ContainerPath: p})
@@ -266,28 +288,44 @@ func TestCheckpointGCSeesStorage(t *testing.T) {
 		return tcd
 	}
 	gcPodSpec := model.TaskContainerDefaultsConfig{CheckpointGCPodSpec: &k8sV1.Pod{}}
-	sharedFS := expconf.CheckpointStorageConfig{
-		RawSharedFSConfig: &expconf.SharedFSConfig{RawHostPath: ptrs.Ptr("/srv")},
-	}
+	cpuPodSpec := model.TaskContainerDefaultsConfig{CPUPodSpec: &k8sV1.Pod{}}
+	gpuPodSpec := model.TaskContainerDefaultsConfig{GPUPodSpec: &k8sV1.Pod{}}
 
 	for _, tc := range []struct {
 		name    string
 		storage expconf.CheckpointStorageConfig
+		exp     expconf.LegacyConfig
 		tcd     model.TaskContainerDefaultsConfig
 		sees    bool
 	}{
-		{"shared_fs is always mounted", sharedFS, mounts(), true},
-		{"unmounted directory", dir("/mnt/ckpts/run"), mounts(), false},
-		{"directory mounted at its path", dir("/mnt/ckpts/run"), mounts("/mnt/ckpts/run/"), true},
-		{"directory under a mount", dir("/mnt/ckpts/run"), mounts("/opt", "/mnt/ckpts"), true},
-		{"a mount that only shares a prefix", dir("/mnt/ckpts/run"), mounts("/mnt/ck"), false},
-		{"a mount under the directory", dir("/mnt/ckpts"), mounts("/mnt/ckpts/run"), false},
-		{"relative paths are in the work dir", dir("ckpts/run"), mounts("ckpts"), true},
-		{"the root", dir("/mnt/ckpts"), mounts("/"), true},
-		{"a pod spec may mount it", dir("/mnt/ckpts"), gcPodSpec, true},
+		{"shared_fs is always mounted", sharedFS, exp("/mnt/ckpts"), gc(), true},
+
+		// The experiment does not mount it: its checkpoints went with its containers.
+		{"directory the experiment does not mount", dir("/mnt/ckpts/run"), exp(), gc(), true},
+		{"an experiment mount elsewhere", dir("/mnt/ckpts/run"), exp("/hooks"), gc(), true},
+		{"an experiment mount that only shares a prefix", dir("/mnt/ckpts/run"), exp("/mnt/ck"), gc(), true},
+		{"an experiment mount under the directory", dir("/mnt/ckpts"), exp("/mnt/ckpts/run"), gc(), true},
+
+		// The experiment mounts it.
+		{"experiment mount above, GC none", dir("/mnt/ckpts/run"), exp("/mnt/ckpts"), gc(), false},
+		{"experiment mount at its path, GC none", dir("/mnt/ckpts/run"), exp("/mnt/ckpts/run/"), gc(), false},
+		{"experiment mount at the root, GC none", dir("/mnt/ckpts"), exp("/"), gc(), false},
+		{"relative experiment mount, GC none", dir("ckpts/run"), exp("ckpts"), gc(), false},
+		{"experiment pod spec, GC none", dir("/mnt/ckpts/run"), expPodSpec, gc(), false},
+
+		// The GC task mounts it as well.
+		{"GC mount at its path", dir("/mnt/ckpts/run"), exp("/mnt/ckpts"), gc("/mnt/ckpts/run/"), true},
+		{"GC mount above", dir("/mnt/ckpts/run"), exp("/mnt/ckpts"), gc("/opt", "/mnt/ckpts"), true},
+		{"GC mount at the root", dir("/mnt/ckpts"), exp("/mnt"), gc("/"), true},
+		{"relative GC mount", dir("ckpts/run"), exp("ckpts"), gc("ckpts"), true},
+		{"GC mount that only shares a prefix", dir("/mnt/ckpts/run"), exp("/mnt/ckpts"), gc("/mnt/ck"), false},
+		{"GC mount under the directory", dir("/mnt/ckpts"), exp("/mnt"), gc("/mnt/ckpts/run"), false},
+		{"checkpoint_gc_pod_spec", dir("/mnt/ckpts"), expPodSpec, gcPodSpec, true},
+		{"cpu_pod_spec", dir("/mnt/ckpts"), exp("/mnt/ckpts"), cpuPodSpec, true},
+		{"gpu_pod_spec", dir("/mnt/ckpts"), exp("/mnt/ckpts"), gpuPodSpec, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := checkpointGCSeesStorage(tc.storage, tc.tcd)
+			err := checkpointGCSeesStorage(tc.storage, tc.exp, tc.tcd)
 			if tc.sees {
 				require.NoError(t, err)
 			} else {

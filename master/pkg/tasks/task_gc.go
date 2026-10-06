@@ -42,7 +42,11 @@ func (g GCCkptSpec) ToTaskSpec() TaskSpec {
 	res := g.Base
 	tcd := g.Base.TaskContainerDefaults
 
-	// The task uses no slots, so it takes the CPU pod spec unless one is set for checkpoint GC.
+	// The task uses no slots, so it takes the CPU pod spec unless one is set for checkpoint GC, and
+	// never the experiment's. Merging the defaults below then merges the GPU pod spec under it by
+	// Kubernetes strategic merge, as it did before: for a config without resources, such as
+	// defaultConfig, MergeIntoExpConfig takes the GPU pod spec, since slots_per_trial defaults to 1.
+	// So with only a GPU pod spec set, the task gets that one.
 	podSpec := tcd.CPUPodSpec
 	if tcd.CheckpointGCPodSpec != nil {
 		podSpec = tcd.CheckpointGCPodSpec
