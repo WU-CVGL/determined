@@ -22,8 +22,6 @@ import (
 
 const maxDynamicPoolRequestBytes = 1 << 20
 
-const redactedDynamicPoolCredential = "********"
-
 var dynamicPoolRequestUser = func(
 	request *http.Request,
 ) (*model.User, *model.UserSession, error) {
@@ -51,19 +49,55 @@ func authorizeDynamicPoolWithProvider(
 }
 
 type createDynamicResourcePoolRequest struct {
-	ClusterName    string                    `json:"cluster_name,omitempty"`
-	IdempotencyKey string                    `json:"idempotency_key"`
-	Config         config.ResourcePoolConfig `json:"config"`
+	ClusterName    string `json:"cluster_name,omitempty"`
+	IdempotencyKey string `json:"idempotency_key"`
+	// Config is kept as sent: only the keys the administrator wrote are saved as the pool's spec.
+	Config json.RawMessage `json:"config"`
+}
+
+// updateDynamicResourcePoolRequest replaces a pool's whole spec rather than patching it: keys that
+// it leaves out are no longer set, as when a master.yaml entry is edited.
+type updateDynamicResourcePoolRequest struct {
+	ExpectedRevision *int64          `json:"expected_revision,omitempty"`
+	Config           json.RawMessage `json:"config"`
+}
+
+// adoptDynamicResourcePoolRequest saves a master.yaml pool as a dynamic pool. Config is the pool's
+// master.yaml entry, copied verbatim.
+type adoptDynamicResourcePoolRequest struct {
+	Config json.RawMessage `json:"config"`
+}
+
+// The top-level fields that each request body may hold.
+var (
+	createDynamicPoolRequestFields = map[string]bool{
+		"cluster_name": true, "idempotency_key": true, "config": true,
+	}
+	updateDynamicPoolRequestFields = map[string]bool{"expected_revision": true, "config": true}
+	adoptDynamicPoolRequestFields  = map[string]bool{"config": true}
+)
+
+// dynamicResourcePoolView is a dynamic pool record as the API returns it.
+type dynamicResourcePoolView struct {
+	db.DynamicResourcePool
+	// ActiveRevision is the revision that the published runtime pool runs. It is null for a pool
+	// that is not published and for a pool served from master.yaml.
+	ActiveRevision      *int64 `json:"active_revision"`
+	DefinedInMasterYAML bool   `json:"defined_in_master_yaml"`
+	// PendingRestart reports that the running master does not run the saved revision.
+	PendingRestart bool `json:"pending_restart"`
 }
 
 type dynamicResourcePoolListResponse struct {
-	ResourcePools []db.DynamicResourcePool `json:"resource_pools"`
+	ResourcePools []dynamicResourcePoolView `json:"resource_pools"`
 }
 
 func (m *Master) registerDynamicResourcePoolRoutes() {
 	group := m.echo.Group("/api/v1/resource-pools/dynamic")
 	group.POST("", m.createDynamicResourcePool, m.dynamicPoolAuth(true))
 	group.GET("", m.listDynamicResourcePools, m.dynamicPoolAuth(false))
+	group.PUT("/:name", m.updateDynamicResourcePool, m.dynamicPoolAuth(true))
+	group.POST("/:name/adopt", m.adoptDynamicResourcePool, m.dynamicPoolAuth(true))
 	group.POST("/:name/retry", m.retryDynamicResourcePool, m.dynamicPoolAuth(true))
 }
 
@@ -104,17 +138,23 @@ func (m *Master) dynamicPoolAuth(update bool) echo.MiddlewareFunc {
 
 func (m *Master) createDynamicResourcePool(c echo.Context) error {
 	var request createDynamicResourcePoolRequest
-	if err := decodeStrictBoundedJSON(c, &request); err != nil {
+	if err := decodeStrictBoundedJSON(c, &request, createDynamicPoolRequestFields); err != nil {
 		return err
 	}
 	resourceManager, clusterName, err := m.selectDynamicAgentRM(request.ClusterName)
 	if err != nil {
 		return err
 	}
-	if staticCluster, ok := m.staticResourcePoolCluster(request.Config.PoolName); ok {
+	var named struct {
+		PoolName string `json:"pool_name"`
+	}
+	if err = json.Unmarshal(request.Config, &named); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("invalid config: %v", err))
+	}
+	if staticCluster, ok := m.staticResourcePoolCluster(named.PoolName); ok {
 		return echo.NewHTTPError(http.StatusConflict, fmt.Sprintf(
 			"resource pool name %q conflicts with static pool in resource manager %q",
-			request.Config.PoolName, staticCluster,
+			named.PoolName, staticCluster,
 		))
 	}
 	record, created, err := resourceManager.CreateDynamicResourcePool(
@@ -127,15 +167,11 @@ func (m *Master) createDynamicResourcePool(c echo.Context) error {
 	if record.ClusterName != clusterName {
 		return echo.NewHTTPError(http.StatusInternalServerError, "resource manager mismatch")
 	}
-	if record.State == db.DynamicResourcePoolReady &&
-		!resourceManager.IsDynamicResourcePoolReady(record.PoolName) {
-		record.State = db.DynamicResourcePoolPending
-	}
 	statusCode := http.StatusOK
 	if created {
 		statusCode = http.StatusCreated
 	}
-	return c.JSON(statusCode, printableDynamicResourcePool(record))
+	return c.JSON(statusCode, m.dynamicResourcePoolView(record))
 }
 
 func (m *Master) listDynamicResourcePools(c echo.Context) error {
@@ -151,16 +187,78 @@ func (m *Master) listDynamicResourcePools(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	for i := range records {
-		if records[i].State == db.DynamicResourcePoolReady {
-			if resourceManager, ok := m.allRms[records[i].ClusterName].(*agentrm.ResourceManager); ok &&
-				!resourceManager.IsDynamicResourcePoolReady(records[i].PoolName) {
-				records[i].State = db.DynamicResourcePoolPending
-			}
-		}
-		records[i] = printableDynamicResourcePool(records[i])
+	views := make([]dynamicResourcePoolView, 0, len(records))
+	for _, record := range records {
+		views = append(views, m.dynamicResourcePoolView(record))
 	}
-	return c.JSON(http.StatusOK, dynamicResourcePoolListResponse{ResourcePools: records})
+	return c.JSON(http.StatusOK, dynamicResourcePoolListResponse{ResourcePools: views})
+}
+
+func (m *Master) updateDynamicResourcePool(c echo.Context) error {
+	var request updateDynamicResourcePoolRequest
+	if err := decodeStrictBoundedJSON(c, &request, updateDynamicPoolRequestFields); err != nil {
+		return err
+	}
+	resourceManager, _, err := m.selectDynamicAgentRM(c.QueryParam("cluster_name"))
+	if err != nil {
+		return err
+	}
+	poolName := c.Param("name")
+	if _, ok := m.staticResourcePoolCluster(poolName); ok {
+		_, err = m.db.DynamicResourcePoolByName(c.Request().Context(), poolName)
+		switch {
+		case err == nil:
+			return echo.NewHTTPError(http.StatusConflict, fmt.Sprintf(
+				"pool %q is still defined in master.yaml; remove it and restart before updating",
+				poolName,
+			))
+		case errors.Is(err, db.ErrDynamicResourcePoolNotFound):
+			return echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf(
+				"%q is configured in master.yaml; adopt it first", poolName,
+			))
+		default:
+			return err
+		}
+	}
+	record, err := resourceManager.UpdateDynamicResourcePool(
+		c.Request().Context(), poolName, request.ExpectedRevision, request.Config,
+		m.config.TaskContainerDefaults,
+	)
+	if err != nil {
+		return dynamicPoolHTTPError(err)
+	}
+	return c.JSON(http.StatusOK, m.dynamicResourcePoolView(record))
+}
+
+func (m *Master) adoptDynamicResourcePool(c echo.Context) error {
+	var request adoptDynamicResourcePoolRequest
+	if err := decodeStrictBoundedJSON(c, &request, adoptDynamicPoolRequestFields); err != nil {
+		return err
+	}
+	resourceManager, clusterName, err := m.selectDynamicAgentRM(c.QueryParam("cluster_name"))
+	if err != nil {
+		return err
+	}
+	poolName := c.Param("name")
+	// Startup compares a saved spec with the pool as master.yaml configures it, so adopt compares
+	// with the same config.
+	static, ok := m.staticResourcePool(clusterName, poolName)
+	if !ok {
+		return echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf(
+			"%q is not configured in master.yaml for resource manager %q", poolName, clusterName,
+		))
+	}
+	record, created, err := resourceManager.AdoptStaticResourcePool(
+		c.Request().Context(), static, request.Config, m.config.TaskContainerDefaults,
+	)
+	if err != nil {
+		return dynamicPoolHTTPError(err)
+	}
+	statusCode := http.StatusOK
+	if created {
+		statusCode = http.StatusCreated
+	}
+	return c.JSON(statusCode, m.dynamicResourcePoolView(record))
 }
 
 func (m *Master) retryDynamicResourcePool(c echo.Context) error {
@@ -177,7 +275,38 @@ func (m *Master) retryDynamicResourcePool(c echo.Context) error {
 	if err != nil {
 		return dynamicPoolHTTPError(err)
 	}
-	return c.JSON(http.StatusOK, printableDynamicResourcePool(record))
+	return c.JSON(http.StatusOK, m.dynamicResourcePoolView(record))
+}
+
+// dynamicResourcePoolView adds what the running master does with a record. A durable Ready can
+// be written immediately before publication, so an unpublished Ready pool is shown as Pending.
+func (m *Master) dynamicResourcePoolView(record db.DynamicResourcePool) dynamicResourcePoolView {
+	var activeRevision *int64
+	if resourceManager, ok := m.allRms[record.ClusterName].(*agentrm.ResourceManager); ok {
+		if record.State == db.DynamicResourcePoolReady &&
+			!resourceManager.IsDynamicResourcePoolReady(record.PoolName) {
+			record.State = db.DynamicResourcePoolPending
+		}
+		if revision, active := resourceManager.ActiveDynamicResourcePoolRevision(
+			record.PoolName,
+		); active {
+			activeRevision = &revision
+		}
+	}
+	_, definedInMasterYAML := m.staticResourcePoolCluster(record.PoolName)
+	return newDynamicResourcePoolView(record, activeRevision, definedInMasterYAML)
+}
+
+func newDynamicResourcePoolView(
+	record db.DynamicResourcePool, activeRevision *int64, definedInMasterYAML bool,
+) dynamicResourcePoolView {
+	return dynamicResourcePoolView{
+		DynamicResourcePool: printableDynamicResourcePool(record),
+		ActiveRevision:      activeRevision,
+		DefinedInMasterYAML: definedInMasterYAML,
+		PendingRestart: definedInMasterYAML ||
+			activeRevision != nil && *activeRevision != record.Revision,
+	}
 }
 
 func (m *Master) selectDynamicAgentRM(
@@ -225,6 +354,22 @@ func (m *Master) selectDynamicAgentRM(
 	return selected, clusterName, nil
 }
 
+func (m *Master) staticResourcePool(
+	clusterName, poolName string,
+) (config.ResourcePoolConfig, bool) {
+	for _, rmConfig := range m.config.ResourceManagers() {
+		if rmConfig.ResourceManager.ClusterName() != clusterName {
+			continue
+		}
+		for _, pool := range rmConfig.ResourcePools {
+			if pool.PoolName == poolName {
+				return pool, true
+			}
+		}
+	}
+	return config.ResourcePoolConfig{}, false
+}
+
 func (m *Master) staticResourcePoolCluster(poolName string) (string, bool) {
 	for _, rmConfig := range m.config.ResourceManagers() {
 		for _, pool := range rmConfig.ResourcePools {
@@ -236,7 +381,9 @@ func (m *Master) staticResourcePoolCluster(poolName string) (string, bool) {
 	return "", false
 }
 
-func decodeStrictBoundedJSON(c echo.Context, target interface{}) error {
+func decodeStrictBoundedJSON(
+	c echo.Context, target interface{}, allowedFields map[string]bool,
+) error {
 	contentType := c.Request().Header.Get(echo.HeaderContentType)
 	if !strings.HasPrefix(strings.ToLower(contentType), echo.MIMEApplicationJSON) {
 		return echo.NewHTTPError(http.StatusUnsupportedMediaType, "Content-Type must be application/json")
@@ -250,7 +397,7 @@ func decodeStrictBoundedJSON(c echo.Context, target interface{}) error {
 		}
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("reading JSON body: %v", err))
 	}
-	if err = validateDynamicPoolRequestJSON(body); err != nil {
+	if err = validateDynamicPoolRequestJSON(body, allowedFields); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
@@ -272,14 +419,12 @@ func decodeStrictBoundedJSON(c echo.Context, target interface{}) error {
 // standard DisallowUnknownFields option cannot see unknown nested fields. Validate the API schema
 // at each configuration object boundary before invoking those unmarshallers. Kubernetes pod specs
 // remain ordinary Kubernetes JSON objects and are validated by their own decoder.
-func validateDynamicPoolRequestJSON(body []byte) error {
+func validateDynamicPoolRequestJSON(body []byte, allowedFields map[string]bool) error {
 	var request map[string]json.RawMessage
 	if err := json.Unmarshal(body, &request); err != nil {
 		return fmt.Errorf("invalid JSON body: %w", err)
 	}
-	if err := rejectUnknownJSONFields(request, map[string]bool{
-		"cluster_name": true, "idempotency_key": true, "config": true,
-	}, "request"); err != nil {
+	if err := rejectUnknownJSONFields(request, allowedFields, "request"); err != nil {
 		return err
 	}
 	configRaw, ok := request["config"]
@@ -321,8 +466,10 @@ func dynamicPoolHTTPError(err error) error {
 	case errors.Is(err, agentrm.ErrInvalidDynamicResourcePool):
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	case errors.Is(err, agentrm.ErrStaticResourcePoolConflict),
+		errors.Is(err, agentrm.ErrDynamicResourcePoolInitializing),
 		errors.Is(err, db.ErrDynamicResourcePoolConflict),
-		errors.Is(err, db.ErrDynamicResourcePoolNotFailed):
+		errors.Is(err, db.ErrDynamicResourcePoolNotFailed),
+		errors.Is(err, db.ErrDynamicResourcePoolChanged):
 		return echo.NewHTTPError(http.StatusConflict, err.Error())
 	case errors.Is(err, db.ErrDynamicResourcePoolNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
@@ -332,6 +479,10 @@ func dynamicPoolHTTPError(err error) error {
 }
 
 func printableDynamicResourcePool(record db.DynamicResourcePool) db.DynamicResourcePool {
+	if record.Spec != nil {
+		spec := printableDynamicPoolSpec(*record.Spec)
+		record.Spec = &spec
+	}
 	var cfg config.ResourcePoolConfig
 	if err := json.Unmarshal(record.Config, &cfg); err != nil {
 		record.Config = json.RawMessage(`{"redacted":true}`)
@@ -340,16 +491,16 @@ func printableDynamicResourcePool(record db.DynamicResourcePool) db.DynamicResou
 	if cfg.TaskContainerDefaults != nil && cfg.TaskContainerDefaults.RegistryAuth != nil {
 		auth := *cfg.TaskContainerDefaults.RegistryAuth
 		if auth.Password != "" {
-			auth.Password = redactedDynamicPoolCredential
+			auth.Password = agentrm.RedactedDynamicPoolCredential
 		}
 		if auth.Auth != "" {
-			auth.Auth = redactedDynamicPoolCredential
+			auth.Auth = agentrm.RedactedDynamicPoolCredential
 		}
 		if auth.IdentityToken != "" {
-			auth.IdentityToken = redactedDynamicPoolCredential
+			auth.IdentityToken = agentrm.RedactedDynamicPoolCredential
 		}
 		if auth.RegistryToken != "" {
-			auth.RegistryToken = redactedDynamicPoolCredential
+			auth.RegistryToken = agentrm.RedactedDynamicPoolCredential
 		}
 		cfg.TaskContainerDefaults.RegistryAuth = &auth
 	}
@@ -358,4 +509,29 @@ func printableDynamicResourcePool(record db.DynamicResourcePool) db.DynamicResou
 		record.Config = printable
 	}
 	return record
+}
+
+// printableDynamicPoolSpec redacts registry credentials in a spec. It edits the decoded object,
+// so the spec keeps only the keys the administrator wrote.
+func printableDynamicPoolSpec(spec json.RawMessage) json.RawMessage {
+	decoder := json.NewDecoder(bytes.NewReader(spec))
+	decoder.UseNumber()
+	var object map[string]interface{}
+	if err := decoder.Decode(&object); err != nil {
+		return json.RawMessage(`{"redacted":true}`)
+	}
+	if defaults, ok := object["task_container_defaults"].(map[string]interface{}); ok {
+		if auth, ok := defaults["registry_auth"].(map[string]interface{}); ok {
+			for _, field := range []string{"password", "auth", "identitytoken", "registrytoken"} {
+				if value, exists := auth[field]; exists && value != nil && value != "" {
+					auth[field] = agentrm.RedactedDynamicPoolCredential
+				}
+			}
+		}
+	}
+	printable, err := json.Marshal(object)
+	if err != nil {
+		return json.RawMessage(`{"redacted":true}`)
+	}
+	return printable
 }

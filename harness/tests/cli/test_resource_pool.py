@@ -9,6 +9,8 @@ from tests.cli import util
 
 MASTER = "http://localhost:8080"
 DYNAMIC_POOLS_URL = f"{MASTER}/api/v1/resource-pools/dynamic"
+# The master refuses dynamic-pool request bodies that are not labelled as JSON.
+JSON_CONTENT_TYPE = matchers.header_matcher({"Content-Type": "application/json"})
 
 
 def dynamic_pool_response(state: str = "Ready") -> dict:
@@ -40,6 +42,7 @@ def test_create_dynamic_pool_posts_yaml_config_and_reports_failed_state(
             DYNAMIC_POOLS_URL,
             status=201,
             match=[
+                JSON_CONTENT_TYPE,
                 matchers.json_params_matcher(
                     {
                         "cluster_name": "agent-cluster",
@@ -49,7 +52,7 @@ def test_create_dynamic_pool_posts_yaml_config_and_reports_failed_state(
                             "max_aux_containers_per_agent": 100,
                         },
                     }
-                )
+                ),
             ],
             json=response,
         )
@@ -84,7 +87,7 @@ def test_create_dynamic_pool_json_output(
     response = dynamic_pool_response()
 
     with util.standard_cli_rsps() as rsps:
-        rsps.post(DYNAMIC_POOLS_URL, status=201, json=response)
+        rsps.post(DYNAMIC_POOLS_URL, status=201, match=[JSON_CONTENT_TYPE], json=response)
         cli.main(
             [
                 "resource-pool",
@@ -147,6 +150,205 @@ def test_retry_dynamic_pool_posts_empty_body_and_renders_state(
     output = capsys.readouterr().out
     assert "online-gpu" in output
     assert "Ready" in output
+
+
+def test_update_dynamic_pool_puts_config_and_reports_failed_state(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path = tmp_path / "pool.yaml"
+    config_path.write_text(
+        "pool_name: online-gpu\ndescription: updated\nagent_reconnect_wait: 10m\n",
+        encoding="utf-8",
+    )
+    response = dynamic_pool_response("Failed")
+
+    with util.standard_cli_rsps() as rsps:
+        rsps.put(
+            f"{DYNAMIC_POOLS_URL}/online-gpu",
+            status=200,
+            match=[
+                matchers.query_param_matcher({"cluster_name": "agent-cluster"}),
+                JSON_CONTENT_TYPE,
+                matchers.json_params_matcher(
+                    {
+                        "expected_revision": 3,
+                        "config": {
+                            "pool_name": "online-gpu",
+                            "description": "updated",
+                            "agent_reconnect_wait": "10m",
+                        },
+                    }
+                ),
+            ],
+            json=response,
+        )
+        with pytest.raises(SystemExit) as failed_exit:
+            cli.main(
+                [
+                    "resource-pool",
+                    "update",
+                    "online-gpu",
+                    str(config_path),
+                    "--expected-revision",
+                    "3",
+                    "--cluster-name",
+                    "agent-cluster",
+                ]
+            )
+        assert failed_exit.value.code == 1
+
+    captured = capsys.readouterr()
+    assert "online-gpu" in captured.out
+    assert "scheduler initialization failed" in captured.out
+    assert "failed" in captured.err.lower()
+
+
+def test_update_dynamic_pool_without_expected_revision_prints_json(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path = tmp_path / "pool.json"
+    config_path.write_text(json.dumps({"pool_name": "online-gpu"}), encoding="utf-8")
+    response = dynamic_pool_response()
+    response.update({"revision": 2, "active_revision": 1, "pending_restart": True})
+
+    with util.standard_cli_rsps() as rsps:
+        rsps.put(
+            f"{DYNAMIC_POOLS_URL}/online-gpu",
+            status=200,
+            match=[
+                matchers.query_param_matcher({}),
+                JSON_CONTENT_TYPE,
+                matchers.json_params_matcher({"config": {"pool_name": "online-gpu"}}),
+            ],
+            json=response,
+        )
+        cli.main(["resource-pool", "update", "online-gpu", str(config_path), "--json"])
+
+    assert json.loads(capsys.readouterr().out) == response
+
+
+def test_adopt_dynamic_pool_posts_master_yaml_entry(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path = tmp_path / "static-gpu.yaml"
+    config_path.write_text(
+        "pool_name: static-gpu\ndescription: GPUs\nagent_reconnect_wait: 10m\n",
+        encoding="utf-8",
+    )
+    response = dynamic_pool_response()
+    response.update(
+        {
+            "pool_name": "static-gpu",
+            "revision": 1,
+            "active_revision": None,
+            "defined_in_master_yaml": True,
+            "pending_restart": True,
+        }
+    )
+
+    with util.standard_cli_rsps() as rsps:
+        rsps.post(
+            f"{DYNAMIC_POOLS_URL}/static-gpu/adopt",
+            status=201,
+            match=[
+                matchers.query_param_matcher({"cluster_name": "agent-cluster"}),
+                JSON_CONTENT_TYPE,
+                matchers.json_params_matcher(
+                    {
+                        "config": {
+                            "pool_name": "static-gpu",
+                            "description": "GPUs",
+                            "agent_reconnect_wait": "10m",
+                        }
+                    }
+                ),
+            ],
+            json=response,
+        )
+        cli.main(
+            [
+                "resource-pool",
+                "adopt",
+                "static-gpu",
+                str(config_path),
+                "--cluster-name",
+                "agent-cluster",
+            ]
+        )
+
+    lines = capsys.readouterr().out.splitlines()
+    cells = [cell.strip() for cell in lines[2].split("|")]
+    assert cells[:6] == ["static-gpu", "agent-cluster", "Ready", "1", "master.yaml", "True"]
+
+
+def test_adopt_dynamic_pool_json_output(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path = tmp_path / "static-gpu.json"
+    config_path.write_text(json.dumps({"pool_name": "static-gpu"}), encoding="utf-8")
+    response = dynamic_pool_response()
+
+    with util.standard_cli_rsps() as rsps:
+        rsps.post(
+            f"{DYNAMIC_POOLS_URL}/static-gpu/adopt",
+            status=200,
+            match=[
+                matchers.query_param_matcher({}),
+                JSON_CONTENT_TYPE,
+                matchers.json_params_matcher({"config": {"pool_name": "static-gpu"}}),
+            ],
+            json=response,
+        )
+        cli.main(["resource-pool", "adopt", "static-gpu", str(config_path), "--json"])
+
+    assert json.loads(capsys.readouterr().out) == response
+
+
+def test_list_dynamic_pools_renders_revisions(capsys: pytest.CaptureFixture[str]) -> None:
+    pending_restart = dynamic_pool_response()
+    pending_restart.update(
+        {"revision": 3, "active_revision": 2, "pending_restart": True, "spec_version": 1}
+    )
+    from_master_yaml = dynamic_pool_response()
+    from_master_yaml.update(
+        {
+            "pool_name": "adopted-gpu",
+            "revision": 1,
+            "active_revision": None,
+            "defined_in_master_yaml": True,
+            "pending_restart": True,
+        }
+    )
+    pending = dynamic_pool_response("Pending")
+    pending.update(
+        {"pool_name": "new-gpu", "revision": 1, "active_revision": None, "pending_restart": False}
+    )
+    with util.standard_cli_rsps() as rsps:
+        rsps.get(
+            DYNAMIC_POOLS_URL,
+            status=200,
+            json={"resource_pools": [pending_restart, from_master_yaml, pending]},
+        )
+        cli.main(["resource-pool", "list-dynamic"])
+
+    lines = capsys.readouterr().out.splitlines()
+    header = lines[0].split("|")
+    assert [column.strip() for column in header] == [
+        "Name",
+        "Cluster",
+        "State",
+        "Revision",
+        "Active",
+        "Pending restart",
+        "Error",
+    ]
+    rows = {
+        cells[0]: cells
+        for cells in ([cell.strip() for cell in line.split("|")] for line in lines[2:])
+    }
+    assert rows["online-gpu"][2:6] == ["Ready", "3", "2", "True"]
+    assert rows["adopted-gpu"][2:6] == ["Ready", "1", "master.yaml", "True"]
+    assert rows["new-gpu"][2:6] == ["Pending", "1", "-", "False"]
 
 
 def test_dynamic_pool_config_must_be_mapping(tmp_path: pathlib.Path) -> None:
