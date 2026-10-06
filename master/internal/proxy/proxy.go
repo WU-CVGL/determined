@@ -3,16 +3,20 @@ package proxy
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/textproto"
 	"net/url"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/hashicorp/go-cleanhttp"
 
 	"github.com/labstack/echo/v4"
@@ -335,4 +339,39 @@ func asyncCopy(dst io.Writer, src io.Reader) chan error {
 		}
 	}()
 	return errs
+}
+
+// closedConnectionErrors are the errors with which a copy stops when a side ended the connection:
+// the end of the stream, a connection closed here, and one that the other side closed (broken
+// pipe) or reset.
+var closedConnectionErrors = []error{
+	io.EOF, io.ErrUnexpectedEOF, net.ErrClosed, syscall.EPIPE, syscall.ECONNRESET,
+}
+
+// isConnectionClosed reports whether err, an error from copying between the two sides of a
+// proxied connection, only says that one side ended the connection, as SSH sessions through a
+// shell and closed JupyterLab tabs do all the time: a WebSocket close with code 1000 (normal),
+// 1001 (going away), 1005 (no status) or 1006 (closed without a close message), or one of
+// closedConnectionErrors. Both may be wrapped in *net.OpError, as io.Copy returns them.
+func isConnectionClosed(err error) bool {
+	var closeErr *websocket.CloseError
+	if errors.As(err, &closeErr) {
+		return websocket.IsCloseError(closeErr, websocket.CloseNormalClosure,
+			websocket.CloseGoingAway, websocket.CloseNoStatusReceived, websocket.CloseAbnormalClosure)
+	}
+	for _, closed := range closedConnectionErrors {
+		if errors.Is(err, closed) {
+			return true
+		}
+	}
+	return false
+}
+
+// copyErrorLogf returns the method to log err, an error from copying between the two sides of a
+// proxied connection, with: Debugf for an ordinary end of the connection, Errorf otherwise.
+func copyErrorLogf(c echo.Context, err error) func(format string, args ...interface{}) {
+	if isConnectionClosed(err) {
+		return c.Logger().Debugf
+	}
+	return c.Logger().Errorf
 }
