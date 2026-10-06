@@ -19,11 +19,18 @@ Version 0.41.0
 
 -  WebUI: Open a terminal in a running shell from the browser.
 
--  WebUI: Launch shells, start a shell or JupyterLab from an earlier config or a template, and
-   launch a task again from its row.
+-  WebUI: Launch shells and JupyterLab from one form, also on the Home page, starting from a recent
+   task, an earlier config, or a template, and launch a task again from its row.
 
--  WebUI: List generic tasks in a Generic Tasks tab, with detail pages and pause, unpause, and kill
-   actions.
+-  WebUI: Add a Jobs page that lists experiments, generic tasks, notebooks, shells, commands, and
+   TensorBoards together, with filters including GPU or CPU-only and bulk kill, and Jobs tabs in
+   workspaces and projects.
+
+-  WebUI: Open a generic task's detail page to pause, unpause, or kill it and to see its tree,
+   allocations, config, and logs.
+
+-  API: Filter experiments by workspace, generic tasks by project and name, and both by requested
+   slots.
 
 -  CLI: List generic tasks with ``det task list-generic``, and name them with the ``name`` and
    ``description`` config keys.
@@ -43,6 +50,13 @@ Version 0.41.0
 
 -  Shells: Keep idle ``det shell open`` sessions connected through proxies.
 
+-  Shells: Stop logging ``Attempt to write login records by non-root user (aborting)`` for each
+   terminal session.
+
+-  WebUI: Give tasks, generic tasks, and experiments action menus in one order, also on the resource
+   pool page, with **Kill** and **Delete** in red and confirmations for **Kill**, **Delete**, and
+   **Stop**.
+
 **Bug Fixes**
 
 -  Resource pools: Apply the master's ``scheduler`` and ``task_container_defaults`` to dynamic
@@ -51,6 +65,9 @@ Version 0.41.0
 -  Agents: Keep an agent registered when it reconnects with a different device count or resource
    pool.
 
+-  Agents: Keep drained slots free of new tasks, and schedule a pool again as soon as one of its
+   slots is enabled, disabled, or drained.
+
 -  Deploy: Use this fork's images by default in ``det deploy``.
 
 -  CLI: Fix ``det resource-pool create``, which failed with ``415 Unsupported Media Type``.
@@ -58,9 +75,15 @@ Version 0.41.0
 -  API: Return client errors instead of HTTP 500 for invalid experiment and generic task requests
    and for ended sessions.
 
+-  Accounts: Handle password changes sent by 0.40 clients, such as WebUI tabs opened before the
+   upgrade, instead of failing with a decoding error.
+
 -  Generic tasks: Fix pausing, killing, and scheduling of generic task trees.
 
 -  WebUI: Offer to retry when a notebook's address fails to load.
+
+-  WebUI: Serve the WebUI's index with ``Cache-Control: no-cache``, so that browsers load a new
+   release's WebUI on reload.
 
 **Security Fixes**
 
@@ -79,6 +102,17 @@ Version 0.41.0
    ``/api/v1/allocations/{id}/``.
 
 -  Proxy: Remove Determined credentials from requests forwarded to task services.
+
+-  TensorBoard: Use an experiment's image, image pull secrets, and ``registry_auth`` only for
+   TensorBoards that the experiment's owner starts.
+
+-  API: Show a task's or experiment's ``registry_auth`` only to its owner and administrators, and
+   leave it out of the experiment config that checkpoints and model versions carry.
+
+-  API: Allow only users who may edit an experiment to delete its TensorBoard files.
+
+-  API: Require a signed-in session for ``POST /task-logs`` and apply the same permission check as
+   ``POST /api/v1/task/logs``.
 
 See :ref:`generic tasks <generic-tasks>`, :ref:`browser terminals <shell-web-terminal>`,
 :doc:`dynamic resource pools <maintenance/dynamic-pools>`, and :doc:`upgrade with running tasks
