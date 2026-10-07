@@ -92,24 +92,18 @@ export interface GetExperimentsParams extends PaginationParams {
   name?: string;
   options?: never;
   projectId?: number;
-  sortBy?:
-    | 'SORT_BY_UNSPECIFIED'
-    | 'SORT_BY_ID'
-    | 'SORT_BY_DESCRIPTION'
-    | 'SORT_BY_START_TIME'
-    | 'SORT_BY_END_TIME'
-    | 'SORT_BY_STATE'
-    | 'SORT_BY_NUM_TRIALS'
-    | 'SORT_BY_PROGRESS'
-    | 'SORT_BY_USER'
-    | 'SORT_BY_NAME';
-  /** GPU (one slot or more per trial) or CPU-only (no slots) experiments. */
-  slotsFilter?: Api.V1SlotsFilter;
+  /** The slot counts per trial to list; with `slotsAbove`, experiments that match either. */
+  slots?: number[];
+  /** Experiments with more slots per trial than this; with `slots`, those that match either. */
+  slotsAbove?: number;
+  sortBy?: Api.V1GetExperimentsRequestSortBy;
   states?: Array<`STATE_${RunState}`>;
   userIds?: Array<number>;
   users?: Array<string>;
   /** The experiments of the projects in this workspace. */
   workspaceId?: number;
+  /** The experiments of the projects in any of these workspaces. */
+  workspaceIds?: number[];
 }
 
 export interface SearchExperimentsParams extends PaginationParams {
@@ -185,13 +179,18 @@ export interface GetGenericTasksParams extends PaginationParams {
   projectId?: number;
   /** A part of the task's name or ID, in any case. */
   search?: string;
-  /** GPU (one slot or more) or CPU-only (no slots) tasks. */
-  slotsFilter?: Api.V1SlotsFilter;
+  /** The slot counts to list; with `slotsAbove`, tasks that match either. */
+  slots?: number[];
+  /** Tasks with more slots than this; with `slots`, those that match either. */
+  slotsAbove?: number;
+  sortBy?: Api.V1GetGenericTasksRequestSortBy;
   states?: GenericTaskState[];
   taskIds?: string[];
   userIds?: number[];
   users?: string[];
   workspaceId?: number;
+  /** The tasks of any of these workspaces. */
+  workspaceIds?: number[];
 }
 
 export interface KillGenericTaskParams {

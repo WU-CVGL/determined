@@ -2,8 +2,6 @@
 // GPUs' recent critical XIDs, which it reads from the cluster's DCGM-Exporter in Prometheus.
 //
 // The agent API (GetAgent, and GetAgents without exclude_slots) queries through XIDCache.Get.
-// GPU selection does not read GPU health yet. When it does (PR B), it must never wait for
-// Prometheus: it reads XIDCache.LastOK, which never queries, and needs its own refresh rule.
 package gpuhealth
 
 import (
@@ -39,24 +37,27 @@ const (
 
 	// xidLookback is XIDStep as a PromQL duration.
 	xidLookback = "5m"
-	// applicationXIDPattern matches the codes of applicationXIDs. PromQL regular expressions are
-	// fully anchored.
-	applicationXIDPattern = "13|31|43|45"
+	// ignoredXIDPattern matches the codes of ignoredXIDCodes. PromQL regular expressions are fully
+	// anchored.
+	ignoredXIDPattern = "13|31|43|45"
 
 	errTimeout         = "timeout"
 	errRequestFailed   = "request failed"
 	errInvalidResponse = "invalid response"
 )
 
-// applicationXIDs are the XIDs that user code causes: 13 (graphics engine exception), 31 (GPU
-// memory page fault), 43 (GPU stopped processing) and 45 (preemptive cleanup). They are no
-// evidence of a faulty GPU and never count, as in the cluster's gpu-xid-critical alert.
-var applicationXIDs = map[int]bool{13: true, 31: true, 43: true, 45: true}
+// ignoredXIDCodes are the XIDs that never count: 13 (graphics engine exception), 31 (GPU memory
+// page fault), 43 (GPU stopped processing) and 45 (preemptive cleanup). This is an exclusion
+// policy, not a statement about their cause: it matches the cluster's gpu-xid-critical alert and
+// keeps out codes that applications commonly trigger, which would raise false alarms. It does not
+// mean that they always come from user code: NVIDIA says that XID 31 is usually an application
+// error but can be a driver or hardware error. A fault seen only as these codes does not count.
+var ignoredXIDCodes = map[int]bool{13: true, 31: true, 43: true, 45: true}
 
 // IsCriticalXID reports whether an XID code counts as GPU-side evidence: every code except 0 and
-// the application codes.
+// ignoredXIDCodes.
 func IsCriticalXID(code int) bool {
-	return code > 0 && !applicationXIDs[code]
+	return code > 0 && !ignoredXIDCodes[code]
 }
 
 // XIDQuery is the PromQL expression for the critical XIDs of the GPUs of a cluster. The exporter's
@@ -65,7 +66,7 @@ func IsCriticalXID(code int) bool {
 // the query takes max_over_time of the gauge, never increase(), which is for counters.
 func XIDQuery(detCluster string) string {
 	return `max by (gpu_uuid, xid) (max_over_time(DCGM_EXP_XID_ERRORS_COUNT{job="dcgm", det_cluster=` +
-		strconv.Quote(detCluster) + `, gpu_uuid!="", xid!="", xid!="0", xid!~"` + applicationXIDPattern +
+		strconv.Quote(detCluster) + `, gpu_uuid!="", xid!="", xid!="0", xid!~"` + ignoredXIDPattern +
 		`"}[` + xidLookback + `])) > 0`
 }
 
@@ -111,7 +112,8 @@ type XIDSnapshot struct {
 	Error string
 	// QueriedAt is when the master queried, or zero when it did not.
 	QueriedAt time.Time
-	// ByUUID holds the critical XIDs of each GPU by its UUID, by code.
+	// ByUUID holds the critical XIDs of each GPU by its UUID, by code. A failed query holds those of
+	// the last successful one that are still recent (stillRecent).
 	ByUUID map[string][]XID
 }
 
@@ -238,8 +240,8 @@ func (c *XIDCache) Peek() *XIDSnapshot {
 }
 
 // LastOK returns the last successful result without querying, whatever its age, or nil if no
-// query has succeeded: a failed query leaves it as it was. GPU selection is meant to read it
-// (PR B), and has to decide how old a result it accepts.
+// query has succeeded: a failed query leaves it as it was, and keeps its XIDs that are still
+// recent.
 func (c *XIDCache) LastOK() *XIDSnapshot {
 	if c == nil {
 		return nil
@@ -265,6 +267,7 @@ func (c *XIDCache) fetch(ctx context.Context) *XIDSnapshot {
 		log.WithField("component", "gpu-xids").Debugf("the Prometheus query for GPU XIDs failed: %s", text)
 		return &XIDSnapshot{
 			Status: agentv1.GpuXidQueryStatus_GPU_XID_QUERY_STATUS_FAILED, Error: text, QueriedAt: queriedAt,
+			ByUUID: stillRecent(c.lastOK.Load(), queriedAt),
 		}
 	}
 	series, err := c.query(ctx, XIDQuery(c.detCluster), start, end, XIDStep)
@@ -281,4 +284,34 @@ func (c *XIDCache) fetch(ctx context.Context) *XIDSnapshot {
 	return &XIDSnapshot{
 		Status: agentv1.GpuXidQueryStatus_GPU_XID_QUERY_STATUS_OK, QueriedAt: queriedAt, ByUUID: byUUID,
 	}
+}
+
+// stillRecent returns the XIDs of ok, the last successful result, that a query at now would still
+// see: those whose last window is in XIDRange(now). A failed query keeps them, so a GPU in error
+// does not turn green while Prometheus cannot be reached, and drops each one when it leaves the 24
+// hours, however old ok is. A kept XID is as ok has it, so its FirstObserved can be before
+// XIDRange(now). It returns new maps and slices and nil when none is left, or no query has
+// succeeded.
+func stillRecent(ok *XIDSnapshot, now time.Time) map[string][]XID {
+	if ok == nil {
+		return nil
+	}
+	start, _ := XIDRange(now)
+	var byUUID map[string][]XID
+	for uuid, xids := range ok.ByUUID {
+		var kept []XID
+		for _, x := range xids {
+			if !x.LastObserved.Before(start) {
+				kept = append(kept, x)
+			}
+		}
+		if len(kept) == 0 {
+			continue
+		}
+		if byUUID == nil {
+			byUUID = map[string][]XID{}
+		}
+		byUUID[uuid] = kept
+	}
+	return byUUID
 }

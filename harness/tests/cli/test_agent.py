@@ -440,6 +440,23 @@ def test_describe_agent_recent_xids(capsys: pytest.CaptureFixture) -> None:
     )
 
 
+def test_describe_agent_recent_xids_of_failed_query(capsys: pytest.CaptureFixture) -> None:
+    # A failed query keeps the XIDs of the last successful one that are still recent: the details
+    # show them as after a successful query, and nothing about the failure.
+    topology = topology_case("recent critical XIDs")
+    assert topology is not None
+    topology["xidQueryStatus"] = "GPU_XID_QUERY_STATUS_FAILED"
+    topology["xidQueryError"] = "timeout"
+    lines = describe_lines(capsys, topology)
+    assert details_of(lines, "  Slot 0 (error):")[-1] == (
+        "Recent critical XIDs: 79 (2026-10-07 10:05-10:10+0000 to 2026-10-07 10:20-10:25+0000)"
+    )
+    out = "\n".join(lines)
+    assert "timeout" not in out
+    assert "QUERY" not in out
+    assert "FAILED" not in out
+
+
 @pytest.mark.parametrize(
     "status,error",
     [

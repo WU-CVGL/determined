@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"reflect"
 	"regexp"
 	"strconv"
 	"sync"
@@ -28,10 +29,10 @@ func TestXIDQuery(t *testing.T) {
 	require.NotContains(t, q, "DCGM_FI_DEV_XID_ERRORS")
 	require.NotContains(t, q, "_TOTAL")
 
-	// The regular expression of the query excludes exactly the application codes; PromQL anchors it.
-	re := regexp.MustCompile("^(?:" + applicationXIDPattern + ")$")
+	// The regular expression of the query excludes exactly the ignored codes; PromQL anchors it.
+	re := regexp.MustCompile("^(?:" + ignoredXIDPattern + ")$")
 	for code := 0; code < 200; code++ {
-		require.Equal(t, applicationXIDs[code], re.MatchString(strconv.Itoa(code)), "XID %d", code)
+		require.Equal(t, ignoredXIDCodes[code], re.MatchString(strconv.Itoa(code)), "XID %d", code)
 	}
 	for _, code := range []int{13, 31, 43, 45, 0, -1} {
 		require.False(t, IsCriticalXID(code), "XID %d", code)
@@ -92,7 +93,7 @@ func TestRecentXIDsFirstAndLastObserved(t *testing.T) {
 		series("GPU-a", "48", 7),
 		series("GPU-b", "94", 2, 3),
 		series("GPU-b", "94", 6), // merged with the series above
-		series("GPU-c", "13", 1), // application codes never count
+		series("GPU-c", "13", 1), // ignored codes never count
 		series("GPU-c", "31", 1),
 		series("GPU-c", "43", 1),
 		series("GPU-c", "45", 1),
@@ -219,7 +220,7 @@ func TestXIDCacheHitMissAndFailure(t *testing.T) {
 	require.Equal(t, agentv1.GpuXidQueryStatus_GPU_XID_QUERY_STATUS_FAILED, failed.Status)
 	require.Equal(t, errRequestFailed, failed.Error, "never the URL")
 	require.Equal(t, clock.now(), failed.QueriedAt)
-	require.Empty(t, failed.ByUUID)
+	require.Equal(t, s.ByUUID, failed.ByUUID, "a failure keeps the XIDs still in the 24 hours")
 	require.Same(t, s, c.LastOK(), "a failure keeps the last successful result")
 	clock.add(XIDCacheTTL - time.Second)
 	require.Same(t, failed, c.Get(ctx))
@@ -242,6 +243,173 @@ func TestXIDCacheHitMissAndFailure(t *testing.T) {
 	require.Equal(t, clock.now(), fresh.QueriedAt)
 	require.Same(t, fresh, c.Peek())
 	require.Same(t, fresh, c.LastOK())
+}
+
+// gpuHealthWith applies xids to one GPU at x16 of x16, as the agent API does, so only an XID can
+// turn it red. It returns the GPU's health and its recent XID codes.
+func gpuHealthWith(uuid string, xids *XIDSnapshot) (agentv1.GpuHealth, []int32) {
+	topo := &agentv1.GpuTopology{Gpus: []*agentv1.GpuInfo{
+		{Uuid: uuid, PcieLinkWidth: 16, PcieLinkWidthMax: 16},
+	}}
+	Apply(topo, xids)
+	var codes []int32
+	for _, x := range topo.Gpus[0].RecentXids {
+		codes = append(codes, x.Xid)
+	}
+	return topo.Gpus[0].Health, codes
+}
+
+// A failed refresh keeps the XIDs of the last successful query: a GPU in error stays in error.
+func TestXIDCacheFailureKeepsRecentXIDs(t *testing.T) {
+	clock := newTestClock(time.Date(2026, 10, 7, 12, 27, 13, 0, time.UTC))
+	f := &fakeQuery{result: []Series{series("GPU-a", "79", 3)}}
+	c := newTestCache(f, clock)
+	ctx := context.Background()
+	okResult := c.Get(ctx)
+	health, codes := gpuHealthWith("GPU-a", okResult)
+	require.Equal(t, failed, health)
+	require.Equal(t, []int32{79}, codes)
+
+	// 30 s later, a background refresh times out.
+	clock.add(XIDCacheTTL)
+	f.set(nil, context.DeadlineExceeded, false, nil)
+	require.Same(t, okResult, c.Get(ctx))
+	waitForQuery(c)
+	require.Equal(t, int32(2), f.calls.Load())
+	s := c.Peek()
+	require.Equal(t, agentv1.GpuXidQueryStatus_GPU_XID_QUERY_STATUS_FAILED, s.Status)
+	require.Equal(t, errTimeout, s.Error)
+	require.Equal(t, clock.now(), s.QueriedAt)
+	require.Equal(t, map[string][]XID{
+		"GPU-a": {{Code: 79, FirstObserved: step(3), LastObserved: step(3)}},
+	}, s.ByUUID)
+	health, codes = gpuHealthWith("GPU-a", s)
+	require.Equal(t, failed, health, "the GPU stays in error")
+	require.Equal(t, []int32{79}, codes)
+	require.Same(t, okResult, c.LastOK())
+
+	// A GPU without an XID in the last successful result keeps the agent's measurement.
+	health, codes = gpuHealthWith("GPU-b", s)
+	require.Equal(t, ok, health)
+	require.Empty(t, codes)
+}
+
+// Failures keep an XID while its last window is in the 24 hours of the failed query, counted from
+// each failure and never from the time of the last successful query.
+func TestXIDCacheFailureDropsExpiredXIDs(t *testing.T) {
+	clock := newTestClock(time.Date(2026, 10, 7, 12, 27, 13, 0, time.UTC))
+	f := &fakeQuery{result: []Series{series("GPU-a", "79", 1, 3), series("GPU-b", "94", 29)}}
+	c := newTestCache(f, clock)
+	ctx := context.Background()
+	okResult := c.Get(ctx)
+	f.set(nil, errors.New("connection refused"), false, nil)
+
+	// Each failure below comes XIDMaxStale or more after the last one, so the caller waits for it.
+	// At 10:10 the next day, XID 79 is kept.
+	clock.set(step(3).Add(XIDWindow - XIDMaxStale))
+	s := c.Get(ctx)
+	require.Equal(t, int32(2), f.calls.Load())
+	require.Equal(t, agentv1.GpuXidQueryStatus_GPU_XID_QUERY_STATUS_FAILED, s.Status)
+	require.Equal(t, okResult.ByUUID, s.ByUUID)
+	// At 10:15, the range starts at step(3), the last window of XID 79: still kept. Its first
+	// window, step(1), is now before the range and stays as the successful query saw it.
+	clock.add(XIDMaxStale)
+	s = c.Get(ctx)
+	require.Equal(t, int32(3), f.calls.Load())
+	require.Equal(t, okResult.ByUUID, s.ByUUID)
+	require.Equal(t, step(1), s.ByUUID["GPU-a"][0].FirstObserved)
+	health, _ := gpuHealthWith("GPU-a", s)
+	require.Equal(t, failed, health)
+
+	// From the next step on, it is out of the 24 hours: dropped, and the GPU is green again.
+	clock.add(XIDMaxStale)
+	s = c.Get(ctx)
+	require.Equal(t, int32(4), f.calls.Load())
+	require.Equal(t, agentv1.GpuXidQueryStatus_GPU_XID_QUERY_STATUS_FAILED, s.Status)
+	require.Equal(t, map[string][]XID{
+		"GPU-b": {{Code: 94, FirstObserved: step(29), LastObserved: step(29)}},
+	}, s.ByUUID)
+	health, codes := gpuHealthWith("GPU-a", s)
+	require.Equal(t, ok, health)
+	require.Empty(t, codes)
+
+	// Once XID 94 leaves the 24 hours too, a failure keeps nothing.
+	clock.set(step(29).Add(XIDWindow + time.Second))
+	s = c.Get(ctx)
+	require.Equal(t, int32(5), f.calls.Load())
+	require.Empty(t, s.ByUUID)
+	require.Same(t, okResult, c.LastOK())
+}
+
+// A later successful query replaces the XIDs that failures keep, also with an empty result.
+func TestXIDCacheFailureAfterNewSuccess(t *testing.T) {
+	clock := newTestClock(time.Date(2026, 10, 7, 12, 27, 13, 0, time.UTC))
+	f := &fakeQuery{result: []Series{series("GPU-a", "79", 3)}}
+	c := newTestCache(f, clock)
+	ctx := context.Background()
+	first := c.Get(ctx)
+
+	f.set(nil, errors.New("connection refused"), false, nil)
+	clock.add(XIDMaxStale)
+	require.Equal(t, first.ByUUID, c.Get(ctx).ByUUID)
+
+	// The XID is gone from Prometheus: the new result has none.
+	f.set(nil, nil, false, nil)
+	clock.add(XIDMaxStale)
+	empty := c.Get(ctx)
+	require.Equal(t, agentv1.GpuXidQueryStatus_GPU_XID_QUERY_STATUS_OK, empty.Status)
+	require.Empty(t, empty.ByUUID)
+	require.Same(t, empty, c.LastOK())
+
+	// A failure after it keeps nothing of the older result.
+	f.set(nil, errors.New("connection refused"), false, nil)
+	clock.add(XIDMaxStale)
+	s := c.Get(ctx)
+	require.Equal(t, int32(4), f.calls.Load())
+	require.Equal(t, agentv1.GpuXidQueryStatus_GPU_XID_QUERY_STATUS_FAILED, s.Status)
+	require.Empty(t, s.ByUUID)
+	health, codes := gpuHealthWith("GPU-a", s)
+	require.Equal(t, ok, health)
+	require.Empty(t, codes)
+}
+
+// A failed result never shares the maps or slices of the successful result it keeps XIDs from,
+// which stays as it was.
+func TestXIDCacheFailureLeavesLastOKUnchanged(t *testing.T) {
+	clock := newTestClock(time.Date(2026, 10, 7, 12, 27, 13, 0, time.UTC))
+	f := &fakeQuery{result: []Series{
+		series("GPU-a", "48", 1), series("GPU-a", "79", 29), series("GPU-b", "94", 29),
+	}}
+	c := newTestCache(f, clock)
+	ctx := context.Background()
+	okResult := c.Get(ctx)
+	want := map[string][]XID{
+		"GPU-a": {
+			{Code: 48, FirstObserved: step(1), LastObserved: step(1)},
+			{Code: 79, FirstObserved: step(29), LastObserved: step(29)},
+		},
+		"GPU-b": {{Code: 94, FirstObserved: step(29), LastObserved: step(29)}},
+	}
+	require.Equal(t, want, okResult.ByUUID)
+	f.set(nil, errors.New("connection refused"), false, nil)
+
+	// Every XID kept, in copies.
+	clock.add(XIDMaxStale)
+	s := c.Get(ctx)
+	require.Equal(t, want, s.ByUUID)
+	require.NotEqual(t, reflect.ValueOf(okResult.ByUUID).Pointer(), reflect.ValueOf(s.ByUUID).Pointer())
+	require.NotSame(t, &okResult.ByUUID["GPU-a"][0], &s.ByUUID["GPU-a"][0])
+	require.NotSame(t, &okResult.ByUUID["GPU-b"][0], &s.ByUUID["GPU-b"][0])
+
+	// XID 48 of GPU-a has left the 24 hours, XID 79 has not.
+	clock.set(step(2).Add(XIDWindow))
+	s = c.Get(ctx)
+	require.Equal(t, map[string][]XID{
+		"GPU-a": {{Code: 79, FirstObserved: step(29), LastObserved: step(29)}},
+		"GPU-b": {{Code: 94, FirstObserved: step(29), LastObserved: step(29)}},
+	}, s.ByUUID)
+	require.Equal(t, want, okResult.ByUUID, "the successful result is unchanged")
+	require.Same(t, okResult, c.LastOK())
 }
 
 // A slow Prometheus never delays a request that has a result to reuse.

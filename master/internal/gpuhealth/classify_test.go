@@ -63,12 +63,12 @@ func TestClassify(t *testing.T) {
 			withXIDs(gpu(0, 0, 0, 0, "", false), 79), failed, "the join is by UUID",
 		},
 		{
-			"application XIDs", "", withXIDs(gpu(16, 16, 4, 4, "", false), 13, 31, 43, 45), ok,
-			"user code causes 13, 31, 43 and 45",
+			"ignored XIDs", "", withXIDs(gpu(16, 16, 4, 4, "", false), 13, 31, 43, 45), ok,
+			"13, 31, 43 and 45 never count",
 		},
-		{"application XIDs, narrow", "", withXIDs(gpu(8, 16, 4, 4, "", false), 13, 31, 43, 45), narrow, ""},
+		{"ignored XIDs, narrow", "", withXIDs(gpu(8, 16, 4, 4, "", false), 13, 31, 43, 45), narrow, ""},
 		{"XID 0", "", withXIDs(gpu(16, 16, 4, 4, "", false), 0), ok, ""},
-		{"an application and a critical XID", "", withXIDs(gpu(16, 16, 4, 4, "", false), 13, 79), failed, ""},
+		{"an ignored and a critical XID", "", withXIDs(gpu(16, 16, 4, 4, "", false), 13, 79), failed, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

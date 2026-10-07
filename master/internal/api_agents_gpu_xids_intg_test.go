@@ -148,7 +148,7 @@ func TestGetAgentsRecentXIDsFailed(t *testing.T) {
 	require.Equal(t, "request failed", topo.XidQueryError)
 	require.NotContains(t, topo.XidQueryError, prom.URL)
 	require.NotNil(t, topo.XidQueriedAt)
-	// The health is left to the agent's report.
+	// No query has succeeded, so there are no XIDs to keep: the health is left to the agent's report.
 	require.Equal(t, []agentv1.GpuHealth{healthOK, healthOK, healthOK}, healths(topo))
 
 	// The failure is cached too.

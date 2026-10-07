@@ -51,4 +51,26 @@
   .footer > *:not(:last-child) {
     margin-right: 8px;
   }
+
+  /* A tick list: a checkbox before each option, and the option under the keyboard marked. */
+
+  &.checklist .option {
+    justify-content: flex-start;
+  }
+  &.checklist .option > .checkbox {
+    display: flex;
+    margin-right: 0;
+  }
+  &.checklist .option > :not(.checkbox) {
+    min-width: 0;
+  }
+  .list {
+    outline: none;
+  }
+  .list:focus-visible .option.active {
+    box-shadow: inset 0 0 0 2px var(--theme-status-active);
+  }
+  .spacer {
+    flex: 1;
+  }
 }

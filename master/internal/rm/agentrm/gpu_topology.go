@@ -7,7 +7,6 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/determined-ai/determined/master/internal/gpuhealth"
 	"github.com/determined-ai/determined/master/pkg/aproto"
 	"github.com/determined-ai/determined/master/pkg/device"
 	"github.com/determined-ai/determined/master/pkg/protoutils"
@@ -240,31 +239,6 @@ func (a *agentState) gpuTopologyProto() *agentv1.GpuTopology {
 		out.Links = append(out.Links, gpuLinkProto(deviceOf(l.UUIDA), deviceOf(l.UUIDB), l))
 	}
 	return out
-}
-
-// gpuHealth returns the health of each CUDA slot by device ID, classified as in the agent API
-// (gpuhealth.Apply), from the agent's last report and xids (nil: no XIDs). An excluded GPU is not a
-// slot and has no entry.
-//
-// Only tests call it so far. It is for GPU selection (PR B), which is to rank the slots in
-// GPU_HEALTH_ERROR last in allocateFreeDevices. For that, PR B still has to pass the master's
-// gpuhealth.XIDCache into the agent RM (agentrm can import gpuhealth, not internal), read its
-// LastOK, which never queries Prometheus and survives a failed query, and add a rule for how old
-// a result may be and how it is refreshed: the cache queries only when the agent API is asked for
-// slots, so without that rule it can be old, or empty after a master restart.
-func (a *agentState) gpuHealth(xids *gpuhealth.XIDSnapshot) map[device.ID]agentv1.GpuHealth {
-	health := map[device.ID]agentv1.GpuHealth{}
-	topo := a.gpuTopologyProto()
-	if topo == nil {
-		return health
-	}
-	gpuhealth.Apply(topo, xids)
-	for _, g := range topo.Gpus {
-		if !g.Excluded {
-			health[device.ID(g.DeviceId)] = g.Health
-		}
-	}
-	return health
 }
 
 func gpuInfoProto(deviceID int32, uuid string, info aproto.GPUInfo, excluded bool) *agentv1.GpuInfo {
