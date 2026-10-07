@@ -29,10 +29,10 @@ func TestXIDQuery(t *testing.T) {
 	require.NotContains(t, q, "DCGM_FI_DEV_XID_ERRORS")
 	require.NotContains(t, q, "_TOTAL")
 
-	// The regular expression of the query excludes exactly the application codes; PromQL anchors it.
-	re := regexp.MustCompile("^(?:" + applicationXIDPattern + ")$")
+	// The regular expression of the query excludes exactly the ignored codes; PromQL anchors it.
+	re := regexp.MustCompile("^(?:" + ignoredXIDPattern + ")$")
 	for code := 0; code < 200; code++ {
-		require.Equal(t, applicationXIDs[code], re.MatchString(strconv.Itoa(code)), "XID %d", code)
+		require.Equal(t, ignoredXIDCodes[code], re.MatchString(strconv.Itoa(code)), "XID %d", code)
 	}
 	for _, code := range []int{13, 31, 43, 45, 0, -1} {
 		require.False(t, IsCriticalXID(code), "XID %d", code)
@@ -93,7 +93,7 @@ func TestRecentXIDsFirstAndLastObserved(t *testing.T) {
 		series("GPU-a", "48", 7),
 		series("GPU-b", "94", 2, 3),
 		series("GPU-b", "94", 6), // merged with the series above
-		series("GPU-c", "13", 1), // application codes never count
+		series("GPU-c", "13", 1), // ignored codes never count
 		series("GPU-c", "31", 1),
 		series("GPU-c", "43", 1),
 		series("GPU-c", "45", 1),

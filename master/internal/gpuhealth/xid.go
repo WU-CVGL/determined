@@ -37,24 +37,27 @@ const (
 
 	// xidLookback is XIDStep as a PromQL duration.
 	xidLookback = "5m"
-	// applicationXIDPattern matches the codes of applicationXIDs. PromQL regular expressions are
-	// fully anchored.
-	applicationXIDPattern = "13|31|43|45"
+	// ignoredXIDPattern matches the codes of ignoredXIDCodes. PromQL regular expressions are fully
+	// anchored.
+	ignoredXIDPattern = "13|31|43|45"
 
 	errTimeout         = "timeout"
 	errRequestFailed   = "request failed"
 	errInvalidResponse = "invalid response"
 )
 
-// applicationXIDs are the XIDs that user code causes: 13 (graphics engine exception), 31 (GPU
-// memory page fault), 43 (GPU stopped processing) and 45 (preemptive cleanup). They are no
-// evidence of a faulty GPU and never count, as in the cluster's gpu-xid-critical alert.
-var applicationXIDs = map[int]bool{13: true, 31: true, 43: true, 45: true}
+// ignoredXIDCodes are the XIDs that never count: 13 (graphics engine exception), 31 (GPU memory
+// page fault), 43 (GPU stopped processing) and 45 (preemptive cleanup). This is an exclusion
+// policy, not a statement about their cause: it matches the cluster's gpu-xid-critical alert and
+// keeps out codes that applications commonly trigger, which would raise false alarms. Each can
+// also come from the driver or the GPU; NVIDIA says that XID 31 is usually an application error but
+// can be a driver or hardware error. So a fault that shows only as these codes does not count.
+var ignoredXIDCodes = map[int]bool{13: true, 31: true, 43: true, 45: true}
 
 // IsCriticalXID reports whether an XID code counts as GPU-side evidence: every code except 0 and
-// the application codes.
+// ignoredXIDCodes.
 func IsCriticalXID(code int) bool {
-	return code > 0 && !applicationXIDs[code]
+	return code > 0 && !ignoredXIDCodes[code]
 }
 
 // XIDQuery is the PromQL expression for the critical XIDs of the GPUs of a cluster. The exporter's
@@ -63,7 +66,7 @@ func IsCriticalXID(code int) bool {
 // the query takes max_over_time of the gauge, never increase(), which is for counters.
 func XIDQuery(detCluster string) string {
 	return `max by (gpu_uuid, xid) (max_over_time(DCGM_EXP_XID_ERRORS_COUNT{job="dcgm", det_cluster=` +
-		strconv.Quote(detCluster) + `, gpu_uuid!="", xid!="", xid!="0", xid!~"` + applicationXIDPattern +
+		strconv.Quote(detCluster) + `, gpu_uuid!="", xid!="", xid!="0", xid!~"` + ignoredXIDPattern +
 		`"}[` + xidLookback + `])) > 0`
 }
 
