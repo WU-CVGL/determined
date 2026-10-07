@@ -11,7 +11,7 @@
 **Improvements**
 
 -  Resource pools: Under ``fitting_policy: best``, pack each task's GPUs by NUMA node inside its
-   agent and use GPUs in error last, instead of taking free GPUs in no particular order; turn it off
-   per pool with ``scheduler.numa_packing: false``. An earlier master does not start while
+   agent, preferring fewer GPUs in error, instead of taking free GPUs in no particular order; turn
+   it off per pool with ``scheduler.numa_packing: false``. An earlier master does not start while
    ``master.yaml`` or a pool spec sets the option. See :ref:`numa_packing
    <master-config-numa-packing>`.
