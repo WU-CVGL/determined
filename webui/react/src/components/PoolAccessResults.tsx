@@ -9,11 +9,12 @@ import css from './PoolAccessResults.module.scss';
 /**
  * Sends a change and answers with its results, or with undefined, sending nothing, while another
  * change runs. The Pool Access tab passes it to its dialogs: one change runs at a time, and it
- * keeps its results when its dialog is closed before the master answered.
+ * keeps its results when its dialog is closed before the master answered. run gets the signal
+ * that ends the change at sign-out.
  */
 export type PoolAccessRunner = (
   action: PoolAccessAction,
-  run: () => Promise<PoolAccessResult[]>,
+  run: (signal: AbortSignal) => Promise<PoolAccessResult[]>,
 ) => Promise<PoolAccessResult[] | undefined>;
 
 export const CHANGE_RUNNING_MESSAGE = 'Another change is being applied. Try again when it ends.';

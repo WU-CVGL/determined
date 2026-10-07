@@ -1,5 +1,6 @@
 import {
   DetailedUser,
+  FetchOptions,
   ResourcePoolAccess,
   ResourcePoolAccessChange,
   ResourcePoolAccessMode,
@@ -15,6 +16,8 @@ import { isApiResponse } from 'utils/service';
 /** The master refuses request bodies over 64 KiB; requests stay below with room to spare. */
 export const RESOURCE_POOL_ACCESS_MAX_BODY_BYTES = 64 * 1024;
 export const RESOURCE_POOL_ACCESS_BODY_BUDGET = 60 * 1024;
+/** A request without an answer by then fails, so that a change always ends. */
+export const RESOURCE_POOL_ACCESS_REQUEST_TIMEOUT_MS = 60_000;
 
 export type PoolAccessUsersAction = 'grant' | 'revoke';
 export type PoolAccessAction = PoolAccessUsersAction | 'restrict' | 'public';
@@ -204,7 +207,8 @@ export const poolAccessErrorMessage = (e: unknown): string => {
 /**
  * What the master answered for one pool. A request is confirmed when the master answered that it
  * succeeded. A failed request may still have been applied: the master answers a write with the
- * pool's access, read after the write, and that read can fail, or the answer can be lost.
+ * pool's access, read after the write, and that read can fail, or the answer can be lost or come
+ * after the timeout.
  */
 export interface PoolAccessResult {
   confirmedRequests: number;
@@ -219,25 +223,70 @@ export interface PoolAccessResult {
   warnings: string[];
 }
 
-type UsersRequest = (params: {
-  poolName: string;
-  usernames: string[];
-}) => Promise<ResourcePoolAccessChange>;
+type UsersRequest = (
+  params: { poolName: string; usernames: string[] },
+  options?: FetchOptions,
+) => Promise<ResourcePoolAccessChange>;
+
+export interface PoolAccessSendOptions {
+  /** Aborting it ends the change: the request being sent is given up and no other is sent. */
+  signal?: AbortSignal;
+  /** A request without an answer by then fails; the master may still apply it. */
+  timeoutMs?: number;
+}
+
+const cancelled = (): Error => new Error('cancelled');
+
+/**
+ * Sends one request and gives it up, aborting it, when signal aborts or after timeoutMs. Giving up
+ * does not wait for the request to honor its own signal.
+ */
+const sendWithin = async <T>(
+  send: (options: FetchOptions) => Promise<T>,
+  { signal, timeoutMs = RESOURCE_POOL_ACCESS_REQUEST_TIMEOUT_MS }: PoolAccessSendOptions,
+): Promise<T> => {
+  if (signal?.aborted) throw cancelled();
+  const canceler = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const givenUp = new Promise<never>((_, reject) => {
+    const giveUp = (reason: Error) => {
+      canceler.abort(reason);
+      reject(reason);
+    };
+    timer = setTimeout(
+      () => giveUp(new Error(`no answer within ${timeoutMs / 1000} s`)),
+      timeoutMs,
+    );
+    onAbort = () => giveUp(cancelled());
+    signal?.addEventListener('abort', onAbort);
+  });
+  try {
+    return await Promise.race([send({ signal: canceler.signal }), givenUp]);
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
+  }
+};
 
 /**
  * Sends the usernames to each pool in turn, in requests under the body limit. A failed request
  * ends that pool, whose earlier requests stay applied, and the other pools go on. Nothing is
- * retried.
+ * retried. An aborted signal ends the change.
  */
 export const changeUsersInPools = async (
   poolNames: readonly string[],
   usernames: readonly string[],
   request: UsersRequest,
-  budget: number = RESOURCE_POOL_ACCESS_BODY_BUDGET,
+  {
+    budget = RESOURCE_POOL_ACCESS_BODY_BUDGET,
+    ...send
+  }: PoolAccessSendOptions & { budget?: number } = {},
 ): Promise<PoolAccessResult[]> => {
   const chunks = chunkUsernames(usernames, budget);
   const results: PoolAccessResult[] = [];
   for (const poolName of poolNames) {
+    if (send.signal?.aborted) break;
     const result: PoolAccessResult = {
       confirmedRequests: 0,
       confirmedUsernames: 0,
@@ -249,7 +298,10 @@ export const changeUsersInPools = async (
     };
     for (const chunk of chunks) {
       try {
-        const change = await request({ poolName, usernames: chunk });
+        const change = await sendWithin(
+          (options) => request({ poolName, usernames: chunk }, options),
+          send,
+        );
         result.confirmedRequests += 1;
         result.confirmedUsernames += chunk.length;
         result.warnings = change.warnings;
@@ -264,21 +316,26 @@ export const changeUsersInPools = async (
   return results;
 };
 
-type ModeRequest = (params: {
-  mode: ResourcePoolAccess['mode'];
-  poolName: string;
-}) => Promise<ResourcePoolAccessChange>;
+type ModeRequest = (
+  params: { mode: ResourcePoolAccess['mode']; poolName: string },
+  options?: FetchOptions,
+) => Promise<ResourcePoolAccessChange>;
 
-/** Restricts each pool or makes it public, in turn; a failure does not stop the other pools. */
+/**
+ * Restricts each pool or makes it public, in turn; a failure does not stop the other pools. An
+ * aborted signal ends the change.
+ */
 export const setModeInPools = async (
   poolNames: readonly string[],
   mode: ResourcePoolAccess['mode'],
   request: ModeRequest,
+  send: PoolAccessSendOptions = {},
 ): Promise<PoolAccessResult[]> => {
   const results: PoolAccessResult[] = [];
   for (const poolName of poolNames) {
+    if (send.signal?.aborted) break;
     try {
-      const change = await request({ mode, poolName });
+      const change = await sendWithin((options) => request({ mode, poolName }, options), send);
       results.push({
         confirmedRequests: 1,
         confirmedUsernames: 0,

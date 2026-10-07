@@ -179,7 +179,9 @@ describe('resourcePoolAccess', () => {
   describe('changeUsersInPools', () => {
     it('sends each chunk to each pool and keeps the last warnings', async () => {
       const request = vi.fn(accepted);
-      const results = await changeUsersInPools(['p1', 'p2'], ['a', 'b', 'c'], request, 24);
+      const results = await changeUsersInPools(['p1', 'p2'], ['a', 'b', 'c'], request, {
+        budget: 24,
+      });
       expect(request.mock.calls.map(([params]) => params)).toEqual([
         { poolName: 'p1', usernames: ['a', 'b'] },
         { poolName: 'p1', usernames: ['c'] },
@@ -218,7 +220,9 @@ describe('resourcePoolAccess', () => {
             )
           : accepted({ poolName }),
       );
-      const results = await changeUsersInPools(['p1', 'p2'], ['a', 'b', 'c', 'd'], request, 24);
+      const results = await changeUsersInPools(['p1', 'p2'], ['a', 'b', 'c', 'd'], request, {
+        budget: 24,
+      });
       expect(request).toHaveBeenCalledTimes(4);
       expect(results[0]).toMatchObject({
         confirmedRequests: 1,
@@ -229,6 +233,67 @@ describe('resourcePoolAccess', () => {
       });
       expect(results[1]).toMatchObject({ confirmedRequests: 2, ok: true });
     });
+
+    it('fails a request that does not answer in time, aborts it, and goes on', async () => {
+      const signals: AbortSignal[] = [];
+      const request = vi.fn(
+        ({ poolName }: { poolName: string }, options?: { signal?: AbortSignal }) => {
+          if (options?.signal) signals.push(options.signal);
+          // The request ignores its signal: the change ends anyway.
+          return poolName === 'p1' ? new Promise<never>(() => undefined) : accepted({ poolName });
+        },
+      );
+      const results = await changeUsersInPools(['p1', 'p2'], ['a', 'b', 'c'], request, {
+        budget: 24,
+        timeoutMs: 20,
+      });
+      expect(request).toHaveBeenCalledTimes(3);
+      expect(signals.map((signal) => signal.aborted)).toEqual([true, false, false]);
+      expect(results[0]).toMatchObject({
+        confirmedRequests: 0,
+        error: 'no answer within 0.02 s',
+        ok: false,
+      });
+      expect(results[1]).toMatchObject({ confirmedRequests: 2, ok: true });
+    });
+
+    it('gives up the request being sent when its signal aborts, and sends no other', async () => {
+      const canceler = new AbortController();
+      const signals: AbortSignal[] = [];
+      const request = vi.fn((_: unknown, options?: { signal?: AbortSignal }) => {
+        if (options?.signal) signals.push(options.signal);
+        canceler.abort();
+        return new Promise<never>(() => undefined);
+      });
+      const results = await changeUsersInPools(['p1', 'p2'], ['a', 'b', 'c'], request, {
+        budget: 24,
+        signal: canceler.signal,
+      });
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(signals[0].aborted).toBe(true);
+      expect(results).toEqual([expect.objectContaining({ error: 'cancelled', ok: false })]);
+    });
+
+    it('sends no more requests once its signal aborts between them', async () => {
+      const canceler = new AbortController();
+      const calls: string[] = [];
+      // Not a mock function, which would answer a tick later than the abort below.
+      const request = ({ poolName }: { poolName: string }) => {
+        calls.push(poolName);
+        const answer = accepted({ poolName });
+        // Aborted once the master answered the first request.
+        void answer.then(() => canceler.abort());
+        return answer;
+      };
+      const results = await changeUsersInPools(['p1', 'p2'], ['a', 'b', 'c'], request, {
+        budget: 24,
+        signal: canceler.signal,
+      });
+      expect(calls).toEqual(['p1']);
+      expect(results).toEqual([
+        expect.objectContaining({ confirmedRequests: 1, error: 'cancelled', ok: false }),
+      ]);
+    });
   });
 
   it('sets the mode of each pool and reports each failure', async () => {
@@ -236,10 +301,35 @@ describe('resourcePoolAccess', () => {
       poolName === 'bad' ? Promise.reject(new Error('offline')) : accepted({ poolName }),
     );
     const results = await setModeInPools(['good', 'bad'], 'restricted', request);
-    expect(request).toHaveBeenCalledWith({ mode: 'restricted', poolName: 'good' });
+    expect(request).toHaveBeenCalledWith(
+      { mode: 'restricted', poolName: 'good' },
+      { signal: expect.any(AbortSignal) },
+    );
     expect(results.map((r) => [r.poolName, r.ok, r.error])).toEqual([
       ['good', true, undefined],
       ['bad', false, 'offline'],
+    ]);
+  });
+
+  it('fails a mode without an answer in time, and sets no more once its signal aborts', async () => {
+    const canceler = new AbortController();
+    const calls: string[] = [];
+    // Not a mock function, which would answer a tick later than the abort below.
+    const request = ({ poolName }: { poolName: string }) => {
+      calls.push(poolName);
+      if (poolName === 'slow') return new Promise<never>(() => undefined);
+      const answer = accepted({ poolName });
+      void answer.then(() => canceler.abort());
+      return answer;
+    };
+    const results = await setModeInPools(['slow', 'last', 'never'], 'public', request, {
+      signal: canceler.signal,
+      timeoutMs: 20,
+    });
+    expect(calls).toEqual(['slow', 'last']);
+    expect(results.map((r) => [r.poolName, r.ok, r.error])).toEqual([
+      ['slow', false, 'no answer within 0.02 s'],
+      ['last', true, undefined],
     ]);
   });
 

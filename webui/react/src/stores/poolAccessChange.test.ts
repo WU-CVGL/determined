@@ -24,7 +24,7 @@ function deferred<T>() {
 }
 
 describe('poolAccessChange', () => {
-  beforeEach(() => poolAccessChange.dismiss());
+  beforeEach(() => poolAccessChange.reset());
 
   it('refuses a change while another one runs, before sending anything', async () => {
     const first = deferred<PoolAccessResult[]>();
@@ -60,6 +60,39 @@ describe('poolAccessChange', () => {
     expect(await poolAccessChange.run('public', () => Promise.resolve([done('a')]))).toEqual([
       done('a'),
     ]);
+  });
+
+  it('aborts and forgets a running change when reset, as at sign-out', async () => {
+    const first = deferred<PoolAccessResult[]>();
+    let signal: AbortSignal | undefined;
+    const running = poolAccessChange.run('grant', (s) => {
+      signal = s;
+      return first.promise;
+    });
+    expect(signal?.aborted).toBe(false);
+
+    poolAccessChange.reset();
+    expect(signal?.aborted).toBe(true);
+    expect(poolAccessChange.change.get()).toBeUndefined();
+    // A new change starts at once, and the old one does not overwrite it when it ends.
+    const second = deferred<PoolAccessResult[]>();
+    const next = poolAccessChange.run('revoke', () => second.promise);
+    first.resolve([done('a')]);
+    expect(await running).toBeUndefined();
+    expect(poolAccessChange.change.get()).toEqual({ action: 'revoke' });
+    second.resolve([done('b')]);
+    expect(await next).toEqual([done('b')]);
+    expect(poolAccessChange.change.get()).toEqual({ action: 'revoke', results: [done('b')] });
+  });
+
+  it('does not clear a newer change when a reset one throws', async () => {
+    const first = deferred<PoolAccessResult[]>();
+    const running = poolAccessChange.run('restrict', () => first.promise);
+    poolAccessChange.reset();
+    poolAccessChange.run('public', () => new Promise(() => undefined));
+    first.reject(new Error('cancelled'));
+    await expect(running).rejects.toThrow('cancelled');
+    expect(poolAccessChange.change.get()).toEqual({ action: 'public' });
   });
 
   it('counts the shown tabs', () => {

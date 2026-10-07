@@ -413,12 +413,14 @@ being sent: its progress and then its results show on the tab, and when the tab
 is not open at its end, a notification names the pools that failed. One change
 runs at a time in each browser tab of the WebUI: until it ends, these actions
 and the revoke of an expanded row are unavailable, also after leaving the tab
-and coming back.
+and coming back. Signing out ends a change: its remaining requests are not
+sent, and the ones sent are not undone.
 
-A failed request may still have been applied: the master answers a change with
-the pool's access, read after the write, so a failed read or a lost answer
-fails a request whose change was stored. The tab reads the list again after
-every change, and every change is idempotent, so applying it again is safe.
+A request without an answer within 60 seconds fails. A failed request may still
+have been applied: the master answers a change with the pool's access, read
+after the write, so a failed read or a lost or late answer fails a request whose
+change was stored. The tab reads the list again after every change, and every
+change is idempotent, so applying it again is safe.
 
 Grant and revoke take users, user groups, and pasted usernames together, and
 show the resulting usernames without duplicates before anything is sent:

@@ -110,10 +110,12 @@ function deferred<T>() {
 
 const user = userEvent.setup();
 
-const setup = async (pools: ResourcePoolAccess[], action: PoolAccessUsersAction = 'grant') => {
-  const runChange = vi.fn<Parameters<PoolAccessRunner>, ReturnType<PoolAccessRunner>>(
-    (_action, run) => run(),
-  );
+const setup = async (
+  pools: ResourcePoolAccess[],
+  action: PoolAccessUsersAction = 'grant',
+  runner: PoolAccessRunner = (_action, run) => run(new AbortController().signal),
+) => {
+  const runChange = vi.fn<Parameters<PoolAccessRunner>, ReturnType<PoolAccessRunner>>(runner);
   userStore.fetchUsers();
   await waitFor(() =>
     expect(Loadable.getOrElse([], userStore.getUsers().get())).toHaveLength(mocks.users.length),
@@ -190,8 +192,15 @@ describe('PoolAccessUsersModal', () => {
     expect(mocks.getGroup).toHaveBeenCalledTimes(2);
     const usernames = ['alice', 'bob', 'carol', 'dave', 'john doe'];
     expect(mocks.grantResourcePoolAccess).toHaveBeenCalledTimes(2);
-    expect(mocks.grantResourcePoolAccess).toHaveBeenCalledWith({ poolName: 'gpu-a100', usernames });
-    expect(mocks.grantResourcePoolAccess).toHaveBeenCalledWith({ poolName: 'gpu-h100', usernames });
+    const withSignal = { signal: expect.any(AbortSignal) };
+    expect(mocks.grantResourcePoolAccess).toHaveBeenCalledWith(
+      { poolName: 'gpu-a100', usernames },
+      withSignal,
+    );
+    expect(mocks.grantResourcePoolAccess).toHaveBeenCalledWith(
+      { poolName: 'gpu-h100', usernames },
+      withSignal,
+    );
     expect(screen.getByTestId('pool-access-result-gpu-a100')).toHaveTextContent(
       'gpu-a100: grant applied for 5 usernames',
     );
@@ -222,10 +231,10 @@ describe('PoolAccessUsersModal', () => {
 
     await user.click(screen.getByRole('button', { name: 'Grant to 2 users' }));
     await screen.findByTestId('pool-access-results');
-    expect(mocks.grantResourcePoolAccess).toHaveBeenCalledWith({
-      poolName: 'gpu-a100',
-      usernames: ['alice', 'bob'],
-    });
+    expect(mocks.grantResourcePoolAccess).toHaveBeenCalledWith(
+      { poolName: 'gpu-a100', usernames: ['alice', 'bob'] },
+      { signal: expect.any(AbortSignal) },
+    );
   });
 
   it('splits large changes under the body limit and reports each pool', async () => {

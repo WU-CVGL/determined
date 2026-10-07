@@ -133,8 +133,8 @@ describe('PoolAccess', () => {
     mocks.setResourcePoolAccessMode.mockReset();
     mocks.revokeResourcePoolAccess.mockReset();
     mocks.users = [{ id: 7, isActive: true, isAdmin: false, username: 'alice' }];
-    // The change of the app outlives the tab: forget the one of the last test.
-    poolAccessChange.dismiss();
+    // The change of the app outlives the tab: end the one of the last test, also a running one.
+    poolAccessChange.reset();
   });
 
   it('renders each pool of the API response', async () => {
@@ -218,10 +218,10 @@ describe('PoolAccess', () => {
     await user.click(screen.getByRole('button', { name: 'Restrict 2 pools' }));
     const results = await screen.findByTestId('pool-access-results');
     expect(mocks.setResourcePoolAccessMode).toHaveBeenCalledTimes(2);
-    expect(mocks.setResourcePoolAccessMode).toHaveBeenCalledWith({
-      mode: 'restricted',
-      poolName: 'cpu',
-    });
+    expect(mocks.setResourcePoolAccessMode).toHaveBeenCalledWith(
+      { mode: 'restricted', poolName: 'cpu' },
+      { signal: expect.any(AbortSignal) },
+    );
     expect(results).toHaveTextContent('1 of 2 pools failed.');
     expect(within(results).getByTestId('pool-access-result-cpu')).toHaveTextContent(
       'cpu: restricted',
@@ -252,10 +252,10 @@ describe('PoolAccess', () => {
 
     await user.click(screen.getByRole('button', { name: 'Make 2 pools public' }));
     expect(await screen.findByText('Done for 2 pools.')).toBeInTheDocument();
-    expect(mocks.setResourcePoolAccessMode).toHaveBeenCalledWith({
-      mode: 'public',
-      poolName: 'gpu-a100',
-    });
+    expect(mocks.setResourcePoolAccessMode).toHaveBeenCalledWith(
+      { mode: 'public', poolName: 'gpu-a100' },
+      { signal: expect.any(AbortSignal) },
+    );
   });
 
   it('revokes the users selected in the detail of a pool', async () => {
@@ -279,10 +279,10 @@ describe('PoolAccess', () => {
     await user.click(screen.getByRole('button', { name: 'Revoke from 1 user' }));
 
     expect(await screen.findByText('Done for 1 pool.')).toBeInTheDocument();
-    expect(mocks.revokeResourcePoolAccess).toHaveBeenCalledWith({
-      poolName: 'gpu-a100',
-      usernames: ['carol'],
-    });
+    expect(mocks.revokeResourcePoolAccess).toHaveBeenCalledWith(
+      { poolName: 'gpu-a100', usernames: ['carol'] },
+      { signal: expect.any(AbortSignal) },
+    );
   });
 
   it('shows the results on the tab when the dialog is closed during a change', async () => {

@@ -28,7 +28,6 @@ import {
   PoolAccessResult,
   PoolAccessUsersAction,
   resolveUsernames,
-  RESOURCE_POOL_ACCESS_BODY_BUDGET,
 } from 'utils/resourcePoolAccess';
 import { pluralizer } from 'utils/string';
 
@@ -195,12 +194,12 @@ const PoolAccessUsersModalComponent: React.FC<Props> = ({
         return;
       }
       if (applied.unknown.length > 0 || applied.usernames.length === 0) return;
-      const answer = await runChange(action, () =>
+      const answer = await runChange(action, (signal) =>
         changeUsersInPools(
           poolNames,
           applied.usernames,
           isGrant ? grantResourcePoolAccess : revokeResourcePoolAccess,
-          RESOURCE_POOL_ACCESS_BODY_BUDGET,
+          { signal },
         ),
       );
       if (answer) setResults(answer);

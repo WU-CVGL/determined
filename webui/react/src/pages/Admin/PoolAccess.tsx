@@ -212,7 +212,7 @@ interface ConfirmConfig {
   content: React.ReactNode;
   danger?: boolean;
   okText: string;
-  run: () => Promise<PoolAccessResult[]>;
+  run: (signal: AbortSignal) => Promise<PoolAccessResult[]>;
   title: string;
 }
 
@@ -379,11 +379,12 @@ const PoolAccess: React.FC = () => {
       ),
       danger: true,
       okText: `Restrict ${targets.length} ${pluralizer(targets.length, 'pool')}`,
-      run: () =>
+      run: (signal) =>
         setModeInPools(
           targets.map((pool) => pool.poolName),
           ResourcePoolAccessMode.Restricted,
           setResourcePoolAccessMode,
+          { signal },
         ),
       title: `Restrict ${targets.length} ${pluralizer(targets.length, 'pool')}`,
     });
@@ -415,11 +416,12 @@ const PoolAccess: React.FC = () => {
         </div>
       ),
       okText: `Make ${targets.length} ${pluralizer(targets.length, 'pool')} public`,
-      run: () =>
+      run: (signal) =>
         setModeInPools(
           targets.map((pool) => pool.poolName),
           ResourcePoolAccessMode.Public,
           setResourcePoolAccessMode,
+          { signal },
         ),
       title: `Make ${targets.length} ${pluralizer(targets.length, 'pool')} public`,
     });
@@ -441,7 +443,8 @@ const PoolAccess: React.FC = () => {
         ),
         danger: true,
         okText: `Revoke from ${sorted.length} ${pluralizer(sorted.length, 'user')}`,
-        run: () => changeUsersInPools([pool.poolName], sorted, revokeResourcePoolAccess),
+        run: (signal) =>
+          changeUsersInPools([pool.poolName], sorted, revokeResourcePoolAccess, { signal }),
         title: `Revoke access to ${pool.poolName}`,
       });
     },
