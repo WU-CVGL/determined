@@ -44,9 +44,9 @@ const (
 	// fewerThanTwoSlots is why prefer_gpu_topology does not rank a reservation of 1 slot.
 	fewerThanTwoSlots = "fewer than 2 slots"
 	// maxTopologySets bounds the sets of free GPUs that prefer_gpu_topology compares in one
-	// reservation (C(16,8) = 12870 fits). Above it, "soft" gets the pool's default choice, while
-	// "strong" chooses inside the same NUMA node by GPUs in error, then IDs, keeping its one-node
-	// constraint.
+	// ranking (C(16,8) = 12870 fits): of the agent's free GPUs for "soft", of each NUMA node's free
+	// GPUs for "strong". Above it, "soft" gets the pool's default choice; "strong" takes that NUMA
+	// node's GPUs in error last, then the lowest IDs, keeping its one-node constraint.
 	maxTopologySets = 20000
 	// maxPackingNUMANodes bounds the NUMA nodes that NUMA packing compares; above it, packing takes
 	// the lowest free IDs. Two sockets at NPS4 give 8.
