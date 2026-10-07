@@ -1,24 +1,70 @@
-import { compareText } from './JobQueue.sort';
+import fixture from 'fixtures/jobsSortOrder.json';
+import { FullJob, Job, JobState, JobType } from 'types';
 
-const sorted = (texts: string[]) => [...texts].sort(compareText);
+import { sortJobs } from './JobQueue.sort';
 
-describe('compareText', () => {
-  it('folds A to Z only, then puts capitals first', () => {
-    expect(sorted(['b', 'B', 'a', 'A'])).toEqual(['A', 'a', 'B', 'b']);
-    expect(sorted(['z', 'é', 'É', 'e'])).toEqual(['e', 'z', 'É', 'é']);
-  });
+/*
+ * The text cases of the Jobs page's shared fixture, which the master's tests check against Postgres
+ * and Go: the Active tab orders names and users as the Jobs page does. Its ties keep the queue
+ * order instead of the fixture's newest start first, so the texts are compared, not the rows.
+ */
 
-  it('orders by code point: digits, then underscores, then letters', () => {
-    expect(sorted(['ab', 'a_b', 'aB', 'a1'])).toEqual(['a1', 'a_b', 'aB', 'ab']);
-    expect(sorted(['alpha_2', 'alpha2', 'Alpha'])).toEqual(['Alpha', 'alpha2', 'alpha_2']);
-  });
+interface FixtureRow {
+  id: string;
+  name: string;
+  owner: string | null;
+}
 
-  it('orders by code point beyond the Basic Multilingual Plane, not by UTF-16 unit', () => {
-    expect(sorted(['\u{1F600}', '～'])).toEqual(['～', '\u{1F600}']);
-  });
+const rows = fixture.rows as FixtureRow[];
+const orders = fixture.orders as Record<string, { ascend: string[]; descend: string[] }>;
+const rowOf = (job: Job): FixtureRow => rows.find((row) => row.id === job.jobId) as FixtureRow;
 
-  it('puts the empty text and a prefix first, and finds equal texts equal', () => {
-    expect(sorted(['a', '', 'a0'])).toEqual(['', 'a', 'a0']);
-    expect(compareText('job', 'job')).toBe(0);
+/** A job of each row, in queue order as the fixture lists the rows. */
+const jobs: FullJob[] = rows.map((row, index) => ({
+  allocatedSlots: 1,
+  entityId: String(100 + index),
+  isPreemptible: true,
+  jobId: row.id,
+  name: row.name,
+  priority: 42,
+  requestedSlots: 1,
+  resourcePool: 'default',
+  submissionTime: new Date('2026-01-01T00:00:00Z'),
+  summary: { jobsAhead: index, state: JobState.SCHEDULED },
+  type: JobType.EXPERIMENT,
+  userId: index,
+  username: row.owner ?? '',
+  workspaceId: 1,
+}));
+
+/** The name the page sorts a user by; none for a row without an owner. */
+const ownerName = (job: Job) => rowOf(job).owner ?? undefined;
+
+const COLUMNS = [
+  { column: 'name', fixtureKey: 'name', text: (job: Job) => rowOf(job).name },
+  { column: 'user', fixtureKey: 'owner', text: ownerName },
+];
+
+describe('sortJobs on the text cases of the shared fixture', () => {
+  describe.each(COLUMNS)('by $column', ({ column, fixtureKey, text }) => {
+    it.each(['ascend', 'descend'] as const)(
+      'orders the texts %sing as the Jobs page does, a missing one last',
+      (direction) => {
+        const sorted = sortJobs(jobs, column, direction === 'descend', ownerName);
+        const expected = orders[fixtureKey][direction].map((id) =>
+          text(jobs.find((job) => job.jobId === id) as Job),
+        );
+        expect(sorted.map(text)).toEqual(expected);
+      },
+    );
+
+    it.each([false, true])('keeps the queue order of equal texts (descending: %s)', (desc) => {
+      expect.hasAssertions();
+      const sorted = sortJobs(jobs, column, desc, ownerName);
+      sorted.slice(1).forEach((job, i) => {
+        if (text(job) !== text(sorted[i])) return;
+        expect(job.summary.jobsAhead).toBeGreaterThan(sorted[i].summary.jobsAhead);
+      });
+    });
   });
 });

@@ -4,7 +4,6 @@ import { mapV1Command, mapV1ExperimentList, mapV1GenericTasksResponse } from 'se
 
 import {
   commandRow,
-  compareJobsText,
   experimentRow,
   genericTaskRow,
   mergeRuns,
@@ -240,35 +239,6 @@ describe('the Jobs page order', () => {
     expect(new Set(pages.map((row) => row.key)).size).toBe(whole.length);
     // The merge is the order of the comparator, across kinds too.
     expect(whole).toEqual([...whole].sort(compare));
-  });
-});
-
-describe('compareJobsText', () => {
-  const order = (texts: string[]) => [...texts].sort(compareJobsText);
-
-  it('folds A-Z only, then compares as is', () => {
-    expect(order(['beta', 'Beta', 'alpha'])).toEqual(['alpha', 'Beta', 'beta']);
-    expect(order(['é', 'É', 'e', 'f'])).toEqual(['e', 'f', 'É', 'é']);
-    // KELVIN SIGN lowercases to k in JavaScript, but not under Postgres's C collation.
-    expect(order(['K', 'l', 'k'])).toEqual(['k', 'l', 'K']);
-  });
-
-  it('compares by code point, not by UTF-16 unit', () => {
-    // 😀 (U+1F600) is D83D DE00 in UTF-16, before ｱ (U+FF71) by unit.
-    expect('😀' < 'ｱ').toBe(true);
-    expect(order(['😀', 'ｱ'])).toEqual(['ｱ', '😀']);
-  });
-
-  it('puts underscores, digits and spaces where their code points are', () => {
-    expect(order(['ab', 'a_b', 'a-b', '_x', '48c', '128c', ' lead'])).toEqual([
-      ' lead',
-      '128c',
-      '48c',
-      '_x',
-      'a-b',
-      'a_b',
-      'ab',
-    ]);
   });
 });
 

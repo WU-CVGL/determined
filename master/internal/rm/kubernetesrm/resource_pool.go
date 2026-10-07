@@ -395,7 +395,6 @@ func (k *kubernetesResourcePool) assignResources(
 		k.syslog.WithField("allocation-id", req.AllocationID).Errorf("cannot find group for job %s", req.JobID)
 		return
 	}
-	k.slotsUsedPerGroup[group] += req.SlotsNeeded
 
 	var resources *k8sJobResource
 	if req.Restore {
@@ -426,6 +425,8 @@ func (k *kubernetesResourcePool) assignResources(
 		JobSubmissionTime: req.JobSubmissionTime,
 		Recovered:         req.Restore,
 	}
+	// Slots count once the request is admitted; a failed reattach is retried and adds none.
+	k.slotsUsedPerGroup[group] += req.SlotsNeeded
 	k.reqList.AddAllocationRaw(req.AllocationID, &assigned)
 	rmevents.Publish(req.AllocationID, assigned.Clone())
 
@@ -511,8 +512,8 @@ func (k *kubernetesResourcePool) resourcesReleased(
 	}
 
 	k.syslog.Infof("resources are released for %s", msg.AllocationID)
-	group := k.groups[req.JobID]
-	if group != nil {
+	// Only an admitted request holds slots of its group.
+	if group := k.groups[req.JobID]; group != nil && k.reqList.IsScheduled(msg.AllocationID) {
 		k.slotsUsedPerGroup[group] -= req.SlotsNeeded
 	}
 
@@ -539,20 +540,26 @@ func (k *kubernetesResourcePool) getOrCreateGroup(jobID model.JobID) *tasklist.G
 }
 
 func (k *kubernetesResourcePool) admitPendingTasks() {
-	for it := k.reqList.Iterator(); it.Next(); {
-		req := it.Value()
-		group := k.groups[req.JobID]
-		if group == nil {
-			k.syslog.Warnf("schedulePendingTasks cannot find group for job %s", req.JobID)
-			continue
-		}
-		if !k.reqList.IsScheduled(req.AllocationID) {
-			if maxSlots := group.MaxSlots; maxSlots != nil {
-				if k.slotsUsedPerGroup[group]+req.SlotsNeeded > *maxSlots {
-					continue
-				}
+	// Restores go first and are not held back by max_slots: their pods already exist.
+	for _, restore := range []bool{true, false} {
+		for it := k.reqList.Iterator(); it.Next(); {
+			req := it.Value()
+			if req.Restore != restore {
+				continue
 			}
-			k.assignResources(req)
+			group := k.groups[req.JobID]
+			if group == nil {
+				k.syslog.Warnf("schedulePendingTasks cannot find group for job %s", req.JobID)
+				continue
+			}
+			if !k.reqList.IsScheduled(req.AllocationID) {
+				if maxSlots := group.MaxSlots; maxSlots != nil && !req.Restore {
+					if k.slotsUsedPerGroup[group]+req.SlotsNeeded > *maxSlots {
+						continue
+					}
+				}
+				k.assignResources(req)
+			}
 		}
 	}
 }
