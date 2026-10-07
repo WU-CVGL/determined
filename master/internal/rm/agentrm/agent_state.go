@@ -225,6 +225,7 @@ func (a *agentState) chooseFreeDevices(slots int, sel deviceSelection) (deviceRe
 		res.choice, res.failure = a.selectRankedDevices(slots, sel)
 		switch {
 		case res.failure != "":
+			// It panicked.
 		case res.choice.devices != nil:
 			err := a.checkFreeDevices(res.choice.devices, slots)
 			if err == nil {
