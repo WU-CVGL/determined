@@ -213,6 +213,7 @@ const mapCommonV1Task = (
     state: mapV1TaskState(task.state),
     type,
     userId: task.userId ?? 0,
+    username: task.username,
     workspaceId: task.workspaceId,
   };
 };
@@ -303,6 +304,7 @@ export const mapV1GenericTask = (task: Sdk.V1GenericTask): types.GenericTask => 
   return {
     allocationId: task.allocationId || undefined,
     description: task.description ?? '',
+    displayName: task.displayName || undefined,
     endTime: (task.endTime as string | undefined) || undefined,
     forkedFrom: task.forkedFrom || undefined,
     jobId: task.jobId,
@@ -581,6 +583,7 @@ export function mapV1Experiment(
     checkpointSize: parseInt(data?.checkpointSize || '0'),
     config: data.config,
     description: data.description,
+    displayName: data.displayName,
     duration: data.duration,
     endTime: data.endTime as unknown as string,
     externalExperimentId: data.externalExperimentId,
@@ -609,6 +612,7 @@ export function mapV1Experiment(
     trialIds: data.trialIds || [],
     unmanaged: data.unmanaged,
     userId: data.userId ?? 0,
+    username: data.username,
     workspaceId: data.workspaceId,
     workspaceName: data.workspaceName,
   };

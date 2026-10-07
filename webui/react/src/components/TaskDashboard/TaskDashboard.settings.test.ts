@@ -4,7 +4,10 @@ import settingsConfig, {
   DEFAULT_COLUMNS,
   defaultWidths,
   normalizedLayout,
+  readFilters,
+  Settings,
   TaskDashboardColumnName,
+  urlView,
 } from './TaskDashboard.settings';
 
 /* The default columns before the Slots column, and widths that a user gave them. */
@@ -77,7 +80,13 @@ describe('normalizedLayout', () => {
       columnWidths: [250, 140, 90, 70],
     });
     expect(layout.columns).toEqual(['name', 'resourcePool', 'slots', 'id', 'kind']);
-    expect(widthOf(layout)).toEqual({ id: 90, kind: 70, name: 250, resourcePool: 140, slots: 72 });
+    expect(widthOf(layout)).toEqual({
+      id: 90,
+      kind: 70,
+      name: 250,
+      resourcePool: 140,
+      slots: DEFAULT_COLUMN_WIDTHS.slots,
+    });
   });
 
   it('adds Slots last without Resource Pool', () => {
@@ -107,11 +116,11 @@ describe('normalizedLayout', () => {
       normalized({ columns: ['name', 'resourcePool', 'id', 'kind'], columnWidths: [250] }),
     ).toEqual({
       columns: ['name', 'resourcePool', 'slots', 'id', 'kind'],
-      columnWidths: [250, 128, 72, 100, 64],
+      columnWidths: [250, 128, DEFAULT_COLUMN_WIDTHS.slots, 100, DEFAULT_COLUMN_WIDTHS.kind],
     });
     expect(normalized({ columns: ['slots', 'name', 'id', 'kind'], columnWidths: [80] })).toEqual({
       columns: ['slots', 'name', 'id', 'kind'],
-      columnWidths: [80, 240, 100, 64],
+      columnWidths: [80, 240, 100, DEFAULT_COLUMN_WIDTHS.kind],
     });
   });
 
@@ -120,7 +129,7 @@ describe('normalizedLayout', () => {
       normalized({ columns: ['name', 'resourcePool', 'id'], columnWidths: [250, 140, 90, 1, 2] }),
     ).toEqual({
       columns: ['name', 'resourcePool', 'slots', 'id'],
-      columnWidths: [250, 140, 72, 90],
+      columnWidths: [250, 140, DEFAULT_COLUMN_WIDTHS.slots, 90],
     });
     expect(normalized({ columns: ['slots', 'name'], columnWidths: [80, 250, 1, 2] })).toEqual({
       columns: ['slots', 'name'],
@@ -131,7 +140,122 @@ describe('normalizedLayout', () => {
   it('reads no columns as the default ones', () => {
     expect(normalized({ columns: [], columnWidths: OLD_WIDTHS })).toEqual({
       columns: DEFAULT_COLUMNS,
-      columnWidths: [301, 302, 303, 304, 305, 306, 307, 72, 308, 309],
+      columnWidths: [301, 302, 303, 304, 305, 306, 307, DEFAULT_COLUMN_WIDTHS.slots, 308, 309],
     });
+  });
+});
+
+describe('readFilters', () => {
+  const read = (saved: Record<string, unknown>, userId?: number) =>
+    readFilters({ ...saved } as unknown as Settings, userId);
+
+  it('reads the filters of now as saved, with nothing to clean', () => {
+    const saved = {
+      search: 'bert',
+      slots: ['0', 'multi:8'],
+      state: ['active'],
+      type: ['shell'],
+      user: [3],
+      workspace: [7, 9],
+    };
+    expect(read(saved, 3)).toEqual({ cleanup: undefined, filters: saved, waitsForUser: false });
+  });
+
+  it('cleans what 0.41.0 saved: GPU, CPU-only, one workspace and Mine', () => {
+    expect(read({ owner: 'mine', slots: 'gpu', workspace: 7 }, 3)).toEqual({
+      cleanup: { owner: undefined, slots: ['multi:0'], user: [3], workspace: [7] },
+      filters: {
+        search: undefined,
+        slots: ['multi:0'],
+        state: undefined,
+        type: undefined,
+        user: [3],
+        workspace: [7],
+      },
+      waitsForUser: false,
+    });
+    expect(read({ owner: 'all', slots: 'cpu-only' }, 3).cleanup).toEqual({
+      owner: undefined,
+      slots: ['0'],
+    });
+  });
+
+  it('waits for the signed-in user for Mine, and cleans the rest meanwhile', () => {
+    expect(read({ owner: 'mine', slots: 'gpu' })).toMatchObject({
+      cleanup: { slots: ['multi:0'] },
+      filters: { user: undefined },
+      waitsForUser: true,
+    });
+  });
+
+  it('drops values it does not know', () => {
+    expect(read({ slots: ['x', '2'], state: ['RUNNING'], type: ['bogus'] }, 3)).toMatchObject({
+      cleanup: { slots: ['2'] },
+      filters: { slots: ['2'], state: undefined, type: undefined },
+    });
+  });
+});
+
+describe('urlView', () => {
+  it('leaves the saved view to a URL without any of its keys', () => {
+    expect(urlView('')).toBeUndefined();
+    expect(urlView('?tab=runs')).toBeUndefined();
+  });
+
+  it('sets every filter, the sort and the page from a URL with any of them', () => {
+    expect(urlView('?state=paused')).toEqual({
+      owner: undefined,
+      search: undefined,
+      slots: undefined,
+      sortDesc: true,
+      sortKey: 'startTime',
+      state: ['paused'],
+      tableLimit: 20,
+      tableOffset: 0,
+      type: undefined,
+      user: undefined,
+      workspace: undefined,
+    });
+    expect(
+      urlView(
+        '?type=shell&type=experiment&search=bert&user=3&user=4&slots=0&slots=multi%3A8' +
+          '&workspace=7&sortKey=name&sortDesc=false&tableOffset=40&tableLimit=50',
+      ),
+    ).toEqual({
+      owner: undefined,
+      search: 'bert',
+      slots: ['0', 'multi:8'],
+      sortDesc: false,
+      sortKey: 'name',
+      state: undefined,
+      tableLimit: 50,
+      tableOffset: 40,
+      type: ['shell', 'experiment'],
+      user: [3, 4],
+      workspace: [7],
+    });
+  });
+
+  it('keeps old /tasks links: kinds, owners, workspaces and the Type sort, not old states', () => {
+    expect(
+      urlView('?type=jupyter-lab&user=5&workspace=2&sortKey=type&sortDesc=false&state=RUNNING'),
+    ).toMatchObject({
+      sortDesc: false,
+      sortKey: 'type',
+      state: undefined,
+      type: ['jupyter-lab'],
+      user: [5],
+      workspace: [2],
+    });
+    expect(urlView('?sortKey=id')).toMatchObject({ sortKey: 'startTime' });
+    expect(urlView('?sortKey=workspace&sortDesc=false')).toMatchObject({
+      sortDesc: true,
+      sortKey: 'startTime',
+    });
+  });
+
+  it("reads 0.41.0's GPU, CPU-only and Mine", () => {
+    expect(urlView('?slots=gpu&owner=mine', 3)).toMatchObject({ slots: ['multi:0'], user: [3] });
+    expect(urlView('?slots=cpu-only')).toMatchObject({ slots: ['0'] });
   });
 });
