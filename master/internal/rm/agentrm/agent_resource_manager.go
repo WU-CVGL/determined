@@ -19,6 +19,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/api"
 	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/db"
+	"github.com/determined-ai/determined/master/internal/gpuhealth"
 	"github.com/determined-ai/determined/master/internal/rm"
 	"github.com/determined-ai/determined/master/internal/rm/rmerrors"
 	"github.com/determined-ai/determined/master/internal/rm/rmevents"
@@ -151,6 +152,16 @@ type ResourceManager struct {
 	dynamicPoolWake   chan struct{}
 	dynamicPoolCancel context.CancelFunc
 	dynamicPoolDone   chan struct{}
+
+	// gpuXIDs is where the pools read the GPUs' recent critical XIDs for GPU selection.
+	gpuXIDs *gpuXIDReader
+}
+
+// SetGPUXIDs gives the pools the master's GPU XIDs for GPU selection: read returns the last
+// successful XID query, or nil, and must never query. Without it, only NVML errors put a GPU in
+// error.
+func (a *ResourceManager) SetGPUXIDs(read func() *gpuhealth.XIDSnapshot) {
+	a.gpuXIDs.set(read)
 }
 
 func newAgentResourceManager(
@@ -168,6 +179,7 @@ func newAgentResourceManager(
 		agentService: agentService,
 		agentUpdates: agentUpdates,
 		registry:     registry,
+		gpuXIDs:      &gpuXIDReader{},
 	}
 
 	for _, poolConfig := range a.registry.desiredConfigs() {
@@ -734,7 +746,7 @@ func (a *ResourceManager) createResourcePool(
 	if err != nil {
 		return nil, err
 	}
-	return newResourcePool(
+	rp, err := newResourcePool(
 		&config,
 		db,
 		cert,
@@ -742,6 +754,14 @@ func (a *ResourceManager) createResourcePool(
 		MakeFitFunction(config.Scheduler.FittingPolicy),
 		a.agentService,
 	)
+	if err != nil {
+		return nil, err
+	}
+	// The pool's scheduler already runs: set it under the pool's lock.
+	rp.mu.Lock()
+	rp.gpuXIDs = a.gpuXIDs
+	rp.mu.Unlock()
+	return rp, nil
 }
 
 func (a *ResourceManager) poolByName(name string) (*resourcePool, error) {

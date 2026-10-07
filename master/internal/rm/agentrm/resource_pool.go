@@ -44,7 +44,9 @@ type resourcePool struct {
 	agentService     *agents
 	agentStatesCache map[aproto.ID]*agentState
 	// gpuPolicy is the GPU selection of the running scheduling pass, read once per pass.
-	gpuPolicy      gpuPolicy
+	gpuPolicy gpuPolicy
+	// gpuXIDs is where the pool reads the GPUs' recent critical XIDs; nil reads none.
+	gpuXIDs        *gpuXIDReader
 	taskList       *tasklist.TaskList
 	groups         map[model.JobID]*tasklist.Group
 	queuePositions tasklist.JobSortState // secondary sort key based on job submission time
