@@ -24,11 +24,12 @@ func (r *gpuXIDReader) set(read func() *gpuhealth.XIDSnapshot) {
 	r.read.Store(&read)
 }
 
-// recent returns the UUIDs of the GPUs with a critical XID last observed less than XIDWindow
-// before now, from the last successful query. It never queries, so a scheduling pass never waits
-// for Prometheus: a background refresh keeps the result current. An XID of an old result that has
-// left the window no longer counts. It reads the snapshot without a lock, from every pool's
-// scheduler: the cache must never change a snapshot after storing it.
+// recent returns the UUIDs of the GPUs with a critical XID in the last successful query whose last
+// window is in the 24 hours a query at now would cover (gpuhealth.XIDRange): the XIDs that a failed
+// query at now keeps. So the XIDs of an old result age as in the agent API. It never queries, so a
+// scheduling pass never waits for Prometheus: a background refresh keeps the result current. It
+// reads the snapshot without a lock, from every pool's scheduler: the cache must never change a
+// snapshot after storing it.
 func (r *gpuXIDReader) recent(now time.Time) map[string]bool {
 	if r == nil {
 		return nil
@@ -41,10 +42,11 @@ func (r *gpuXIDReader) recent(now time.Time) map[string]bool {
 	if snapshot == nil {
 		return nil
 	}
+	start, _ := gpuhealth.XIDRange(now)
 	out := map[string]bool{}
 	for uuid, xids := range snapshot.ByUUID {
 		for _, x := range xids {
-			if gpuhealth.IsCriticalXID(x.Code) && now.Sub(x.LastObserved) < gpuhealth.XIDWindow {
+			if gpuhealth.IsCriticalXID(x.Code) && !x.LastObserved.Before(start) {
 				out[uuid] = true
 				break
 			}
@@ -53,9 +55,10 @@ func (r *gpuXIDReader) recent(now time.Time) map[string]bool {
 	return out
 }
 
-// gpuPolicy is a pool's GPU selection for one scheduling pass. The scheduler's simulation and the
-// pass's live reservations use the same one, so they choose the same devices for the same state
-// and the same placements (see deepCopy). Its zero value takes devices in map order.
+// gpuPolicy is a pool's GPU selection for one scheduling pass, with one aged XID result for the
+// whole pass. The scheduler's simulation and the pass's live reservations use the same one, so
+// they choose the same devices for the same state and the same placements (see deepCopy), and no
+// reservation reads the XIDs under the agent's lock. Its zero value takes devices in map order.
 type gpuPolicy struct {
 	// packNUMA packs every task's GPUs by NUMA node: fitting_policy best, numa_packing not false.
 	packNUMA bool

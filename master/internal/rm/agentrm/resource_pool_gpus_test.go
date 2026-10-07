@@ -45,9 +45,11 @@ func TestGPUXIDReaderRecent(t *testing.T) {
 		Status: agentv1.GpuXidQueryStatus_GPU_XID_QUERY_STATUS_OK, QueriedAt: now.Add(-time.Hour),
 		ByUUID: map[string][]gpuhealth.XID{
 			"GPU-recent":  {{Code: 79, FirstObserved: now.Add(-2 * time.Hour), LastObserved: now.Add(-time.Hour)}},
-			"GPU-expired": {{Code: 79, LastObserved: now.Add(-gpuhealth.XIDWindow - time.Minute)}},
-			// The query leaves application codes out; they never count here either.
-			"GPU-app": {{Code: 13, LastObserved: now.Add(-time.Minute)}},
+			"GPU-expired": {{Code: 79, LastObserved: now.Add(-gpuhealth.XIDWindow - gpuhealth.XIDStep)}},
+			// The last window that a query at now still covers, as a failed query keeps it.
+			"GPU-edge": {{Code: 79, LastObserved: now.Add(-gpuhealth.XIDWindow)}},
+			// The query leaves the ignored codes out; they never count here either.
+			"GPU-ignored": {{Code: 13, LastObserved: now.Add(-time.Minute)}},
 		},
 	}
 
@@ -58,7 +60,10 @@ func TestGPUXIDReaderRecent(t *testing.T) {
 	r.set(func() *gpuhealth.XIDSnapshot { return nil })
 	require.Nil(t, r.recent(now), "no successful query yet")
 	r.set(func() *gpuhealth.XIDSnapshot { return snapshot })
-	require.Equal(t, map[string]bool{"GPU-recent": true}, r.recent(now))
+	require.Equal(t, map[string]bool{"GPU-recent": true, "GPU-edge": true}, r.recent(now))
+	// A second earlier, the range starts there too; a second later, it starts one step later.
+	require.Equal(t, map[string]bool{"GPU-recent": true, "GPU-edge": true}, r.recent(now.Add(-time.Second)))
+	require.Equal(t, map[string]bool{"GPU-recent": true}, r.recent(now.Add(time.Second)))
 }
 
 func TestSetGPUXIDsReachesThePools(t *testing.T) {

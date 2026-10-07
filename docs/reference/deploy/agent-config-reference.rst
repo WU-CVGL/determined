@@ -415,10 +415,11 @@ after a quiet period. So a slow Prometheus can delay such a request, but never a
 and ``xid_queried_at`` can be up to 5 minutes old. Agent enable and disable responses carry the last
 result without querying.
 
-GPU selection never queries: each scheduling pass reads the last successful result and counts the
-XIDs last observed in the 24 hours before it. So that this result stays current, the master with a
-Prometheus asks for the XIDs itself about every 30 seconds. Until its first query succeeds after a
-master start, only NVML errors count.
+GPU selection never queries and never waits for Prometheus: each scheduling pass reads the last
+successful result once and uses it for every task it places. It counts the XIDs whose last window is
+in the 24 hours that a query at the time of the pass covers, the XIDs that a failed query then
+keeps. So that this result stays current, the master with a Prometheus asks for the XIDs itself
+about every 30 seconds. Until its first query succeeds after a master start, only NVML errors count.
 
 CLI and WebUI
 =============
