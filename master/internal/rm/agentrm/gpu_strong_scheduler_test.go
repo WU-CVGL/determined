@@ -187,6 +187,24 @@ func TestStrongStartsInOnePassUnderPacking(t *testing.T) {
 	require.False(t, again)
 }
 
+func TestStrongPlansWithThePassXIDs(t *testing.T) {
+	// GPU 7 is busy and GPU 0 has a recent critical XID in the pass's policy. With it, the first
+	// strong 2-GPU task takes healthy GPUs of NUMA node 0 (fewer allocatable healthy slots), the
+	// strong 3-GPU task takes node 1, and the second 2-GPU task takes the rest of node 0, GPU 0
+	// included: all three start in one pass. A plan without the pass's XIDs puts the first on
+	// node 1 and leaves no node for the third.
+	xids := map[string]bool{gpuDevice(0).UUID: true}
+	s := newStrongPool(t, false, gpuPolicy{packNUMA: true, xids: xids}, map[aproto.ID]topologyFixture{"a": node02},
+		strongTask{id: "busy", slots: 1, priority: 42, running: []int{7}},
+		strongTask{id: "first", slots: 2, priority: 42, strong: true},
+		strongTask{id: "three", slots: 3, priority: 42, strong: true},
+		strongTask{id: "last", slots: 2, priority: 42, strong: true},
+	)
+	allocated, _, again := s.pass(t)
+	require.Equal(t, map[string][]int{"first": {1, 2}, "three": {4, 5, 6}, "last": {0, 3}}, allocated)
+	require.False(t, again)
+}
+
 func TestStrongStartsWithinTwoPassesWithoutPacking(t *testing.T) {
 	// The same in map order (worst, or numa_packing false): the plan and the reservations take
 	// random GPUs for the 1-GPU task. The strong task starts, in the first pass or in the one the
