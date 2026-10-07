@@ -18,8 +18,9 @@
 // calls either. Continuations (experiment, trial, command and generic task restore; trial
 // allocations and restarts; generic task resume recovery and retried resume plans) are not
 // checked, because they continue work that a pool has accepted. Checkpoint GC is not checked
-// either, and that is a known gap, not a rule: GC runs in the cluster's default aux pool also when
-// a user's request (deleting checkpoints or TensorBoard files) starts it. See runCheckpointGCTask.
+// either: it always runs in the cluster's default aux pool, also when a user's request starts it,
+// as the experiment's owner in a fixed environment that takes only the experiment's checkpoint
+// storage, so it runs no code that a user chose. See runCheckpointGCTask.
 package poolaccess
 
 import (

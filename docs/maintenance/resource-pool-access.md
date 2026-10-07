@@ -48,7 +48,9 @@ pool:
   experiment, also another user's, whose trials run as its owner; activating
   an experiment, one at a time or in bulk; and resuming runs.
 - Moving a job to another pool in the job queue. A move must name its target
-  pool.
+  pool. Moving another user's experiment checks your access, not theirs: its
+  trials then run in the new pool as that user, who needs access to the pool to
+  activate the experiment again after a pause.
 - Setting a new default compute or aux pool of a workspace, and saving an
   experiment config policy, of a workspace or of the cluster, whose invariant
   config sets a new `resources.resource_pool`.
@@ -78,14 +80,14 @@ Work that a pool has accepted keeps its access:
   `max_slots` lets an accepted experiment use more slots of its pool.
 
 Checkpoint garbage collection is not checked either. It runs in the cluster's
-default aux pool even when that pool is restricted. It starts when an
-experiment ends with checkpoints to delete, and when a user deletes
-checkpoints, an experiment, or an experiment's TensorBoard files, or changes
-how many checkpoints an experiment keeps. Whoever starts it, it runs as the
-experiment's owner, without a user session, and takes nothing from the
-experiment but its checkpoint storage: no environment variables, bind mounts,
-or pod spec. It runs a fixed entrypoint with the task container defaults of
-that pool. A user without a grant can therefore start garbage collection in a
+default aux pool even when that pool is restricted. It starts when an experiment
+ends with checkpoints to delete, and when a user deletes checkpoints, an
+experiment's TensorBoard files, or experiments, also by deleting a project or a
+workspace, or changes how many checkpoints an experiment keeps. Whoever starts
+it, it runs as the experiment's owner, without a user session, and takes nothing
+from the experiment but its checkpoint storage: no environment variables, bind
+mounts, or pod spec. It runs a fixed entrypoint with the task container defaults
+of that pool. A user without a grant can therefore start garbage collection in a
 restricted default aux pool, but cannot make it run code of their choice.
 
 ## Revocation
@@ -213,10 +215,10 @@ may change only the fields that bound its training, so its pool stays the one
 the owner chose unless a config policy sets another, as described below. You
 still need access to that pool.
 
-Deleting another user's checkpoints, experiment, or TensorBoard files does not
-lend your session either: checkpoint garbage collection runs as the
-experiment's owner, without a user session, and runs no code that the owner
-chose (see "What is not checked").
+Deleting another user's checkpoints, TensorBoard files, or experiments, also by
+deleting a project or a workspace, does not lend your session either: checkpoint
+garbage collection runs as the experiment's owner, without a user session, and
+runs no code that the owner chose (see "What is not checked").
 
 An experiment config policy, of a workspace or of the cluster, overrides what
 the experiments in its scope set, including their image, entrypoint,
