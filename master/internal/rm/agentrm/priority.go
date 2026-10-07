@@ -18,6 +18,10 @@ import (
 type priorityScheduler struct {
 	preemptionEnabled      bool
 	allowHeterogeneousFits bool
+	// gpus is the pool's GPU selection for the pass that Schedule runs. The simulation selects
+	// devices on its copies with it, as the pass's live reservations do; its zero value takes
+	// devices in map order.
+	gpus gpuPolicy
 }
 
 // NewPriorityScheduler creates a new scheduler that schedules tasks via priority.
@@ -32,6 +36,8 @@ func (p priorityScheduler) Schedule(rp *resourcePool) (
 	[]*sproto.AllocateRequest,
 	[]model.AllocationID,
 ) {
+	// p is a copy: the policy holds for this pass only.
+	p.gpus = rp.gpuPolicy
 	return p.prioritySchedule(
 		rp.taskList,
 		rp.groups,
@@ -157,7 +163,7 @@ func (p priorityScheduler) prioritySchedulerWithFilter(
 					log.Debugf(
 						"Not preempting tasks for task %s as it will be able to launch "+
 							"once already scheduled preemptions complete", prioritizedAllocation.Name)
-					addTaskToAgents(fits)
+					p.addTaskToAgents(prioritizedAllocation, fits)
 					continue
 				}
 
@@ -239,7 +245,7 @@ func (p priorityScheduler) trySchedulingTaskViaPreemption(
 				fittingMethod,
 				p.allowHeterogeneousFits,
 			); len(fits) > 0 {
-				addTaskToAgents(fits)
+				p.addTaskToAgents(allocationRequest, fits)
 				return true, localAgentsState, preemptedTasks
 			}
 		}
@@ -265,7 +271,7 @@ func (p priorityScheduler) trySchedulingPendingTasksInPriority(
 			unSuccessfulAllocations = append(unSuccessfulAllocations, allocationRequest)
 			continue
 		}
-		addTaskToAgents(fits)
+		p.addTaskToAgents(allocationRequest, fits)
 		successfulAllocations = append(successfulAllocations, allocationRequest)
 	}
 
@@ -316,9 +322,12 @@ func deepCopyAgents(agents map[aproto.ID]*agentState) map[aproto.ID]*agentState 
 	return copiedAgents
 }
 
-func addTaskToAgents(fits []*fittingState) {
+// addTaskToAgents places a request on the scheduler's copies, choosing its devices as the live
+// reservation does (gpuPolicy.selection).
+func (p priorityScheduler) addTaskToAgents(req *sproto.AllocateRequest, fits []*fittingState) {
+	sel := p.gpus.selection(req, fits)
 	for _, fit := range fits {
-		if _, err := fit.Agent.allocateFreeDevices(fit.Slots, cproto.NewID()); err != nil {
+		if _, err := fit.Agent.allocateFreeDevices(fit.Slots, cproto.NewID(), sel); err != nil {
 			panic(errors.Wrap(err, "can't add task to agents"))
 		}
 	}

@@ -107,10 +107,14 @@ type (
 	allocateFreeDevices struct {
 		slots       int
 		containerID cproto.ID
+		selection   deviceSelection
 	}
 	// allocateFreeDevicesResponse is a response to allocateFreeDevices.
 	allocateFreeDevicesResponse struct {
 		devices []device.Device
+		choice  gpuChoice
+		// failure is why the selection fell back to map order, or "".
+		failure string
 	}
 	// deallocateContainer calls agentState.deallocateContainer.
 	deallocateContainer struct {
@@ -174,11 +178,12 @@ func (a *agent) AllocateFreeDevices(msg allocateFreeDevices) (allocateFreeDevice
 		return allocateFreeDevicesResponse{}, errors.New("can't allocate free devices: agent not started")
 	}
 
-	devices, err := a.agentState.allocateFreeDevices(msg.slots, msg.containerID)
+	// The selection reads the live agent under its lock, not the scheduler's cache.
+	res, err := a.agentState.allocateFreeDevices(msg.slots, msg.containerID, msg.selection)
 	if err != nil {
 		return allocateFreeDevicesResponse{}, err
 	}
-	return allocateFreeDevicesResponse{devices: devices}, nil
+	return allocateFreeDevicesResponse{devices: res.devices, choice: res.choice, failure: res.failure}, nil
 }
 
 func (a *agent) DeallocateContainer(msg deallocateContainer) error {
