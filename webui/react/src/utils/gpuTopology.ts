@@ -1,3 +1,4 @@
+import dayjs from 'dayjs';
 import { getStateColorCssVar } from 'hew/Theme';
 
 import {
@@ -381,4 +382,51 @@ export const linkText = (gpu: V1GpuInfo): string => {
 export const nvmlErrorsText = (topo: V1GpuTopology, gpu: V1GpuInfo): string => {
   if (topo.unknownReason) return 'not collected';
   return gpu.nvmlError || 'none';
+};
+
+/**
+ * The length of the master's XID query windows. A recent XID's first and last observed times are
+ * the ends of such windows.
+ */
+export const GPU_XID_WINDOW_MINUTES = 5;
+
+/**
+ * A query window of a recent XID by its end, in local time, for example "2026-10-07, 10:05–10:10".
+ * The end shows its date when it is not the start's: "2026-10-07, 23:55–2026-10-08, 00:00". When
+ * the UTC offset changes within the window, as at the end of daylight saving time, both times show
+ * their offset: "2026-11-01, 01:55 -04:00–01:00 -05:00". With withOffset, the end shows it anyway.
+ */
+export const xidWindowText = (end: Date | string, withOffset = false): string => {
+  const e = dayjs(end);
+  const s = e.subtract(GPU_XID_WINDOW_MINUTES, 'minute');
+  const offsetChanges = s.utcOffset() !== e.utcOffset();
+  const endDate = s.format('YYYY-MM-DD') === e.format('YYYY-MM-DD') ? '' : 'YYYY-MM-DD, ';
+  const startText = s.format(offsetChanges ? 'YYYY-MM-DD, HH:mm Z' : 'YYYY-MM-DD, HH:mm');
+  const endText = e.format(`${endDate}HH:mm${withOffset || offsetChanges ? ' Z' : ''}`);
+  return `${startText}–${endText}`;
+};
+
+/**
+ * A GPU's recent critical XIDs, one text per code with its first and last observed windows, for
+ * example "79 (2026-10-07, 10:05–10:10 to 2026-10-07, 10:20–10:25)"; one window when they are the
+ * same time. When the windows of the GPU's XIDs span a change of UTC offset, every window shows its
+ * offset, so windows in the repeated hour at the end of daylight saving time stay apart, also of
+ * two codes. Empty without XIDs.
+ */
+export const recentXidTexts = (gpu: V1GpuInfo): string[] => {
+  const xids = gpu.recentXids ?? [];
+  const offsets = new Set(
+    xids.flatMap((x) =>
+      [dayjs(x.firstObserved), dayjs(x.lastObserved)].flatMap((e) => [
+        e.utcOffset(),
+        e.subtract(GPU_XID_WINDOW_MINUTES, 'minute').utcOffset(),
+      ]),
+    ),
+  );
+  const withOffset = offsets.size > 1;
+  return xids.map((x) => {
+    const first = xidWindowText(x.firstObserved, withOffset);
+    if (dayjs(x.firstObserved).isSame(x.lastObserved)) return `${x.xid} (${first})`;
+    return `${x.xid} (${first} to ${xidWindowText(x.lastObserved, withOffset)})`;
+  });
 };

@@ -7422,11 +7422,14 @@ class v1GetWorkspacesWithDefaultNamespaceBindingsResponse(Printable):
         return out
 
 class v1GpuHealth(DetEnum):
-    """GpuHealth is a GPU's health from what the agent measured at its last start.
+    """GpuHealth is a GPU's health from what the agent measured at its last start
+    and the GPU's recent critical XIDs.
     - GPU_HEALTH_UNSPECIFIED: Unknown: no report, NVML did not run, or the link width is unknown.
-    - GPU_HEALTH_OK: No NVML error, and the link width was at its maximum at agent start.
+    - GPU_HEALTH_OK: No NVML error, no recent critical XID, and the link width was at its
+    maximum at agent start.
     - GPU_HEALTH_LINK_BELOW_MAX: The link width was below its maximum at agent start.
-    - GPU_HEALTH_ERROR: An NVML health call failed at agent start.
+    - GPU_HEALTH_ERROR: An NVML health call failed at agent start, or the GPU has a recent
+    critical XID.
     """
     UNSPECIFIED = "GPU_HEALTH_UNSPECIFIED"
     OK = "GPU_HEALTH_OK"
@@ -7437,6 +7440,7 @@ class v1GpuInfo(Printable):
     """GpuInfo describes one GPU of an agent: a slot, or a GPU left out by the
     agent's exclude list.
     """
+    recentXids: "typing.Optional[typing.Sequence[v1GpuXid]]" = None
 
     def __init__(
         self,
@@ -7452,6 +7456,7 @@ class v1GpuInfo(Printable):
         pcieLinkWidth: int,
         pcieLinkWidthMax: int,
         uuid: str,
+        recentXids: "typing.Union[typing.Sequence[v1GpuXid], None, Unset]" = _unset,
     ):
         self.deviceId = deviceId
         self.excluded = excluded
@@ -7464,6 +7469,8 @@ class v1GpuInfo(Printable):
         self.pcieLinkWidth = pcieLinkWidth
         self.pcieLinkWidthMax = pcieLinkWidthMax
         self.uuid = uuid
+        if not isinstance(recentXids, Unset):
+            self.recentXids = recentXids
 
     @classmethod
     def from_json(cls, obj: Json) -> "v1GpuInfo":
@@ -7480,6 +7487,8 @@ class v1GpuInfo(Printable):
             "pcieLinkWidthMax": obj["pcieLinkWidthMax"],
             "uuid": obj["uuid"],
         }
+        if "recentXids" in obj:
+            kwargs["recentXids"] = [v1GpuXid.from_json(x) for x in obj["recentXids"]] if obj["recentXids"] is not None else None
         return cls(**kwargs)
 
     def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
@@ -7496,6 +7505,8 @@ class v1GpuInfo(Printable):
             "pcieLinkWidthMax": self.pcieLinkWidthMax,
             "uuid": self.uuid,
         }
+        if not omit_unset or "recentXids" in vars(self):
+            out["recentXids"] = None if self.recentXids is None else [x.to_json(omit_unset) for x in self.recentXids]
         return out
 
 class v1GpuLink(Printable):
@@ -7627,8 +7638,13 @@ class v1GpuP2pStatus(DetEnum):
     NOT_SUPPORTED = "GPU_P2P_STATUS_NOT_SUPPORTED"
 
 class v1GpuTopology(Printable):
-    """GpuTopology is what an agent measured with NVML when it started."""
+    """GpuTopology is what an agent measured with NVML when it started, and the
+    GPUs' recent critical XIDs from the master's Prometheus.
+    """
     collectedAt: "typing.Optional[str]" = None
+    xidQueriedAt: "typing.Optional[str]" = None
+    xidQueryError: "typing.Optional[str]" = None
+    xidQueryStatus: "typing.Optional[v1GpuXidQueryStatus]" = None
 
     def __init__(
         self,
@@ -7638,6 +7654,9 @@ class v1GpuTopology(Printable):
         links: "typing.Sequence[v1GpuLink]",
         unknownReason: str,
         collectedAt: "typing.Union[str, None, Unset]" = _unset,
+        xidQueriedAt: "typing.Union[str, None, Unset]" = _unset,
+        xidQueryError: "typing.Union[str, None, Unset]" = _unset,
+        xidQueryStatus: "typing.Union[v1GpuXidQueryStatus, None, Unset]" = _unset,
     ):
         self.driverVersion = driverVersion
         self.gpus = gpus
@@ -7645,6 +7664,12 @@ class v1GpuTopology(Printable):
         self.unknownReason = unknownReason
         if not isinstance(collectedAt, Unset):
             self.collectedAt = collectedAt
+        if not isinstance(xidQueriedAt, Unset):
+            self.xidQueriedAt = xidQueriedAt
+        if not isinstance(xidQueryError, Unset):
+            self.xidQueryError = xidQueryError
+        if not isinstance(xidQueryStatus, Unset):
+            self.xidQueryStatus = xidQueryStatus
 
     @classmethod
     def from_json(cls, obj: Json) -> "v1GpuTopology":
@@ -7656,6 +7681,12 @@ class v1GpuTopology(Printable):
         }
         if "collectedAt" in obj:
             kwargs["collectedAt"] = obj["collectedAt"]
+        if "xidQueriedAt" in obj:
+            kwargs["xidQueriedAt"] = obj["xidQueriedAt"]
+        if "xidQueryError" in obj:
+            kwargs["xidQueryError"] = obj["xidQueryError"]
+        if "xidQueryStatus" in obj:
+            kwargs["xidQueryStatus"] = v1GpuXidQueryStatus(obj["xidQueryStatus"]) if obj["xidQueryStatus"] is not None else None
         return cls(**kwargs)
 
     def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
@@ -7667,7 +7698,58 @@ class v1GpuTopology(Printable):
         }
         if not omit_unset or "collectedAt" in vars(self):
             out["collectedAt"] = self.collectedAt
+        if not omit_unset or "xidQueriedAt" in vars(self):
+            out["xidQueriedAt"] = self.xidQueriedAt
+        if not omit_unset or "xidQueryError" in vars(self):
+            out["xidQueryError"] = self.xidQueryError
+        if not omit_unset or "xidQueryStatus" in vars(self):
+            out["xidQueryStatus"] = None if self.xidQueryStatus is None else self.xidQueryStatus.value
         return out
+
+class v1GpuXid(Printable):
+    """GpuXid is one critical XID code that a GPU reported recently."""
+
+    def __init__(
+        self,
+        *,
+        firstObserved: str,
+        lastObserved: str,
+        xid: int,
+    ):
+        self.firstObserved = firstObserved
+        self.lastObserved = lastObserved
+        self.xid = xid
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1GpuXid":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "firstObserved": obj["firstObserved"],
+            "lastObserved": obj["lastObserved"],
+            "xid": obj["xid"],
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "firstObserved": self.firstObserved,
+            "lastObserved": self.lastObserved,
+            "xid": self.xid,
+        }
+        return out
+
+class v1GpuXidQueryStatus(DetEnum):
+    """GpuXidQueryStatus is the result of the master's Prometheus query for recent
+    critical XIDs.
+    - GPU_XID_QUERY_STATUS_UNSPECIFIED: Not queried.
+    - GPU_XID_QUERY_STATUS_NOT_CONFIGURED: The master has no Prometheus (integrations.task_resources).
+    - GPU_XID_QUERY_STATUS_OK: The query succeeded. No XID can also mean that the exporter does not
+    report the GPU.
+    - GPU_XID_QUERY_STATUS_FAILED: The query failed or timed out.
+    """
+    UNSPECIFIED = "GPU_XID_QUERY_STATUS_UNSPECIFIED"
+    NOT_CONFIGURED = "GPU_XID_QUERY_STATUS_NOT_CONFIGURED"
+    OK = "GPU_XID_QUERY_STATUS_OK"
+    FAILED = "GPU_XID_QUERY_STATUS_FAILED"
 
 class v1Group(Printable):
     groupId: "typing.Optional[int]" = None
