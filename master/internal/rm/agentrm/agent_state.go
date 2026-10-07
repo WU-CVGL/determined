@@ -177,10 +177,6 @@ type deviceReservation struct {
 	failure string
 }
 
-// selectFreeDevicesFunc is the selection of allocateFreeDevices; tests replace it to inject
-// failures.
-var selectFreeDevicesFunc = selectFreeDevices
-
 // allocateFreeDevices reserves slots devices for the container cid. Its one change of state comes
 // last: chooseFreeDevices picks a full set and validates it whole without changing anything, then
 // every device of the set is reserved at once. With fewer than slots free devices it returns an
@@ -194,7 +190,7 @@ func (a *agentState) allocateFreeDevices(
 		a.containerState[cid] = &cproto.Container{ID: cid}
 		return deviceReservation{}, nil
 	}
-	res, err := a.chooseFreeDevices(slots, sel)
+	res, err := a.chooseFreeDevices(slots, sel, selectFreeDevices)
 	if err != nil {
 		return deviceReservation{}, err
 	}
@@ -206,9 +202,10 @@ func (a *agentState) allocateFreeDevices(
 }
 
 // chooseFreeDevices returns a full set of slots free devices, validated whole (checkFreeDevices),
-// and how it was chosen; it changes nothing. When sel ranks, the selection (selectFreeDevices) runs
-// first and its set is taken if it is valid. Otherwise the set is the free devices in map order, as
-// before GPU selection existed, and goes through the same validation:
+// and how it was chosen; it changes nothing. When sel ranks, the selection (selector:
+// selectFreeDevices, or a fake in tests) runs first and its set is taken if it is valid. Otherwise
+// the set is the free devices in map order, as before GPU selection existed, and goes through the
+// same validation:
 //   - for the zero selection, which never runs the selection;
 //   - when the selection chooses no devices and says why (gpuChoice.mapOrder);
 //   - when the selection fails: its set is invalid, it gives neither a set nor a reason, or it
@@ -216,13 +213,15 @@ func (a *agentState) allocateFreeDevices(
 //     would.
 //
 // Only the selection runs under recover: it has no side effects.
-func (a *agentState) chooseFreeDevices(slots int, sel deviceSelection) (deviceReservation, error) {
+func (a *agentState) chooseFreeDevices(
+	slots int, sel deviceSelection, selector func(gpuSelectionInput, int, deviceSelection) gpuChoice,
+) (deviceReservation, error) {
 	if a.numFreeDevices() < slots {
 		return deviceReservation{}, errors.New("not enough devices")
 	}
 	var res deviceReservation
 	if sel.ranks() {
-		res.choice, res.failure = a.selectRankedDevices(slots, sel)
+		res.choice, res.failure = a.selectRankedDevices(slots, sel, selector)
 		switch {
 		case res.failure != "":
 			// It panicked.
@@ -280,13 +279,15 @@ func (a *agentState) numFreeDevices() int {
 }
 
 // selectRankedDevices runs the selection, recovering a panic as a failure.
-func (a *agentState) selectRankedDevices(slots int, sel deviceSelection) (c gpuChoice, failure string) {
+func (a *agentState) selectRankedDevices(
+	slots int, sel deviceSelection, selector func(gpuSelectionInput, int, deviceSelection) gpuChoice,
+) (c gpuChoice, failure string) {
 	defer func() {
 		if r := recover(); r != nil {
 			c, failure = gpuChoice{}, fmt.Sprintf("panic: %v\n%s", r, debug.Stack())
 		}
 	}()
-	return selectFreeDevicesFunc(a.gpuSelectionInput(), slots, sel), ""
+	return selector(a.gpuSelectionInput(), slots, sel), ""
 }
 
 // gpuSelectionInput returns what a GPU selection reads of the agent.
