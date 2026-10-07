@@ -53,7 +53,8 @@ const settingsToQuery = <T>(config: SettingsConfig<T>, settings: Settings) => {
 
   (Object.values(config.settings) as SettingsConfigProp<T>[]).forEach((setting) => {
     const value = settings[setting.storageKey];
-    const isDefault = _.isEqual(setting.defaultValue, value);
+    // A setting never stored is its default.
+    const isDefault = value === undefined || _.isEqual(setting.defaultValue, value);
     if (!setting.skipUrlEncoding && !isDefault) {
       if (Array.isArray(value) && value.length > 0) {
         retVal.set(setting.storageKey, value[0]);
