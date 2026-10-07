@@ -144,10 +144,11 @@ func runCheckpointGCTask(
 	}
 
 	// Resource pool access is not checked: GC always runs in the cluster's default aux pool, also
-	// when a user's request (deleting checkpoints or TensorBoard files) starts it. A user without
-	// a grant can therefore run the experiment's environment in a restricted default aux pool; see
-	// "What is not checked" in docs/maintenance/resource-pool-access.md. Closing this is a
-	// separate fix.
+	// when that pool is restricted and a user's request (deleting checkpoints, an experiment or
+	// TensorBoard files) starts it. It runs as the experiment's owner in a fixed environment that
+	// takes nothing from the experiment but its checkpoint storage (see checkpointGCIdentity and
+	// checkpointGCSeesStorage), so it runs no code that the user who starts it or the owner chose;
+	// see "What is not checked" in docs/maintenance/resource-pool-access.md.
 	rp, err := rm.ResolveResourcePool("", -1, 0)
 	if err != nil {
 		return fmt.Errorf("resolving resource pool: %w", err)

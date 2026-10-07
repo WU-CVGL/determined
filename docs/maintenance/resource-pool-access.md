@@ -76,13 +76,15 @@ Work that a pool has accepted keeps its access:
   `max_slots` lets an accepted experiment use more slots of its pool.
 
 Checkpoint garbage collection is not checked either. It runs in the cluster's
-default aux pool even when that pool is restricted, and it runs with the
-experiment's environment variables and bind mounts. Code that these settings
-make it run, for example through `PYTHONPATH` or `LD_PRELOAD`, runs in that pool
-too. Restricting the cluster's default aux pool therefore does not keep a user
-without a grant from running CPU work there this way: garbage collection starts
-when an experiment ends with checkpoints to delete, and when a user deletes
-checkpoints or an experiment's TensorBoard files.
+default aux pool even when that pool is restricted. It starts when an
+experiment ends with checkpoints to delete, and when a user deletes
+checkpoints, an experiment, or an experiment's TensorBoard files, or changes
+how many checkpoints an experiment keeps. Whoever starts it, it runs as the
+experiment's owner, without a user session, and takes nothing from the
+experiment but its checkpoint storage: no environment variables, bind mounts,
+or pod spec. It runs a fixed entrypoint with the task container defaults of
+that pool. A user without a grant can therefore start garbage collection in a
+restricted default aux pool, but cannot make it run code of their choice.
 
 ## Revocation
 
@@ -188,10 +190,10 @@ experiment's owner, with the owner's session and agent user and group, and you
 may change only the fields that bound its training, so its pool stays the one
 the owner chose. You still need access to that pool.
 
-Deleting another user's checkpoints or TensorBoard files starts checkpoint
-garbage collection with your session and with that experiment's environment
-variables and bind mounts, which can make it run code that the experiment's
-owner chose.
+Deleting another user's checkpoints, experiment, or TensorBoard files does not
+lend your session either: checkpoint garbage collection runs as the
+experiment's owner, without a user session, and runs no code that the owner
+chose (see "What is not checked").
 
 A TensorBoard takes an experiment's image, image pull secrets, and
 `registry_auth` only when the user who starts it owns the experiment.
