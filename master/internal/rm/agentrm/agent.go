@@ -115,7 +115,7 @@ type (
 		choice  gpuChoice
 		// failure is why the selection failed (an invalid set, neither a set nor a reason, or a
 		// panic), so the reservation took map order; it is "" for a normal fallback, whose reason
-		// is in choice.mapOrder.
+		// is in choice.noSelectionReason.
 		failure string
 	}
 	// deallocateContainer calls agentState.deallocateContainer.
