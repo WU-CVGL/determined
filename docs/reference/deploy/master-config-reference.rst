@@ -387,12 +387,13 @@ entirely. For more on scheduling behavior in Determined, see :ref:`scheduling`.
 
    Rows 3 to 5 count only healthy GPUs with a known NUMA node, so a task that has to take GPUs in
    error gets the lowest IDs among them. Packing never reads the PCIe link width; only
-   ``prefer_gpu_topology`` ranks narrow GPUs after full-width ones, among sets of equal locality. On
-   an agent with two NUMA nodes, a task that fits one node gets the lowest free IDs of the node with
-   the fewest free GPUs; a task that fits neither takes every free GPU of the node with the most
-   free GPUs, then the lowest free IDs of the other. For example, 1-slot tasks fill an idle 8-GPU
-   agent with GPUs 0-3 on node 0 and 4-7 on node 1 in the order 0 to 7, and with free GPUs 0, 1, 4,
-   5 and 6 a 3-slot task gets 4, 5 and 6. The GPUs are passed to the task in ascending order
+   ``prefer_gpu_topology`` does: ``soft`` ranks a pair with a narrow GPU after the otherwise equal
+   full pair, and ``strong`` prefers the NUMA node whose set has fewer narrow GPUs. On an agent with
+   two NUMA nodes, a task that fits one node gets the lowest free IDs of the node with the fewest
+   free GPUs; a task that fits neither takes every free GPU of the node with the most free GPUs,
+   then the lowest free IDs of the other. For example, 1-slot tasks fill an idle 8-GPU agent with
+   GPUs 0-3 on node 0 and 4-7 on node 1 in the order 0 to 7, and with free GPUs 0, 1, 4, 5 and 6 a
+   3-slot task gets 4, 5 and 6. The GPUs are passed to the task in ascending order
    (``DET_SLOT_IDS``).
 
    An agent whose topology the master does not have, for example right after a master restart until
