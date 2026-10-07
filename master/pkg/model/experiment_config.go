@@ -12,6 +12,7 @@ import (
 	"github.com/ghodss/yaml"
 
 	"github.com/determined-ai/determined/master/pkg/check"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 )
 
 const (
@@ -93,6 +94,10 @@ type ResourcesConfig struct {
 	Priority       *int         `json:"priority,omitempty"`
 	IsSingleNode   *bool        `json:"is_single_node"`
 
+	// PreferGPUTopology is resources.prefer_gpu_topology, left out when unset. The merged command
+	// config is decoded with DisallowUnknownFields, so it needs the field.
+	PreferGPUTopology *expconf.GPUTopologyPreference `json:"prefer_gpu_topology,omitempty"`
+
 	Devices DevicesConfig `json:"devices"`
 }
 
@@ -156,6 +161,14 @@ func ValidatePrioritySetting(priority *int) []error {
 			"scheduling priority must be greater than 0 and less than 100"))
 	}
 	return errs
+}
+
+// GPUTopology returns resources.prefer_gpu_topology, off when it is not set.
+func (r ResourcesConfig) GPUTopology() expconf.GPUTopologyPreference {
+	if r.PreferGPUTopology == nil {
+		return expconf.GPUTopologyOff
+	}
+	return *r.PreferGPUTopology
 }
 
 // Validate implements the check.Validatable interface.

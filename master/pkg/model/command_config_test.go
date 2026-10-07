@@ -1,9 +1,14 @@
 package model
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/determined-ai/determined/master/pkg/check"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 )
 
 func TestConfigValidate(t *testing.T) {
@@ -78,4 +83,36 @@ func TestConfigValidate(t *testing.T) {
 	for _, tc := range tests {
 		runTestCase(t, tc)
 	}
+}
+
+func TestCommandConfigPreferGPUTopology(t *testing.T) {
+	decode := func(config *CommandConfig, text string) error {
+		dec := json.NewDecoder(strings.NewReader(text))
+		dec.DisallowUnknownFields()
+		return dec.Decode(config)
+	}
+
+	// The merged command config is decoded strictly, as in the command API.
+	config := DefaultConfig(nil)
+	require.NoError(t, decode(&config, `{"resources": {"prefer_gpu_topology": "soft"}}`))
+	require.Equal(t, expconf.GPUTopologySoft, config.Resources.GPUTopology())
+	require.Equal(t, expconf.GPUTopologySoft, config.Resources.ToExpconf().GPUTopology())
+	require.NoError(t, check.Validate(config.Resources))
+
+	// A user's false over a template's soft.
+	require.NoError(t, decode(&config, `{"resources": {"prefer_gpu_topology": false}}`))
+	require.Equal(t, expconf.GPUTopologyOff, config.Resources.GPUTopology())
+	raw, err := json.Marshal(config.Resources)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"prefer_gpu_topology":false`)
+
+	config = DefaultConfig(nil)
+	require.Equal(t, expconf.GPUTopologyOff, config.Resources.GPUTopology())
+	raw, err = json.Marshal(config)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "prefer_gpu_topology", "an unset key is not stored")
+
+	require.Error(t, decode(&config, `{"resources": {"prefer_gpu_topology": true}}`))
+	require.NoError(t, decode(&config, `{"resources": {"prefer_gpu_topology": "strong"}}`))
+	require.ErrorContains(t, check.Validate(config.Resources), `"strong" is not available yet`)
 }

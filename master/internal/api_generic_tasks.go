@@ -398,6 +398,7 @@ func (a *apiServer) CreateGenericTask(
 		ResourcePool: genericTaskSpec.GenericTaskConfig.Resources.ResourcePool(),
 		FittingRequirements: sproto.FittingRequirements{
 			SingleAgent: isSingleNode,
+			GPUTopology: genericTaskSpec.GenericTaskConfig.Resources.GPUTopology(),
 		},
 
 		ProxyPorts: sproto.NewProxyPortConfig(genericTaskSpec.ProxyPorts(), taskID),

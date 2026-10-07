@@ -1,12 +1,17 @@
 package agentrm
 
 import (
+	"fmt"
 	"sync/atomic"
 	"time"
 
 	"github.com/determined-ai/determined/master/internal/gpuhealth"
+	"github.com/determined-ai/determined/master/internal/rm/rmevents"
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/pkg/cproto"
+	"github.com/determined-ai/determined/master/pkg/model"
+	"github.com/determined-ai/determined/master/pkg/ptrs"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 )
 
 // gpuXIDReader is where the pools of an agent RM read the GPUs' recent critical XIDs. The master
@@ -68,8 +73,14 @@ func (rp *resourcePool) newGPUPolicy() gpuPolicy {
 }
 
 // selection returns how a request's reservation on one of its fits chooses its devices.
-func (p gpuPolicy) selection(_ *sproto.AllocateRequest, _ []*fittingState) deviceSelection {
-	return deviceSelection{packNUMA: p.packNUMA, xids: p.xids}
+// prefer_gpu_topology "soft" ranks GPU sets only on one agent: a multi-agent fit takes whole idle
+// agents, so there is no choice.
+func (p gpuPolicy) selection(req *sproto.AllocateRequest, fits []*fittingState) deviceSelection {
+	return deviceSelection{
+		packNUMA:       p.packNUMA,
+		preferTopology: req.FittingRequirements.GPUTopology == expconf.GPUTopologySoft && len(fits) == 1,
+		xids:           p.xids,
+	}
 }
 
 // gpuReservation is one reservation of an allocation, for its logs.
@@ -80,8 +91,22 @@ type gpuReservation struct {
 }
 
 // logGPUChoices logs how each reservation of an allocation chose its devices, once the allocation
-// is published: a selection that fell back to map order at Error, the rule at Debug.
+// is published: a selection that fell back to map order at Error, the rule at Debug. For a task
+// with prefer_gpu_topology "soft" and 2 or more slots, it also publishes one line to the task log
+// and logs it at Info.
 func (rp *resourcePool) logGPUChoices(req *sproto.AllocateRequest, reservations []gpuReservation) {
+	if req.FittingRequirements.GPUTopology == expconf.GPUTopologySoft && req.SlotsNeeded >= 2 &&
+		len(reservations) > 0 {
+		msg := gpuTopologyPreferenceLine(reservations)
+		rp.syslog.WithField("allocation-id", req.AllocationID).Info(msg)
+		rmevents.Publish(req.AllocationID, &sproto.ContainerLog{
+			ContainerID: reservations[0].containerID,
+			Timestamp:   time.Now().UTC(),
+			AuxMessage:  &msg,
+			Level:       ptrs.Ptr(model.LogLevelInfo),
+			AgentID:     ptrs.Ptr(string(reservations[0].fit.Agent.id)),
+		})
+	}
 	for _, r := range reservations {
 		log := rp.syslog.WithField("allocation-id", req.AllocationID).WithField("agent-id", r.fit.Agent.id)
 		switch {
@@ -91,5 +116,24 @@ func (rp *resourcePool) logGPUChoices(req *sproto.AllocateRequest, reservations 
 		case r.resp.choice.rule != "":
 			log.Debugf("agent %s: slots %s (%s)", r.fit.Agent.id, idList(r.resp.devices), r.resp.choice.rule)
 		}
+	}
+}
+
+// gpuTopologyPreferenceLine is the task-log line of prefer_gpu_topology "soft".
+func gpuTopologyPreferenceLine(reservations []gpuReservation) string {
+	if len(reservations) > 1 {
+		return "GPU topology preference has no effect: the task uses whole agents"
+	}
+	r := reservations[0]
+	switch {
+	case r.resp.failure != "":
+		return fmt.Sprintf("GPU topology preference: agent %s not ranked (GPU selection failed); "+
+			"slots chosen in map order", r.fit.Agent.id)
+	case r.resp.choice.worstPair != "":
+		return fmt.Sprintf("GPU topology preference: agent %s, slots %s; %s",
+			r.fit.Agent.id, idList(r.resp.devices), r.resp.choice.worstPair)
+	default:
+		return fmt.Sprintf("GPU topology preference: agent %s not ranked (%s); "+
+			"slots chosen as for tasks without it", r.fit.Agent.id, r.resp.choice.unranked)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/gpuhealth"
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/proto/pkg/agentv1"
 )
 
@@ -89,4 +90,46 @@ func TestSetGPUXIDsReachesThePools(t *testing.T) {
 	pool.mu.Unlock()
 	require.Equal(t, map[string]bool{"GPU-3": true}, policy.xids)
 	require.True(t, policy.packNUMA)
+}
+
+func TestGPUPolicySelectionPrefersTopologyOnOneAgent(t *testing.T) {
+	policy := gpuPolicy{packNUMA: true}
+	one := []*fittingState{{Slots: 4}}
+	two := []*fittingState{{Slots: 8}, {Slots: 8}}
+	for pref, want := range map[expconf.GPUTopologyPreference]bool{
+		"": false, expconf.GPUTopologyOff: false, expconf.GPUTopologySoft: true,
+		// Strong is refused at submit in this release; the RM never treats it as soft.
+		expconf.GPUTopologyStrong: false,
+	} {
+		req := &sproto.AllocateRequest{
+			SlotsNeeded: 4, FittingRequirements: sproto.FittingRequirements{GPUTopology: pref},
+		}
+		require.Equal(t, want, policy.selection(req, one).preferTopology, pref)
+		require.False(t, policy.selection(req, two).preferTopology, "whole agents: %s", pref)
+		require.True(t, policy.selection(req, one).packNUMA)
+	}
+}
+
+func TestGPUTopologyPreferenceLine(t *testing.T) {
+	fit := &fittingState{Agent: &agentState{id: "node02"}}
+	reserved := func(resp allocateFreeDevicesResponse) []gpuReservation {
+		return []gpuReservation{{fit: fit, resp: resp}}
+	}
+	require.Equal(t, "GPU topology preference: agent node02, slots 4,5,6,7; worst pair NODE, P2P usable",
+		gpuTopologyPreferenceLine(reserved(allocateFreeDevicesResponse{
+			devices: gpuDeviceList(4, 5, 6, 7),
+			choice:  gpuChoice{worstPair: "worst pair NODE, P2P usable"},
+		})))
+	require.Equal(t, "GPU topology preference: agent node02 not ranked (every pair of free GPUs "+
+		"unknown); slots chosen as for tasks without it",
+		gpuTopologyPreferenceLine(reserved(allocateFreeDevicesResponse{
+			devices: gpuDeviceList(0, 1),
+			choice:  gpuChoice{unranked: "every pair of free GPUs unknown"},
+		})))
+	require.Equal(t, "GPU topology preference: agent node02 not ranked (GPU selection failed); "+
+		"slots chosen in map order",
+		gpuTopologyPreferenceLine(reserved(allocateFreeDevicesResponse{failure: "panic: x"})))
+	require.Equal(t, "GPU topology preference has no effect: the task uses whole agents",
+		gpuTopologyPreferenceLine(append(reserved(allocateFreeDevicesResponse{}),
+			reserved(allocateFreeDevicesResponse{})...)))
 }
