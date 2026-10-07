@@ -354,14 +354,18 @@ task resources <native-task-resources>` (``integrations.task_resources``), it re
 critical XIDs of the last 24 hours from the cluster's DCGM-Exporter. A GPU with one is in error, and
 its details list each code with the first and last 5-minute window in which the master saw it, for
 example ``79 (2026-10-07 10:05-10:10+0000 to 2026-10-07 10:10-10:15+0000)`` in ``det agent
-describe`` (in UTC) and the same in local time in the WebUI. A GPU stays in error until its XIDs
-leave the 24 hours, also after a reboot that fixed it. A CLI older than this release shows such a
-GPU as ``error`` without its XIDs.
+describe`` (in UTC) and the same in local time in the WebUI. The WebUI adds the date to a window
+that ends on another date, and the UTC offset to the windows of a code that span a change of
+daylight saving time. A GPU stays in error until its XIDs leave the 24 hours, also after a reboot
+that fixed it. A CLI older than this release shows such a GPU as ``error`` without its XIDs.
 
-Every XID code counts except the application codes 13, 31, 43 and 45, which faulty user code causes;
-this is the class of the ``gpu-xid-critical`` alert of `cluster-setup
-<https://github.com/WU-CVGL/cluster-setup>`__. A driver fault that shows only as XID 31 therefore
-does not count. For a GPU that fails without an XID, use :ref:`exclude_gpus <agent-exclude-gpus>`.
+Every XID code counts except 13, 31, 43 and 45. This is an exclusion policy that matches the
+``gpu-xid-critical`` alert of `cluster-setup <https://github.com/WU-CVGL/cluster-setup>`__:
+applications commonly trigger these codes, and counting them would raise false alarms. It does not
+mean that they always come from user code; NVIDIA describes XID 31, for example, as usually an
+application error that can also be a driver or hardware error. A fault that shows only as one of
+these codes therefore does not count. For a GPU that fails without an XID, use :ref:`exclude_gpus
+<agent-exclude-gpus>`.
 
 The master runs one range query over the 24 hours at a 300-second step, with steps on a 5-minute
 grid that ends at or after the query time:
@@ -389,9 +393,12 @@ window, and for the agent ``xid_query_status`` (``NOT_CONFIGURED``, ``OK`` or ``
 
 No XID does not mean that a GPU is healthy, also after a successful query: the exporter can be down,
 miss the GPU or not enable the metric, or the labels may not match. When the master has no
-Prometheus or the query fails, the health comes from the agent's measurement alone and the CLI and
-the WebUI show nothing about XIDs; the master logs a failure at debug level, without the Prometheus
-URL or response.
+Prometheus, the health comes from the agent's measurement alone. When a query fails, the master
+keeps the XIDs of its last successful query whose last window is still in the 24 hours of the failed
+query, so a GPU in error stays in error until its XIDs leave the 24 hours; the other GPUs, and all
+of them before the first successful query after a master start, get their health from the agent's
+measurement alone. The CLI and the WebUI show no notice of a missing or failed query. The master
+logs a failure at debug level, without the Prometheus URL or response.
 
 Only requests for agents with their slots query: ``GetAgent``, and ``GetAgents`` without
 ``exclude_slots``, for example ``det agent list``, ``det agent describe`` and the resource pool
