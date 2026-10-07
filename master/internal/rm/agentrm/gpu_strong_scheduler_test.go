@@ -299,8 +299,10 @@ func TestStrongPreemptsWithTheExistingSearch(t *testing.T) {
 }
 
 func TestStrongPlanMatchesTheReservations(t *testing.T) {
-	// Under best with packing on and no preemption, the pass's plan and its reservations choose
-	// the same GPUs for strong, soft and plain tasks, in the order the pass returns them.
+	// Under best with packing on and no preemption, the live reservations of the requests that a
+	// pass plans, in the order the pass returns them, choose the GPUs that the simulation
+	// (addTaskToAgents) chooses on copies of the agents with the pass's policy, for strong, soft
+	// and plain tasks.
 	agents := map[aproto.ID]topologyFixture{"a": node01Widths, "b": node07}
 	var tasks []strongTask
 	modes := []expconf.GPUTopologyPreference{"", "strong", "", "strong", "", "soft", "", "strong"}
