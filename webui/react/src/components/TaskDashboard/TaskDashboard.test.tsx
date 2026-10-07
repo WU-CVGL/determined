@@ -813,6 +813,11 @@ describe('TaskDashboard', () => {
         expect(at).toBeGreaterThan(-1);
         return screen.getByText(name).closest('tr')?.children[at] as HTMLElement;
       };
+      // The table shows these columns once it has seen the screen's width.
+      await waitFor(
+        () => expect(cell('eval-sweep', 'Resource Pool')).toHaveTextContent('default'),
+        AFTER_LOAD,
+      );
 
       for (const title of ['Owner', 'Workspace › Project', 'Resource Pool']) {
         expect(cell('bert-finetune', title)).toHaveClass('ant-table-cell-ellipsis');
