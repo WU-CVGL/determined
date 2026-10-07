@@ -532,20 +532,28 @@ func (a *allocation) requestResources() (*sproto.ResourcesSubscription, error) {
 			return nil, errors.Wrap(err, "loading trial allocation")
 		}
 
-		sub, err := a.rm.Allocate(a.req)
+		queued, err := a.neverAssigned()
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to request allocation")
+			return nil, err
 		}
-		a.sendTaskLog(&model.TaskLog{Log: fmt.Sprintf("Restoring %s (id: %s)", a.req.Name, a.req.AllocationID)})
-		return sub, nil
-	}
+		if !queued {
+			sub, err := a.rm.Allocate(a.req)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to request allocation")
+			}
+			a.sendTaskLog(&model.TaskLog{Log: fmt.Sprintf("Restoring %s (id: %s)", a.req.Name, a.req.AllocationID)})
+			return sub, nil
+		}
+		// Nothing to restore: the allocation keeps its ID and requests resources as a new one.
+		a.req.Restore = false
+	} else {
+		// Insert new allocation.
+		a.syslog.Debug("requestResources add allocation")
 
-	// Insert new allocation.
-	a.syslog.Debug("requestResources add allocation")
-
-	a.setModelState(model.AllocationStatePending)
-	if err := db.AddAllocation(context.TODO(), &a.model); err != nil {
-		return nil, errors.Wrap(err, "saving trial allocation")
+		a.setModelState(model.AllocationStatePending)
+		if err := db.AddAllocation(context.TODO(), &a.model); err != nil {
+			return nil, errors.Wrap(err, "saving trial allocation")
+		}
 	}
 
 	sub, err := a.rm.Allocate(a.req)
@@ -554,6 +562,23 @@ func (a *allocation) requestResources() (*sproto.ResourcesSubscription, error) {
 	}
 	a.sendTaskLog(&model.TaskLog{Log: fmt.Sprintf("Scheduling %s (id: %s)", a.req.Name, a.req.AllocationID)})
 	return sub, nil
+}
+
+// neverAssigned returns whether the loaded allocation never received resources: it is pending
+// and has no resources. Resources are persisted before the allocation leaves the pending state,
+// so a pending allocation with resources received them just before the master stopped; it is
+// restored.
+func (a *allocation) neverAssigned() (bool, error) {
+	if a.getModelState() != model.AllocationStatePending {
+		return false, nil
+	}
+	exists, err := db.Bun().NewSelect().Model((*taskmodel.ResourcesWithState)(nil)).
+		Where("allocation_id = ?", a.model.AllocationID).
+		Exists(context.TODO())
+	if err != nil {
+		return false, errors.Wrap(err, "loading allocation resources")
+	}
+	return !exists, nil
 }
 
 // Cleanup ensures an allocation is properly closed. It tries to do everything before failing and
