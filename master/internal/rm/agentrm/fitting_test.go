@@ -2,6 +2,7 @@ package agentrm
 
 import (
 	"fmt"
+	"math/rand"
 	"sort"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/pkg/aproto"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 )
 
 func TestIsViable(t *testing.T) {
@@ -319,7 +321,7 @@ func TestFindFits(t *testing.T) {
 				))
 			}
 			agentsByHandler, agentsByIndex := byID(agents...)
-			fits := findFits(&tc.Task, agentsByHandler, tc.FittingMethod, false)
+			fits := findFits(&tc.Task, agentsByHandler, tc.FittingMethod, false, false)
 			assert.Assert(t, len(fits) > 0)
 			assert.Equal(t, fits[0].Agent, agentsByIndex[tc.ExpectedAgentFit])
 		})
@@ -479,7 +481,7 @@ func TestFindFitDisallowedNodes(t *testing.T) {
 		SlotsNeeded:  1,
 		TaskID:       "noAgents",
 	}
-	fits := findFits(task, agentsByHandler, BestFit, false)
+	fits := findFits(task, agentsByHandler, BestFit, false, false)
 	assert.Assert(t, len(fits) == 0)
 
 	task = &sproto.AllocateRequest{
@@ -488,7 +490,7 @@ func TestFindFitDisallowedNodes(t *testing.T) {
 		SlotsNeeded:  1,
 		TaskID:       "notOnAgent1",
 	}
-	fits = findFits(task, agentsByHandler, BestFit, false)
+	fits = findFits(task, agentsByHandler, BestFit, false, false)
 	assert.Assert(t, len(fits) == 1)
 	assert.Equal(t, fits[0].Agent, agents[1])
 
@@ -498,7 +500,7 @@ func TestFindFitDisallowedNodes(t *testing.T) {
 		SlotsNeeded:  1,
 		TaskID:       "notOnAgent2",
 	}
-	fits = findFits(task, agentsByHandler, BestFit, false)
+	fits = findFits(task, agentsByHandler, BestFit, false, false)
 	assert.Assert(t, len(fits) == 1)
 	assert.Equal(t, fits[0].Agent, agents[0])
 }
@@ -513,4 +515,105 @@ func byID(
 		index = append(index, agent)
 	}
 	return agents, index
+}
+
+func TestCandidateListLessIsAStrictWeakOrder(t *testing.T) {
+	// Over random fitting states with ties in every key, Less is irreflexive and transitive, and so
+	// is being equivalent (neither less): a strict weak order, which sort.Sort needs. It is the
+	// lexicographic order of OneNUMANode (set first), the score (higher first), the hash distance
+	// (smaller first) and the agent ID; without OneNUMANode set, the order is the one before the
+	// key.
+	type key struct {
+		oneNode bool
+		score   float64
+		hash    uint64
+		id      aproto.ID
+	}
+	reference := func(a, b key) bool {
+		switch {
+		case a.oneNode != b.oneNode:
+			return a.oneNode
+		case a.score != b.score:
+			return a.score > b.score
+		case a.hash != b.hash:
+			return a.hash < b.hash
+		default:
+			return a.id < b.id
+		}
+	}
+	rng := rand.New(rand.NewSource(3)) //nolint:gosec
+	for trial := 0; trial < 300; trial++ {
+		var c candidateList
+		var keys []key
+		for i := 0; i < 10; i++ {
+			k := key{
+				oneNode: trial%3 != 0 && rng.Intn(2) == 0,
+				score:   float64(rng.Intn(3)) / 4,
+				hash:    uint64(rng.Intn(3)),
+				id:      aproto.ID(fmt.Sprintf("agent-%d", rng.Intn(3))),
+			}
+			keys = append(keys, k)
+			c = append(c, &fittingState{
+				Agent: &agentState{id: k.id}, Score: k.score, HashDistance: k.hash, OneNUMANode: k.oneNode,
+			})
+		}
+		equivalent := func(i, j int) bool { return !c.Less(i, j) && !c.Less(j, i) }
+		for i := range c {
+			if c.Less(i, i) {
+				t.Fatalf("trial %d: %+v less than itself", trial, keys[i])
+			}
+			for j := range c {
+				if c.Less(i, j) != reference(keys[i], keys[j]) {
+					t.Fatalf("trial %d: Less(%+v, %+v) = %v", trial, keys[i], keys[j], c.Less(i, j))
+				}
+				for k := range c {
+					if c.Less(i, j) && c.Less(j, k) && !c.Less(i, k) {
+						t.Fatalf("trial %d: Less not transitive on %+v, %+v, %+v", trial, keys[i], keys[j], keys[k])
+					}
+					if equivalent(i, j) && equivalent(j, k) && !equivalent(i, k) {
+						t.Fatalf("trial %d: equivalence not transitive on %+v, %+v, %+v",
+							trial, keys[i], keys[j], keys[k])
+					}
+				}
+			}
+		}
+		sort.Sort(c)
+		for i := 1; i < len(c); i++ {
+			if c.Less(i, i-1) {
+				t.Fatalf("trial %d: not sorted at %d", trial, i)
+			}
+		}
+	}
+}
+
+func TestOneNUMANodeOnlyForSoft(t *testing.T) {
+	// OneNUMANode is set only for a request with prefer_gpu_topology "soft" and 2 or more slots,
+	// under the gate, on an agent where one NUMA node has its slots free.
+	idle := topologyAgentState(t, node02)
+	agents := map[aproto.ID]*agentState{idle.id: idle}
+	request := func(n int, pref expconf.GPUTopologyPreference) *sproto.AllocateRequest {
+		return &sproto.AllocateRequest{
+			AllocationID: "r", SlotsNeeded: n,
+			FittingRequirements: sproto.FittingRequirements{SingleAgent: true, GPUTopology: pref},
+		}
+	}
+	for _, c := range []struct {
+		n    int
+		pref expconf.GPUTopologyPreference
+		gate bool
+		want bool
+	}{
+		{4, expconf.GPUTopologySoft, true, true},
+		{2, expconf.GPUTopologySoft, true, true},
+		{4, expconf.GPUTopologySoft, false, false},
+		{5, expconf.GPUTopologySoft, true, false},
+		{1, expconf.GPUTopologySoft, true, false},
+		{0, expconf.GPUTopologySoft, true, false},
+		{4, "", true, false},
+		{4, expconf.GPUTopologyStrong, true, false},
+	} {
+		fit := findSharedAgentFit(request(c.n, c.pref), agents, BestFit, c.gate)
+		assert.Assert(t, fit != nil)
+		assert.Equal(t, c.want, fit.OneNUMANode, "%+v", c)
+	}
 }

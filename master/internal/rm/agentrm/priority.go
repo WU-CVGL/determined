@@ -19,8 +19,9 @@ type priorityScheduler struct {
 	preemptionEnabled      bool
 	allowHeterogeneousFits bool
 	// gpus is the pool's GPU selection for the pass that Schedule runs. The simulation selects
-	// devices on its copies with it, as the pass's live reservations do; deepCopy says when both
-	// choose the same devices. Its zero value takes a plain task's devices in map order.
+	// devices on its copies with it, and its fits order the agents with its packNUMA, as the pass's
+	// live reservations do; deepCopy says when both choose the same devices. Its zero value takes a
+	// plain task's devices in map order.
 	gpus gpuPolicy
 }
 
@@ -157,6 +158,7 @@ func (p priorityScheduler) prioritySchedulerWithFilter(
 					localAgentsState,
 					fittingMethod,
 					p.allowHeterogeneousFits,
+					p.gpus.packNUMA,
 				); len(fits) > 0 && p.addTaskToAgents(prioritizedAllocation, fits) {
 					log.Debugf(
 						"Not preempting tasks for task %s as it will be able to launch "+
@@ -241,6 +243,7 @@ func (p priorityScheduler) trySchedulingTaskViaPreemption(
 				localAgentsState,
 				fittingMethod,
 				p.allowHeterogeneousFits,
+				p.gpus.packNUMA,
 			); len(fits) > 0 && p.addTaskToAgents(allocationRequest, fits) {
 				return true, localAgentsState, preemptedTasks
 			}
@@ -262,7 +265,7 @@ func (p priorityScheduler) trySchedulingPendingTasksInPriority(
 	unSuccessfulAllocations := make([]*sproto.AllocateRequest, 0)
 
 	for _, allocationRequest := range allocationRequests {
-		fits := findFits(allocationRequest, agents, fittingMethod, p.allowHeterogeneousFits)
+		fits := findFits(allocationRequest, agents, fittingMethod, p.allowHeterogeneousFits, p.gpus.packNUMA)
 		if len(fits) == 0 || !p.addTaskToAgents(allocationRequest, fits) {
 			unSuccessfulAllocations = append(unSuccessfulAllocations, allocationRequest)
 			continue

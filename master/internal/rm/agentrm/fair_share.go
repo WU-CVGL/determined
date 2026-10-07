@@ -56,6 +56,7 @@ func (f *fairShare) Schedule(rp *resourcePool) ([]*sproto.AllocateRequest, []mod
 		rp.agentStatesCache,
 		rp.fittingMethod,
 		rp.config.Scheduler.AllowHeterogeneousFits,
+		rp.gpuPolicy.packNUMA,
 	)
 }
 
@@ -85,6 +86,7 @@ func fairshareSchedule(
 	agents map[aproto.ID]*agentState,
 	fittingMethod SoftConstraint,
 	allowHeterogeneousAgentFits bool,
+	packNUMA bool,
 ) ([]*sproto.AllocateRequest, []model.AllocationID) {
 	allToAllocate := make([]*sproto.AllocateRequest, 0)
 	allToRelease := make([]model.AllocationID, 0)
@@ -98,6 +100,7 @@ func fairshareSchedule(
 				agents,
 				fittingMethod,
 				allowHeterogeneousAgentFits,
+				packNUMA,
 			); len(fits) == 0 {
 				continue
 			}
@@ -118,7 +121,7 @@ func fairshareSchedule(
 	// reclaiming slots should be rethought in scheduler v2.
 	capacity := totalCapacity(agents)
 	groupStates := calculateGroupStates(
-		taskList, groups, capacity, agents, fittingMethod, allowHeterogeneousAgentFits,
+		taskList, groups, capacity, agents, fittingMethod, allowHeterogeneousAgentFits, packNUMA,
 	)
 
 	allocateSlotOffers(groupStates, capacity)
@@ -127,6 +130,7 @@ func fairshareSchedule(
 		groupStates,
 		fittingMethod,
 		allowHeterogeneousAgentFits,
+		packNUMA,
 	)
 	allToAllocate = append(allToAllocate, toAllocate...)
 	allToRelease = append(allToRelease, toRelease...)
@@ -151,6 +155,7 @@ func calculateGroupStates(
 	agents map[aproto.ID]*agentState,
 	fittingMethod SoftConstraint,
 	allowHeterogeneousAgentFits bool,
+	packNUMA bool,
 ) []*groupState {
 	// Group all tasks by their respective task group and calculate the slot demand of each group.
 	// Demand is calculated by summing the slots needed for each schedulable task.
@@ -172,6 +177,7 @@ func calculateGroupStates(
 				agents,
 				fittingMethod,
 				allowHeterogeneousAgentFits,
+				packNUMA,
 			); len(fits) == 0 {
 				continue
 			}
@@ -360,7 +366,7 @@ func calculateSmallestAllocatableTask(state *groupState) (smallest *sproto.Alloc
 
 func assignTasks(
 	agents map[aproto.ID]*agentState, states []*groupState, fittingMethod SoftConstraint,
-	allowHetergenousAgentFits bool,
+	allowHetergenousAgentFits bool, packNUMA bool,
 ) ([]*sproto.AllocateRequest, []model.AllocationID) {
 	toAllocate := make([]*sproto.AllocateRequest, 0)
 	toRelease := make([]model.AllocationID, 0)
@@ -390,6 +396,7 @@ func assignTasks(
 						agents,
 						fittingMethod,
 						allowHetergenousAgentFits,
+						packNUMA,
 					); len(fits) == 0 {
 						continue
 					}

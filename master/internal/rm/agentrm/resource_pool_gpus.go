@@ -62,9 +62,12 @@ func (r *gpuXIDReader) recent(now time.Time) map[string]bool {
 // it ranks, "strong") then chooses the same devices in both for the same placements in the same
 // order while every earlier placement on the agent in the pass ranked too; map order gives no such
 // guarantee (see deepCopy). Fits use counts only, so a difference never changes which tasks fit,
-// except for "strong". Its zero value takes a plain task's devices in map order.
+// except for "strong", and never changes the agent a task gets, except for "strong" and for "soft"
+// under NUMA packing (preferOneNUMANode). Its zero value takes a plain task's devices in map order.
 type gpuPolicy struct {
 	// packNUMA packs every task's GPUs by NUMA node: fitting_policy best, numa_packing not false.
+	// It is also the gate of the agent choice of "soft" (preferOneNUMANode), which every findFits
+	// of the pass reads.
 	packNUMA bool
 	// xids holds the UUIDs of GPUs with a recent critical XID.
 	xids map[string]bool
@@ -96,6 +99,16 @@ func (p gpuPolicy) selection(req *sproto.AllocateRequest, fits []*fittingState) 
 // "strong" with 2 or more slots. With fewer, "strong" is as no preference.
 func strongTopology(req *sproto.AllocateRequest) bool {
 	return req.FittingRequirements.GPUTopology == expconf.GPUTopologyStrong && req.SlotsNeeded >= 2
+}
+
+// preferOneNUMANode reports whether a request's single-agent fit puts the agents where one NUMA
+// node has its slots free (holdsOnOneNUMANode) before the others: prefer_gpu_topology "soft" with 2
+// or more slots, in a pool that packs GPUs by NUMA node (packNUMA). The fitting score decides
+// within each group, so an agent with an unknown topology is with the agents that would split the
+// task. It needs packing: only then do the scheduler's copies and the live agents keep the same
+// free GPUs on each NUMA node, which the order reads (see deepCopy).
+func preferOneNUMANode(req *sproto.AllocateRequest, packNUMA bool) bool {
+	return packNUMA && req.FittingRequirements.GPUTopology == expconf.GPUTopologySoft && req.SlotsNeeded >= 2
 }
 
 // gpuReservation is one reservation of an allocation, for its logs.
@@ -194,7 +207,8 @@ func (rp *resourcePool) checkStrongRequests(reserved bool) bool {
 		if !strongTopology(req) || rp.taskList.IsScheduled(req.AllocationID) {
 			continue
 		}
-		fits := findFits(req, rp.agentStatesCache, rp.fittingMethod, rp.config.Scheduler.AllowHeterogeneousFits)
+		fits := findFits(req, rp.agentStatesCache, rp.fittingMethod, rp.config.Scheduler.AllowHeterogeneousFits,
+			rp.gpuPolicy.packNUMA)
 		if len(fits) > 0 {
 			again = again || reserved
 			continue

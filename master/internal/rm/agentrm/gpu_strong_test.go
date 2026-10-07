@@ -150,7 +150,7 @@ func TestStrongTakesGPUsInErrorWithoutABetterNode(t *testing.T) {
 		cid := cproto.NewID()
 		state.Devices[gpuDevice(id)] = &cid
 	}
-	fits := findFits(strongRequest(4), map[aproto.ID]*agentState{state.id: state}, BestFit, false)
+	fits := findFits(strongRequest(4), map[aproto.ID]*agentState{state.id: state}, BestFit, false, false)
 	require.Len(t, fits, 1)
 	require.Equal(t, []int{0, 1, 2, 3}, reserve(t, state, 4, deviceSelection{strong: true}))
 }
@@ -217,7 +217,7 @@ func TestStrongFit(t *testing.T) {
 		}
 	}
 	fits := func(req *sproto.AllocateRequest, states ...*agentState) bool {
-		return len(findFits(req, agentsOf(states...), BestFit, false)) > 0
+		return len(findFits(req, agentsOf(states...), BestFit, false, false)) > 0
 	}
 
 	idle := topologyAgentState(t, node02)
@@ -271,9 +271,9 @@ func TestStrongFit(t *testing.T) {
 	a.id = "a"
 	b := busy(topologyAgentState(t, node02), 5, 6, 7)
 	b.id = "b"
-	got := findFits(plain(4), agentsOf(a, b), BestFit, false)
+	got := findFits(plain(4), agentsOf(a, b), BestFit, false, false)
 	require.Equal(t, aproto.ID("a"), got[0].Agent.id)
-	got = findFits(strongRequest(4), agentsOf(a, b), BestFit, false)
+	got = findFits(strongRequest(4), agentsOf(a, b), BestFit, false, false)
 	require.Len(t, got, 1)
 	require.Equal(t, aproto.ID("b"), got[0].Agent.id)
 }
@@ -289,9 +289,9 @@ func TestStrongUsesOneAgent(t *testing.T) {
 	for _, n := range []int{8, 16} {
 		req := strongRequest(n)
 		req.FittingRequirements.SingleAgent = false
-		require.Empty(t, findFits(req, agents, BestFit, false), "n=%d", n)
+		require.Empty(t, findFits(req, agents, BestFit, false, false), "n=%d", n)
 		req.FittingRequirements.GPUTopology = expconf.GPUTopologySoft
-		require.NotEmpty(t, findFits(req, agents, BestFit, false), "n=%d", n)
+		require.NotEmpty(t, findFits(req, agents, BestFit, false, false), "n=%d", n)
 	}
 }
 
@@ -355,7 +355,7 @@ func TestStrongMissInTheSimulationIsNotAPanic(t *testing.T) {
 	copies["a"].id = "a"
 	req := strongRequest(4)
 	p := priorityScheduler{gpus: gpuPolicy{packNUMA: true}}
-	fits := findFits(req, copies, BestFit, false)
+	fits := findFits(req, copies, BestFit, false, false)
 	require.Len(t, fits, 1)
 	for _, id := range []int{0, 4} {
 		cid := cproto.NewID()
@@ -625,7 +625,7 @@ func TestStrongReservationOverRandomStates(t *testing.T) {
 			}
 		}
 		n := 2 + rng.Intn(4)
-		fit := len(findFits(strongRequest(n), map[aproto.ID]*agentState{state.id: state}, BestFit, false)) > 0
+		fit := len(findFits(strongRequest(n), map[aproto.ID]*agentState{state.id: state}, BestFit, false, false)) > 0
 		before := snapshotOf(state)
 		res, err := state.allocateFreeDevices(n, cproto.NewID(), deviceSelection{strong: true, packNUMA: true})
 		require.Equal(t, fit, err == nil, "trial %d, n=%d: %v", trial, n, err)

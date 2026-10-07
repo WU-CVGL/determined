@@ -425,7 +425,9 @@ func (a *agentState) freeDevice(d device.Device) {
 // order gives no such guarantee: a map-order placement can make the agent's later choices differ,
 // ranked ones included. Fits use counts only, so a difference never changes which tasks fit, except
 // for prefer_gpu_topology "strong", whose fit counts the free GPUs of each NUMA node; the check
-// after the pass then asks for one more pass (checkStrongRequests).
+// after the pass then asks for one more pass (checkStrongRequests). The agent choice of "soft"
+// counts them too, but only under NUMA packing (preferOneNUMANode): with every placement ranked,
+// the copies and the live agents keep the same free GPUs under the conditions above.
 func (a *agentState) deepCopy() *agentState {
 	copiedAgent := &agentState{
 		id:                    a.id,

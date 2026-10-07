@@ -14,7 +14,8 @@ import (
 // GPU selection chooses which free devices of the agent the scheduler picked a reservation gets.
 // It never changes how many devices a task gets or on which agent: the fit and the agent choice
 // are made before it, from counts only, except for prefer_gpu_topology "strong", whose fit also
-// counts the free GPUs of each NUMA node (holdsOnOneNUMANode).
+// counts the free GPUs of each NUMA node (holdsOnOneNUMANode), and for "soft" under NUMA packing,
+// whose agent choice counts them the same way (preferOneNUMANode).
 //
 // Three rules rank the free devices; without any, a reservation takes them in map order, as before
 // GPU selection existed:
@@ -720,7 +721,8 @@ func (g *gpuTopology) worstPair(set []device.Device) string {
 // freeByNUMA returns the free devices with a known NUMA node (numaNodeOf), by NUMA node, sorted by
 // ID. GPUs in error count: an error only ranks a set last. It is the one count of both the fit of
 // prefer_gpu_topology "strong" (holdsOnOneNUMANode) and its selection (selectOnOneNUMANode), so the
-// selection chooses a set on every agent the fit admits.
+// selection chooses a set on every agent the fit admits; the agent choice of "soft"
+// (preferOneNUMANode) uses it too.
 func freeByNUMA(in gpuSelectionInput) map[int][]device.Device {
 	out := map[int][]device.Device{}
 	for _, d := range in.free {
@@ -732,7 +734,8 @@ func freeByNUMA(in gpuSelectionInput) map[int][]device.Device {
 }
 
 // holdsOnOneNUMANode reports whether one NUMA node has n free GPUs: the fit of prefer_gpu_topology
-// "strong" on an agent. An agent without a known topology holds none.
+// "strong" on an agent, and the first key of the agent choice of "soft" under NUMA packing. An
+// agent without a known topology holds none.
 func holdsOnOneNUMANode(in gpuSelectionInput, n int) bool {
 	for _, devices := range freeByNUMA(in) {
 		if len(devices) >= n {
