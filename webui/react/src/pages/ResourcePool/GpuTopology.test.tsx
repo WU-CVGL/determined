@@ -490,7 +490,8 @@ describe('ClusterTopology', () => {
     setup(
       <ClusterTopology
         highlight={[
-          { agentId: 'node01', deviceIds: [0, 1, 5, 6] },
+          // -1 is the device ID of an excluded GPU, which is never a job's.
+          { agentId: 'node01', deviceIds: [-1, 0, 1, 5, 6] },
           { agentId: 'node02', deviceIds: [2] },
         ]}
         nodes={[node01, node02]}
