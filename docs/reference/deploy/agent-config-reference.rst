@@ -353,9 +353,10 @@ An XID is an error report of the NVIDIA driver. When the master has a Prometheus
 task resources <native-task-resources>` (``integrations.task_resources``), it reads each GPU's
 critical XIDs of the last 24 hours from the cluster's DCGM-Exporter. A GPU with one is in error, and
 its details list each code with the first and last 5-minute window in which the master saw it, for
-example ``79 (2026-10-07 10:05-10:10+0000 to 2026-10-07 10:20-10:25+0000)`` in ``det agent
+example ``79 (2026-10-07 10:05-10:10+0000 to 2026-10-07 10:10-10:15+0000)`` in ``det agent
 describe`` (in UTC) and the same in local time in the WebUI. A GPU stays in error until its XIDs
-leave the 24 hours, also after a reboot that fixed it.
+leave the 24 hours, also after a reboot that fixed it. A CLI older than this release shows such a
+GPU as ``error`` without its XIDs.
 
 Every XID code counts except the application codes 13, 31, 43 and 45, which faulty user code causes;
 this is the class of the ``gpu-xid-critical`` alert of `cluster-setup
@@ -377,12 +378,14 @@ Prometheus must give it the ``det_cluster`` label of ``integrations.task_resourc
 agent's excluded GPUs and GPUs of an unknown topology match too. Each step looks back exactly one
 step, so the steps see every sample.
 
-The windows are when the master saw an XID, not when it happened: a record stays in the exporter's
-window (5 minutes in cluster-setup), so the XID happened up to that long, plus the scrape interval,
-before the start of its first window. The agent API returns each GPU's ``recent_xids`` with
-``first_observed`` and ``last_observed``, the ends of the first and last window, and for the agent
-``xid_query_status`` (``NOT_CONFIGURED``, ``OK`` or ``FAILED``), ``xid_query_error`` and
-``xid_queried_at``.
+The windows are when the master saw an XID, not when it happened. The XID happened in its first
+window, or at most one exporter collection interval and one scrape interval before it (earlier only
+for the first window of the 24 hours). A record stays in the exporter's window (5 minutes in
+cluster-setup), so the last window can end up to about 10 minutes after the last XID, and a single
+XID usually shows as two consecutive windows, as in the example above. The agent API returns each
+GPU's ``recent_xids`` with ``first_observed`` and ``last_observed``, the ends of the first and last
+window, and for the agent ``xid_query_status`` (``NOT_CONFIGURED``, ``OK`` or ``FAILED``),
+``xid_query_error`` and ``xid_queried_at``.
 
 No XID does not mean that a GPU is healthy, also after a successful query: the exporter can be down,
 miss the GPU or not enable the metric, or the labels may not match. When the master has no
@@ -393,9 +396,13 @@ URL or response.
 Only requests for agents with their slots query: ``GetAgent``, and ``GetAgents`` without
 ``exclude_slots``, for example ``det agent list``, ``det agent describe`` and the resource pool
 page's GPU topology, and only for users who may view sensitive agent information. The master reuses
-each result, also a failed one, for 30 seconds, runs one query at a time and waits at most 5 seconds
-for it, so it sends at most one query every 30 seconds. Agent enable and disable responses carry the
-last result without querying.
+each result, also a failed one, for 30 seconds and runs one query at a time, so it sends at most one
+query every 30 seconds. After the 30 seconds, a request gets the last result at once while the
+master queries again in the background. A request waits for the query, at most 5 seconds, only when
+there is no result yet or the last one is 5 minutes old: the first request after a master start or
+after a quiet period. So a slow Prometheus can delay such a request, but never a client that polls,
+and ``xid_queried_at`` can be up to 5 minutes old. Agent enable and disable responses carry the last
+result without querying.
 
 CLI and WebUI
 =============
