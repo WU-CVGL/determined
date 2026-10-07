@@ -44,11 +44,11 @@ type resourcePool struct {
 	agentService     *agents
 	agentStatesCache map[aproto.ID]*agentState
 	// gpuPolicy is the GPU selection of the running scheduling pass, read once per pass.
-	gpuPolicy gpuPolicy
-	taskList         *tasklist.TaskList
-	groups           map[model.JobID]*tasklist.Group
-	queuePositions   tasklist.JobSortState // secondary sort key based on job submission time
-	scalingInfo      *sproto.ScalingInfo
+	gpuPolicy      gpuPolicy
+	taskList       *tasklist.TaskList
+	groups         map[model.JobID]*tasklist.Group
+	queuePositions tasklist.JobSortState // secondary sort key based on job submission time
+	scalingInfo    *sproto.ScalingInfo
 
 	reschedule      bool
 	rescheduleTimer *time.Timer

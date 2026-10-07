@@ -9,7 +9,7 @@ import (
 // pass's live reservations use the same one, so they choose the same devices for the same state.
 // Its zero value takes devices in map order.
 type gpuPolicy struct {
-	// packNUMA packs every task's GPUs by NUMA node: fitting_policy best.
+	// packNUMA packs every task's GPUs by NUMA node: fitting_policy best, numa_packing not false.
 	packNUMA bool
 	// xids holds the UUIDs of GPUs with a recent critical XID.
 	xids map[string]bool
@@ -18,7 +18,7 @@ type gpuPolicy struct {
 // newGPUPolicy returns the pool's GPU selection for a pass. It reads the pool's config, which
 // also built the pool's fitting method, so packing and the fitting policy never disagree.
 func (rp *resourcePool) newGPUPolicy() gpuPolicy {
-	return gpuPolicy{packNUMA: rp.config.Scheduler.FittingPolicy == best}
+	return gpuPolicy{packNUMA: rp.config.Scheduler.PacksGPUsByNUMA()}
 }
 
 // selection returns how a request's reservation on one of its fits chooses its devices.

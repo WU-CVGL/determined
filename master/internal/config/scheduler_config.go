@@ -43,6 +43,16 @@ type SchedulerConfig struct {
 	RoundRobin             *RoundRobinSchedulerConfig `union:"type,round_robin" json:"-"`
 	FittingPolicy          string                     `json:"fitting_policy"`
 	AllowHeterogeneousFits bool                       `json:"allow_heterogeneous_fits"`
+	// NUMAPacking turns off NUMA packing when false: under fitting_policy best, the agent RM
+	// chooses each task's GPUs inside the agent by NUMA node. Unset means on. It never changes
+	// how agents are chosen, and it has no effect under worst.
+	NUMAPacking *bool `json:"numa_packing,omitempty"`
+}
+
+// PacksGPUsByNUMA reports whether the pool chooses each task's GPUs inside the agent by NUMA node:
+// fitting_policy best, and numa_packing unset or true.
+func (s SchedulerConfig) PacksGPUsByNUMA() bool {
+	return s.FittingPolicy == best && (s.NUMAPacking == nil || *s.NUMAPacking)
 }
 
 // MarshalJSON implements the json.Marshaler interface.

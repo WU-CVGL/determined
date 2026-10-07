@@ -65,11 +65,19 @@ func MarshalEx(v interface{}, allowEmptyUnion bool) ([]byte, error) {
 			jsonTagValue = field.Name
 			fallthrough
 		default:
-			if strings.Contains(jsonTagValue, ",") {
+			name, options, hasOptions := strings.Cut(jsonTagValue, ",")
+			switch {
+			case !hasOptions:
+			case options == "omitempty" && field.Type.Kind() == reflect.Ptr:
+				// omitempty is supported for pointers: a nil one is left out.
+				if value.Field(i).IsNil() {
+					continue
+				}
+			default:
 				return nil, errors.New(
 					"advanced json tag features not support in union type marshaling")
 			}
-			data[jsonTagValue] = value.Field(i).Interface()
+			data[name] = value.Field(i).Interface()
 		}
 	}
 

@@ -528,6 +528,7 @@ func TestSpecSnapshotReadableByLegacyDecoder(t *testing.T) {
 		`{"pool_name":"plain"}`,
 		`{"pool_name":"reconnect","description":"d","agent_reconnect_wait":"10m"}`,
 		`{"pool_name":"scheduled","scheduler":{"type":"priority","default_priority":10}}`,
+		`{"pool_name":"unpacked","scheduler":{"type":"priority","numa_packing":false}}`,
 		`{"pool_name":"overrides","task_container_defaults":{"shm_size_bytes":1024,
 			"registry_auth":{"username":"u","password":"p"},"add_capabilities":["CAP_X"]}}`,
 	} {
@@ -588,7 +589,7 @@ func TestDynamicPoolJSONFieldSetsMatch0401(t *testing.T) {
 		}},
 		{config.SchedulerConfig{}, []string{
 			"- union:type,fair_share", "- union:type,priority", "- union:type,round_robin",
-			"fitting_policy", "allow_heterogeneous_fits",
+			"fitting_policy", "allow_heterogeneous_fits", "numa_packing,omitempty",
 		}},
 		{config.FairShareSchedulerConfig{}, []string{}},
 		{config.PrioritySchedulerConfig{}, []string{"preemption", "default_priority"}},
@@ -671,4 +672,31 @@ func TestDynamicPoolReadyWriteFailureDoesNotPublish(t *testing.T) {
 	require.Equal(t, db.DynamicResourcePoolFailed, record.State)
 	require.Equal(t, 1, stopped)
 	require.False(t, rm.IsDynamicResourcePoolReady(cfg.PoolName))
+}
+
+// numa_packing is a scheduler option of dynamic pool specs as of master.yaml pools. A spec that
+// does not set it stores no key, so its snapshot stays readable by an older master.
+func TestDynamicPoolSpecNUMAPacking(t *testing.T) {
+	manager := testDynamicPoolRM()
+	masterDefaults := *model.DefaultTaskContainerDefaults()
+	for spec, packs := range map[string]bool{
+		`{"pool_name":"packed","scheduler":{"type":"priority"}}`:                              true,
+		`{"pool_name":"packed-explicit","scheduler":{"type":"priority","numa_packing":true}}`: true,
+		`{"pool_name":"unpacked","scheduler":{"type":"priority","numa_packing":false}}`:       false,
+		`{"pool_name":"worst","scheduler":{"type":"priority","fitting_policy":"worst"}}`:      false,
+		`{"pool_name":"worst-on","scheduler":{"fitting_policy":"worst","numa_packing":true}}`: false,
+		`{"pool_name":"inherits"}`: true,
+	} {
+		require.NoError(t, ValidateDynamicResourcePoolConfigJSON(json.RawMessage(spec)), spec)
+		prepared, err := manager.prepareDynamicPoolSpec(json.RawMessage(spec), masterDefaults)
+		require.NoError(t, err, spec)
+		effective, err := manager.NormalizeDynamicResourcePoolConfig(prepared.config, masterDefaults)
+		require.NoError(t, err, spec)
+		require.Equal(t, packs, effective.Scheduler.PacksGPUsByNUMA(), spec)
+		hasKey := strings.Contains(string(prepared.snapshot.Config), "numa_packing")
+		require.Equal(t, strings.Contains(spec, "numa_packing"), hasKey, spec)
+	}
+	_, err := manager.prepareDynamicPoolSpec(
+		json.RawMessage(`{"pool_name":"bad","scheduler":{"numa_packing":"no"}}`), masterDefaults)
+	require.Error(t, err)
 }
