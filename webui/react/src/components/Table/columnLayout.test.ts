@@ -11,7 +11,7 @@ const widthOf = ({ columns, columnWidths }: ColumnLayout) => {
 describe('withColumn', () => {
   it('inserts the column after its neighbour with its width at the same place', () => {
     const layout = withColumn(
-      { columnWidths: [200, 90, 140, 80], columns: ['name', 'slots', 'state', 'user'] },
+      { columns: ['name', 'slots', 'state', 'user'], columnWidths: [200, 90, 140, 80] },
       'gpus',
       'slots',
       WIDTHS,
@@ -22,7 +22,7 @@ describe('withColumn', () => {
 
   it('puts the column last without its neighbour', () => {
     const layout = withColumn(
-      { columnWidths: [200, 80], columns: ['name', 'user'] },
+      { columns: ['name', 'user'], columnWidths: [200, 80] },
       'gpus',
       'slots',
       WIDTHS,
@@ -33,7 +33,7 @@ describe('withColumn', () => {
 
   it('gives the column its width at its place when the widths are one short', () => {
     const layout = withColumn(
-      { columnWidths: [200, 90, 80], columns: ['name', 'slots', 'gpus', 'user'] },
+      { columns: ['name', 'slots', 'gpus', 'user'], columnWidths: [200, 90, 80] },
       'gpus',
       'slots',
       WIDTHS,
@@ -43,7 +43,7 @@ describe('withColumn', () => {
 
   it('gives a stored name without a default width the width of an unknown column', () => {
     const layout = withColumn(
-      { columnWidths: [200], columns: ['name', 'dropped', 'slots'] },
+      { columns: ['name', 'dropped', 'slots'], columnWidths: [200] },
       'gpus',
       'slots',
       WIDTHS,
@@ -57,10 +57,15 @@ describe('withColumn', () => {
   });
 
   it('keeps a layout that has the column, and drops widths past the last column', () => {
-    const layout = { columnWidths: [200, 90, 180], columns: ['name', 'slots', 'gpus'] };
+    const layout = { columns: ['name', 'slots', 'gpus'], columnWidths: [200, 90, 180] };
     expect(withColumn(layout, 'gpus', 'slots', WIDTHS)).toEqual(layout);
     expect(
-      withColumn({ ...layout, columnWidths: [...layout.columnWidths, 99] }, 'gpus', 'slots', WIDTHS),
+      withColumn(
+        { ...layout, columnWidths: [...layout.columnWidths, 99] },
+        'gpus',
+        'slots',
+        WIDTHS,
+      ),
     ).toEqual(layout);
   });
 });
