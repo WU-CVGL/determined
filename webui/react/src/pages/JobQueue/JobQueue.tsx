@@ -570,6 +570,7 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
     commandTasks,
     fetchJobsTable,
     launchAgain,
+    users,
   ]);
 
   // table title using selectedRp and schedulerType from list of resource pools

@@ -138,13 +138,15 @@ vi.mock('services/api', () => ({
   killTask: vi.fn(),
   updateUserSetting: vi.fn(() => Promise.resolve()),
 }));
-vi.mock('hooks/usePermissions', () => ({
-  default: () => ({
+vi.mock('hooks/usePermissions', () => {
+  // The same functions on every render, as the hook memoizes them.
+  const checks = {
     canCreateWorkspaceNSC: () => true,
     canModifyExperiment: () => permissions.canModify,
     canModifyWorkspaceNSC: () => permissions.canModify,
-  }),
-}));
+  };
+  return { default: () => checks };
+});
 vi.mock('hooks/useTaskResourcesEnabled', () => ({ default: () => true }));
 vi.mock('hooks/useFeature', () => ({ default: () => ({ isOn: () => true }) }));
 // The launch form itself is tested in NtscLaunchModal.test.tsx and useLaunchForm.test.tsx. The
@@ -292,6 +294,13 @@ const rowOrder = () =>
   Array.from(document.querySelectorAll('tbody tr[data-row-key]')).map((row) =>
     row.getAttribute('data-row-key'),
   );
+
+/** The job ID and the initials of the user avatar of each row, from the top. */
+const rowAvatars = () =>
+  Array.from(document.querySelectorAll('tbody tr[data-row-key]')).map((row) => [
+    row.getAttribute('data-row-key'),
+    row.querySelector('#avatar')?.textContent ?? null,
+  ]);
 
 const settingsPath = (jobState: JobState) => `job-queue-${jobState}`;
 
@@ -643,6 +652,55 @@ describe('JobQueue', () => {
       await waitFor(() => expect(rowOrder()).toEqual(['q1', 'q3', 'q5', 'q0', 'q4', 'q2']));
       await clickHeader('User');
       await waitFor(() => expect(rowOrder()).toEqual(['q0', 'q4', 'q5', 'q3', 'q1', 'q2']));
+    });
+
+    it('shows the names it sorts users by once the users load', async () => {
+      const usersReply = deferred<Awaited<ReturnType<typeof getUsers>>>();
+      vi.mocked(getUsers).mockReturnValue(usersReply.promise);
+      userStore.fetchUsers();
+      storeSettings(JobState.SCHEDULED, { sortDesc: false, sortKey: 'user' });
+      mocks.jobs = activeJobs.map((job) =>
+        job.jobId === 'q1' ? { ...job, userId: OWNER_ID + 1 } : job,
+      );
+      setup(Api.V1SchedulerType.PRIORITY, JobState.SCHEDULED, 'avatars');
+      // By username until the users load: carol after bob.
+      await waitFor(() =>
+        expect(rowAvatars()).toEqual([
+          ['q3', 'A'],
+          ['q5', 'A'],
+          ['q0', 'B'],
+          ['q4', 'B'],
+          ['q1', 'C'],
+          ['q2', null],
+        ]),
+      );
+
+      await act(async () => {
+        usersReply.resolve({
+          pagination: {},
+          users: [
+            {
+              displayName: 'Aaron Zed',
+              id: OWNER_ID + 1,
+              isActive: true,
+              isAdmin: false,
+              username: 'carol',
+            },
+          ],
+        });
+        await usersReply.promise;
+      });
+      // carol, shown as Aaron Zed, comes first.
+      await waitFor(() =>
+        expect(rowAvatars()).toEqual([
+          ['q1', 'AZ'],
+          ['q3', 'A'],
+          ['q5', 'A'],
+          ['q0', 'B'],
+          ['q4', 'B'],
+          ['q2', null],
+        ]),
+      );
     });
 
     it('goes back to the queue order without a queue position column', async () => {
