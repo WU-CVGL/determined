@@ -61,11 +61,11 @@ import { getActionsForExperiment } from 'utils/experiment';
 import { alphaNumericSorter, numericSorter } from 'utils/sort';
 import { pluralizer } from 'utils/string';
 import { canKillGenericTask, isTaskKillable } from 'utils/task';
+import { compareText } from 'utils/textOrder';
 import { getDisplayName } from 'utils/user';
 
 import { fetchRunPage, RunPage, RunQuery } from './fetchRuns';
 import {
-  compareJobsText,
   DashboardScope,
   DEFAULT_SORT,
   kindsOf,
@@ -229,7 +229,7 @@ const ownersMeFirst = (users: DetailedUser[], me?: DetailedUser): DetailedUser[]
   ...(me ? [me] : []),
   ...users
     .filter((user) => user.id !== me?.id)
-    .sort((a, b) => compareJobsText(getDisplayName(a), getDisplayName(b))),
+    .sort((a, b) => compareText(getDisplayName(a), getDisplayName(b))),
 ];
 
 interface ChecklistFilter {

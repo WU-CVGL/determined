@@ -556,9 +556,8 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
           sortOrder: key === sortKey ? (sortDesc ? 'descend' : 'ascend') : null,
         };
       });
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    defaultColumns,
     isJobOrderAvailable,
     dropDownOnTrigger,
     settingsColumns,

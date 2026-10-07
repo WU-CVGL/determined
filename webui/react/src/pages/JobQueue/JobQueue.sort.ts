@@ -1,6 +1,7 @@
 import { SortOrder } from 'antd/es/table/interface';
 
 import { Job } from 'types';
+import { compareText } from 'utils/textOrder';
 
 /** The queue order: no column sort. */
 export const QUEUE_ORDER = { sortDesc: false, sortKey: 'jobsAhead' } as const;
@@ -34,26 +35,6 @@ export const ACTIVE_SORTS: Record<string, ColumnSort> = {
 
 export const isActiveSortKey = (key: unknown): key is string =>
   typeof key === 'string' && Object.keys(ACTIVE_SORTS).includes(key);
-
-const compareCodePoints = (a: string, b: string): number => {
-  const [x, y] = [
-    Array.from(a, (c) => c.codePointAt(0) ?? 0),
-    Array.from(b, (c) => c.codePointAt(0) ?? 0),
-  ];
-  for (let i = 0; i < Math.min(x.length, y.length); i++) {
-    if (x[i] !== y[i]) return x[i] - y[i];
-  }
-  return x.length - y.length;
-};
-
-const foldAToZ = (text: string): string => text.replace(/[A-Z]+/g, (s) => s.toLowerCase());
-
-/**
- * The Jobs page's text order: A-Z folded to a-z only, by code point, then the text as is; as
- * Postgres orders `lower(x COLLATE "C"), x COLLATE "C"`.
- */
-export const compareText = (a: string, b: string): number =>
-  compareCodePoints(foldAToZ(a), foldAToZ(b)) || compareCodePoints(a, b);
 
 const compareValues = (a: string | number[], b: string | number[]): number => {
   if (typeof a === 'string' || typeof b === 'string') {
