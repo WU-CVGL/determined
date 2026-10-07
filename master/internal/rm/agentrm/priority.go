@@ -19,9 +19,8 @@ type priorityScheduler struct {
 	preemptionEnabled      bool
 	allowHeterogeneousFits bool
 	// gpus is the pool's GPU selection for the pass that Schedule runs. The simulation selects
-	// devices on its copies with it, as the pass's live reservations do, so both choose the same
-	// devices unless preemption or a failed reservation makes them place different tasks (see
-	// deepCopy). Its zero value takes devices in map order.
+	// devices on its copies with it, as the pass's live reservations do; deepCopy says when both
+	// choose the same devices. Its zero value takes devices in map order.
 	gpus gpuPolicy
 }
 
@@ -325,8 +324,7 @@ func deepCopyAgents(agents map[aproto.ID]*agentState) map[aproto.ID]*agentState 
 
 // addTaskToAgents places a request on the scheduler's copies, choosing its devices as the live
 // reservation does (gpuPolicy.selection). A fit counts free devices and a selection that cannot
-// choose falls back to map order, so a reservation here does not fail; strong must keep that true
-// (chooseFreeDevices).
+// choose falls back to map order, so a reservation here does not fail.
 func (p priorityScheduler) addTaskToAgents(req *sproto.AllocateRequest, fits []*fittingState) {
 	sel := p.gpus.selection(req, fits)
 	for _, fit := range fits {

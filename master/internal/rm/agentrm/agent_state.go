@@ -352,8 +352,10 @@ func (a *agentState) freeDevice(d device.Device) {
 // never mutated, only replaced, so the simulation selects GPUs on the copies from the inputs the
 // live reservation reads on the agent. A ranked selection (NUMA packing, "soft" when it ranks) is
 // deterministic: with the pass's policy and the same placements in the same order on unchanged
-// agents (no preemption, every reservation succeeding), the two choose the same devices. Map order
-// gives no such guarantee. Fits use counts only, so a difference never changes which tasks fit.
+// agents (no preemption, every reservation succeeding), the two choose the same devices while every
+// earlier placement on the agent in the pass ranked too, as under NUMA packing. Map order gives no
+// such guarantee: a map-order placement can make the agent's later choices differ, ranked ones
+// included. Fits use counts only, so a difference never changes which tasks fit.
 func (a *agentState) deepCopy() *agentState {
 	copiedAgent := &agentState{
 		id:                    a.id,
