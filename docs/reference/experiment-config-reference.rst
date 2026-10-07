@@ -1322,15 +1322,16 @@ In a pool with :ref:`NUMA packing <master-config-numa-packing>` (``fitting_polic
 the agents where one NUMA node has the task's slots free come first, and the fitting policy picks
 among them, or among the others when no agent has such a node, as for other tasks. Free GPUs count
 as for ``"strong"`` below: free GPUs in error count; GPUs without a known NUMA node never count, and
-an agent whose topology the master does not have counts as one without such a node. The choice reads
-only how many free GPUs each NUMA node has: on the chosen agent, the task still gets the set that
-ranks first above, fewer GPUs in error first, so ``"soft"`` does not guarantee a set on one NUMA
-node; ``"strong"`` does. For example, on an agent with GPUs 0-3 on NUMA node 0 and 4-7 on node 1,
-with GPUs 0 to 4 free and GPU 0 in error, a 4-slot task with ``"soft"`` gets GPUs 1 to 4, and one
-with ``"strong"`` gets GPUs 0 to 3. Soft may take a pool's emptier agent, including an idle one:
-with one agent that has 2 free GPUs on each NUMA node and another, emptier one with 4 free GPUs on
-one node, a 4-slot task takes the emptier agent, where a task without the preference takes the
-fuller one. In other pools, ``"soft"`` never changes the agent the scheduler picks.
+an agent whose topology the master does not have counts as one without such a node. Which agents
+come first depends only on how many free GPUs each NUMA node has: on the chosen agent, the task
+still gets the set that ranks first above, fewer GPUs in error first, so ``"soft"`` does not
+guarantee a set on one NUMA node; ``"strong"`` does. For example, on an agent with GPUs 0-3 on NUMA
+node 0 and 4-7 on node 1, with GPUs 0 to 4 free and GPU 0 in error, a 4-slot task with ``"soft"``
+gets GPUs 1 to 4, and one with ``"strong"`` gets GPUs 0 to 3. Soft may take a pool's emptier agent,
+including an idle one: with one agent that has 2 free GPUs on each NUMA node and another, emptier
+one with 4 free GPUs on one node, a 4-slot task takes the emptier agent, where a task without the
+preference takes the fuller one. In other pools, ``"soft"`` never changes the agent the scheduler
+picks.
 
 With ``"strong"``, a task with 2 or more slots starts only when one NUMA node of one agent has that
 many free GPUs, and gets GPUs of that node. It waits for such a node without limit, uses one agent,
