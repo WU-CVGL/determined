@@ -228,8 +228,9 @@ When it starts, an agent measures its NVIDIA GPUs with NVML and reports the resu
 This is not an option: every agent with NVIDIA GPUs does it, and no configuration turns it on or
 off. The master keeps the report in memory and serves it in the agent API (``gpu_topology``, left
 out of agent lists requested with ``exclude_slots``), in ``det agent list``, in ``det agent describe
-AGENT_ID``, and on the resource pool page of the WebUI. Users without permission to view sensitive
-agent information see no topology.
+AGENT_ID``, and on the resource pool page of the WebUI, with each GPU's :ref:`recent critical XIDs
+<agent-gpu-xids>` when the master has a Prometheus. Users without permission to view sensitive agent
+information see no topology.
 
 NVML
 ====
@@ -300,8 +301,8 @@ row wins.
       -  CLI
 
    -  -  error
-      -  One of the GPU's NVML health calls (handle, PCI info, link width or generation) failed at
-         agent start. A failed query for a pair of GPUs makes only that pair's value unknown.
+      -  An NVML health call of the GPU (handle, PCI info, link width or generation) failed at agent
+         start, or the GPU has a :ref:`recent critical XID <agent-gpu-xids>`.
       -  red
       -  ``error``
 
@@ -320,25 +321,81 @@ row wins.
       -  hollow gray
       -  ``unknown``
 
-The link generation never changes the state. Green means that there was no NVML error and the link
-width was at its maximum at agent start; it does not mean that the GPU is verified to be healthy.
+A failed NVML query for a pair of GPUs makes only that pair's value unknown. The link generation
+never changes the state. Green means that there was no NVML error and the link width was at its
+maximum at agent start, and that no recent critical XID was found; it does not mean that the GPU is
+verified to be healthy. Only GPU-side evidence turns a GPU red: a task that fails is no evidence,
+since faulty user code fails the same way.
 
 The link width is an observation at agent start, not a confirmed fault. A GPU can reduce its link
 width while it is idle, and a link can train to a different width after a reboot. A lower link width
 lowers the bandwidth cap of the GPU's link; the actual collective throughput depends on the
 workload.
 
-The details of each GPU (``det agent describe`` and the WebUI's details) list three facts
-separately: ``PCIe link``, the current and maximum link width at agent start and the highest link
-generation that the GPU and its slot support, for example ``x8 of x16, Gen4``; ``NVML errors``, the
-NVML health calls that failed at agent start; and ``Collected at``, the time of the measurement by
-the agent's clock. XID errors are not collected.
+The details of each GPU (``det agent describe`` and the WebUI's details) list its facts separately:
+``PCIe link``, the current and maximum link width at agent start and the highest link generation
+that the GPU and its slot support, for example ``x8 of x16, Gen4``; ``NVML errors``, the NVML health
+calls that failed at agent start; ``Collected at``, the time of the measurement by the agent's
+clock; and, only when the GPU has any, ``Recent critical XIDs``.
 
 The details leave out the current link generation: a GPU lowers it while it is idle, often to Gen1,
 so its value at agent start says little about the link under load. The highest generation says what
 the GPU and its slot support, not what the link runs at: a link that trains to a lower generation
 under load still shows it. The agent API reports both, as ``pcie_link_gen`` and
 ``pcie_link_gen_max``.
+
+.. _agent-gpu-xids:
+
+Recent critical XIDs
+====================
+
+An XID is an error report of the NVIDIA driver. When the master has a Prometheus for :ref:`native
+task resources <native-task-resources>` (``integrations.task_resources``), it reads each GPU's
+critical XIDs of the last 24 hours from the cluster's DCGM-Exporter. A GPU with one is in error, and
+its details list each code with the first and last 5-minute window in which the master saw it, for
+example ``79 (2026-10-07 10:05-10:10+0000 to 2026-10-07 10:20-10:25+0000)`` in ``det agent
+describe`` (in UTC) and the same in local time in the WebUI. A GPU stays in error until its XIDs
+leave the 24 hours, also after a reboot that fixed it.
+
+Every XID code counts except the application codes 13, 31, 43 and 45, which faulty user code causes;
+this is the class of the ``gpu-xid-critical`` alert of `cluster-setup
+<https://github.com/WU-CVGL/cluster-setup>`__. A driver fault that shows only as XID 31 therefore
+does not count. For a GPU that fails without an XID, use :ref:`exclude_gpus <agent-exclude-gpus>`.
+
+The master runs one range query over the 24 hours at a 300-second step, with steps on a 5-minute
+grid that ends at or after the query time:
+
+.. code::
+
+   max by (gpu_uuid, xid) (max_over_time(DCGM_EXP_XID_ERRORS_COUNT{job="dcgm",
+     det_cluster="<det_cluster>", gpu_uuid!="", xid!="", xid!="0", xid!~"13|31|43|45"}[5m])) > 0
+
+``DCGM_EXP_XID_ERRORS_COUNT`` is a gauge: for each GPU and code (label ``xid``), the number of XID
+records in the exporter's sliding window. The exporter's counters file must enable it, and
+Prometheus must give it the ``det_cluster`` label of ``integrations.task_resources`` and a
+``gpu_uuid`` label with the GPU's UUID, which the master matches against the agent's GPUs; the
+agent's excluded GPUs and GPUs of an unknown topology match too. Each step looks back exactly one
+step, so the steps see every sample once.
+
+The windows are when the master saw an XID, not when it happened: a record stays in the exporter's
+window (5 minutes in cluster-setup), so the XID happened up to that long, plus the scrape interval,
+before the start of its first window. The agent API returns each GPU's ``recent_xids`` with
+``first_observed`` and ``last_observed``, the ends of the first and last window, and for the agent
+``xid_query_status`` (``NOT_CONFIGURED``, ``OK`` or ``FAILED``), ``xid_query_error`` and
+``xid_queried_at``.
+
+No XID does not mean that a GPU is healthy, also after a successful query: the exporter can be down,
+miss the GPU or not enable the metric, or the labels may not match. When the master has no
+Prometheus or the query fails, the health comes from the agent's measurement alone and the CLI and
+the WebUI show nothing about XIDs; the master logs a failure at debug level, without the Prometheus
+URL or response.
+
+Only requests for agents with their slots query: ``GetAgent``, and ``GetAgents`` without
+``exclude_slots``, for example ``det agent list``, ``det agent describe`` and the resource pool
+page's GPU topology, and only for users who may view sensitive agent information. The master reuses
+each result, also a failed one, for 30 seconds, runs one query at a time and waits at most 5 seconds
+for it, so it sends at most one query every 30 seconds. Agent enable and disable responses carry the
+last result without querying.
 
 CLI and WebUI
 =============
@@ -387,10 +444,12 @@ Coverage
 ========
 
 The measurement is a snapshot of the agent's start. A GPU that is lost, or a link that retrains,
-while the agent runs shows only at its next start. A GPU that ``nvidia-smi`` no longer lists at
-agent start is not measured: the agent registers fewer slots, or falls back to CPU slots with
-``slot_type: auto``, and an agent that reconnects with fewer slots is stopped by the master. Use the
-cluster's GPU monitoring for these cases.
+while the agent runs shows only at its next start, unless the GPU reports a critical XID, such as 79
+for a GPU that has fallen off the bus, and the master reads :ref:`XIDs <agent-gpu-xids>`: the GPU is
+then red within minutes. A GPU that ``nvidia-smi`` no longer lists at agent start is not measured:
+the agent registers fewer slots, or falls back to CPU slots with ``slot_type: auto``, and an agent
+that reconnects with fewer slots is stopped by the master. Use the cluster's GPU monitoring for
+these cases.
 
 ``determined-agent gpu-topology``
 =================================
