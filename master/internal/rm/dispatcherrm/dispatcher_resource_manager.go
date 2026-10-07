@@ -2226,6 +2226,12 @@ func (m *DispatcherResourceManager) TaskContainerDefaults(
 	return result, nil
 }
 
+// AppliesPodSpecs implements rm.PodSpecApplier. The launcher's manifest of a task takes its bind
+// mounts and no pod spec, in every pool.
+func (*DispatcherResourceManager) AppliesPodSpecs(rm.ResourcePoolName) (bool, error) {
+	return false, nil
+}
+
 // EnableSlot implements 'det slot enable...' functionality.
 func (m *DispatcherResourceManager) EnableSlot(*apiv1.EnableSlotRequest,
 ) (resp *apiv1.EnableSlotResponse, err error) {

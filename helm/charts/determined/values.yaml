@@ -325,6 +325,8 @@ telemetry:
 ## Configure Prometheus endpoints for monitoring.
 # observability:
 #   enable_prometheus: true
+#   ## How long an allocation runs before its metrics are attributed to its task.
+#   task_mapping_delay: 5m
 
 ## A user-friendly name to identify this cluster by.
 # clusterName: Dev

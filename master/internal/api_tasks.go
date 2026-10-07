@@ -19,6 +19,7 @@ import (
 	"github.com/hashicorp/go-multierror"
 
 	"github.com/determined-ai/determined/master/internal/api"
+	"github.com/determined-ai/determined/master/internal/api/apiutils"
 	"github.com/determined-ai/determined/master/internal/authz"
 	"github.com/determined-ai/determined/master/internal/command"
 	"github.com/determined-ai/determined/master/internal/db"
@@ -549,11 +550,9 @@ func (a *apiServer) monitor(ctx context.Context, taskID model.TaskID, logs []*mo
 
 // addTaskLogsForUser writes a batch of task logs that curUser posts. PostTaskLogs and the legacy
 // POST /task-logs route share it, so both apply the same rules before anything is written: at
-// least one log, no log with an ID, a single task for the whole batch, and that task passes
-// canDoActionsOnTaskForUser with CanEditExperiment. That means edit permission for a trial's
-// experiment, but only view permission (CanGetNSC) for commands, notebooks, shells, TensorBoards
-// and generic tasks, and none for checkpoint GC tasks. It returns the task's workspace and,
-// for a trial, its experiment ID.
+// least one log, no log with an ID, a single task for the whole batch, and that curUser may write
+// that task's logs (see canWriteTaskLogs). It returns the task's workspace and, for a trial, its
+// experiment ID.
 func (a *apiServer) addTaskLogsForUser(
 	ctx context.Context, curUser model.User, logs []*model.TaskLog,
 ) (*model.AccessScopeID, *int, error) {
@@ -565,8 +564,7 @@ func (a *apiServer) addTaskLogsForUser(
 	}
 	taskID := logs[0].TaskID
 
-	workspaceID, expID, err := a.canDoActionsOnTaskForUser(ctx, model.TaskID(taskID), curUser,
-		expauth.AuthZProvider.Get().CanEditExperiment)
+	workspaceID, expID, err := a.canWriteTaskLogs(ctx, model.TaskID(taskID), curUser)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -591,11 +589,92 @@ func (a *apiServer) addTaskLogsForUser(
 	return workspaceID, expID, nil
 }
 
+// canWriteTaskLogs checks that curUser may append to a task's logs. The task must first pass the
+// checks of canDoActionsOnLoadedTaskForUser with CanEditExperiment, as it did before, so a task
+// that the user cannot see is not found, and a trial takes edit permission on its experiment and
+// nothing more. Other tasks must pass canWriteNonTrialTaskLogs as well, since seeing them is not
+// enough to write to their logs. Reading a task and its logs still takes only the view check.
+func (a *apiServer) canWriteTaskLogs(
+	ctx context.Context, taskID model.TaskID, curUser model.User,
+) (*model.AccessScopeID, *int, error) {
+	t, err := taskForAction(ctx, taskID)
+	if err != nil {
+		return nil, nil, err
+	}
+	workspaceID, expID, err := a.canDoActionsOnLoadedTaskForUser(ctx, taskID, t, curUser,
+		expauth.AuthZProvider.Get().CanEditExperiment)
+	if err != nil {
+		return nil, nil, err
+	}
+	if t.TaskType != model.TaskTypeTrial {
+		if err := canWriteNonTrialTaskLogs(ctx, curUser, taskID); err != nil {
+			return nil, nil, err
+		}
+	}
+	return workspaceID, expID, nil
+}
+
+// canWriteNonTrialTaskLogs is the write rule for the logs of a command, notebook, shell,
+// TensorBoard, generic task or checkpoint GC task. The task's own containers, which ship their
+// output with its allocation session (ship_logs.py), may always write. Anyone else must be allowed
+// to control the task, whose owner is the owner of its job. For a task with command state, that is
+// CanControlGenericTask, as for killing it: the owner or an admin under basic authorization,
+// UPDATE_NSC in its workspace under RBAC. A task without command state, such as a checkpoint GC
+// task, has no workspace, and not every GC task has an experiment, so it takes the owner or an
+// admin in every authz mode, as checkAllocationController does. A task whose owner is unknown is
+// refused.
+func canWriteNonTrialTaskLogs(
+	ctx context.Context, curUser model.User, taskID model.TaskID,
+) error {
+	session, err := grpcutil.GetAllocationSession(ctx)
+	if err != nil {
+		return err
+	}
+	if session != nil && strings.Contains(string(session.AllocationID), ".") &&
+		session.AllocationID.ToTaskID() == taskID {
+		return nil
+	}
+
+	var ownerID *model.UserID
+	err = db.Bun().NewSelect().
+		ColumnExpr("j.owner_id").
+		TableExpr("tasks AS t").
+		Join("JOIN jobs AS j ON j.job_id = t.job_id").
+		Where("t.task_id = ?", taskID).
+		Scan(ctx, &ownerID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if ownerID == nil {
+		return status.Errorf(codes.PermissionDenied,
+			"task %s has no known owner, so only its own containers may write its logs", taskID)
+	}
+
+	spec, err := command.IdentifyTask(ctx, taskID)
+	switch {
+	case errors.Is(err, db.ErrNotFound):
+		if curUser.Admin || *ownerID == curUser.ID {
+			return nil
+		}
+		return status.Error(codes.PermissionDenied,
+			"only the task's own containers, its owner or an admin may write its logs")
+	case err != nil:
+		return err
+	}
+	return apiutils.MapAndFilterErrors(command.AuthZProvider.Get().CanControlGenericTask(
+		ctx, curUser, spec.WorkspaceID, ownerID,
+	), nil, nil)
+}
+
 func (a *apiServer) PostTaskLogs(
 	ctx context.Context, req *apiv1.PostTaskLogsRequest,
 ) (*apiv1.PostTaskLogsResponse, error) {
 	if len(req.Logs) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "len logs must be greater than 0")
+	}
+	// model.TaskLogFromProto dereferences each log, so refuse a null one before converting.
+	if slices.Contains(req.Logs, nil) {
+		return nil, status.Error(codes.InvalidArgument, "logs must not be null")
 	}
 	curUser, _, err := grpcutil.GetUser(ctx)
 	if err != nil {

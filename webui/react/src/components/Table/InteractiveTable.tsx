@@ -71,6 +71,8 @@ export interface ColumnDef<RecordType> extends Omit<ColumnType<RecordType>, 'onC
   dataIndex: string;
   defaultWidth: number;
   isFiltered?: (s: unknown) => boolean;
+  /** The narrowest the column can be resized to; its default width when not given. */
+  minWidth?: number;
   onCell?: (record: RecordType, index?: number) => CellProps;
 }
 export type ColumnDefs<ColumnName extends string, RecordType> = Record<
@@ -134,6 +136,9 @@ interface CellProps {
 export const onRightClickableCell = (): CellProps => ({ isCellRightClickable: true });
 
 const RightClickableRowContext = createContext({});
+
+const minWidthOf = (column?: { defaultWidth: number; minWidth?: number }): number =>
+  column?.minWidth ?? column?.defaultWidth ?? 40;
 
 const getAdjustedColumnWidthSum = (columnsWidths: number[]) => {
   return columnsWidths.reduce((a, b) => a + b, 0) + 2 * WIDGET_COLUMN_WIDTH + 2 * 24;
@@ -395,7 +400,8 @@ const InteractiveTable = <
   );
 
   const [widthData, setWidthData] = useState(() => {
-    const widths = settings.columnWidths || [];
+    // A copy: a resize changes these widths in place, and the settings' own must stay as stored.
+    const widths = [...(settings.columnWidths || [])];
     return {
       dropLeftStyles:
         widths.map((width, idx) => ({
@@ -470,7 +476,7 @@ const InteractiveTable = <
       newSettings.columnWidths = reorderedWidths;
 
       updateSettings(newSettings);
-      setWidthData({ ...widthData, widths: reorderedWidths });
+      setWidthData({ ...widthData, widths: [...reorderedWidths] });
     },
     [settingsColumns, settings.columnWidths, widthData, updateSettings],
   );
@@ -482,7 +488,7 @@ const InteractiveTable = <
 
         if (timeout.current) clearTimeout(timeout.current);
         const column = settingsColumns[resizeIndex];
-        const minWidth = columnDefs[column]?.defaultWidth ?? 40;
+        const minWidth = minWidthOf(columnDefs[column]);
         const currentWidths = widthData.widths;
 
         if (x === currentWidths[resizeIndex]) return;
@@ -533,7 +539,7 @@ const InteractiveTable = <
         setWidthData(({ widths, ...rest }) => {
           const column = settingsColumns[index];
           const startWidth = widths[index];
-          const minWidth = columnDefs[column]?.defaultWidth ?? 40;
+          const minWidth = minWidthOf(columnDefs[column]);
           const deltaX = startWidth - minWidth;
           const minX = x - deltaX;
           return { minX, widths, ...rest };
@@ -563,7 +569,7 @@ const InteractiveTable = <
           index,
           interactiveColumns,
           isResizing,
-          minWidth: columnDef.defaultWidth,
+          minWidth: minWidthOf(columnDef),
           moveColumn,
           onResize: handleResize(index),
           onResizeStart: handleResizeStart(index),
@@ -603,7 +609,8 @@ const InteractiveTable = <
 
       const column = columnDefs[columnName];
       const currentWidth = widthData.widths[index];
-      const columnWidth = currentWidth < column.defaultWidth ? column.defaultWidth : currentWidth; // avoid rendering a column with less width than the default
+      const minWidth = minWidthOf(column);
+      const columnWidth = currentWidth < minWidth ? minWidth : currentWidth; // avoid rendering a column narrower than its minimum
       const sortOrder =
         column.key === settings.sortKey ? (settings.sortDesc ? 'descend' : 'ascend') : null;
 

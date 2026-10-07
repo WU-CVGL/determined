@@ -201,9 +201,12 @@ func (t TaskSpec) EnvVars() map[string]string {
 		"DET_RESOURCES_ID":  t.ResourcesID,
 		"DET_CONTAINER_ID":  t.ContainerID,
 		"DET_SESSION_TOKEN": t.AllocationSessionToken,
-		"DET_USER_TOKEN":    t.UserSessionToken,
 		"DET_WORKDIR":       t.WorkDir,
 		"DET_RUN_DIR":       RunDir,
+	}
+	// Checkpoint GC tasks have no user session.
+	if t.UserSessionToken != "" {
+		e["DET_USER_TOKEN"] = t.UserSessionToken
 	}
 	if t.Owner != nil {
 		e["DET_USER"] = t.Owner.Username

@@ -19,9 +19,11 @@ import (
 	"github.com/determined-ai/determined/master/internal/storage"
 	"github.com/determined-ai/determined/master/internal/task"
 	"github.com/determined-ai/determined/master/internal/user"
+	"github.com/determined-ai/determined/master/internal/workspace"
 	"github.com/determined-ai/determined/master/pkg/logger"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/protoutils/protoconverter"
+	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 )
@@ -39,8 +41,6 @@ func runCheckpointGCForCheckpoints(
 	toDeleteCheckpoints []uuid.UUID,
 	checkpointGlobs []string,
 	deleteTensorboards bool,
-	agentUserGroup *model.AgentUserGroup,
-	owner *model.User,
 	logCtx logger.Context,
 ) error {
 	groups, err := storage.GroupCheckpoints(context.TODO(), toDeleteCheckpoints)
@@ -55,8 +55,7 @@ func runCheckpointGCForCheckpoints(
 			if err := runCheckpointGCTask(
 				rm, db, taskID, jobID, jobSubmissionTime, *taskSpec,
 				expID, legacyConfig, g.StorageID, g.Checkpoints,
-				checkpointGlobs, deleteTensorboards,
-				agentUserGroup, owner, logCtx,
+				checkpointGlobs, deleteTensorboards, logCtx,
 			); err != nil {
 				return err
 			}
@@ -72,6 +71,54 @@ func runCheckpointGCForCheckpoints(
 	return nil
 }
 
+// checkpointGCIdentity returns whom a checkpoint GC task of the experiment runs as: always the
+// experiment's owner, with the owner's agent user and group, whoever asked for the GC. The task
+// works on the owner's files with settings the owner chose, such as the checkpoint storage, so
+// running it as the user who asked, who may be an administrator, would lend that user's identity to
+// the owner. Whether the user who asked may do so is checked before, as that user.
+//
+// A deactivated owner is still the owner: the task needs no user session (see runCheckpointGCTask),
+// its allocation token acts as its owner whether or not the owner is active, and its fixed
+// environment (see tasks.GCCkptSpec) runs no code of the owner's choice.
+func checkpointGCIdentity(
+	ctx context.Context, expID int,
+) (*model.User, *model.AgentUserGroup, error) {
+	exp, err := db.ExperimentByID(ctx, expID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("getting experiment %d: %w", expID, err)
+	}
+	if exp.OwnerID == nil {
+		return nil, nil, fmt.Errorf("experiment %d has no owner", expID)
+	}
+	owner, err := user.ByID(ctx, *exp.OwnerID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("getting user %d, the owner of experiment %d: %w",
+			*exp.OwnerID, expID, err)
+	}
+	workspaceIDs, err := workspace.WorkspacesIDsByExperimentIDs(ctx, []int{expID})
+	if err != nil {
+		return nil, nil, err
+	}
+	agentUserGroup, err := user.GetAgentUserGroup(ctx, owner.ID, workspaceIDs[0])
+	if err != nil {
+		return nil, nil, fmt.Errorf("getting the agent user and group of user %d: %w", owner.ID, err)
+	}
+	return ptrs.Ptr(owner.ToUser()), agentUserGroup, nil
+}
+
+// trialsPodSpecs returns whether the resource manager of the experiment's resource pool, where its
+// trials ran, applies pod specs. The pool is the one that the experiment's config names now, or the
+// default one if it names none.
+func trialsPodSpecs(ctx context.Context, r rm.ResourceManager, expID int) (podSpecs, error) {
+	var pool string
+	if err := db.Bun().NewSelect().Table("experiments").
+		ColumnExpr("COALESCE(config->'resources'->>'resource_pool', '')").
+		Where("id = ?", expID).Scan(ctx, &pool); err != nil {
+		return podSpecsUnknown, fmt.Errorf("getting the resource pool of experiment %d: %w", expID, err)
+	}
+	return podSpecsOf(r, rm.ResourcePoolName(pool)), nil
+}
+
 func runCheckpointGCTask(
 	rm rm.ResourceManager,
 	pgDB *db.PgDB,
@@ -85,8 +132,6 @@ func runCheckpointGCTask(
 	toDeleteCheckpoints []uuid.UUID,
 	checkpointGlobs []string,
 	deleteTensorboards bool,
-	agentUserGroup *model.AgentUserGroup,
-	owner *model.User,
 	logCtx logger.Context,
 ) error {
 	conv := &protoconverter.ProtoConverter{}
@@ -118,30 +163,45 @@ func runCheckpointGCTask(
 	}
 	taskSpec.TaskContainerDefaults = tcd
 
-	userSessionToken, err := user.StartSession(context.TODO(), owner)
+	owner, agentUserGroup, err := checkpointGCIdentity(context.TODO(), expID)
 	if err != nil {
-		return errors.Wrapf(err, "unable to create user session for checkpoint gc")
+		return fmt.Errorf("finding whom checkpoint GC runs as: %w", err)
 	}
-	taskSpec.UserSessionToken = userSessionToken
-	taskSpec.AgentUserGroup = agentUserGroup
 	taskSpec.Owner = owner
+	taskSpec.AgentUserGroup = agentUserGroup
+	// The task gets no user session. It reports to the master with its allocation session token
+	// (DET_SESSION_TOKEN), which acts as taskSpec.Owner, and needs nothing else. No session is minted
+	// for it, so drop whatever user token the caller's spec carries rather than pass it on: for the
+	// end-of-experiment GC, that is the experiment's own, which stop() revokes.
+	taskSpec.UserSessionToken = ""
+
+	// The checkpoints' storage: the storage backend they were saved to, else the experiment's.
+	checkpointStorage := legacyConfig.CheckpointStorage
+	if storageID != nil {
+		checkpointStorage, err = storage.Backend(context.TODO(), *storageID)
+		if err != nil {
+			return fmt.Errorf("getting storage id %d in create gc task: %w", *storageID, err)
+		}
+	}
+	// The experiment's bind mounts and pod spec serve only to check here that the task sees the
+	// storage. The task's spec takes nothing from the experiment's config but the storage.
+	trialPods, err := trialsPodSpecs(context.TODO(), rm, expID)
+	if err != nil {
+		return err
+	}
+	if err := checkpointGCSeesStorage(
+		checkpointStorage, legacyConfig, trialPods, tcd, podSpecsOf(rm, rp),
+	); err != nil {
+		return fmt.Errorf("checkpoint GC of experiment %d: %w", expID, err)
+	}
 
 	gcSpec := tasks.GCCkptSpec{
 		Base:               taskSpec,
 		ExperimentID:       expID,
-		LegacyConfig:       legacyConfig,
+		CheckpointStorage:  checkpointStorage,
 		ToDelete:           deleteCheckpointsStr,
 		CheckpointGlobs:    checkpointGlobs,
 		DeleteTensorboards: deleteTensorboards,
-	}
-
-	// Update checkpoint storage with storageID.
-	if storageID != nil {
-		checkpointStorage, err := storage.Backend(context.TODO(), *storageID)
-		if err != nil {
-			return fmt.Errorf("getting storage id %d in create gc task: %w", *storageID, err)
-		}
-		gcSpec.LegacyConfig.CheckpointStorage = checkpointStorage
 	}
 
 	logCtx = logger.MergeContexts(logCtx, logger.Context{

@@ -17,6 +17,8 @@ import (
 	"github.com/o1egl/paseto"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
+
+	"github.com/determined-ai/determined/master/pkg/logger"
 )
 
 // A JupyterLab session: Tornado quotes its signed cookie values.
@@ -89,6 +91,8 @@ func newTestProxy(t *testing.T, sawAuthCookie *string) (*Proxy, string) {
 		syslog:        logrus.WithField("component", "proxy"),
 	}
 	e := echo.New()
+	// As in the master, the proxies log through logrus.
+	e.Logger = logger.New()
 	e.Any("/proxy/:service/*", p.NewProxyHandler("service"))
 	srv := httptest.NewServer(e)
 	t.Cleanup(srv.Close)

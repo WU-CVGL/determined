@@ -175,7 +175,7 @@ export const taskNameRenderer: TaskRenderer = (_id, record) => {
         <a
           href={`${process.env.PUBLIC_URL}${paths.shellTerminal(record.id)}`}
           target={`shell-terminal-${record.id}`}
-          title="Open a terminal in this shell">
+          title={record.name}>
           <span>{record.name}</span>
         </a>
       </div>

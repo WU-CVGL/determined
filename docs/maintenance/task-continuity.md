@@ -5,6 +5,8 @@ continue computing while the master is unavailable, but preserving a container,
 keeping computation moving, and delivering metrics and checkpoints afterward are
 separate outcomes. Plan upgrades around checkpoints; a master restart is not a
 zero-downtime guarantee.
+[Upgrade with running tasks](hot-upgrade.md) gives the measured limits for
+replacing the master and agents while tasks run.
 
 ## Pause, resume, and kill
 
@@ -32,6 +34,17 @@ normally starts about 145 seconds after reconnecting begins, plus connection
 time. These values are not an exact outage guarantee. Disconnected agents
 cannot take new work while their reservations are retained.
 
+A master outage has further limits. An agent that exhausts its attempts exits
+and leaves its task containers running; a restart policy brings it back, and
+it reattaches the containers once the master returns. For agents that it
+restores, the master counts `agent_reconnect_wait` from its own start, so the
+setting bounds the wait after the master is back, not the length of the
+outage. A task that writes output is killed by its log shipper about 11
+minutes (661 seconds) after its first failed log upload, whatever
+`agent_reconnect_wait` is. A trial then restarts from its last recorded
+checkpoint; other tasks end. See
+[upgrade with running tasks](hot-upgrade.md) for the measured outage budget.
+
 **Upgrading only the master does not change a running agent's settings.** An
 unmodified 0.38.1 agent defaults to five attempts at five-second intervals;
 the 0.38.1 master's default wait is 25 seconds. Existing explicit agent
@@ -58,9 +71,11 @@ the new progress reporter when the master is upgraded.
 After the master returns, verify the agent rejoined and is enabled, then check
 the task's allocation ID, container/process identity, progress, metrics, and
 confirmed checkpoints. A completed experiment alone does not establish that
-computation advanced throughout the outage. If an agent exhausted its retries,
-or an allocation was replaced, treat that as a continuity failure and recover
-from the last confirmed checkpoint. If the master cannot start because a
+computation advanced throughout the outage. An agent that exhausted its
+retries and was restarted reattaches the containers that still run, so judge
+continuity by the allocations, not by the agent's exit. If an allocation was
+replaced or its container is gone, treat that as a continuity failure and
+recover from the last confirmed checkpoint. If the master cannot start because a
 resume operation remains open, preserve its database state and logs while
 fixing the reported cause.
 
@@ -72,8 +87,9 @@ identity with metrics and checkpoints after recovery. Use images and settings
 that match the deployment being assessed. The diagnostic does not validate GPU
 reservations, every network fault, or all checkpoint failure windows.
 
-For a planned upgrade, follow the [upgrade procedure](../manage/upgrade.rst):
-disable agents, allow running work to checkpoint and stop, back up PostgreSQL,
-then update the master and agents. Keep the previous images and a compatible
-database backup for rollback; selecting an older image does not reverse schema
-migrations.
+For a planned upgrade, either follow the
+[upgrade procedure](../manage/upgrade.rst): disable agents, allow running work
+to checkpoint and stop, back up PostgreSQL, then update the master and agents;
+or, when the release allows it, [upgrade with running tasks](hot-upgrade.md).
+Keep the previous images and a compatible database backup for rollback;
+selecting an older image does not reverse schema migrations.

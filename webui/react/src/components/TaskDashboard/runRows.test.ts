@@ -14,6 +14,7 @@ import {
   commandStateGroup,
   experimentRow,
   experimentSearch,
+  experimentSlots,
   experimentStates,
   filterCommandRows,
   genericTaskRow,
@@ -277,6 +278,19 @@ describe('runRows', () => {
         workspaceId: 2,
         workspaceName: 'lab',
       });
+    });
+
+    it("carry the slots per trial from the experiment's stored config, 1 when it has none", () => {
+      const withConfig = (config: unknown): BulkExperimentItem => ({
+        ...experiment(4, '2026-01-01T00:00:00Z'),
+        config: config as BulkExperimentItem['config'],
+      });
+      expect(experimentSlots(withConfig({ resources: { slots_per_trial: 4 } }))).toBe(4);
+      expect(experimentSlots(withConfig({ resources: { slots_per_trial: 0 } }))).toBe(0);
+      expect(experimentSlots(withConfig({ resources: {} }))).toBe(1);
+      expect(experimentSlots(withConfig({}))).toBe(1);
+      expect(experimentSlots(experiment(4, '2026-01-01T00:00:00Z'))).toBeUndefined();
+      expect(experimentRow(withConfig({ resources: { slots_per_trial: 2 } })).slots).toBe(2);
     });
   });
 

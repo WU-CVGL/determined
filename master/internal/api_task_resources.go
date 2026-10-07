@@ -39,7 +39,10 @@ func (a *apiServer) GetTaskResources(
 	if err != nil {
 		return nil, err
 	}
-	return getTaskResourcesForAPI(ctx, *user, req, conf, a.m.taskResourceDependencies())
+	deps := a.m.taskResourceDependencies()
+	// The v1 labels carry no in-container GPU index, so skip reading the GPU sets.
+	deps.gpuSets = nil
+	return getTaskResourcesForAPI(ctx, *user, req, conf, deps)
 }
 
 func getTaskResourcesForAPI(ctx context.Context, user model.User,

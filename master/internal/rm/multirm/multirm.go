@@ -214,6 +214,20 @@ func (m *MultiRMRouter) TaskContainerDefaults(
 	return m.rms[resolvedRMName].TaskContainerDefaults(rpName, fallbackConfig)
 }
 
+// AppliesPodSpecs implements rm.PodSpecApplier for the resource manager of the pool.
+func (m *MultiRMRouter) AppliesPodSpecs(rpName rm.ResourcePoolName) (bool, error) {
+	resolvedRMName, err := m.getRMName(rpName)
+	if err != nil {
+		return false, err
+	}
+	applier, ok := m.rms[resolvedRMName].(rm.PodSpecApplier)
+	if !ok {
+		return false, fmt.Errorf("resource manager %s does not say whether it applies pod specs",
+			resolvedRMName)
+	}
+	return applier.AppliesPodSpecs(rpName)
+}
+
 // GetJobQ routes a GetJobQ call to a specified resource manager/pool.
 func (m *MultiRMRouter) GetJobQ(rpName rm.ResourcePoolName) (map[model.JobID]*sproto.RMJobInfo, error) {
 	resolvedRMName, err := m.getRMName(rpName)
