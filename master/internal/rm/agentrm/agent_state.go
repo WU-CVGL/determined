@@ -316,7 +316,10 @@ func (a *agentState) freeDevice(d device.Device) {
 // deepCopy returns a copy of agentState for scheduler internals. Each copy gets its own slot
 // states, since the scheduler's simulation frees devices on it. It shares gpuTopology, which is
 // never mutated, only replaced: the scheduler's simulation selects GPUs on the copies as the live
-// reservation does on the agent, so the two choose the same devices.
+// reservation does on the agent. So the two choose the same devices when every placement of the
+// simulation is also reserved live, in the same order, on unchanged agents: without preemption and
+// with every reservation succeeding. Otherwise they can differ; fits use counts only, so that
+// changes no fit.
 func (a *agentState) deepCopy() *agentState {
 	copiedAgent := &agentState{
 		id:                    a.id,

@@ -8,12 +8,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/pkg/aproto"
 	"github.com/determined-ai/determined/master/pkg/cproto"
 	"github.com/determined-ai/determined/master/pkg/device"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 )
 
 var packing = deviceSelection{packNUMA: true}
@@ -249,6 +251,72 @@ func TestSimulationChoosesTheLiveDevices(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, planned, deviceIDs(res.devices), "request %d", i)
 		}
+	}
+}
+
+func TestPrioritySchedulePassSelectsWithThePoolPolicy(t *testing.T) {
+	// A pass through the pool's priority scheduler simulates with the pass's GPU policy (packing,
+	// the pass's XIDs, "soft"), and the live reservations of the planned requests, in the order the
+	// pass returns them, choose the devices the simulation chose. Preemption is off.
+	conf := &config.ResourcePoolConfig{PoolName: "pool", Scheduler: &config.SchedulerConfig{
+		Priority:      &config.PrioritySchedulerConfig{DefaultPriority: ptrs.Ptr(42)},
+		FittingPolicy: best,
+	}}
+	var tasks []*MockTask
+	var groups []*MockGroup
+	for i, n := range []int{1, 2, 1, 3, 4, 1, 2} {
+		// Two priorities: the pass places the higher one first.
+		group := &MockGroup{ID: fmt.Sprintf("job-%d", i), Priority: ptrs.Ptr(10 + 32*(i%2))}
+		groups = append(groups, group)
+		tasks = append(tasks, &MockTask{
+			ID: model.AllocationID(fmt.Sprintf("task-%d", i)), SlotsNeeded: n, Group: group,
+		})
+	}
+	rp := setupResourcePool(t, nil, conf, tasks, groups, nil)
+	soft, ok := rp.taskList.TaskByID("task-1")
+	require.True(t, ok)
+	soft.FittingRequirements.GPUTopology = expconf.GPUTopologySoft
+
+	live := map[aproto.ID]*agentState{}
+	for id, f := range map[aproto.ID]topologyFixture{"a": node01, "b": node02} {
+		state := topologyAgentState(t, f)
+		state.id = id
+		busy := cproto.NewID()
+		state.Devices[gpuDevice(6)] = &busy
+		live[id] = state
+	}
+	rp.agentStatesCache = live
+	rp.gpuPolicy = gpuPolicy{packNUMA: true, xids: map[string]bool{gpuDevice(1).UUID: true}}
+
+	type selected struct {
+		sel     deviceSelection
+		devices []int
+	}
+	var planned []selected
+	restore := replaceSelection(func(in gpuSelectionInput, n int, sel deviceSelection) gpuChoice {
+		c := selectFreeDevices(in, n, sel)
+		planned = append(planned, selected{sel: sel, devices: deviceIDs(c.devices)})
+		return c
+	})
+	toAllocate, toRelease := rp.scheduler.Schedule(rp)
+	restore()
+	require.Empty(t, toRelease)
+	require.NotEmpty(t, toAllocate)
+	require.Len(t, planned, len(toAllocate), "one selection per planned single-agent request")
+	for i, p := range planned {
+		require.True(t, p.sel.packNUMA, "selection %d", i)
+		require.Equal(t, rp.gpuPolicy.xids, p.sel.xids, "selection %d", i)
+		require.Equal(t, toAllocate[i].AllocationID == "task-1", p.sel.preferTopology, "selection %d", i)
+	}
+
+	for i, req := range toAllocate {
+		fits := findFits(req, live, rp.fittingMethod, false)
+		require.Len(t, fits, 1)
+		res, err := fits[0].Agent.allocateFreeDevices(fits[0].Slots, cproto.NewID(),
+			rp.gpuPolicy.selection(req, fits))
+		require.NoError(t, err)
+		require.Empty(t, res.failure)
+		require.Equal(t, planned[i].devices, deviceIDs(res.devices), "request %s", req.AllocationID)
 	}
 }
 

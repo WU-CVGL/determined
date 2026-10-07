@@ -27,7 +27,8 @@ func (r *gpuXIDReader) set(read func() *gpuhealth.XIDSnapshot) {
 // recent returns the UUIDs of the GPUs with a critical XID last observed less than XIDWindow
 // before now, from the last successful query. It never queries, so a scheduling pass never waits
 // for Prometheus: a background refresh keeps the result current. An XID of an old result that has
-// left the window no longer counts.
+// left the window no longer counts. It reads the snapshot without a lock, from every pool's
+// scheduler: the cache must never change a snapshot after storing it.
 func (r *gpuXIDReader) recent(now time.Time) map[string]bool {
 	if r == nil {
 		return nil
@@ -53,8 +54,8 @@ func (r *gpuXIDReader) recent(now time.Time) map[string]bool {
 }
 
 // gpuPolicy is a pool's GPU selection for one scheduling pass. The scheduler's simulation and the
-// pass's live reservations use the same one, so they choose the same devices for the same state.
-// Its zero value takes devices in map order.
+// pass's live reservations use the same one, so they choose the same devices for the same state
+// and the same placements (see deepCopy). Its zero value takes devices in map order.
 type gpuPolicy struct {
 	// packNUMA packs every task's GPUs by NUMA node: fitting_policy best, numa_packing not false.
 	packNUMA bool
