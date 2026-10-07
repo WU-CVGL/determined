@@ -291,7 +291,31 @@ func TestNUMAPackingAboveEightNodesTakesLowestIDs(t *testing.T) {
 	f := topologyFixture{ids: ids, numa: numa}
 	c := selectFreeDevices(selection(ids, ids, f.build()), 2, deviceSelection{packNUMA: true})
 	require.Equal(t, []int{0, 1}, deviceIDs(c.devices))
-	require.Contains(t, c.rule, "more than 8 NUMA nodes")
+	require.Equal(t, "lowest free IDs: more than 8 NUMA nodes", c.rule)
+}
+
+func TestNUMAPackingRules(t *testing.T) {
+	// The rule of the pool's Debug line says how packing chose, without nested parentheses.
+	rule := func(g *gpuTopology, free []int, n int, xids ...int) string {
+		sel := deviceSelection{packNUMA: true, xids: map[string]bool{}}
+		for _, id := range xids {
+			sel.xids[gpuDevice(id).UUID] = true
+		}
+		return selectFreeDevices(selection(free, node02IDs, g), n, sel).rule
+	}
+	require.Equal(t, "NUMA packing; free per NUMA node 0:4 1:4", rule(node02.build(), node02IDs, 2))
+	require.Equal(t, "NUMA packing; free per NUMA node 0:3 1:3; in error: 0,5",
+		rule(node02.build(), node02IDs, 2, 0, 5))
+	require.Equal(t, "lowest free IDs: not reported since the master started; in error last: 0",
+		rule(nil, []int{0, 1, 2}, 2, 0))
+	// Every free GPU in error: GPUs in error take no part in the NUMA rows, so the lowest IDs.
+	require.Equal(t, "lowest free IDs: every free GPU in error; in error last: 1,2,3",
+		rule(node02.build(), []int{1, 2, 3}, 2, 1, 2, 3))
+
+	cpus := []device.Device{{ID: 0, Type: device.CPU}, {ID: 1, Type: device.CPU}}
+	c := selectFreeDevices(gpuSelectionInput{free: cpus, allocatable: cpus, topology: node02.build()}, 1,
+		deviceSelection{packNUMA: true})
+	require.Equal(t, "lowest free IDs: no free healthy GPU with a known NUMA node", c.rule)
 }
 
 func TestGPUsInErrorRankLast(t *testing.T) {
@@ -628,11 +652,109 @@ func TestTopologyPreferenceSubsetCap(t *testing.T) {
 	require.Equal(t, intRange(0, 8), deviceIDs(c.devices))
 }
 
+func TestTopologyPreferenceEqualsBruteForce(t *testing.T) {
+	// Over random topologies (levels, P2P, NVLinks, NUMA nodes, GPUs in error), "soft" gives the
+	// argmin of: GPUs in error, the pair ranks worst first, then the packing key or the IDs.
+	rng := rand.New(rand.NewSource(3)) //nolint:gosec
+	levels := []aproto.GPULinkLevel{
+		aproto.GPULinkLevelPIX, aproto.GPULinkLevelPXB, aproto.GPULinkLevelNode, aproto.GPULinkLevelSys, "",
+	}
+	caps := []aproto.GPUP2PCaps{p2pOK, p2pNotOK, p2pUnknown}
+	cases := 0
+	for trial := 0; trial < 1500; trial++ {
+		m := 2 + rng.Intn(7)
+		f := topologyFixture{ids: intRange(0, m), numa: map[int]int{}, nvmlError: map[int]bool{}}
+		for id := 0; id < m; id++ {
+			if rng.Float64() >= 0.15 {
+				f.numa[id] = rng.Intn(3)
+			}
+			f.nvmlError[id] = rng.Float64() < 0.15
+		}
+		g := f.build()
+		for k := range g.pairs {
+			p2p := caps[rng.Intn(len(caps))]
+			pair := gpuPair{level: levels[rng.Intn(len(levels))], p2pAToB: p2p, p2pBToA: p2p}
+			if rng.Float64() < 0.2 {
+				pair.nvlinks = 1 + rng.Intn(2)
+			}
+			g.pairs[k] = pair
+		}
+		var free []int
+		for id := 0; id < m; id++ {
+			if rng.Float64() < 0.8 {
+				free = append(free, id)
+			}
+		}
+		in := selection(free, f.ids, g)
+		ranked := rankGPUs(in.free, g, nil)
+		layout := newNUMALayout(ranked, rankGPUs(in.allocatable, g, nil))
+		for n := 2; n <= len(free); n++ {
+			for _, packNUMA := range []bool{false, true} {
+				c := selectFreeDevices(in, n, deviceSelection{preferTopology: true, packNUMA: packNUMA})
+				if c.unranked != "" {
+					continue
+				}
+				cases++
+				var best []rankedGPU
+				var bestFaulty int
+				var bestPairs []pairRank
+				forEachSubset(len(ranked), n, func(idx []int) {
+					set := make([]rankedGPU, n)
+					faulty := 0
+					var pairs []pairRank
+					for a, i := range idx {
+						set[a] = ranked[i]
+						if ranked[i].faulty {
+							faulty++
+						}
+						for _, j := range idx[a+1:] {
+							pairs = append(pairs, g.pairRank(ranked[i].device.ID, ranked[j].device.ID))
+						}
+					}
+					sort.Slice(pairs, func(x, y int) bool { return comparePairRanks(pairs[x], pairs[y]) > 0 })
+					cmp := -1
+					if best != nil {
+						cmp = cmpInt(faulty, bestFaulty)
+						for x := 0; cmp == 0 && x < len(pairs); x++ {
+							cmp = comparePairRanks(pairs[x], bestPairs[x])
+						}
+						if cmp == 0 && packNUMA {
+							cmp = layout.key(set).compare(layout.key(best))
+						}
+					}
+					if cmp < 0 {
+						best, bestFaulty, bestPairs = set, faulty, pairs
+					}
+				})
+				require.Equal(t, deviceIDs(sortedDevices(best)), deviceIDs(c.devices),
+					"trial %d, free %v, n=%d, packing %v", trial, free, n, packNUMA)
+			}
+		}
+	}
+	t.Logf("soft equals the brute-force argmin in %d cases", cases)
+}
+
 func BenchmarkTopologyPreferenceEightChooseFour(b *testing.B) {
 	g := node02.build()
 	in := selection(node02IDs, node02IDs, g)
 	sel := deviceSelection{preferTopology: true, packNUMA: true}
 	for i := 0; i < b.N; i++ {
 		selectFreeDevices(in, 4, sel)
+	}
+}
+
+func BenchmarkTopologyPreferenceSixteenChooseEightAllTied(b *testing.B) {
+	// The worst case under the set cap: every pair equal, so every set ties and goes to packing.
+	ids := intRange(0, 16)
+	numa := map[int]int{}
+	for _, id := range ids {
+		numa[id] = 0
+	}
+	f := topologyFixture{ids: ids, numa: numa, p2p: allP2P(p2pOK)}
+	in := selection(ids, ids, f.build())
+	sel := deviceSelection{preferTopology: true, packNUMA: true}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		selectFreeDevices(in, 8, sel)
 	}
 }

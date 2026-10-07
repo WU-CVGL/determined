@@ -2,6 +2,7 @@ package agentrm
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,7 +32,7 @@ import (
 
 const (
 	// noKnownNUMANode describes an agent without a free healthy GPU with a known NUMA node.
-	noKnownNUMANode = "no free GPU with a known NUMA node"
+	noKnownNUMANode = "no free healthy GPU with a known NUMA node"
 	// maxTopologySets bounds the sets of free GPUs that prefer_gpu_topology compares in one
 	// reservation; above it, the reservation takes the pool's default (C(16,8) = 12870 fits).
 	maxTopologySets = 20000
@@ -138,11 +139,7 @@ func selectFreeDevices(in gpuSelectionInput, n int, sel deviceSelection) gpuChoi
 
 	var out gpuChoice
 	if sel.preferTopology && n >= 2 {
-		var tie func(a, b []rankedGPU) int
-		if layout != nil {
-			tie = func(a, b []rankedGPU) int { return layout.key(a).compare(layout.key(b)) }
-		}
-		set, worst, unranked := selectByTopology(free, in.topology, n, tie)
+		set, worst, unranked := selectByTopology(free, in.topology, n, layout)
 		if set != nil {
 			return gpuChoice{
 				devices:   set,
@@ -173,6 +170,8 @@ func topologyUnknownReason(g *gpuTopology) string {
 type numaLayout struct {
 	// nodes holds the NUMA nodes with a free healthy GPU, in ascending order.
 	nodes []int
+	// index holds the position of each node in nodes.
+	index map[int]int
 	// free holds the free healthy GPUs of each node, by ID.
 	free map[int][]rankedGPU
 	// capacity holds the number of healthy allocatable slots of each node.
@@ -191,6 +190,10 @@ func newNUMALayout(free, allocatable []rankedGPU) *numaLayout {
 		l.free[g.numa] = append(l.free[g.numa], g)
 	}
 	sort.Ints(l.nodes)
+	l.index = make(map[int]int, len(l.nodes))
+	for i, node := range l.nodes {
+		l.index[node] = i
+	}
 	for _, g := range allocatable {
 		if !g.faulty && g.numa >= 0 {
 			l.capacity[g.numa]++
@@ -220,8 +223,9 @@ type packingKey struct {
 }
 
 func (l numaLayout) key(set []rankedGPU) packingKey {
-	var k packingKey
-	share := map[int]int{}
+	k := packingKey{ids: make([]device.ID, 0, len(set)), left: make([]int, len(l.nodes))}
+	// left first counts the set's GPUs on each node: a free healthy GPU with a known NUMA node is
+	// on one of l.nodes.
 	known := 0
 	for _, g := range set {
 		k.ids = append(k.ids, g.device.ID)
@@ -231,24 +235,24 @@ func (l numaLayout) key(set []rankedGPU) packingKey {
 		case g.numa < 0:
 			k.unknown++
 		default:
-			share[g.numa]++
+			k.left[l.index[g.numa]]++
 			known++
 		}
 	}
-	sort.Slice(k.ids, func(i, j int) bool { return k.ids[i] < k.ids[j] })
-	sumSquares := 0
-	for _, s := range share {
-		sumSquares += s * s
+	slices.Sort(k.ids)
+	sumSquares, used, onNode := 0, 0, 0
+	for i, share := range k.left {
+		sumSquares += share * share
+		if share > 0 {
+			used++
+			onNode = l.nodes[i]
+		}
+		k.left[i] = len(l.free[l.nodes[i]]) - share
 	}
 	k.cross = (known*known - sumSquares) / 2
-	for _, node := range l.nodes {
-		k.left = append(k.left, len(l.free[node])-share[node])
-	}
-	sort.Sort(sort.Reverse(sort.IntSlice(k.left)))
-	if len(share) == 1 {
-		for node := range share {
-			k.oneNode = l.capacity[node]
-		}
+	slices.SortFunc(k.left, func(a, b int) int { return cmpInt(b, a) })
+	if used == 1 {
+		k.oneNode = l.capacity[onNode]
 	}
 	return k
 }
@@ -290,21 +294,17 @@ func packByNUMA(free []rankedGPU, l numaLayout, n int, unknownReason string) ([]
 			known = append(known, g)
 		}
 	}
-	rule := "NUMA packing (" + l.describe()
+	rule := "NUMA packing; " + l.describe()
 	if len(faulty) > 0 {
 		rule += "; in error: " + idList(gpuDevices(faulty))
 	}
-	rule += ")"
 
 	if n >= len(known) {
 		set := append([]rankedGPU{}, known...)
 		set = append(set, unknown[:min(n-len(set), len(unknown))]...)
 		set = append(set, faulty[:n-len(set)]...)
 		if len(l.nodes) == 0 {
-			if unknownReason == "" {
-				unknownReason = noKnownNUMANode
-			}
-			rule = "lowest free IDs (" + unknownReason + ")"
+			rule = "lowest free IDs: " + noPackingReason(unknownReason, len(unknown), len(faulty))
 			if len(faulty) > 0 {
 				rule += "; in error last: " + idList(gpuDevices(faulty))
 			}
@@ -313,7 +313,7 @@ func packByNUMA(free []rankedGPU, l numaLayout, n int, unknownReason string) ([]
 	}
 	if len(l.nodes) > maxPackingNUMANodes {
 		return sortedDevices(known[:n]), fmt.Sprintf(
-			"lowest free IDs (more than %d NUMA nodes)", maxPackingNUMANodes)
+			"lowest free IDs: more than %d NUMA nodes", maxPackingNUMANodes)
 	}
 
 	var best []rankedGPU
@@ -348,6 +348,20 @@ func packByNUMA(free []rankedGPU, l numaLayout, n int, unknownReason string) ([]
 		}
 	}
 	return sortedDevices(best), rule
+}
+
+// noPackingReason says why an agent has no free healthy GPU with a known NUMA node: its topology
+// is unknown, every free GPU is in error, or no free healthy GPU reports a NUMA node (CPU slots
+// included).
+func noPackingReason(unknownReason string, unknown, faulty int) string {
+	switch {
+	case unknownReason != "":
+		return unknownReason
+	case faulty > 0 && unknown == 0:
+		return "every free GPU in error"
+	default:
+		return noKnownNUMANode
+	}
 }
 
 // describe lists the free healthy GPUs per NUMA node, for example "free per NUMA node 0:4 1:3".
@@ -478,13 +492,13 @@ func (g *gpuTopology) describePair(a, b device.ID) string {
 
 // selectByTopology returns the set of n free GPUs that prefer_gpu_topology ranks first, sorted by
 // ID, with its worst pair described. A set's key is the number of its GPUs in error, then its
-// C(n,2) pair ranks sorted worst first, compared lexicographically. Exact ties go to tie when it is
-// set (NUMA packing), then to the smallest sorted list of IDs.
+// C(n,2) pair ranks sorted worst first, compared lexicographically. Exact ties go to the packing
+// key when tie is set (NUMA packing), then to the smallest sorted list of IDs.
 //
 // It returns no set, with the reason, when the topology is unknown, when every pair of free GPUs is
 // unknown in every field (the report holds nothing to rank), or above maxTopologySets sets.
 func selectByTopology(
-	free []rankedGPU, g *gpuTopology, n int, tie func(a, b []rankedGPU) int,
+	free []rankedGPU, g *gpuTopology, n int, tie *numaLayout,
 ) (set []device.Device, worstPair string, unranked string) {
 	switch {
 	case topologyUnknownReason(g) != "":
@@ -519,8 +533,9 @@ func selectByTopology(
 		faulty int
 		pairs  []pairRank
 	}
-	keyOf := func(idx []int) setKey {
-		k := setKey{pairs: make([]pairRank, 0, n*(n-1)/2)}
+	// keyOf fills k with the key of the set idx, reusing its slice.
+	keyOf := func(k *setKey, idx []int) {
+		k.faulty, k.pairs = 0, k.pairs[:0]
 		for a, i := range idx {
 			if free[i].faulty {
 				k.faulty++
@@ -529,8 +544,7 @@ func selectByTopology(
 				k.pairs = append(k.pairs, ranks[i][j])
 			}
 		}
-		sort.Slice(k.pairs, func(x, y int) bool { return comparePairRanks(k.pairs[x], k.pairs[y]) > 0 })
-		return k
+		slices.SortFunc(k.pairs, func(x, y pairRank) int { return comparePairRanks(y, x) })
 	}
 	compareKeys := func(a, b setKey) int {
 		if a.faulty != b.faulty {
@@ -543,33 +557,48 @@ func selectByTopology(
 		}
 		return 0
 	}
+	gpus := make([]rankedGPU, n)
 	gpusOf := func(idx []int) []rankedGPU {
-		out := make([]rankedGPU, len(idx))
 		for x, i := range idx {
-			out[x] = free[i]
+			gpus[x] = free[i]
 		}
-		return out
+		return gpus
 	}
 
 	// Combinations in lexicographic order of sorted IDs: keeping only a strictly better set makes
-	// the smallest IDs win exact ties.
+	// the smallest IDs win exact ties. The best set's packing key is computed once, at its first
+	// tie.
 	idx := make([]int, n)
 	for i := range idx {
 		idx[i] = i
 	}
-	var best []int
-	var bestKey setKey
+	best := make([]int, n)
+	found := false
+	pairs := n * (n - 1) / 2
+	candKey := setKey{pairs: make([]pairRank, 0, pairs)}
+	bestKey := setKey{pairs: make([]pairRank, 0, pairs)}
+	var bestPack *packingKey
 	for {
-		k := keyOf(idx)
-		c := 1
-		if best != nil {
-			c = compareKeys(k, bestKey)
+		keyOf(&candKey, idx)
+		c := -1
+		var candPack *packingKey
+		if found {
+			c = compareKeys(candKey, bestKey)
 			if c == 0 && tie != nil {
-				c = tie(gpusOf(idx), gpusOf(best))
+				if bestPack == nil {
+					k := tie.key(gpusOf(best))
+					bestPack = &k
+				}
+				k := tie.key(gpusOf(idx))
+				candPack = &k
+				c = candPack.compare(*bestPack)
 			}
 		}
-		if best == nil || c < 0 {
-			best, bestKey = append([]int(nil), idx...), k
+		if c < 0 {
+			found = true
+			copy(best, idx)
+			candKey, bestKey = bestKey, candKey
+			bestPack = candPack
 		}
 		i := n - 1
 		for i >= 0 && idx[i] == f-n+i {
@@ -584,7 +613,7 @@ func selectByTopology(
 		}
 	}
 
-	chosen := gpusOf(best)
+	chosen := append([]rankedGPU(nil), gpusOf(best)...)
 	worstA, worstB := chosen[0].device.ID, chosen[1].device.ID
 	worst := ranks[best[0]][best[1]]
 	for a := range best {
