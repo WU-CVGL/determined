@@ -35,6 +35,8 @@ import (
 const (
 	// noKnownNUMANode describes an agent without a free healthy GPU with a known NUMA node.
 	noKnownNUMANode = "no free healthy GPU with a known NUMA node"
+	// fewerThanTwoSlots is why prefer_gpu_topology does not rank a reservation of 1 slot.
+	fewerThanTwoSlots = "fewer than 2 slots"
 	// maxTopologySets bounds the sets of free GPUs that prefer_gpu_topology compares in one
 	// reservation; above it, the reservation takes the pool's default (C(16,8) = 12870 fits).
 	maxTopologySets = 20000
@@ -162,7 +164,7 @@ func selectFreeDevices(in gpuSelectionInput, n int, sel deviceSelection) gpuChoi
 	if layout == nil {
 		out.mapOrder = out.unranked
 		if out.mapOrder == "" {
-			out.mapOrder = "fewer than 2 slots"
+			out.mapOrder = fewerThanTwoSlots
 		}
 		return out
 	}
@@ -576,7 +578,7 @@ func selectByTopology(
 	case topologyUnknownReason(g) != "":
 		return nil, "", "topology unknown: " + topologyUnknownReason(g)
 	case n < 2 || len(free) < n:
-		return nil, "", "fewer than 2 slots"
+		return nil, "", fewerThanTwoSlots
 	}
 
 	f := len(free)

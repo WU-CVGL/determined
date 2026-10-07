@@ -775,9 +775,9 @@ func TestNUMAPackingIgnoresWidth(t *testing.T) {
 	for name, f := range map[string]topologyFixture{
 		"node01": node01Widths, "node05": node05, "node06": node06, "node07": node07,
 	} {
-		noWidths := f
-		noWidths.width = nil
-		g, gNoWidths := f.build(), noWidths.build()
+		g := f.build()
+		f.width = nil
+		gNoWidths := f.build()
 		forEachNonEmptySubset(f.ids, func(free []int) {
 			for n := 1; n <= len(free); n++ {
 				got := selectFreeDevices(selection(free, f.ids, g), n, packing)
