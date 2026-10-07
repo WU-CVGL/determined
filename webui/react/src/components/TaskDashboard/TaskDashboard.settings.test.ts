@@ -111,7 +111,7 @@ describe('normalizedLayout', () => {
     });
     expect(normalized({ columns: ['slots', 'name', 'id', 'kind'], columnWidths: [80] })).toEqual({
       columns: ['slots', 'name', 'id', 'kind'],
-      columnWidths: [80, 220, 100, 64],
+      columnWidths: [80, 240, 100, 64],
     });
   });
 

@@ -27,6 +27,8 @@ describe('taskNameRenderer', () => {
     const link = screen.getByText(shell.name).closest('a');
     expect(link).toHaveAttribute('href', '/shells/shell-1/terminal');
     expect(link).toHaveAttribute('target', 'shell-terminal-shell-1');
+    // The whole name, which a narrow column cuts short.
+    expect(link).toHaveAttribute('title', shell.name);
   });
 
   it('does not link other users’ or stopped shells', () => {

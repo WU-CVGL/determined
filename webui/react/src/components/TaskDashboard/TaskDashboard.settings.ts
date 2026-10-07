@@ -38,14 +38,17 @@ export const DEFAULT_COLUMN_WIDTHS: Record<TaskDashboardColumnName, number> = {
   endTime: 117,
   id: 100,
   kind: 64,
-  location: 180,
-  name: 220,
+  location: 230,
+  name: 240,
   resourcePool: 128,
   slots: 72,
   startTime: 117,
   state: 120,
   user: 85,
 };
+
+/** The narrowest a column can be resized to, below its default width. */
+export const MIN_COLUMN_WIDTH = 60;
 
 /**
  * The widths of the default columns, which the settings give when none were stored: a new array
