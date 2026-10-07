@@ -170,8 +170,8 @@ func TestReservationUnrankedTakesMapOrderWithItsReason(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, res.failure)
 	require.Nil(t, res.choice.devices)
-	require.Equal(t, "topology unknown: "+reasonNotReportedSinceMasterStart, res.choice.mapOrder)
-	require.Equal(t, res.choice.mapOrder, res.choice.unranked)
+	require.Equal(t, "topology unknown: "+reasonNotReportedSinceMasterStart, res.choice.noSelectionReason)
+	require.Equal(t, res.choice.noSelectionReason, res.choice.unranked)
 	require.Len(t, res.devices, 3)
 	require.Equal(t, 3, state.numUsedSlots())
 
@@ -180,13 +180,13 @@ func TestReservationUnrankedTakesMapOrderWithItsReason(t *testing.T) {
 	res, err = state.allocateFreeDevices(8, cproto.NewID(), soft)
 	require.NoError(t, err)
 	require.Empty(t, res.failure)
-	require.Equal(t, "more than 20000 sets of free GPUs", res.choice.mapOrder)
+	require.Equal(t, "more than 20000 sets of free GPUs", res.choice.noSelectionReason)
 	require.Len(t, res.devices, 8)
 
 	// 1 slot: "soft" does not apply.
 	res, err = state.allocateFreeDevices(1, cproto.NewID(), soft)
 	require.NoError(t, err)
-	require.Equal(t, "fewer than 2 slots", res.choice.mapOrder)
+	require.Equal(t, "fewer than 2 slots", res.choice.noSelectionReason)
 	require.Empty(t, res.choice.unranked)
 }
 
@@ -196,8 +196,10 @@ func TestChooseFreeDevicesChangesNothing(t *testing.T) {
 	selections := map[string]func(gpuSelectionInput, int, deviceSelection) gpuChoice{
 		"ranked":  selectFreeDevices,
 		"invalid": func(in gpuSelectionInput, _ int, _ deviceSelection) gpuChoice { return gpuChoice{devices: in.free[:1]} },
-		"reason":  func(gpuSelectionInput, int, deviceSelection) gpuChoice { return gpuChoice{mapOrder: "injected"} },
-		"panic":   func(gpuSelectionInput, int, deviceSelection) gpuChoice { panic("injected") },
+		"reason": func(gpuSelectionInput, int, deviceSelection) gpuChoice {
+			return gpuChoice{noSelectionReason: "injected"}
+		},
+		"panic": func(gpuSelectionInput, int, deviceSelection) gpuChoice { panic("injected") },
 	}
 	for name, selector := range selections {
 		for _, sel := range []deviceSelection{{}, packing, {preferTopology: true}} {

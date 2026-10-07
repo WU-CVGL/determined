@@ -109,6 +109,7 @@ const mocks = vi.hoisted(() => ({
 }));
 const permissions = vi.hoisted(() => ({ canModify: true }));
 const launched = vi.hoisted(() => ({ response: undefined as CommandResponse | undefined }));
+const features = vi.hoisted(() => ({ flatRuns: true }));
 
 vi.mock('services/api', () => ({
   cancelExperiment: vi.fn(),
@@ -146,7 +147,10 @@ vi.mock('hooks/usePermissions', () => {
   return { default: () => checks };
 });
 vi.mock('hooks/useTaskResourcesEnabled', () => ({ default: () => true }));
-vi.mock('hooks/useFeature', () => ({ default: () => ({ isOn: () => true }) }));
+// Every feature switch is on, but flat_runs as the test sets it.
+vi.mock('hooks/useFeature', () => ({
+  default: () => ({ isOn: (feature: string) => feature !== 'flat_runs' || features.flatRuns }),
+}));
 // The launch form itself is tested in NtscLaunchModal.test.tsx and useLaunchForm.test.tsx. The
 // stand-in is a modal, so it shows only once Launch Again opens it, and its title shows the task
 // and the type the form opens with.
@@ -182,29 +186,31 @@ const pool = (schedulerType: Api.V1SchedulerType, name: string) =>
 let testPool = '';
 let testCount = 0;
 
+const page = (selectedRp: ResourcePool, jobState: JobState) => (
+  <UIProvider theme={DefaultTheme.Light}>
+    <ThemeProvider>
+      <DndProvider backend={HTML5Backend}>
+        <SettingsProvider>
+          <BrowserRouter>
+            <ConfirmationProvider>
+              <JobQueue jobState={jobState} rpStats={[]} selectedRp={selectedRp} />
+            </ConfirmationProvider>
+          </BrowserRouter>
+        </SettingsProvider>
+      </DndProvider>
+    </ThemeProvider>
+  </UIProvider>
+);
+
+/** Renders the page; rerenderPage renders it again with the same pool. */
 const setup = (
   schedulerType: Api.V1SchedulerType = Api.V1SchedulerType.PRIORITY,
   jobState: JobState = JobState.SCHEDULED,
-) =>
-  render(
-    <UIProvider theme={DefaultTheme.Light}>
-      <ThemeProvider>
-        <DndProvider backend={HTML5Backend}>
-          <SettingsProvider>
-            <BrowserRouter>
-              <ConfirmationProvider>
-                <JobQueue
-                  jobState={jobState}
-                  rpStats={[]}
-                  selectedRp={pool(schedulerType, testPool)}
-                />
-              </ConfirmationProvider>
-            </BrowserRouter>
-          </SettingsProvider>
-        </DndProvider>
-      </ThemeProvider>
-    </UIProvider>,
-  );
+) => {
+  const selectedRp = pool(schedulerType, testPool);
+  const view = render(page(selectedRp, jobState));
+  return { ...view, rerenderPage: () => view.rerender(page(selectedRp, jobState)) };
+};
 
 const openRowMenu = async (rowText: string | RegExp) => {
   const row = (await screen.findByText(rowText)).closest('tr');
@@ -335,6 +341,9 @@ const ALL_JOBS = 2 ** 31 - 1;
 
 const clickHeader = (title: string) => userEvent.click(screen.getByTestId(title));
 
+/** The header cell of the column with this title, which carries the column's sort state. */
+const header = (title: string) => screen.getByTestId(title).closest('th');
+
 describe('JobQueue', () => {
   beforeEach(() => {
     testPool = `pool-${++testCount}`;
@@ -346,6 +355,7 @@ describe('JobQueue', () => {
     mocks.jobs = [shellJob];
     mocks.hold = undefined;
     permissions.canModify = true;
+    features.flatRuns = true;
     launched.response = {
       command: { ...runningShell, id: 'shell-2', state: CommandState.Queued },
       warnings: [],
@@ -463,6 +473,18 @@ describe('JobQueue', () => {
     expect(getTask).not.toHaveBeenCalled();
   });
 
+  it('calls an experiment’s ID a search ID with flat runs on, also once the switch changes', async () => {
+    mocks.jobs = [experimentJob];
+    const { rerenderPage } = setup();
+    await userEvent.hover(await screen.findByText('(12)'));
+    expect(await screen.findByText('Search ID')).toBeInTheDocument();
+
+    features.flatRuns = false;
+    rerenderPage();
+    expect(await screen.findByText('Experiment ID')).toBeInTheDocument();
+    expect(screen.queryByText('Search ID')).not.toBeInTheDocument();
+  });
+
   it('shows Kill in red in an experiment’s job menu, and Cancel not', async () => {
     mocks.jobs = [experimentJob];
     setup();
@@ -567,7 +589,7 @@ describe('JobQueue', () => {
     it('opens in queue order, a page at a time', async () => {
       setup();
       await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
-      expect(screen.getByTestId('#')).toHaveAttribute('aria-sort', 'ascending');
+      expect(header('#')).toHaveAttribute('aria-sort', 'ascending');
       expect(lastListing()).toMatchObject({ limit: 10, offset: 0, orderBy: 'ORDER_BY_ASC' });
     });
 
@@ -607,8 +629,8 @@ describe('JobQueue', () => {
 
         await clickHeader(title);
         await waitFor(() => expect(rowOrder()).toEqual(first));
-        expect(screen.getByTestId(title)).toHaveAttribute('aria-sort', firstClick);
-        expect(screen.getByTestId('#')).not.toHaveAttribute('aria-sort');
+        expect(header(title)).toHaveAttribute('aria-sort', firstClick);
+        expect(header('#')).not.toHaveAttribute('aria-sort');
         // All jobs of the tab, in queue order, for the browser to sort.
         await waitFor(() =>
           expect(lastListing()).toMatchObject({
@@ -620,12 +642,12 @@ describe('JobQueue', () => {
 
         await clickHeader(title);
         await waitFor(() => expect(rowOrder()).toEqual(second));
-        expect(screen.getByTestId(title)).toHaveAttribute('aria-sort', secondClick);
+        expect(header(title)).toHaveAttribute('aria-sort', secondClick);
 
         await clickHeader(title);
         await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
-        expect(screen.getByTestId(title)).not.toHaveAttribute('aria-sort');
-        expect(screen.getByTestId('#')).toHaveAttribute('aria-sort', 'ascending');
+        expect(header(title)).not.toHaveAttribute('aria-sort');
+        expect(header('#')).toHaveAttribute('aria-sort', 'ascending');
         await waitFor(() =>
           expect(lastListing()).toMatchObject({ limit: 10, offset: 0, orderBy: 'ORDER_BY_ASC' }),
         );
@@ -710,11 +732,11 @@ describe('JobQueue', () => {
     it('goes back to the queue order without a queue position column', async () => {
       setup(Api.V1SchedulerType.FAIRSHARE);
       await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
-      expect(screen.getByTestId('Preemptible')).not.toHaveAttribute('aria-sort');
+      expect(header('Preemptible')).not.toHaveAttribute('aria-sort');
       for (let click = 0; click < 3; click++) await clickHeader('Job Name');
       await waitFor(() => expect(saved(JobState.SCHEDULED, 'sortKey')).toBe('jobsAhead'));
       await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
-      expect(screen.getByTestId('Job Name')).not.toHaveAttribute('aria-sort');
+      expect(header('Job Name')).not.toHaveAttribute('aria-sort');
     });
 
     it('sorts all jobs of the tab, not the page, and starts a new sort on the first page', async () => {
@@ -771,7 +793,7 @@ describe('JobQueue', () => {
       window.history.replaceState(null, '', '/');
       setup();
       await waitFor(() => expect(rowOrder()).toEqual(['q1', 'q2', 'q0', 'q4', 'q3', 'q5']));
-      expect(screen.getByTestId('Slots')).toHaveAttribute('aria-sort', 'descending');
+      expect(header('Slots')).toHaveAttribute('aria-sort', 'descending');
     });
   });
 
@@ -791,7 +813,7 @@ describe('JobQueue', () => {
       await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
       for (const title of ['Job Name', 'User', 'Slots', 'Submitted', 'State', 'Type', 'Priority']) {
         await clickHeader(title);
-        expect(screen.getByTestId(title)).not.toHaveAttribute('aria-sort');
+        expect(header(title)).not.toHaveAttribute('aria-sort');
       }
       expect(rowOrder()).toEqual(QUEUE_ORDER);
       expect(saved(JobState.QUEUED, 'sortKey')).toBeUndefined();
@@ -803,7 +825,7 @@ describe('JobQueue', () => {
       setup(Api.V1SchedulerType.PRIORITY, JobState.QUEUED);
       await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
       expect(lastListing()).toMatchObject({ limit: 10, offset: 0, orderBy: 'ORDER_BY_ASC' });
-      expect(screen.getByTestId('#')).toHaveAttribute('aria-sort', 'ascending');
+      expect(header('#')).toHaveAttribute('aria-sort', 'ascending');
     });
 
     it('still reverses the queue from the queue position column', async () => {
@@ -815,7 +837,7 @@ describe('JobQueue', () => {
         expect(lastListing()).toMatchObject({ limit: 10, offset: 0, orderBy: 'ORDER_BY_DESC' }),
       );
       await waitFor(() => expect(rowOrder()).toEqual([...QUEUE_ORDER].reverse()));
-      expect(screen.getByTestId('#')).toHaveAttribute('aria-sort', 'descending');
+      expect(header('#')).toHaveAttribute('aria-sort', 'descending');
     });
   });
 });

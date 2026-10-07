@@ -21,6 +21,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/proxy"
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/internal/task/tasklogger"
+	"github.com/determined-ai/determined/master/internal/task/taskmodel"
 	"github.com/determined-ai/determined/master/pkg/aproto"
 	"github.com/determined-ai/determined/master/pkg/cproto"
 	"github.com/determined-ai/determined/master/pkg/device"
@@ -624,11 +625,20 @@ func TestRestore(t *testing.T) {
 		State:        ptrs.Ptr(model.AllocationStatePending),
 	})
 	require.NoError(t, err)
+	// It has resources, so it is restored, also while its state is still pending.
+	restoredResources := taskmodel.ResourcesWithState{
+		ResourceID:   sproto.ResourcesID(cproto.NewID()),
+		AllocationID: restoredAr.AllocationID,
+	}
+	require.NoError(t, restoredResources.Persist())
 
-	closeDB, _, id, q, exitFuture := requireStarted(t, func(ar *sproto.AllocateRequest) {
+	closeDB, rm, id, q, exitFuture := requireStarted(t, func(ar *sproto.AllocateRequest) {
 		*ar = restoredAr
 	})
 	defer closeDB()
+	rm.AssertCalled(t, "Allocate", mock.MatchedBy(func(req sproto.AllocateRequest) bool {
+		return req.Restore
+	}))
 
 	rID, resources := requireAssigned(t, restoredAr.AllocationID, q)
 	q.Put(&sproto.ResourcesAllocated{
@@ -637,7 +647,83 @@ func TestRestore(t *testing.T) {
 		Resources:    map[sproto.ResourcesID]sproto.Resources{rID: resources},
 		Recovered:    true,
 	})
+	resources.AssertNotCalled(t, "Start", mock.Anything, mock.Anything, mock.Anything)
 	defer requireKilled(t, id, exitFuture)
+}
+
+// An allocation that was waiting for resources when the master stopped has nothing to restore: it
+// requests resources as a new allocation under its ID, and starts them when it gets them.
+func TestRestoreQueued(t *testing.T) {
+	pgDB, closeDB := requireDeps(t)
+	defer closeDB()
+
+	queuedTask := db.RequireMockTask(t, pgDB, nil)
+	queuedAr := stubAllocateRequest(queuedTask)
+	queuedAr.Restore = true
+
+	err := db.AddAllocation(context.TODO(), &model.Allocation{
+		AllocationID: queuedAr.AllocationID,
+		TaskID:       queuedAr.TaskID,
+		Slots:        queuedAr.SlotsNeeded,
+		ResourcePool: queuedAr.ResourcePool,
+		State:        ptrs.Ptr(model.AllocationStatePending),
+		Ports:        map[string]int{},
+	})
+	require.NoError(t, err)
+
+	closeDB, rm, id, q, exitFuture := requireStarted(t, func(ar *sproto.AllocateRequest) {
+		*ar = queuedAr
+	})
+	defer closeDB()
+	defer requireKilled(t, id, exitFuture)
+	rm.AssertCalled(t, "Allocate", mock.MatchedBy(func(req sproto.AllocateRequest) bool {
+		return req.AllocationID == id && !req.Restore
+	}))
+
+	_, resources := requireAssigned(t, id, q)
+	resources.AssertNumberOfCalls(t, "Start", 1)
+}
+
+// A queued allocation that an earlier master start stamped with the last heartbeat as its start
+// gets its start time when it gets resources.
+func TestRestoreQueuedStartTime(t *testing.T) {
+	pgDB, closeDB := requireDeps(t)
+	defer closeDB()
+
+	queuedTask := db.RequireMockTask(t, pgDB, nil)
+	queuedAr := stubAllocateRequest(queuedTask)
+	queuedAr.Restore = true
+
+	heartbeat := time.Now().UTC().Add(-48 * time.Hour)
+	err := db.AddAllocation(context.TODO(), &model.Allocation{
+		AllocationID: queuedAr.AllocationID,
+		TaskID:       queuedAr.TaskID,
+		Slots:        queuedAr.SlotsNeeded,
+		ResourcePool: queuedAr.ResourcePool,
+		StartTime:    &heartbeat,
+		State:        ptrs.Ptr(model.AllocationStatePending),
+		Ports:        map[string]int{},
+	})
+	require.NoError(t, err)
+
+	closeDB, _, id, q, exitFuture := requireStarted(t, func(ar *sproto.AllocateRequest) {
+		*ar = queuedAr
+	})
+	defer closeDB()
+	defer requireKilled(t, id, exitFuture)
+	row, err := db.AllocationByID(context.TODO(), id)
+	require.NoError(t, err)
+	require.Nil(t, row.StartTime)
+
+	before := time.Now().UTC().Add(-time.Second)
+	rID, _ := requireAssigned(t, id, q)
+	q.Put(&sproto.ResourcesStateChanged{ResourcesID: rID, ResourcesState: sproto.Pulling})
+	require.True(t, waitForCondition(time.Second, func() bool {
+		row, err = db.AllocationByID(context.TODO(), id)
+		require.NoError(t, err)
+		return row.StartTime != nil
+	}), "start time not recorded")
+	require.True(t, row.StartTime.After(before), "start %s", row.StartTime)
 }
 
 func requireDeps(t *testing.T) (*db.PgDB, func()) {

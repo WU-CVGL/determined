@@ -208,7 +208,7 @@ func (a *agentState) allocateFreeDevices(
 // the set is the free devices in map order, as before GPU selection existed, and goes through the
 // same validation:
 //   - for the zero selection, which never runs the selection;
-//   - when the selection chooses no devices and says why (gpuChoice.mapOrder);
+//   - when the selection chooses no devices and says why (gpuChoice.noSelectionReason);
 //   - when the selection fails: its set is invalid, it gives neither a set nor a reason, or it
 //     panics. The reservation reports the failure, so it succeeds exactly when one in map order
 //     would.
@@ -237,7 +237,7 @@ func (a *agentState) chooseFreeDevices(
 				return res, nil
 			}
 			res.failure = err.Error()
-		case res.choice.mapOrder == "":
+		case res.choice.noSelectionReason == "":
 			res.failure = "no devices and no reason"
 		}
 		if res.failure != "" {
@@ -270,10 +270,10 @@ func (a *agentState) chooseOnOneNUMANode(
 	switch {
 	case failure != "":
 		return deviceReservation{}, fmt.Errorf("GPU topology preference strong: selection failed: %s", failure)
-	case choice.devices == nil && choice.mapOrder == "":
+	case choice.devices == nil && choice.noSelectionReason == "":
 		return deviceReservation{}, errors.New("GPU topology preference strong: no devices and no reason")
 	case choice.devices == nil:
-		return deviceReservation{}, fmt.Errorf("GPU topology preference strong: %s", choice.mapOrder)
+		return deviceReservation{}, fmt.Errorf("GPU topology preference strong: %s", choice.noSelectionReason)
 	}
 	if err := a.checkFreeDevices(choice.devices, slots); err != nil {
 		return deviceReservation{}, fmt.Errorf("GPU topology preference strong: %w", err)

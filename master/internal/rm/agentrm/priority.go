@@ -325,23 +325,18 @@ func deepCopyAgents(agents map[aproto.ID]*agentState) map[aproto.ID]*agentState 
 // devices and a selection that cannot choose falls back to map order, so a reservation here does
 // not fail, except for prefer_gpu_topology "strong", which never takes map order. Its fit admits
 // only agents where one NUMA node holds the request, and a strong reservation that still fails is
-// a miss: the copies are left as they were.
+// a miss. A strong selection uses one agent (sel.strong is set only for a single fit), so that
+// failure is the first and only placement and leaves the copies as they were.
 func (p priorityScheduler) addTaskToAgents(req *sproto.AllocateRequest, fits []*fittingState) bool {
 	sel := p.gpus.selection(req, fits)
-	placed := make([]cproto.ID, 0, len(fits))
-	for i, fit := range fits {
-		cid := cproto.NewID()
-		if _, err := fit.Agent.allocateFreeDevices(fit.Slots, cid, sel); err != nil {
+	for _, fit := range fits {
+		if _, err := fit.Agent.allocateFreeDevices(fit.Slots, cproto.NewID(), sel); err != nil {
 			if !sel.strong {
 				panic(errors.Wrap(err, "can't add task to agents"))
 			}
-			for j, id := range placed {
-				fits[j].Agent.deallocateContainer(id)
-			}
-			log.WithError(err).Debugf("task %s not placed on agent %s", req.Name, fits[i].Agent.id)
+			log.WithError(err).Debugf("task %s not placed on agent %s", req.Name, fit.Agent.id)
 			return false
 		}
-		placed = append(placed, cid)
 	}
 	return true
 }
