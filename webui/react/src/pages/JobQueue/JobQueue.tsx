@@ -7,6 +7,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import ActionDropdown, { Triggers } from 'components/ActionDropdown';
 import Section from 'components/Section';
+import { withColumn } from 'components/Table/columnLayout';
 import InteractiveTable, { ColumnDef } from 'components/Table/InteractiveTable';
 import SkeletonTable from 'components/Table/SkeletonTable';
 import {
@@ -24,7 +25,7 @@ import usePermissions from 'hooks/usePermissions';
 import usePolling from 'hooks/usePolling';
 import { useSettings } from 'hooks/useSettings';
 import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
-import { columns as columnsFunc, SCHEDULING_VAL_KEY } from 'pages/JobQueue/JobQueue.table';
+import { columns as columnsFunc, JobGpus, SCHEDULING_VAL_KEY } from 'pages/JobQueue/JobQueue.table';
 import { paths } from 'routes/utils';
 import {
   cancelExperiment,
@@ -50,18 +51,26 @@ import {
   TaskItem,
 } from 'types';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
-import { canManageJob, jobTypeToCommandType, orderedSchedulers } from 'utils/job';
+import {
+  canManageJob,
+  jobTypeToCommandType,
+  orderedSchedulers,
+  placementLines,
+  poolListsJobGpus,
+} from 'utils/job';
 import { useObservable } from 'utils/observable';
 import { routeToReactUrl } from 'utils/routes';
 import { numericSorter } from 'utils/sort';
 import { capitalize } from 'utils/string';
 
 import css from './JobQueue.module.scss';
-import settingsConfig, { Settings } from './JobQueue.settings';
+import settingsConfig, { DEFAULT_COLUMN_WIDTHS, Settings } from './JobQueue.settings';
 import ManageJobModalComponent from './ManageJob';
 
 interface Props {
   jobState: JobState;
+  /** Takes the GPUs of the job whose tiles to highlight, or undefined for none. */
+  onHighlight?: (placement?: Api.V1JobPlacement[]) => void;
   rpStats: Api.V1RPQueueStat[];
   selectedRp: ResourcePool;
 }
@@ -82,7 +91,7 @@ const commandTaskFromJob = (job: FullJob, type: CommandType, task: TaskItem): Co
   workspaceId: job.workspaceId,
 });
 
-const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
+const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState, onHighlight }) => {
   const resourcesEnabled = useTaskResourcesEnabled();
   const { canModifyExperiment, canModifyWorkspaceNSC } = usePermissions();
   const users = Loadable.getOrElse([], useObservable(userStore.getUsers()));
@@ -109,7 +118,7 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
       manageJobModal.open();
     }
   }, [managingJob, manageJobModal]);
-  const { settings, updateSettings } = useSettings<Settings>(
+  const { isLoading, settings, updateSettings } = useSettings<Settings>(
     useMemo(() => settingsConfig(jobState), [jobState]),
   );
   const settingsColumns = useMemo(() => [...settings.columns], [settings.columns]);
@@ -334,8 +343,48 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.columns, settingsColumns]);
 
+  /*
+   * The Active tab of an agent pool with GPU slots lists the GPUs each job holds, after Slots.
+   * Layouts are stored per tab: once the stored settings have loaded, the tab's layout gains the
+   * column, and a pool without it skips the stored column.
+   */
+  const showGpus = jobState === JobState.SCHEDULED && poolListsJobGpus(selectedRp);
+  const layoutUpdate = useMemo(() => {
+    if (!showGpus || isLoading) return undefined;
+    const layout = { columns: settings.columns, columnWidths: settings.columnWidths };
+    const update = withColumn(layout, 'gpus', 'slots', DEFAULT_COLUMN_WIDTHS);
+    return _.isEqual(update, layout) ? undefined : update;
+  }, [isLoading, settings.columnWidths, settings.columns, showGpus]);
+  useEffect(() => {
+    if (layoutUpdate) updateSettings(layoutUpdate);
+  }, [layoutUpdate, updateSettings]);
+
+  /*
+   * The job whose tiles the topology panel highlights. The highlight follows the job across polls
+   * and clears once the job leaves the list or holds no GPU, or the tab closes.
+   */
+  const [highlightedJobId, setHighlightedJobId] = useState<string>();
+  const toggleHighlight = useCallback(
+    (jobId: string) => setHighlightedJobId((cur) => (cur === jobId ? undefined : jobId)),
+    [],
+  );
+  const highlightedPlacement = useMemo(() => {
+    if (!showGpus || !highlightedJobId) return undefined;
+    const job = jobs.find((j) => j.jobId === highlightedJobId);
+    const placement = job && 'entityId' in job ? job.placement : undefined;
+    return placementLines(placement).length > 0 ? placement : undefined;
+  }, [highlightedJobId, jobs, showGpus]);
+  useEffect(() => {
+    if (highlightedJobId && !highlightedPlacement) setHighlightedJobId(undefined);
+  }, [highlightedJobId, highlightedPlacement]);
+  useEffect(() => {
+    onHighlight?.(highlightedPlacement);
+  }, [highlightedPlacement, onHighlight]);
+  useEffect(() => () => onHighlight?.(undefined), [onHighlight]);
+
   const columns = useMemo(() => {
     return defaultColumns
+      .filter((col) => col.key !== 'gpus' || showGpus)
       .map<ColumnDef<Job>>((col) => {
         switch (col.key) {
           case 'actions':
@@ -447,6 +496,17 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
                 title: '#',
               };
             }
+          case 'gpus':
+            return {
+              ...col,
+              render: createOmitableRenderer<Job, FullJob>('entityId', (_, record) => (
+                <JobGpus
+                  job={record}
+                  pressed={record.jobId === highlightedJobId}
+                  onToggle={onHighlight && toggleHighlight}
+                />
+              )),
+            };
           case 'user':
             return {
               ...col,
@@ -487,6 +547,10 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
     settings.sortDesc,
     selectedRp.schedulerType,
     canManage,
+    showGpus,
+    highlightedJobId,
+    onHighlight,
+    toggleHighlight,
     commandTasks,
     fetchJobsTable,
     launchAgain,

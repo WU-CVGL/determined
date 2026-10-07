@@ -6,7 +6,7 @@ import Pivot, { PivotProps } from 'hew/Pivot';
 import Spinner from 'hew/Spinner';
 import { ShirtSize } from 'hew/Theme';
 import { Loadable } from 'hew/utils/loadable';
-import { isEmpty } from 'lodash';
+import { isEmpty, isEqual } from 'lodash';
 import React, { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
@@ -25,7 +25,12 @@ import JobQueue from 'pages/JobQueue/JobQueue';
 import Topology from 'pages/ResourcePool/ClusterTopology';
 import { paths } from 'routes/utils';
 import { getAgents, getJobQStats } from 'services/api';
-import { V1ResourcePoolDetail, V1RPQueueStat, V1SchedulerType } from 'services/api-ts-sdk';
+import {
+  V1JobPlacement,
+  V1ResourcePoolDetail,
+  V1RPQueueStat,
+  V1SchedulerType,
+} from 'services/api-ts-sdk';
 import clusterStore, { maxPoolSlotCapacity } from 'stores/cluster';
 import { Agent, JobState, JsonObject, ResourceState, ValueOf } from 'types';
 import { getSlotContainerStates } from 'utils/cluster';
@@ -72,6 +77,13 @@ const ResourcepoolDetailInner: React.FC = () => {
   const [tabKey, setTabKey] = useState<TabType>(tab ?? DEFAULT_POOL_TAB_KEY);
   const [poolsStats, setPoolsStats] = useState<V1RPQueueStat[]>();
   const [agentsWithSlots, setAgentsWithSlots] = useState<Agent[]>([]);
+  // The GPUs of the job that the Active tab highlights in the topology panel.
+  const [highlight, setHighlight] = useState<V1JobPlacement[]>();
+  const onHighlight = useCallback(
+    (placement?: V1JobPlacement[]) =>
+      setHighlight((cur) => (isEqual(cur, placement) ? cur : placement)),
+    [],
+  );
 
   const pool = useMemo(() => {
     if (!Loadable.isLoaded(resourcePools)) return;
@@ -236,7 +248,14 @@ const ResourcepoolDetailInner: React.FC = () => {
 
     const tabItems: PivotProps['items'] = [
       {
-        children: <JobQueue jobState={JobState.SCHEDULED} rpStats={rpStats} selectedRp={pool} />,
+        children: (
+          <JobQueue
+            jobState={JobState.SCHEDULED}
+            rpStats={rpStats}
+            selectedRp={pool}
+            onHighlight={onHighlight}
+          />
+        ),
         key: TabType.Active,
         label: `${poolStats?.stats.scheduledCount ?? ''} Active`,
       },
@@ -266,7 +285,15 @@ const ResourcepoolDetailInner: React.FC = () => {
     }
 
     return tabItems;
-  }, [canManageResourcePoolBindings, pool, poolStats, renderPoolConfig, rpStats, rpBindingFlagOn]);
+  }, [
+    canManageResourcePoolBindings,
+    onHighlight,
+    pool,
+    poolStats,
+    renderPoolConfig,
+    rpStats,
+    rpBindingFlagOn,
+  ]);
 
   const ManageNodesModal = useModal(ManageNodesModalComponent);
 
@@ -329,7 +356,9 @@ const ResourcepoolDetailInner: React.FC = () => {
         </Section>
         {isTopologyAvailable && (
           <>
-            {topologyAgentPool.length !== 0 && poolname && <Topology nodes={topologyAgentPool} />}
+            {topologyAgentPool.length !== 0 && poolname && (
+              <Topology highlight={highlight} nodes={topologyAgentPool} />
+            )}
           </>
         )}
         <Section>

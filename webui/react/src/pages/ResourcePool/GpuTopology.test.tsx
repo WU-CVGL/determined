@@ -484,6 +484,34 @@ describe('ClusterTopology', () => {
     expect(screen.getAllByRole('note', { name: 'GPU topology legend' })).toHaveLength(1);
   });
 
+  it("rings the highlighted job's tiles on each agent, never an excluded GPU", () => {
+    const node01 = agentOf('node01', gpuTopologyCase('node01 with the exclude list'));
+    const node02 = agentOf('node02', gpuTopologyCase('node02'));
+    setup(
+      <ClusterTopology
+        highlight={[
+          { agentId: 'node01', deviceIds: [0, 1, 5, 6] },
+          { agentId: 'node02', deviceIds: [2] },
+        ]}
+        nodes={[node01, node02]}
+      />,
+    );
+    const tileOn = (agentId: string, name: string) =>
+      within(screen.getByRole('article', { name: `GPU topology of agent ${agentId}` })).getByRole(
+        'group',
+        { name: new RegExp(`^${name},`) },
+      );
+    for (const id of [0, 1, 5, 6]) {
+      expect(tileOn('node01', `Slot ${id}`)).toHaveClass('highlighted');
+      expect(tileOn('node01', `Slot ${id}`).dataset.highlighted).toBe('true');
+    }
+    expect(tileOn('node01', 'Slot 2')).not.toHaveClass('highlighted');
+    expect(tileOn('node01', 'Slot 2').dataset.highlighted).toBeUndefined();
+    expect(tileOn('node01', 'Excluded GPU 81:00.0')).not.toHaveClass('highlighted');
+    expect(tileOn('node02', 'Slot 2')).toHaveClass('highlighted');
+    expect(tileOn('node02', 'Slot 0')).not.toHaveClass('highlighted');
+  });
+
   it('shows no legend without GPU topology', () => {
     const cpuAgent: Agent = { ...agentOf('cpu', undefined), resources: [slot(0)] };
     setup(<ClusterTopology nodes={[cpuAgent]} />);

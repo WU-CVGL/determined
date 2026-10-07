@@ -109,6 +109,15 @@
   padding: 5px 6px 6px 8px;
   position: relative;
 }
+
+// The tiles of the job whose GPUs cell is pressed on the Active tab: a ring of the surface colour
+// and its text colour, which shows on every fill.
+
+.highlighted {
+  box-shadow:
+    0 0 0 2px var(--theme-surface),
+    0 0 0 4px var(--theme-surface-on);
+}
 .striped {
   background-image: repeating-linear-gradient(
     135deg,
