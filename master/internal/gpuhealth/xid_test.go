@@ -305,12 +305,13 @@ func TestXIDCacheFailureDropsExpiredXIDs(t *testing.T) {
 	f.set(nil, errors.New("connection refused"), false, nil)
 
 	// Each failure below comes XIDMaxStale or more after the last one, so the caller waits for it.
-	// At 10:15 the next day, the range starts at step(3), the last window of XID 79: kept.
+	// At 10:10 the next day, XID 79 is kept.
 	clock.set(step(3).Add(XIDWindow - XIDMaxStale))
 	s := c.Get(ctx)
 	require.Equal(t, int32(2), f.calls.Load())
 	require.Equal(t, agentv1.GpuXidQueryStatus_GPU_XID_QUERY_STATUS_FAILED, s.Status)
 	require.Equal(t, okResult.ByUUID, s.ByUUID)
+	// At 10:15, the range starts at step(3), the last window of XID 79: still kept.
 	clock.add(XIDMaxStale)
 	s = c.Get(ctx)
 	require.Equal(t, int32(3), f.calls.Load())
