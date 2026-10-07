@@ -335,6 +335,9 @@ const ALL_JOBS = 2 ** 31 - 1;
 
 const clickHeader = (title: string) => userEvent.click(screen.getByTestId(title));
 
+/** The header cell of the column with this title, which carries the column's sort state. */
+const header = (title: string) => screen.getByTestId(title).closest('th');
+
 describe('JobQueue', () => {
   beforeEach(() => {
     testPool = `pool-${++testCount}`;
@@ -567,7 +570,7 @@ describe('JobQueue', () => {
     it('opens in queue order, a page at a time', async () => {
       setup();
       await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
-      expect(screen.getByTestId('#')).toHaveAttribute('aria-sort', 'ascending');
+      expect(header('#')).toHaveAttribute('aria-sort', 'ascending');
       expect(lastListing()).toMatchObject({ limit: 10, offset: 0, orderBy: 'ORDER_BY_ASC' });
     });
 
@@ -607,8 +610,8 @@ describe('JobQueue', () => {
 
         await clickHeader(title);
         await waitFor(() => expect(rowOrder()).toEqual(first));
-        expect(screen.getByTestId(title)).toHaveAttribute('aria-sort', firstClick);
-        expect(screen.getByTestId('#')).not.toHaveAttribute('aria-sort');
+        expect(header(title)).toHaveAttribute('aria-sort', firstClick);
+        expect(header('#')).not.toHaveAttribute('aria-sort');
         // All jobs of the tab, in queue order, for the browser to sort.
         await waitFor(() =>
           expect(lastListing()).toMatchObject({
@@ -620,12 +623,12 @@ describe('JobQueue', () => {
 
         await clickHeader(title);
         await waitFor(() => expect(rowOrder()).toEqual(second));
-        expect(screen.getByTestId(title)).toHaveAttribute('aria-sort', secondClick);
+        expect(header(title)).toHaveAttribute('aria-sort', secondClick);
 
         await clickHeader(title);
         await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
-        expect(screen.getByTestId(title)).not.toHaveAttribute('aria-sort');
-        expect(screen.getByTestId('#')).toHaveAttribute('aria-sort', 'ascending');
+        expect(header(title)).not.toHaveAttribute('aria-sort');
+        expect(header('#')).toHaveAttribute('aria-sort', 'ascending');
         await waitFor(() =>
           expect(lastListing()).toMatchObject({ limit: 10, offset: 0, orderBy: 'ORDER_BY_ASC' }),
         );
@@ -710,11 +713,11 @@ describe('JobQueue', () => {
     it('goes back to the queue order without a queue position column', async () => {
       setup(Api.V1SchedulerType.FAIRSHARE);
       await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
-      expect(screen.getByTestId('Preemptible')).not.toHaveAttribute('aria-sort');
+      expect(header('Preemptible')).not.toHaveAttribute('aria-sort');
       for (let click = 0; click < 3; click++) await clickHeader('Job Name');
       await waitFor(() => expect(saved(JobState.SCHEDULED, 'sortKey')).toBe('jobsAhead'));
       await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
-      expect(screen.getByTestId('Job Name')).not.toHaveAttribute('aria-sort');
+      expect(header('Job Name')).not.toHaveAttribute('aria-sort');
     });
 
     it('sorts all jobs of the tab, not the page, and starts a new sort on the first page', async () => {
@@ -771,7 +774,7 @@ describe('JobQueue', () => {
       window.history.replaceState(null, '', '/');
       setup();
       await waitFor(() => expect(rowOrder()).toEqual(['q1', 'q2', 'q0', 'q4', 'q3', 'q5']));
-      expect(screen.getByTestId('Slots')).toHaveAttribute('aria-sort', 'descending');
+      expect(header('Slots')).toHaveAttribute('aria-sort', 'descending');
     });
   });
 
@@ -791,7 +794,7 @@ describe('JobQueue', () => {
       await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
       for (const title of ['Job Name', 'User', 'Slots', 'Submitted', 'State', 'Type', 'Priority']) {
         await clickHeader(title);
-        expect(screen.getByTestId(title)).not.toHaveAttribute('aria-sort');
+        expect(header(title)).not.toHaveAttribute('aria-sort');
       }
       expect(rowOrder()).toEqual(QUEUE_ORDER);
       expect(saved(JobState.QUEUED, 'sortKey')).toBeUndefined();
@@ -803,7 +806,7 @@ describe('JobQueue', () => {
       setup(Api.V1SchedulerType.PRIORITY, JobState.QUEUED);
       await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
       expect(lastListing()).toMatchObject({ limit: 10, offset: 0, orderBy: 'ORDER_BY_ASC' });
-      expect(screen.getByTestId('#')).toHaveAttribute('aria-sort', 'ascending');
+      expect(header('#')).toHaveAttribute('aria-sort', 'ascending');
     });
 
     it('still reverses the queue from the queue position column', async () => {
@@ -815,7 +818,7 @@ describe('JobQueue', () => {
         expect(lastListing()).toMatchObject({ limit: 10, offset: 0, orderBy: 'ORDER_BY_DESC' }),
       );
       await waitFor(() => expect(rowOrder()).toEqual([...QUEUE_ORDER].reverse()));
-      expect(screen.getByTestId('#')).toHaveAttribute('aria-sort', 'descending');
+      expect(header('#')).toHaveAttribute('aria-sort', 'descending');
     });
   });
 });
