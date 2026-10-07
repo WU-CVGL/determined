@@ -691,8 +691,8 @@ func TestTopologyPreferenceComposition(t *testing.T) {
 }
 
 func TestTopologyPreferenceRanksWidthAfterLocality(t *testing.T) {
-	// The expected sets of follow-up 3/4 for idle nodes, n = 2, 3 and 4: "soft" avoids x8 GPUs
-	// among sets of equal locality; plain tasks get NUMA packing, which never reads the width.
+	// The expected sets for idle nodes, n = 2, 3 and 4: "soft" avoids x8 GPUs between
+	// otherwise equal pairs; plain tasks get NUMA packing, which never reads the width.
 	for _, c := range []struct {
 		name        string
 		f           topologyFixture
@@ -845,6 +845,16 @@ func TestTopologyPreferenceSubsetCap(t *testing.T) {
 	require.Equal(t, "more than 20000 sets of free GPUs", c.unranked)
 	c = topologySelect(t, f, ids[:16], 8, false)
 	require.Equal(t, intRange(0, 8), deviceIDs(c.devices))
+
+	// With every pair unknown too, the cap is the reason; under the cap, the unknown pairs are.
+	f.level = func(int, int) aproto.GPULinkLevel { return "" }
+	f.p2p = allP2P(p2pUnknown)
+	for _, packNUMA := range []bool{false, true} {
+		c = topologySelect(t, f, ids, 8, packNUMA)
+		require.Equal(t, "more than 20000 sets of free GPUs", c.unranked, "packing %v", packNUMA)
+		c = topologySelect(t, f, ids[:16], 8, packNUMA)
+		require.Equal(t, "every pair of free GPUs unknown", c.unranked, "packing %v", packNUMA)
+	}
 }
 
 func TestTopologyPreferenceEqualsBruteForce(t *testing.T) {
