@@ -119,8 +119,9 @@ The following configuration settings are supported:
 
    -  ``prefer_gpu_topology``: ``false`` or ``"soft"``: with ``"soft"``, a task with 2 or more slots
       gets the best-ranked set of free GPUs of its agent by P2P, NVLinks, PCIe switches and NUMA
-      nodes. See :ref:`prefer_gpu_topology <exp-config-resources-prefer-gpu-topology>`; for example
-      ``det cmd run --config resources.slots=4 --config resources.prefer_gpu_topology=soft``.
+      nodes, for example ``det cmd run --config resources.slots=4 --config
+      resources.prefer_gpu_topology=soft 'echo $DET_SLOT_IDS'``. See :ref:`prefer_gpu_topology
+      <exp-config-resources-prefer-gpu-topology>`.
 
 -  ``bind_mounts``: Specifies a collection of directories that are bind-mounted into the Docker
    containers for execution. This can be used to allow commands to access additional data that is

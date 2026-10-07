@@ -1263,7 +1263,7 @@ shells, and commands, and cannot be modified.
 Optional. Whether the agent resource manager chooses a task's GPUs by the :ref:`GPU topology
 <agent-gpu-topology>` that agents report: ``false`` or ``"soft"``. Unset is ``false``. ``true`` is
 not a value, and ``"strong"`` is not available yet; both are rejected. An explicit value, also
-``false``, wins over a template, and an invariant config policy can force ``"soft"``.
+``false``, wins over a template; for experiments, an invariant config policy can force ``"soft"``.
 
 With ``"soft"``, a task with 2 or more slots on one agent gets the set of free GPUs of that agent
 that ranks first:
@@ -1299,6 +1299,15 @@ change.
 
 The task log gets one line for each such task, for example ``GPU topology preference: agent node02,
 slots 4,5,6,7; worst pair NODE, P2P usable``, or the reason the set was not ranked.
+
+A master without this option, after a rollback, treats a config that sets it, also to ``false``, as
+follows. Experiments that are not terminal move to ERROR when it starts, and their trials are
+killed; continuing or editing any experiment that sets it fails. New experiments and tasks that set
+it are refused, and so are creating an experiment from a template that sets it and saving a
+workspace config policy while the global policy sets it. The option is ignored in command, notebook,
+shell and TensorBoard templates, in invariant config policies, and in the commands and generic tasks
+that the master restores or resumes. Before rolling back, end the experiments that set it and remove
+it from templates and config policies.
 
 .. _exp-resources-devices:
 

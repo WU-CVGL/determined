@@ -344,7 +344,8 @@ behavior specified here. For more on scheduling behavior in Determined, see :ref
       (:ref:`numa_packing <master-config-numa-packing>`).
 
    -  ``worst``: The worst-fit policy ensures that tasks will be placed on under-utilized agents.
-      Inside the agent, a task takes free GPUs in no particular order.
+      Inside the agent, a task takes free GPUs in no particular order, unless it sets
+      ``prefer_gpu_topology: soft``.
 
 .. _allow-uneven-slots:
 
@@ -361,9 +362,11 @@ behavior specified here. For more on scheduling behavior in Determined, see :ref
 ^^^^^^^^^^^^^^^^
 
    Whether ``fitting_policy: best`` chooses each task's GPUs inside the agent by NUMA node. Defaults
-   to ``true``. ``false`` takes free GPUs in no particular order, as ``worst`` does. It never
-   changes which agent a task gets or how many slots, and it has no effect under ``worst``. Dynamic
-   pool specs accept it as well.
+   to ``true``. ``false`` takes free GPUs in no particular order, as ``worst`` does, so GPUs in
+   error are not used last; only a task with :ref:`prefer_gpu_topology
+   <exp-config-resources-prefer-gpu-topology>` ``"soft"`` still gets a ranked set, with GPUs in
+   error last and ties to the lowest IDs. It never changes which agent a task gets or how many
+   slots, and it has no effect under ``worst``. Dynamic pool specs accept it as well.
 
    Packing applies to every task with 1 or more slots and reads the NUMA node that each agent
    reports for its GPUs (:ref:`GPU topology <agent-gpu-topology>`). Among the free GPUs, a task gets
@@ -378,21 +381,29 @@ behavior specified here. For more on scheduling behavior in Determined, see :ref
    #. for a set on one NUMA node, fewer allocatable slots on that node;
    #. the lowest GPU IDs.
 
-   Rows 3 to 5 count only healthy GPUs with a known NUMA node. On an agent with two NUMA nodes, a
-   task that fits one node gets the lowest free IDs of the node with the fewest free GPUs; a task
-   that fits neither takes every free GPU of the node with the most free GPUs, then the lowest free
-   IDs of the other. For example, 1-slot tasks fill an idle 8-GPU agent with GPUs 0-3 on node 0 and
-   4-7 on node 1 in the order 0 to 7, and with free GPUs 0, 1, 4, 5 and 6 a 3-slot task gets 4, 5
-   and 6. The GPUs are passed to the task in ascending order (``DET_SLOT_IDS``).
+   Rows 3 to 5 count only healthy GPUs with a known NUMA node, so a task that has to take GPUs in
+   error gets the lowest IDs among them. On an agent with two NUMA nodes, a task that fits one node
+   gets the lowest free IDs of the node with the fewest free GPUs; a task that fits neither takes
+   every free GPU of the node with the most free GPUs, then the lowest free IDs of the other. For
+   example, 1-slot tasks fill an idle 8-GPU agent with GPUs 0-3 on node 0 and 4-7 on node 1 in the
+   order 0 to 7, and with free GPUs 0, 1, 4, 5 and 6 a 3-slot task gets 4, 5 and 6. The GPUs are
+   passed to the task in ascending order (``DET_SLOT_IDS``).
 
    An agent whose topology the master does not have, for example right after a master restart until
-   the agent reconnects, gives the lowest free IDs. A NUMA node equals a socket only with NPS1: with
-   NPS2 or NPS4, packing can choose GPUs on two sockets while a set on one socket is free.
+   the agent reconnects, gives the lowest free IDs, GPUs with a recent critical XID last. Slots
+   without a NUMA node, such as CPU slots, are taken lowest IDs first too. A NUMA node equals a
+   socket only with NPS1: with NPS2 or NPS4, packing can choose GPUs on two sockets while a set on
+   one socket is free.
 
    A GPU that fails tasks without an NVML error or a critical XID still takes every task whose set
    includes it, restarts included. Leave it out with :ref:`exclude_gpus <agent-exclude-gpus>`: ``det
    slot disable`` lasts only until the agent reconnects, the agent is enabled or disabled, or the
    master restarts.
+
+   An earlier master does not start while ``master.yaml`` or a dynamic pool spec sets this option,
+   so remove it from both before rolling back. A pool spec without a ``scheduler`` stores a copy of
+   the ``master.yaml`` scheduler, which a master before 0.41 reads: after removing the option from
+   ``master.yaml``, start this master once before rolling back below 0.41.
 
 ``default_aux_resource_pool``
 -----------------------------
@@ -912,7 +923,10 @@ The scheduling policy to use when assigning tasks to agents in the cluster. Defa
 
 Whether ``fitting_policy: best`` chooses each task's GPUs inside the agent by NUMA node. Defaults to
 ``true``. See :ref:`numa_packing <master-config-numa-packing>`. A pool's ``scheduler`` replaces the
-global one as a whole, so a pool that sets any scheduler field and leaves this one out packs.
+global one as a whole: a pool that sets any scheduler field and leaves this one out packs, and a
+pool that sets only ``numa_packing`` gets the defaults for every other field (``priority`` with
+``default_priority: 42``, no preemption, ``fitting_policy: best``), so repeat the global settings
+there.
 
 ``provider``
 ============
