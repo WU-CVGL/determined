@@ -1281,24 +1281,36 @@ that ranks first:
       unknown level; then not usable before unknown P2P; then a pair on two PCIe switches before a
       pair behind one (``PIX``), whose GPUs share one link to host memory;
 
+   and last, among pairs equal in all of that, by PCIe link width: both GPUs at their maximum width
+   before a pair with an unknown width before a narrow pair, one with a GPU whose current width was
+   below its maximum (``narrow`` in the CLI);
+
 #. equal sets go to :ref:`NUMA packing <master-config-numa-packing>` in pools that pack, and to the
    lowest IDs otherwise.
 
-NVLinks count only with usable P2P, link width is not used, and a pair the agent did not report is
-unknown. An NVML error ranks a GPU last, as above; otherwise the ranking reads only the values that
-the agent reported, so a failed NVML query for a pair only leaves that pair unknown. NVML's ``NODE``
-and ``SYS`` are NUMA levels: they are one socket and two sockets only with NPS1. Without usable P2P,
-the ranking uses only the NUMA class and PCIe switches.
+NVLinks count only with usable P2P, and a pair the agent did not report is unknown. An NVML error
+ranks a GPU last, as above; otherwise the ranking reads only the values that the agent reported, so
+a failed NVML query for a pair only leaves that pair unknown. NVML's ``NODE`` and ``SYS`` are NUMA
+levels: they are one socket and two sockets only with NPS1. Without usable P2P, the ranking uses
+only the NUMA class, PCIe switches and link width.
+
+The link width is the one the agent read at its start, as in the :ref:`GPU health
+<agent-gpu-topology>`; the link generation is never used. The width decides only between pairs equal
+in everything above, so locality comes first: when every pair has the same P2P state and none has
+NVLinks, a set on one NUMA node with a narrow GPU ranks before every set across NUMA nodes. An
+unknown width ranks before a narrow one, the one place where a missing value ranks before a reported
+one. Widths alone rank nothing: when every pair of free GPUs is unknown, the set is not ranked.
 
 The preference is soft: it never waits, never moves running tasks, and never changes the agent the
 scheduler picks or the number of slots. It has no effect on a task with fewer than 2 slots or on
 several agents, with the Kubernetes resource manager, when the agent's topology is unknown or every
 pair of its free GPUs is unknown, or with more than 20000 sets to compare; the task then gets its
 GPUs as without it. The agent measures its topology when it starts, so restart agents after a driver
-change.
+change, and after a link's width changed.
 
 The task log gets one line for each such task, for example ``GPU topology preference: agent node02,
-slots 4,5,6,7; worst pair NODE, P2P usable``, or the reason the set was not ranked.
+slots 4,5,6,7; worst pair NODE, P2P usable``, with ``, narrow`` when a GPU of that pair is narrow,
+or the reason the set was not ranked.
 
 A master without this option, after a rollback, treats a config that sets it, also to ``false``, as
 follows. Experiments that are not terminal move to ERROR when it starts, and their trials are

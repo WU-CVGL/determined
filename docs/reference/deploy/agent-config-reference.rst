@@ -333,7 +333,9 @@ in error last when they choose GPUs inside an agent.
 The link width is an observation at agent start, not a confirmed fault. A GPU can reduce its link
 width while it is idle, and a link can train to a different width after a reboot. A lower link width
 lowers the bandwidth cap of the GPU's link; the actual collective throughput depends on the
-workload.
+workload. ``prefer_gpu_topology: soft`` ranks a pair with a narrow GPU after the otherwise equal
+pair; NUMA packing does not read the width. After a GPU reset or a change of a link's state, check
+the width with ``nvidia-smi -q -d PCIE``, and restart the agent if it changed.
 
 The details of each GPU (``det agent describe`` and the WebUI's details) list its facts separately:
 ``PCIe link``, the current and maximum link width at agent start and the highest link generation
