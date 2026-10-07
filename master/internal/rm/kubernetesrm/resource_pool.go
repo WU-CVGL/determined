@@ -539,20 +539,26 @@ func (k *kubernetesResourcePool) getOrCreateGroup(jobID model.JobID) *tasklist.G
 }
 
 func (k *kubernetesResourcePool) admitPendingTasks() {
-	for it := k.reqList.Iterator(); it.Next(); {
-		req := it.Value()
-		group := k.groups[req.JobID]
-		if group == nil {
-			k.syslog.Warnf("schedulePendingTasks cannot find group for job %s", req.JobID)
-			continue
-		}
-		if !k.reqList.IsScheduled(req.AllocationID) {
-			if maxSlots := group.MaxSlots; maxSlots != nil {
-				if k.slotsUsedPerGroup[group]+req.SlotsNeeded > *maxSlots {
-					continue
-				}
+	// Restores go first and are not held back by max_slots: their pods already exist.
+	for _, restore := range []bool{true, false} {
+		for it := k.reqList.Iterator(); it.Next(); {
+			req := it.Value()
+			if req.Restore != restore {
+				continue
 			}
-			k.assignResources(req)
+			group := k.groups[req.JobID]
+			if group == nil {
+				k.syslog.Warnf("schedulePendingTasks cannot find group for job %s", req.JobID)
+				continue
+			}
+			if !k.reqList.IsScheduled(req.AllocationID) {
+				if maxSlots := group.MaxSlots; maxSlots != nil && !req.Restore {
+					if k.slotsUsedPerGroup[group]+req.SlotsNeeded > *maxSlots {
+						continue
+					}
+				}
+				k.assignResources(req)
+			}
 		}
 	}
 }
