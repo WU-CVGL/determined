@@ -183,7 +183,7 @@ func (a *agent) AllocateFreeDevices(msg allocateFreeDevices) (allocateFreeDevice
 	if err != nil {
 		return allocateFreeDevicesResponse{}, err
 	}
-	return allocateFreeDevicesResponse{devices: res.devices, choice: res.choice, failure: res.failure}, nil
+	return allocateFreeDevicesResponse(res), nil
 }
 
 func (a *agent) DeallocateContainer(msg deallocateContainer) error {

@@ -438,7 +438,8 @@ func TestPairRank(t *testing.T) {
 		aproto.GPULinkLevelInternal, aproto.GPULinkLevelPIX, aproto.GPULinkLevelPXB,
 		aproto.GPULinkLevelPHB, aproto.GPULinkLevelNode, aproto.GPULinkLevelSys, "",
 	}
-	states := map[string]aproto.GPUP2PCaps{"usable": p2pOK, "not usable": p2pNotOK, "unknown": p2pUnknown}
+	const usable, notUsable, unknown = "usable", "not usable", "unknown"
+	states := map[string]aproto.GPUP2PCaps{usable: p2pOK, notUsable: p2pNotOK, unknown: p2pUnknown}
 	rankOf := func(level aproto.GPULinkLevel, caps aproto.GPUP2PCaps, nvlinks int) pairRank {
 		g := &gpuTopology{pairs: map[gpuPairKey]gpuPair{
 			{a: 0, b: 1}: {level: level, nvlinks: nvlinks, p2pAToB: caps, p2pBToA: caps},
@@ -469,18 +470,18 @@ func TestPairRank(t *testing.T) {
 			for _, nvA := range []int{0, 2} {
 				a := rankOf(la, ca, nvA)
 				// NVLinks never change a key without usable P2P.
-				if na != "usable" {
+				if na != usable {
 					require.Equal(t, rankOf(la, ca, 0), a)
 				}
 				for _, lb := range levels {
 					for nb, cb := range states {
 						b := rankOf(lb, cb, 0)
 						switch {
-						case na == "usable" && nb != "usable":
+						case na == usable && nb != usable:
 							require.Negative(t, comparePairRanks(a, b), "%s %s vs %s %s", la, na, lb, nb)
-						case na != "usable" && nb != "usable" && numaClassOf[la] < numaClassOf[lb]:
+						case na != usable && nb != usable && numaClassOf[la] < numaClassOf[lb]:
 							require.Negative(t, comparePairRanks(a, b), "%s %s vs %s %s", la, na, lb, nb)
-						case na == "not usable" && nb == "unknown" && la == lb:
+						case na == notUsable && nb == unknown && la == lb:
 							require.Negative(t, comparePairRanks(a, b), "%s %s vs %s %s", la, na, lb, nb)
 						}
 					}
@@ -582,8 +583,10 @@ func forEachNonEmptySubset(ids []int, fn func([]int)) {
 }
 
 func TestTopologyPreferenceGate(t *testing.T) {
-	everyPairUnknown := topologyFixture{ids: intRange(0, 4), numa: twoSockets(intRange(0, 4)),
-		level: func(int, int) aproto.GPULinkLevel { return "" }}
+	everyPairUnknown := topologyFixture{
+		ids: intRange(0, 4), numa: twoSockets(intRange(0, 4)),
+		level: func(int, int) aproto.GPULinkLevel { return "" },
+	}
 	c := topologySelect(t, everyPairUnknown, intRange(0, 4), 2, false)
 	require.Nil(t, c.devices, "nothing to rank: map order")
 	require.Equal(t, "every pair of free GPUs unknown", c.unranked)

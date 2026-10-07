@@ -30,6 +30,8 @@ import (
 // them too.
 
 const (
+	// noKnownNUMANode describes an agent without a free healthy GPU with a known NUMA node.
+	noKnownNUMANode = "no free GPU with a known NUMA node"
 	// maxTopologySets bounds the sets of free GPUs that prefer_gpu_topology compares in one
 	// reservation; above it, the reservation takes the pool's default (C(16,8) = 12870 fits).
 	maxTopologySets = 20000
@@ -300,7 +302,7 @@ func packByNUMA(free []rankedGPU, l numaLayout, n int, unknownReason string) ([]
 		set = append(set, faulty[:n-len(set)]...)
 		if len(l.nodes) == 0 {
 			if unknownReason == "" {
-				unknownReason = "no free GPU with a known NUMA node"
+				unknownReason = noKnownNUMANode
 			}
 			rule = "lowest free IDs (" + unknownReason + ")"
 			if len(faulty) > 0 {
@@ -355,7 +357,7 @@ func (l numaLayout) describe() string {
 		parts = append(parts, fmt.Sprintf("%d:%d", node, len(l.free[node])))
 	}
 	if len(parts) == 0 {
-		return "no free GPU with a known NUMA node"
+		return noKnownNUMANode
 	}
 	return "free per NUMA node " + strings.Join(parts, " ")
 }
@@ -455,7 +457,7 @@ func pixRank(level aproto.GPULinkLevel) int {
 func (g *gpuTopology) describePair(a, b device.ID) string {
 	p, ok := g.pair(a, b)
 	if !ok {
-		return "unknown"
+		return "not reported"
 	}
 	level := string(p.level)
 	if !p.level.Known() {

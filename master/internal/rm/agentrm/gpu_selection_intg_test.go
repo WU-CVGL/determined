@@ -38,8 +38,18 @@ func priorityScheduler42(fittingPolicy string, numaPacking *bool) *config.Schedu
 	}
 }
 
+// ensureTestDB reconnects the database singleton when an earlier test, such as a dynamic pool test
+// with a database of its own, left it closed.
+func ensureTestDB(t *testing.T) {
+	t.Helper()
+	if err := db.Bun().PingContext(context.Background()); err != nil {
+		db.MustResolveTestPostgres(t)
+	}
+}
+
 func newGPUHarness(t *testing.T, f topologyFixture, scheduler *config.SchedulerConfig) *gpuHarness {
 	t.Helper()
+	ensureTestDB(t)
 	poolName := "gpus-" + uuid.NewString()[:8]
 	poolConfig := config.ResourcePoolConfig{
 		PoolName:                 poolName,
