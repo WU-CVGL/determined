@@ -318,7 +318,7 @@ func TestFairShareRequestsUnchangedByAgentPreference(t *testing.T) {
 	// Schedule()'s output for the same snapshot, the requests to allocate, is the same with the gate
 	// on and off: the fair-share scheduler only checks whether a request fits, so its demand, quotas
 	// and request list do not change. Every request is pending, so the empty release list is not a
-	// check of release behaviour. The reservations are not checked: they run one by one, and the
+	// check of release behavior. The reservations are not checked: they run one by one, and the
 	// agent choice changes the free counts that later requests see, so which requests actually
 	// start can change. With soft 4 then plain 6 on agents with 2+3 and 3+4 free, the preference
 	// puts the soft task on the 3+4 agent, and the plain 6 no longer fits.
