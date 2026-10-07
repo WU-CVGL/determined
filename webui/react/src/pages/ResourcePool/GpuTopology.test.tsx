@@ -431,6 +431,22 @@ describe('GpuTopology', () => {
     expect(dialog).not.toHaveTextContent(/XID|timeout|query|Prometheus/i);
   });
 
+  it('shows the XIDs that a failed query keeps and nothing about the failure', async () => {
+    const topo = gpuTopologyCase('recent critical XIDs');
+    topo.xidQueryStatus = V1GpuXidQueryStatus.FAILED;
+    topo.xidQueryError = 'timeout';
+    setup(<GpuTopology agent={agentOf('a', topo)} />);
+    expect(
+      within(tile('Slot 0')).getByRole('img', { name: 'GPU health: error' }),
+    ).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/timeout|Prometheus/i);
+    await userEvent.click(within(tile('Slot 0')).getByRole('button'));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('Slot 0 on a: error');
+    expect(dialog).toHaveTextContent(/Recent critical XIDs79 \(.+ to .+\)$/);
+    expect(dialog).not.toHaveTextContent(/timeout|query|Prometheus|failed/i);
+  });
+
   it('keeps the inventory when the topology is unknown', () => {
     const topo = gpuTopologyCase('NVML init failed');
     setup(<GpuTopology agent={agentOf('a', topo)} />);
