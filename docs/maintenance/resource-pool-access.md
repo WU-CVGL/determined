@@ -415,6 +415,11 @@ runs at a time in each browser tab of the WebUI: until it ends, these actions
 and the revoke of an expanded row are unavailable, also after leaving the tab
 and coming back.
 
+A failed request may still have been applied: the master answers a change with
+the pool's access, read after the write, so a failed read or a lost answer
+fails a request whose change was stored. The tab reads the list again after
+every change, and every change is idempotent, so applying it again is safe.
+
 Grant and revoke take users, user groups, and pasted usernames together, and
 show the resulting usernames without duplicates before anything is sent:
 
@@ -427,8 +432,8 @@ show the resulting usernames without duplicates before anything is sent:
   commas or spaces. A username that contains a space goes on a line of its own.
 - The usernames go to each pool in requests below the 64 KiB body limit. A
   failed request ends that pool, while the requests before it stay applied, and
-  nothing is retried; the other pools go on. Changes are idempotent, so applying
-  the same change again is safe.
+  nothing is retried; the other pools go on. The result of a pool that failed
+  counts the requests that the master confirmed.
 - Each pool's result counts the usernames sent, not the users whose access
   changed: a user who already had a grant, or had none to revoke, is counted
   but unchanged.

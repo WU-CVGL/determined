@@ -17,6 +17,8 @@ export type PoolAccessRunner = (
 ) => Promise<PoolAccessResult[] | undefined>;
 
 export const CHANGE_RUNNING_MESSAGE = 'Another change is being applied. Try again when it ends.';
+export const UNCONFIRMED_NOTE =
+  'A failed request may still have been applied. Check the list; applying the change again is safe.';
 
 const usernames = (count: number): string => `${count} ${pluralizer(count, 'username')}`;
 
@@ -37,12 +39,13 @@ const doneText = (action: PoolAccessAction, result: PoolAccessResult): string =>
   }
 };
 
+/** A failed request may have been applied too: only the confirmed requests are counted. */
 const failedText = (result: PoolAccessResult): string => {
   if (result.requests <= 1 || result.totalUsernames === 0) return `failed: ${result.error}`;
   return (
-    `failed: ${result.error}. ${result.appliedRequests} of ${result.requests} requests were ` +
-    `applied (${result.appliedUsernames} of ${usernames(result.totalUsernames)}); nothing was ` +
-    'retried'
+    `failed: ${result.error}. ${result.confirmedRequests} of ${result.requests} requests ` +
+    `confirmed (${result.confirmedUsernames} of ${usernames(result.totalUsernames)}); nothing ` +
+    'was retried'
   );
 };
 
@@ -89,6 +92,7 @@ const PoolAccessResults: React.FC<Props> = ({ action, results }: Props) => {
           </li>
         ))}
       </ul>
+      {failed > 0 && <p className={css.note}>{UNCONFIRMED_NOTE}</p>}
       {(action === 'grant' || action === 'revoke') && (
         <p className={css.note}>
           A user who already had a grant, or had none to revoke, is counted but unchanged.

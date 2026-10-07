@@ -6,13 +6,19 @@ import { HTML5Backend } from 'react-dnd-html5-backend';
 import { HelmetProvider } from 'react-helmet-async';
 import { BrowserRouter } from 'react-router-dom';
 
+import { UNCONFIRMED_NOTE } from 'components/PoolAccessResults';
 import { ThemeProvider } from 'components/ThemeProvider';
 import { resourcePoolAccessResponse } from 'fixtures/resourcePoolAccess';
 import { SettingsProvider } from 'hooks/useSettingsProvider';
-import { mapResourcePoolAccess, mapResourcePoolAccessChange } from 'services/decoder';
+import {
+  mapResourcePoolAccess,
+  mapResourcePoolAccessChange,
+  RawResourcePoolAccess,
+} from 'services/decoder';
 import poolAccessChange from 'stores/poolAccessChange';
 import { DetailedUser, ResourcePoolAccessChange } from 'types';
 import { DetError } from 'utils/error';
+import { chunkUsernames } from 'utils/resourcePoolAccess';
 
 import PoolAccess, {
   PENDING_DISMISSED_NOTE,
@@ -438,6 +444,71 @@ describe('PoolAccess', () => {
     expect(await screen.findByText('Done for 2 pools.')).toBeInTheDocument();
     expect(mocks.setResourcePoolAccessMode).toHaveBeenCalledTimes(2);
     expect(loading).toBeDisabled();
+  });
+
+  it('says that a failed request may still have been applied, and reads the list again', async () => {
+    // Long usernames, so that the grant takes two requests.
+    mocks.users = Array.from({ length: 64 }, (_, i) => ({
+      id: 100 + i,
+      isActive: true,
+      isAdmin: false,
+      username: `${String(i).padStart(2, '0')}-${'x'.repeat(1000)}`,
+    }));
+    const usernames = mocks.users.map((u) => u.username);
+    const [firstChunk] = chunkUsernames(usernames);
+    // The master stores the grants of the first request, and then its answer fails.
+    mocks.grantResourcePoolAccess.mockImplementation(() =>
+      Promise.reject(
+        new DetError(new Response('', { status: 500 }), { publicMessage: 'database unavailable' }),
+      ),
+    );
+    const written = resourcePoolAccessResponse.resource_pools.map(
+      (pool): RawResourcePoolAccess =>
+        pool.pool_name === 'gpu-h100'
+          ? {
+              ...pool,
+              users: [
+                ...(pool.users ?? []),
+                ...firstChunk.map((username, i) => ({
+                  active: true,
+                  admin: false,
+                  id: 100 + i,
+                  username,
+                })),
+              ],
+            }
+          : pool,
+    );
+    setup();
+    await selectPools('gpu-h100');
+    mocks.getResourcePoolAccess.mockImplementation(() =>
+      Promise.resolve(written.map(mapResourcePoolAccess)),
+    );
+    await user.click(screen.getByRole('button', { name: 'Grant…' }));
+    fireEvent.change(await screen.findByLabelText('Paste usernames'), {
+      target: { value: usernames.join('\n') },
+    });
+    const apply = await screen.findByRole('button', { name: 'Grant to 64 users' });
+    await waitFor(() => expect(apply).toBeEnabled());
+    await user.click(apply);
+
+    const results = await screen.findByTestId('pool-access-results');
+    expect(mocks.grantResourcePoolAccess).toHaveBeenCalledTimes(1);
+    expect(within(results).getByTestId('pool-access-result-gpu-h100')).toHaveTextContent(
+      'gpu-h100: failed: 500 database unavailable. 0 of 2 requests confirmed (0 of 64 ' +
+        'usernames); nothing was retried',
+    );
+    expect(results).not.toHaveTextContent('were applied');
+    expect(results).toHaveTextContent(UNCONFIRMED_NOTE);
+
+    // The list is read again, and shows the grants that the failed request stored.
+    await user.click(screen.getAllByRole('button', { name: 'Close' })[0]);
+    await waitFor(() =>
+      expect(screen.getByTestId('pool-access-users-gpu-h100')).toHaveTextContent(
+        String(1 + firstChunk.length),
+      ),
+    );
+    expect(mocks.getResourcePoolAccess).toHaveBeenCalledTimes(2);
   });
 
   it('shows why the list could not be loaded', async () => {

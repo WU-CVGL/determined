@@ -3,8 +3,8 @@ import { PoolAccessResult } from 'utils/resourcePoolAccess';
 import poolAccessChange from './poolAccessChange';
 
 const done = (poolName: string): PoolAccessResult => ({
-  appliedRequests: 1,
-  appliedUsernames: 0,
+  confirmedRequests: 1,
+  confirmedUsernames: 0,
   ok: true,
   poolName,
   requests: 1,

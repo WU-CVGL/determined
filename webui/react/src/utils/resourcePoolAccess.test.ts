@@ -188,8 +188,8 @@ describe('resourcePoolAccess', () => {
       ]);
       expect(results).toEqual([
         {
-          appliedRequests: 2,
-          appliedUsernames: 3,
+          confirmedRequests: 2,
+          confirmedUsernames: 3,
           ok: true,
           poolName: 'p1',
           requests: 2,
@@ -197,8 +197,8 @@ describe('resourcePoolAccess', () => {
           warnings: ['w'],
         },
         {
-          appliedRequests: 2,
-          appliedUsernames: 3,
+          confirmedRequests: 2,
+          confirmedUsernames: 3,
           ok: true,
           poolName: 'p2',
           requests: 2,
@@ -221,13 +221,13 @@ describe('resourcePoolAccess', () => {
       const results = await changeUsersInPools(['p1', 'p2'], ['a', 'b', 'c', 'd'], request, 24);
       expect(request).toHaveBeenCalledTimes(4);
       expect(results[0]).toMatchObject({
-        appliedRequests: 1,
-        appliedUsernames: 2,
+        confirmedRequests: 1,
+        confirmedUsernames: 2,
         error: '413 request body exceeds 64 KiB',
         ok: false,
         requests: 2,
       });
-      expect(results[1]).toMatchObject({ appliedRequests: 2, ok: true });
+      expect(results[1]).toMatchObject({ confirmedRequests: 2, ok: true });
     });
   });
 

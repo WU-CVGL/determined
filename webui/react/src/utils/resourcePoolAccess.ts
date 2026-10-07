@@ -201,10 +201,15 @@ export const poolAccessErrorMessage = (e: unknown): string => {
   return String(e);
 };
 
+/**
+ * What the master answered for one pool. A request is confirmed when the master answered that it
+ * succeeded. A failed request may still have been applied: the master answers a write with the
+ * pool's access, read after the write, and that read can fail, or the answer can be lost.
+ */
 export interface PoolAccessResult {
-  /** Usernames in the requests that the master accepted. */
-  appliedUsernames: number;
-  appliedRequests: number;
+  confirmedRequests: number;
+  /** Usernames in the confirmed requests. */
+  confirmedUsernames: number;
   error?: string;
   ok: boolean;
   poolName: string;
@@ -234,8 +239,8 @@ export const changeUsersInPools = async (
   const results: PoolAccessResult[] = [];
   for (const poolName of poolNames) {
     const result: PoolAccessResult = {
-      appliedRequests: 0,
-      appliedUsernames: 0,
+      confirmedRequests: 0,
+      confirmedUsernames: 0,
       ok: true,
       poolName,
       requests: chunks.length,
@@ -245,8 +250,8 @@ export const changeUsersInPools = async (
     for (const chunk of chunks) {
       try {
         const change = await request({ poolName, usernames: chunk });
-        result.appliedRequests += 1;
-        result.appliedUsernames += chunk.length;
+        result.confirmedRequests += 1;
+        result.confirmedUsernames += chunk.length;
         result.warnings = change.warnings;
       } catch (e) {
         result.ok = false;
@@ -275,8 +280,8 @@ export const setModeInPools = async (
     try {
       const change = await request({ mode, poolName });
       results.push({
-        appliedRequests: 1,
-        appliedUsernames: 0,
+        confirmedRequests: 1,
+        confirmedUsernames: 0,
         ok: true,
         poolName,
         requests: 1,
@@ -285,8 +290,8 @@ export const setModeInPools = async (
       });
     } catch (e) {
       results.push({
-        appliedRequests: 0,
-        appliedUsernames: 0,
+        confirmedRequests: 0,
+        confirmedUsernames: 0,
         error: poolAccessErrorMessage(e),
         ok: false,
         poolName,

@@ -275,8 +275,8 @@ describe('PoolAccessUsersModal', () => {
     );
     const firstChunk = a100Calls[0].usernames.length;
     expect(within(results).getByTestId('pool-access-result-gpu-h100')).toHaveTextContent(
-      `gpu-h100: failed: 500 database unavailable. 1 of ${a100Calls.length} requests were ` +
-        `applied (${firstChunk} of 2500 usernames); nothing was retried`,
+      `gpu-h100: failed: 500 database unavailable. 1 of ${a100Calls.length} requests ` +
+        `confirmed (${firstChunk} of 2500 usernames); nothing was retried`,
     );
   });
 
