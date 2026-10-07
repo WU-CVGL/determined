@@ -183,6 +183,8 @@ message GenericTask {
   string resource_pool = 16;
   // ID of the task's current or last allocation.
   optional string allocation_id = 17;
+  // Display name of the user who owns the task; empty without one.
+  string display_name = 18;
 }
 
 // Address represents an exposed port on a container.

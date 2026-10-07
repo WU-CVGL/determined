@@ -23,7 +23,6 @@ import {
   unpauseGenericTask,
   updateUserSetting,
 } from 'services/api';
-import { V1SlotsFilter } from 'services/api-ts-sdk';
 import authStore from 'stores/auth';
 import userStore from 'stores/users';
 import userSettings from 'stores/userSettings';
@@ -534,18 +533,15 @@ describe('TaskDashboard', () => {
 
     await choose('slots', 'GPU');
 
-    await waitFor(() =>
-      expect(lastListCall(getGenericTasks)?.slotsFilter).toBe(V1SlotsFilter.HASSLOTS),
-    );
-    expect(lastListCall(getExperiments)?.slotsFilter).toBe(V1SlotsFilter.HASSLOTS);
+    await waitFor(() => expect(lastListCall(getGenericTasks)?.slotsAbove).toBe(0));
+    expect(lastListCall(getExperiments)?.slotsAbove).toBe(0);
     await waitFor(() => expect(screen.queryByText('cpu-notebook')).not.toBeInTheDocument());
     expect(screen.getByText('gpu-shell')).toBeInTheDocument();
 
     await choose('slots', 'CPU-only');
 
-    await waitFor(() =>
-      expect(lastListCall(getGenericTasks)?.slotsFilter).toBe(V1SlotsFilter.ZEROSLOTS),
-    );
+    await waitFor(() => expect(lastListCall(getGenericTasks)?.slots).toEqual([0]));
+    expect(lastListCall(getGenericTasks)?.slotsAbove).toBeUndefined();
     await waitFor(() => expect(screen.queryByText('gpu-shell')).not.toBeInTheDocument());
     expect(screen.getByText('cpu-notebook')).toBeInTheDocument();
   });

@@ -1008,14 +1008,20 @@ func TestGetGenericTasksFiltersByProjectSearchAndSlots(t *testing.T) {
 	}))
 	require.Empty(t, list(&apiv1.GetGenericTasksRequest{Search: "no such task " + uuid.NewString()}))
 
-	// Slot count: HAS_SLOTS is above 0, ZERO_SLOTS is 0. A spec without a slot count counts as
-	// 0 slots, which is what its slots field reads.
+	// Slot count: one of the counts, above slots_above, or either with both. A spec without a
+	// slot count counts as 0 slots, which is what its slots field reads.
 	require.Equal(t, ids(twoSlots), list(&apiv1.GetGenericTasksRequest{
-		ProjectId: pid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_HAS_SLOTS,
+		ProjectId: pid, SlotsAbove: ptrs.Ptr(int32(0)),
 	}))
 	require.ElementsMatch(t, ids(zeroSlots, unsetSlots), list(&apiv1.GetGenericTasksRequest{
-		ProjectId: pid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_ZERO_SLOTS,
+		ProjectId: pid, Slots: []int32{0},
 	}))
+	require.Empty(t, list(&apiv1.GetGenericTasksRequest{
+		ProjectId: pid, Slots: []int32{1}, SlotsAbove: ptrs.Ptr(int32(2)),
+	}))
+	require.ElementsMatch(t, ids(twoSlots, zeroSlots, unsetSlots), list(
+		&apiv1.GetGenericTasksRequest{ProjectId: pid, Slots: []int32{0}, SlotsAbove: ptrs.Ptr(int32(1))},
+	))
 	resp, err := api.GetGenericTasks(ctx, &apiv1.GetGenericTasksRequest{TaskIds: ids(unsetSlots)})
 	require.NoError(t, err)
 	require.Len(t, resp.Tasks, 1)
@@ -1023,7 +1029,7 @@ func TestGetGenericTasksFiltersByProjectSearchAndSlots(t *testing.T) {
 
 	// Paging counts only the matching tasks.
 	resp, err = api.GetGenericTasks(ctx, &apiv1.GetGenericTasksRequest{
-		ProjectId: pid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_ZERO_SLOTS, Limit: 1,
+		ProjectId: pid, Slots: []int32{0}, Limit: 1,
 	})
 	require.NoError(t, err)
 	require.Len(t, resp.Tasks, 1)
@@ -1034,9 +1040,6 @@ func TestGetGenericTasksFiltersByProjectSearchAndSlots(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, resp.Tasks, 1)
 	require.Equal(t, int32(2), resp.Pagination.Total)
-
-	_, err = api.GetGenericTasks(ctx, &apiv1.GetGenericTasksRequest{SlotsFilter: 99})
-	require.Equal(t, codes.InvalidArgument, status.Code(err), "%v", err)
 }
 
 func TestGetGenericTasksChecksProjectView(t *testing.T) {

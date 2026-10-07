@@ -1,4 +1,3 @@
-import { V1SlotsFilter } from 'services/api-ts-sdk';
 import {
   BulkExperimentItem,
   CommandState,
@@ -173,14 +172,17 @@ export const slotsFilterLabel: Record<SlotsFilter, string> = {
   [SlotsFilter.Gpu]: 'GPU',
 };
 
-export const toApiSlotsFilter = (filter?: SlotsFilter): V1SlotsFilter | undefined => {
+/** The list APIs' slot filter: GPU is more than 0 slots, CPU-only is 0 slots. */
+export const toApiSlotsFilter = (
+  filter?: SlotsFilter,
+): { slots?: number[]; slotsAbove?: number } => {
   switch (filter) {
     case SlotsFilter.Gpu:
-      return V1SlotsFilter.HASSLOTS;
+      return { slotsAbove: 0 };
     case SlotsFilter.CpuOnly:
-      return V1SlotsFilter.ZEROSLOTS;
+      return { slots: [0] };
     default:
-      return undefined;
+      return {};
   }
 };
 
