@@ -44,12 +44,12 @@ its repository:
 
    python -m pip install 'git+https://github.com/WU-CVGL/determined.git@main#subdirectory=harness'
 
-The moving ``main`` branch produces a commit-specific development version. After the 0.40.0
-release tag is published, pin the source revision and package version together:
+The moving ``main`` branch produces a commit-specific development version. To install a release, pin
+the source revision and package version together:
 
 .. code:: bash
 
-   VERSION=0.40.0 python -m pip install 'git+https://github.com/WU-CVGL/determined.git@0.40.0#subdirectory=harness'
+   VERSION=0.41.0 python -m pip install 'git+https://github.com/WU-CVGL/determined.git@0.41.0#subdirectory=harness'
 
 .. include:: ../../_shared/note-pip-install-determined.txt
 
@@ -105,9 +105,9 @@ To upgrade this fork's CLI and SDK from the repository's current ``main`` branch
 
    python -m pip install --upgrade 'git+https://github.com/WU-CVGL/determined.git@main#subdirectory=harness'
 
-This command builds ``determined`` and the CLI from this fork's current revision. For a
-reproducible 0.40.0 installation after publication, use the pinned command above. Installing
-the Python package does not replace the master or agent images.
+This command builds ``determined`` and the CLI from this fork's current revision. For a reproducible
+0.41.0 installation, use the pinned command above. Installing the Python package does not replace
+the master or agent images.
 
 **************
  Getting Help

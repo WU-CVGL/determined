@@ -7,6 +7,166 @@
 ###############
 
 **************
+ Version 0.41
+**************
+
+Version 0.41.0
+==============
+
+**Release Date:** October 7, 2026
+
+**New Features**
+
+-  WebUI: Open a terminal in a running shell from the browser.
+
+-  WebUI: Launch shells and JupyterLab from one form, also on the Home page, starting from a recent
+   task, an earlier config, or a template, and launch a task again from its row.
+
+-  WebUI: Add a Jobs page that lists experiments, generic tasks, notebooks, shells, commands, and
+   TensorBoards together, with a Slots column, filters including GPU or CPU-only, bulk kill, and
+   Jobs tabs in workspaces and projects.
+
+-  WebUI: Open a generic task's detail page to pause, unpause, or kill it and to see its tree,
+   allocations, config, and logs.
+
+-  API: Filter experiments by workspace, generic tasks by project and name, and both by requested
+   slots.
+
+-  CLI: List generic tasks with ``det task list-generic``, and name them with the ``name`` and
+   ``description`` config keys.
+
+-  Generic tasks: Expose ``environment.proxy_ports`` through the master.
+
+-  Resource pools: Update dynamic pools and adopt ``master.yaml`` pools as dynamic pools, so that
+   every pool can be dynamic.
+
+-  Agents: Measure each NVIDIA GPU's topology, P2P status, NUMA node, PCIe link, and health with
+   NVML when the agent starts, and show them in ``det agent list``, the new ``det agent describe``,
+   and the resource pool page. The agent binary now needs glibc 2.35 or newer.
+
+-  Agents: Report a faulty GPU but never offer it as a slot with the ``exclude_gpus`` option. Remove
+   the option before rolling an agent back to an earlier version.
+
+**Improvements**
+
+-  Generic tasks: Schedule generic tasks as job queue entries whose priority and weight persist
+   across pause and master restarts.
+
+-  Generic tasks: Allow pausing only generic tasks created with ``--pausable``, because unpausing
+   runs the entrypoint again.
+
+-  Shells: Keep idle ``det shell open`` sessions connected through proxies.
+
+-  Shells: Stop logging ``Attempt to write login records by non-root user (aborting)`` for each
+   terminal session.
+
+-  WebUI: Give tasks, generic tasks, and experiments action menus in one order, also on the resource
+   pool page, with **Kill** and **Delete** in red and confirmations for **Kill**, **Delete**, and
+   **Stop**.
+
+-  WebUI: Open a task's resource charts on **Since start**, from when the task got its resources,
+   instead of the last hour.
+
+-  WebUI: Number GPUs in the resource chart legends as ``nvidia-smi`` in the container does, with
+   the UUID, host, and PCI bus ID on hover.
+
+-  Resources: Attribute task metrics only after an allocation has run for
+   ``observability.task_mapping_delay`` (default 5 minutes).
+
+-  Proxy: Log ordinary ends and abrupt disconnects of proxied shell, JupyterLab, and TensorBoard
+   connections at debug level instead of as errors.
+
+**Bug Fixes**
+
+-  Resource pools: Apply the master's ``scheduler`` and ``task_container_defaults`` to dynamic
+   pools, as to ``master.yaml`` pools.
+
+-  Agents: Keep an agent registered when it reconnects with a different device count or resource
+   pool.
+
+-  Agents: Keep drained slots free of new tasks, and schedule a pool again as soon as one of its
+   slots is enabled, disabled, or drained.
+
+-  Deploy: Use this fork's images by default in ``det deploy``.
+
+-  CLI: Fix ``det resource-pool create``, which failed with ``415 Unsupported Media Type``.
+
+-  API: Return client errors instead of HTTP 500 for invalid experiment and generic task requests
+   and for ended sessions.
+
+-  Accounts: Handle password changes sent by 0.40 clients, such as WebUI tabs opened before the
+   upgrade, instead of failing with a decoding error.
+
+-  Experiments: Refuse to continue an experiment whose owner is deactivated, and stop leaving a
+   session open when a continue fails before the experiment starts.
+
+-  Experiments: Continue an experiment in its own project and workspace, not the ones its config
+   names. A running experiment moved to a workspace that enforces a different weight now fails its
+   weight check when the master restarts.
+
+-  Generic tasks: Fix pausing, killing, and scheduling of generic task trees.
+
+-  Detached mode: Keep an unmanaged trial printing and able to exit when sending its output to the
+   master fails or stalls, and send each line's own timestamp and the worker's rank.
+
+-  WebUI: Offer to retry when a notebook's address fails to load.
+
+-  WebUI: Serve the WebUI's index with ``Cache-Control: no-cache``, so that browsers load a new
+   release's WebUI on reload.
+
+-  Resources: Remove ended allocations and experiments from ``/prom/det-state-metrics`` instead of
+   keeping them until the master restarts.
+
+**Security Fixes**
+
+-  API: Accept a task's session token only as a task token and a login token only as a login token.
+
+-  Shell, Notebook: Give a shell's SSH key and a notebook's token only to its owner and
+   administrators.
+
+-  WebUI: Keep the session in an ``HttpOnly``, ``SameSite=Lax`` cookie instead of local storage, and
+   refuse cross-site requests that rely on it. Reverse proxies must forward the ``Host`` header.
+
+-  Accounts: Require the current password to change your own password or username, and revoke a
+   user's access tokens when their password changes. Upgrade the CLI and the SDK, which ask for it.
+
+-  API: Allow only a task, its owner, and administrators to make the task's reporting calls under
+   ``/api/v1/allocations/{id}/``.
+
+-  Proxy: Remove Determined credentials from requests forwarded to task services.
+
+-  Experiments: Run a continued experiment as its owner, and let anyone else change only its name,
+   description, labels, ``max_restarts``, ``searcher.max_length``, and checkpoint retention counts
+   when continuing it.
+
+-  TensorBoard: Use an experiment's image, image pull secrets, and ``registry_auth`` only for
+   TensorBoards that the experiment's owner starts.
+
+-  API: Show a task's or experiment's ``registry_auth`` only to its owner and administrators, and
+   leave it out of the experiment config that checkpoints and model versions carry.
+
+-  API: Allow only users who may edit an experiment to delete its TensorBoard files.
+
+-  API: Require a signed-in session for ``POST /task-logs`` and apply the same permission check as
+   ``POST /api/v1/task/logs``.
+
+-  API: Let only a task's own containers, its owner, and administrators add lines to the logs of
+   notebooks, shells, commands, TensorBoards, generic tasks, and checkpoint GC tasks.
+
+-  Checkpoints: Run checkpoint garbage collection as the experiment's owner, without a user session,
+   and with the GC pool's task container defaults and the experiment's checkpoint storage instead of
+   the experiment's environment, mounts, and pod spec.
+
+-  Checkpoints: Collect ``directory`` checkpoint storage only when the GC task has the same storage
+   mounted as the trials, and otherwise keep the checkpoints with the reason in the master log. An
+   experiment's own mount over part of the ``shared_fs`` path is not detected.
+
+See :ref:`generic tasks <generic-tasks>`, :ref:`browser terminals <shell-web-terminal>`,
+:doc:`dynamic resource pools <maintenance/dynamic-pools>`, :ref:`GPU topology and health
+<agent-gpu-topology>`, and :doc:`upgrade with running tasks <maintenance/hot-upgrade>` for setup and
+usage.
+
+**************
  Version 0.40
 **************
 

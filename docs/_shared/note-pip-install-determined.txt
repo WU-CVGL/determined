@@ -4,7 +4,7 @@
 
     The repository install command above builds this fork's ``determined`` library and command-line
     interface (CLI) from ``harness``. A moving ``main`` checkout derives a commit-specific
-    development version. Set ``VERSION=0.40.0`` only when installing the published ``0.40.0`` tag
+    development version. Set ``VERSION=0.41.0`` only when installing the published ``0.41.0`` tag
     to pin that release's package version. This installs the CLI and SDK,
     not matching master or agent images. Historical local/cloud deployment examples may still
     select upstream image defaults and are not verified fork registry paths. See the
