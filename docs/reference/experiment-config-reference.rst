@@ -1312,6 +1312,10 @@ which the master logs as an error, also takes free GPUs in no particular order. 
 its topology when it starts, so restart agents after a driver change, and after a link's width
 changed.
 
+The task log gets one line for each such task, for example ``GPU topology preference: agent node02,
+slots 4,5,6,7; worst pair NODE, P2P usable``, with ``, narrow`` when a GPU of that pair is narrow,
+or the reason the set was not ranked.
+
 In a pool with :ref:`NUMA packing <master-config-numa-packing>` (``fitting_policy: best`` and
 ``numa_packing`` not ``false``), ``"soft"`` also chooses the agent of a task that fits on one agent:
 the agents where one NUMA node has the task's slots free come first, and the fitting policy picks
@@ -1322,10 +1326,6 @@ pool's emptier agent, including an idle one: with one agent that has 2 free GPUs
 and another, emptier one with 4 free GPUs on one node, a 4-slot task takes the emptier agent, where
 a task without the preference takes the fuller one. In other pools, ``"soft"`` never changes the
 agent the scheduler picks.
-
-The task log gets one line for each such task, for example ``GPU topology preference: agent node02,
-slots 4,5,6,7; worst pair NODE, P2P usable``, with ``, narrow`` when a GPU of that pair is narrow,
-or the reason the set was not ranked.
 
 With ``"strong"``, a task with 2 or more slots starts only when one NUMA node of one agent has that
 many free GPUs, and gets GPUs of that node. It waits for such a node without limit, uses one agent,
