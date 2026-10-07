@@ -551,6 +551,51 @@ describe('PoolAccess', () => {
     expect(mocks.getResourcePoolAccess).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    {
+      apply: 'Restrict 2 pools',
+      name: 'Restrict',
+      open: () => user.click(screen.getByRole('button', { name: 'Restrict' })),
+      request: () => mocks.setResourcePoolAccessMode,
+    },
+    {
+      apply: 'Make 2 pools public',
+      name: 'Make public',
+      open: () => user.click(screen.getByRole('button', { name: 'Make public' })),
+      request: () => mocks.setResourcePoolAccessMode,
+    },
+    {
+      apply: 'Grant to 1 user',
+      name: 'Grant…',
+      open: async () => {
+        await user.click(screen.getByRole('button', { name: 'Grant…' }));
+        await choose('Users', 'alice');
+      },
+      request: () => mocks.grantResourcePoolAccess,
+    },
+    {
+      apply: 'Revoke from 1 user',
+      name: 'Revoke selected',
+      open: async () => user.click(await selectCarolInDetail()),
+      request: () => mocks.revokeResourcePoolAccess,
+    },
+  ])('ends the change of $name being sent when signing out', async ({ apply, open, request }) => {
+    request().mockImplementation(() => new Promise(() => undefined));
+    setup();
+    await selectPools('cpu', 'gpu-h100');
+    await open();
+    await user.click(await screen.findByRole('button', { name: apply }));
+    await waitFor(() => expect(request()).toHaveBeenCalledTimes(1));
+    const [, options] = request().mock.calls[0];
+    expect(options.signal.aborted).toBe(false);
+
+    // Sign-out resets the change.
+    poolAccessChange.reset();
+    expect(options.signal.aborted).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(request()).toHaveBeenCalledTimes(1);
+  });
+
   it('shows why the list could not be loaded', async () => {
     mocks.getResourcePoolAccess.mockImplementation(() =>
       Promise.reject(
