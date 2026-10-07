@@ -80,9 +80,9 @@ type taskResourceResponse struct {
 // task_stats row (a restored allocation records another QUEUED row when the master restarts).
 // Every allocation writes that row before it can start, so ContainerStart is null for one that
 // never got resources. allocations.start_time is not used: on master start, CloseOpenAllocations
-// sets it to the last cluster heartbeat for every allocation that is still queued. Image pulling
-// comes after ContainerStart on purpose, since the devices are held while pulling. End is null
-// while the allocation has not been released.
+// sets it to the last cluster heartbeat for every allocation it closes, also one that never got
+// resources. Image pulling comes after ContainerStart on purpose, since the devices are held
+// while pulling. End is null while the allocation has not been released.
 type taskResourceAllocation struct {
 	AllocationID   string     `json:"allocation_id" bun:"allocation_id"`
 	ContainerStart *time.Time `json:"container_start" bun:"container_start"`

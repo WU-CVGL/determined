@@ -35,7 +35,11 @@ func restoreTestRM() (*mocks.ResourceManager, *queue.Queue[sproto.ResourcesEvent
 	var manager mocks.ResourceManager
 	q := queue.New[sproto.ResourcesEvent]()
 	manager.On("Allocate", mock.Anything).Return(sproto.NewAllocationSubscription(q, func() {}), nil)
-	manager.On("Release", mock.Anything).Return()
+	manager.On("Release", mock.Anything).Return().Run(func(args mock.Arguments) {
+		if args[0].(sproto.ResourcesReleased).ResourcesID == nil {
+			q.Put(sproto.ResourcesReleasedEvent{})
+		}
+	})
 	manager.On("SetGroupPriority", mock.Anything).Return(nil)
 	manager.On("SmallerValueIsHigherPriority").Return(true, nil)
 	return &manager, q
@@ -54,9 +58,12 @@ func (s stoppingMasterAllocations) StartAllocation(
 	)
 }
 
-// A shell that waits for resources when the master stops still waits after the master restarts,
-// with its allocation, job, submission time, and priority, and starts when it gets resources.
-func TestRestoreQueuedShell(t *testing.T) {
+// restartWithQueuedShell launches a shell that waits for resources, stops the master, and
+// restores the shell in a new master as the master start does, up to closing the open
+// allocations with the last cluster heartbeat at heartbeat.
+func restartWithQueuedShell(t *testing.T, heartbeat time.Time) (
+	*Command, *mocks.ResourceManager, *queue.Queue[sproto.ResourcesEvent],
+) {
 	// The restore picks up every command in the database that has not ended.
 	newDB, dropDB := internaldb.MustResolveNewPostgresDatabase(t)
 	t.Cleanup(func() {
@@ -87,6 +94,9 @@ func TestRestoreQueuedShell(t *testing.T) {
 		return !slices.Contains(task.DefaultService.GetAllAllocationIDs(), shell.allocationID)
 	}, 5*time.Second, 10*time.Millisecond)
 	require.NoError(t, tasklist.GroupPriorityChangeRegistry.Delete(shell.jobID))
+	_, err = pgDB.GetOrCreateClusterID("")
+	require.NoError(t, err)
+	require.NoError(t, pgDB.UpdateClusterHeartBeat(heartbeat))
 
 	restartedRM, q := restoreTestRM()
 	cs, err = NewService(pgDB, restartedRM)
@@ -99,6 +109,9 @@ func TestRestoreQueuedShell(t *testing.T) {
 		_ = task.DefaultService.Detach(shell.allocationID)
 		_ = tasklist.GroupPriorityChangeRegistry.Delete(shell.jobID)
 	})
+	require.NoError(t, internaldb.CloseOpenAllocations(
+		context.Background(), task.DefaultService.GetAllAllocationIDs(),
+	))
 
 	restartedRM.AssertCalled(t, "SetGroupPriority", sproto.SetGroupPriority{
 		Priority: 7, ResourcePool: shell.Config.Resources.ResourcePool, JobID: shell.jobID,
@@ -111,6 +124,17 @@ func TestRestoreQueuedShell(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, model.AllocationStatePending, state.State)
 	require.Equal(t, taskv1.State_STATE_QUEUED, restored.ToV1Shell().State)
+	row, err := internaldb.AllocationByID(context.Background(), shell.allocationID)
+	require.NoError(t, err)
+	require.Nil(t, row.StartTime)
+	require.Nil(t, row.EndTime)
+	return restored, restartedRM, q
+}
+
+// A shell that waits for resources when the master stops still waits after the master restarts,
+// with its allocation, job, submission time, and priority, and starts when it gets resources.
+func TestRestoreQueuedShell(t *testing.T) {
+	shell, _, q := restartWithQueuedShell(t, time.Now().UTC().Add(-time.Hour))
 
 	// It gets resources: it starts on them.
 	var started atomic.Bool
@@ -125,6 +149,7 @@ func TestRestoreQueuedShell(t *testing.T) {
 	resources.On("Start", mock.Anything, mock.Anything, mock.Anything).Return(nil).
 		Run(func(mock.Arguments) { started.Store(true) })
 	resources.On("Kill", mock.Anything).Return()
+	before := time.Now().UTC().Add(-time.Second)
 	q.Put(&sproto.ResourcesAllocated{
 		ID:                shell.allocationID,
 		ResourcePool:      shell.Config.Resources.ResourcePool,
@@ -132,7 +157,42 @@ func TestRestoreQueuedShell(t *testing.T) {
 		JobSubmissionTime: shell.registeredTime,
 	})
 	require.Eventually(t, started.Load, 5*time.Second, 10*time.Millisecond)
-	state, err = task.DefaultService.State(shell.allocationID)
+	state, err := task.DefaultService.State(shell.allocationID)
 	require.NoError(t, err)
 	require.Equal(t, model.AllocationStateAssigned, state.State)
+
+	// Its start is when its container starts.
+	q.Put(&sproto.ResourcesStateChanged{ResourcesID: rID, ResourcesState: sproto.Pulling})
+	var row *model.Allocation
+	require.Eventually(t, func() bool {
+		row, err = internaldb.AllocationByID(context.Background(), shell.allocationID)
+		require.NoError(t, err)
+		return row.StartTime != nil
+	}, 5*time.Second, 10*time.Millisecond)
+	require.True(t, row.StartTime.After(before), "start %s", row.StartTime)
+}
+
+// A shell killed while it waits for resources after a master restart records no usage.
+func TestRestoreQueuedShellKilled(t *testing.T) {
+	shell, _, _ := restartWithQueuedShell(t, time.Now().UTC().Add(-time.Hour))
+
+	require.NoError(t, task.DefaultService.Signal(shell.allocationID, task.KillAllocation, "killed"))
+	require.Eventually(t, func() bool {
+		return !slices.Contains(task.DefaultService.GetAllAllocationIDs(), shell.allocationID)
+	}, 5*time.Second, 10*time.Millisecond)
+	row, err := internaldb.AllocationByID(context.Background(), shell.allocationID)
+	require.NoError(t, err)
+	require.Nil(t, row.StartTime)
+	require.Nil(t, row.EndTime)
+
+	// The next master start closes it without a duration.
+	heartbeat := time.Now().UTC().Truncate(time.Millisecond)
+	require.NoError(t, internaldb.SingleDB().UpdateClusterHeartBeat(heartbeat))
+	require.NoError(t, internaldb.CloseOpenAllocations(context.Background(), nil))
+	row, err = internaldb.AllocationByID(context.Background(), shell.allocationID)
+	require.NoError(t, err)
+	require.NotNil(t, row.StartTime)
+	require.NotNil(t, row.EndTime)
+	require.True(t, heartbeat.Equal(*row.StartTime), "start %s", row.StartTime)
+	require.True(t, heartbeat.Equal(*row.EndTime), "end %s", row.EndTime)
 }

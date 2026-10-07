@@ -546,6 +546,14 @@ func (a *allocation) requestResources() (*sproto.ResourcesSubscription, error) {
 		}
 		// Nothing to restore: the allocation keeps its ID and requests resources as a new one.
 		a.req.Restore = false
+		if a.model.StartTime != nil {
+			// An earlier master start stamped it with the last heartbeat; it starts when it gets
+			// resources.
+			a.model.StartTime = nil
+			if err := db.UpdateAllocationStartTime(context.TODO(), a.model); err != nil {
+				return nil, errors.Wrap(err, "clearing allocation start time")
+			}
+		}
 	} else {
 		// Insert new allocation.
 		a.syslog.Debug("requestResources add allocation")

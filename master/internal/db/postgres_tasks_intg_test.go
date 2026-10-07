@@ -767,6 +767,47 @@ func TestCloseOpenAllocations(t *testing.T) {
 	require.NotNil(t, a1.EndTime)
 }
 
+// An allocation that never started gets the last cluster heartbeat as its start and end when it
+// is closed. A live one keeps no start time, since it sets it when it gets resources.
+func TestCloseOpenAllocationsNeverStarted(t *testing.T) {
+	ctx := context.Background()
+	pgDB, closeDB := MustResolveTestPostgres(t)
+	defer closeDB()
+	MustMigrateTestPostgres(t, pgDB, MigrationsFromDB)
+
+	_, err := pgDB.GetOrCreateClusterID("")
+	require.NoError(t, err)
+	heartbeat := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
+	require.NoError(t, pgDB.UpdateClusterHeartBeat(heartbeat))
+
+	pending := model.AllocationStatePending
+	add := func() model.AllocationID {
+		tIn := RequireMockTask(t, pgDB, nil)
+		a := model.Allocation{
+			AllocationID: model.AllocationID(fmt.Sprintf("%s.1", tIn.TaskID)),
+			TaskID:       tIn.TaskID,
+			State:        &pending,
+		}
+		require.NoError(t, AddAllocation(ctx, &a))
+		return a.AllocationID
+	}
+	live, closed := add(), add()
+
+	require.NoError(t, CloseOpenAllocations(ctx, []model.AllocationID{live}))
+
+	a, err := AllocationByID(ctx, live)
+	require.NoError(t, err)
+	require.Nil(t, a.StartTime)
+	require.Nil(t, a.EndTime)
+
+	a, err = AllocationByID(ctx, closed)
+	require.NoError(t, err)
+	require.NotNil(t, a.StartTime)
+	require.True(t, heartbeat.Equal(*a.StartTime), "start %s", a.StartTime)
+	require.NotNil(t, a.EndTime)
+	require.True(t, heartbeat.Equal(*a.EndTime), "end %s", a.EndTime)
+}
+
 func TestTaskLogsFlow(t *testing.T) {
 	pgDB, closeDB := MustResolveTestPostgres(t)
 	defer closeDB()

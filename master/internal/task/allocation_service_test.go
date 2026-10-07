@@ -684,6 +684,48 @@ func TestRestoreQueued(t *testing.T) {
 	resources.AssertNumberOfCalls(t, "Start", 1)
 }
 
+// A queued allocation that an earlier master start stamped with the last heartbeat as its start
+// gets its start time when it gets resources.
+func TestRestoreQueuedStartTime(t *testing.T) {
+	pgDB, closeDB := requireDeps(t)
+	defer closeDB()
+
+	queuedTask := db.RequireMockTask(t, pgDB, nil)
+	queuedAr := stubAllocateRequest(queuedTask)
+	queuedAr.Restore = true
+
+	heartbeat := time.Now().UTC().Add(-48 * time.Hour)
+	err := db.AddAllocation(context.TODO(), &model.Allocation{
+		AllocationID: queuedAr.AllocationID,
+		TaskID:       queuedAr.TaskID,
+		Slots:        queuedAr.SlotsNeeded,
+		ResourcePool: queuedAr.ResourcePool,
+		StartTime:    &heartbeat,
+		State:        ptrs.Ptr(model.AllocationStatePending),
+		Ports:        map[string]int{},
+	})
+	require.NoError(t, err)
+
+	closeDB, _, id, q, exitFuture := requireStarted(t, func(ar *sproto.AllocateRequest) {
+		*ar = queuedAr
+	})
+	defer closeDB()
+	defer requireKilled(t, id, exitFuture)
+	row, err := db.AllocationByID(context.TODO(), id)
+	require.NoError(t, err)
+	require.Nil(t, row.StartTime)
+
+	before := time.Now().UTC().Add(-time.Second)
+	rID, _ := requireAssigned(t, id, q)
+	q.Put(&sproto.ResourcesStateChanged{ResourcesID: rID, ResourcesState: sproto.Pulling})
+	require.True(t, waitForCondition(time.Second, func() bool {
+		row, err = db.AllocationByID(context.TODO(), id)
+		require.NoError(t, err)
+		return row.StartTime != nil
+	}), "start time not recorded")
+	require.True(t, row.StartTime.After(before), "start %s", row.StartTime)
+}
+
 func requireDeps(t *testing.T) (*db.PgDB, func()) {
 	tasklogger.SetDefaultLogger(tasklogger.New(&nullWriter{}))
 	portregistry.InitPortRegistry(nil)
