@@ -634,7 +634,7 @@ def patch_agent(enabled: bool) -> Callable[[argparse.Namespace], None]:
         if args.agent_id:
             agent_ids = [args.agent_id]
         else:
-            resp = bindings.get_GetAgents(sess)
+            resp = bindings.get_GetAgents(sess, excludeSlots=True)
             agent_ids = sorted(local_id(a.id) for a in resp.agents or [])
 
         drain_mode = None if enabled else args.drain
@@ -697,7 +697,7 @@ def patch_slot(enabled: bool) -> Callable[[argparse.Namespace], None]:
 
 
 def agent_id_completer(_1: str, parsed_args: argparse.Namespace, _2: Any) -> List[str]:
-    resp = bindings.get_GetAgents(cli.setup_session(parsed_args))
+    resp = bindings.get_GetAgents(cli.setup_session(parsed_args), excludeSlots=True)
     return [a.id for a in resp.agents or []]
 
 

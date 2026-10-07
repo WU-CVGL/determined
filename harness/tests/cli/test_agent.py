@@ -1,11 +1,15 @@
+import argparse
 import copy
 import json
 import pathlib
 from typing import Any, Dict, List, Optional
 
 import pytest
+import responses
+from responses import matchers
 
 from determined.cli import agent, cli
+from determined.common import api
 from determined.common.api import bindings
 from tests.cli import util
 
@@ -509,3 +513,25 @@ def test_describe_agent_without_topology(capsys: pytest.CaptureFixture) -> None:
     lines = capsys.readouterr().out.splitlines()
     assert f"GPU Topology:    {agent.GPU_TOPOLOGY_NOT_REPORTED}" in lines
     assert not any("Slot" in line for line in lines)
+
+
+def test_agent_ids_without_slots(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Commands that need only agent IDs ask for agents without slots, so the master runs no XID
+    # query for them. The mock fails on a request without excludeSlots=true.
+    without_slots = [matchers.query_param_matcher({"excludeSlots": "true"})]
+    agents = [agent_json("node02", None, slots={}), agent_json("node01", None, slots={})]
+    with util.standard_cli_rsps() as rsps:
+        rsps.get(
+            f"{MASTER}/api/v1/agents", status=200, json={"agents": agents}, match=without_slots
+        )
+        rsps.post(f"{MASTER}/api/v1/agents/node01/enable", status=200, json={})
+        rsps.post(f"{MASTER}/api/v1/agents/node02/enable", status=200, json={})
+        cli.main(["agent", "enable", "--all"])
+
+    monkeypatch.setattr(agent.cli, "setup_session", lambda _: api.UnauthSession(MASTER, None))
+    with responses.RequestsMock() as rsps:
+        rsps.get(
+            f"{MASTER}/api/v1/agents", status=200, json={"agents": agents}, match=without_slots
+        )
+        args = argparse.Namespace(master=MASTER, user=None)
+        assert agent.agent_id_completer("", args, None) == ["node02", "node01"]
