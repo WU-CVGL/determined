@@ -289,8 +289,9 @@ func (c *XIDCache) fetch(ctx context.Context) *XIDSnapshot {
 // stillRecent returns the XIDs of ok, the last successful result, that a query at now would still
 // see: those whose last window is in XIDRange(now). A failed query keeps them, so a GPU in error
 // does not turn green while Prometheus cannot be reached, and drops each one when it leaves the 24
-// hours, however old ok is. It returns new maps and slices and nil when none is left, or no query
-// has succeeded.
+// hours, however old ok is. A kept XID is as ok has it, so its FirstObserved can be before
+// XIDRange(now). It returns new maps and slices and nil when none is left, or no query has
+// succeeded.
 func stillRecent(ok *XIDSnapshot, now time.Time) map[string][]XID {
 	if ok == nil {
 		return nil

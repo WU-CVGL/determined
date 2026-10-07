@@ -397,8 +397,9 @@ Prometheus, the health comes from the agent's measurement alone. When a query fa
 keeps the XIDs of its last successful query whose last window is still in the 24 hours of the failed
 query, so a GPU in error stays in error until its XIDs leave the 24 hours; the other GPUs, and all
 of them before the first successful query after a master start, get their health from the agent's
-measurement alone. The CLI and the WebUI show no notice of a missing or failed query. The master
-logs a failure at debug level, without the Prometheus URL or response.
+measurement alone. A kept XID keeps the first window of that successful query, which can be before
+the 24 hours of the failed query. The CLI and the WebUI show no notice of a missing or failed query.
+The master logs a failure at debug level, without the Prometheus URL or response.
 
 Only requests for agents with their slots query: ``GetAgent``, and ``GetAgents`` without
 ``exclude_slots``, for example ``det agent list``, ``det agent describe`` and the resource pool

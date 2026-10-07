@@ -311,11 +311,13 @@ func TestXIDCacheFailureDropsExpiredXIDs(t *testing.T) {
 	require.Equal(t, int32(2), f.calls.Load())
 	require.Equal(t, agentv1.GpuXidQueryStatus_GPU_XID_QUERY_STATUS_FAILED, s.Status)
 	require.Equal(t, okResult.ByUUID, s.ByUUID)
-	// At 10:15, the range starts at step(3), the last window of XID 79: still kept.
+	// At 10:15, the range starts at step(3), the last window of XID 79: still kept. Its first
+	// window, step(1), is now before the range and stays as the successful query saw it.
 	clock.add(XIDMaxStale)
 	s = c.Get(ctx)
 	require.Equal(t, int32(3), f.calls.Load())
 	require.Equal(t, okResult.ByUUID, s.ByUUID)
+	require.Equal(t, step(1), s.ByUUID["GPU-a"][0].FirstObserved)
 	health, _ := gpuHealthWith("GPU-a", s)
 	require.Equal(t, failed, health)
 
