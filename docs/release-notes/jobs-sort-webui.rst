@@ -8,4 +8,4 @@
    Multi-node, and workspace, each with **All**, **None**, and **OK**.
 -  WebUI: Keep only the search box and the launch buttons in the Jobs page toolbar, with **Clear
    Filters** while a filter is on.
--  WebUI: Open the same Jobs page view from a link that has its filters or sort.
+-  WebUI: Share a Jobs page view by its link, whose address holds its filters and sort.

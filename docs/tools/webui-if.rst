@@ -196,6 +196,8 @@ first, and Slots, Started, and Ended most or newest first.
    digits, and ``_`` come before letters, ``128c`` before ``48c``, and accented letters after ``z``.
 -  A missing value sorts last in either direction: no end time, no resource pool, no owner.
 -  Runs with the same value sort newest first, then by kind, then by ID.
+-  The list refreshes every 5 seconds, so a run that starts or changes state can move rows from one
+   page to the next.
 
 **Filtering.** Select a column's funnel to tick what to list, then **OK**. **All** and **None** tick
 or untick the options shown, and Ctrl+click or Cmd+click ticks all but one. Ticking every option or
@@ -210,12 +212,15 @@ box finds a name or an ID.
 -  **Slots** is the number of slots a run asks for, per trial for an experiment (1 when its
    configuration does not say). 0 is a CPU-only run. The filter lists 0 to the most slots of any
    connected agent, then **Multi-node**: more slots than that, which takes more than one agent.
-   Multi-node keeps the number it was saved with, so new agents do not change a saved filter.
+   Multi-node keeps the number it was saved with, so agents that join or leave do not change a saved
+   filter.
 
 -  **Owner** lists you first, then everyone else.
 
-**Links.** A Jobs page link with a filter, a sort, or a page opens that view, and the view is saved
-as yours; ``/jobs`` alone opens your saved view.
+**Links.** The page's address holds its filters, sort, and page, so a copied link opens the same
+view, which is then saved as yours; ``/jobs`` alone opens your saved view. In a link, a missing
+filter is no filter, a missing ``sortKey`` sorts by Started, and a missing ``sortDesc`` sorts
+descending.
 
 JupyterLabs, shells, commands, and TensorBoards have no end time. They are listed for 24 hours after
 they end, and not after the master restarts.
