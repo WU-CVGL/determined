@@ -100,10 +100,12 @@ const Container: React.FC<ContainerProps> = ({ action, pools, runChange }) => {
 /** A promise that the test settles. */
 function deferred<T>() {
   let resolve: (value: T) => void = () => undefined;
-  const promise = new Promise<T>((res) => {
+  let reject: (reason: unknown) => void = () => undefined;
+  const promise = new Promise<T>((res, rej) => {
     resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 const user = userEvent.setup();
@@ -315,6 +317,25 @@ describe('PoolAccessUsersModal', () => {
     second.resolve(groupResponse(1, ['alice']));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(mocks.grantResourcePoolAccess).not.toHaveBeenCalled();
+  });
+
+  it('ignores a group expansion that failed after its group was removed', async () => {
+    const expansion = deferred<ReturnType<typeof groupResponse>>();
+    mocks.getGroup.mockImplementation(() => expansion.promise);
+    await setup(poolsNamed('gpu-a100'));
+
+    await choose('Users', 'alice');
+    await choose('Groups', 'team-a (2 members)');
+    await waitFor(() => expect(mocks.getGroup).toHaveBeenCalledTimes(1));
+    expect(preview()).toHaveTextContent('Expanding groups...');
+    // Choosing the group again removes it, while its expansion still waits.
+    await choose('Groups', 'team-a (2 members)');
+    await waitFor(() => expect(preview()).toHaveTextContent('1 user after removing duplicates'));
+
+    expansion.reject(new DetError(undefined, { publicMessage: 'group service down' }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText(/Unable to expand the groups/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Grant to 1 user' })).toBeEnabled();
   });
 
   it('reports the master refusing a pool', async () => {

@@ -113,7 +113,6 @@ const PoolAccessUsersModalComponent: React.FC<Props> = ({
   const [notice, setNotice] = useState<string>();
   const [isApplying, setIsApplying] = useState(false);
   const [results, setResults] = useState<PoolAccessResult[]>();
-  const membersRequest = useRef(0);
   /** Set when the modal is closed: a change that was not sent yet is then not sent. */
   const closed = useRef(false);
 
@@ -134,21 +133,25 @@ const PoolAccessUsersModalComponent: React.FC<Props> = ({
     return () => canceler.abort();
   }, []);
 
-  // The preview expands the picked groups that it has not expanded yet.
+  // The preview expands the picked groups that it has not expanded yet. A newer preview, also one
+  // that needs no request, ignores the answer of an older one.
   useEffect(() => {
     const missing = pickedGroupIds.filter((groupId) => !members.has(groupId));
     setMembersError(undefined);
     if (missing.length === 0) return;
-    const request = ++membersRequest.current;
+    let isCurrent = true;
     fetchMembersOf(missing)
       .then((fetched) => {
-        if (request !== membersRequest.current) return;
+        if (!isCurrent) return;
         setMembersError(undefined);
         setMembers((prev) => new Map([...prev, ...fetched]));
       })
       .catch((e) => {
-        if (request === membersRequest.current) setMembersError(poolAccessErrorMessage(e));
+        if (isCurrent) setMembersError(poolAccessErrorMessage(e));
       });
+    return () => {
+      isCurrent = false;
+    };
   }, [expandAttempt, members, pickedGroupIds]);
 
   const previewMembers = useMemo(
