@@ -106,9 +106,17 @@ func TestStrongExpectedChoices(t *testing.T) {
 	require.Equal(t, []int{0, 1, 2, 3}, packed(t, node07, node02IDs, node02IDs, 4))
 	require.Equal(t, []int{5, 6, 7}, packed(t, node01Widths, node01IDs, node01IDs, 3))
 	require.Equal(t, []int{4, 5}, packed(t, node05, intRange(0, 6), node02IDs, 2))
+	require.Equal(t, []int{0, 1}, packed(t, node07, []int{0, 1, 4, 5, 6, 7}, node02IDs, 2))
+	require.Equal(t, []int{5, 6, 7}, packed(t, node01, []int{0, 1, 2, 5, 6, 7}, node01IDs, 3))
+	healthy := clusterNode(node02IDs)
+	free := []int{0, 1, 4, 5, 6, 7}
+	require.Equal(t, []int{0, 1}, packed(t, healthy, free, node02IDs, 2))
+	c := selectFreeDevices(selection(free, node02IDs, healthy.build()), 2,
+		deviceSelection{packNUMA: true, xids: map[string]bool{gpuDevice(0).UUID: true}})
+	require.Equal(t, []int{4, 5}, deviceIDs(c.devices))
 
 	// The set and the task log's worst pair.
-	c := strongSelect(t, node07, node02IDs, 4, true, nil)
+	c = strongSelect(t, node07, node02IDs, 4, true, nil)
 	require.Equal(t, "worst pair NODE, P2P usable", c.worstPair)
 	require.Equal(t, "GPU topology preference strong; NUMA node 1; worst pair NODE, P2P usable", c.rule)
 	require.Empty(t, c.mapOrder)
@@ -127,6 +135,8 @@ func TestStrongTakesGPUsInErrorWithoutABetterNode(t *testing.T) {
 		// Inside a node, GPUs in error go last.
 		require.Equal(t, []int{0, 2, 3}, deviceIDs(strongSelect(t, f, node02IDs, 3, packNUMA, nil).devices))
 	}
+	// Plain packing takes every healthy GPU with a known NUMA node first.
+	require.Equal(t, []int{0, 2, 3, 4}, packed(t, f, []int{0, 1, 2, 3, 4}, node02IDs, 4))
 
 	// The agent fits, and the reservation takes the set.
 	state := topologyAgentState(t, f)

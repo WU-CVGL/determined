@@ -655,7 +655,7 @@ func (a *ResourceManager) ValidateResources(
 	}
 
 	// prefer_gpu_topology "strong" uses one agent, whatever is_single_node says.
-	if msg.IsSingleNode || msg.GPUTopology == expconf.GPUTopologyStrong {
+	if msg.IsSingleNode || (msg.GPUTopology == expconf.GPUTopologyStrong && msg.Slots >= 2) {
 		pool, err := a.poolByName(msg.ResourcePool)
 		if err != nil {
 			a.syslog.WithError(err).Error("recovering job position")
