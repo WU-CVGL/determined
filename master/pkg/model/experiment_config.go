@@ -132,20 +132,28 @@ func (d *StorageSize) UnmarshalJSON(data []byte) error {
 // fails that can just get caught later.
 func ParseJustResources(configBytes []byte) ResourcesConfig {
 	// Make this function usable on experiment or command configs.
+	// prefer_gpu_topology is read as raw JSON: an invalid value, such as true, would stop the
+	// decode before resource_pool and slots, which sort after it.
+	type DummyResources struct {
+		ResourcesConfig
+		PreferGPUTopology json.RawMessage `json:"prefer_gpu_topology"`
+	}
 	type DummyConfig struct {
-		Resources ResourcesConfig `json:"resources"`
+		Resources DummyResources `json:"resources"`
 	}
 
 	dummy := DummyConfig{
-		Resources: ResourcesConfig{
-			Slots: 1,
+		Resources: DummyResources{
+			ResourcesConfig: ResourcesConfig{
+				Slots: 1,
+			},
 		},
 	}
 
 	// Don't throw errors; validation should happen elsewhere.
 	_ = yaml.Unmarshal(configBytes, &dummy)
 
-	return dummy.Resources
+	return dummy.Resources.ResourcesConfig
 }
 
 // ValidatePrioritySetting checks that priority if set is within a valid range.

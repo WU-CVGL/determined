@@ -35,7 +35,8 @@ func (p GPUTopologyPreference) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON reads false as off, and "soft" and "strong"; it rejects true and anything else.
-// null leaves the value unchanged, as for other types.
+// null leaves the value unchanged, as for other types. Its error names only the values this
+// release accepts: Validate refuses "strong" with its own message.
 func (p *GPUTopologyPreference) UnmarshalJSON(data []byte) error {
 	switch trimmed := bytes.TrimSpace(data); string(trimmed) {
 	case "null":
@@ -51,7 +52,7 @@ func (p *GPUTopologyPreference) UnmarshalJSON(data []byte) error {
 		return nil
 	default:
 		return fmt.Errorf(
-			`prefer_gpu_topology must be false, "soft" or "strong", not %s`, string(trimmed))
+			`prefer_gpu_topology must be false or "soft", not %s`, string(trimmed))
 	}
 }
 

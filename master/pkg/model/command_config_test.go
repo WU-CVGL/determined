@@ -116,3 +116,16 @@ func TestCommandConfigPreferGPUTopology(t *testing.T) {
 	require.NoError(t, decode(&config, `{"resources": {"prefer_gpu_topology": "strong"}}`))
 	require.ErrorContains(t, check.Validate(config.Resources), `"strong" is not available yet`)
 }
+
+func TestParseJustResourcesSkipsPreferGPUTopology(t *testing.T) {
+	// The command API resolves the pool from these resources before the strict decode reports an
+	// invalid prefer_gpu_topology: an invalid value must not hide the pool and the slots.
+	for _, value := range []string{`true`, `"soft"`, `"on"`, `false`} {
+		r := ParseJustResources([]byte(
+			`{"resources":{"prefer_gpu_topology":` + value + `,"resource_pool":"gpu","slots":4}}`))
+		require.Equal(t, "gpu", r.ResourcePool, value)
+		require.Equal(t, 4, r.Slots, value)
+		require.Nil(t, r.PreferGPUTopology, value)
+	}
+	require.Equal(t, 1, ParseJustResources(nil).Slots)
+}

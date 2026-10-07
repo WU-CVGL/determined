@@ -26,7 +26,7 @@ func TestGPUTopologyPreferenceJSON(t *testing.T) {
 	for _, text := range []string{`true`, `"off"`, `"true"`, `1`, `{}`} {
 		var p GPUTopologyPreference
 		require.ErrorContains(t, json.Unmarshal([]byte(text), &p),
-			`prefer_gpu_topology must be false, "soft" or "strong"`, text)
+			`prefer_gpu_topology must be false or "soft"`, text)
 	}
 	_, err := json.Marshal(GPUTopologyPreference("bogus"))
 	require.Error(t, err)

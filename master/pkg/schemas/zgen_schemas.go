@@ -2061,7 +2061,7 @@ var (
                 "null"
             ],
             "checks": {
-                "prefer_gpu_topology must be false, \"soft\" or \"strong\"": {
+                "prefer_gpu_topology must be false or \"soft\"": {
                     "enum": [
                         null,
                         false,
