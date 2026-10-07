@@ -102,4 +102,30 @@ describe('usePolling', () => {
     await settle(INTERVAL);
     expect(pollingFn).toHaveBeenCalledTimes(4);
   });
+
+  it('polls once an interval after a stop and a restart during a later request', async () => {
+    const second = deferred();
+    const pollingFn = vi.fn(() => Promise.resolve());
+    pollingFn.mockReturnValueOnce(Promise.resolve()).mockReturnValueOnce(second.promise);
+    const { result } = renderHook(() => usePolling(pollingFn, { interval: INTERVAL }));
+    await settle();
+    await settle(INTERVAL);
+    // The timer's request is pending.
+    expect(pollingFn).toHaveBeenCalledTimes(2);
+
+    act(() => result.current.stopPolling());
+    act(() => {
+      result.current.startPolling();
+    });
+    expect(pollingFn).toHaveBeenCalledTimes(3);
+    // The restart's first request completes before the timer's.
+    await settle();
+    second.resolve();
+    await settle();
+    expect(vi.getTimerCount()).toBe(1);
+    await settle(INTERVAL);
+    expect(pollingFn).toHaveBeenCalledTimes(4);
+    await settle(INTERVAL);
+    expect(pollingFn).toHaveBeenCalledTimes(5);
+  });
 });

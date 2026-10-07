@@ -46,7 +46,7 @@ const usePolling = (pollingFn: PollingFn, options: PollingOptions = {}): Polling
   const pollingOptions = useRef<PollingOptions>({ ...DEFAULT_OPTIONS, ...options });
   const timer = useRef<NodeJS.Timeout>();
   const isPolling = useRef(false);
-  // The stops that kill the timer: a start polls on only if none ran during its first request.
+  // The stops that kill the timer: a request polls on only if none ran while it was pending.
   const stops = useRef(0);
   const isPollingBeforeHidden = useRef(false);
   const pollingFnIndicator = pollingOptions.current.rerunOnNewFn ? pollingFn : undefined;
@@ -62,8 +62,11 @@ const usePolling = (pollingFn: PollingFn, options: PollingOptions = {}): Polling
   const poll = useCallback(() => {
     clearTimer();
 
+    const stopsAtSchedule = stops.current;
     timer.current = setTimeout(async () => {
       await savedPollingFn.current();
+      // After a stop during this request, the timer may already belong to a restart.
+      if (stops.current !== stopsAtSchedule) return;
       timer.current = undefined;
       if (isPolling.current) poll();
     }, pollingOptions.current.interval) as unknown as NodeJS.Timeout;
