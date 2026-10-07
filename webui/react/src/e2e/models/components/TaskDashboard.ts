@@ -1,4 +1,5 @@
 import { BaseComponent } from 'playwright-page-model-base/BaseComponent';
+import { BaseOverlay, OverlayArgs } from 'playwright-page-model-base/BaseOverlay';
 import { BaseReactFragment } from 'playwright-page-model-base/BaseReactFragment';
 
 import { Modal } from 'e2e/models/common/ant/Modal';
@@ -44,6 +45,39 @@ class TaskKillModal extends Modal {
 }
 
 /**
+ * Represents a column's tick list filter, TableFilterDropdown in src/components/Table as the Jobs
+ * page opens it from the column's funnel.
+ */
+class ChecklistFilter extends BaseOverlay {
+  constructor(args: OverlayArgs) {
+    super({
+      ...args,
+      selector:
+        '.ant-dropdown:not(.ant-dropdown-hidden) [aria-label="table-filter-dropdown-container"]',
+    });
+  }
+
+  readonly search = new BaseComponent({
+    parent: this,
+    selector: 'input[aria-label="table-filter-dropdown-input"]',
+  });
+  readonly list = new BaseComponent({ parent: this, selector: '[role="listbox"]' });
+  readonly all = new BaseComponent({ parent: this, selector: 'button:has-text("All")' });
+  readonly none = new BaseComponent({ parent: this, selector: 'button:has-text("None")' });
+  readonly ok = new BaseComponent({ parent: this, selector: 'button:has-text("OK")' });
+  readonly option = (text: string): BaseComponent =>
+    new BaseComponent({ parent: this, selector: `[role="option"]:has-text("${text}")` });
+
+  /**
+   * Closes the filter without applying its ticks.
+   */
+  async close(): Promise<void> {
+    await this.pwLocator.press('Escape');
+    await this.pwLocator.waitFor({ state: 'hidden' });
+  }
+}
+
+/**
  * Represents the TaskDashboard in src/components/TaskDashboard/TaskDashboard.tsx: the Jobs page,
  * the tasks-only view at /tasks, and the Jobs tabs of workspaces and projects.
  */
@@ -59,8 +93,23 @@ export class TaskDashboard extends BaseReactFragment {
     parent: this,
     selector: '[data-testid="shell-button"]',
   });
-  readonly kindChip = (kind: string): BaseComponent =>
-    new BaseComponent({ parent: this, selector: `[data-testid="kind-${kind}"]` });
+  readonly search = new BaseComponent({
+    parent: this,
+    selector: 'input[placeholder="Search name or ID"]',
+  });
+  readonly clearFilters = new BaseComponent({
+    parent: this,
+    selector: 'button:has-text("Clear Filters")',
+  });
+  /** A column's filter, by its funnel's label, such as "Filter by kind". */
+  readonly filter = (label: string): ChecklistFilter =>
+    new ChecklistFilter({
+      clickThisComponentToOpen: new BaseComponent({
+        parent: this,
+        selector: `[role="button"][aria-label="${label}"]`,
+      }),
+      root: this.root,
+    });
   readonly table = new InteractiveTable({
     parent: this,
     tableArgs: {

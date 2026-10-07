@@ -46,6 +46,8 @@ const usePolling = (pollingFn: PollingFn, options: PollingOptions = {}): Polling
   const pollingOptions = useRef<PollingOptions>({ ...DEFAULT_OPTIONS, ...options });
   const timer = useRef<NodeJS.Timeout>();
   const isPolling = useRef(false);
+  // The stops that kill the timer: a request polls on only if none ran while it was pending.
+  const stops = useRef(0);
   const isPollingBeforeHidden = useRef(false);
   const pollingFnIndicator = pollingOptions.current.rerunOnNewFn ? pollingFn : undefined;
   const { ui } = useUI();
@@ -60,8 +62,11 @@ const usePolling = (pollingFn: PollingFn, options: PollingOptions = {}): Polling
   const poll = useCallback(() => {
     clearTimer();
 
+    const stopsAtSchedule = stops.current;
     timer.current = setTimeout(async () => {
       await savedPollingFn.current();
+      // After a stop during this request, the timer may already belong to a restart.
+      if (stops.current !== stopsAtSchedule) return;
       timer.current = undefined;
       if (isPolling.current) poll();
     }, pollingOptions.current.interval) as unknown as NodeJS.Timeout;
@@ -69,14 +74,19 @@ const usePolling = (pollingFn: PollingFn, options: PollingOptions = {}): Polling
 
   const startPolling = useCallback(async () => {
     isPolling.current = true;
+    const stopsAtStart = stops.current;
     if (pollingOptions.current.runImmediately) await savedPollingFn.current();
-    poll();
+    // A stop during the first request ends the polling; a graceful one still lets one poll run.
+    if (stops.current === stopsAtStart) poll();
   }, [poll]);
 
   const stopPolling = useCallback(
     (options: StopOptions = {}) => {
       isPolling.current = false;
-      if (!options.terminateGracefully) clearTimer();
+      if (!options.terminateGracefully) {
+        stops.current += 1;
+        clearTimer();
+      }
     },
     [clearTimer],
   );

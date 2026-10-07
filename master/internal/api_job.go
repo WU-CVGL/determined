@@ -3,10 +3,14 @@ package internal
 import (
 	"context"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/determined-ai/determined/master/internal/api"
 	"github.com/determined-ai/determined/master/internal/api/apiutils"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/job/jobservice"
+	"github.com/determined-ai/determined/master/internal/poolaccess"
 	"github.com/determined-ai/determined/master/internal/rm"
 
 	"github.com/determined-ai/determined/master/internal/authz"
@@ -145,6 +149,18 @@ func updateJobQueueAuthorized(
 		}
 		if err := authorize(ctx, curUser, model.JobID(update.JobId)); err != nil {
 			return apiutils.MapAndFilterErrors(err, nil, nil)
+		}
+		// Moving a job to another pool is a new admission into the target pool. Priority and
+		// weight changes manage accepted work and are not checked.
+		if move, ok := update.Action.(*jobv1.QueueControl_ResourcePool); ok {
+			if move.ResourcePool == "" {
+				// An empty target would resolve to a default pool: an unchecked re-route.
+				return status.Error(codes.InvalidArgument,
+					"moving a job to another resource pool requires the target pool name")
+			}
+			if err := poolaccess.CanUseResourcePool(ctx, curUser, move.ResourcePool); err != nil {
+				return err
+			}
 		}
 	}
 	return apply(updates)

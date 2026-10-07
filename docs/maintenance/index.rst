@@ -8,4 +8,5 @@
    distribution
    hot-upgrade
    dynamic-pools
+   resource-pool-access
    task-continuity

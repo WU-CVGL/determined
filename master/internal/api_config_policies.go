@@ -17,6 +17,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/license"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 )
 
@@ -103,6 +104,53 @@ func parseConfigPolicies(configAndConstraints string) (
 	return policies, configPolicy, constraintsPolicy, nil
 }
 
+// invariantExperimentPool returns the resource pool that the invariant config of an experiment
+// config policy pins, or "" when it pins none. invariantConfig is that invariant config as JSON.
+func invariantExperimentPool(invariantConfig *string) (string, error) {
+	if invariantConfig == nil {
+		return "", nil
+	}
+	var config expconf.ExperimentConfigV0
+	if err := json.Unmarshal([]byte(*invariantConfig), &config); err != nil {
+		return "", err
+	}
+	if config.RawResources == nil || config.RawResources.RawResourcePool == nil {
+		return "", nil
+	}
+	return *config.RawResources.RawResourcePool, nil
+}
+
+// canSetConfigPolicyPool checks that user may save the config policy of workloadType whose
+// invariant config is invariantConfig (JSON) for workspaceID, or globally when workspaceID is nil.
+// An experiment policy's pool replaces the pool of every experiment in its scope, also one that
+// names its own, so it follows the rule of a workspace default pool: see canSetDefaultPool. Only
+// experiment policies can pin a pool; NTSC policies have no invariant config.
+func canSetConfigPolicyPool(
+	ctx context.Context, user model.User, workspaceID *int, workloadType string,
+	invariantConfig *string,
+) error {
+	if workloadType != model.ExperimentType {
+		return nil
+	}
+	pool, err := invariantExperimentPool(invariantConfig)
+	if err != nil {
+		return status.Errorf(codes.InvalidArgument,
+			configpolicy.InvalidExperimentConfigPolicyErr+": %s", err)
+	}
+	if pool == "" {
+		return nil
+	}
+	current, err := configpolicy.GetTaskConfigPolicies(ctx, workspaceID, workloadType)
+	if err != nil {
+		return status.Errorf(codes.Internal, "reading the current config policy: %s", err)
+	}
+	currentPool, err := invariantExperimentPool(current.InvariantConfig)
+	if err != nil {
+		return status.Errorf(codes.Internal, "reading the current config policy: %s", err)
+	}
+	return canSetDefaultPool(ctx, user, pool, currentPool)
+}
+
 // Add or update workspace task config policies.
 func (a *apiServer) PutWorkspaceConfigPolicies(
 	ctx context.Context, req *apiv1.PutWorkspaceConfigPoliciesRequest,
@@ -139,6 +187,12 @@ func (a *apiServer) PutWorkspaceConfigPolicies(
 	configPolicies, invariantConfig, constraints, err := parseConfigPolicies(req.ConfigPolicies)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+
+	// Returned as is: a refusal is PermissionDenied, and access that could not be read Unavailable.
+	if err = canSetConfigPolicyPool(ctx, *curUser, ptrs.Ptr(int(req.WorkspaceId)),
+		req.WorkloadType, invariantConfig); err != nil {
+		return nil, err
 	}
 
 	err = configpolicy.SetTaskConfigPolicies(ctx, &model.TaskConfigPolicies{
@@ -183,6 +237,11 @@ func (a *apiServer) PutGlobalConfigPolicies(
 	configPolicies, invariantConfig, constraints, err := parseConfigPolicies(req.ConfigPolicies)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, err.Error())
+	}
+
+	err = canSetConfigPolicyPool(ctx, *curUser, nil, req.WorkloadType, invariantConfig)
+	if err != nil {
+		return nil, err
 	}
 
 	err = configpolicy.SetTaskConfigPolicies(ctx, &model.TaskConfigPolicies{

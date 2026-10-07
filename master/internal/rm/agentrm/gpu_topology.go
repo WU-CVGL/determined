@@ -142,7 +142,7 @@ func newGPUTopology(
 // gpuTopologyProto assembles the agent's GPU topology for the API: one entry per CUDA slot, with
 // device_id and uuid from the slots, so the shape is the same when the topology is unknown; then
 // the excluded GPUs, also when the topology is unknown. It is nil only for agents with neither
-// CUDA slots nor excluded GPUs. Health is left to the API layer (classifyGPUHealth).
+// CUDA slots nor excluded GPUs. Health is left to gpuhealth.Apply.
 func (a *agentState) gpuTopologyProto() *agentv1.GpuTopology {
 	var slots []device.Device
 	slotOf := map[string]device.ID{}

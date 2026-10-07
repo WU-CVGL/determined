@@ -64,6 +64,15 @@ GPUs, or press Enter on them, to outline its tiles, and again to remove the outl
    index on hover.
 -  Kubernetes pools have no **GPUs** column.
 
+On a resource pool's **Active** tab, the WebUI also sorts the jobs by **Job Name**, **User**,
+**Submitted**, or **Slots**. A sort covers all jobs of the tab, not only the page. Names and users
+sort from A to Z first, submission times and slots from newest and most first, and a third click on
+the column returns to scheduling order. Text compares by character code with A to Z read as a to z,
+so digits and underscores come before letters, letters with accents after z, and capitals before
+lowercase between texts that differ only in case. Users sort by the name the WebUI shows, and slots
+by allocated slots, then requested slots. Jobs without a value, such as jobs you cannot view, come
+last in both directions, and jobs with equal values keep their scheduling order.
+
 *************************
  Modifying the Job Queue
 *************************

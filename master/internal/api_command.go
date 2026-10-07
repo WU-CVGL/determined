@@ -25,6 +25,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/configpolicy"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
+	"github.com/determined-ai/determined/master/internal/poolaccess"
 	"github.com/determined-ai/determined/master/internal/rbac/audit"
 	"github.com/determined-ai/determined/master/internal/rm"
 	"github.com/determined-ai/determined/master/internal/templates"
@@ -144,6 +145,14 @@ func (a *apiServer) getCommandLaunchParams(ctx context.Context, req *protoComman
 	fillTaskConfig(resources.Slots, taskSpec, &config.Environment)
 	config.Resources.ResourcePool = poolName.String()
 	config.Resources.Slots = resources.Slots
+
+	// The pool is final here: a template or the request cannot change it after the line above.
+	if err := poolaccess.CanUseResourcePool(ctx, *userModel, poolName.String()); err != nil {
+		return nil, launchWarnings, err
+	}
+	if err := validateGPUTopology(a.m.rm, poolName, resources.Slots, config.Resources.GPUTopology()); err != nil {
+		return nil, launchWarnings, err
+	}
 
 	// Apply the scheduler's default priority.
 	if config.Resources.Priority == nil {

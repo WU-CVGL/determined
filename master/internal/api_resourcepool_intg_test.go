@@ -5,6 +5,7 @@ package internal
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/uptrace/bun"
@@ -12,10 +13,14 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/mocks"
+	"github.com/determined-ai/determined/master/internal/poolaccess"
 	"github.com/determined-ai/determined/master/internal/rm"
+	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/set"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 	"github.com/determined-ai/determined/proto/pkg/resourcepoolv1"
@@ -366,4 +371,65 @@ func TestDeleteBindingsSucceeds(t *testing.T) {
 	require.Zero(t, len(resp.WorkspaceIds))
 
 	require.True(t, mockRM.AssertExpectations(t))
+}
+
+func TestGetResourcePoolsFiltersByAccess(t *testing.T) {
+	var pools []*resourcepoolv1.ResourcePool
+	mockRM := MockRM()
+	mockRM.On("GetResourcePools").Return(func() *apiv1.GetResourcePoolsResponse {
+		return &apiv1.GetResourcePoolsResponse{ResourcePools: pools}
+	}, nil)
+	api, admin, adminCtx := setupAPITest(t, nil, mockRM)
+	u1 := db.RequireMockUser(t, api.m.db)
+	u2 := db.RequireMockUser(t, api.m.db)
+	public := accessTestPool(t, "a-public", admin, false)
+	granted := accessTestPool(t, "b-granted", admin, true, u1)
+	adminsOnly := accessTestPool(t, "c-admins-only", admin, true)
+	// The resource manager lists the pools out of order; the response is sorted by name.
+	for _, name := range []string{adminsOnly, public, granted} {
+		pools = append(pools, &resourcepoolv1.ResourcePool{Name: name})
+	}
+	names := func(resp *apiv1.GetResourcePoolsResponse) []string {
+		out := []string{}
+		for _, pool := range resp.ResourcePools {
+			out = append(out, pool.Name)
+		}
+		return out
+	}
+
+	u2Ctx := ntscUserCtx(t, u2)
+	ctxs := map[string]context.Context{
+		"granted user": ntscUserCtx(t, u1), "other user": u2Ctx, "admin": adminCtx,
+	}
+	for name, want := range map[string][]string{
+		"granted user": {public, granted},
+		"other user":   {public},
+		"admin":        {public, granted, adminsOnly},
+	} {
+		resp, err := api.GetResourcePools(ctxs[name], &apiv1.GetResourcePoolsRequest{})
+		require.NoError(t, err, name)
+		require.Equal(t, want, names(resp), name)
+		require.Equal(t, int32(len(want)), resp.Pagination.Total, name)
+
+		// The unbound pools are a subset of the usable pools.
+		resp, err = api.GetResourcePools(ctxs[name], &apiv1.GetResourcePoolsRequest{Unbound: true})
+		require.NoError(t, err, name)
+		require.Subset(t, want, names(resp), name)
+	}
+
+	// Pagination counts only the usable pools.
+	resp, err := api.GetResourcePools(u2Ctx, &apiv1.GetResourcePoolsRequest{Offset: 1, Limit: 1})
+	require.NoError(t, err)
+	require.Empty(t, resp.ResourcePools)
+	require.Equal(t, int32(1), resp.Pagination.Total)
+
+	// A failed read never returns the unfiltered list.
+	poolaccess.SetReaderForTest(t, func(context.Context, model.UserID, []string) (map[string]bool, error) {
+		return nil, fmt.Errorf("the database went away")
+	})
+	_, err = api.GetResourcePools(u2Ctx, &apiv1.GetResourcePoolsRequest{})
+	require.Equal(t, codes.Unavailable, status.Code(err))
+	resp, err = api.GetResourcePools(adminCtx, &apiv1.GetResourcePoolsRequest{})
+	require.NoError(t, err)
+	require.Equal(t, []string{public, granted, adminsOnly}, names(resp))
 }

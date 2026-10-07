@@ -33,16 +33,19 @@ type dynamicPoolRouteTest struct {
 func newDynamicPoolRouteTest(
 	t *testing.T, pgDB *db.PgDB, rmConfig *config.ResourceManagerWithPoolsConfig,
 ) dynamicPoolRouteTest {
-	originalUser := dynamicPoolRequestUser
-	originalAuthorize := authorizeDynamicPoolRequest
+	originalUser := masterConfigRouteUser
+	originalAuthorize := authorizeMasterConfigRoute
 	t.Cleanup(func() {
-		dynamicPoolRequestUser = originalUser
-		authorizeDynamicPoolRequest = originalAuthorize
+		masterConfigRouteUser = originalUser
+		authorizeMasterConfigRoute = originalAuthorize
+		// The test's own database replaced the shared one in Bun and is dropped when the test
+		// ends, so the next setupAPITest must connect to the shared database again.
+		thePgDB = nil
 	})
-	dynamicPoolRequestUser = func(*http.Request) (*model.User, *model.UserSession, error) {
+	masterConfigRouteUser = func(*http.Request) (*model.User, *model.UserSession, error) {
 		return &model.User{Active: true, Admin: true}, &model.UserSession{}, nil
 	}
-	authorizeDynamicPoolRequest = func(*http.Request, *model.User, bool) (error, error) {
+	authorizeMasterConfigRoute = func(*http.Request, *model.User, bool) (error, error) {
 		return nil, nil
 	}
 

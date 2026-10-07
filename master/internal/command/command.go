@@ -158,6 +158,7 @@ func (c *Command) Start(ctx context.Context) error {
 		}
 	}
 
+	fitting := sproto.FittingRequirements{SingleAgent: true, GPUTopology: c.Config.Resources.GPUTopology()}
 	err := task.DefaultService.StartAllocation(c.logCtx,
 		sproto.AllocateRequest{
 			AllocationID:        c.allocationID,
@@ -168,7 +169,7 @@ func (c *Command) Start(ctx context.Context) error {
 			Name:                c.Config.Description,
 			SlotsNeeded:         c.Config.Resources.Slots,
 			ResourcePool:        c.Config.Resources.ResourcePool,
-			FittingRequirements: sproto.FittingRequirements{SingleAgent: true},
+			FittingRequirements: fitting,
 			ProxyPorts:          sproto.NewProxyPortConfig(c.GenericCommandSpec.ProxyPorts(), c.taskID),
 			IdleTimeout:         idleWatcherConfig,
 			Restore:             c.restored,

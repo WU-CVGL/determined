@@ -135,6 +135,7 @@ describe('Decoder', () => {
     const sdkTask: V1GenericTask = {
       allocationId: 'alloc-1',
       description: 'evaluates the checkpoints of run 12',
+      displayName: 'Alice Chen',
       forkedFrom: '',
       jobId: 'job-1',
       name: 'eval-sweep',
@@ -175,6 +176,7 @@ describe('Decoder', () => {
       expect(decoder.mapV1GenericTask(sdkTask)).toStrictEqual({
         allocationId: 'alloc-1',
         description: 'evaluates the checkpoints of run 12',
+        displayName: 'Alice Chen',
         endTime: undefined,
         forkedFrom: undefined,
         jobId: 'job-1',

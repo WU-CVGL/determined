@@ -1,3 +1,4 @@
+import dayjs from 'dayjs';
 import { getStateColorCssVar } from 'hew/Theme';
 
 import { GPU_TOPOLOGY_CASES, GpuTopologyCase, gpuTopologyCase } from 'fixtures/gpuTopologyCases';
@@ -16,12 +17,14 @@ import {
   numaGroups,
   nvmlErrorsText,
   pairLevels,
+  recentXidTexts,
   shortPciBusId,
   slotFillColor,
   slotFillOnColor,
   slotFillState,
   slotOffLabel,
   switchGroups,
+  xidWindowText,
 } from './gpuTopology';
 
 const resource = (container?: Resource['container']): Resource => ({
@@ -249,6 +252,31 @@ describe('gpuTopology', () => {
       expect(nvmlErrorsText(topo, topo.gpus[1])).toBe('none');
       const unknown = gpuTopologyCase('NVML init failed');
       expect(nvmlErrorsText(unknown, unknown.gpus[0])).toBe('not collected');
+    });
+
+    it('lists recent critical XIDs with their first and last observed windows', () => {
+      const topo = gpuTopologyCase('recent critical XIDs');
+      // A 5-minute window by its end, in local time.
+      const end = dayjs('2026-10-07T10:10:00Z');
+      expect(xidWindowText('2026-10-07T10:10:00Z')).toBe(
+        `${end.subtract(5, 'minute').format('YYYY-MM-DD, HH:mm')}–${end.format('HH:mm')}`,
+      );
+      expect(xidWindowText('2026-10-07T10:10:00Z')).toMatch(
+        /^\d{4}-\d{2}-\d{2}, \d{2}:\d{2}–\d{2}:\d{2}$/,
+      );
+      const w = xidWindowText;
+      expect(recentXidTexts(topo.gpus[0])).toEqual([
+        `79 (${w('2026-10-07T10:10:00Z')} to ${w('2026-10-07T10:25:00Z')})`,
+      ]);
+      // By code, as the master sends them; one window when first and last are the same.
+      expect(recentXidTexts(topo.gpus[1])).toEqual([
+        `48 (${w('2026-10-07T11:00:00Z')})`,
+        `79 (${w('2026-10-07T11:00:00Z')} to ${w('2026-10-07T11:05:00Z')})`,
+      ]);
+      expect(recentXidTexts(topo.gpus[2])).toEqual([]);
+      expect(recentXidTexts(topo.gpus[3])).toEqual([`94 (${w('2026-10-07T12:30:00Z')})`]);
+      // A master of an earlier version sends none.
+      expect(recentXidTexts(gpuTopologyCase('node02').gpus[0])).toEqual([]);
     });
 
     it('shortens bus ids in domain 0000 only', () => {

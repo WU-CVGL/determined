@@ -29,6 +29,11 @@ type fittingState struct {
 	// as an deterministic pseudorandom function for load balance.
 	HashDistance uint64
 	Slots        int
+	// OneNUMANode is set when one NUMA node of the agent has the request's slots free, counted as
+	// prefer_gpu_topology "strong" counts them (holdsOnOneNUMANode). It is set only for a request
+	// that preferOneNUMANode admits, and false for every other request, so their order does not
+	// change.
+	OneNUMANode bool
 }
 
 type candidateList []*fittingState
@@ -44,13 +49,16 @@ func (c candidateList) Len() int {
 }
 
 func (c candidateList) Less(i, j int) bool {
-	// Multiple zero-slot tasks will all end up on the same agent if we only consider the fitting
-	// score. To combat this, break ties by selecting the agent whose hashed ID is closest to the
-	// hashed ID of the task.
+	// An agent where one NUMA node holds the request comes first (OneNUMANode), then the higher
+	// fitting score. Multiple zero-slot tasks will all end up on the same agent if we only consider
+	// the fitting score. To combat this, break ties by selecting the agent whose hashed ID is
+	// closest to the hashed ID of the task.
 
 	a := c[i]
 	b := c[j]
 	switch {
+	case a.OneNUMANode != b.OneNUMANode:
+		return a.OneNUMANode
 	case a.Score > b.Score:
 		return true
 	case a.Score < b.Score:
@@ -69,17 +77,21 @@ func (c candidateList) Swap(i, j int) {
 	c[j], c[i] = c[i], c[j]
 }
 
+// findFits returns the agents a request takes, with their slots. packNUMA is the pool's
+// gpuPolicy.packNUMA (fitting_policy best, numa_packing not false), one value for a whole scheduling
+// pass; it orders the agents of a request with prefer_gpu_topology "soft" (preferOneNUMANode).
 func findFits(
 	req *sproto.AllocateRequest, agents map[aproto.ID]*agentState, fittingMethod SoftConstraint,
-	allowHeterogeneousFits bool,
+	allowHeterogeneousFits bool, packNUMA bool,
 ) []*fittingState {
 	// TODO(DET-4035): Some of this code is duplicated in calculateDesiredNewAgentNum()
 	//    to prevent the provisioner from scaling up for jobs that can never be scheduled in
 	//    the current cluster configuration.
-	if fit := findSharedAgentFit(req, agents, fittingMethod); fit != nil {
+	if fit := findSharedAgentFit(req, agents, fittingMethod, packNUMA); fit != nil {
 		return []*fittingState{fit}
 	}
-	if req.FittingRequirements.SingleAgent || req.SlotsNeeded <= 1 {
+	// prefer_gpu_topology "strong" uses one agent.
+	if req.FittingRequirements.SingleAgent || req.SlotsNeeded <= 1 || strongTopology(req) {
 		return nil
 	}
 	if fits := findDedicatedAgentFits(
@@ -219,12 +231,19 @@ func findDedicatedAgentFits(
 	return nil
 }
 
+// findSharedAgentFit returns the agent that takes the whole request, or nil. Every agent that can
+// take it counts, whatever its NUMA nodes, except for prefer_gpu_topology "strong"
+// (gpuTopologySatisfied); under preferOneNUMANode, the agents where one NUMA node holds the request
+// come first.
 func findSharedAgentFit(
 	req *sproto.AllocateRequest, agents map[aproto.ID]*agentState, fittingMethod SoftConstraint,
+	packNUMA bool,
 ) *fittingState {
+	oneNode := preferOneNUMANode(req, packNUMA)
 	var candidates candidateList
 	for _, agent := range agents {
-		if !isViable(req, agent, slotsSatisfied, maxZeroSlotContainersSatisfied, agentPermittedSatisfied) {
+		if !isViable(req, agent, slotsSatisfied, maxZeroSlotContainersSatisfied, agentPermittedSatisfied,
+			gpuTopologySatisfied) {
 			continue
 		}
 
@@ -232,6 +251,7 @@ func findSharedAgentFit(
 			Agent:        agent,
 			Score:        fittingMethod(req, agent),
 			HashDistance: hashDistance(req, agent),
+			OneNUMANode:  oneNode && holdsOnOneNUMANode(agent.gpuSelectionInput(), req.SlotsNeeded),
 		})
 	}
 

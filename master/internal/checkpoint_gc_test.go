@@ -172,6 +172,11 @@ func TestRunCheckpointGCTask(t *testing.T) {
 			tmp := task.DefaultService
 			task.DefaultService = tt.args.as(t)
 			defer func() { task.DefaultService = tmp }()
+			// Checkpoint GC does not check resource pool access (see runCheckpointGCTask): it
+			// starts even when its pool is restricted for every non-admin user, the experiment's
+			// owner included, and reads no access table.
+			accessReads := restrictEveryPoolForTest(t)
+			defer func() { require.Zero(t, accessReads()) }()
 
 			jobID := db.RequireMockJob(t, pgDB, &user.ID)
 			exp := &model.Experiment{

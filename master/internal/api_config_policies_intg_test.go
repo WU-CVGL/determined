@@ -19,6 +19,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/configpolicy"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/mocks"
+	"github.com/determined-ai/determined/master/internal/poolaccess"
 	"github.com/determined-ai/determined/master/internal/user"
 	"github.com/determined-ai/determined/master/internal/workspace"
 	"github.com/determined-ai/determined/master/pkg/model"
@@ -2570,4 +2571,91 @@ invariant_config:
 	})
 	require.ErrorContains(t, err, "no workload type specified")
 	require.Nil(t, resp)
+}
+
+// An experiment config policy's pool replaces the pool of every experiment in its scope, also one
+// that names its own, so it follows the rule of a workspace default pool: a new pool must be one
+// that the user who saves the policy may use. Removing the pool and re-sending the current one
+// are not checked.
+func TestConfigPolicyPoolAccess(t *testing.T) {
+	mockRM := MockRM()
+	mockRM.On("SmallerValueIsHigherPriority", mock.Anything).Return(true, nil)
+	api, admin, adminCtx := setupAPITest(t, nil, mockRM)
+	owner := db.RequireMockUser(t, api.m.db)
+	other := db.RequireMockUser(t, api.m.db)
+	restricted := accessTestPool(t, "restricted", admin, true, owner)
+	public := accessTestPool(t, "public", admin, false)
+	ownerCtx := ntscUserCtx(t, owner)
+	otherCtx := ntscUserCtx(t, other)
+	ownerWID, _ := createProjectAndWorkspace(ownerCtx, t, api)
+	otherWID, _ := createProjectAndWorkspace(otherCtx, t, api)
+	t.Cleanup(func() {
+		for _, scope := range []*int{&ownerWID, &otherWID, nil} {
+			require.NoError(t, configpolicy.DeleteConfigPolicies(
+				context.Background(), scope, model.ExperimentType))
+		}
+	})
+
+	policy := func(pool, image string) string {
+		p := fmt.Sprintf("invariant_config:\n  environment:\n    image: %s\n", image)
+		if pool != "" {
+			p += fmt.Sprintf("  resources:\n    resource_pool: %s\n", pool)
+		}
+		return p
+	}
+	put := func(ctx context.Context, workspaceID int, pool, image string) error {
+		_, err := api.PutWorkspaceConfigPolicies(ctx, &apiv1.PutWorkspaceConfigPoliciesRequest{
+			WorkspaceId:    int32(workspaceID),
+			WorkloadType:   model.ExperimentType,
+			ConfigPolicies: policy(pool, image),
+		})
+		return err
+	}
+	requirePolicyPool := func(workspaceID *int, want string) {
+		t.Helper()
+		saved, err := configpolicy.GetTaskConfigPolicies(adminCtx, workspaceID, model.ExperimentType)
+		require.NoError(t, err)
+		got, err := invariantExperimentPool(saved.InvariantConfig)
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+	}
+
+	// A workspace owner without a grant may pin a public pool but not the restricted one.
+	requirePoolDenied(t, put(otherCtx, otherWID, restricted, "other/own:1"), other, restricted)
+	requirePolicyPool(&otherWID, "")
+	require.NoError(t, put(otherCtx, otherWID, public, "other/own:1"))
+	requirePolicyPool(&otherWID, public)
+
+	// An owner with a grant, and an admin in another user's workspace, may pin it.
+	require.NoError(t, put(ownerCtx, ownerWID, restricted, "owner/own:1"))
+	requirePolicyPool(&ownerWID, restricted)
+	require.NoError(t, put(adminCtx, otherWID, restricted, "other/own:1"))
+	requirePolicyPool(&otherWID, restricted)
+
+	// Without a grant, the owner can still re-send the current pool, also with other fields
+	// changed, and move away from it, but cannot pin it again.
+	_, err := poolaccess.Revoke(adminCtx, restricted, []model.UserID{owner.ID})
+	require.NoError(t, err)
+	require.NoError(t, put(ownerCtx, ownerWID, restricted, "owner/own:2"))
+	requirePolicyPool(&ownerWID, restricted)
+	require.NoError(t, put(ownerCtx, ownerWID, public, "owner/own:2"))
+	requirePolicyPool(&ownerWID, public)
+	requirePoolDenied(t, put(ownerCtx, ownerWID, restricted, "owner/own:2"), owner, restricted)
+	requirePolicyPool(&ownerWID, public)
+	require.NoError(t, put(ownerCtx, ownerWID, "", "owner/own:2"))
+	requirePolicyPool(&ownerWID, "")
+
+	// A failed read refuses a new pool, never treating it as public; admins read no access record.
+	poolaccess.SetReaderForTest(t, func(context.Context, model.UserID, []string) (map[string]bool, error) {
+		return nil, fmt.Errorf("the database went away")
+	})
+	err = put(ownerCtx, ownerWID, public, "owner/own:2")
+	require.Equal(t, codes.Unavailable, status.Code(err), "%v", err)
+	requirePolicyPool(&ownerWID, "")
+	_, err = api.PutGlobalConfigPolicies(adminCtx, &apiv1.PutGlobalConfigPoliciesRequest{
+		WorkloadType:   model.ExperimentType,
+		ConfigPolicies: policy(restricted, "admin/own:1"),
+	})
+	require.NoError(t, err)
+	requirePolicyPool(nil, restricted)
 }

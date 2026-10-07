@@ -212,12 +212,18 @@ func ToAPIResults(results []ExperimentActionResult) []*apiv1.ExperimentActionRes
 
 // ActivateExperiments works on one or many experiments.
 // If filters are provided, experimentIds are ignored.
+// admit decides whether the request may activate each experiment, such as into its resource pool;
+// an experiment it refuses is not activated and its result carries the error. It is required.
 func ActivateExperiments(
 	ctx context.Context,
 	projectID int32,
 	experimentIds []int32,
 	filters *apiv1.BulkExperimentFilters,
+	admit func(context.Context, Experiment) error,
 ) ([]ExperimentActionResult, error) {
+	if admit == nil {
+		return nil, status.Error(codes.Internal, "activating experiments without an admission check")
+	}
 	if filters != nil && filters.States == nil {
 		filters.States = []experimentv1.State{experimentv1.State_STATE_PAUSED}
 	}
@@ -240,8 +246,12 @@ func ActivateExperiments(
 
 	refs, results := nonTerminalExperiments(expIDs, results)
 	for id, ref := range refs {
+		err := admit(ctx, ref)
+		if err == nil {
+			err = ref.ActivateExperiment()
+		}
 		results = append(results, ExperimentActionResult{
-			Error: ref.ActivateExperiment(),
+			Error: err,
 			ID:    id,
 		})
 	}

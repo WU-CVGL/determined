@@ -12,22 +12,32 @@ import {
   commandRow,
   CommandRunRow,
   commandStateGroup,
+  experimentApiSort,
   experimentRow,
   experimentSearch,
   experimentSlots,
+  experimentStateGroup,
   experimentStates,
   filterCommandRows,
+  genericTaskApiSort,
   genericTaskRow,
+  genericTaskStateGroup,
   genericTaskStates,
   kindsOf,
   matchesSlots,
   mergeRuns,
+  MULTI_NODE,
   pageOfRuns,
   RunKind,
   RunRow,
-  SlotsFilter,
+  savedSlots,
+  slotsOptions,
+  slotsQuery,
   sortCommandRows,
+  SortKey,
   StateGroup,
+  tickedSlots,
+  toApiSlots,
 } from './runRows';
 
 const command = (
@@ -160,25 +170,81 @@ describe('runRows', () => {
     });
   });
 
-  describe('GPU and CPU-only', () => {
-    it('counts one slot or more as GPU and no slots as CPU-only', () => {
-      expect(matchesSlots(2, SlotsFilter.Gpu)).toBe(true);
-      expect(matchesSlots(0, SlotsFilter.Gpu)).toBe(false);
-      expect(matchesSlots(0, SlotsFilter.CpuOnly)).toBe(true);
-      expect(matchesSlots(1, SlotsFilter.CpuOnly)).toBe(false);
+  describe('state groups for the sort', () => {
+    it('groups experiments as the master sorts them: queued and running are active', () => {
+      [RunState.Running, RunState.Queued, RunState.Pulling, RunState.StoppingKilled].forEach(
+        (state) => expect(experimentStateGroup(state)).toBe(StateGroup.Active),
+      );
+      expect(experimentStateGroup(RunState.Paused)).toBe(StateGroup.Paused);
+      [RunState.Completed, RunState.Canceled, RunState.Error, RunState.DeleteFailed].forEach(
+        (state) => expect(experimentStateGroup(state)).toBe(StateGroup.Ended),
+      );
+    });
+
+    it('leaves a generic task without a state out of every group', () => {
+      expect(genericTaskStateGroup(GenericTaskState.Unspecified)).toBeUndefined();
+      expect(genericTaskStateGroup(GenericTaskState.StoppingPaused)).toBe(StateGroup.Active);
+      expect(genericTaskStateGroup(GenericTaskState.Paused)).toBe(StateGroup.Paused);
+      expect(genericTaskStateGroup(GenericTaskState.Error)).toBe(StateGroup.Ended);
+    });
+  });
+
+  describe('slots', () => {
+    it('reads saved counts and Multi-node with its N, and drops anything else', () => {
+      expect(slotsQuery(undefined)).toBeUndefined();
+      expect(slotsQuery([])).toBeUndefined();
+      expect(slotsQuery(['gpu', 'multi:x'])).toBeUndefined();
+      expect(slotsQuery(['2', '0', '2'])).toEqual({ above: undefined, counts: [0, 2] });
+      expect(slotsQuery(['1', 'multi:8'])).toEqual({ above: 8, counts: [1] });
+    });
+
+    it('sends counts and slots_above, either one alone', () => {
+      expect(toApiSlots(undefined)).toEqual({});
+      expect(toApiSlots(slotsQuery(['0']))).toEqual({ slots: [0] });
+      expect(toApiSlots(slotsQuery(['multi:0']))).toEqual({ slotsAbove: 0 });
+      expect(toApiSlots(slotsQuery(['0', '1', 'multi:8']))).toEqual({
+        slots: [0, 1],
+        slotsAbove: 8,
+      });
+    });
+
+    it('matches a count or more than Multi-node, never unknown slots', () => {
+      const query = slotsQuery(['0', 'multi:8']);
+      expect(matchesSlots(0, query)).toBe(true);
+      expect(matchesSlots(4, query)).toBe(false);
+      expect(matchesSlots(8, query)).toBe(false);
+      expect(matchesSlots(16, query)).toBe(true);
+      expect(matchesSlots(undefined, query)).toBe(false);
       expect(matchesSlots(undefined, undefined)).toBe(true);
     });
 
-    it('leaves a task with unknown slots out of both', () => {
-      expect(matchesSlots(undefined, SlotsFilter.Gpu)).toBe(false);
-      expect(matchesSlots(undefined, SlotsFilter.CpuOnly)).toBe(false);
+    it('lists 0 to N, saved counts above N, then Multi-node', () => {
+      expect(slotsOptions(2)).toEqual(['0', '1', '2', MULTI_NODE]);
+      expect(slotsOptions(2, ['16', '1', 'multi:8'])).toEqual(['0', '1', '2', '16', MULTI_NODE]);
+      expect(slotsOptions(0)).toEqual(['0', MULTI_NODE]);
+    });
+
+    it('ticks the counts between the saved N and N, so that a new agent changes nothing', () => {
+      expect(tickedSlots(8, undefined)).toEqual([]);
+      expect(tickedSlots(8, ['0', 'multi:8'])).toEqual(['0', MULTI_NODE]);
+      expect(tickedSlots(10, ['0', 'multi:8'])).toEqual(['0', '9', '10', MULTI_NODE]);
+      // GPU in 0.41.0: more than 0 slots.
+      expect(tickedSlots(2, ['multi:0'])).toEqual(['1', '2', MULTI_NODE]);
+    });
+
+    it('saves Multi-node with N', () => {
+      expect(savedSlots(8, ['0', MULTI_NODE])).toEqual(['0', 'multi:8']);
     });
   });
 
   describe('filterCommandRows', () => {
     const rows = [
       commandRow(
-        command('gpu-shell', '2026-01-03T00:00:00Z', { slots: 1, type: CommandType.Shell }),
+        command('gpu-shell', '2026-01-03T00:00:00Z', {
+          slots: 1,
+          type: CommandType.Shell,
+          workspaceId: 3,
+        }),
       ),
       commandRow(command('cpu-cmd', '2026-01-02T00:00:00Z', { name: 'Preprocess' })),
       commandRow(
@@ -186,13 +252,14 @@ describe('runRows', () => {
           slots: 4,
           state: CommandState.Terminated,
           type: CommandType.JupyterLab,
+          userId: 2,
         }),
       ),
     ];
     const all = [CommandType.Shell, CommandType.Command, CommandType.JupyterLab];
     const ids = (filtered: CommandRunRow[]) => filtered.map((row) => row.id);
 
-    it('filters by kind, state, search and slots', () => {
+    it('filters by kind, state, search, slots, owner and workspace', () => {
       expect(ids(filterCommandRows(rows, { kinds: [CommandType.Shell] }))).toEqual(['gpu-shell']);
       expect(ids(filterCommandRows(rows, { kinds: all, states: [StateGroup.Ended] }))).toEqual([
         'old-nb',
@@ -200,12 +267,17 @@ describe('runRows', () => {
       expect(ids(filterCommandRows(rows, { kinds: all, states: [StateGroup.Paused] }))).toEqual([]);
       expect(ids(filterCommandRows(rows, { kinds: all, search: 'PREPRO' }))).toEqual(['cpu-cmd']);
       expect(ids(filterCommandRows(rows, { kinds: all, search: 'old-' }))).toEqual(['old-nb']);
-      expect(ids(filterCommandRows(rows, { kinds: all, slots: SlotsFilter.Gpu }))).toEqual([
+      expect(ids(filterCommandRows(rows, { kinds: all, slots: slotsQuery(['multi:0']) }))).toEqual([
         'gpu-shell',
         'old-nb',
       ]);
-      expect(ids(filterCommandRows(rows, { kinds: all, slots: SlotsFilter.CpuOnly }))).toEqual([
+      expect(ids(filterCommandRows(rows, { kinds: all, slots: slotsQuery(['0', '4']) }))).toEqual([
         'cpu-cmd',
+        'old-nb',
+      ]);
+      expect(ids(filterCommandRows(rows, { kinds: all, userIds: [2] }))).toEqual(['old-nb']);
+      expect(ids(filterCommandRows(rows, { kinds: all, workspaceIds: [3, 4] }))).toEqual([
+        'gpu-shell',
       ]);
     });
   });
@@ -253,6 +325,76 @@ describe('runRows', () => {
       expect(keys(merged)).toEqual(['generic-task:g', 'command:c']);
     });
 
+    it('sorts by a key, with missing values last both ways and ties newest first', () => {
+      const rows = [
+        commandRow(command('c1', '2026-01-01T00:00:00Z', { resourcePool: '' })),
+        commandRow(command('c2', '2026-01-03T00:00:00Z', { resourcePool: 'b' })),
+        commandRow(command('c3', '2026-01-02T00:00:00Z', { resourcePool: 'B' })),
+        commandRow(command('c4', '2026-01-04T00:00:00Z', { resourcePool: 'b' })),
+      ];
+      const pool = (desc: boolean) =>
+        sortCommandRows(rows, { desc, key: SortKey.ResourcePool }).map((row) => row.id);
+      expect(pool(false)).toEqual(['c3', 'c4', 'c2', 'c1']);
+      expect(pool(true)).toEqual(['c4', 'c2', 'c3', 'c1']);
+    });
+
+    it('merges a RUNNING experiment among paused and ended runs by state group', () => {
+      const running = experimentRow({ ...experiment(5, '2026-01-01T00:00:00Z') });
+      const paused = genericTaskRow({
+        ...generic('g-paused', '2026-01-03T00:00:00Z'),
+        state: GenericTaskState.Paused,
+      });
+      const stateless = genericTaskRow({
+        ...generic('g-none', '2026-01-05T00:00:00Z'),
+        state: GenericTaskState.Unspecified,
+      });
+      const ended = commandRow(
+        command('c-ended', '2026-01-04T00:00:00Z', { state: CommandState.Terminated }),
+      );
+      const active = commandRow(command('c-active', '2026-01-02T00:00:00Z'));
+      const sort = { desc: false, key: SortKey.State };
+      expect(keys(mergeRuns([[active, ended], [paused, stateless], [running]], sort))).toEqual([
+        'command:c-active',
+        'experiment:5',
+        'generic-task:g-paused',
+        'command:c-ended',
+        'generic-task:g-none',
+      ]);
+    });
+
+    it('sorts by kind, Experiment first, newest first within a kind', () => {
+      const merged = mergeRuns(
+        [
+          [commandRow(command('c', '2026-01-03T00:00:00Z'))],
+          [genericTaskRow(generic('g', '2026-01-04T00:00:00Z'))],
+          [
+            experimentRow(experiment(2, '2026-01-02T00:00:00Z')),
+            experimentRow(experiment(1, '2026-01-01T00:00:00Z')),
+          ],
+        ],
+        { desc: false, key: SortKey.Kind },
+      );
+      expect(keys(merged)).toEqual(['experiment:2', 'experiment:1', 'generic-task:g', 'command:c']);
+    });
+
+    it('asks the master for the same sort, newest first by kind', () => {
+      expect(experimentApiSort({ desc: false, key: SortKey.Name })).toEqual({
+        orderBy: 'ORDER_BY_ASC',
+        sortBy: 'SORT_BY_NAME',
+      });
+      expect(genericTaskApiSort({ desc: true, key: SortKey.Slots })).toEqual({
+        orderBy: 'ORDER_BY_DESC',
+        sortBy: 'SORT_BY_SLOTS',
+      });
+      expect(experimentApiSort({ desc: false, key: SortKey.Kind })).toEqual({
+        orderBy: 'ORDER_BY_DESC',
+        sortBy: 'SORT_BY_START_TIME',
+      });
+      expect(genericTaskApiSort({ desc: true, key: SortKey.State }).sortBy).toBe(
+        'SORT_BY_STATE_GROUP',
+      );
+    });
+
     it('cuts a deep page out of the first offset + limit runs of each source', () => {
       const day = (n: number) => `2026-01-${String(n).padStart(2, '0')}T00:00:00Z`;
       // Odd days are experiments, even days generic tasks; each source returns its first 6.
@@ -262,6 +404,24 @@ describe('runRows', () => {
       );
       const page = pageOfRuns([[], generics, experiments], 4, 2);
       expect(keys(page)).toEqual(['experiment:25', 'generic-task:g24']);
+    });
+  });
+
+  describe('owner names', () => {
+    it('are the display name, else the username, as each list API sends them', () => {
+      expect(
+        experimentRow({ ...experiment(1, '2026-01-01T00:00:00Z'), displayName: '', username: 'bo' })
+          .ownerName,
+      ).toBe('bo');
+      expect(
+        genericTaskRow({ ...generic('g', '2026-01-01T00:00:00Z'), displayName: 'Al' }).ownerName,
+      ).toBe('Al');
+      expect(
+        genericTaskRow({ ...generic('g', '2026-01-01T00:00:00Z'), username: '' }).ownerName,
+      ).toBeUndefined();
+      expect(commandRow(command('c', '2026-01-01T00:00:00Z', { username: 'cy' })).ownerName).toBe(
+        'cy',
+      );
     });
   });
 

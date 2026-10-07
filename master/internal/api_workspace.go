@@ -26,6 +26,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/grpcutil"
 
 	"github.com/determined-ai/determined/master/internal/license"
+	"github.com/determined-ai/determined/master/internal/poolaccess"
 	"github.com/determined-ai/determined/master/internal/rm/kubernetesrm"
 	"github.com/determined-ai/determined/master/internal/templates"
 	"github.com/determined-ai/determined/master/internal/workspace"
@@ -500,6 +501,13 @@ func (a *apiServer) PostWorkspace(
 		}
 	}
 
+	// The creator owns the new workspace, so only the pool check applies to its default pools.
+	for _, pool := range []string{req.DefaultComputePool, req.DefaultAuxPool} {
+		if err = canSetDefaultPool(ctx, *curUser, pool, ""); err != nil {
+			return nil, err
+		}
+	}
+
 	w := &model.Workspace{
 		Name: req.Name, UserID: curUser.ID,
 		DefaultComputePool: req.DefaultComputePool, DefaultAuxPool: req.DefaultAuxPool,
@@ -673,6 +681,18 @@ func (a *apiServer) deleteWorkspaceNamespaceBindings(ctx context.Context,
 	return nil
 }
 
+// canSetDefaultPool checks that user may make pool the new pool of a setting that chooses the pool
+// of other users' submissions, whose current pool is current: a default pool of a workspace, or the
+// pool that an experiment config policy pins (see canSetConfigPolicyPool). Such a setting may name
+// a restricted pool only for those who may use it. Unsetting it and re-sending the current pool are
+// not checked.
+func canSetDefaultPool(ctx context.Context, user model.User, pool, current string) error {
+	if pool == "" || pool == current {
+		return nil
+	}
+	return poolaccess.CanUseResourcePool(ctx, user, pool)
+}
+
 func (a *apiServer) PatchWorkspace(
 	ctx context.Context, req *apiv1.PatchWorkspaceRequest,
 ) (*apiv1.PatchWorkspaceResponse, error) {
@@ -744,6 +764,10 @@ func (a *apiServer) PatchWorkspace(
 				return nil, status.Error(codes.FailedPrecondition, "unable to bind a resource "+
 					"pool that does not exist or is not available to the workspace")
 			}
+			if err := canSetDefaultPool(ctx, currUser,
+				*req.Workspace.DefaultComputeResourcePool, currWorkspace.DefaultComputePool); err != nil {
+				return nil, err
+			}
 			updatedWorkspace.DefaultComputePool = *req.Workspace.DefaultComputeResourcePool
 			insertColumns = append(insertColumns, "default_compute_pool")
 		}
@@ -751,6 +775,10 @@ func (a *apiServer) PatchWorkspace(
 			if !rpNames.Contains(*req.Workspace.DefaultAuxResourcePool) {
 				return nil, status.Error(codes.FailedPrecondition, "unable to bind a resource "+
 					"pool that does not exist or is not available to the workspace")
+			}
+			if err := canSetDefaultPool(ctx, currUser,
+				*req.Workspace.DefaultAuxResourcePool, currWorkspace.DefaultAuxPool); err != nil {
+				return nil, err
 			}
 			updatedWorkspace.DefaultAuxPool = *req.Workspace.DefaultAuxResourcePool
 			insertColumns = append(insertColumns, "default_aux_pool")

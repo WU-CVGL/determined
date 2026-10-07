@@ -11,17 +11,31 @@
   gap: 8px;
   justify-content: space-between;
 }
-.kinds,
-.filters {
+.filters,
+.launch {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
-.count {
-  color: var(--theme-surface-on-weak);
-  font-variant-numeric: tabular-nums;
-  margin-left: 6px;
+
+/* A column's funnel, which the keyboard reaches. */
+
+.funnel {
+  align-items: center;
+  border-radius: var(--theme-border-radius);
+  display: flex;
+  height: 100%;
+  padding: 0 4px;
+}
+.funnel:focus-visible {
+  box-shadow: var(--theme-outline);
+  outline: none;
+}
+.kindOption {
+  align-items: center;
+  display: flex;
+  gap: 8px;
 }
 
 /* The table scrolls sideways in its own box (its scroll.x), never the page. */
@@ -45,11 +59,6 @@
 .separator {
   color: var(--theme-surface-on-weak);
   margin: 0 4px;
-}
-.note {
-  color: var(--theme-surface-on-weak);
-  font-size: 12px;
-  margin: 0;
 }
 .sourceName {
   align-items: baseline;

@@ -92,6 +92,14 @@ func (r *ResourcesConfigV0) SetIsSingleNode(val *bool) {
 	r.RawIsSingleNode = val
 }
 
+func (r ResourcesConfigV0) PreferGPUTopology() *GPUTopologyPreference {
+	return r.RawPreferGPUTopology
+}
+
+func (r *ResourcesConfigV0) SetPreferGPUTopology(val *GPUTopologyPreference) {
+	r.RawPreferGPUTopology = val
+}
+
 func (r ResourcesConfigV0) Devices() DevicesConfigV0 {
 	return r.RawDevices
 }

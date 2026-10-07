@@ -18,7 +18,7 @@ import {
 } from 'types';
 
 import { fetchRunPage, RunQuery } from './fetchRuns';
-import { kindsOf, RunKind, SlotsFilter, StateGroup } from './runRows';
+import { kindsOf, RunKind, slotsQuery, SortKey, StateGroup } from './runRows';
 
 vi.mock('services/api', () => ({
   getCommands: vi.fn(),
@@ -88,24 +88,17 @@ const experimentPage = (experiments: BulkExperimentItem[], total = experiments.l
   pagination: { limit: 0, offset: 0, total },
 });
 
-/** The calls of a paged source: the page's list, then the active count (limit 1). */
 type PagedList<P> = (params: P, options?: FetchOptions) => Promise<unknown>;
-const listCall = <P extends { limit?: number }>(fn: PagedList<P>): P | undefined =>
-  vi.mocked(fn).mock.calls.find(([params]) => params.limit !== 1)?.[0];
-const countCall = <P extends { limit?: number }>(fn: PagedList<P>): P | undefined =>
-  vi.mocked(fn).mock.calls.find(([params]) => params.limit === 1)?.[0];
+/** The parameters of a paged source's one call. */
+const listCall = <P>(fn: PagedList<P>): P | undefined => vi.mocked(fn).mock.calls[0]?.[0];
 
-const globalJobs = (overrides: Partial<RunQuery> = {}): RunQuery => {
-  const pageKinds = kindsOf({ type: 'global' }, true);
-  return {
-    kinds: pageKinds,
-    limit: 20,
-    offset: 0,
-    pageKinds,
-    scope: { type: 'global' },
-    ...overrides,
-  };
-};
+const globalJobs = (overrides: Partial<RunQuery> = {}): RunQuery => ({
+  kinds: kindsOf({ type: 'global' }, true),
+  limit: 20,
+  offset: 0,
+  scope: { type: 'global' },
+  ...overrides,
+});
 
 describe('fetchRunPage', () => {
   beforeEach(() => {
@@ -116,23 +109,17 @@ describe('fetchRunPage', () => {
       command('nb-cpu', CommandType.JupyterLab, '2026-01-03T00:00:00Z'),
       command('nb-ended', CommandType.JupyterLab, '2026-01-01T00:00:00Z', {
         state: CommandState.Terminated,
+        userId: 2,
+        workspaceId: 4,
       }),
     ]);
     vi.mocked(getShells).mockResolvedValue([]);
     vi.mocked(getTensorBoards).mockResolvedValue([]);
-    vi.mocked(getGenericTasks).mockImplementation((params) =>
-      Promise.resolve(
-        params.limit === 1
-          ? genericPage([], 3)
-          : genericPage([generic('g1', '2026-01-04T00:00:00Z')], 7),
-      ),
+    vi.mocked(getGenericTasks).mockResolvedValue(
+      genericPage([generic('g1', '2026-01-04T00:00:00Z')], 7),
     );
-    vi.mocked(getExperiments).mockImplementation((params) =>
-      Promise.resolve(
-        params.limit === 1
-          ? experimentPage([], 2)
-          : experimentPage([experiment(5, '2026-01-02T00:00:00Z')], 11),
-      ),
+    vi.mocked(getExperiments).mockResolvedValue(
+      experimentPage([experiment(5, '2026-01-02T00:00:00Z')], 11),
     );
   });
 
@@ -151,20 +138,17 @@ describe('fetchRunPage', () => {
     // 3 tasks listed whole, and the totals of the two paged sources.
     expect(page.total).toBe(3 + 7 + 11);
     expect(page.errors).toEqual({});
-    expect(page.activeCounts).toEqual({
-      [RunKind.Command]: 1,
-      [RunKind.Experiment]: 2,
-      [RunKind.GenericTask]: 3,
-      [RunKind.JupyterLab]: 1,
-      [RunKind.Shell]: 0,
-      [RunKind.TensorBoard]: 0,
-    });
   });
 
   it('asks the paged sources for their first offset + limit runs, newest first', async () => {
     await fetchRunPage(globalJobs({ limit: 20, offset: 40 }));
 
-    expect(listCall(getGenericTasks)).toMatchObject({ limit: 60, offset: 0 });
+    expect(listCall(getGenericTasks)).toMatchObject({
+      limit: 60,
+      offset: 0,
+      orderBy: 'ORDER_BY_DESC',
+      sortBy: 'SORT_BY_START_TIME',
+    });
     expect(listCall(getExperiments)).toMatchObject({
       archived: false,
       limit: 60,
@@ -174,40 +158,70 @@ describe('fetchRunPage', () => {
     });
     // Without a state filter, deleted experiments stay out.
     expect(listCall(getExperiments)?.states).not.toContain('STATE_DELETED');
+    // One call each: the kind chips and their counts are gone.
+    expect(getGenericTasks).toHaveBeenCalledTimes(1);
+    expect(getExperiments).toHaveBeenCalledTimes(1);
   });
 
-  it('counts the active runs of the paged sources with one light call each', async () => {
+  it('asks the paged sources for the sort, and sorts the others the same way here', async () => {
+    const page = await fetchRunPage(globalJobs({ sort: { desc: false, key: SortKey.Name } }));
+
+    expect(listCall(getGenericTasks)).toMatchObject({
+      orderBy: 'ORDER_BY_ASC',
+      sortBy: 'SORT_BY_NAME',
+    });
+    expect(listCall(getExperiments)).toMatchObject({
+      orderBy: 'ORDER_BY_ASC',
+      sortBy: 'SORT_BY_NAME',
+    });
+    // "cmd-gpu" < "exp 5" < "g1" < "nb-cpu" < "nb-ended"
+    expect(page.rows.map((row) => row.key)).toEqual([
+      'command:cmd-gpu',
+      'experiment:5',
+      'generic-task:g1',
+      'jupyter-lab:nb-cpu',
+      'jupyter-lab:nb-ended',
+    ]);
+  });
+
+  it('asks each paged source for newest first when sorted by kind', async () => {
+    await fetchRunPage(globalJobs({ sort: { desc: false, key: SortKey.Kind } }));
+
+    expect(listCall(getExperiments)).toMatchObject({
+      orderBy: 'ORDER_BY_DESC',
+      sortBy: 'SORT_BY_START_TIME',
+    });
+    expect(listCall(getGenericTasks)).toMatchObject({
+      orderBy: 'ORDER_BY_DESC',
+      sortBy: 'SORT_BY_START_TIME',
+    });
+  });
+
+  it('asks for the state groups of the filter', async () => {
     await fetchRunPage(globalJobs({ states: [StateGroup.Ended] }));
 
-    expect(countCall(getGenericTasks)).toMatchObject({
-      limit: 1,
-      offset: 0,
-      states: [
-        GenericTaskState.Active,
-        GenericTaskState.StoppingPaused,
-        GenericTaskState.StoppingCompleted,
-        GenericTaskState.StoppingCanceled,
-        GenericTaskState.StoppingError,
-      ],
-    });
-    expect(countCall(getExperiments)?.states).toContain('STATE_ACTIVE');
     expect(listCall(getGenericTasks)?.states).toEqual([
       GenericTaskState.Completed,
       GenericTaskState.Canceled,
       GenericTaskState.Error,
     ]);
+    expect(listCall(getExperiments)?.states).toContain('STATE_DELETE_FAILED');
   });
 
-  it('sends the user for Mine', async () => {
-    await fetchRunPage(globalJobs({ userId: 3 }));
+  it('sends the owners, and filters the other tasks by them here', async () => {
+    const page = await fetchRunPage(globalJobs({ userIds: [3, 2] }));
 
-    expect(listCall(getGenericTasks)?.userIds).toEqual([3]);
-    expect(listCall(getExperiments)?.userIds).toEqual([3]);
-    expect(vi.mocked(getCommands).mock.calls[0][0]).toMatchObject({ users: ['3'] });
-    expect(vi.mocked(getJupyterLabs).mock.calls[0][0]).toMatchObject({ users: ['3'] });
+    expect(listCall(getGenericTasks)?.userIds).toEqual([3, 2]);
+    expect(listCall(getExperiments)?.userIds).toEqual([3, 2]);
+    expect(vi.mocked(getCommands).mock.calls[0][0]).toMatchObject({ users: ['3', '2'] });
+    expect(vi.mocked(getJupyterLabs).mock.calls[0][0]).toMatchObject({ users: ['3', '2'] });
+    // The mock lists every user's tasks; only the owners' are shown.
+    expect(page.rows.filter((row) => row.kind === RunKind.JupyterLab).map((row) => row.id)).toEqual(
+      ['nb-ended'],
+    );
   });
 
-  it('lists all users without Mine', async () => {
+  it('lists all users without an owner filter', async () => {
     await fetchRunPage(globalJobs());
 
     expect(listCall(getGenericTasks)?.userIds).toBeUndefined();
@@ -223,39 +237,31 @@ describe('fetchRunPage', () => {
     );
   });
 
-  it('skips the paged sources that the kind filter leaves out', async () => {
+  it('fetches only the kinds of the filter', async () => {
     const page = await fetchRunPage(globalJobs({ kinds: [RunKind.JupyterLab] }));
 
-    expect(listCall(getGenericTasks)).toBeUndefined();
-    expect(listCall(getExperiments)).toBeUndefined();
+    expect(getGenericTasks).not.toHaveBeenCalled();
+    expect(getExperiments).not.toHaveBeenCalled();
+    expect(getCommands).not.toHaveBeenCalled();
+    expect(getShells).not.toHaveBeenCalled();
     expect(page.rows.map((row) => row.key)).toEqual(['jupyter-lab:nb-cpu', 'jupyter-lab:nb-ended']);
     expect(page.total).toBe(2);
-    // The chips still count every kind.
-    expect(page.activeCounts[RunKind.Experiment]).toBe(2);
-    expect(page.activeCounts[RunKind.Command]).toBe(1);
   });
 
-  describe('GPU and CPU-only', () => {
-    it('filters experiments and generic tasks on the master', async () => {
-      await fetchRunPage(globalJobs({ slots: SlotsFilter.Gpu }));
+  describe('slots', () => {
+    it('filters experiments and generic tasks on the master by counts and Multi-node', async () => {
+      await fetchRunPage(globalJobs({ slots: slotsQuery(['0', '1', 'multi:8']) }));
 
-      // GPU: more than 0 slots.
-      for (const call of [
-        listCall(getGenericTasks),
-        countCall(getGenericTasks),
-        listCall(getExperiments),
-        countCall(getExperiments),
-      ]) {
-        expect(call?.slotsAbove).toBe(0);
-        expect(call?.slots).toBeUndefined();
+      for (const call of [listCall(getGenericTasks), listCall(getExperiments)]) {
+        expect(call?.slots).toEqual([0, 1]);
+        expect(call?.slotsAbove).toBe(8);
       }
 
       vi.clearAllMocks();
-      await fetchRunPage(globalJobs({ slots: SlotsFilter.CpuOnly }));
-      // CPU-only: 0 slots.
+      await fetchRunPage(globalJobs({ slots: slotsQuery(['multi:0']) }));
       for (const call of [listCall(getGenericTasks), listCall(getExperiments)]) {
-        expect(call?.slots).toEqual([0]);
-        expect(call?.slotsAbove).toBeUndefined();
+        expect(call?.slots).toBeUndefined();
+        expect(call?.slotsAbove).toBe(0);
       }
     });
 
@@ -263,32 +269,21 @@ describe('fetchRunPage', () => {
       await fetchRunPage(globalJobs());
 
       for (const call of [listCall(getGenericTasks), listCall(getExperiments)]) {
-        expect(call?.slots).toBeUndefined();
-        expect(call?.slotsAbove).toBeUndefined();
+        expect(call).not.toHaveProperty('slots');
+        expect(call).not.toHaveProperty('slotsAbove');
       }
     });
 
     it('filters notebooks, shells, commands and TensorBoards by their slots here', async () => {
-      const gpu = await fetchRunPage(
-        globalJobs({
-          kinds: [...[CommandType.Command, CommandType.JupyterLab]],
-          slots: SlotsFilter.Gpu,
-        }),
-      );
-      expect(gpu.rows.map((row) => row.key)).toEqual(['command:cmd-gpu']);
-      expect(gpu.activeCounts[RunKind.JupyterLab]).toBe(0);
+      const kinds = [CommandType.Command, CommandType.JupyterLab];
+      const many = await fetchRunPage(globalJobs({ kinds, slots: slotsQuery(['multi:1']) }));
+      expect(many.rows.map((row) => row.key)).toEqual(['command:cmd-gpu']);
 
-      const cpu = await fetchRunPage(
-        globalJobs({
-          kinds: [CommandType.Command, CommandType.JupyterLab],
-          slots: SlotsFilter.CpuOnly,
-        }),
-      );
-      expect(cpu.rows.map((row) => row.key)).toEqual([
+      const none = await fetchRunPage(globalJobs({ kinds, slots: slotsQuery(['0']) }));
+      expect(none.rows.map((row) => row.key)).toEqual([
         'jupyter-lab:nb-cpu',
         'jupyter-lab:nb-ended',
       ]);
-      expect(cpu.activeCounts[RunKind.Command]).toBe(0);
       // The task lists themselves are not filtered by the master.
       expect(vi.mocked(getCommands).mock.calls[0][0]).not.toHaveProperty('slots');
       expect(vi.mocked(getCommands).mock.calls[0][0]).not.toHaveProperty('slotsAbove');
@@ -308,8 +303,7 @@ describe('fetchRunPage', () => {
 
   it("lists a workspace's runs in the workspace", async () => {
     const scope = { type: 'workspace' as const, workspaceId: 7 };
-    const pageKinds = kindsOf(scope, true);
-    await fetchRunPage({ kinds: pageKinds, limit: 20, offset: 0, pageKinds, scope });
+    await fetchRunPage({ kinds: kindsOf(scope, true), limit: 20, offset: 0, scope });
 
     expect(listCall(getGenericTasks)).toMatchObject({ workspaceId: 7 });
     expect(listCall(getGenericTasks)?.projectId).toBeUndefined();
@@ -317,18 +311,23 @@ describe('fetchRunPage', () => {
     expect(vi.mocked(getTensorBoards).mock.calls[0][0]).toMatchObject({ workspaceId: 7 });
   });
 
-  it('filters the global page by one workspace', async () => {
-    await fetchRunPage(globalJobs({ workspaceId: 4 }));
+  it('filters the global page by workspaces, the other tasks here', async () => {
+    const page = await fetchRunPage(globalJobs({ workspaceIds: [4, 9] }));
 
-    expect(listCall(getGenericTasks)).toMatchObject({ workspaceId: 4 });
-    expect(listCall(getExperiments)).toMatchObject({ workspaceId: 4 });
-    expect(vi.mocked(getCommands).mock.calls[0][0]).toMatchObject({ workspaceId: 4 });
+    expect(listCall(getGenericTasks)).toMatchObject({ workspaceIds: [4, 9] });
+    expect(listCall(getExperiments)).toMatchObject({ workspaceIds: [4, 9] });
+    expect(listCall(getExperiments)?.workspaceId).toBeUndefined();
+    expect(vi.mocked(getCommands).mock.calls[0][0].workspaceId).toBeUndefined();
+    expect(
+      page.rows.filter(
+        (row) => row.kind !== RunKind.Experiment && row.kind !== RunKind.GenericTask,
+      ),
+    ).toEqual([expect.objectContaining({ id: 'nb-ended' })]);
   });
 
   it("lists a project's experiments and generic tasks only", async () => {
     const scope = { projectId: 1, type: 'project' as const };
-    const pageKinds = kindsOf(scope, true);
-    const page = await fetchRunPage({ kinds: pageKinds, limit: 20, offset: 0, pageKinds, scope });
+    const page = await fetchRunPage({ kinds: kindsOf(scope, true), limit: 20, offset: 0, scope });
 
     expect(getCommands).not.toHaveBeenCalled();
     expect(getJupyterLabs).not.toHaveBeenCalled();
@@ -341,12 +340,10 @@ describe('fetchRunPage', () => {
   });
 
   it('leaves experiments out of the tasks-only view', async () => {
-    const pageKinds = kindsOf({ type: 'global' }, false);
-    const page = await fetchRunPage(globalJobs({ kinds: pageKinds, pageKinds }));
+    const page = await fetchRunPage(globalJobs({ kinds: kindsOf({ type: 'global' }, false) }));
 
     expect(getExperiments).not.toHaveBeenCalled();
     expect(page.rows.some((row) => row.kind === RunKind.Experiment)).toBe(false);
-    expect(page.activeCounts[RunKind.Experiment]).toBeUndefined();
   });
 
   it('reports a failed source and leaves it out of the rows and the total', async () => {
@@ -361,19 +358,6 @@ describe('fetchRunPage', () => {
     expect(Object.keys(page.errors).sort()).toEqual([RunKind.Experiment, RunKind.Shell].sort());
     expect(page.rows.some((row) => row.kind === RunKind.Experiment)).toBe(false);
     expect(page.total).toBe(3 + 7);
-    expect(page.activeCounts[RunKind.Experiment]).toBeUndefined();
-    expect(page.activeCounts[RunKind.Shell]).toBeUndefined();
-  });
-
-  it('reports no failure of a kind the kind filter leaves out, and leaves it uncounted', async () => {
-    vi.mocked(getShells).mockRejectedValue(new Error('shells are down'));
-
-    const page = await fetchRunPage(globalJobs({ kinds: [RunKind.JupyterLab] }));
-
-    expect(page.errors).toEqual({});
-    expect(page.activeCounts[RunKind.Shell]).toBeUndefined();
-    expect(page.activeCounts[RunKind.JupyterLab]).toBe(1);
-    expect(page.rows.map((row) => row.key)).toEqual(['jupyter-lab:nb-cpu', 'jupyter-lab:nb-ended']);
   });
 
   it('forwards the abort signal to every call', async () => {

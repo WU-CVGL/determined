@@ -10,8 +10,10 @@ import (
 	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
+	"github.com/determined-ai/determined/master/internal/poolaccess"
 	"github.com/determined-ai/determined/master/internal/rm"
 	workspaceauth "github.com/determined-ai/determined/master/internal/workspace"
+	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/set"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 	"github.com/determined-ai/determined/proto/pkg/resourcepoolv1"
@@ -42,6 +44,28 @@ func (a *apiServer) getUnboundResourcePools(ctx context.Context,
 	return unboundPools, nil
 }
 
+// usableResourcePools returns the pools that user may use. A failed read of the access tables
+// fails the request: the unfiltered list is never returned.
+func usableResourcePools(
+	ctx context.Context, user model.User, pools []*resourcepoolv1.ResourcePool,
+) ([]*resourcepoolv1.ResourcePool, error) {
+	names := make([]string, 0, len(pools))
+	for _, pool := range pools {
+		names = append(names, pool.Name)
+	}
+	usable, err := poolaccess.UsablePools(ctx, user, names)
+	if err != nil {
+		return nil, err
+	}
+	usablePools := make([]*resourcepoolv1.ResourcePool, 0, len(pools))
+	for _, pool := range pools {
+		if usable[pool.Name] {
+			usablePools = append(usablePools, pool)
+		}
+	}
+	return usablePools, nil
+}
+
 func (a *apiServer) GetResourcePools(
 	ctx context.Context, req *apiv1.GetResourcePoolsRequest,
 ) (*apiv1.GetResourcePoolsResponse, error) {
@@ -69,6 +93,12 @@ func (a *apiServer) GetResourcePools(
 
 	filteredPools, err := rm.AuthZProvider.Get().FilterResourcePools(ctx, *curUser,
 		resp.ResourcePools, ids)
+	if err != nil {
+		return nil, err
+	}
+	// Hide the pools the user may not use, before the unbound subset and the pagination, so
+	// their totals count only usable pools.
+	filteredPools, err = usableResourcePools(ctx, *curUser, filteredPools)
 	if err != nil {
 		return nil, err
 	}

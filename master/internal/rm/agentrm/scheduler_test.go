@@ -83,7 +83,7 @@ func forceAddAgent(
 		}
 	}
 	for i := 0; i < numZeroSlotContainers; i++ {
-		_, err := state.allocateFreeDevices(0, cproto.NewID())
+		_, err := state.allocateFreeDevices(0, cproto.NewID(), deviceSelection{})
 		assert.NilError(t, err)
 	}
 	agents[state.id] = state
@@ -111,14 +111,14 @@ func newFakeAgentState(
 				Preemptible: true,
 			},
 		}
-		if _, err := state.allocateFreeDevices(req.SlotsNeeded, cproto.NewID()); err != nil {
+		if _, err := state.allocateFreeDevices(req.SlotsNeeded, cproto.NewID(), deviceSelection{}); err != nil {
 			panic(err)
 		}
 	}
 
 	for i := 0; i < zeroSlotContainers; i++ {
 		req := &sproto.AllocateRequest{}
-		if _, err := state.allocateFreeDevices(req.SlotsNeeded, cproto.NewID()); err != nil {
+		if _, err := state.allocateFreeDevices(req.SlotsNeeded, cproto.NewID(), deviceSelection{}); err != nil {
 			panic(err)
 		}
 	}
@@ -282,9 +282,9 @@ func TestJobStats(t *testing.T) {
 		expectedStats *jobv1.QueueStats,
 	) {
 		taskList, groupMap, agentMap := setupSchedulerStates(t, tasks, groups, agents)
-		toAllocate, _ := fairshareSchedule(taskList, groupMap, agentMap, BestFit, false)
+		toAllocate, _ := fairshareSchedule(taskList, groupMap, agentMap, BestFit, false, false)
 		AllocateTasks(toAllocate, agentMap, taskList)
-		fairshareSchedule(taskList, groupMap, agentMap, BestFit, false)
+		fairshareSchedule(taskList, groupMap, agentMap, BestFit, false, false)
 
 		assertStatsEqual(t, tasklist.JobStats(taskList), expectedStats)
 	}
@@ -363,9 +363,9 @@ func TestJobOrder(t *testing.T) {
 		agents []*MockAgent,
 	) map[model.JobID]*sproto.RMJobInfo {
 		taskList, groupMap, agentMap := setupSchedulerStates(t, tasks, groups, agents)
-		toAllocate, _ := fairshareSchedule(taskList, groupMap, agentMap, BestFit, false)
+		toAllocate, _ := fairshareSchedule(taskList, groupMap, agentMap, BestFit, false, false)
 		AllocateTasks(toAllocate, agentMap, taskList)
-		fairshareSchedule(taskList, groupMap, agentMap, BestFit, false)
+		fairshareSchedule(taskList, groupMap, agentMap, BestFit, false, false)
 		f := fairShare{}
 		return f.JobQInfo(&resourcePool{taskList: taskList, groups: groupMap})
 	}
@@ -519,7 +519,7 @@ func setupSchedulerStates(
 			devices := make([]device.Device, 0)
 			if mockTask.ContainerStarted {
 				if mockTask.SlotsNeeded == 0 {
-					_, err := agentState.allocateFreeDevices(0, containerID)
+					_, err := agentState.allocateFreeDevices(0, containerID, deviceSelection{})
 					assert.NilError(t, err)
 				} else {
 					i := 0

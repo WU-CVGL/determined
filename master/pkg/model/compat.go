@@ -42,6 +42,8 @@ func (r ResourcesConfig) ToExpconf() expconf.ResourcesConfig {
 		RawPriority:       r.Priority,
 		RawDevices:        r.Devices.ToExpconf(),
 		RawIsSingleNode:   r.IsSingleNode,
+
+		RawPreferGPUTopology: r.PreferGPUTopology,
 	})
 }
 

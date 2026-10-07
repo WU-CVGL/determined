@@ -42,7 +42,6 @@ const shellsOnly = (overrides: Partial<RunQuery> = {}): RunQuery => ({
   kinds: [RunKind.Shell],
   limit: 20,
   offset: 0,
-  pageKinds: [RunKind.Shell],
   scope: { type: 'global' },
   ...overrides,
 });
