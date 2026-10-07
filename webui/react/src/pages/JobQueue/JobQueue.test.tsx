@@ -104,9 +104,7 @@ function deferred<T>() {
 
 const mocks = vi.hoisted(() => ({
   /** Holds a reply of the list API until the promise it returns resolves. */
-  hold: undefined as
-    | ((params: { offset?: number; resourcePool?: string; states?: unknown }) => unknown)
-    | undefined,
+  hold: undefined as ((params: { offset?: number; resourcePool?: string }) => unknown) | undefined,
   jobs: [] as unknown[],
 }));
 const permissions = vi.hoisted(() => ({ canModify: true }));
@@ -116,14 +114,14 @@ vi.mock('services/api', () => ({
   cancelExperiment: vi.fn(),
   getCommands: vi.fn(() => Promise.resolve([])),
   // The jobs in queue order, or the reverse, paged as the master pages them.
-  getJobQ: vi.fn(async ({ limit, offset, orderBy, resourcePool, states }) => {
+  getJobQ: vi.fn(async ({ limit, offset, orderBy, resourcePool }) => {
     const jobs = orderBy === 'ORDER_BY_DESC' ? [...mocks.jobs].reverse() : mocks.jobs;
     const start = offset ?? 0;
     const reply = {
       jobs: jobs.slice(start, start + (limit || 100)),
       pagination: { total: jobs.length },
     };
-    await mocks.hold?.({ offset, resourcePool, states });
+    await mocks.hold?.({ offset, resourcePool });
     return reply;
   }),
   getJupyterLab: vi.fn(),
@@ -177,11 +175,16 @@ vi.mock('components/NtscLaunchModal', async () => {
 const pool = (schedulerType: Api.V1SchedulerType, name: string) =>
   ({ name, schedulerType }) as unknown as ResourcePool;
 
+/**
+ * The pool of the test's page. Each test has a pool of its own, which tells the page's API calls
+ * from a poll left over from a page of an earlier test.
+ */
+let testPool = '';
+let testCount = 0;
+
 const setup = (
   schedulerType: Api.V1SchedulerType = Api.V1SchedulerType.PRIORITY,
   jobState: JobState = JobState.SCHEDULED,
-  /* A pool of its own tells the page's API calls from those of a page of an earlier test. */
-  poolName = 'default',
 ) =>
   render(
     <UIProvider theme={DefaultTheme.Light}>
@@ -193,7 +196,7 @@ const setup = (
                 <JobQueue
                   jobState={jobState}
                   rpStats={[]}
-                  selectedRp={pool(schedulerType, poolName)}
+                  selectedRp={pool(schedulerType, testPool)}
                 />
               </ConfirmationProvider>
             </BrowserRouter>
@@ -318,14 +321,14 @@ const saved = (jobState: JobState, key: string): unknown => {
   return value === undefined ? undefined : JSON.parse(value);
 };
 
-/** The page's requests of the jobs in the pool. */
-const listings = (poolName = 'default') =>
+/** The page's requests of the jobs in its pool. */
+const listings = () =>
   vi
     .mocked(getJobQ)
     .mock.calls.map(([params]) => params)
-    .filter((params) => params.resourcePool === poolName);
+    .filter((params) => params.resourcePool === testPool);
 
-const lastListing = (poolName = 'default') => listings(poolName).at(-1);
+const lastListing = () => listings().at(-1);
 
 /** The largest limit the API takes, which the Active tab asks for to sort all its jobs. */
 const ALL_JOBS = 2 ** 31 - 1;
@@ -334,6 +337,7 @@ const clickHeader = (title: string) => userEvent.click(screen.getByTestId(title)
 
 describe('JobQueue', () => {
   beforeEach(() => {
+    testPool = `pool-${++testCount}`;
     userStore.reset();
     userStore.updateCurrentUser({ id: OWNER_ID, isActive: true, isAdmin: false, username: 'a' });
     // No settings from an earlier test, in the store or in the URL.
@@ -360,21 +364,21 @@ describe('JobQueue', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       mocks.jobs = [experimentJob];
-      setup(Api.V1SchedulerType.PRIORITY, JobState.SCHEDULED, 'poll');
+      setup();
       await screen.findByText('mnist');
       const listing = {
         limit: 10,
         offset: 0,
         orderBy: 'ORDER_BY_ASC',
-        resourcePool: 'poll',
+        resourcePool: testPool,
         states: [JobState.SCHEDULED],
       };
-      await waitFor(() => expect(listings('poll')).toEqual([listing]));
+      await waitFor(() => expect(listings()).toEqual([listing]));
 
       await act(() => vi.advanceTimersByTimeAsync(5000));
-      await waitFor(() => expect(listings('poll')).toHaveLength(2));
+      await waitFor(() => expect(listings()).toHaveLength(2));
       await act(() => vi.advanceTimersByTimeAsync(100));
-      expect(listings('poll')).toEqual([listing, listing]);
+      expect(listings()).toEqual([listing, listing]);
     } finally {
       vi.useRealTimers();
     }
@@ -662,7 +666,7 @@ describe('JobQueue', () => {
       mocks.jobs = activeJobs.map((job) =>
         job.jobId === 'q1' ? { ...job, userId: OWNER_ID + 1 } : job,
       );
-      setup(Api.V1SchedulerType.PRIORITY, JobState.SCHEDULED, 'avatars');
+      setup();
       // By username until the users load: carol after bob.
       await waitFor(() =>
         expect(rowAvatars()).toEqual([
@@ -716,7 +720,7 @@ describe('JobQueue', () => {
     it('sorts all jobs of the tab, not the page, and starts a new sort on the first page', async () => {
       mocks.jobs = TWELVE_JOBS;
       storeSettings(JobState.SCHEDULED, { tableOffset: 10 });
-      setup(Api.V1SchedulerType.PRIORITY, JobState.SCHEDULED, 'paged');
+      setup();
       await waitFor(() => expect(rowOrder()).toEqual(['q10', 'q11']));
 
       await clickHeader('Job Name');
@@ -724,27 +728,25 @@ describe('JobQueue', () => {
       await waitFor(() => expect(saved(JobState.SCHEDULED, 'tableOffset')).toBe(0));
 
       // The jobs are all here: a page click fetches none.
-      const fetched = listings('paged').length;
+      const fetched = listings().length;
       await userEvent.click(screen.getByTitle('2'));
       await waitFor(() => expect(rowOrder()).toEqual(['q1', 'q0']));
       expect(saved(JobState.SCHEDULED, 'sortKey')).toBe('name');
       await waitFor(() => expect(saved(JobState.SCHEDULED, 'tableOffset')).toBe(10));
-      expect(listings('paged')).toHaveLength(fetched);
+      expect(listings()).toHaveLength(fetched);
     });
 
     it('drops the reply of a fetch that a newer one replaced', async () => {
       mocks.jobs = TWELVE_JOBS;
-      setup(Api.V1SchedulerType.PRIORITY, JobState.SCHEDULED, 'stale');
+      setup();
       await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER_12.slice(0, 10)));
 
       // The second page of the queue order arrives after the list of the sort that replaced it.
       const secondPage = deferred<void>();
-      mocks.hold = ({ offset, resourcePool, states }) =>
-        states !== undefined && resourcePool === 'stale' && offset === 10
-          ? secondPage.promise
-          : undefined;
+      mocks.hold = ({ offset, resourcePool }) =>
+        resourcePool === testPool && offset === 10 ? secondPage.promise : undefined;
       await userEvent.click(screen.getByTitle('2'));
-      await waitFor(() => expect(lastListing('stale')).toMatchObject({ limit: 10, offset: 10 }));
+      await waitFor(() => expect(lastListing()).toMatchObject({ limit: 10, offset: 10 }));
       await clickHeader('Job Name');
       await waitFor(() => expect(rowOrder()).toEqual(BY_NAME.slice(0, 10)));
 
@@ -793,9 +795,7 @@ describe('JobQueue', () => {
       }
       expect(rowOrder()).toEqual(QUEUE_ORDER);
       expect(saved(JobState.QUEUED, 'sortKey')).toBeUndefined();
-      expect(vi.mocked(getJobQ).mock.calls.every(([params]) => params.limit !== ALL_JOBS)).toBe(
-        true,
-      );
+      expect(listings().every((params) => params.limit !== ALL_JOBS)).toBe(true);
     });
 
     it('shows the queue order for a sort key of the Active tab', async () => {
