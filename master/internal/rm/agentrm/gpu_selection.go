@@ -20,7 +20,9 @@ import (
 //   - NUMA packing (packingKey), for every task in a pool with fitting_policy best and numa_packing
 //     not false;
 //   - prefer_gpu_topology "soft" (topology set key), for a task on one agent with 2 or more slots.
-//     Under NUMA packing, packing breaks its ties; otherwise the lowest IDs do.
+//     Under NUMA packing, packing breaks its ties; otherwise the lowest IDs do. It also ranks a
+//     pair with a GPU whose link was below its maximum width at agent start after the otherwise
+//     equal pair (pairRank); NUMA packing never reads the width.
 //
 // Both rank GPUs in error last: an NVML health call of the GPU failed at agent start, or the GPU has
 // a recent critical XID (gpuhealth.IsCriticalXID: 13, 31, 43 and 45 never count). This supersedes
@@ -396,12 +398,21 @@ func (l numaLayout) describe() string {
 //     level), then not usable before unknown P2P, then a pair on different PCIe switches before a
 //     pair behind one switch (PIX), whose GPUs share one uplink to host memory.
 //
-// A pair missing from the report is unknown in every field, the last row. NVLinks count only with
-// usable P2P, and link width is not used.
-type pairRank [4]int
+// The last element, in every band, is the pair's link width (pairWidth): a narrow pair ranks right
+// after the otherwise equal full-width pair, so locality always decides first. A pair missing from
+// the report is unknown in every link field, the last row of band 2, and still has its GPUs'
+// widths. NVLinks count only with usable P2P.
+type pairRank [5]int
 
-// unknownPairRank is the last row of band 2: unknown level and unknown P2P.
-var unknownPairRank = pairRank{2, 2, 1, 0}
+// unknownLink is the rank, before its width, of a pair whose level and P2P are unknown, as for a
+// pair missing from the report: the last row of band 2.
+var unknownLink = pairRank{2, 2, 1, 0}
+
+// linkUnknown reports whether the pair's level and P2P are unknown, whatever its width.
+func (r pairRank) linkUnknown() bool {
+	r[len(r)-1] = 0
+	return r == unknownLink
+}
 
 func comparePairRanks(a, b pairRank) int {
 	for i := range a {
@@ -438,9 +449,16 @@ func (p gpuPair) p2p() aproto.GPUP2PUsability {
 }
 
 func (g *gpuTopology) pairRank(a, b device.ID) pairRank {
+	r := g.linkRank(a, b)
+	r[len(r)-1] = g.pairWidth(a, b)
+	return r
+}
+
+// linkRank is the pair's rank without its width.
+func (g *gpuTopology) linkRank(a, b device.ID) pairRank {
 	p, ok := g.pair(a, b)
 	if !ok {
-		return unknownPairRank
+		return unknownLink
 	}
 	switch p.p2p() {
 	case aproto.GPUP2PUsable:
@@ -456,6 +474,38 @@ func (g *gpuTopology) pairRank(a, b device.ID) pairRank {
 	default:
 		return pairRank{2, numaClass(p.level), 1, pixRank(p.level)}
 	}
+}
+
+// Link widths of a GPU at agent start, as ranked: full before unknown before narrow.
+const (
+	widthFull = iota
+	widthUnknown
+	widthNarrow
+)
+
+// gpuWidth classifies a GPU's PCIe link width at agent start as the health view does
+// (gpuhealth.Classify): narrow when both widths are known (> 0) and the current one is below the
+// maximum, full when they are known and equal, unknown otherwise, also for a GPU without an entry.
+// NVML's maximum covers the GPU and its slot, so a x16 GPU in a x8 slot is full. The link
+// generation is never read: it only shows whether the GPU was idle.
+func (g *gpuTopology) gpuWidth(id device.ID) int {
+	info, ok := g.gpus[id]
+	switch {
+	case !ok || info.PCIeLinkWidth <= 0 || info.PCIeLinkWidthMax <= 0:
+		return widthUnknown
+	case info.PCIeLinkWidth < info.PCIeLinkWidthMax:
+		return widthNarrow
+	case info.PCIeLinkWidth == info.PCIeLinkWidthMax:
+		return widthFull
+	default:
+		return widthUnknown
+	}
+}
+
+// pairWidth is the width class of a pair: narrow when either GPU is narrow, unknown when either is
+// unknown and neither is narrow, full when both are full.
+func (g *gpuTopology) pairWidth(a, b device.ID) int {
+	return max(g.gpuWidth(a), g.gpuWidth(b))
 }
 
 // numaClass is 0 for a pair on one NUMA node, 1 for SYS and 2 for an unknown level. NVML's NODE and
@@ -479,8 +529,17 @@ func pixRank(level aproto.GPULinkLevel) int {
 	return 0
 }
 
-// describePair describes a pair for the task log, for example "NODE, P2P usable".
+// describePair describes a pair for the task log, for example "NODE, P2P usable", with ", narrow"
+// when a GPU of the pair is narrow.
 func (g *gpuTopology) describePair(a, b device.ID) string {
+	text := g.describeLink(a, b)
+	if g.pairWidth(a, b) == widthNarrow {
+		text += ", narrow"
+	}
+	return text
+}
+
+func (g *gpuTopology) describeLink(a, b device.ID) string {
 	p, ok := g.pair(a, b)
 	if !ok {
 		return "not reported"
@@ -507,8 +566,9 @@ func (g *gpuTopology) describePair(a, b device.ID) string {
 // C(n,2) pair ranks sorted worst first, compared lexicographically. Exact ties go to the packing
 // key when tie is set (NUMA packing), then to the smallest sorted list of IDs.
 //
-// It returns no set, with the reason, when the topology is unknown, when every pair of free GPUs is
-// unknown in every field (the report holds nothing to rank), or above maxTopologySets sets.
+// It returns no set, with the reason, when the topology is unknown, when the level and P2P of every
+// pair of free GPUs are unknown (the report holds no link to rank; widths alone do not rank), or
+// above maxTopologySets sets.
 func selectByTopology(
 	free []rankedGPU, g *gpuTopology, n int, tie *numaLayout,
 ) (set []device.Device, worstPair string, unranked string) {
@@ -529,7 +589,7 @@ func selectByTopology(
 				continue
 			}
 			ranks[i][j] = g.pairRank(free[i].device.ID, free[j].device.ID)
-			if ranks[i][j] != unknownPairRank {
+			if !ranks[i][j].linkUnknown() {
 				rankable = true
 			}
 		}

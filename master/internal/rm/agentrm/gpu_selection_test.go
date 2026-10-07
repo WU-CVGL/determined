@@ -14,7 +14,8 @@ import (
 
 // Fixtures of the cluster's layouts. Nodes 02-08 have GPUs 0-3 on NUMA node 0 and 4-7 on node 1,
 // NODE within a socket and SYS across; node01 excludes GPU 4, so NUMA node 1 has slots 5-7; g292
-// has one NUMA node and four PCIe switches, each with a PIX pair.
+// has one NUMA node and four PCIe switches, each with a PIX pair. Only the width fixtures
+// (clusterNode) report link widths.
 
 func gpuDevice(id int) device.Device {
 	return device.Device{ID: device.ID(id), Brand: "nvda", UUID: fmt.Sprintf("GPU-%d", id), Type: device.CUDA}
@@ -75,6 +76,8 @@ type topologyFixture struct {
 	p2p   func(a, b int) aproto.GPUP2PCaps
 	// nvmlError sets the NVML error of these GPUs.
 	nvmlError map[int]bool
+	// width sets the current and maximum PCIe link width of these GPUs; the others report none.
+	width map[int][2]int
 }
 
 func (f topologyFixture) build() *gpuTopology {
@@ -87,6 +90,9 @@ func (f topologyFixture) build() *gpuTopology {
 		}
 		if f.nvmlError[id] {
 			info.NVMLError = "GetPciInfo: ERROR_GPU_IS_LOST (15)"
+		}
+		if w, ok := f.width[id]; ok {
+			info.PCIeLinkWidth, info.PCIeLinkWidthMax = w[0], w[1]
 		}
 		g.gpus[device.ID(id)] = info
 	}
@@ -137,6 +143,33 @@ var (
 	node01IDs = without(intRange(0, 8), 4)
 	node02    = topologyFixture{ids: node02IDs, numa: twoSockets(node02IDs), p2p: allP2P(p2pNotOK)}
 	node01    = topologyFixture{ids: node01IDs, numa: twoSockets(node01IDs), p2p: allP2P(p2pNotOK)}
+)
+
+var (
+	x16 = [2]int{16, 16}
+	x8  = [2]int{8, 16}
+)
+
+// clusterNode is a node of the cluster as its agent reports it: two NUMA nodes, P2P usable on
+// every pair, every GPU at x16 of x16 except narrow ones at x8 of x16.
+func clusterNode(ids []int, narrow ...int) topologyFixture {
+	f := topologyFixture{ids: ids, numa: twoSockets(ids), p2p: allP2P(p2pOK), width: map[int][2]int{}}
+	for _, id := range ids {
+		f.width[id] = x16
+	}
+	for _, id := range narrow {
+		f.width[id] = x8
+	}
+	return f
+}
+
+// The x8 GPUs of the cluster: node01 61:00.0 and a1:00.0, node05 23:00.0 and 81:00.0, node06
+// c1:00.0 and node07 21:00.0.
+var (
+	node01Widths = clusterNode(node01IDs, 3, 5)
+	node05       = clusterNode(node02IDs, 1, 4)
+	node06       = clusterNode(node02IDs, 6)
+	node07       = clusterNode(node02IDs, 1)
 )
 
 // g292 has one NUMA node and PIX pairs {0,1}, {2,3}, {4,5}, {6,7}.
@@ -513,14 +546,77 @@ func TestPairRank(t *testing.T) {
 			}
 		}
 	}
-	// Link width and the NVML error field never change a key.
+	// The NVML error field never changes a key, and a width without its maximum is unknown, as for
+	// a GPU without an entry.
 	plain := &gpuTopology{pairs: map[gpuPairKey]gpuPair{
 		{a: 0, b: 1}: {level: aproto.GPULinkLevelNode, p2pAToB: p2pOK, p2pBToA: p2pOK},
 	}}
 	require.Equal(t, plain.pairRank(0, 1), rankOf(aproto.GPULinkLevelNode, p2pOK, 0))
 	// A missing pair, as for a GPU whose handle lookup failed, is in the last row.
-	require.Equal(t, unknownPairRank, (&gpuTopology{}).pairRank(0, 1))
-	require.Equal(t, unknownPairRank, rankOf("", p2pUnknown, 0))
+	require.Equal(t, pairRank{2, 2, 1, 0, widthUnknown}, (&gpuTopology{}).pairRank(0, 1))
+	require.True(t, (&gpuTopology{}).pairRank(0, 1).linkUnknown())
+	require.Equal(t, pairRank{2, 2, 1, 0, widthUnknown}, rankOf("", p2pUnknown, 0))
+}
+
+func TestPairRankWidth(t *testing.T) {
+	// The rank of the pair {0,1}, whose GPUs have the widths a and b.
+	rankOf := func(level aproto.GPULinkLevel, caps aproto.GPUP2PCaps, nvlinks int, a, b aproto.GPUInfo) pairRank {
+		g := &gpuTopology{pairs: map[gpuPairKey]gpuPair{
+			{a: 0, b: 1}: {level: level, nvlinks: nvlinks, p2pAToB: caps, p2pBToA: caps},
+		}, gpus: map[device.ID]aproto.GPUInfo{0: a, 1: b}}
+		return g.pairRank(0, 1)
+	}
+	width := func(w [2]int) aproto.GPUInfo {
+		return aproto.GPUInfo{PCIeLinkWidth: w[0], PCIeLinkWidthMax: w[1]}
+	}
+	full, narrow := width(x16), width(x8)
+	unknown := width([2]int{0, 16}) // NOT_SUPPORTED
+	node, sys, pix := aproto.GPULinkLevelNode, aproto.GPULinkLevelSys, aproto.GPULinkLevelPIX
+
+	for _, caps := range []aproto.GPUP2PCaps{p2pOK, p2pNotOK, p2pUnknown} {
+		// Locality first: a narrow NODE pair beats a full SYS pair.
+		require.Negative(t, comparePairRanks(rankOf(node, caps, 0, full, narrow), rankOf(sys, caps, 0, full, full)))
+		// Then the width: full before unknown before narrow; either GPU narrow makes a narrow pair.
+		require.Negative(t, comparePairRanks(rankOf(node, caps, 0, full, full), rankOf(node, caps, 0, full, unknown)))
+		require.Negative(t, comparePairRanks(
+			rankOf(node, caps, 0, unknown, unknown), rankOf(node, caps, 0, full, narrow)))
+		require.Equal(t, rankOf(node, caps, 0, narrow, full), rankOf(node, caps, 0, unknown, narrow))
+		require.Equal(t, rankOf(node, caps, 0, narrow, full), rankOf(node, caps, 0, narrow, narrow))
+		// A missing pair keeps its GPUs' widths, and its link stays unknown.
+		g := &gpuTopology{gpus: map[device.ID]aproto.GPUInfo{0: full, 1: full}}
+		require.Negative(t, comparePairRanks(g.pairRank(0, 1), rankOf("", p2pUnknown, 0, full, narrow)))
+		require.True(t, g.pairRank(0, 1).linkUnknown())
+	}
+	// With usable P2P, PIX beats NODE whatever the width, and more NVLinks beat full width.
+	require.Negative(t, comparePairRanks(rankOf(pix, p2pOK, 0, narrow, narrow), rankOf(node, p2pOK, 0, full, full)))
+	require.Negative(t, comparePairRanks(rankOf("", p2pOK, 4, narrow, narrow), rankOf("", p2pOK, 2, full, full)))
+	// Without P2P, two switches beat one before the width counts.
+	require.Negative(t, comparePairRanks(
+		rankOf(node, p2pNotOK, 0, narrow, narrow), rankOf(pix, p2pNotOK, 0, full, full)))
+
+	// The classes of the health view: x8 of x8 is full (a x16 GPU in a x8 slot), and a current
+	// width above the maximum is unknown.
+	g := &gpuTopology{gpus: map[device.ID]aproto.GPUInfo{
+		0: full, 1: narrow, 2: unknown, 3: width([2]int{8, 8}), 4: width([2]int{16, 8}), 5: width([2]int{16, 0}),
+	}}
+	got := map[device.ID]int{}
+	for id := range g.gpus {
+		got[id] = g.gpuWidth(id)
+	}
+	got[6] = g.gpuWidth(6)
+	require.Equal(t, map[device.ID]int{
+		0: widthFull, 1: widthNarrow, 2: widthUnknown, 3: widthFull, 4: widthUnknown, 5: widthUnknown,
+		6: widthUnknown,
+	}, got)
+
+	// The generation never changes a key: it only shows whether the GPU was idle.
+	idle, busy := narrow, narrow
+	idle.PCIeLinkGen, idle.PCIeLinkGenMax = 1, 4
+	busy.PCIeLinkGen, busy.PCIeLinkGenMax = 4, 4
+	require.Equal(t, rankOf(node, p2pOK, 0, busy, full), rankOf(node, p2pOK, 0, idle, full))
+	idle, busy = full, full
+	idle.PCIeLinkGen, busy.PCIeLinkGen = 1, 4
+	require.Equal(t, rankOf(node, p2pOK, 0, busy, full), rankOf(node, p2pOK, 0, idle, full))
 }
 
 func topologySelect(
@@ -594,6 +690,105 @@ func TestTopologyPreferenceComposition(t *testing.T) {
 	require.Equal(t, []int{4, 6}, packed(t, mixed, free, node02IDs, 2))
 }
 
+func TestTopologyPreferenceRanksWidthAfterLocality(t *testing.T) {
+	// The expected sets of follow-up 3/4 for idle nodes, n = 2, 3 and 4: "soft" avoids x8 GPUs
+	// among sets of equal locality; plain tasks get NUMA packing, which never reads the width.
+	for _, c := range []struct {
+		name        string
+		f           topologyFixture
+		soft, plain [][]int
+	}{
+		{"node01", node01Widths, [][]int{{6, 7}, {0, 1, 2}, {0, 1, 2, 3}}, [][]int{{5, 6}, {5, 6, 7}, {0, 1, 2, 3}}},
+		{"node05", node05, [][]int{{0, 2}, {0, 2, 3}, {0, 1, 2, 3}}, [][]int{{0, 1}, {0, 1, 2}, {0, 1, 2, 3}}},
+		{"node06", node06, [][]int{{0, 1}, {0, 1, 2}, {0, 1, 2, 3}}, [][]int{{0, 1}, {0, 1, 2}, {0, 1, 2, 3}}},
+		{"node07", node07, [][]int{{0, 2}, {0, 2, 3}, {4, 5, 6, 7}}, [][]int{{0, 1}, {0, 1, 2}, {0, 1, 2, 3}}},
+	} {
+		// The same with P2P not usable: the NUMA class still comes first.
+		for _, caps := range []aproto.GPUP2PCaps{p2pOK, p2pNotOK} {
+			f := c.f
+			f.p2p = allP2P(caps)
+			for i, n := range []int{2, 3, 4} {
+				got := topologySelect(t, f, f.ids, n, true)
+				require.Equal(t, c.soft[i], deviceIDs(got.devices), "%s, soft, n=%d", c.name, n)
+				require.Equal(t, c.plain[i], packed(t, f, f.ids, f.ids, n), "%s, plain, n=%d", c.name, n)
+			}
+		}
+	}
+
+	// Every one-node 4-GPU set of node01 holds an x8 GPU, and still beats every set across NUMA
+	// nodes; the task log names the narrow pair.
+	c := topologySelect(t, node01Widths, node01IDs, 4, true)
+	require.Equal(t, "worst pair NODE, P2P usable, narrow", c.worstPair)
+	c = topologySelect(t, node07, node02IDs, 4, true)
+	require.Equal(t, "worst pair NODE, P2P usable", c.worstPair)
+
+	// With GPUs busy: node07 with {0,1,4,5,6,7} free, and node05 with {0,...,5} free.
+	free := []int{0, 1, 4, 5, 6, 7}
+	require.Equal(t, []int{4, 5}, deviceIDs(topologySelect(t, node07, free, 2, true).devices))
+	require.Equal(t, []int{0, 1}, packed(t, node07, free, node02IDs, 2))
+	free = intRange(0, 6)
+	require.Equal(t, []int{0, 2}, deviceIDs(topologySelect(t, node05, free, 2, true).devices))
+	require.Equal(t, []int{4, 5}, packed(t, node05, free, node02IDs, 2))
+
+	// Without packing (worst, numa_packing false), "soft" ranks by width too; ties go to the lowest
+	// IDs.
+	require.Equal(t, []int{4, 5, 6, 7}, deviceIDs(topologySelect(t, node07, node02IDs, 4, false).devices))
+	require.Equal(t, []int{0, 2}, deviceIDs(topologySelect(t, node05, node02IDs, 2, false).devices))
+	require.Equal(t, []int{0, 1, 2}, deviceIDs(topologySelect(t, node01Widths, node01IDs, 3, false).devices))
+}
+
+func TestTopologyPreferenceUnknownWidth(t *testing.T) {
+	// GPU 1 is x8 and GPU 2 reports no width (NOT_SUPPORTED): unknown ranks between full and
+	// narrow, after locality.
+	f := clusterNode(node02IDs, 1)
+	f.width[2] = [2]int{0, 0}
+	for _, c := range []struct {
+		free []int
+		want []int
+	}{
+		{[]int{0, 1, 2}, []int{0, 2}},    // unknown beats narrow
+		{[]int{0, 1, 2, 3}, []int{0, 3}}, // full beats unknown
+		{[]int{1, 2, 4}, []int{1, 2}},    // a narrow NODE pair beats an unknown SYS pair
+		{[]int{2, 4, 5}, []int{4, 5}},
+	} {
+		for _, packNUMA := range []bool{false, true} {
+			got := topologySelect(t, f, c.free, 2, packNUMA)
+			require.Equal(t, c.want, deviceIDs(got.devices), "free %v, packing %v", c.free, packNUMA)
+		}
+	}
+	// A GPU without an entry in the report has an unknown width too.
+	g := f.build()
+	delete(g.gpus, 2)
+	got := selectFreeDevices(selection([]int{0, 1, 2}, node02IDs, g), 2, deviceSelection{preferTopology: true})
+	require.Equal(t, []int{0, 2}, deviceIDs(got.devices))
+
+	// Widths alone rank nothing: with every link unknown, the set is not ranked.
+	f.level = func(int, int) aproto.GPULinkLevel { return "" }
+	f.p2p = allP2P(p2pUnknown)
+	got = topologySelect(t, f, intRange(0, 4), 2, false)
+	require.Nil(t, got.devices)
+	require.Equal(t, "every pair of free GPUs unknown", got.unranked)
+}
+
+func TestNUMAPackingIgnoresWidth(t *testing.T) {
+	// For every free set and n, plain packing chooses the same GPUs with and without the widths.
+	for name, f := range map[string]topologyFixture{
+		"node01": node01Widths, "node05": node05, "node06": node06, "node07": node07,
+	} {
+		noWidths := f
+		noWidths.width = nil
+		g, gNoWidths := f.build(), noWidths.build()
+		forEachNonEmptySubset(f.ids, func(free []int) {
+			for n := 1; n <= len(free); n++ {
+				got := selectFreeDevices(selection(free, f.ids, g), n, packing)
+				want := selectFreeDevices(selection(free, f.ids, gNoWidths), n, packing)
+				require.Equal(t, deviceIDs(want.devices), deviceIDs(got.devices), "%s, free %v, n=%d", name, free, n)
+				require.Equal(t, want.rule, got.rule)
+			}
+		})
+	}
+}
+
 func forEachNonEmptySubset(ids []int, fn func([]int)) {
 	for mask := 1; mask < 1<<len(ids); mask++ {
 		var set []int
@@ -653,22 +848,27 @@ func TestTopologyPreferenceSubsetCap(t *testing.T) {
 }
 
 func TestTopologyPreferenceEqualsBruteForce(t *testing.T) {
-	// Over random topologies (levels, P2P, NVLinks, NUMA nodes, GPUs in error), "soft" gives the
-	// argmin of: GPUs in error, the pair ranks worst first, then the packing key or the IDs.
+	// Over random topologies (levels, P2P, NVLinks, link widths, NUMA nodes, GPUs in error), "soft"
+	// gives the argmin of: GPUs in error, the pair ranks worst first, then the packing key or the
+	// IDs.
 	rng := rand.New(rand.NewSource(3)) //nolint:gosec
 	levels := []aproto.GPULinkLevel{
 		aproto.GPULinkLevelPIX, aproto.GPULinkLevelPXB, aproto.GPULinkLevelNode, aproto.GPULinkLevelSys, "",
 	}
 	caps := []aproto.GPUP2PCaps{p2pOK, p2pNotOK, p2pUnknown}
+	widths := [][2]int{x16, x16, x8, {0, 16}}
 	cases := 0
 	for trial := 0; trial < 1500; trial++ {
 		m := 2 + rng.Intn(7)
-		f := topologyFixture{ids: intRange(0, m), numa: map[int]int{}, nvmlError: map[int]bool{}}
+		f := topologyFixture{
+			ids: intRange(0, m), numa: map[int]int{}, nvmlError: map[int]bool{}, width: map[int][2]int{},
+		}
 		for id := 0; id < m; id++ {
 			if rng.Float64() >= 0.15 {
 				f.numa[id] = rng.Intn(3)
 			}
 			f.nvmlError[id] = rng.Float64() < 0.15
+			f.width[id] = widths[rng.Intn(len(widths))]
 		}
 		g := f.build()
 		for k := range g.pairs {
