@@ -878,8 +878,9 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
       .map((col) => ({
         ...col,
         minWidth:
-          MIN_SORT_FILTER_WIDTHS[col.dataIndex as TaskDashboardColumnName] ??
-          Math.min(col.defaultWidth, MIN_COLUMN_WIDTH),
+          (col.sorter || col.filterDropdown
+            ? MIN_SORT_FILTER_WIDTHS[col.dataIndex as TaskDashboardColumnName]
+            : undefined) ?? Math.min(col.defaultWidth, MIN_COLUMN_WIDTH),
       }));
   }, [
     columnFilters,

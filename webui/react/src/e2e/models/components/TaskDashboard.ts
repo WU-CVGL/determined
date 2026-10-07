@@ -57,7 +57,10 @@ class ChecklistFilter extends BaseOverlay {
     });
   }
 
-  readonly search = new BaseComponent({ parent: this, selector: 'input' });
+  readonly search = new BaseComponent({
+    parent: this,
+    selector: 'input[aria-label="table-filter-dropdown-input"]',
+  });
   readonly list = new BaseComponent({ parent: this, selector: '[role="listbox"]' });
   readonly all = new BaseComponent({ parent: this, selector: 'button:has-text("All")' });
   readonly none = new BaseComponent({ parent: this, selector: 'button:has-text("None")' });

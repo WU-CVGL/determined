@@ -602,7 +602,9 @@ describe('TaskDashboard', () => {
     await user.click(within(dropdown).getByRole('button', { name: 'OK' }));
     await waitFor(() => expect(screen.getByText('bert-finetune')).toBeInTheDocument());
     await waitFor(() => expect(stored().type).toBeUndefined());
-    expect(screen.queryByText('Clear Filters', { exact: false })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText('Clear Filters', { exact: false })).not.toBeInTheDocument(),
+    );
   });
 
   it("applies the URL's kind filter, as /tasks/generic redirects with it", async () => {
@@ -834,7 +836,9 @@ describe('TaskDashboard', () => {
     await waitFor(() => expect(stored().state).toBeUndefined());
     expect(stored().type).toBeUndefined();
     expect(stored()).toMatchObject({ columnWidths: NEW_WIDTHS, sortKey: 'name' });
-    expect(screen.queryByText('Clear Filters', { exact: false })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText('Clear Filters', { exact: false })).not.toBeInTheDocument(),
+    );
   }, 30_000);
 
   it('shows the slots each run asks for between Resource Pool and Started', async () => {
@@ -1006,7 +1010,7 @@ describe('TaskDashboard', () => {
     await resize('Name', 450);
     // Widths stored alone would be bound by place to the default columns of a later version.
     await waitFor(() =>
-      expect(saved('columnWidths')).toEqual([84, 100, 450, 120, 100, 230, 128, 90, 117, 117]),
+      expect(saved('columnWidths')).toEqual([84, 100, 450, 120, 115, 230, 130, 90, 117, 117]),
     );
     expect(saved('columns')).toEqual(NEW_COLUMNS);
     expect(storedWidths()).toMatchObject({ kind: 84, name: 450, slots: 90 });

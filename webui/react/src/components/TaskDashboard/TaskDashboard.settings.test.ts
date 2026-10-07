@@ -116,7 +116,13 @@ describe('normalizedLayout', () => {
       normalized({ columns: ['name', 'resourcePool', 'id', 'kind'], columnWidths: [250] }),
     ).toEqual({
       columns: ['name', 'resourcePool', 'slots', 'id', 'kind'],
-      columnWidths: [250, 128, DEFAULT_COLUMN_WIDTHS.slots, 100, DEFAULT_COLUMN_WIDTHS.kind],
+      columnWidths: [
+        250,
+        DEFAULT_COLUMN_WIDTHS.resourcePool,
+        DEFAULT_COLUMN_WIDTHS.slots,
+        100,
+        DEFAULT_COLUMN_WIDTHS.kind,
+      ],
     });
     expect(normalized({ columns: ['slots', 'name', 'id', 'kind'], columnWidths: [80] })).toEqual({
       columns: ['slots', 'name', 'id', 'kind'],

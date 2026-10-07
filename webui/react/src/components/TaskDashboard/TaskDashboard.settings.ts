@@ -49,11 +49,11 @@ export const DEFAULT_COLUMN_WIDTHS: Record<TaskDashboardColumnName, number> = {
   kind: 84,
   location: 230,
   name: 240,
-  resourcePool: 128,
+  resourcePool: 130,
   slots: 90,
   startTime: 117,
   state: 120,
-  user: 100,
+  user: 115,
 };
 
 /** The narrowest a column can be resized to, below its default width. */
@@ -66,13 +66,13 @@ export const MIN_COLUMN_WIDTH = 60;
 export const MIN_SORT_FILTER_WIDTHS: Partial<Record<TaskDashboardColumnName, number>> = {
   endTime: 95,
   kind: 84,
-  location: 100,
+  location: 190,
   name: 80,
-  resourcePool: 120,
+  resourcePool: 130,
   slots: 90,
   startTime: 95,
   state: 105,
-  user: 100,
+  user: 115,
 };
 
 /**
