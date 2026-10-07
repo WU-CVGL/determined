@@ -247,7 +247,10 @@ export interface Agent {
   /** The agent drains: disabled, with its running work allowed to finish. */
   draining?: boolean;
   enabled?: boolean;
-  /** What the agent measured with NVML at its last start; unset for agents without GPUs. */
+  /**
+   * What the agent measured with NVML at its last start, and the GPUs' recent critical XIDs; unset
+   * for agents without GPUs.
+   */
   gpuTopology?: Api.V1GpuTopology;
   id: string;
   registeredTime: number;

@@ -1,3 +1,4 @@
+import dayjs from 'dayjs';
 import { getStateColorCssVar } from 'hew/Theme';
 
 import {
@@ -382,3 +383,28 @@ export const nvmlErrorsText = (topo: V1GpuTopology, gpu: V1GpuInfo): string => {
   if (topo.unknownReason) return 'not collected';
   return gpu.nvmlError || 'none';
 };
+
+/**
+ * The length of the master's XID query windows. A recent XID's first and last observed times are
+ * the ends of such windows.
+ */
+export const GPU_XID_WINDOW_MINUTES = 5;
+
+/** A query window of a recent XID by its end, in local time, for example "2026-10-07, 10:05–10:10". */
+export const xidWindowText = (end: Date | string): string => {
+  const e = dayjs(end);
+  const start = e.subtract(GPU_XID_WINDOW_MINUTES, 'minute');
+  return `${start.format('YYYY-MM-DD, HH:mm')}–${e.format('HH:mm')}`;
+};
+
+/**
+ * A GPU's recent critical XIDs, one text per code with its first and last observed windows, for
+ * example "79 (2026-10-07, 10:05–10:10 to 2026-10-07, 10:20–10:25)"; one window when they are the
+ * same. Empty without XIDs.
+ */
+export const recentXidTexts = (gpu: V1GpuInfo): string[] =>
+  (gpu.recentXids ?? []).map((x) => {
+    const first = xidWindowText(x.firstObserved);
+    const last = xidWindowText(x.lastObserved);
+    return first === last ? `${x.xid} (${first})` : `${x.xid} (${first} to ${last})`;
+  });
