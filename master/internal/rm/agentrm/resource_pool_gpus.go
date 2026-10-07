@@ -56,18 +56,13 @@ func (r *gpuXIDReader) recent(now time.Time) map[string]bool {
 	return out
 }
 
-// gpuPolicy is a pool's GPU selection for one scheduling pass, with one aged XID result for the
-// whole pass. The scheduler's simulation and the pass's live reservations use the same one, and no
-// reservation reads the XIDs under the agent's lock. A ranked selection (NUMA packing, "soft" when
-// it ranks, "strong") then chooses the same devices in both for the same placements in the same
-// order while every earlier placement on the agent in the pass ranked too; map order gives no such
-// guarantee (see deepCopy). Fits use counts only, so a difference never changes which tasks fit,
-// except for "strong", and never changes the agent a task gets, except for "strong" and for "soft"
-// under NUMA packing (preferOneNUMANode). Its zero value takes a plain task's devices in map order.
+// gpuPolicy is a pool's GPU selection for one scheduling pass: one policy and one aged XID set
+// serve the pass's simulation and its live reservations, and no reservation reads the XIDs under
+// the agent's lock. deepCopy says when the two agree. Its zero value takes a plain task's devices
+// in map order.
 type gpuPolicy struct {
 	// packNUMA packs every task's GPUs by NUMA node: fitting_policy best, numa_packing not false.
-	// It is also the gate of the agent choice of "soft" (preferOneNUMANode), which every findFits
-	// of the pass reads.
+	// It is also the gate of the agent choice of "soft" (preferOneNUMANode).
 	packNUMA bool
 	// xids holds the UUIDs of GPUs with a recent critical XID.
 	xids map[string]bool
@@ -105,8 +100,7 @@ func strongTopology(req *sproto.AllocateRequest) bool {
 // node has its slots free (holdsOnOneNUMANode) before the others: prefer_gpu_topology "soft" with 2
 // or more slots, in a pool that packs GPUs by NUMA node (packNUMA). An agent with an unknown
 // topology holds none, so it is with the agents that would split the task; the fitting score
-// decides within each group. It needs packing: only then do the scheduler's copies and the live
-// agents keep the same free GPUs on each NUMA node, which the order reads (see deepCopy).
+// decides within each group. deepCopy says when the simulation and the reservations agree on it.
 func preferOneNUMANode(req *sproto.AllocateRequest, packNUMA bool) bool {
 	return packNUMA && req.FittingRequirements.GPUTopology == expconf.GPUTopologySoft && req.SlotsNeeded >= 2
 }
