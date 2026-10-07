@@ -18,6 +18,8 @@ interface Props extends FilterDropdownProps {
    * closes it without applying. Ticking nothing or every option applies no filter (no keys).
    */
   checklist?: boolean;
+  /** The tick list's name, for assistive technology. */
+  label?: string;
   multiple?: boolean;
   onFilter?: (keys: string[]) => void;
   onReset?: () => void;
@@ -41,6 +43,7 @@ const TableFilterDropdown: React.FC<Props> = ({
   close,
   confirm,
   filters,
+  label,
   multiple,
   onFilter,
   onReset,
@@ -175,6 +178,7 @@ const TableFilterDropdown: React.FC<Props> = ({
       const isJSX = typeof data[index].text !== 'string';
       if (checklist) {
         if (index === activeIndex) classes.push(css.active);
+        // The option's title shows a name cut short: its children take no pointer events.
         return (
           <div
             aria-selected={isSelected}
@@ -183,11 +187,12 @@ const TableFilterDropdown: React.FC<Props> = ({
             id={`${listId}-${index}`}
             role="option"
             style={style}
+            title={isJSX ? undefined : data[index].text}
             onClick={handleOptionClick}>
             <span aria-hidden className={css.checkbox}>
               <Checkbox checked={isSelected} tabIndex={-1} />
             </span>
-            {isJSX ? data[index].text : <span title={data[index].text}>{data[index].text}</span>}
+            {isJSX ? data[index].text : <span>{data[index].text}</span>}
           </div>
         );
       }
@@ -363,6 +368,7 @@ const TableFilterDropdown: React.FC<Props> = ({
           aria-activedescendant={
             filteredOptions.length > 0 ? `${listId}-${activeIndex}` : undefined
           }
+          aria-label={label}
           aria-multiselectable={multiple}
           className={css.list}
           ref={listRef}

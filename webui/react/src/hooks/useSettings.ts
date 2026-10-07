@@ -38,7 +38,8 @@ export type UseSettingsReturn<T> = {
   updateSettings: UpdateSettings<T>;
 };
 
-const settingsToQuery = <T>(config: SettingsConfig<T>, settings: Settings) => {
+/** The URL query of the settings: those the URL holds, without the defaults. */
+export const settingsToQuery = <T>(config: SettingsConfig<T>, settings: Settings): string => {
   const retVal = new URLSearchParams();
   const qParams = new URLSearchParams(window.location.search);
 

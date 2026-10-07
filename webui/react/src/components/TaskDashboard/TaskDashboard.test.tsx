@@ -658,7 +658,7 @@ describe('TaskDashboard', () => {
     expect(urlParams().getAll('state')).toEqual(['paused']);
   }, 30_000);
 
-  it('opens the saved view at a URL without its keys', async () => {
+  it('opens the saved view at a URL without its keys, and then shows it in the URL', async () => {
     storeBeforeLoad({ sortDesc: false, sortKey: 'name', state: ['ended'] });
     setup({}, '/jobs', { browser: true });
 
@@ -672,6 +672,40 @@ describe('TaskDashboard', () => {
       AFTER_LOAD,
     );
     expect(stored()).toMatchObject({ sortKey: 'name', state: ['ended'] });
+    // A copied link shows the same rows.
+    await waitFor(() => expect(urlParams().getAll('state')).toEqual(['ended']));
+    expect(urlParams().get('sortKey')).toBe('name');
+    expect(urlParams().get('sortDesc')).toBe('false');
+  }, 30_000);
+
+  it('keeps a plain URL plain with the default view', async () => {
+    setup({}, '/jobs', { browser: true });
+
+    expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+    await settingsLoaded();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
+    expect(window.location.search).toBe('');
+  });
+
+  it('shows the view in the URL again when the browser goes to the plain page', async () => {
+    setup({}, '/jobs?state=active', { browser: true });
+    await waitFor(() => expect(stored().state).toEqual(['active']), AFTER_LOAD);
+
+    // As after the sidebar's link to the page, or Back to it.
+    act(() => {
+      window.history.pushState(null, '', '/jobs');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+
+    await waitFor(() => expect(urlParams().getAll('state')).toEqual(['active']));
+    expect(stored().state).toEqual(['active']);
+    expect(lastListCall(getExperiments)?.states).toEqual([
+      'STATE_ACTIVE',
+      'STATE_STOPPING_COMPLETED',
+      'STATE_STOPPING_CANCELED',
+      'STATE_STOPPING_ERROR',
+      'STATE_STOPPING_KILLED',
+    ]);
   }, 30_000);
 
   it('turns what 0.41.0 saved into the filters of now, before the first fetch, and saves them once', async () => {
@@ -713,8 +747,17 @@ describe('TaskDashboard', () => {
     await settingsLoaded();
     expect(lastListCall(getGenericTasks)?.userIds).toBeUndefined();
 
+    const funnel = screen.getByRole('button', { name: 'Filter by owner' });
+    expect(funnel).toHaveAttribute('aria-haspopup', 'listbox');
+    expect(funnel).toHaveAttribute('aria-pressed', 'false');
     const dropdown = await openFilter('Filter by owner');
+    expect(within(dropdown).getByRole('listbox', { name: 'Owner' })).toBeInTheDocument();
     await waitFor(() => expect(options(dropdown)).toEqual(['me', 'alice', 'Zoe']));
+    // A name cut short shows in full on hover.
+    expect(within(dropdown).getByRole('option', { name: 'alice' })).toHaveAttribute(
+      'title',
+      'alice',
+    );
     await user.click(within(dropdown).getByRole('option', { name: 'me' }));
     await user.click(within(dropdown).getByRole('button', { name: 'OK' }));
 
@@ -724,6 +767,10 @@ describe('TaskDashboard', () => {
       users: [String(CURRENT_USER_ID)],
     });
     expect(header('Owner').className).toMatch(/headerFilterOn/);
+    expect(screen.getByRole('button', { name: 'Filter by owner' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
   });
 
   it('filters by slot counts and Multi-node, listing 0 to the most slots of any agent', async () => {
@@ -760,6 +807,37 @@ describe('TaskDashboard', () => {
     expect(screen.getByText('cpu-notebook')).toBeInTheDocument();
     await waitFor(() => expect(stored().slots).toEqual(['0', 'multi:8']));
   });
+
+  it('keeps the N of a saved Multi-node once the agent with the most slots has left', async () => {
+    vi.mocked(getAgents).mockResolvedValue([AGENT('a', 4)]);
+    clusterStore.fetchAgents();
+    storeBeforeLoad({ slots: ['multi:8'] });
+    setup();
+    expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+    await waitFor(() => expect(lastListCall(getExperiments)).toMatchObject({ slotsAbove: 8 }));
+
+    const dropdown = await openFilter('Filter by slots');
+    await waitFor(() =>
+      expect(options(dropdown)).toEqual([
+        '0',
+        '1',
+        '2',
+        '3',
+        '4',
+        '5',
+        '6',
+        '7',
+        '8',
+        'Multi-node',
+      ]),
+    );
+    expect(ticked(dropdown)).toEqual(['Multi-node']);
+    await user.click(within(dropdown).getByRole('option', { name: '0' }));
+    await user.click(within(dropdown).getByRole('button', { name: 'OK' }));
+
+    await waitFor(() => expect(stored().slots).toEqual(['0', 'multi:8']));
+    expect(lastListCall(getExperiments)).toMatchObject({ slots: [0], slotsAbove: 8 });
+  }, 30_000);
 
   it('opens a funnel with Enter without sorting, and goes round the filter with Tab', async () => {
     setup();
@@ -819,6 +897,23 @@ describe('TaskDashboard', () => {
     await user.click(within(dropdown).getByRole('button', { name: 'None' }));
     expect(ticked(dropdown)).toEqual([]);
   });
+
+  it('counts no filter that the page does not apply', async () => {
+    const project = setup({ projectId: 1 }, '/projects/1/jobs?type=shell');
+    expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+    await waitFor(() => expect(stored('jobs-dashboard-project-1').type).toEqual(['shell']));
+    expect(screen.queryByText('Clear Filters', { exact: false })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Filter by kind' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    project.unmount();
+
+    setup({ workspace: WORKSPACE }, '/workspaces/7/jobs?workspace=3');
+    expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+    await waitFor(() => expect(stored('jobs-dashboard-ws-7').workspace).toEqual([3]));
+    expect(screen.queryByText('Clear Filters', { exact: false })).not.toBeInTheDocument();
+  }, 30_000);
 
   it('clears the filters, and only them, with Clear Filters', async () => {
     storeBeforeLoad({

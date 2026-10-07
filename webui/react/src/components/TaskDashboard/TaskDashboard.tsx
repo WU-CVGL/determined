@@ -8,7 +8,7 @@ import { Loadable } from 'hew/utils/loadable';
 import _ from 'lodash';
 import { useObservable } from 'micro-observables';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 import Badge, { BadgeType } from 'components/Badge';
 import BatchActionConfirmModalComponent from 'components/BatchActionConfirmModal';
@@ -48,7 +48,7 @@ import {
 import { useLaunchAgain } from 'hooks/useLaunchAgain';
 import usePermissions from 'hooks/usePermissions';
 import usePolling from 'hooks/usePolling';
-import { useSettings } from 'hooks/useSettings';
+import { settingsToQuery, useSettings } from 'hooks/useSettings';
 import { paths } from 'routes/utils';
 import { killExperiment, killGenericTask, killTask } from 'services/api';
 import clusterStore from 'stores/cluster';
@@ -201,10 +201,15 @@ const RunLocation: React.FC<{
   );
 };
 
-/** A column's funnel: a button that Enter or Space opens without sorting the column. */
-const FilterButton: React.FC<{ label: string }> = ({ label }) => (
+/**
+ * A column's funnel: a button that Enter or Space opens without sorting the column. It is pressed
+ * while the column is filtered.
+ */
+const FilterButton: React.FC<{ filtered: boolean; label: string }> = ({ filtered, label }) => (
   <span
+    aria-haspopup="listbox"
     aria-label={label}
+    aria-pressed={filtered}
     className={css.funnel}
     role="button"
     tabIndex={0}
@@ -228,7 +233,10 @@ const ownersMeFirst = (users: DetailedUser[], me?: DetailedUser): DetailedUser[]
 ];
 
 interface ChecklistFilter {
-  label: string;
+  /** Whether the column's filter is on. */
+  filtered: boolean;
+  /** What the column filters by: "Owner". */
+  name: string;
   onFilter: (keys: string[]) => void;
   options: ColumnFilterItem[];
   searchable?: boolean;
@@ -238,17 +246,22 @@ interface ChecklistFilter {
 
 /** A column's tick list filter. */
 const checklistFilter = ({
-  label,
+  filtered,
+  name,
   onFilter,
   options,
   searchable,
   ticked,
   width,
-}: ChecklistFilter): Pick<ColumnDef<RunRow>, 'filterDropdown' | 'filterIcon' | 'filters'> => ({
+}: ChecklistFilter): Pick<
+  ColumnDef<RunRow>,
+  'filterDropdown' | 'filterIcon' | 'filters' | 'isFiltered'
+> => ({
   filterDropdown: (filterProps: FilterDropdownProps) => (
     <TableFilterDropdown
       {...filterProps}
       checklist
+      label={name}
       multiple
       searchable={searchable}
       values={ticked}
@@ -256,8 +269,9 @@ const checklistFilter = ({
       onFilter={onFilter}
     />
   ),
-  filterIcon: <FilterButton label={label} />,
+  filterIcon: <FilterButton filtered={filtered} label={`Filter by ${name.toLowerCase()}`} />,
   filters: options,
+  isFiltered: () => filtered,
 });
 
 /**
@@ -326,6 +340,7 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
   const requestedProjects = useRef(new Set<number>());
   const appliedSearch = useRef<string>();
   const location = useLocation();
+  const navigate = useNavigate();
   const currentUserId = currentUser?.id;
 
   // The filters, cleaned of what 0.41.0 saved before the first fetch.
@@ -345,7 +360,9 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
    * A URL with any filter, sort or page key sets the whole view, once: on the first load, and after
    * an in-app link or redirect such as /tasks/generic, which the settings read only on the first
    * page load. The URL's view and the clean-up of the saved filters go in one update. Each update
-   * writes the URL, whose view is then the one of the settings.
+   * writes the URL, whose view is then the one of the settings. A URL without any of the keys, as
+   * the app's links to the page are, opens the saved view and then shows it, so that a copied link
+   * shows the same rows.
    */
   useEffect(() => {
     // Settings that are still loading would drop the update; "Mine" needs the signed-in user.
@@ -353,10 +370,29 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
     let wanted: Partial<Settings> = { ...cleanup };
     if (location.search !== appliedSearch.current) {
       appliedSearch.current = location.search;
-      wanted = { ...wanted, ...urlView(location.search, currentUserId) };
+      const view = urlView(location.search, currentUserId);
+      if (view) {
+        wanted = { ...wanted, ...view };
+      } else {
+        const query = settingsToQuery(config, { ...settings, ...written.current, ...wanted });
+        const search = query ? `?${query}` : '';
+        if (search !== location.search) {
+          appliedSearch.current = search;
+          navigate({ search }, { replace: true });
+        }
+      }
     }
     writeSettings(wanted);
-  }, [cleanup, currentUserId, isLoading, location.search, settings, writeSettings]);
+  }, [
+    cleanup,
+    config,
+    currentUserId,
+    isLoading,
+    location.search,
+    navigate,
+    settings,
+    writeSettings,
+  ]);
 
   // Stored columns and widths, also from before the Slots column, get one width for each column.
   const layoutUpdate = useMemo(
@@ -381,12 +417,21 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
     () => (filters.type ?? []).filter((kind) => pageKinds.includes(kind)),
     [filters.type, pageKinds],
   );
-  const kinds = selectedKinds.length > 0 ? selectedKinds : pageKinds;
+  // Kinds of other pages, as a link can have, filter nothing here, and neither do all of the page's.
+  const kindFiltered = selectedKinds.length > 0 && selectedKinds.length < pageKinds.length;
+  const kinds = kindFiltered ? selectedKinds : pageKinds;
   const limit = Math.min(Math.max(settings.tableLimit || DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
   const offset = Math.max(settings.tableOffset || 0, 0);
   const sortKey = SORT_KEYS.includes(settings.sortKey) ? settings.sortKey : DEFAULT_SORT.key;
   const sortDesc = typeof settings.sortDesc === 'boolean' ? settings.sortDesc : DEFAULT_SORT.desc;
-  const maxSlots = useMemo(() => mostAgentSlots(agents), [agents]);
+  /*
+   * The Slots filter's N: the most slots of any agent, or the N that Multi-node was saved with if
+   * larger, so that an agent that leaves, or agents still loading, never widen a saved filter.
+   */
+  const maxSlots = useMemo(
+    () => Math.max(mostAgentSlots(agents), slotsQuery(filters.slots)?.above ?? 0),
+    [agents, filters.slots],
+  );
 
   // The settings the table shows: its sort arrows are those of the sort the page fetches.
   const tableSettings = useMemo(
@@ -475,7 +520,13 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
 
   /* Filters */
 
-  const filterCount = FILTER_KEYS.filter((key) => filters[key] !== undefined).length;
+  // The filters that the page applies: the workspaces only on the global page.
+  const workspaceFiltered = scope.type === 'global' && filters.workspace !== undefined;
+  const filterCount = FILTER_KEYS.filter((key) => {
+    if (key === 'type') return kindFiltered;
+    if (key === 'workspace') return workspaceFiltered;
+    return filters[key] !== undefined;
+  }).length;
 
   const clearFilters = useCallback(() => {
     // Not a reset of the settings, which would also drop the columns, their widths and the sort.
@@ -499,7 +550,8 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
     const ids = (keys: string[]) => (keys.length > 0 ? keys.map(Number) : undefined);
     return {
       kind: checklistFilter({
-        label: 'Filter by kind',
+        filtered: kindFiltered,
+        name: 'Kind',
         onFilter: (keys) => apply({ type: keys.length > 0 ? (keys as RunKind[]) : undefined }),
         options: pageKinds.map((kind) => ({
           text: (
@@ -514,7 +566,8 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         width: 180,
       }),
       location: checklistFilter({
-        label: 'Filter by workspace',
+        filtered: workspaceFiltered,
+        name: 'Workspace',
         onFilter: (keys) => apply({ workspace: ids(keys) }),
         options: workspaces.map((ws) => ({ text: ws.name, value: String(ws.id) })),
         searchable: true,
@@ -522,7 +575,8 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         width: 240,
       }),
       slots: checklistFilter({
-        label: 'Filter by slots',
+        filtered: filters.slots !== undefined,
+        name: 'Slots',
         onFilter: (keys) =>
           apply({ slots: keys.length > 0 ? savedSlots(maxSlots, keys) : undefined }),
         options: slotsOptions(maxSlots, filters.slots).map((option) => ({
@@ -533,14 +587,16 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         width: 160,
       }),
       state: checklistFilter({
-        label: 'Filter by state',
+        filtered: filters.state !== undefined,
+        name: 'State',
         onFilter: (keys) => apply({ state: keys.length > 0 ? (keys as StateGroup[]) : undefined }),
         options: STATE_GROUPS.map((group) => ({ text: stateGroupLabel[group], value: group })),
         ticked: filters.state ?? [],
         width: 160,
       }),
       user: checklistFilter({
-        label: 'Filter by owner',
+        filtered: filters.user !== undefined,
+        name: 'Owner',
         onFilter: (keys) => apply({ user: ids(keys) }),
         options: owners.map((user) => ({ text: getDisplayName(user), value: String(user.id) })),
         searchable: true,
@@ -548,7 +604,17 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         width: 220,
       }),
     };
-  }, [filters, maxSlots, owners, pageKinds, selectedKinds, workspaces, writeSettings]);
+  }, [
+    filters,
+    kindFiltered,
+    maxSlots,
+    owners,
+    pageKinds,
+    selectedKinds,
+    workspaceFiltered,
+    workspaces,
+    writeSettings,
+  ]);
 
   /* Actions */
 
@@ -709,7 +775,6 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         dataIndex: 'kind',
         defaultWidth: DEFAULT_COLUMN_WIDTHS.kind,
         ...columnFilters.kind,
-        isFiltered: () => selectedKinds.length > 0,
         // The sort key of the old task list's Type column.
         key: 'type',
         render: (_: unknown, row: RunRow) => (
@@ -777,7 +842,6 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         dataIndex: 'state',
         defaultWidth: DEFAULT_COLUMN_WIDTHS.state,
         ...columnFilters.state,
-        isFiltered: () => filters.state !== undefined,
         key: 'state',
         onCell: () => ({ 'data-testid': 'state' }),
         render: (_: unknown, row: RunRow) => {
@@ -797,7 +861,6 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         defaultWidth: DEFAULT_COLUMN_WIDTHS.user,
         ellipsis: true,
         ...columnFilters.user,
-        isFiltered: () => filters.user !== undefined,
         key: 'user',
         render: (_: unknown, row: RunRow) => {
           const user = users.find((u) => u.id === row.userId);
@@ -812,9 +875,7 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         dataIndex: 'location',
         defaultWidth: DEFAULT_COLUMN_WIDTHS.location,
         ellipsis: true,
-        ...(scope.type === 'global'
-          ? { ...columnFilters.location, isFiltered: () => filters.workspace !== undefined }
-          : {}),
+        ...(scope.type === 'global' ? columnFilters.location : {}),
         key: 'location',
         render: (_: unknown, row: RunRow) => (
           <RunLocation row={row} showWorkspace={scope.type === 'global'} workspaces={workspaces} />
@@ -836,7 +897,6 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         dataIndex: 'slots',
         defaultWidth: DEFAULT_COLUMN_WIDTHS.slots,
         ...columnFilters.slots,
-        isFiltered: () => filters.slots !== undefined,
         key: 'slots',
         onCell: () => ({ 'data-testid': 'slots-cell' }),
         render: (_: unknown, row: RunRow) => {
@@ -889,19 +949,7 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
             ? MIN_SORT_FILTER_WIDTHS[col.dataIndex as TaskDashboardColumnName]
             : undefined) ?? Math.min(col.defaultWidth, MIN_COLUMN_WIDTH),
       }));
-  }, [
-    columnFilters,
-    entityCopyMap,
-    filters.slots,
-    filters.state,
-    filters.user,
-    filters.workspace,
-    renderMenu,
-    scope.type,
-    selectedKinds.length,
-    users,
-    workspaces,
-  ]);
+  }, [columnFilters, entityCopyMap, renderMenu, scope.type, users, workspaces]);
 
   /* Layout */
 

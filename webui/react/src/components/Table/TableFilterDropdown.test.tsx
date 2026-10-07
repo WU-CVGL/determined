@@ -70,6 +70,14 @@ describe('TableFilterDropdown', () => {
       expect(confirm).toHaveBeenCalledTimes(2);
     });
 
+    it('names the list, and shows each option in full on hover', () => {
+      setup({ label: 'Owner' });
+
+      expect(screen.getByRole('listbox', { name: 'Owner' })).toBeInTheDocument();
+      // Not on the option's text, which takes no pointer events.
+      expect(screen.getByRole('option', { name: 'Gamma' })).toHaveAttribute('title', 'Gamma');
+    });
+
     it('ticks every option but the one of a Ctrl+click or a Cmd+click', async () => {
       setup();
 
