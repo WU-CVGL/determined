@@ -102,7 +102,13 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-const mocks = vi.hoisted(() => ({ jobs: [] as unknown[] }));
+const mocks = vi.hoisted(() => ({
+  /** Holds a reply of the list API until the promise it returns resolves. */
+  hold: undefined as
+    | ((params: { offset?: number; resourcePool?: string; states?: unknown }) => unknown)
+    | undefined,
+  jobs: [] as unknown[],
+}));
 const permissions = vi.hoisted(() => ({ canModify: true }));
 const launched = vi.hoisted(() => ({ response: undefined as CommandResponse | undefined }));
 
@@ -110,13 +116,15 @@ vi.mock('services/api', () => ({
   cancelExperiment: vi.fn(),
   getCommands: vi.fn(() => Promise.resolve([])),
   // The jobs in queue order, or the reverse, paged as the master pages them.
-  getJobQ: vi.fn(({ limit, offset, orderBy }) => {
+  getJobQ: vi.fn(async ({ limit, offset, orderBy, resourcePool, states }) => {
     const jobs = orderBy === 'ORDER_BY_DESC' ? [...mocks.jobs].reverse() : mocks.jobs;
     const start = offset ?? 0;
-    return Promise.resolve({
+    const reply = {
       jobs: jobs.slice(start, start + (limit || 100)),
       pagination: { total: jobs.length },
-    });
+    };
+    await mocks.hold?.({ offset, resourcePool, states });
+    return reply;
   }),
   getJupyterLab: vi.fn(),
   getJupyterLabs: vi.fn(() => Promise.resolve([])),
@@ -164,12 +172,14 @@ vi.mock('components/NtscLaunchModal', async () => {
   };
 });
 
-const pool = (schedulerType: Api.V1SchedulerType) =>
-  ({ name: 'default', schedulerType }) as unknown as ResourcePool;
+const pool = (schedulerType: Api.V1SchedulerType, name: string) =>
+  ({ name, schedulerType }) as unknown as ResourcePool;
 
 const setup = (
   schedulerType: Api.V1SchedulerType = Api.V1SchedulerType.PRIORITY,
   jobState: JobState = JobState.SCHEDULED,
+  /* A pool of its own tells the page's API calls from those of a page of an earlier test. */
+  poolName = 'default',
 ) =>
   render(
     <UIProvider theme={DefaultTheme.Light}>
@@ -178,7 +188,11 @@ const setup = (
           <SettingsProvider>
             <BrowserRouter>
               <ConfirmationProvider>
-                <JobQueue jobState={jobState} rpStats={[]} selectedRp={pool(schedulerType)} />
+                <JobQueue
+                  jobState={jobState}
+                  rpStats={[]}
+                  selectedRp={pool(schedulerType, poolName)}
+                />
               </ConfirmationProvider>
             </BrowserRouter>
           </SettingsProvider>
@@ -266,6 +280,13 @@ const activeJobs: Job[] = [
 
 const QUEUE_ORDER = ['q0', 'q1', 'q2', 'q3', 'q4', 'q5'];
 
+/* Twelve jobs, named in the reverse of the queue order: q0 is "n11", q11 is "n00". */
+const TWELVE_JOBS = Array.from({ length: 12 }, (_, index) =>
+  queued(index, { name: `n${String(11 - index).padStart(2, '0')}` }),
+);
+const QUEUE_ORDER_12 = TWELVE_JOBS.map((job) => job.jobId);
+const BY_NAME = [...QUEUE_ORDER_12].reverse();
+
 /** The job IDs of the rows, from the top. */
 const rowOrder = () =>
   Array.from(document.querySelectorAll('tbody tr[data-row-key]')).map((row) =>
@@ -288,13 +309,14 @@ const saved = (jobState: JobState, key: string): unknown => {
   return value === undefined ? undefined : JSON.parse(value);
 };
 
-/** The last listing of the tab's jobs: not the lookup of the first job of the pool. */
-const lastListing = () =>
+/** The listings of the tab's jobs in the pool: not the lookups of the first job of the pool. */
+const listings = (poolName = 'default') =>
   vi
     .mocked(getJobQ)
     .mock.calls.map(([params]) => params)
-    .filter((params) => params.states !== undefined)
-    .at(-1);
+    .filter((params) => params.states !== undefined && params.resourcePool === poolName);
+
+const lastListing = (poolName = 'default') => listings(poolName).at(-1);
 
 /** The largest limit the API takes, which the Active tab asks for to sort all its jobs. */
 const ALL_JOBS = 2 ** 31 - 1;
@@ -309,6 +331,7 @@ describe('JobQueue', () => {
     userSettings.reset();
     window.history.replaceState(null, '', '/');
     mocks.jobs = [shellJob];
+    mocks.hold = undefined;
     permissions.canModify = true;
     launched.response = {
       command: { ...runningShell, id: 'shell-2', state: CommandState.Queued },
@@ -609,23 +632,46 @@ describe('JobQueue', () => {
     });
 
     it('sorts all jobs of the tab, not the page, and starts a new sort on the first page', async () => {
-      // Twelve jobs, named in the reverse of the queue order: q0 is "n11", q11 is "n00".
-      mocks.jobs = Array.from({ length: 12 }, (_, index) =>
-        queued(index, { name: `n${String(11 - index).padStart(2, '0')}` }),
-      );
+      mocks.jobs = TWELVE_JOBS;
       storeSettings(JobState.SCHEDULED, { tableOffset: 10 });
-      setup();
+      setup(Api.V1SchedulerType.PRIORITY, JobState.SCHEDULED, 'paged');
       await waitFor(() => expect(rowOrder()).toEqual(['q10', 'q11']));
 
       await clickHeader('Job Name');
-      await waitFor(() =>
-        expect(rowOrder()).toEqual(['q11', 'q10', 'q9', 'q8', 'q7', 'q6', 'q5', 'q4', 'q3', 'q2']),
-      );
+      await waitFor(() => expect(rowOrder()).toEqual(BY_NAME.slice(0, 10)));
       await waitFor(() => expect(saved(JobState.SCHEDULED, 'tableOffset')).toBe(0));
 
+      // The jobs are all here: a page click fetches none.
+      const fetched = listings('paged').length;
       await userEvent.click(screen.getByTitle('2'));
       await waitFor(() => expect(rowOrder()).toEqual(['q1', 'q0']));
       expect(saved(JobState.SCHEDULED, 'sortKey')).toBe('name');
+      await waitFor(() => expect(saved(JobState.SCHEDULED, 'tableOffset')).toBe(10));
+      expect(listings('paged')).toHaveLength(fetched);
+    });
+
+    it('drops the reply of a fetch that a newer one replaced', async () => {
+      mocks.jobs = TWELVE_JOBS;
+      setup(Api.V1SchedulerType.PRIORITY, JobState.SCHEDULED, 'stale');
+      await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER_12.slice(0, 10)));
+
+      // The second page of the queue order arrives after the list of the sort that replaced it.
+      const secondPage = deferred<void>();
+      mocks.hold = ({ offset, resourcePool, states }) =>
+        states !== undefined && resourcePool === 'stale' && offset === 10
+          ? secondPage.promise
+          : undefined;
+      await userEvent.click(screen.getByTitle('2'));
+      await waitFor(() => expect(lastListing('stale')).toMatchObject({ limit: 10, offset: 10 }));
+      await clickHeader('Job Name');
+      await waitFor(() => expect(rowOrder()).toEqual(BY_NAME.slice(0, 10)));
+
+      await act(async () => {
+        secondPage.resolve();
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+      expect(rowOrder()).toEqual(BY_NAME.slice(0, 10));
+      expect(screen.getByTitle('2')).toBeInTheDocument();
     });
 
     it('keeps the sort for the next visit', async () => {

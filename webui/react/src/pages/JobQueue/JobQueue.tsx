@@ -135,6 +135,16 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
   const knownSortKey = sortedInBrowser || settings.sortKey === QUEUE_ORDER.sortKey;
   const sortKey = knownSortKey ? settings.sortKey : QUEUE_ORDER.sortKey;
   const sortDesc = knownSortKey ? settings.sortDesc : QUEUE_ORDER.sortDesc;
+  // A sort in the browser fetches all jobs and pages them here, so a page click fetches nothing.
+  const fetchLimit = sortedInBrowser ? ALL_JOBS : settings.tableLimit;
+  const fetchOffset = sortedInBrowser ? 0 : settings.tableOffset;
+  // The page the table shows, for the check that a sorted list still reaches it.
+  const tableOffset = useRef(settings.tableOffset);
+  useEffect(() => {
+    tableOffset.current = settings.tableOffset;
+  }, [settings.tableOffset]);
+  // The latest fetch of the jobs: a reply to an earlier one, for another sort or page, is stale.
+  const latestFetch = useRef(0);
 
   useEffect(() => {
     isMounted.current = true;
@@ -190,14 +200,13 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
   }, []);
 
   const fetchJobsTable = useCallback(async () => {
-    if (!settings) return;
-
+    const fetchId = ++latestFetch.current;
     try {
       const orderBy = !sortedInBrowser && sortDesc ? 'ORDER_BY_DESC' : 'ORDER_BY_ASC';
       const jobs = await getJobQ(
         {
-          limit: sortedInBrowser ? ALL_JOBS : settings.tableLimit,
-          offset: sortedInBrowser ? 0 : settings.tableOffset,
+          limit: fetchLimit,
+          offset: fetchOffset,
           orderBy,
           resourcePool: selectedRp.name,
           states: jobState ? [jobState] : undefined,
@@ -214,6 +223,7 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
         { signal: canceler.signal },
       );
       const firstJob = firstJobResp.jobs[0];
+      if (fetchId !== latestFetch.current) return;
 
       // Process jobs response.
       if (firstJob && !_.isEqual(firstJob, topJob)) setTopJob(firstJob);
@@ -221,14 +231,15 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
       setJobs(newJobs);
       if (sortedInBrowser) {
         setTotal(newJobs.length);
-        if (settings.tableOffset > 0 && settings.tableOffset >= newJobs.length) {
+        if (tableOffset.current > 0 && tableOffset.current >= newJobs.length) {
           updateSettings({ tableOffset: 0 });
         }
       } else if (jobs.pagination.total !== undefined) {
         setTotal(jobs.pagination.total);
       }
     } catch (e) {
-      if ((e as DetError)?.publicMessage === 'offset out of bounds' && settings.tableOffset !== 0) {
+      if (fetchId !== latestFetch.current) return;
+      if ((e as DetError)?.publicMessage === 'offset out of bounds' && fetchOffset !== 0) {
         updateSettings({ tableOffset: 0 });
         return;
       }
@@ -239,12 +250,13 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
         type: ErrorType.Server,
       });
     } finally {
-      setPageState((cur) => ({ ...cur, isLoading: false }));
+      if (fetchId === latestFetch.current) setPageState((cur) => ({ ...cur, isLoading: false }));
     }
   }, [
     canceler.signal,
+    fetchLimit,
+    fetchOffset,
     selectedRp.name,
-    settings,
     jobState,
     topJob,
     updateSettings,
