@@ -7912,6 +7912,7 @@ class v1Job(Printable):
     """Job represents a user submitted work that is not in a terminal
     state.
     """
+    placement: "typing.Optional[typing.Sequence[v1JobPlacement]]" = None
     priority: "typing.Optional[int]" = None
     progress: "typing.Optional[float]" = None
     summary: "typing.Optional[v1JobSummary]" = None
@@ -7932,6 +7933,7 @@ class v1Job(Printable):
         type: "jobv1Type",
         username: str,
         workspaceId: int,
+        placement: "typing.Union[typing.Sequence[v1JobPlacement], None, Unset]" = _unset,
         priority: "typing.Union[int, None, Unset]" = _unset,
         progress: "typing.Union[float, None, Unset]" = _unset,
         summary: "typing.Union[v1JobSummary, None, Unset]" = _unset,
@@ -7949,6 +7951,8 @@ class v1Job(Printable):
         self.type = type
         self.username = username
         self.workspaceId = workspaceId
+        if not isinstance(placement, Unset):
+            self.placement = placement
         if not isinstance(priority, Unset):
             self.priority = priority
         if not isinstance(progress, Unset):
@@ -7975,6 +7979,8 @@ class v1Job(Printable):
             "username": obj["username"],
             "workspaceId": obj["workspaceId"],
         }
+        if "placement" in obj:
+            kwargs["placement"] = [v1JobPlacement.from_json(x) for x in obj["placement"]] if obj["placement"] is not None else None
         if "priority" in obj:
             kwargs["priority"] = obj["priority"]
         if "progress" in obj:
@@ -8001,6 +8007,8 @@ class v1Job(Printable):
             "username": self.username,
             "workspaceId": self.workspaceId,
         }
+        if not omit_unset or "placement" in vars(self):
+            out["placement"] = None if self.placement is None else [x.to_json(omit_unset) for x in self.placement]
         if not omit_unset or "priority" in vars(self):
             out["priority"] = self.priority
         if not omit_unset or "progress" in vars(self):
@@ -8011,6 +8019,33 @@ class v1Job(Printable):
             out["userId"] = self.userId
         if not omit_unset or "weight" in vars(self):
             out["weight"] = None if self.weight is None else dump_float(self.weight)
+        return out
+
+class v1JobPlacement(Printable):
+    """The slots a job holds on one agent."""
+
+    def __init__(
+        self,
+        *,
+        agentId: str,
+        deviceIds: "typing.Sequence[int]",
+    ):
+        self.agentId = agentId
+        self.deviceIds = deviceIds
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1JobPlacement":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "agentId": obj["agentId"],
+            "deviceIds": obj["deviceIds"],
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "agentId": self.agentId,
+            "deviceIds": self.deviceIds,
+        }
         return out
 
 class v1JobSummary(Printable):

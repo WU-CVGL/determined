@@ -9,6 +9,8 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/determined-ai/determined/master/internal/sproto"
+	"github.com/determined-ai/determined/master/pkg/aproto"
+	"github.com/determined-ai/determined/master/pkg/device"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/proto/pkg/jobv1"
 )
@@ -40,6 +42,36 @@ func ReduceToJobQInfo(reqs AllocReqs) map[model.JobID]*sproto.RMJobInfo {
 		}
 	}
 	return isAdded
+}
+
+// AddPlacement adds to each job of the job queue the devices its allocated, user-visible requests
+// hold, by agent. A request that is queued or holds no device, such as a zero-slot one, adds
+// nothing; a job missing from the queue is skipped.
+func AddPlacement(jobQ sproto.AQueue, taskList *TaskList) {
+	for it := taskList.Iterator(); it.Next(); {
+		req := it.Value()
+		if !req.IsUserVisible {
+			continue
+		}
+		info, ok := jobQ[req.JobID]
+		if !ok || info == nil {
+			continue
+		}
+		allocated := taskList.Allocation(req.AllocationID)
+		if allocated == nil {
+			continue
+		}
+		for _, r := range allocated.Resources {
+			for agentID, devices := range r.Summary().AgentDevices {
+				for _, d := range devices {
+					if info.Placement == nil {
+						info.Placement = make(map[aproto.ID][]device.ID)
+					}
+					info.Placement[agentID] = append(info.Placement[agentID], d.ID)
+				}
+			}
+		}
+	}
 }
 
 // JobStats returns quick job-related stats about the TaskList.
