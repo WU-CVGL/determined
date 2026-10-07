@@ -155,8 +155,9 @@ func requireTaskResourceAllocations(t *testing.T, got []taskResourceAllocation, 
 	}
 }
 
-// A master restart sets the last cluster heartbeat as the start of every allocation that is still
-// queued and closes the ones no trial restores. Neither gets a container start from it.
+// A master restart closes the allocations no task restores with the last cluster heartbeat as their
+// start and end; one that never got resources gets no container start from it. An allocation that
+// is still queued keeps no start time.
 func TestTaskResourceAllocationsIgnoreRestartHeartbeat(t *testing.T) {
 	api, curUser, ctx := setupAPITest(t, nil)
 	_, trialTask := createTestTrial(t, api, curUser)
@@ -187,7 +188,7 @@ func TestTaskResourceAllocationsIgnoreRestartHeartbeat(t *testing.T) {
 	require.True(t, at(30).Equal(*closedRow.EndTime), "end %s", closedRow.EndTime)
 	pendingRow, err := db.AllocationByID(ctx, pending)
 	require.NoError(t, err)
-	require.True(t, at(30).Equal(*pendingRow.StartTime), "start %s", pendingRow.StartTime)
+	require.Nil(t, pendingRow.StartTime)
 	require.Nil(t, pendingRow.EndTime)
 
 	got, err := queryTaskResourceAllocations(ctx, string(taskID))
