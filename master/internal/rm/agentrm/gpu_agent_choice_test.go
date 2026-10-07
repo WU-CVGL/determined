@@ -285,6 +285,33 @@ func TestSoftAgentChoiceInAPass(t *testing.T) {
 	require.Contains(t, allocated, "four")
 	agent, _ := s.placed(t, "four")
 	require.Equal(t, aproto.ID("node03"), agent)
+
+	// The pass plans its later tasks where its simulation put the soft task. With packing, soft is
+	// on node04, so a 6-GPU task at the same priority fits on neither agent (node03 has 5 free,
+	// node04 3) and a 1-GPU task at a lower priority waits behind it. Without packing, soft is on
+	// node03, and both start.
+	for _, c := range []struct {
+		policy gpuPolicy
+		want   []string
+	}{
+		{gpuPolicy{packNUMA: true}, []string{"four"}},
+		{gpuPolicy{}, []string{"four", "six", "one"}},
+	} {
+		s := clusterPlan(t, c.policy,
+			strongTask{id: "four", slots: 4, priority: 42},
+			strongTask{id: "six", slots: 6, priority: 42},
+			strongTask{id: "one", slots: 1, priority: 50},
+		)
+		req, ok := s.rp.taskList.TaskByID("four")
+		require.True(t, ok)
+		req.FittingRequirements.GPUTopology = soft
+		allocated, _, _ := s.pass(t)
+		var got []string
+		for id := range allocated {
+			got = append(got, id)
+		}
+		require.ElementsMatch(t, c.want, got, "packing %v", c.policy.packNUMA)
+	}
 }
 
 func TestFairShareAgentChoiceUnchanged(t *testing.T) {
@@ -343,10 +370,11 @@ func TestFairShareAgentChoiceUnchanged(t *testing.T) {
 func TestAgentChoicePlanMatchesTheReservations(t *testing.T) {
 	// Over random agent states (busy, disabled and draining slots, unknown topologies, XIDs) and
 	// random mixes of soft, plain and strong tasks at two priorities, under best with packing on and
-	// no preemption: the live reservation of each request the pass plans, in the order the pass
-	// returns them and with the pass's policy, takes the agents and the GPUs that the simulation
-	// (addTaskToAgents) chooses on copies of the agents with that policy, and the agents end as the
-	// copies do.
+	// no preemption: the scheduler's own simulation step (trySchedulingPendingTasksInPriority), run
+	// for each request the pass plans, in the order the pass returns them, on copies of the agents
+	// with the pass's policy, chooses the agents and the GPUs that the live reservation of that
+	// request then takes, and the agents end as the copies do. Without preemption, the requests the
+	// pass returns are the first it places on its copies, in that order.
 	fixtures := []topologyFixture{node02, node01, node07, node05, clusterNode(node02IDs)}
 	moved, softPlanned, planned := 0, 0, 0
 	for trial := 0; trial < 500; trial++ {
@@ -413,36 +441,44 @@ func TestAgentChoicePlanMatchesTheReservations(t *testing.T) {
 		s.rp.mu.Unlock()
 		require.Empty(t, toRelease)
 
+		// The pass's scheduler with the pass's policy, as Schedule sets it.
+		simulation := *s.rp.scheduler.(*priorityScheduler)
+		simulation.gpus = policy
 		copies := deepCopyAgents(s.live)
-		simulation := priorityScheduler{gpus: policy}
 		planned += len(toAllocate)
 		for _, req := range toAllocate {
-			copyFits := fitsUnder(req, copies, s.rp.fittingMethod, policy.packNUMA)
-			require.NotEmpty(t, copyFits, "trial %d, request %s", trial, req.AllocationID)
+			before := map[aproto.ID][]device.ID{}
+			for id, state := range copies {
+				before[id] = freeDeviceIDs(state)
+			}
+			placed, _ := simulation.trySchedulingPendingTasksInPriority(
+				[]*sproto.AllocateRequest{req}, copies, s.rp.fittingMethod,
+			)
+			require.Len(t, placed, 1, "trial %d, request %s", trial, req.AllocationID)
+			chosen := map[aproto.ID][]int{}
+			for id, state := range copies {
+				if taken := idsMinus(before[id], freeDeviceIDs(state)); len(taken) > 0 {
+					chosen[id] = taken
+				}
+			}
+
+			// The live reservation, as allocateResources makes it.
 			fits := fitsUnder(req, s.live, s.rp.fittingMethod, policy.packNUMA)
-			require.Len(t, fits, len(copyFits), "trial %d, request %s", trial, req.AllocationID)
 			if len(fits) == 1 && preferOneNUMANode(req, policy.packNUMA) {
 				softPlanned++
 				if plain := fitsUnder(req, s.live, s.rp.fittingMethod, false); plain[0].Agent.id != fits[0].Agent.id {
 					moved++
 				}
 			}
-
-			before := map[aproto.ID][]device.ID{}
-			for _, fit := range copyFits {
-				before[fit.Agent.id] = freeDeviceIDs(fit.Agent)
-			}
-			require.True(t, simulation.addTaskToAgents(req, copyFits), "trial %d, request %s", trial, req.AllocationID)
-
 			sel := policy.selection(req, fits)
-			for i, fit := range fits {
-				require.Equal(t, copyFits[i].Agent.id, fit.Agent.id, "trial %d, request %s", trial, req.AllocationID)
-				chosen := idsMinus(before[fit.Agent.id], freeDeviceIDs(copyFits[i].Agent))
+			reserved := map[aproto.ID][]int{}
+			for _, fit := range fits {
 				res, err := fit.Agent.allocateFreeDevices(fit.Slots, cproto.NewID(), sel)
 				require.NoError(t, err, "trial %d, request %s", trial, req.AllocationID)
 				require.Empty(t, res.failure)
-				require.Equal(t, chosen, deviceIDs(res.devices), "trial %d, request %s", trial, req.AllocationID)
+				reserved[fit.Agent.id] = deviceIDs(res.devices)
 			}
+			require.Equal(t, chosen, reserved, "trial %d, request %s", trial, req.AllocationID)
 		}
 		for id, state := range s.live {
 			require.Equal(t, freeDeviceIDs(copies[id]), freeDeviceIDs(state), "trial %d, agent %s", trial, id)

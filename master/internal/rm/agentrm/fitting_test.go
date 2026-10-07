@@ -521,8 +521,8 @@ func TestCandidateListLessIsAStrictWeakOrder(t *testing.T) {
 	// Over random fitting states with ties in every key, Less is irreflexive and transitive, and so
 	// is being equivalent (neither less): a strict weak order, which sort.Sort needs. It is the
 	// lexicographic order of OneNUMANode (set first), the score (higher first), the hash distance
-	// (smaller first) and the agent ID; without OneNUMANode set, the order is the one before the
-	// key.
+	// (smaller first) and the agent ID; without OneNUMANode set, the order is by the score, the hash
+	// distance and the agent ID.
 	type key struct {
 		oneNode bool
 		score   float64

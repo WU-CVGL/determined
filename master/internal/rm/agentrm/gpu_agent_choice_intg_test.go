@@ -59,6 +59,10 @@ func TestLiveSoftAgentChoice(t *testing.T) {
 	// (free 1,2,3 | 4,5,6,7). Under best with packing, with the priority and the fair-share
 	// scheduler, a plain 4-GPU task gets node03 {2,5,6,7}, and soft and strong get node04
 	// {4,5,6,7}. With numa_packing false, soft gets node03, as a plain task does.
+	//
+	// Under worst, node03 runs a strong 4-GPU task on one NUMA node (4 of 8 GPUs free, all on the
+	// other node), and node04 with slots 0 and 4 disabled has 6 of 6 free (1,2,3 | 5,6,7): soft
+	// gets node04, which WorstFit picks, and its best set there.
 	type placement struct {
 		agent string
 		gpus  []int
@@ -95,15 +99,33 @@ func TestLiveSoftAgentChoice(t *testing.T) {
 			got := placement{names[resources.agent.id], deviceIDs(resources.devices)}
 			require.Equal(t, want, got, "%s, %q", name, pref)
 			if pref == expconf.GPUTopologySoft {
-				worst := "SYS"
+				pair := "SYS"
 				if got.agent == "node04" {
-					worst = "NODE"
+					pair = "NODE"
 				}
 				require.Equal(t, "GPU topology preference: agent "+string(resources.agent.id)+", slots "+
-					idList(resources.devices)+"; worst pair "+worst+", P2P usable",
+					idList(resources.devices)+"; worst pair "+pair+", P2P usable",
 					awaitTaskLog(t, sub, drainScheduleWait), name)
 			}
 			h.release(id)
 		}
 	}
+
+	layout := clusterNode(node02IDs)
+	h := newGPUHarness(t, layout, priorityScheduler42(worst, nil))
+	node04 := h.addGPUAgent(t, aproto.ID(h.pool+"-node04"), layout)
+	disableSlots(t, node04, 0, 4)
+	strongID, strongSub := h.requestWithID(t, 4, expconf.GPUTopologyStrong)
+	held := awaitAllocated(t, strongSub, drainScheduleWait)
+	require.NotNil(t, held)
+	require.Equal(t, h.agent.id, held.agent.id)
+	id, sub := h.requestWithID(t, 4, expconf.GPUTopologySoft)
+	resources := awaitAllocated(t, sub, drainScheduleWait)
+	require.NotNil(t, resources)
+	require.Equal(t, node04.id, resources.agent.id)
+	require.Equal(t, []int{1, 2, 3, 5}, deviceIDs(resources.devices))
+	require.Equal(t, "GPU topology preference: agent "+string(node04.id)+", slots 1,2,3,5; worst pair SYS, "+
+		"P2P usable", awaitTaskLog(t, sub, drainScheduleWait))
+	h.release(id)
+	h.release(strongID)
 }
