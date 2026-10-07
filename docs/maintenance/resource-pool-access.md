@@ -131,9 +131,10 @@ An experiment config policy whose invariant config sets
 experiment in its workspace, or in the cluster for a global policy, runs in
 that pool, also one that names another pool. When that pool is restricted, every
 experiment there is refused for users without a grant. The response to a
-restriction does not warn about such policies, and `det resource-pool access
-list` does not show them; `det config-policies describe experiment` with
-`--workspace-name`, or without it for the cluster, does.
+restriction does not warn about such policies, and neither `det resource-pool
+access list` nor the WebUI's **Pool Access** tab shows them;
+`det config-policies describe experiment` with `--workspace-name`, or without
+it for the cluster, does.
 
 ### Who may change workspace defaults
 
