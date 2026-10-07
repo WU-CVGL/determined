@@ -151,8 +151,9 @@ func TestValidateStrongAtSubmit(t *testing.T) {
 		require.EqualError(t, validate(h, 5, strong, singleNode),
 			"no NUMA node in pool "+h.pool+" has 5 slots; use soft")
 	}
-	require.EqualError(t, validate(h, 9, strong, false),
-		"request unfulfillable, please try requesting less slots")
+	// The single-node check refuses it with the cause of strong.
+	require.EqualError(t, validate(h, 9, strong, false), "no NUMA node in pool "+h.pool+" has 9 slots; use soft")
+	require.EqualError(t, validate(h, 9, "", true), "request unfulfillable, please try requesting less slots")
 
 	// Disabled slots count.
 	for _, id := range []device.ID{0, 1} {
@@ -168,4 +169,12 @@ func TestValidateStrongAtSubmit(t *testing.T) {
 	h = newDevicesHarness(t, gpuDeviceList(node02IDs...),
 		&gpuTopology{unknownReason: "agent 0.40.0 does not report GPU topology"}, priorityScheduler42(best, nil))
 	require.EqualError(t, validate(h, 2, strong, true), "no agent in pool "+h.pool+" reports NUMA nodes; use soft")
+
+	// A pool without agents: the single-node check refuses strong, as it refuses is_single_node.
+	h = newGPUHarness(t, node02, priorityScheduler42(best, nil))
+	require.NoError(t, h.rm.agentService.agents.Delete(h.agent.id))
+	require.EqualError(t, validate(h, 2, strong, false), "no agent in pool "+h.pool+" reports NUMA nodes; use soft")
+	require.EqualError(t, validate(h, 2, "", true), "request unfulfillable, please try requesting less slots")
+	require.NoError(t, validate(h, 2, expconf.GPUTopologySoft, false))
+	require.NoError(t, validate(h, 1, strong, false))
 }

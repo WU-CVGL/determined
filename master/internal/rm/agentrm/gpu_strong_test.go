@@ -73,6 +73,12 @@ func TestStrongExpectedChoices(t *testing.T) {
 			require.Equal(t, c.want, deviceIDs(got.devices), "%s, n=%d, packing %v", c.name, c.n, packNUMA)
 		}
 
+		// GPUs in error before width: node07's GPU 1 is narrow; with an NVML error on GPU 5, NUMA
+		// node 0's set has no GPU in error and one narrow GPU, node 1's one GPU in error.
+		inError := node07
+		inError.nvmlError = map[int]bool{5: true}
+		require.Equal(t, []int{0, 1, 2, 3}, deviceIDs(strongSelect(t, inError, node02IDs, 4, packNUMA, nil).devices))
+
 		// Then packing's rows 3 and 4: the fullest node that holds the set, then the node with
 		// fewer allocatable slots, then the lower node number. The node02 fixture reports no
 		// widths: every GPU is of unknown width.
@@ -502,11 +508,21 @@ func bruteForceStrong(g *gpuTopology, free, allocatable []int, n int, xids map[s
 				key[2]++
 			}
 		}
-		if best == nil || compareStrongNodeKeys(key, bestKey) < 0 {
+		if best == nil || lexLess(key, bestKey) {
 			best, bestKey = nodeBest, key
 		}
 	}
 	return best
+}
+
+// lexLess compares the rows of two node keys in order, independently of compareStrongNodeKeys.
+func lexLess(a, b [6]int) bool {
+	for i := range a {
+		if a[i] != b[i] {
+			return a[i] < b[i]
+		}
+	}
+	return false
 }
 
 func TestStrongEqualsBruteForce(t *testing.T) {

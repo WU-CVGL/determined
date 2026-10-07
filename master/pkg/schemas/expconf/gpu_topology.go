@@ -35,7 +35,10 @@ func (p GPUTopologyPreference) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON reads false as off, and "soft" and "strong"; it rejects true and anything else.
-// null leaves the value unchanged, as for other types.
+// null leaves a value unchanged. For null on the pointer fields that hold the value, encoding/json
+// does not call it but sets them to nil: in a command's config, an explicit null clears a
+// template's value; in an experiment's, schemas.Merge reads nil as unset, so a template's value
+// applies.
 func (p *GPUTopologyPreference) UnmarshalJSON(data []byte) error {
 	switch trimmed := bytes.TrimSpace(data); string(trimmed) {
 	case "null":

@@ -383,10 +383,14 @@ func (rp *resourcePool) schedulerTick() {
 				WithField("toRelease", len(toRelease)).
 				Debugf("scheduled")
 		}
+		// Whether the pass allocated or failed a reservation, under which an agent can have
+		// changed; a persistence failure changes no agent once rolled back.
 		reserved := false
 		for _, req := range toAllocate {
-			if rp.allocateResources(req) != noReservation {
+			switch rp.allocateResources(req) {
+			case reservationAllocated, reservationFailed:
 				reserved = true
+			case noReservation, persistenceFailed:
 			}
 		}
 		for _, aID := range toRelease {
@@ -406,9 +410,11 @@ type reservationOutcome int
 const (
 	// noReservation: the request has no fit, and nothing was reserved.
 	noReservation reservationOutcome = iota
-	// reservationFailed: a reservation or its persistence failed, and the request's reservations
-	// were rolled back.
+	// reservationFailed: a reservation failed, and the request's reservations were rolled back.
 	reservationFailed
+	// persistenceFailed: the request's reservations were made, persisting them failed, and they
+	// were rolled back.
+	persistenceFailed
 	// reservationAllocated: the request has its resources.
 	reservationAllocated
 )
@@ -481,12 +487,12 @@ func (rp *resourcePool) allocateResources(req *sproto.AllocateRequest) reservati
 		if err := rs.Persist(); err != nil {
 			rp.syslog.WithError(err).Error("persistence failure")
 			rollback = true
-			return reservationFailed
+			return persistenceFailed
 		}
 		if err := cr.persist(); err != nil {
 			rp.syslog.WithError(err).Error("persistence failure")
 			rollback = true
-			return reservationFailed
+			return persistenceFailed
 		}
 	}
 
@@ -625,12 +631,20 @@ func (rp *resourcePool) ValidateResources(
 
 		fulfillable = maxSlots >= msg.Slots
 	}
-	if !fulfillable || msg.GPUTopology != expconf.GPUTopologyStrong || msg.Slots < 2 {
+	if msg.GPUTopology != expconf.GPUTopologyStrong || msg.Slots < 2 {
 		return sproto.ValidateResourcesResponse{Fulfillable: fulfillable}
 	}
 
-	// prefer_gpu_topology "strong": refused when every agent has reported its topology and none has
-	// a NUMA node with the slots.
+	// prefer_gpu_topology "strong": refused when the single-node check fails (the pool has no agent,
+	// or none with the slots), or when every agent has reported its topology and none has a NUMA
+	// node with the slots. Each refusal gives one of strong's causes.
+	if !fulfillable {
+		cause := errStrongNoNUMANodeHolds(rp.config.PoolName, msg.Slots)
+		if rp.slotsPerInstance <= 0 && len(rp.agentStatesCache) == 0 {
+			cause = errStrongNoNUMANodes(rp.config.PoolName)
+		}
+		return sproto.ValidateResourcesResponse{Fulfillable: false, Reason: cause.Error()}
+	}
 	agents := rp.agentStatesCache
 	if agents == nil {
 		agents = rp.agentService.list(rp.config.PoolName)

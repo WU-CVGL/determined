@@ -18,6 +18,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/determined-ai/determined/master/internal/command"
+	"github.com/determined-ai/determined/master/internal/configpolicy"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/mocks"
 	"github.com/determined-ai/determined/master/internal/sproto"
@@ -25,6 +26,7 @@ import (
 	pkgCommand "github.com/determined-ai/determined/master/pkg/command"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
+	"github.com/determined-ai/determined/master/pkg/schemas"
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 )
@@ -199,4 +201,95 @@ resources:
 		Config: experiment(4), ValidateOnly: true,
 	})
 	require.NoError(t, err)
+
+	// An experiment whose template sets "strong".
+	plain := func(slots int) string {
+		conf := minExpConfig
+		conf.RawResources = &expconf.ResourcesConfig{
+			RawResourcePool: ptrs.Ptr("kubernetes"), RawSlotsPerTrial: ptrs.Ptr(slots),
+		}
+		bytes, err := yaml.Marshal(conf)
+		require.NoError(t, err)
+		return string(bytes)
+	}
+	expTemplate := "strong-exp-" + uuid.NewString()
+	_, err = db.Bun().NewRaw("INSERT INTO templates (name, config, workspace_id) VALUES (?, ?::jsonb, 1)",
+		expTemplate, `{"resources": {"prefer_gpu_topology": "strong"}}`).Exec(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = db.Bun().NewDelete().Table("templates").Where("name = ?", expTemplate).
+			Exec(context.Background())
+	})
+	_, err = api.CreateExperiment(ctx, &apiv1.CreateExperimentRequest{
+		Config: plain(5), Template: &expTemplate, ValidateOnly: true,
+	})
+	refused(err)
+	_, err = api.CreateExperiment(ctx, &apiv1.CreateExperimentRequest{
+		Config: plain(4), Template: &expTemplate, ValidateOnly: true,
+	})
+	require.NoError(t, err)
+
+	// An invariant config policy that forces "strong" and the pool: the check asks the pool the
+	// experiment runs in.
+	wsID, _ := db.RequireMockWorkspaceID(t, api.m.db, "")
+	projID, _ := db.RequireMockProjectID(t, api.m.db, wsID, false)
+	require.NoError(t, configpolicy.SetTaskConfigPolicies(ctx, &model.TaskConfigPolicies{
+		WorkspaceID: &wsID, WorkloadType: model.ExperimentType, LastUpdatedBy: curUser.ID,
+		InvariantConfig: ptrs.Ptr(`{"resources": {"prefer_gpu_topology": "strong", "resource_pool": "forced"}}`),
+	}))
+	_, err = api.CreateExperiment(ctx, &apiv1.CreateExperimentRequest{
+		Config: plain(5), ProjectId: int32(projID), ValidateOnly: true,
+	})
+	refused(err)
+	require.Contains(t, err.Error(), "no NUMA node in pool forced has 5 slots")
+	_, err = api.CreateExperiment(ctx, &apiv1.CreateExperimentRequest{
+		Config: plain(4), ProjectId: int32(projID), ValidateOnly: true,
+	})
+	require.NoError(t, err)
+	checks = strongChecks(seen())
+	require.Equal(t, sproto.ValidateResourcesRequest{
+		ResourcePool: "forced", Slots: 4, GPUTopology: expconf.GPUTopologyStrong,
+	}, checks[len(checks)-1])
+}
+
+// Continuing an experiment checks "strong" against the config it would run with, and so does
+// moving an experiment to another pool.
+func TestContinueAndMoveCheckStrongGPUTopology(t *testing.T) {
+	mockRM, seen := strongValidatingRM()
+	api, curUser, _ := setupAPITest(t, nil, mockRM)
+
+	owner := addContinueTestUser(t, false, 51300)
+	expID := endedTestExpInProject(t, api, owner, model.DefaultProjectID,
+		"resources: {resource_pool: kubernetes, slots_per_trial: 5, prefer_gpu_topology: strong}")
+	_, err := api.ContinueExperiment(owner.ctx, &apiv1.ContinueExperimentRequest{Id: int32(expID)})
+	require.Equal(t, codes.InvalidArgument, status.Code(err), "%v", err)
+	require.ErrorContains(t, err, "no NUMA node in pool kubernetes has 5 slots; use soft")
+
+	move := func(slots int) (*internalExperiment, error) {
+		active := schemas.WithDefaults(schemas.Merge(expconf.ExperimentConfig{
+			RawResources: &expconf.ResourcesConfig{
+				RawResourcePool:      ptrs.Ptr("kubernetes"),
+				RawSlotsPerTrial:     ptrs.Ptr(slots),
+				RawPreferGPUTopology: ptrs.Ptr(expconf.GPUTopologyStrong),
+			},
+		}, minExpConfig))
+		exp := createTestExpWithActiveConfig(t, api, curUser, model.DefaultProjectID, active)
+		e := &internalExperiment{
+			Experiment: exp, activeConfig: active, db: api.m.db, rm: api.m.rm,
+			trials: map[model.RequestID]*trial{},
+		}
+		return e, e.setRP("other")
+	}
+	e, err := move(5)
+	require.Equal(t, codes.InvalidArgument, status.Code(err), "%v", err)
+	require.ErrorContains(t, err, "no NUMA node in pool other has 5 slots; use soft")
+	require.Equal(t, "kubernetes", e.activeConfig.Resources().ResourcePool())
+	e, err = move(4)
+	require.NoError(t, err)
+	require.Equal(t, "other", e.activeConfig.Resources().ResourcePool())
+
+	checks := strongChecks(seen())
+	require.Equal(t, sproto.ValidateResourcesRequest{
+		ResourcePool: "other", Slots: 4, GPUTopology: expconf.GPUTopologyStrong,
+	}, checks[len(checks)-1])
 }

@@ -360,7 +360,7 @@
 - name: prefer_gpu_topology true (invalid)
   sanity_errors:
     http://determined.ai/schemas/expconf/v0/resources.json:
-      - "<config>.prefer_gpu_topology: prefer_gpu_topology must be false, \"soft\" or \"strong\""
+      - "<config>.prefer_gpu_topology: prefer_gpu_topology must be false, \"soft\" or \"strong\", not true"
   case:
     prefer_gpu_topology: true
 

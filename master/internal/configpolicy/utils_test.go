@@ -404,7 +404,7 @@ constraints:
 
 	t.Run("exp invariant config prefer_gpu_topology", func(t *testing.T) {
 		for value, want := range map[string]string{
-			"soft": "", "false": "", "strong": "", "true": `prefer_gpu_topology must be false, "soft" or "strong"`,
+			"soft": "", "false": "", "strong": "", "true": `prefer_gpu_topology must be false, "soft" or "strong", not true`,
 		} {
 			err := ValidateExperimentConfig(nil, `
 invariant_config:

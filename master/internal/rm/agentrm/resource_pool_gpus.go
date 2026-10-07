@@ -166,9 +166,10 @@ const (
 // checkStrongRequests runs after the reservations of a scheduling pass, on the agent states as the
 // pass left them (rp.agentStatesCache, refreshed for every agent the pass reserved on or failed
 // on). For each pending request with prefer_gpu_topology "strong":
-//   - if it fits and the pass reserved or failed a reservation, it asks for one more pass: the
+//   - if it fits and the pass allocated or failed a reservation, it asks for one more pass: the
 //     pass's plan and its reservations can differ (deepCopy), and an agent can change under a
-//     failed reservation. A pass that reserves nothing does not ask again, so passes converge;
+//     failed reservation. A pass that does neither, also one whose only failures are persistence
+//     failures, does not ask again, so passes converge;
 //   - if no agent of the pool can ever hold it (strongCannotFit), the request fails, once, with an
 //     InvalidResourcesRequestError whose cause is that type too, so a trial ends without restarts;
 //   - otherwise, if it does not fit, the task log says once that it waits.
@@ -242,7 +243,17 @@ func strongCannotFit(pool string, agents map[aproto.ID]*agentState, n int) error
 		}
 	}
 	if !known {
-		return fmt.Errorf("no agent in pool %s reports NUMA nodes; use soft", pool)
+		return errStrongNoNUMANodes(pool)
 	}
+	return errStrongNoNUMANodeHolds(pool, n)
+}
+
+// errStrongNoNUMANodes and errStrongNoNUMANodeHolds are why a task with prefer_gpu_topology
+// "strong" is refused or fails.
+func errStrongNoNUMANodes(pool string) error {
+	return fmt.Errorf("no agent in pool %s reports NUMA nodes; use soft", pool)
+}
+
+func errStrongNoNUMANodeHolds(pool string, n int) error {
 	return fmt.Errorf("no NUMA node in pool %s has %d slots; use soft", pool, n)
 }

@@ -61,10 +61,18 @@ func (m *Master) ResolveResources(
 func (m *Master) validateGPUTopology(
 	pool rm.ResourcePoolName, slots int, pref expconf.GPUTopologyPreference,
 ) error {
+	return validateGPUTopology(m.rm, pool, slots, pref)
+}
+
+// validateGPUTopology is Master.validateGPUTopology with a resource manager; moving an experiment
+// to another pool also calls it.
+func validateGPUTopology(
+	r rm.ResourceManager, pool rm.ResourcePoolName, slots int, pref expconf.GPUTopologyPreference,
+) error {
 	if pref != expconf.GPUTopologyStrong || slots < 2 {
 		return nil
 	}
-	if _, err := m.rm.ValidateResources(sproto.ValidateResourcesRequest{
+	if _, err := r.ValidateResources(sproto.ValidateResourcesRequest{
 		ResourcePool: pool.String(),
 		Slots:        slots,
 		GPUTopology:  pref,
