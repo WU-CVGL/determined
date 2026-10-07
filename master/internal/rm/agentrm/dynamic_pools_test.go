@@ -22,6 +22,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/rm/tasklist"
 	"github.com/determined-ai/determined/master/pkg/aproto"
 	"github.com/determined-ai/determined/master/pkg/model"
+	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 )
 
@@ -528,7 +529,6 @@ func TestSpecSnapshotReadableByLegacyDecoder(t *testing.T) {
 		`{"pool_name":"plain"}`,
 		`{"pool_name":"reconnect","description":"d","agent_reconnect_wait":"10m"}`,
 		`{"pool_name":"scheduled","scheduler":{"type":"priority","default_priority":10}}`,
-		`{"pool_name":"unpacked","scheduler":{"type":"priority","numa_packing":false}}`,
 		`{"pool_name":"overrides","task_container_defaults":{"shm_size_bytes":1024,
 			"registry_auth":{"username":"u","password":"p"},"add_capabilities":["CAP_X"]}}`,
 	} {
@@ -561,6 +561,10 @@ func TestSpecSnapshotReadableByLegacyDecoder(t *testing.T) {
 // Snapshots are decoded strictly by masters without spec support. A field added to one of these
 // types without omitempty, or renamed, makes those masters refuse to start, so a change here must
 // keep every snapshot readable by the oldest master that a cluster may roll back to.
+//
+// numa_packing is the exception: it is readable by those masters only while it is unset. A
+// snapshot that sets it, from a pool spec or, for a pool without a scheduler, from master.yaml's
+// scheduler, makes them refuse to start; the docs say to remove it before rolling back.
 func TestDynamicPoolJSONFieldSetsMatch0401(t *testing.T) {
 	fieldTags := func(value interface{}) []string {
 		typ := reflect.TypeOf(value)
@@ -699,4 +703,11 @@ func TestDynamicPoolSpecNUMAPacking(t *testing.T) {
 	_, err := manager.prepareDynamicPoolSpec(
 		json.RawMessage(`{"pool_name":"bad","scheduler":{"numa_packing":"no"}}`), masterDefaults)
 	require.Error(t, err)
+
+	// A pool without a scheduler copies the master's into its snapshot, numa_packing included.
+	manager.config.Scheduler = config.DefaultSchedulerConfig()
+	manager.config.Scheduler.NUMAPacking = ptrs.Ptr(false)
+	prepared, err := manager.prepareDynamicPoolSpec(json.RawMessage(`{"pool_name":"inherits"}`), masterDefaults)
+	require.NoError(t, err)
+	require.Contains(t, string(prepared.snapshot.Config), `"numa_packing":false`)
 }
