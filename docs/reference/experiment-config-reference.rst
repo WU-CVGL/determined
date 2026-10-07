@@ -1255,6 +1255,49 @@ shells, and commands, and cannot be modified.
 
    This option is currently not supported by Slurm RM.
 
+.. _exp-config-resources-prefer-gpu-topology:
+
+``prefer_gpu_topology``
+=======================
+
+Optional. Whether the agent resource manager chooses a task's GPUs by the :ref:`GPU topology
+<agent-gpu-topology>` that agents report: ``false`` or ``"soft"``. Unset is ``false``. ``true`` is
+not a value, and ``"strong"`` is not available yet; both are rejected. An explicit value, also
+``false``, wins over a template, and an invariant config policy can force ``"soft"``.
+
+With ``"soft"``, a task with 2 or more slots on one agent gets the set of free GPUs of that agent
+that ranks first:
+
+#. fewer GPUs in error: an NVML health call of the GPU failed at agent start, or the GPU has a
+   :ref:`recent critical XID <agent-gpu-xids>`;
+
+#. then its pairs of GPUs, worst pair first, each ranked:
+
+   -  P2P usable, with more NVLinks first;
+
+   -  P2P usable, by level: ``INTERNAL``, ``PIX``, ``PXB``, ``PHB``, ``NODE``, ``SYS``, unknown;
+
+   -  P2P not usable or unknown: one NUMA node (``INTERNAL`` to ``NODE``) before ``SYS`` before an
+      unknown level; then not usable before unknown P2P; then a pair on two PCIe switches before a
+      pair behind one (``PIX``), whose GPUs share one link to host memory;
+
+#. equal sets go to :ref:`NUMA packing <master-config-numa-packing>` in pools that pack, and to the
+   lowest IDs otherwise.
+
+NVLinks count only with usable P2P, link width is not used, and a pair the agent did not report is
+unknown. NVML's ``NODE`` and ``SYS`` are NUMA levels: they are one socket and two sockets only with
+NPS1. Without usable P2P, the ranking uses only the NUMA class and PCIe switches.
+
+The preference is soft: it never waits, never moves running tasks, and never changes the agent the
+scheduler picks or the number of slots. It has no effect on a task with fewer than 2 slots or on
+several agents, with the Kubernetes resource manager, when the agent's topology is unknown or every
+pair of its free GPUs is unknown, or with more than 20000 sets to compare; the task then gets its
+GPUs as without it. The agent measures its topology when it starts, so restart agents after a driver
+change.
+
+The task log gets one line for each such task, for example ``GPU topology preference: agent node02,
+slots 4,5,6,7; worst pair NODE, P2P usable``, or the reason the set was not ranked.
+
 .. _exp-resources-devices:
 
 ``devices``
