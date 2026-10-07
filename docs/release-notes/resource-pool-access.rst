@@ -6,9 +6,9 @@
    it; a restricted pool can be used only by administrators and the users granted access (``det
    resource-pool access``, or ``det rp access``). Access is checked when work is submitted,
    activated, unpaused, resumed, or continued, when a job is moved to another pool, and when a
-   workspace default pool is set. Pools a user cannot use are hidden from ``GET
-   /api/v1/resource-pools``. Administrators manage access with ``det rp access list``, ``set``,
-   ``grant``, and ``revoke``, or through ``/api/v1/resource-pool-access``. See
+   workspace default pool or the pool of an experiment config policy is set. Pools a user cannot use
+   are hidden from ``GET /api/v1/resource-pools``. Administrators manage access with ``det rp access
+   list``, ``set``, ``grant``, and ``revoke``, or through ``/api/v1/resource-pool-access``. See
    :doc:`/maintenance/resource-pool-access`.
 
 **Breaking Changes**

@@ -503,7 +503,7 @@ func (a *apiServer) PostWorkspace(
 
 	// The creator owns the new workspace, so only the pool check applies to its default pools.
 	for _, pool := range []string{req.DefaultComputePool, req.DefaultAuxPool} {
-		if err = canSetWorkspaceDefaultPool(ctx, *curUser, pool, ""); err != nil {
+		if err = canSetDefaultPool(ctx, *curUser, pool, ""); err != nil {
 			return nil, err
 		}
 	}
@@ -681,11 +681,12 @@ func (a *apiServer) deleteWorkspaceNamespaceBindings(ctx context.Context,
 	return nil
 }
 
-// canSetWorkspaceDefaultPool checks that user may make pool a new default pool of a workspace,
-// whose current default is current. A default decides the pool of every submission in the
-// workspace that omits one, so it may name a restricted pool only for those who may use it.
-// Unsetting a default and re-sending the current one are not checked.
-func canSetWorkspaceDefaultPool(ctx context.Context, user model.User, pool, current string) error {
+// canSetDefaultPool checks that user may make pool the new pool of a setting that chooses the pool
+// of other users' submissions, whose current pool is current: a default pool of a workspace, or the
+// pool that an experiment config policy pins (see canSetConfigPolicyPool). Such a setting may name
+// a restricted pool only for those who may use it. Unsetting it and re-sending the current pool are
+// not checked.
+func canSetDefaultPool(ctx context.Context, user model.User, pool, current string) error {
 	if pool == "" || pool == current {
 		return nil
 	}
@@ -763,7 +764,7 @@ func (a *apiServer) PatchWorkspace(
 				return nil, status.Error(codes.FailedPrecondition, "unable to bind a resource "+
 					"pool that does not exist or is not available to the workspace")
 			}
-			if err := canSetWorkspaceDefaultPool(ctx, currUser,
+			if err := canSetDefaultPool(ctx, currUser,
 				*req.Workspace.DefaultComputeResourcePool, currWorkspace.DefaultComputePool); err != nil {
 				return nil, err
 			}
@@ -775,7 +776,7 @@ func (a *apiServer) PatchWorkspace(
 				return nil, status.Error(codes.FailedPrecondition, "unable to bind a resource "+
 					"pool that does not exist or is not available to the workspace")
 			}
-			if err := canSetWorkspaceDefaultPool(ctx, currUser,
+			if err := canSetDefaultPool(ctx, currUser,
 				*req.Workspace.DefaultAuxResourcePool, currWorkspace.DefaultAuxPool); err != nil {
 				return nil, err
 			}
