@@ -732,6 +732,10 @@ func TestCloseOpenAllocations(t *testing.T) {
 	defer closeDB()
 	MustMigrateTestPostgres(t, pgDB, MigrationsFromDB)
 
+	_, err := pgDB.GetOrCreateClusterID("")
+	require.NoError(t, err)
+	require.NoError(t, pgDB.UpdateClusterHeartBeat(time.Now().UTC()))
+
 	db := SingleDB()
 
 	// Create test allocations, with a NULL end time.
@@ -747,7 +751,7 @@ func TestCloseOpenAllocations(t *testing.T) {
 	a2In.State = &terminated
 
 	// Close only a2In open allocations (filter out the rest).
-	err := CloseOpenAllocations(ctx, []model.AllocationID{a1In.AllocationID})
+	err = CloseOpenAllocations(ctx, []model.AllocationID{a1In.AllocationID})
 	require.NoError(t, err)
 
 	a1, err := AllocationByID(ctx, a1In.AllocationID)
