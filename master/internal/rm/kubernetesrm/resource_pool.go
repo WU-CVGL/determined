@@ -395,7 +395,6 @@ func (k *kubernetesResourcePool) assignResources(
 		k.syslog.WithField("allocation-id", req.AllocationID).Errorf("cannot find group for job %s", req.JobID)
 		return
 	}
-	k.slotsUsedPerGroup[group] += req.SlotsNeeded
 
 	var resources *k8sJobResource
 	if req.Restore {
@@ -426,6 +425,8 @@ func (k *kubernetesResourcePool) assignResources(
 		JobSubmissionTime: req.JobSubmissionTime,
 		Recovered:         req.Restore,
 	}
+	// Slots count once the request is admitted; a failed reattach is retried and adds none.
+	k.slotsUsedPerGroup[group] += req.SlotsNeeded
 	k.reqList.AddAllocationRaw(req.AllocationID, &assigned)
 	rmevents.Publish(req.AllocationID, assigned.Clone())
 
@@ -511,8 +512,8 @@ func (k *kubernetesResourcePool) resourcesReleased(
 	}
 
 	k.syslog.Infof("resources are released for %s", msg.AllocationID)
-	group := k.groups[req.JobID]
-	if group != nil {
+	// Only an admitted request holds slots of its group.
+	if group := k.groups[req.JobID]; group != nil && k.reqList.IsScheduled(msg.AllocationID) {
 		k.slotsUsedPerGroup[group] -= req.SlotsNeeded
 	}
 
