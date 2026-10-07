@@ -104,22 +104,23 @@ interface RowProps<RecordType> {
 }
 
 interface HeaderCellProps {
-  className: string;
-  columnName: string;
-  dragState: DragState;
-  dropLeftStyle: CSSProperties;
-  dropRightStyle: CSSProperties;
-  filterActive: boolean;
-  index: number;
-  interactiveColumns: boolean;
-  isResizing: boolean;
-  minWidth: number;
-  moveColumn: (source: number, destination: number) => void;
-  onResize: (e: DraggableEvent, data: DraggableData) => number;
-  onResizeStart: DraggableEventHandler;
-  onResizeStop: DraggableEventHandler;
-  title: unknown;
-  width: number;
+  'aria-sort'?: React.AriaAttributes['aria-sort'];
+  'className': string;
+  'columnName': string;
+  'dragState': DragState;
+  'dropLeftStyle': CSSProperties;
+  'dropRightStyle': CSSProperties;
+  'filterActive': boolean;
+  'index': number;
+  'interactiveColumns': boolean;
+  'isResizing': boolean;
+  'minWidth': number;
+  'moveColumn': (source: number, destination: number) => void;
+  'onResize': (e: DraggableEvent, data: DraggableData) => number;
+  'onResizeStart': DraggableEventHandler;
+  'onResizeStop': DraggableEventHandler;
+  'title': unknown;
+  'width': number;
 }
 
 interface CellProps {
@@ -221,6 +222,7 @@ const ResizeShadow: React.FC<{ display: 'none' | 'block'; x: number }> = React.m
 );
 
 const HeaderCell = ({
+  'aria-sort': ariaSort,
   onResize,
   onResizeStart,
   onResizeStop,
@@ -231,7 +233,7 @@ const HeaderCell = ({
   minWidth,
   moveColumn,
   index,
-  title: unusedTitleFromAntd,
+  'title': unusedTitleFromAntd,
   isResizing,
   interactiveColumns,
   dropRightStyle,
@@ -288,13 +290,21 @@ const HeaderCell = ({
   if (isOver) dropTargetClasses.push(css.dropTargetActive);
   if (filterActive) headerCellClasses.push(css.headerFilterOn);
 
-  if (!columnName) return <th className={className} {...props} />;
+  if (!columnName) return <th aria-sort={ariaSort} className={className} {...props} />;
 
   if (!interactiveColumns)
-    return <th className={headerCellClasses.join(' ')} data-testid={columnName} {...props} />;
+    return (
+      <th
+        aria-sort={ariaSort}
+        className={headerCellClasses.join(' ')}
+        data-testid={columnName}
+        {...props}
+      />
+    );
 
+  // The sort state belongs to the column header; the sorter's click and keys stay on the title.
   const tableCell = (
-    <th className={headerCellClasses.join(' ')}>
+    <th aria-sort={ariaSort} className={headerCellClasses.join(' ')}>
       <div
         className={`${className} ${css.columnDraggingDiv}`}
         data-testid={columnName}
