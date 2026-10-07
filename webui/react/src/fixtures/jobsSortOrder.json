@@ -3,8 +3,9 @@
     "The order of the Jobs page's sorts, which the master (Postgres for experiments, Go for generic tasks) and the browser must all give.",
     "Each sort: the key in the chosen direction, a missing key last in either direction, then the newest start, then the source's ID.",
     "Text (name, owner, pool): A-Z folded to a-z, compared by code point, then compared as is by code point.",
-    "owner is the owner's display name. A null or empty pool is missing; end null is missing.",
-    "stateGroup: PAUSED is paused; COMPLETED, CANCELED, ERROR and DELETE_FAILED are ended; any other state is active. Ascending is active, paused, ended.",
+    "owner is the owner's display name, or the username without one; null for a generic task without an owner, which is missing. A null or empty pool is missing; end null is missing.",
+    "stateGroup: PAUSED is paused; COMPLETED, CANCELED, ERROR and DELETE_FAILED are ended; any other state is active. Ascending is active, paused, ended. state null is a generic task without a state, which is missing.",
+    "slotsDefault: an experiment's config leaves resources.slots_per_trial out, which counts as 1. genericTaskOnly: only generic tasks have the row; experiments and commands leave it out, which keeps their order.",
     "start and end compare at full precision (microseconds), not milliseconds.",
     "Rows are listed in ID tie-break order: when two rows tie on the key and the start, the one listed first comes first. Give them IDs in that order (experiments: a later row has a lower ID; generic tasks: a later row has a higher task ID)."
   ],
@@ -97,7 +98,8 @@
       "slots": 1,
       "state": "ACTIVE",
       "start": "2026-01-01T00:01:30.000000Z",
-      "end": null
+      "end": null,
+      "slotsDefault": true
     },
     {
       "id": "r10",
@@ -228,6 +230,28 @@
       "state": "ACTIVE",
       "start": "2026-01-01T00:03:20.000002Z",
       "end": null
+    },
+    {
+      "id": "r23",
+      "name": "alpha",
+      "owner": null,
+      "pool": "a100",
+      "slots": 2,
+      "state": "ACTIVE",
+      "start": "2026-01-01T00:00:15.000000Z",
+      "end": null,
+      "genericTaskOnly": true
+    },
+    {
+      "id": "r24",
+      "name": "Zed",
+      "owner": "bob",
+      "pool": "",
+      "slots": 0,
+      "state": null,
+      "start": "2026-01-01T00:02:00.000000Z",
+      "end": "2026-01-01T00:10:00.000000Z",
+      "genericTaskOnly": true
     }
   ],
   "orders": {
@@ -242,6 +266,7 @@
         "r07",
         "r03",
         "r02",
+        "r23",
         "r01",
         "r04",
         "r05",
@@ -250,6 +275,7 @@
         "r19",
         "r20",
         "r12",
+        "r24",
         "r14",
         "r13",
         "r17",
@@ -263,12 +289,14 @@
         "r13",
         "r14",
         "r12",
+        "r24",
         "r19",
         "r20",
         "r22",
         "r21",
         "r05",
         "r04",
+        "r23",
         "r01",
         "r02",
         "r03",
@@ -300,11 +328,13 @@
         "r20",
         "r15",
         "r12",
+        "r24",
         "r08",
         "r03",
         "r21",
         "r13",
-        "r07"
+        "r07",
+        "r23"
       ],
       "descend": [
         "r21",
@@ -314,6 +344,7 @@
         "r20",
         "r15",
         "r12",
+        "r24",
         "r08",
         "r03",
         "r22",
@@ -328,7 +359,8 @@
         "r02",
         "r16",
         "r10",
-        "r04"
+        "r04",
+        "r23"
       ]
     },
     "pool": {
@@ -340,6 +372,7 @@
         "r10",
         "r09",
         "r03",
+        "r23",
         "r01",
         "r07",
         "r06",
@@ -353,6 +386,7 @@
         "r22",
         "r21",
         "r14",
+        "r24",
         "r05",
         "r04"
       ],
@@ -372,11 +406,13 @@
         "r10",
         "r09",
         "r03",
+        "r23",
         "r01",
         "r02",
         "r22",
         "r21",
         "r14",
+        "r24",
         "r05",
         "r04"
       ]
@@ -384,6 +420,7 @@
     "slots": {
       "ascend": [
         "r17",
+        "r24",
         "r06",
         "r05",
         "r19",
@@ -397,6 +434,7 @@
         "r12",
         "r07",
         "r02",
+        "r23",
         "r11",
         "r22",
         "r21",
@@ -419,6 +457,7 @@
         "r12",
         "r07",
         "r02",
+        "r23",
         "r19",
         "r20",
         "r14",
@@ -427,6 +466,7 @@
         "r09",
         "r01",
         "r17",
+        "r24",
         "r06",
         "r05"
       ]
@@ -443,6 +483,7 @@
         "r09",
         "r07",
         "r06",
+        "r23",
         "r01",
         "r16",
         "r10",
@@ -454,7 +495,8 @@
         "r08",
         "r05",
         "r04",
-        "r03"
+        "r03",
+        "r24"
       ],
       "descend": [
         "r21",
@@ -478,12 +520,15 @@
         "r09",
         "r07",
         "r06",
-        "r01"
+        "r23",
+        "r01",
+        "r24"
       ]
     },
     "start": {
       "ascend": [
         "r01",
+        "r23",
         "r02",
         "r03",
         "r04",
@@ -495,6 +540,7 @@
         "r10",
         "r11",
         "r12",
+        "r24",
         "r13",
         "r14",
         "r15",
@@ -518,6 +564,7 @@
         "r14",
         "r13",
         "r12",
+        "r24",
         "r11",
         "r10",
         "r09",
@@ -528,6 +575,7 @@
         "r04",
         "r03",
         "r02",
+        "r23",
         "r01"
       ]
     },
@@ -539,6 +587,7 @@
         "r08",
         "r14",
         "r12",
+        "r24",
         "r21",
         "r18",
         "r22",
@@ -554,6 +603,7 @@
         "r07",
         "r06",
         "r02",
+        "r23",
         "r01"
       ],
       "descend": [
@@ -561,6 +611,7 @@
         "r18",
         "r14",
         "r12",
+        "r24",
         "r08",
         "r04",
         "r03",
@@ -578,6 +629,7 @@
         "r07",
         "r06",
         "r02",
+        "r23",
         "r01"
       ]
     }

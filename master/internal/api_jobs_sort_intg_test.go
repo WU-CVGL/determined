@@ -62,23 +62,31 @@ func addJobsSortOwners(
 	t.Helper()
 	owners := map[string]model.UserID{}
 	for _, row := range fixture.Rows {
-		if _, ok := owners[row.Owner]; !ok {
-			owners[row.Owner] = addJobsSortUser(ctx, t, "jobsort-", ptrs.Ptr(row.Owner)).ID
+		if row.Owner == nil {
+			continue
+		}
+		if _, ok := owners[*row.Owner]; !ok {
+			owners[*row.Owner] = addJobsSortUser(ctx, t, "jobsort-", row.Owner).ID
 		}
 	}
 	return owners
 }
 
 // updateJobsSortExperiment sets an experiment's fields that the Jobs page sorts by. A nil pool
-// leaves resources.resource_pool out of the config.
+// leaves resources.resource_pool out of the config, and nil slots resources.slots_per_trial.
 func updateJobsSortExperiment(
 	ctx context.Context, t *testing.T, id int, owner model.UserID, name string, pool *string,
-	slotsPerTrial int, state string, start time.Time, end *time.Time,
+	slotsPerTrial *int, state string, start time.Time, end *time.Time,
 ) {
 	t.Helper()
-	config := "jsonb_set(jsonb_set(config, '{name}', to_jsonb(?::text)), " +
-		"'{resources,slots_per_trial}', to_jsonb(?::int))"
-	args := []any{name, slotsPerTrial}
+	config := "jsonb_set(config, '{name}', to_jsonb(?::text))"
+	args := []any{name}
+	if slotsPerTrial == nil {
+		config = "(" + config + ") #- '{resources,slots_per_trial}'"
+	} else {
+		config = "jsonb_set(" + config + ", '{resources,slots_per_trial}', to_jsonb(?::int))"
+		args = append(args, *slotsPerTrial)
+	}
 	if pool == nil {
 		config = "(" + config + ") #- '{resources,resource_pool}'"
 	} else {
@@ -132,9 +140,17 @@ func TestGetExperimentsJobsSortFixture(t *testing.T) {
 	labels := map[int32]string{}
 	for i := len(fixture.Rows) - 1; i >= 0; i-- {
 		row := fixture.Rows[i]
+		if row.GenericTaskOnly {
+			continue
+		}
+		slots := ptrs.Ptr(row.Slots)
+		if row.SlotsDefault {
+			require.Equal(t, 1, row.Slots, row.ID)
+			slots = nil
+		}
 		exp := createTestExpWithProjectID(t, api, curUser, projectID)
-		updateJobsSortExperiment(ctx, t, exp.ID, owners[row.Owner], row.Name, row.Pool, row.Slots,
-			row.State, row.Start, row.End)
+		updateJobsSortExperiment(ctx, t, exp.ID, owners[*row.Owner], row.Name, row.Pool, slots,
+			*row.State, row.Start, row.End)
 		labels[int32(exp.ID)] = row.ID
 	}
 
@@ -159,6 +175,7 @@ func TestGetExperimentsJobsSortFixture(t *testing.T) {
 			if orderBy == apiv1.OrderBy_ORDER_BY_DESC {
 				want = fixture.Orders[key].Descend
 			}
+			want = fixture.experimentOrder(want)
 			got, _ := list(sortBy, orderBy, 0, -1)
 			require.Equal(t, want, got, "%s %s", key, orderBy)
 
@@ -185,8 +202,16 @@ func TestGetGenericTasksJobsSortFixture(t *testing.T) {
 	labels := map[string]string{}
 	for i, row := range fixture.Rows {
 		taskID := model.TaskID(fmt.Sprintf("%s-%02d", prefix, i))
-		addJobsSortGenericTask(ctx, t, taskID, ptrs.Ptr(owners[row.Owner]), workspaceID, projectID,
-			row.Name, row.Pool, row.Slots, ptrs.Ptr(model.TaskState(row.State)), row.Start, row.End)
+		var owner *model.UserID
+		if row.Owner != nil {
+			owner = ptrs.Ptr(owners[*row.Owner])
+		}
+		var state *model.TaskState
+		if row.State != nil {
+			state = ptrs.Ptr(model.TaskState(*row.State))
+		}
+		addJobsSortGenericTask(ctx, t, taskID, owner, workspaceID, projectID, row.Name, row.Pool,
+			row.Slots, state, row.Start, row.End)
 		labels[taskID.String()] = row.ID
 	}
 
@@ -235,7 +260,7 @@ func TestGetGenericTasksJobsSortFixture(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, resp.Tasks, 1)
-	require.Equal(t, fixture.Rows[0].Owner, resp.Tasks[0].DisplayName)
+	require.Equal(t, *fixture.Rows[0].Owner, resp.Tasks[0].DisplayName)
 }
 
 func TestGetExperimentsJobsStateGroupsOwnersAndFilters(t *testing.T) {
@@ -254,7 +279,7 @@ func TestGetExperimentsJobsStateGroupsOwnersAndFilters(t *testing.T) {
 	add := func(projectID int, owner model.User, slots int, state string, start time.Time) int32 {
 		t.Helper()
 		exp := createTestExpWithProjectID(t, api, curUser, projectID)
-		updateJobsSortExperiment(ctx, t, exp.ID, owner.ID, "exp", ptrs.Ptr("default"), slots, state,
+		updateJobsSortExperiment(ctx, t, exp.ID, owner.ID, "exp", ptrs.Ptr("default"), &slots, state,
 			start, nil)
 		return int32(exp.ID)
 	}

@@ -23,12 +23,18 @@ const jobsSortFixturePath = "../../webui/react/src/fixtures/jobsSortOrder.json"
 
 // jobsSortFixtureRow is a run in the fixture. Rows are listed in ID tie-break order.
 type jobsSortFixtureRow struct {
-	ID    string     `json:"id"`
-	Name  string     `json:"name"`
-	Owner string     `json:"owner"`
-	Pool  *string    `json:"pool"`
-	Slots int        `json:"slots"`
-	State string     `json:"state"`
+	ID string `json:"id"`
+	// GenericTaskOnly rows are left out of the experiments.
+	GenericTaskOnly bool   `json:"genericTaskOnly"`
+	Name            string `json:"name"`
+	// Owner is the owner's display name; nil for a generic task without an owner.
+	Owner *string `json:"owner"`
+	Pool  *string `json:"pool"`
+	Slots int     `json:"slots"`
+	// SlotsDefault leaves resources.slots_per_trial out of an experiment's config.
+	SlotsDefault bool `json:"slotsDefault"`
+	// State is nil for a generic task without a state.
+	State *string    `json:"state"`
 	Start time.Time  `json:"start"`
 	End   *time.Time `json:"end"`
 }
@@ -41,6 +47,21 @@ type jobsSortFixtureOrder struct {
 type jobsSortFixture struct {
 	Rows   []jobsSortFixtureRow            `json:"rows"`
 	Orders map[string]jobsSortFixtureOrder `json:"orders"`
+}
+
+// experimentOrder is the order without the rows that only generic tasks have.
+func (f jobsSortFixture) experimentOrder(order []string) []string {
+	genericTaskOnly := map[string]bool{}
+	for _, row := range f.Rows {
+		genericTaskOnly[row.ID] = row.GenericTaskOnly
+	}
+	out := []string{}
+	for _, id := range order {
+		if !genericTaskOnly[id] {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // jobsSortFixtureGenericKeys are the generic task sorts of the fixture's keys.
@@ -81,14 +102,18 @@ func jobsSortFixtureGenericTasks(fixture jobsSortFixture) []*taskv1.GenericTask 
 	out := make([]*taskv1.GenericTask, 0, len(fixture.Rows))
 	for i, row := range fixture.Rows {
 		task := &taskv1.GenericTask{
-			TaskId:      fmt.Sprintf("task-%02d", i),
-			Name:        row.Name,
-			DisplayName: row.Owner,
-			Username:    fmt.Sprintf("user-%02d", i),
-			Slots:       int32(row.Slots),
-			State: taskv1.GenericTaskState(
-				taskv1.GenericTaskState_value[genericTaskStateProtoPrefix+row.State]),
+			TaskId:    fmt.Sprintf("task-%02d", i),
+			Name:      row.Name,
+			Slots:     int32(row.Slots),
 			StartTime: timestamppb.New(row.Start),
+		}
+		if row.Owner != nil {
+			task.DisplayName = *row.Owner
+			task.Username = fmt.Sprintf("user-%02d", i)
+		}
+		if row.State != nil {
+			task.State = taskv1.GenericTaskState(
+				taskv1.GenericTaskState_value[genericTaskStateProtoPrefix+*row.State])
 		}
 		if row.Pool != nil {
 			task.ResourcePool = *row.Pool
