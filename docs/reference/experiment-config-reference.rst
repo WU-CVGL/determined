@@ -1264,8 +1264,8 @@ Optional. Whether the agent resource manager chooses a task's GPUs by the :ref:`
 <agent-gpu-topology>` that agents report: ``false``, ``"soft"`` or ``"strong"``. Unset is ``false``.
 ``true`` is not a value and is rejected. An explicit value, also ``false``, wins over a template;
 for experiments, an invariant config policy can force a value. To force one with a template or a
-policy, use ``"soft"``: ``"strong"`` makes every task it applies to with 2 or more slots wait until
-one NUMA node has that many free GPUs.
+policy, use ``"soft"``: ``"strong"`` makes every task with 2 or more slots that it applies to wait
+until one NUMA node has that many free GPUs.
 
 With ``"soft"``, a task with 2 or more slots on one agent gets the set of free GPUs of that agent
 that ranks first:
