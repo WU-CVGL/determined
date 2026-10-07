@@ -96,7 +96,7 @@ const commandTaskFromJob = (job: FullJob, type: CommandType, task: TaskItem): Co
 const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
   const resourcesEnabled = useTaskResourcesEnabled();
   const { canModifyExperiment, canModifyWorkspaceNSC } = usePermissions();
-  const loadableUsers = useObservable(userStore.getUsers());
+  const loadableUsers = useObservable(useMemo(() => userStore.getUsers(), []));
   const users = useMemo(() => Loadable.getOrElse([], loadableUsers), [loadableUsers]);
   const [managingJob, setManagingJob] = useState<Job>();
   const [jobs, setJobs] = useState<Job[]>([]);
