@@ -314,9 +314,14 @@ func TestSoftAgentChoiceInAPass(t *testing.T) {
 	}
 }
 
-func TestFairShareAgentChoiceUnchanged(t *testing.T) {
-	// The fair-share scheduler checks only whether a request fits; the gate never changes which
-	// requests it starts or releases. The reservation then chooses the agent.
+func TestFairShareRequestsUnchangedByAgentPreference(t *testing.T) {
+	// Schedule()'s output for the same snapshot, the requests to allocate, is the same with the gate
+	// on and off: the fair-share scheduler only checks whether a request fits, so its demand, quotas
+	// and request list do not change. Every request is pending, so the empty release list is not a
+	// check of release behaviour. The reservations are not checked: they run one by one, and the
+	// agent choice changes the free counts that later requests see, so which requests actually
+	// start can change. With soft 4 then plain 6 on agents with 2+3 and 3+4 free, the preference
+	// puts the soft task on the 3+4 agent, and the plain 6 no longer fits.
 	for trial := 0; trial < 50; trial++ {
 		rng := rand.New(rand.NewSource(int64(trial))) //nolint:gosec
 		var tasks []*MockTask
@@ -331,7 +336,7 @@ func TestFairShareAgentChoiceUnchanged(t *testing.T) {
 			tasks = append(tasks, &MockTask{ID: id, SlotsNeeded: 1 + rng.Intn(5), Group: groups[i%3]})
 			modes[id] = []expconf.GPUTopologyPreference{"", soft, strong}[rng.Intn(3)]
 		}
-		var outcomes [2][2][]model.AllocationID
+		var outcomes [2][]model.AllocationID
 		for g, gate := range []bool{false, true} {
 			rp := setupResourcePool(t, nil, nil, tasks, groups, nil)
 			t.Cleanup(rp.stop)
@@ -357,13 +362,12 @@ func TestFairShareAgentChoiceUnchanged(t *testing.T) {
 			rp.gpuPolicy = gpuPolicy{packNUMA: gate}
 			toAllocate, toRelease := rp.scheduler.Schedule(rp)
 			rp.mu.Unlock()
+			require.Empty(t, toRelease, "trial %d", trial)
 			for _, req := range toAllocate {
-				outcomes[g][0] = append(outcomes[g][0], req.AllocationID)
+				outcomes[g] = append(outcomes[g], req.AllocationID)
 			}
-			outcomes[g][1] = toRelease
 		}
-		require.ElementsMatch(t, outcomes[0][0], outcomes[1][0], "trial %d", trial)
-		require.ElementsMatch(t, outcomes[0][1], outcomes[1][1], "trial %d", trial)
+		require.ElementsMatch(t, outcomes[0], outcomes[1], "trial %d", trial)
 	}
 }
 
