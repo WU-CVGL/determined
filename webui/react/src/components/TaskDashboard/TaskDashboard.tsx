@@ -329,10 +329,17 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
   const currentUserId = currentUser?.id;
 
   // The filters, cleaned of what 0.41.0 saved before the first fetch.
-  const { cleanup, filters, waitsForUser } = useMemo(
-    () => readFilters(settings, currentUserId),
-    [currentUserId, settings],
+  const read = useMemo(() => readFilters(settings, currentUserId), [currentUserId, settings]);
+  const { cleanup, waitsForUser } = read;
+  // The same filters keep their object, so that a change of another setting fetches nothing.
+  const filtersRef = useRef(read.filters);
+  const filters = useMemo(
+    () => (_.isEqual(read.filters, filtersRef.current) ? filtersRef.current : read.filters),
+    [read.filters],
   );
+  useEffect(() => {
+    filtersRef.current = filters;
+  }, [filters]);
 
   /*
    * A URL with any filter, sort or page key sets the whole view, once: on the first load, and after

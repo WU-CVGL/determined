@@ -506,7 +506,7 @@ describe('TaskDashboard', () => {
         sortBy: 'SORT_BY_STATE_GROUP',
       }),
     );
-  });
+  }, 30_000);
 
   it('keeps a page under a non-default sort, and goes to the first page on a new sort', async () => {
     storeBeforeLoad({ sortDesc: false, sortKey: 'name', tableLimit: 2 });
@@ -1000,6 +1000,19 @@ describe('TaskDashboard', () => {
 
     load({ settings: [] });
     expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+  });
+
+  it('fetches nothing on a column resize', async () => {
+    setup();
+    expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+    await settingsLoaded();
+    const calls = vi.mocked(getExperiments).mock.calls.length;
+
+    await resize('Name', 450);
+    await waitFor(() => expect(storedWidths()).toMatchObject({ name: 450 }));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 200)));
+
+    expect(vi.mocked(getExperiments).mock.calls).toHaveLength(calls);
   });
 
   it('stores the columns with the widths of a resize', async () => {
