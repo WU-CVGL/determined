@@ -361,8 +361,8 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
    * an in-app link or redirect such as /tasks/generic, which the settings read only on the first
    * page load. The URL's view and the clean-up of the saved filters go in one update. Each update
    * writes the URL, whose view is then the one of the settings. A URL without any of the keys, as
-   * the app's links to the page are, opens the saved view and then shows it, so that a copied link
-   * shows the same rows.
+   * the app's links to the page are, opens the saved view and then shows it, the default view with
+   * its sort key, so that a copied link shows the same rows.
    */
   useEffect(() => {
     // Settings that are still loading would drop the update; "Mine" needs the signed-in user.

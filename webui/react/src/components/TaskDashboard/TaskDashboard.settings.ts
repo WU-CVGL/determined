@@ -349,6 +349,8 @@ const settingsConfig = (scope: DashboardScope, experiments: boolean): SettingsCo
         literal(SortKey.State),
         literal(SortKey.User),
       ]),
+      // The URL of the default view sets it too, as one with any filter, sort or page key does.
+      urlFallback: true,
     },
     state: {
       defaultValue: undefined,

@@ -19,6 +19,8 @@ export interface SettingsConfigProp<A> {
   skipUrlEncoding?: boolean;
   storageKey: string;
   type: t.Type<A>;
+  /** The URL holds this setting, also at its default, when it holds no other setting. */
+  urlFallback?: boolean;
 }
 
 export interface SettingsConfig<T> {
@@ -38,7 +40,10 @@ export type UseSettingsReturn<T> = {
   updateSettings: UpdateSettings<T>;
 };
 
-/** The URL query of the settings: those the URL holds, without the defaults. */
+/**
+ * The URL query of the settings: those the URL holds, without the defaults. Without any of them, it
+ * holds the setting with `urlFallback`, so that a URL of the default settings sets them too.
+ */
 export const settingsToQuery = <T>(config: SettingsConfig<T>, settings: Settings): string => {
   const retVal = new URLSearchParams();
   const qParams = new URLSearchParams(window.location.search);
@@ -52,7 +57,8 @@ export const settingsToQuery = <T>(config: SettingsConfig<T>, settings: Settings
     }
   }
 
-  (Object.values(config.settings) as SettingsConfigProp<T>[]).forEach((setting) => {
+  const props = Object.values(config.settings) as SettingsConfigProp<T>[];
+  props.forEach((setting) => {
     const value = settings[setting.storageKey];
     // A setting never stored is its default.
     const isDefault = value === undefined || _.isEqual(setting.defaultValue, value);
@@ -65,6 +71,11 @@ export const settingsToQuery = <T>(config: SettingsConfig<T>, settings: Settings
       }
     }
   });
+
+  const fallback = props.find((setting) => setting.urlFallback);
+  if (fallback && !props.some((setting) => retVal.has(setting.storageKey))) {
+    retVal.set(fallback.storageKey, String(settings[fallback.storageKey] ?? fallback.defaultValue));
+  }
 
   return retVal.toString();
 };

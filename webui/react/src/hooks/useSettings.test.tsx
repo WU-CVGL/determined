@@ -366,4 +366,21 @@ describe('useSettings and the URL', () => {
     expect(result.current.settings.type).toStrictEqual(['b']);
     expect(query().getAll('type')).toStrictEqual(['b']);
   });
+
+  it('holds the fallback setting, also at its default, in a URL without any other setting', () => {
+    const sortConfig: hook.SettingsConfig<PageSettings & { sort: string }> = {
+      settings: {
+        ...pageConfig.settings,
+        sort: { defaultValue: 'start', storageKey: 'sort', type: string, urlFallback: true },
+      },
+      storagePath: pageConfig.storagePath,
+    };
+
+    expect(hook.settingsToQuery(sortConfig, {})).toBe('sort=start');
+    expect(hook.settingsToQuery(sortConfig, layout)).toBe('sort=start');
+    expect(hook.settingsToQuery(sortConfig, { sort: 'name' })).toBe('sort=name');
+    expect(hook.settingsToQuery(sortConfig, { state: ['active'] })).toBe('state=active');
+    // Without a fallback, the URL of the default settings is empty.
+    expect(hook.settingsToQuery(pageConfig, layout)).toBe('');
+  });
 });

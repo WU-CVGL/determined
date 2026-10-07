@@ -678,14 +678,48 @@ describe('TaskDashboard', () => {
     expect(urlParams().get('sortDesc')).toBe('false');
   }, 30_000);
 
-  it('keeps a plain URL plain with the default view', async () => {
-    setup({}, '/jobs', { browser: true });
-
+  it("opens a link to the default view at the default view, not the recipient's saved one", async () => {
+    // The sender's page has the default view: no filters, newest first.
+    const sender = setup({}, '/jobs', { browser: true });
     expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
     await settingsLoaded();
-    await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
-    expect(window.location.search).toBe('');
-  });
+    await waitFor(() =>
+      expect(lastListCall(getExperiments)).toMatchObject({
+        orderBy: 'ORDER_BY_DESC',
+        sortBy: 'SORT_BY_START_TIME',
+      }),
+    );
+    const link = `${window.location.pathname}${window.location.search}`;
+    sender.unmount();
+
+    // The recipient saved an owner, a state and a sort of their own.
+    await userSettings.clear();
+    vi.clearAllMocks();
+    window.history.replaceState(null, '', '/');
+    storeBeforeLoad({ sortDesc: false, sortKey: 'name', state: ['paused'], user: [4] });
+    setup({}, link, { browser: true });
+
+    await waitFor(() => expect(stored()).toMatchObject({ sortKey: 'startTime' }), AFTER_LOAD);
+    expect(stored()).toMatchObject({ sortDesc: true });
+    expect(stored().state).toBeUndefined();
+    expect(stored().user).toBeUndefined();
+    await waitFor(() =>
+      expect(lastListCall(getExperiments)).toMatchObject({
+        orderBy: 'ORDER_BY_DESC',
+        sortBy: 'SORT_BY_START_TIME',
+      }),
+    );
+    expect(lastListCall(getExperiments)?.userIds).toBeUndefined();
+    expect(lastListCall(getGenericTasks)).toMatchObject({
+      orderBy: 'ORDER_BY_DESC',
+      sortBy: 'SORT_BY_START_TIME',
+    });
+    expect(lastListCall(getGenericTasks)?.states).toBeUndefined();
+    expect(lastListCall(getGenericTasks)?.userIds).toBeUndefined();
+    expect(urlParams().get('sortKey')).toBe('startTime');
+    expect(urlParams().has('state')).toBe(false);
+    expect(urlParams().has('user')).toBe(false);
+  }, 30_000);
 
   it('shows the view in the URL again when the browser goes to the plain page', async () => {
     setup({}, '/jobs?state=active', { browser: true });
@@ -706,6 +740,16 @@ describe('TaskDashboard', () => {
       'STATE_STOPPING_ERROR',
       'STATE_STOPPING_KILLED',
     ]);
+  }, 30_000);
+
+  it('keeps the sort key in the URL once Clear Filters leaves the default view', async () => {
+    setup({}, '/jobs?state=active', { browser: true });
+    const clear = await screen.findByRole('button', { name: 'Clear Filters (1)' }, AFTER_LOAD);
+
+    await user.click(clear);
+
+    await waitFor(() => expect(stored().state).toBeUndefined());
+    await waitFor(() => expect(window.location.search).toBe('?sortKey=startTime'));
   }, 30_000);
 
   it('turns what 0.41.0 saved into the filters of now, before the first fetch, and saves them once', async () => {
