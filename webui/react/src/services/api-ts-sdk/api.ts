@@ -3739,6 +3739,12 @@ export interface V1GenericTask {
      * @memberof V1GenericTask
      */
     allocationId?: string;
+    /**
+     * Display name of the user who owns the task; empty without one.
+     * @type {string}
+     * @memberof V1GenericTask
+     */
+    displayName?: string;
 }
 /**
  * State of a Generic task - GENERIC_TASK_STATE_UNSPECIFIED: The task state unknown  - GENERIC_TASK_STATE_ACTIVE: The task state unknown  - GENERIC_TASK_STATE_CANCELED: The task state unknown  - GENERIC_TASK_STATE_COMPLETED: The task state unknown  - GENERIC_TASK_STATE_ERROR: The task state unknown  - GENERIC_TASK_STATE_PAUSED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_PAUSED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_CANCELED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_COMPLETED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_ERROR: The task state unknown
@@ -4027,7 +4033,7 @@ export interface V1GetExperimentResponse {
     config?: any;
 }
 /**
- * Sorts experiments by the given field.   - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.  - SORT_BY_ID: Returns experiments sorted by id.  - SORT_BY_DESCRIPTION: Returns experiments sorted by description.  - SORT_BY_START_TIME: Return experiments sorted by start time.  - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are returned after the ones with end_time.  - SORT_BY_STATE: Return experiments sorted by state.  - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.  - SORT_BY_PROGRESS: Return experiments sorted by progress.  - SORT_BY_USER: Return experiments sorted by user.  - SORT_BY_NAME: Returns experiments sorted by name.  - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.  - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool.  - SORT_BY_PROJECT_ID: Returns experiments sorted by project.  - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.  - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.  - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..
+ * Sorts experiments by the given field.   - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.  - SORT_BY_ID: Returns experiments sorted by id.  - SORT_BY_DESCRIPTION: Returns experiments sorted by description.  - SORT_BY_START_TIME: Return experiments sorted by start time.  - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are returned after the ones with end_time, in either order.  - SORT_BY_STATE: Return experiments sorted by state.  - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.  - SORT_BY_PROGRESS: Return experiments sorted by progress.  - SORT_BY_USER: Return experiments sorted by user: the owner's display name, or the username without one.  - SORT_BY_NAME: Returns experiments sorted by name.  - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.  - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool. Experiments without one are returned last, in either order.  - SORT_BY_PROJECT_ID: Returns experiments sorted by project.  - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.  - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.  - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..  - SORT_BY_SLOTS: Return experiments sorted by the slot count each trial requests (resources.slots_per_trial, 1 when unset).  - SORT_BY_STATE_GROUP: Return experiments sorted by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED). Every other state is active.
  * @export
  * @enum {string}
  */
@@ -4048,6 +4054,8 @@ export const V1GetExperimentsRequestSortBy = {
     CHECKPOINTSIZE: 'SORT_BY_CHECKPOINT_SIZE',
     CHECKPOINTCOUNT: 'SORT_BY_CHECKPOINT_COUNT',
     SEARCHERMETRICVAL: 'SORT_BY_SEARCHER_METRIC_VAL',
+    SLOTS: 'SORT_BY_SLOTS',
+    STATEGROUP: 'SORT_BY_STATE_GROUP',
 } as const
 export type V1GetExperimentsRequestSortBy = ValueOf<typeof V1GetExperimentsRequestSortBy>
 /**
@@ -4134,6 +4142,22 @@ export interface V1GetGenericTaskConfigResponse {
      */
     config: string;
 }
+/**
+ * Sorts generic tasks by the given field.   - SORT_BY_UNSPECIFIED: Sort by start time, newest first unless order_by is ascending.  - SORT_BY_START_TIME: Sort by start time.  - SORT_BY_END_TIME: Sort by end time. Tasks without one come last, in either order.  - SORT_BY_NAME: Sort by name, as the task's name field shows it.  - SORT_BY_STATE_GROUP: Sort by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR). Every other state is active. Tasks without a state come last, in either order.  - SORT_BY_USER: Sort by user: the owner's display name, or the username without one. Tasks without an owner come last, in either order.  - SORT_BY_RESOURCE_POOL: Sort by resource pool. Tasks without one come last, in either order.  - SORT_BY_SLOTS: Sort by the slot count the task requests.
+ * @export
+ * @enum {string}
+ */
+export const V1GetGenericTasksRequestSortBy = {
+    UNSPECIFIED: 'SORT_BY_UNSPECIFIED',
+    STARTTIME: 'SORT_BY_START_TIME',
+    ENDTIME: 'SORT_BY_END_TIME',
+    NAME: 'SORT_BY_NAME',
+    STATEGROUP: 'SORT_BY_STATE_GROUP',
+    USER: 'SORT_BY_USER',
+    RESOURCEPOOL: 'SORT_BY_RESOURCE_POOL',
+    SLOTS: 'SORT_BY_SLOTS',
+} as const
+export type V1GetGenericTasksRequestSortBy = ValueOf<typeof V1GetGenericTasksRequestSortBy>
 /**
  * Response to GetGenericTasksRequest.
  * @export
@@ -11356,17 +11380,6 @@ export interface V1Slot {
     draining?: boolean;
 }
 /**
- * Filter workloads by the slot count they request: experiments by resources.slots_per_trial (1 when the config leaves it out, its default), generic tasks by the resources.slots stored with the task (0 when the stored config has none, as the task's slots field reports it). The filter counts slots of any type. A slot is a GPU only in a resource pool whose slot type is cuda or rocm; in a pool whose slot type is cpu, a slot is a CPU, so a workload with slots does not necessarily use a GPU.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.  - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
- * @export
- * @enum {string}
- */
-export const V1SlotsFilter = {
-    UNSPECIFIED: 'SLOTS_FILTER_UNSPECIFIED',
-    HASSLOTS: 'SLOTS_FILTER_HAS_SLOTS',
-    ZEROSLOTS: 'SLOTS_FILTER_ZERO_SLOTS',
-} as const
-export type V1SlotsFilter = ValueOf<typeof V1SlotsFilter>
-/**
  * SlotStats contains statistics about a set of slots.
  * @export
  * @interface V1SlotStats
@@ -17030,7 +17043,7 @@ export const ExperimentsApiFetchParamCreator = function (configuration?: Configu
         /**
          * 
          * @summary Get a list of experiments.
-         * @param {V1GetExperimentsRequestSortBy} [sortBy] Sort experiments by the given field.   - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.  - SORT_BY_ID: Returns experiments sorted by id.  - SORT_BY_DESCRIPTION: Returns experiments sorted by description.  - SORT_BY_START_TIME: Return experiments sorted by start time.  - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are returned after the ones with end_time.  - SORT_BY_STATE: Return experiments sorted by state.  - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.  - SORT_BY_PROGRESS: Return experiments sorted by progress.  - SORT_BY_USER: Return experiments sorted by user.  - SORT_BY_NAME: Returns experiments sorted by name.  - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.  - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool.  - SORT_BY_PROJECT_ID: Returns experiments sorted by project.  - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.  - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.  - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..
+         * @param {V1GetExperimentsRequestSortBy} [sortBy] Sort experiments by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Sorted by start time, end time, name, user, resource pool, slots or state group, experiments that tie go newest start first, then highest ID first.   - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.  - SORT_BY_ID: Returns experiments sorted by id.  - SORT_BY_DESCRIPTION: Returns experiments sorted by description.  - SORT_BY_START_TIME: Return experiments sorted by start time.  - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are returned after the ones with end_time, in either order.  - SORT_BY_STATE: Return experiments sorted by state.  - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.  - SORT_BY_PROGRESS: Return experiments sorted by progress.  - SORT_BY_USER: Return experiments sorted by user: the owner's display name, or the username without one.  - SORT_BY_NAME: Returns experiments sorted by name.  - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.  - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool. Experiments without one are returned last, in either order.  - SORT_BY_PROJECT_ID: Returns experiments sorted by project.  - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.  - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.  - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..  - SORT_BY_SLOTS: Return experiments sorted by the slot count each trial requests (resources.slots_per_trial, 1 when unset).  - SORT_BY_STATE_GROUP: Return experiments sorted by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED). Every other state is active.
          * @param {V1OrderBy} [orderBy] Order experiments in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
          * @param {number} [offset] Skip the number of experiments before returning results. Negative values denote number of experiments to skip from the end before returning results.
          * @param {number} [limit] Limit the number of experiments. 0 or Unspecified - returns a default of 100. -1               - returns everything. -2               - returns pagination info but no experiments.
@@ -17050,11 +17063,13 @@ export const ExperimentsApiFetchParamCreator = function (configuration?: Configu
          * @param {Array<number>} [experimentIdFilterNotIn] Not in a set.
          * @param {boolean} [showTrialData] whether to surface trial specific data from the best trial.
          * @param {number} [workspaceId] Limit experiments to those in projects of this workspace, or 0 for all workspaces.
-         * @param {V1SlotsFilter} [slotsFilter] Limit experiments by the slot count each trial requests (resources.slots_per_trial, 1 when unset): at least one slot, or none.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.  - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
+         * @param {Array<number>} [slots] Limit experiments to those whose trials request one of these slot counts (resources.slots_per_trial, 1 when unset). With slots_above, an experiment that matches either is listed.
+         * @param {number} [slotsAbove] Limit experiments to those whose trials request more than this many slots. With slots, an experiment that matches either is listed.
+         * @param {Array<number>} [workspaceIds] Limit experiments to those in projects of these workspaces. IDs of workspaces that are gone or that the user cannot view are skipped; if none remain, no experiments are listed.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getExperiments(sortBy?: V1GetExperimentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, description?: string, name?: string, labels?: Array<string>, archived?: boolean, states?: Array<Experimentv1State>, users?: Array<string>, userIds?: Array<number>, projectId?: number, experimentIdFilterLt?: number, experimentIdFilterLte?: number, experimentIdFilterGt?: number, experimentIdFilterGte?: number, experimentIdFilterIncl?: Array<number>, experimentIdFilterNotIn?: Array<number>, showTrialData?: boolean, workspaceId?: number, slotsFilter?: V1SlotsFilter, options: any = {}): FetchArgs {
+        getExperiments(sortBy?: V1GetExperimentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, description?: string, name?: string, labels?: Array<string>, archived?: boolean, states?: Array<Experimentv1State>, users?: Array<string>, userIds?: Array<number>, projectId?: number, experimentIdFilterLt?: number, experimentIdFilterLte?: number, experimentIdFilterGt?: number, experimentIdFilterGte?: number, experimentIdFilterIncl?: Array<number>, experimentIdFilterNotIn?: Array<number>, showTrialData?: boolean, workspaceId?: number, slots?: Array<number>, slotsAbove?: number, workspaceIds?: Array<number>, options: any = {}): FetchArgs {
             const localVarPath = `/api/v1/experiments`;
             const localVarUrlObj = new URL(localVarPath, BASE_PATH);
             const localVarRequestOptions = { method: 'GET', ...options };
@@ -17149,8 +17164,16 @@ export const ExperimentsApiFetchParamCreator = function (configuration?: Configu
                 localVarQueryParameter['workspaceId'] = workspaceId
             }
             
-            if (slotsFilter !== undefined) {
-                localVarQueryParameter['slotsFilter'] = slotsFilter
+            if (slots) {
+                localVarQueryParameter['slots'] = slots
+            }
+            
+            if (slotsAbove !== undefined) {
+                localVarQueryParameter['slotsAbove'] = slotsAbove
+            }
+            
+            if (workspaceIds) {
+                localVarQueryParameter['workspaceIds'] = workspaceIds
             }
             
             objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
@@ -18544,7 +18567,7 @@ export const ExperimentsApiFp = function (configuration?: Configuration) {
         /**
          * 
          * @summary Get a list of experiments.
-         * @param {V1GetExperimentsRequestSortBy} [sortBy] Sort experiments by the given field.   - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.  - SORT_BY_ID: Returns experiments sorted by id.  - SORT_BY_DESCRIPTION: Returns experiments sorted by description.  - SORT_BY_START_TIME: Return experiments sorted by start time.  - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are returned after the ones with end_time.  - SORT_BY_STATE: Return experiments sorted by state.  - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.  - SORT_BY_PROGRESS: Return experiments sorted by progress.  - SORT_BY_USER: Return experiments sorted by user.  - SORT_BY_NAME: Returns experiments sorted by name.  - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.  - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool.  - SORT_BY_PROJECT_ID: Returns experiments sorted by project.  - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.  - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.  - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..
+         * @param {V1GetExperimentsRequestSortBy} [sortBy] Sort experiments by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Sorted by start time, end time, name, user, resource pool, slots or state group, experiments that tie go newest start first, then highest ID first.   - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.  - SORT_BY_ID: Returns experiments sorted by id.  - SORT_BY_DESCRIPTION: Returns experiments sorted by description.  - SORT_BY_START_TIME: Return experiments sorted by start time.  - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are returned after the ones with end_time, in either order.  - SORT_BY_STATE: Return experiments sorted by state.  - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.  - SORT_BY_PROGRESS: Return experiments sorted by progress.  - SORT_BY_USER: Return experiments sorted by user: the owner's display name, or the username without one.  - SORT_BY_NAME: Returns experiments sorted by name.  - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.  - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool. Experiments without one are returned last, in either order.  - SORT_BY_PROJECT_ID: Returns experiments sorted by project.  - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.  - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.  - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..  - SORT_BY_SLOTS: Return experiments sorted by the slot count each trial requests (resources.slots_per_trial, 1 when unset).  - SORT_BY_STATE_GROUP: Return experiments sorted by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED). Every other state is active.
          * @param {V1OrderBy} [orderBy] Order experiments in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
          * @param {number} [offset] Skip the number of experiments before returning results. Negative values denote number of experiments to skip from the end before returning results.
          * @param {number} [limit] Limit the number of experiments. 0 or Unspecified - returns a default of 100. -1               - returns everything. -2               - returns pagination info but no experiments.
@@ -18564,12 +18587,14 @@ export const ExperimentsApiFp = function (configuration?: Configuration) {
          * @param {Array<number>} [experimentIdFilterNotIn] Not in a set.
          * @param {boolean} [showTrialData] whether to surface trial specific data from the best trial.
          * @param {number} [workspaceId] Limit experiments to those in projects of this workspace, or 0 for all workspaces.
-         * @param {V1SlotsFilter} [slotsFilter] Limit experiments by the slot count each trial requests (resources.slots_per_trial, 1 when unset): at least one slot, or none.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.  - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
+         * @param {Array<number>} [slots] Limit experiments to those whose trials request one of these slot counts (resources.slots_per_trial, 1 when unset). With slots_above, an experiment that matches either is listed.
+         * @param {number} [slotsAbove] Limit experiments to those whose trials request more than this many slots. With slots, an experiment that matches either is listed.
+         * @param {Array<number>} [workspaceIds] Limit experiments to those in projects of these workspaces. IDs of workspaces that are gone or that the user cannot view are skipped; if none remain, no experiments are listed.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getExperiments(sortBy?: V1GetExperimentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, description?: string, name?: string, labels?: Array<string>, archived?: boolean, states?: Array<Experimentv1State>, users?: Array<string>, userIds?: Array<number>, projectId?: number, experimentIdFilterLt?: number, experimentIdFilterLte?: number, experimentIdFilterGt?: number, experimentIdFilterGte?: number, experimentIdFilterIncl?: Array<number>, experimentIdFilterNotIn?: Array<number>, showTrialData?: boolean, workspaceId?: number, slotsFilter?: V1SlotsFilter, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetExperimentsResponse> {
-            const localVarFetchArgs = ExperimentsApiFetchParamCreator(configuration).getExperiments(sortBy, orderBy, offset, limit, description, name, labels, archived, states, users, userIds, projectId, experimentIdFilterLt, experimentIdFilterLte, experimentIdFilterGt, experimentIdFilterGte, experimentIdFilterIncl, experimentIdFilterNotIn, showTrialData, workspaceId, slotsFilter, options);
+        getExperiments(sortBy?: V1GetExperimentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, description?: string, name?: string, labels?: Array<string>, archived?: boolean, states?: Array<Experimentv1State>, users?: Array<string>, userIds?: Array<number>, projectId?: number, experimentIdFilterLt?: number, experimentIdFilterLte?: number, experimentIdFilterGt?: number, experimentIdFilterGte?: number, experimentIdFilterIncl?: Array<number>, experimentIdFilterNotIn?: Array<number>, showTrialData?: boolean, workspaceId?: number, slots?: Array<number>, slotsAbove?: number, workspaceIds?: Array<number>, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetExperimentsResponse> {
+            const localVarFetchArgs = ExperimentsApiFetchParamCreator(configuration).getExperiments(sortBy, orderBy, offset, limit, description, name, labels, archived, states, users, userIds, projectId, experimentIdFilterLt, experimentIdFilterLte, experimentIdFilterGt, experimentIdFilterGte, experimentIdFilterIncl, experimentIdFilterNotIn, showTrialData, workspaceId, slots, slotsAbove, workspaceIds, options);
             return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
                 return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
                     if (response.status >= 200 && response.status < 300) {
@@ -19256,7 +19281,7 @@ export const ExperimentsApiFactory = function (configuration?: Configuration, fe
         /**
          * 
          * @summary Get a list of experiments.
-         * @param {V1GetExperimentsRequestSortBy} [sortBy] Sort experiments by the given field.   - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.  - SORT_BY_ID: Returns experiments sorted by id.  - SORT_BY_DESCRIPTION: Returns experiments sorted by description.  - SORT_BY_START_TIME: Return experiments sorted by start time.  - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are returned after the ones with end_time.  - SORT_BY_STATE: Return experiments sorted by state.  - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.  - SORT_BY_PROGRESS: Return experiments sorted by progress.  - SORT_BY_USER: Return experiments sorted by user.  - SORT_BY_NAME: Returns experiments sorted by name.  - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.  - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool.  - SORT_BY_PROJECT_ID: Returns experiments sorted by project.  - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.  - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.  - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..
+         * @param {V1GetExperimentsRequestSortBy} [sortBy] Sort experiments by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Sorted by start time, end time, name, user, resource pool, slots or state group, experiments that tie go newest start first, then highest ID first.   - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.  - SORT_BY_ID: Returns experiments sorted by id.  - SORT_BY_DESCRIPTION: Returns experiments sorted by description.  - SORT_BY_START_TIME: Return experiments sorted by start time.  - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are returned after the ones with end_time, in either order.  - SORT_BY_STATE: Return experiments sorted by state.  - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.  - SORT_BY_PROGRESS: Return experiments sorted by progress.  - SORT_BY_USER: Return experiments sorted by user: the owner's display name, or the username without one.  - SORT_BY_NAME: Returns experiments sorted by name.  - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.  - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool. Experiments without one are returned last, in either order.  - SORT_BY_PROJECT_ID: Returns experiments sorted by project.  - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.  - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.  - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..  - SORT_BY_SLOTS: Return experiments sorted by the slot count each trial requests (resources.slots_per_trial, 1 when unset).  - SORT_BY_STATE_GROUP: Return experiments sorted by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED). Every other state is active.
          * @param {V1OrderBy} [orderBy] Order experiments in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
          * @param {number} [offset] Skip the number of experiments before returning results. Negative values denote number of experiments to skip from the end before returning results.
          * @param {number} [limit] Limit the number of experiments. 0 or Unspecified - returns a default of 100. -1               - returns everything. -2               - returns pagination info but no experiments.
@@ -19276,12 +19301,14 @@ export const ExperimentsApiFactory = function (configuration?: Configuration, fe
          * @param {Array<number>} [experimentIdFilterNotIn] Not in a set.
          * @param {boolean} [showTrialData] whether to surface trial specific data from the best trial.
          * @param {number} [workspaceId] Limit experiments to those in projects of this workspace, or 0 for all workspaces.
-         * @param {V1SlotsFilter} [slotsFilter] Limit experiments by the slot count each trial requests (resources.slots_per_trial, 1 when unset): at least one slot, or none.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.  - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
+         * @param {Array<number>} [slots] Limit experiments to those whose trials request one of these slot counts (resources.slots_per_trial, 1 when unset). With slots_above, an experiment that matches either is listed.
+         * @param {number} [slotsAbove] Limit experiments to those whose trials request more than this many slots. With slots, an experiment that matches either is listed.
+         * @param {Array<number>} [workspaceIds] Limit experiments to those in projects of these workspaces. IDs of workspaces that are gone or that the user cannot view are skipped; if none remain, no experiments are listed.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getExperiments(sortBy?: V1GetExperimentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, description?: string, name?: string, labels?: Array<string>, archived?: boolean, states?: Array<Experimentv1State>, users?: Array<string>, userIds?: Array<number>, projectId?: number, experimentIdFilterLt?: number, experimentIdFilterLte?: number, experimentIdFilterGt?: number, experimentIdFilterGte?: number, experimentIdFilterIncl?: Array<number>, experimentIdFilterNotIn?: Array<number>, showTrialData?: boolean, workspaceId?: number, slotsFilter?: V1SlotsFilter, options?: any) {
-            return ExperimentsApiFp(configuration).getExperiments(sortBy, orderBy, offset, limit, description, name, labels, archived, states, users, userIds, projectId, experimentIdFilterLt, experimentIdFilterLte, experimentIdFilterGt, experimentIdFilterGte, experimentIdFilterIncl, experimentIdFilterNotIn, showTrialData, workspaceId, slotsFilter, options)(fetch, basePath);
+        getExperiments(sortBy?: V1GetExperimentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, description?: string, name?: string, labels?: Array<string>, archived?: boolean, states?: Array<Experimentv1State>, users?: Array<string>, userIds?: Array<number>, projectId?: number, experimentIdFilterLt?: number, experimentIdFilterLte?: number, experimentIdFilterGt?: number, experimentIdFilterGte?: number, experimentIdFilterIncl?: Array<number>, experimentIdFilterNotIn?: Array<number>, showTrialData?: boolean, workspaceId?: number, slots?: Array<number>, slotsAbove?: number, workspaceIds?: Array<number>, options?: any) {
+            return ExperimentsApiFp(configuration).getExperiments(sortBy, orderBy, offset, limit, description, name, labels, archived, states, users, userIds, projectId, experimentIdFilterLt, experimentIdFilterLte, experimentIdFilterGt, experimentIdFilterGte, experimentIdFilterIncl, experimentIdFilterNotIn, showTrialData, workspaceId, slots, slotsAbove, workspaceIds, options)(fetch, basePath);
         },
         /**
          * 
@@ -19772,7 +19799,7 @@ export class ExperimentsApi extends BaseAPI {
     /**
      * 
      * @summary Get a list of experiments.
-     * @param {V1GetExperimentsRequestSortBy} [sortBy] Sort experiments by the given field.   - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.  - SORT_BY_ID: Returns experiments sorted by id.  - SORT_BY_DESCRIPTION: Returns experiments sorted by description.  - SORT_BY_START_TIME: Return experiments sorted by start time.  - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are returned after the ones with end_time.  - SORT_BY_STATE: Return experiments sorted by state.  - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.  - SORT_BY_PROGRESS: Return experiments sorted by progress.  - SORT_BY_USER: Return experiments sorted by user.  - SORT_BY_NAME: Returns experiments sorted by name.  - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.  - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool.  - SORT_BY_PROJECT_ID: Returns experiments sorted by project.  - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.  - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.  - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..
+     * @param {V1GetExperimentsRequestSortBy} [sortBy] Sort experiments by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Sorted by start time, end time, name, user, resource pool, slots or state group, experiments that tie go newest start first, then highest ID first.   - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.  - SORT_BY_ID: Returns experiments sorted by id.  - SORT_BY_DESCRIPTION: Returns experiments sorted by description.  - SORT_BY_START_TIME: Return experiments sorted by start time.  - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are returned after the ones with end_time, in either order.  - SORT_BY_STATE: Return experiments sorted by state.  - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.  - SORT_BY_PROGRESS: Return experiments sorted by progress.  - SORT_BY_USER: Return experiments sorted by user: the owner's display name, or the username without one.  - SORT_BY_NAME: Returns experiments sorted by name.  - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.  - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool. Experiments without one are returned last, in either order.  - SORT_BY_PROJECT_ID: Returns experiments sorted by project.  - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.  - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.  - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..  - SORT_BY_SLOTS: Return experiments sorted by the slot count each trial requests (resources.slots_per_trial, 1 when unset).  - SORT_BY_STATE_GROUP: Return experiments sorted by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED). Every other state is active.
      * @param {V1OrderBy} [orderBy] Order experiments in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
      * @param {number} [offset] Skip the number of experiments before returning results. Negative values denote number of experiments to skip from the end before returning results.
      * @param {number} [limit] Limit the number of experiments. 0 or Unspecified - returns a default of 100. -1               - returns everything. -2               - returns pagination info but no experiments.
@@ -19792,13 +19819,15 @@ export class ExperimentsApi extends BaseAPI {
      * @param {Array<number>} [experimentIdFilterNotIn] Not in a set.
      * @param {boolean} [showTrialData] whether to surface trial specific data from the best trial.
      * @param {number} [workspaceId] Limit experiments to those in projects of this workspace, or 0 for all workspaces.
-     * @param {V1SlotsFilter} [slotsFilter] Limit experiments by the slot count each trial requests (resources.slots_per_trial, 1 when unset): at least one slot, or none.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.  - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
+     * @param {Array<number>} [slots] Limit experiments to those whose trials request one of these slot counts (resources.slots_per_trial, 1 when unset). With slots_above, an experiment that matches either is listed.
+     * @param {number} [slotsAbove] Limit experiments to those whose trials request more than this many slots. With slots, an experiment that matches either is listed.
+     * @param {Array<number>} [workspaceIds] Limit experiments to those in projects of these workspaces. IDs of workspaces that are gone or that the user cannot view are skipped; if none remain, no experiments are listed.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      * @memberof ExperimentsApi
      */
-    public getExperiments(sortBy?: V1GetExperimentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, description?: string, name?: string, labels?: Array<string>, archived?: boolean, states?: Array<Experimentv1State>, users?: Array<string>, userIds?: Array<number>, projectId?: number, experimentIdFilterLt?: number, experimentIdFilterLte?: number, experimentIdFilterGt?: number, experimentIdFilterGte?: number, experimentIdFilterIncl?: Array<number>, experimentIdFilterNotIn?: Array<number>, showTrialData?: boolean, workspaceId?: number, slotsFilter?: V1SlotsFilter, options?: any) {
-        return ExperimentsApiFp(this.configuration).getExperiments(sortBy, orderBy, offset, limit, description, name, labels, archived, states, users, userIds, projectId, experimentIdFilterLt, experimentIdFilterLte, experimentIdFilterGt, experimentIdFilterGte, experimentIdFilterIncl, experimentIdFilterNotIn, showTrialData, workspaceId, slotsFilter, options)(this.fetch, this.basePath)
+    public getExperiments(sortBy?: V1GetExperimentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, description?: string, name?: string, labels?: Array<string>, archived?: boolean, states?: Array<Experimentv1State>, users?: Array<string>, userIds?: Array<number>, projectId?: number, experimentIdFilterLt?: number, experimentIdFilterLte?: number, experimentIdFilterGt?: number, experimentIdFilterGte?: number, experimentIdFilterIncl?: Array<number>, experimentIdFilterNotIn?: Array<number>, showTrialData?: boolean, workspaceId?: number, slots?: Array<number>, slotsAbove?: number, workspaceIds?: Array<number>, options?: any) {
+        return ExperimentsApiFp(this.configuration).getExperiments(sortBy, orderBy, offset, limit, description, name, labels, archived, states, users, userIds, projectId, experimentIdFilterLt, experimentIdFilterLte, experimentIdFilterGt, experimentIdFilterGte, experimentIdFilterIncl, experimentIdFilterNotIn, showTrialData, workspaceId, slots, slotsAbove, workspaceIds, options)(this.fetch, this.basePath)
     }
     
     /**
@@ -31595,11 +31624,15 @@ export const TasksApiFetchParamCreator = function (configuration?: Configuration
          * @param {Array<string>} [taskIds] Limit tasks to these task IDs.
          * @param {number} [projectId] Limit tasks to this project; 0 for all projects.
          * @param {string} [search] Limit tasks to those whose name or task ID contains this text, ignoring case.
-         * @param {V1SlotsFilter} [slotsFilter] Limit tasks by the slot count they request (resources.slots): at least one slot, or none.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.  - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
+         * @param {Array<number>} [slots] Limit tasks to those that request one of these slot counts (resources.slots, 0 when unset). With slots_above, a task that matches either is listed.
+         * @param {number} [slotsAbove] Limit tasks to those that request more than this many slots. With slots, a task that matches either is listed.
+         * @param {Array<number>} [workspaceIds] Limit tasks to these workspaces. IDs of workspaces that are gone or that the user cannot view are skipped; if none remain, no tasks are listed.
+         * @param {V1GetGenericTasksRequestSortBy} [sortBy] Sort tasks by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Tasks that tie go newest start first, then by task ID (A to Z, by code point).   - SORT_BY_UNSPECIFIED: Sort by start time, newest first unless order_by is ascending.  - SORT_BY_START_TIME: Sort by start time.  - SORT_BY_END_TIME: Sort by end time. Tasks without one come last, in either order.  - SORT_BY_NAME: Sort by name, as the task's name field shows it.  - SORT_BY_STATE_GROUP: Sort by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR). Every other state is active. Tasks without a state come last, in either order.  - SORT_BY_USER: Sort by user: the owner's display name, or the username without one. Tasks without an owner come last, in either order.  - SORT_BY_RESOURCE_POOL: Sort by resource pool. Tasks without one come last, in either order.  - SORT_BY_SLOTS: Sort by the slot count the task requests.
+         * @param {V1OrderBy} [orderBy] Order tasks in either ascending or descending order. Unspecified is ascending, or descending with SORT_BY_UNSPECIFIED.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getGenericTasks(offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, states?: Array<V1GenericTaskState>, parentId?: string, taskIds?: Array<string>, projectId?: number, search?: string, slotsFilter?: V1SlotsFilter, options: any = {}): FetchArgs {
+        getGenericTasks(offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, states?: Array<V1GenericTaskState>, parentId?: string, taskIds?: Array<string>, projectId?: number, search?: string, slots?: Array<number>, slotsAbove?: number, workspaceIds?: Array<number>, sortBy?: V1GetGenericTasksRequestSortBy, orderBy?: V1OrderBy, options: any = {}): FetchArgs {
             const localVarPath = `/api/v1/generic-tasks`;
             const localVarUrlObj = new URL(localVarPath, BASE_PATH);
             const localVarRequestOptions = { method: 'GET', ...options };
@@ -31654,8 +31687,24 @@ export const TasksApiFetchParamCreator = function (configuration?: Configuration
                 localVarQueryParameter['search'] = search
             }
             
-            if (slotsFilter !== undefined) {
-                localVarQueryParameter['slotsFilter'] = slotsFilter
+            if (slots) {
+                localVarQueryParameter['slots'] = slots
+            }
+            
+            if (slotsAbove !== undefined) {
+                localVarQueryParameter['slotsAbove'] = slotsAbove
+            }
+            
+            if (workspaceIds) {
+                localVarQueryParameter['workspaceIds'] = workspaceIds
+            }
+            
+            if (sortBy !== undefined) {
+                localVarQueryParameter['sortBy'] = sortBy
+            }
+            
+            if (orderBy !== undefined) {
+                localVarQueryParameter['orderBy'] = orderBy
             }
             
             objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
@@ -32208,12 +32257,16 @@ export const TasksApiFp = function (configuration?: Configuration) {
          * @param {Array<string>} [taskIds] Limit tasks to these task IDs.
          * @param {number} [projectId] Limit tasks to this project; 0 for all projects.
          * @param {string} [search] Limit tasks to those whose name or task ID contains this text, ignoring case.
-         * @param {V1SlotsFilter} [slotsFilter] Limit tasks by the slot count they request (resources.slots): at least one slot, or none.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.  - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
+         * @param {Array<number>} [slots] Limit tasks to those that request one of these slot counts (resources.slots, 0 when unset). With slots_above, a task that matches either is listed.
+         * @param {number} [slotsAbove] Limit tasks to those that request more than this many slots. With slots, a task that matches either is listed.
+         * @param {Array<number>} [workspaceIds] Limit tasks to these workspaces. IDs of workspaces that are gone or that the user cannot view are skipped; if none remain, no tasks are listed.
+         * @param {V1GetGenericTasksRequestSortBy} [sortBy] Sort tasks by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Tasks that tie go newest start first, then by task ID (A to Z, by code point).   - SORT_BY_UNSPECIFIED: Sort by start time, newest first unless order_by is ascending.  - SORT_BY_START_TIME: Sort by start time.  - SORT_BY_END_TIME: Sort by end time. Tasks without one come last, in either order.  - SORT_BY_NAME: Sort by name, as the task's name field shows it.  - SORT_BY_STATE_GROUP: Sort by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR). Every other state is active. Tasks without a state come last, in either order.  - SORT_BY_USER: Sort by user: the owner's display name, or the username without one. Tasks without an owner come last, in either order.  - SORT_BY_RESOURCE_POOL: Sort by resource pool. Tasks without one come last, in either order.  - SORT_BY_SLOTS: Sort by the slot count the task requests.
+         * @param {V1OrderBy} [orderBy] Order tasks in either ascending or descending order. Unspecified is ascending, or descending with SORT_BY_UNSPECIFIED.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getGenericTasks(offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, states?: Array<V1GenericTaskState>, parentId?: string, taskIds?: Array<string>, projectId?: number, search?: string, slotsFilter?: V1SlotsFilter, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetGenericTasksResponse> {
-            const localVarFetchArgs = TasksApiFetchParamCreator(configuration).getGenericTasks(offset, limit, users, userIds, workspaceId, states, parentId, taskIds, projectId, search, slotsFilter, options);
+        getGenericTasks(offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, states?: Array<V1GenericTaskState>, parentId?: string, taskIds?: Array<string>, projectId?: number, search?: string, slots?: Array<number>, slotsAbove?: number, workspaceIds?: Array<number>, sortBy?: V1GetGenericTasksRequestSortBy, orderBy?: V1OrderBy, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetGenericTasksResponse> {
+            const localVarFetchArgs = TasksApiFetchParamCreator(configuration).getGenericTasks(offset, limit, users, userIds, workspaceId, states, parentId, taskIds, projectId, search, slots, slotsAbove, workspaceIds, sortBy, orderBy, options);
             return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
                 return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
                     if (response.status >= 200 && response.status < 300) {
@@ -32483,12 +32536,16 @@ export const TasksApiFactory = function (configuration?: Configuration, fetch?: 
          * @param {Array<string>} [taskIds] Limit tasks to these task IDs.
          * @param {number} [projectId] Limit tasks to this project; 0 for all projects.
          * @param {string} [search] Limit tasks to those whose name or task ID contains this text, ignoring case.
-         * @param {V1SlotsFilter} [slotsFilter] Limit tasks by the slot count they request (resources.slots): at least one slot, or none.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.  - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
+         * @param {Array<number>} [slots] Limit tasks to those that request one of these slot counts (resources.slots, 0 when unset). With slots_above, a task that matches either is listed.
+         * @param {number} [slotsAbove] Limit tasks to those that request more than this many slots. With slots, a task that matches either is listed.
+         * @param {Array<number>} [workspaceIds] Limit tasks to these workspaces. IDs of workspaces that are gone or that the user cannot view are skipped; if none remain, no tasks are listed.
+         * @param {V1GetGenericTasksRequestSortBy} [sortBy] Sort tasks by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Tasks that tie go newest start first, then by task ID (A to Z, by code point).   - SORT_BY_UNSPECIFIED: Sort by start time, newest first unless order_by is ascending.  - SORT_BY_START_TIME: Sort by start time.  - SORT_BY_END_TIME: Sort by end time. Tasks without one come last, in either order.  - SORT_BY_NAME: Sort by name, as the task's name field shows it.  - SORT_BY_STATE_GROUP: Sort by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR). Every other state is active. Tasks without a state come last, in either order.  - SORT_BY_USER: Sort by user: the owner's display name, or the username without one. Tasks without an owner come last, in either order.  - SORT_BY_RESOURCE_POOL: Sort by resource pool. Tasks without one come last, in either order.  - SORT_BY_SLOTS: Sort by the slot count the task requests.
+         * @param {V1OrderBy} [orderBy] Order tasks in either ascending or descending order. Unspecified is ascending, or descending with SORT_BY_UNSPECIFIED.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getGenericTasks(offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, states?: Array<V1GenericTaskState>, parentId?: string, taskIds?: Array<string>, projectId?: number, search?: string, slotsFilter?: V1SlotsFilter, options?: any) {
-            return TasksApiFp(configuration).getGenericTasks(offset, limit, users, userIds, workspaceId, states, parentId, taskIds, projectId, search, slotsFilter, options)(fetch, basePath);
+        getGenericTasks(offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, states?: Array<V1GenericTaskState>, parentId?: string, taskIds?: Array<string>, projectId?: number, search?: string, slots?: Array<number>, slotsAbove?: number, workspaceIds?: Array<number>, sortBy?: V1GetGenericTasksRequestSortBy, orderBy?: V1OrderBy, options?: any) {
+            return TasksApiFp(configuration).getGenericTasks(offset, limit, users, userIds, workspaceId, states, parentId, taskIds, projectId, search, slots, slotsAbove, workspaceIds, sortBy, orderBy, options)(fetch, basePath);
         },
         /**
          * 
@@ -32666,13 +32723,17 @@ export class TasksApi extends BaseAPI {
      * @param {Array<string>} [taskIds] Limit tasks to these task IDs.
      * @param {number} [projectId] Limit tasks to this project; 0 for all projects.
      * @param {string} [search] Limit tasks to those whose name or task ID contains this text, ignoring case.
-     * @param {V1SlotsFilter} [slotsFilter] Limit tasks by the slot count they request (resources.slots): at least one slot, or none.   - SLOTS_FILTER_UNSPECIFIED: No filter.  - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.  - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
+     * @param {Array<number>} [slots] Limit tasks to those that request one of these slot counts (resources.slots, 0 when unset). With slots_above, a task that matches either is listed.
+     * @param {number} [slotsAbove] Limit tasks to those that request more than this many slots. With slots, a task that matches either is listed.
+     * @param {Array<number>} [workspaceIds] Limit tasks to these workspaces. IDs of workspaces that are gone or that the user cannot view are skipped; if none remain, no tasks are listed.
+     * @param {V1GetGenericTasksRequestSortBy} [sortBy] Sort tasks by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Tasks that tie go newest start first, then by task ID (A to Z, by code point).   - SORT_BY_UNSPECIFIED: Sort by start time, newest first unless order_by is ascending.  - SORT_BY_START_TIME: Sort by start time.  - SORT_BY_END_TIME: Sort by end time. Tasks without one come last, in either order.  - SORT_BY_NAME: Sort by name, as the task's name field shows it.  - SORT_BY_STATE_GROUP: Sort by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR). Every other state is active. Tasks without a state come last, in either order.  - SORT_BY_USER: Sort by user: the owner's display name, or the username without one. Tasks without an owner come last, in either order.  - SORT_BY_RESOURCE_POOL: Sort by resource pool. Tasks without one come last, in either order.  - SORT_BY_SLOTS: Sort by the slot count the task requests.
+     * @param {V1OrderBy} [orderBy] Order tasks in either ascending or descending order. Unspecified is ascending, or descending with SORT_BY_UNSPECIFIED.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      * @memberof TasksApi
      */
-    public getGenericTasks(offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, states?: Array<V1GenericTaskState>, parentId?: string, taskIds?: Array<string>, projectId?: number, search?: string, slotsFilter?: V1SlotsFilter, options?: any) {
-        return TasksApiFp(this.configuration).getGenericTasks(offset, limit, users, userIds, workspaceId, states, parentId, taskIds, projectId, search, slotsFilter, options)(this.fetch, this.basePath)
+    public getGenericTasks(offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, states?: Array<V1GenericTaskState>, parentId?: string, taskIds?: Array<string>, projectId?: number, search?: string, slots?: Array<number>, slotsAbove?: number, workspaceIds?: Array<number>, sortBy?: V1GetGenericTasksRequestSortBy, orderBy?: V1OrderBy, options?: any) {
+        return TasksApiFp(this.configuration).getGenericTasks(offset, limit, users, userIds, workspaceId, states, parentId, taskIds, projectId, search, slots, slotsAbove, workspaceIds, sortBy, orderBy, options)(this.fetch, this.basePath)
     }
     
     /**

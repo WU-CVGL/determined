@@ -166,6 +166,8 @@ export const settingsConfigForProject = (id: number): SettingsConfig<ExperimentL
         literal(V1GetExperimentsRequestSortBy.CHECKPOINTSIZE),
         literal(V1GetExperimentsRequestSortBy.CHECKPOINTCOUNT),
         literal(V1GetExperimentsRequestSortBy.SEARCHERMETRICVAL),
+        literal(V1GetExperimentsRequestSortBy.SLOTS),
+        literal(V1GetExperimentsRequestSortBy.STATEGROUP),
       ]),
     },
     state: {

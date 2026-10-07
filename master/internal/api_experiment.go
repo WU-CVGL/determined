@@ -512,6 +512,66 @@ func getExperimentColumns(q *bun.SelectQuery) *bun.SelectQuery {
 // the config default of 1 for a config that has none.
 const experimentSlotsPerTrialExpr = "COALESCE((e.config->'resources'->>'slots_per_trial')::int, 1)"
 
+// experimentStateGroupExpr is an experiment's state group: 0 active, 1 paused, 2 ended. Every
+// state that is neither paused nor ended is active, so queued and running experiments are too.
+const experimentStateGroupExpr = "CASE WHEN e.state = 'PAUSED' THEN 1 " +
+	"WHEN e.state IN ('COMPLETED', 'CANCELED', 'ERROR', 'DELETE_FAILED') THEN 2 ELSE 0 END"
+
+// jobsSortKey is a sort that the Jobs page merges with the other kinds of runs, so it orders as
+// the page does: text with A-Z folded to a-z by code point and then as is, missing values (NULL)
+// last in either direction, and ties newest start first, then highest ID first.
+type jobsSortKey struct {
+	expr string
+	text bool
+}
+
+// experimentJobsSortKeys are the experiment sorts of the Jobs page. The expressions are written
+// out in full: a column alias does not bind inside lower().
+var experimentJobsSortKeys = map[apiv1.GetExperimentsRequest_SortBy]jobsSortKey{
+	apiv1.GetExperimentsRequest_SORT_BY_START_TIME: {expr: "e.start_time"},
+	apiv1.GetExperimentsRequest_SORT_BY_END_TIME:   {expr: "e.end_time"},
+	apiv1.GetExperimentsRequest_SORT_BY_NAME: {
+		expr: "COALESCE(e.config->>'name', '')", text: true,
+	},
+	apiv1.GetExperimentsRequest_SORT_BY_USER: {
+		expr: "COALESCE(NULLIF(u.display_name, ''), u.username)", text: true,
+	},
+	apiv1.GetExperimentsRequest_SORT_BY_RESOURCE_POOL: {
+		expr: "NULLIF(e.config->'resources'->>'resource_pool', '')", text: true,
+	},
+	apiv1.GetExperimentsRequest_SORT_BY_SLOTS:       {expr: experimentSlotsPerTrialExpr},
+	apiv1.GetExperimentsRequest_SORT_BY_STATE_GROUP: {expr: experimentStateGroupExpr},
+}
+
+// orderExpr is the ORDER BY of the key in the direction, before the tie-breaks.
+func (k jobsSortKey) orderExpr(desc bool) string {
+	dir := "ASC NULLS LAST"
+	if desc {
+		dir = "DESC NULLS LAST"
+	}
+	if k.text {
+		return fmt.Sprintf(`lower((%[1]s) COLLATE "C") %[2]s, (%[1]s) COLLATE "C" %[2]s`, k.expr, dir)
+	}
+	return k.expr + " " + dir
+}
+
+// applySlotsFilter keeps the rows whose slot count, the SQL expression, is one of the counts or
+// above slotsAbove; either one with both. It keeps all rows without either.
+func applySlotsFilter(
+	query *bun.SelectQuery, slotsExpr string, counts []int32, slotsAbove *int32,
+) *bun.SelectQuery {
+	switch {
+	case len(counts) > 0 && slotsAbove != nil:
+		return query.Where("("+slotsExpr+" IN (?) OR "+slotsExpr+" > ?)", bun.In(counts), *slotsAbove)
+	case len(counts) > 0:
+		return query.Where(slotsExpr+" IN (?)", bun.In(counts))
+	case slotsAbove != nil:
+		return query.Where(slotsExpr+" > ?", *slotsAbove)
+	default:
+		return query
+	}
+}
+
 func (a *apiServer) GetExperiments(
 	ctx context.Context, req *apiv1.GetExperimentsRequest,
 ) (*apiv1.GetExperimentsResponse, error) {
@@ -530,20 +590,15 @@ func (a *apiServer) GetExperiments(
 		) AS best_trial_searcher_metric`)
 	}
 
-	// Construct the ordering expression.
+	// Construct the ordering expression. The Jobs page's sorts are in experimentJobsSortKeys.
 	orderColMap := map[apiv1.GetExperimentsRequest_SortBy]string{
 		apiv1.GetExperimentsRequest_SORT_BY_UNSPECIFIED:      "id",
 		apiv1.GetExperimentsRequest_SORT_BY_ID:               "id",
 		apiv1.GetExperimentsRequest_SORT_BY_DESCRIPTION:      "description",
-		apiv1.GetExperimentsRequest_SORT_BY_NAME:             "name",
-		apiv1.GetExperimentsRequest_SORT_BY_START_TIME:       "e.start_time",
-		apiv1.GetExperimentsRequest_SORT_BY_END_TIME:         "e.end_time",
 		apiv1.GetExperimentsRequest_SORT_BY_STATE:            "e.state",
 		apiv1.GetExperimentsRequest_SORT_BY_NUM_TRIALS:       "num_trials",
 		apiv1.GetExperimentsRequest_SORT_BY_PROGRESS:         "COALESCE(progress, 0)",
-		apiv1.GetExperimentsRequest_SORT_BY_USER:             "display_name",
 		apiv1.GetExperimentsRequest_SORT_BY_FORKED_FROM:      "e.parent_id",
-		apiv1.GetExperimentsRequest_SORT_BY_RESOURCE_POOL:    "resource_pool",
 		apiv1.GetExperimentsRequest_SORT_BY_PROJECT_ID:       "e.project_id",
 		apiv1.GetExperimentsRequest_SORT_BY_CHECKPOINT_SIZE:  "checkpoint_size",
 		apiv1.GetExperimentsRequest_SORT_BY_CHECKPOINT_COUNT: "checkpoint_count",
@@ -560,7 +615,11 @@ func (a *apiServer) GetExperiments(
 		apiv1.OrderBy_ORDER_BY_DESC:        "DESC NULLS LAST",
 	}
 	orderExpr := ""
+	jobsKey, isJobsKey := experimentJobsSortKeys[req.SortBy]
 	switch _, ok := orderColMap[req.SortBy]; {
+	case isJobsKey:
+		orderExpr = jobsKey.orderExpr(req.OrderBy == apiv1.OrderBy_ORDER_BY_DESC) +
+			", e.start_time DESC, e.id DESC"
 	case !ok:
 		return nil, fmt.Errorf("unsupported sort by %s", req.SortBy)
 	case orderColMap[req.SortBy] != "id": //nolint:goconst // Not actually the same constant.
@@ -638,15 +697,20 @@ func (a *apiServer) GetExperiments(
 		}
 		query = query.Where("p.workspace_id = ?", req.WorkspaceId)
 	}
-	switch req.SlotsFilter {
-	case apiv1.SlotsFilter_SLOTS_FILTER_UNSPECIFIED:
-	case apiv1.SlotsFilter_SLOTS_FILTER_HAS_SLOTS:
-		query = query.Where(experimentSlotsPerTrialExpr + " > 0")
-	case apiv1.SlotsFilter_SLOTS_FILTER_ZERO_SLOTS:
-		query = query.Where(experimentSlotsPerTrialExpr + " <= 0")
-	default:
-		return nil, status.Errorf(codes.InvalidArgument, "invalid slots filter %s", req.SlotsFilter)
+	if len(req.WorkspaceIds) > 0 {
+		// Workspaces that are gone match no project; those the user cannot view are left out.
+		visible, err := workspace.AuthZProvider.Get().
+			FilterWorkspaceIDs(ctx, *curUser, req.WorkspaceIds)
+		if err != nil {
+			return nil, err
+		}
+		if len(visible) == 0 {
+			query = query.Where("FALSE")
+		} else {
+			query = query.Where("p.workspace_id IN (?)", bun.In(visible))
+		}
 	}
+	query = applySlotsFilter(query, experimentSlotsPerTrialExpr, req.Slots, req.SlotsAbove)
 	if query, err = experiment.AuthZProvider.Get().
 		FilterExperimentsQuery(ctx, *curUser, proj, query,
 			[]rbacv1.PermissionType{rbacv1.PermissionType_PERMISSION_TYPE_VIEW_EXPERIMENT_METADATA},
