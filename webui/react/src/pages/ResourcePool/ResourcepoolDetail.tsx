@@ -142,6 +142,9 @@ const ResourcepoolDetailInner: React.FC = () => {
     [poolname, agentsWithSlots],
   );
 
+  // A job's GPUs can be highlighted only on GPU tiles, which agents that report a GPU topology get.
+  const hasGpuTiles = isTopologyAvailable && topologyAgentPool.some((agent) => agent.gpuTopology);
+
   const fetchStats = useCallback(async () => {
     try {
       const stats = await getJobQStats({}, { signal: canceler.signal });
@@ -253,7 +256,7 @@ const ResourcepoolDetailInner: React.FC = () => {
             jobState={JobState.SCHEDULED}
             rpStats={rpStats}
             selectedRp={pool}
-            onHighlight={onHighlight}
+            onHighlight={hasGpuTiles ? onHighlight : undefined}
           />
         ),
         key: TabType.Active,
@@ -287,6 +290,7 @@ const ResourcepoolDetailInner: React.FC = () => {
     return tabItems;
   }, [
     canManageResourcePoolBindings,
+    hasGpuTiles,
     onHighlight,
     pool,
     poolStats,

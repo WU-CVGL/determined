@@ -113,31 +113,32 @@ const saved = (jobState: JobState, key: string): unknown => {
   return value === undefined ? undefined : JSON.parse(value);
 };
 
-const setup = (
+const page = (
   selectedRp: ResourcePool = pool(),
   jobState: JobState = JobState.SCHEDULED,
   onHighlight?: (placement?: Api.V1JobPlacement[]) => void,
-) =>
-  render(
-    <UIProvider theme={DefaultTheme.Light}>
-      <ThemeProvider>
-        <DndProvider backend={HTML5Backend}>
-          <SettingsProvider>
-            <BrowserRouter>
-              <ConfirmationProvider>
-                <JobQueue
-                  jobState={jobState}
-                  rpStats={[]}
-                  selectedRp={selectedRp}
-                  onHighlight={onHighlight}
-                />
-              </ConfirmationProvider>
-            </BrowserRouter>
-          </SettingsProvider>
-        </DndProvider>
-      </ThemeProvider>
-    </UIProvider>,
-  );
+) => (
+  <UIProvider theme={DefaultTheme.Light}>
+    <ThemeProvider>
+      <DndProvider backend={HTML5Backend}>
+        <SettingsProvider>
+          <BrowserRouter>
+            <ConfirmationProvider>
+              <JobQueue
+                jobState={jobState}
+                rpStats={[]}
+                selectedRp={selectedRp}
+                onHighlight={onHighlight}
+              />
+            </ConfirmationProvider>
+          </BrowserRouter>
+        </SettingsProvider>
+      </DndProvider>
+    </ThemeProvider>
+  </UIProvider>
+);
+
+const setup = (...args: Parameters<typeof page>) => render(page(...args));
 
 /** The titles of the table's columns, from the left. */
 const headers = () =>
@@ -158,6 +159,12 @@ const gpusCell = (jobId: string): HTMLElement => {
 };
 
 const gpusButton = (jobId: string) => within(gpusCell(jobId)).getByRole('button');
+
+/** The job IDs of the table's rows, from the top. */
+const rowKeys = () =>
+  Array.from(document.querySelectorAll<HTMLElement>('tbody tr[data-row-key]')).map(
+    (tr) => tr.dataset.rowKey,
+  );
 
 /** Waits for the job's row. */
 const waitForRow = (jobId: string) =>
@@ -204,6 +211,8 @@ describe('JobQueue GPUs', () => {
     // A job without a GPU has an empty cell; a job the user cannot view has the omitted mark.
     expect(gpusCell('job-3')).toBeEmptyDOMElement();
     expect(gpusCell('job-4')).toHaveTextContent(/^\*\*\*$/);
+    // Without a topology panel to highlight in, the GPUs are text.
+    expect(within(gpusCell('job-1')).queryByRole('button')).toBeNull();
   });
 
   it("adds the column to the tab's stored layout with its width after Slots", async () => {
@@ -264,6 +273,10 @@ describe('JobQueue GPUs', () => {
     setup(pool(), JobState.SCHEDULED, onHighlight);
     await screen.findByText('node01: 0, 1, 5, 6');
 
+    // Jobs without GPUs and jobs the user cannot view have no toggle.
+    expect(within(gpusCell('job-3')).queryByRole('button')).toBeNull();
+    expect(within(gpusCell('job-4')).queryByRole('button')).toBeNull();
+
     await userEvent.click(gpusButton('job-1'));
     expect(gpusButton('job-1')).toHaveAttribute('aria-pressed', 'true');
     expect(gpusButton('job-2')).toHaveAttribute('aria-pressed', 'false');
@@ -298,6 +311,14 @@ describe('JobQueue GPUs', () => {
     expect(gpusButton('job-1')).toHaveAttribute('aria-pressed', 'true');
     expect(onHighlight).toHaveBeenLastCalledWith(grown);
 
+    // The queue order changes.
+    mocks.jobs = [dist, { ...sweep, placement: grown }];
+    await poll();
+    await waitFor(() => expect(rowKeys()).toEqual(['job-2', 'job-1']));
+    expect(gpusButton('job-1')).toHaveAttribute('aria-pressed', 'true');
+    expect(gpusButton('job-2')).toHaveAttribute('aria-pressed', 'false');
+    expect(onHighlight).toHaveBeenLastCalledWith(grown);
+
     // The job holds no GPU.
     mocks.jobs = [{ ...sweep, placement: undefined }, dist];
     await poll();
@@ -316,6 +337,24 @@ describe('JobQueue GPUs', () => {
     mocks.jobs = [dist];
     await poll();
     await waitFor(() => expect(onHighlight).toHaveBeenLastCalledWith(undefined));
+  });
+
+  it('clears the highlight when the topology panel has no GPU tiles', async () => {
+    storeSettings(JobState.SCHEDULED);
+    const onHighlight = vi.fn();
+    const { rerender } = setup(pool(), JobState.SCHEDULED, onHighlight);
+    await screen.findByText('node01: 0, 1, 5, 6');
+    await userEvent.click(gpusButton('job-1'));
+    expect(onHighlight).toHaveBeenLastCalledWith(SWEEP);
+
+    rerender(page(pool(), JobState.SCHEDULED, undefined));
+    expect(onHighlight).toHaveBeenLastCalledWith(undefined);
+    expect(within(gpusCell('job-1')).queryByRole('button')).toBeNull();
+
+    // The tiles return: the highlight stays cleared.
+    rerender(page(pool(), JobState.SCHEDULED, onHighlight));
+    expect(gpusButton('job-1')).toHaveAttribute('aria-pressed', 'false');
+    expect(onHighlight).toHaveBeenLastCalledWith(undefined);
   });
 
   it('clears the highlight when the tab closes', async () => {

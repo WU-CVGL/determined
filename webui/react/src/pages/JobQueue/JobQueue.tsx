@@ -73,7 +73,10 @@ import ManageJobModalComponent from './ManageJob';
 
 interface Props {
   jobState: JobState;
-  /** Takes the GPUs of the job whose tiles to highlight, or undefined for none. */
+  /**
+   * Takes the GPUs of the job whose tiles to highlight, or undefined for none. Given while the
+   * topology panel shows GPU tiles; without it, the GPUs are text.
+   */
   onHighlight?: (placement?: Api.V1JobPlacement[]) => void;
   rpStats: Api.V1RPQueueStat[];
   selectedRp: ResourcePool;
@@ -365,7 +368,8 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState, onHighlight 
 
   /*
    * The job whose tiles the topology panel highlights. The highlight follows the job across polls
-   * and clears once the job leaves the list or holds no GPU, or the tab closes.
+   * and clears once the job leaves the list or holds no GPU, the panel shows no GPU tiles, or the
+   * tab closes.
    */
   const [highlightedJobId, setHighlightedJobId] = useState<string>();
   const toggleHighlight = useCallback(
@@ -373,11 +377,11 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState, onHighlight 
     [],
   );
   const highlightedPlacement = useMemo(() => {
-    if (!showGpus || !highlightedJobId) return undefined;
+    if (!showGpus || !onHighlight || !highlightedJobId) return undefined;
     const job = jobs.find((j) => j.jobId === highlightedJobId);
     const placement = job && 'entityId' in job ? job.placement : undefined;
     return placementLines(placement).length > 0 ? placement : undefined;
-  }, [highlightedJobId, jobs, showGpus]);
+  }, [highlightedJobId, jobs, onHighlight, showGpus]);
   useEffect(() => {
     if (highlightedJobId && !highlightedPlacement) setHighlightedJobId(undefined);
   }, [highlightedJobId, highlightedPlacement]);
