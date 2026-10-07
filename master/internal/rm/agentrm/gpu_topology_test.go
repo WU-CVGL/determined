@@ -135,12 +135,18 @@ func TestGPUTopologyKeepsExcludedForDisplay(t *testing.T) {
 	}, g.pairs, "links with an excluded end never reach the slot pairs")
 }
 
-func TestAgentStateGPUTopologyStaysOutOfCopies(t *testing.T) {
+// The scheduler's copies share the topology, which is replaced, never mutated: the simulation
+// selects GPUs on them as the live reservation does.
+func TestAgentStateCopiesShareGPUTopology(t *testing.T) {
 	state := newAgentState("agent", 0)
 	g := newGPUTopology(&aproto.GPUTopology{}, nil, "0.42.0", testGPULog)
 	state.setGPUTopology(g)
 	require.Same(t, g, state.gpuTopology)
-	require.Nil(t, state.deepCopy().gpuTopology)
+	copied := state.deepCopy()
+	require.Same(t, g, copied.gpuTopology)
+
+	state.setGPUTopology(newGPUTopology(&aproto.GPUTopology{}, nil, "0.42.0", testGPULog))
+	require.Same(t, g, copied.gpuTopology, "a new report replaces the live pointer only")
 }
 
 // The API reads the topology through summarize.

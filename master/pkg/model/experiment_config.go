@@ -12,6 +12,7 @@ import (
 	"github.com/ghodss/yaml"
 
 	"github.com/determined-ai/determined/master/pkg/check"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 )
 
 const (
@@ -93,6 +94,10 @@ type ResourcesConfig struct {
 	Priority       *int         `json:"priority,omitempty"`
 	IsSingleNode   *bool        `json:"is_single_node"`
 
+	// PreferGPUTopology is resources.prefer_gpu_topology, left out when unset. The merged command
+	// config is decoded with DisallowUnknownFields, so it needs the field.
+	PreferGPUTopology *expconf.GPUTopologyPreference `json:"prefer_gpu_topology,omitempty"`
+
 	Devices DevicesConfig `json:"devices"`
 }
 
@@ -127,20 +132,28 @@ func (d *StorageSize) UnmarshalJSON(data []byte) error {
 // fails that can just get caught later.
 func ParseJustResources(configBytes []byte) ResourcesConfig {
 	// Make this function usable on experiment or command configs.
+	// prefer_gpu_topology is read as raw JSON: an invalid value, such as true, would stop the
+	// decode before resource_pool and slots, which sort after it.
+	type DummyResources struct {
+		ResourcesConfig
+		PreferGPUTopology json.RawMessage `json:"prefer_gpu_topology"`
+	}
 	type DummyConfig struct {
-		Resources ResourcesConfig `json:"resources"`
+		Resources DummyResources `json:"resources"`
 	}
 
 	dummy := DummyConfig{
-		Resources: ResourcesConfig{
-			Slots: 1,
+		Resources: DummyResources{
+			ResourcesConfig: ResourcesConfig{
+				Slots: 1,
+			},
 		},
 	}
 
 	// Don't throw errors; validation should happen elsewhere.
 	_ = yaml.Unmarshal(configBytes, &dummy)
 
-	return dummy.Resources
+	return dummy.Resources.ResourcesConfig
 }
 
 // ValidatePrioritySetting checks that priority if set is within a valid range.
@@ -156,6 +169,14 @@ func ValidatePrioritySetting(priority *int) []error {
 			"scheduling priority must be greater than 0 and less than 100"))
 	}
 	return errs
+}
+
+// GPUTopology returns resources.prefer_gpu_topology, off when it is not set.
+func (r ResourcesConfig) GPUTopology() expconf.GPUTopologyPreference {
+	if r.PreferGPUTopology == nil {
+		return expconf.GPUTopologyOff
+	}
+	return *r.PreferGPUTopology
 }
 
 // Validate implements the check.Validatable interface.

@@ -71,15 +71,15 @@ func requireOnlyAllocatable(t *testing.T, state *agentState, want ...device.ID) 
 	require.Equal(t, len(want), state.numEmptySlots())
 
 	tooMany := cproto.NewID()
-	_, err := state.allocateFreeDevices(len(want)+1, tooMany)
+	_, err := state.allocateFreeDevices(len(want)+1, tooMany, deviceSelection{})
 	require.Error(t, err, "reserved more slots than are allocatable")
 	state.deallocateContainer(tooMany)
 
 	cid := cproto.NewID()
-	got, err := state.allocateFreeDevices(len(want), cid)
+	res, err := state.allocateFreeDevices(len(want), cid, deviceSelection{})
 	require.NoError(t, err)
-	gotIDs := make([]device.ID, 0, len(got))
-	for _, d := range got {
+	gotIDs := make([]device.ID, 0, len(res.devices))
+	for _, d := range res.devices {
 		gotIDs = append(gotIDs, d.ID)
 	}
 	sort.Slice(gotIDs, func(i, j int) bool { return gotIDs[i] < gotIDs[j] })
@@ -106,7 +106,7 @@ func TestDrainRunningSlotIsNotAllocatableAfterItsTaskExits(t *testing.T) {
 
 	// A task runs on both slots: the pool reserves them, and the agent starts the container.
 	cid := cproto.NewID()
-	_, err := state.allocateFreeDevices(2, cid)
+	_, err := state.allocateFreeDevices(2, cid, deviceSelection{})
 	require.NoError(t, err)
 	for _, d := range devices {
 		state.slotStates[d.ID].containerID = &cid
@@ -134,7 +134,7 @@ func TestDrainReservedSlotIsNotAllocatableAfterTheReservationIsCanceled(t *testi
 
 	// The pool reserves both slots; no container has started yet.
 	cid := cproto.NewID()
-	_, err := state.allocateFreeDevices(2, cid)
+	_, err := state.allocateFreeDevices(2, cid, deviceSelection{})
 	require.NoError(t, err)
 
 	// Draining slot 0 keeps the reservation.
@@ -166,10 +166,10 @@ func TestEnableDrainedSlotMakesItAllocatable(t *testing.T) {
 func runOnOneSlot(t *testing.T, state *agentState) (cproto.ID, device.ID, device.ID) {
 	t.Helper()
 	cid := cproto.NewID()
-	got, err := state.allocateFreeDevices(1, cid)
+	res, err := state.allocateFreeDevices(1, cid, deviceSelection{})
 	require.NoError(t, err)
-	require.Len(t, got, 1)
-	used := got[0].ID
+	require.Len(t, res.devices, 1)
+	used := res.devices[0].ID
 	state.slotStates[used].containerID = &cid
 	state.containerAllocation[cid] = model.AllocationID("drain-" + string(cid))
 	return cid, used, 1 - used
@@ -260,14 +260,14 @@ func TestPrioritySchedulerDoesNotPreemptForADrainingSlot(t *testing.T) {
 			}
 			taskList.AddTask(low)
 			cid := cproto.NewID()
-			got, err := state.allocateFreeDevices(1, cid)
+			res, err := state.allocateFreeDevices(1, cid, deviceSelection{})
 			require.NoError(t, err)
 			state.slotStates[devices[0].ID].containerID = &cid
 			taskList.AddAllocation(low.AllocationID, &sproto.ResourcesAllocated{
 				ID: low.AllocationID,
 				Resources: map[sproto.ResourcesID]sproto.Resources{
 					sproto.ResourcesID(cid): &containerResources{
-						req: low, agent: state, containerID: cid, devices: got,
+						req: low, agent: state, containerID: cid, devices: res.devices,
 					},
 				},
 			})

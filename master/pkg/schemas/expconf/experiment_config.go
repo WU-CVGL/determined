@@ -213,6 +213,9 @@ type ResourcesConfigV0 struct {
 	RawPriority       *int     `json:"priority"`
 	RawIsSingleNode   *bool    `json:"is_single_node"`
 
+	// RawPreferGPUTopology is left out when unset, so stored configs gain no key.
+	RawPreferGPUTopology *GPUTopologyPreference `json:"prefer_gpu_topology,omitempty"`
+
 	RawDevices DevicesConfigV0 `json:"devices"`
 }
 

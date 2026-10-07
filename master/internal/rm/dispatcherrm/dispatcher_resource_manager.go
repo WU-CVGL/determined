@@ -35,6 +35,7 @@ import (
 	"github.com/determined-ai/determined/master/pkg/logger"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/master/pkg/set"
 	"github.com/determined-ai/determined/master/pkg/syncx/mapx"
 	"github.com/determined-ai/determined/master/pkg/syncx/orderedmapx"
@@ -565,6 +566,9 @@ func (*DispatcherResourceManager) SetGroupWeight(sproto.SetGroupWeight) error {
 func (*DispatcherResourceManager) ValidateResources(
 	req sproto.ValidateResourcesRequest,
 ) ([]command.LaunchWarning, error) {
+	if req.GPUTopology == expconf.GPUTopologyStrong && req.Slots >= 2 {
+		return nil, errors.New(`prefer_gpu_topology "strong" is not available on Slurm or PBS`)
+	}
 	// TODO(HAL-2862): Use inferred value here if possible.
 	// fulfillable := m.config.MaxSlotsPerContainer >= msg.Slots
 	return nil, nil

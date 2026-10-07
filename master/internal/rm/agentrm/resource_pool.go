@@ -22,6 +22,7 @@ import (
 	"github.com/determined-ai/determined/master/pkg/aproto"
 	"github.com/determined-ai/determined/master/pkg/cproto"
 	"github.com/determined-ai/determined/master/pkg/model"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/master/pkg/set"
 	"github.com/determined-ai/determined/proto/pkg/jobv1"
 )
@@ -43,10 +44,17 @@ type resourcePool struct {
 
 	agentService     *agents
 	agentStatesCache map[aproto.ID]*agentState
-	taskList         *tasklist.TaskList
-	groups           map[model.JobID]*tasklist.Group
-	queuePositions   tasklist.JobSortState // secondary sort key based on job submission time
-	scalingInfo      *sproto.ScalingInfo
+	// gpuPolicy is the GPU selection of the running scheduling pass, read once per pass.
+	gpuPolicy gpuPolicy
+	// gpuXIDs is where the pool reads the GPUs' recent critical XIDs; nil reads none.
+	gpuXIDs *gpuXIDReader
+	// strongNotices holds what the pool told the pending tasks with prefer_gpu_topology "strong"
+	// (checkStrongRequests).
+	strongNotices  map[model.AllocationID]strongNotice
+	taskList       *tasklist.TaskList
+	groups         map[model.JobID]*tasklist.Group
+	queuePositions tasklist.JobSortState // secondary sort key based on job submission time
+	scalingInfo    *sproto.ScalingInfo
 
 	reschedule      bool
 	rescheduleTimer *time.Timer
@@ -357,11 +365,14 @@ func (rp *resourcePool) schedulerTick() {
 			}
 		}
 	}
+	again := false
 	if rp.reschedule {
 		rp.syslog.Trace("scheduling")
 		rp.agentStatesCache = rp.agentService.list(rp.config.PoolName)
+		rp.gpuPolicy = rp.newGPUPolicy()
 		defer func() {
 			rp.agentStatesCache = nil
+			rp.gpuPolicy = gpuPolicy{}
 		}()
 
 		rp.pruneTaskList()
@@ -372,33 +383,59 @@ func (rp *resourcePool) schedulerTick() {
 				WithField("toRelease", len(toRelease)).
 				Debugf("scheduled")
 		}
+		// Whether the pass allocated or failed a reservation, under which an agent can have
+		// changed; a persistence failure changes no agent once rolled back.
+		reserved := false
 		for _, req := range toAllocate {
-			rp.allocateResources(req)
+			switch rp.allocateResources(req) {
+			case reservationAllocated, reservationFailed:
+				reserved = true
+			case noReservation, persistenceFailed:
+			}
 		}
 		for _, aID := range toRelease {
 			rp.releaseResource(aID)
 		}
+		again = rp.checkStrongRequests(reserved)
 		rp.sendScalingInfo()
 	}
-	rp.reschedule = false
+	// The check after the pass can ask for one more.
+	rp.reschedule = again
 	rp.rescheduleTimer = time.AfterFunc(actionCoolDown, rp.schedulerTick)
 }
 
-// allocateResources assigns resources based on a request and notifies the request
-// handler of the assignment. It returns true if it is successfully allocated.
-func (rp *resourcePool) allocateResources(req *sproto.AllocateRequest) bool {
+// reservationOutcome is what allocateResources did.
+type reservationOutcome int
+
+const (
+	// noReservation: the request has no fit, and nothing was reserved.
+	noReservation reservationOutcome = iota
+	// reservationFailed: a reservation failed, and the request's reservations were rolled back.
+	reservationFailed
+	// persistenceFailed: the request's reservations were made, persisting them failed, and they
+	// were rolled back.
+	persistenceFailed
+	// reservationAllocated: the request has its resources.
+	reservationAllocated
+)
+
+// allocateResources assigns resources based on a request and notifies the request handler of the
+// assignment.
+func (rp *resourcePool) allocateResources(req *sproto.AllocateRequest) reservationOutcome {
 	fits := findFits(
 		req,
 		rp.agentStatesCache,
 		rp.fittingMethod,
 		rp.config.Scheduler.AllowHeterogeneousFits,
+		rp.gpuPolicy.packNUMA,
 	)
 
 	if len(fits) == 0 {
-		return false
+		return noReservation
 	}
 
 	resources := make([]*containerResources, 0, len(fits))
+	reservations := make([]gpuReservation, 0, len(fits))
 	rollback := false
 
 	defer func() {
@@ -418,17 +455,22 @@ func (rp *resourcePool) allocateResources(req *sproto.AllocateRequest) bool {
 		}
 	}()
 
+	selection := rp.gpuPolicy.selection(req, fits)
 	for _, fit := range fits {
 		containerID := cproto.NewID()
 		resp, err := fit.Agent.handler.AllocateFreeDevices(allocateFreeDevices{
 			slots:       fit.Slots,
 			containerID: containerID,
+			selection:   selection,
 		})
 		if err != nil {
 			// Rollback previous allocations.
 			rp.syslog.WithError(err).Warnf("failed to allocate request %s", req.AllocationID)
 			rollback = true
-			return false
+			// The agent can differ from the cache, which the check after the pass reads
+			// (checkStrongRequests); the failed reservation changed nothing on it.
+			rp.refreshAgentStateCacheFor([]*agent{fit.Agent.handler})
+			return reservationFailed
 		}
 
 		resources = append(resources, &containerResources{
@@ -437,6 +479,7 @@ func (rp *resourcePool) allocateResources(req *sproto.AllocateRequest) bool {
 			containerID: containerID,
 			devices:     resp.devices,
 		})
+		reservations = append(reservations, gpuReservation{fit: fit, containerID: containerID, resp: resp})
 	}
 
 	// persist allocation_resources and container_resources.
@@ -445,12 +488,12 @@ func (rp *resourcePool) allocateResources(req *sproto.AllocateRequest) bool {
 		if err := rs.Persist(); err != nil {
 			rp.syslog.WithError(err).Error("persistence failure")
 			rollback = true
-			return false
+			return persistenceFailed
 		}
 		if err := cr.persist(); err != nil {
 			rp.syslog.WithError(err).Error("persistence failure")
 			rollback = true
-			return false
+			return persistenceFailed
 		}
 	}
 
@@ -467,6 +510,7 @@ func (rp *resourcePool) allocateResources(req *sproto.AllocateRequest) bool {
 	}
 	rp.taskList.AddAllocation(req.AllocationID, &allocated)
 	rmevents.Publish(req.AllocationID, allocated.Clone())
+	rp.logGPUChoices(req, reservations)
 
 	// Refresh state for the updated agents.
 	allocatedAgents := make([]*agent, 0, len(resources))
@@ -478,7 +522,7 @@ func (rp *resourcePool) allocateResources(req *sproto.AllocateRequest) bool {
 
 	rp.syslog.Infof("allocated resources to %s", req.Name)
 
-	return true
+	return reservationAllocated
 }
 
 func (rp *resourcePool) releaseResource(aID model.AllocationID) {
@@ -509,7 +553,7 @@ func (rp *resourcePool) refreshAgentStateCacheFor(agents []*agent) {
 		state, err := a.State()
 		if err != nil {
 			rp.syslog.WithError(err).Warnf("failed to get agent state for agent %s", a.id)
-			delete(rp.agentStatesCache, state.id)
+			delete(rp.agentStatesCache, a.id)
 			continue
 		}
 		rp.agentStatesCache[a.id] = state
@@ -588,8 +632,28 @@ func (rp *resourcePool) ValidateResources(
 
 		fulfillable = maxSlots >= msg.Slots
 	}
+	if msg.GPUTopology != expconf.GPUTopologyStrong || msg.Slots < 2 {
+		return sproto.ValidateResourcesResponse{Fulfillable: fulfillable}
+	}
 
-	return sproto.ValidateResourcesResponse{Fulfillable: fulfillable}
+	// prefer_gpu_topology "strong": refused when the single-node check fails (the pool has no agent,
+	// or none with the slots), or when every agent has reported its topology and none has a NUMA
+	// node with the slots. Each refusal gives one of strong's causes.
+	if !fulfillable {
+		cause := errStrongNoNUMANodeHolds(rp.config.PoolName, msg.Slots)
+		if rp.slotsPerInstance <= 0 && len(rp.agentStatesCache) == 0 {
+			cause = errStrongNoNUMANodes(rp.config.PoolName)
+		}
+		return sproto.ValidateResourcesResponse{Fulfillable: false, Reason: cause.Error()}
+	}
+	agents := rp.agentStatesCache
+	if agents == nil {
+		agents = rp.agentService.list(rp.config.PoolName)
+	}
+	if err := strongCannotFit(rp.config.PoolName, agents, msg.Slots); err != nil {
+		return sproto.ValidateResourcesResponse{Fulfillable: false, Reason: err.Error()}
+	}
+	return sproto.ValidateResourcesResponse{Fulfillable: true}
 }
 
 // GetResourceSummary requests a summary of the resources used by the resource pool (agents, slots, cpu containers).

@@ -1,3 +1,9 @@
+import {
+  FilterValue,
+  SorterResult,
+  TableCurrentDataSource,
+  TablePaginationConfig,
+} from 'antd/es/table/interface';
 import Icon from 'hew/Icon';
 import { useModal } from 'hew/Modal';
 import { DetError } from 'hew/utils/error';
@@ -55,9 +61,11 @@ import { useObservable } from 'utils/observable';
 import { routeToReactUrl } from 'utils/routes';
 import { numericSorter } from 'utils/sort';
 import { capitalize } from 'utils/string';
+import { getDisplayName } from 'utils/user';
 
 import css from './JobQueue.module.scss';
 import settingsConfig, { Settings } from './JobQueue.settings';
+import { ACTIVE_SORTS, isActiveSortKey, QUEUE_ORDER, sortJobs } from './JobQueue.sort';
 import ManageJobModalComponent from './ManageJob';
 
 interface Props {
@@ -65,6 +73,9 @@ interface Props {
   rpStats: Api.V1RPQueueStat[];
   selectedRp: ResourcePool;
 }
+
+/** The largest limit the API takes, to list all jobs: the master lists 100 for a limit of 0. */
+const ALL_JOBS = 2 ** 31 - 1;
 
 /**
  * The task of a shell, JupyterLab, command or TensorBoard job, as the task action menu takes it:
@@ -85,7 +96,8 @@ const commandTaskFromJob = (job: FullJob, type: CommandType, task: TaskItem): Co
 const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
   const resourcesEnabled = useTaskResourcesEnabled();
   const { canModifyExperiment, canModifyWorkspaceNSC } = usePermissions();
-  const users = Loadable.getOrElse([], useObservable(userStore.getUsers()));
+  const loadableUsers = useObservable(useMemo(() => userStore.getUsers(), []));
+  const users = useMemo(() => Loadable.getOrElse([], loadableUsers), [loadableUsers]);
   const [managingJob, setManagingJob] = useState<Job>();
   const [jobs, setJobs] = useState<Job[]>([]);
   // The shells, JupyterLabs, commands and TensorBoards among the jobs on the page, by task ID.
@@ -94,7 +106,6 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
   const pageTaskIds = useRef<Set<string>>(new Set());
   const taskLookups = useRef<Set<string>>(new Set());
   const isMounted = useRef(true);
-  const [topJob, setTopJob] = useState<Job>();
   const [total, setTotal] = useState(0);
   const [canceler] = useState(new AbortController());
   const [pageState, setPageState] = useState<{ isLoading: boolean }>({ isLoading: true });
@@ -115,6 +126,24 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
   const settingsColumns = useMemo(() => [...settings.columns], [settings.columns]);
 
   const isJobOrderAvailable = orderedSchedulers.has(selectedRp.schedulerType);
+
+  // The Active tab sorts all its jobs in the browser by a column. Without a column sort both tabs
+  // show the queue order, also for a sort key the tab has no column for, such as from a link.
+  const hasColumnSorts = jobState === JobState.SCHEDULED;
+  const sortedInBrowser = hasColumnSorts && isActiveSortKey(settings.sortKey);
+  const knownSortKey = sortedInBrowser || settings.sortKey === QUEUE_ORDER.sortKey;
+  const sortKey = knownSortKey ? settings.sortKey : QUEUE_ORDER.sortKey;
+  const sortDesc = knownSortKey ? settings.sortDesc : QUEUE_ORDER.sortDesc;
+  // A sort in the browser fetches all jobs and pages them here, so a page click fetches nothing.
+  const fetchLimit = sortedInBrowser ? ALL_JOBS : settings.tableLimit;
+  const fetchOffset = sortedInBrowser ? 0 : settings.tableOffset;
+  // The page the table shows, for the check that a sorted list still reaches it.
+  const tableOffset = useRef(settings.tableOffset);
+  useEffect(() => {
+    tableOffset.current = settings.tableOffset;
+  }, [settings.tableOffset]);
+  // The latest fetch of the jobs: a reply to an earlier one, for another sort or page, is stale.
+  const latestFetch = useRef(0);
 
   useEffect(() => {
     isMounted.current = true;
@@ -170,39 +199,34 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
   }, []);
 
   const fetchJobsTable = useCallback(async () => {
-    if (!settings) return;
-
+    const fetchId = ++latestFetch.current;
     try {
-      const orderBy = settings.sortDesc ? 'ORDER_BY_DESC' : 'ORDER_BY_ASC';
+      const orderBy = !sortedInBrowser && sortDesc ? 'ORDER_BY_DESC' : 'ORDER_BY_ASC';
       const jobs = await getJobQ(
         {
-          limit: settings.tableLimit,
-          offset: settings.tableOffset,
+          limit: fetchLimit,
+          offset: fetchOffset,
           orderBy,
           resourcePool: selectedRp.name,
           states: jobState ? [jobState] : undefined,
         },
         { signal: canceler.signal },
       );
+      if (fetchId !== latestFetch.current) return;
 
-      const firstJobResp = await getJobQ(
-        {
-          limit: 1,
-          offset: 0,
-          resourcePool: selectedRp.name,
-        },
-        { signal: canceler.signal },
-      );
-      const firstJob = firstJobResp.jobs[0];
-
-      // Process jobs response.
-      if (firstJob && !_.isEqual(firstJob, topJob)) setTopJob(firstJob);
       const newJobs = jobState ? jobs.jobs.filter((j) => j.summary.state === jobState) : jobs.jobs;
       setJobs(newJobs);
-      if (jobs.pagination.total !== undefined) setTotal(jobs.pagination.total);
-      refreshCommandTasks(newJobs);
+      if (sortedInBrowser) {
+        setTotal(newJobs.length);
+        if (tableOffset.current > 0 && tableOffset.current >= newJobs.length) {
+          updateSettings({ tableOffset: 0 });
+        }
+      } else if (jobs.pagination.total !== undefined) {
+        setTotal(jobs.pagination.total);
+      }
     } catch (e) {
-      if ((e as DetError)?.publicMessage === 'offset out of bounds' && settings.tableOffset !== 0) {
+      if (fetchId !== latestFetch.current) return;
+      if ((e as DetError)?.publicMessage === 'offset out of bounds' && fetchOffset !== 0) {
         updateSettings({ tableOffset: 0 });
         return;
       }
@@ -213,19 +237,71 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
         type: ErrorType.Server,
       });
     } finally {
-      setPageState((cur) => ({ ...cur, isLoading: false }));
+      if (fetchId === latestFetch.current) setPageState((cur) => ({ ...cur, isLoading: false }));
     }
   }, [
     canceler.signal,
+    fetchLimit,
+    fetchOffset,
     selectedRp.name,
-    settings,
     jobState,
-    topJob,
     updateSettings,
-    refreshCommandTasks,
+    sortedInBrowser,
+    sortDesc,
   ]);
 
   usePolling(fetchJobsTable, { rerunOnNewFn: true });
+
+  // The jobs on the page. A column sort orders all jobs of the tab; jobs with equal values keep
+  // their queue order. Users sort by the name their avatar shows.
+  const pageJobs = useMemo(() => {
+    if (!sortedInBrowser) return jobs;
+    const ownerName = (job: Job) => {
+      if (!('username' in job)) return undefined;
+      const user = users.find((u) => u.id === job.userId);
+      return user ? getDisplayName(user) : job.username;
+    };
+    const { tableLimit, tableOffset } = settings;
+    return sortJobs(jobs, sortKey, sortDesc, ownerName).slice(
+      tableOffset,
+      tableOffset + tableLimit,
+    );
+  }, [jobs, settings, sortDesc, sortKey, sortedInBrowser, users]);
+
+  useEffect(() => refreshCommandTasks(pageJobs), [pageJobs, refreshCommandTasks]);
+
+  /**
+   * In place of InteractiveTable's own change handler, which the props it passes on to the table
+   * override: a third click on a sorted column goes back to the queue order, and a new sort starts
+   * on the first page.
+   */
+  const handleTableChange = useCallback(
+    (
+      pagination: TablePaginationConfig,
+      _filters: Record<string, FilterValue | null>,
+      sorter: SorterResult<Job> | SorterResult<Job>[],
+      { action }: TableCurrentDataSource<Job>,
+    ) => {
+      const tableLimit = pagination.pageSize ?? settings.tableLimit;
+      const updates: Partial<Settings> = {
+        tableLimit,
+        tableOffset: ((pagination.current ?? 1) - 1) * tableLimit,
+      };
+      if (action === 'sort' && !Array.isArray(sorter)) {
+        const key = String(sorter.columnKey);
+        const sortable = key === QUEUE_ORDER.sortKey || (hasColumnSorts && isActiveSortKey(key));
+        const sort =
+          sorter.order && sortable
+            ? { sortDesc: sorter.order === 'descend', sortKey: key }
+            : QUEUE_ORDER;
+        if (sort.sortKey !== settings.sortKey || sort.sortDesc !== settings.sortDesc) {
+          Object.assign(updates, sort, { tableOffset: 0 });
+        }
+      }
+      updateSettings(updates);
+    },
+    [hasColumnSorts, settings, updateSettings],
+  );
 
   const { launchAgain, launchAgainModals } = useLaunchAgain({ onLaunched: fetchJobsTable });
 
@@ -470,26 +546,30 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
             return col;
         }
       })
-      .map((column) => {
-        column.sortOrder = null;
-        if (column.key === settings.sortKey) {
-          column.sortOrder = settings.sortDesc ? 'descend' : 'ascend';
-        }
-        return column;
+      .map<ColumnDef<Job>>((column) => {
+        const key = String(column.key);
+        return {
+          ...column,
+          ...(hasColumnSorts && isActiveSortKey(key)
+            ? { sortDirections: ACTIVE_SORTS[key].directions, sorter: true }
+            : {}),
+          sortOrder: key === sortKey ? (sortDesc ? 'descend' : 'ascend') : null,
+        };
       });
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    defaultColumns,
     isJobOrderAvailable,
     dropDownOnTrigger,
     settingsColumns,
-    settings.sortKey,
-    settings.sortDesc,
+    hasColumnSorts,
+    sortKey,
+    sortDesc,
     selectedRp.schedulerType,
     canManage,
     commandTasks,
     fetchJobsTable,
     launchAgain,
+    users,
   ]);
 
   // table title using selectedRp and schedulerType from list of resource pools
@@ -511,7 +591,7 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
           <InteractiveTable<Job, Settings>
             columns={columns}
             containerRef={pageRef}
-            dataSource={jobs}
+            dataSource={pageJobs}
             loading={pageState.isLoading}
             pagination={getFullPaginationConfig(
               {
@@ -527,6 +607,7 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
             showSorterTooltip={false}
             size="small"
             updateSettings={updateSettings}
+            onChange={handleTableChange}
           />
         ) : (
           <SkeletonTable columns={columns.length} />

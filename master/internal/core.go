@@ -47,6 +47,7 @@ import (
 	detContext "github.com/determined-ai/determined/master/internal/context"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/elastic"
+	"github.com/determined-ai/determined/master/internal/gpuhealth"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
 	"github.com/determined-ai/determined/master/internal/job/jobservice"
 	"github.com/determined-ai/determined/master/internal/license"
@@ -119,6 +120,10 @@ type Master struct {
 
 	trialLogBackend TrialLogBackend
 	taskLogBackend  TaskLogBackend
+
+	// xidCache holds the GPUs' recent critical XIDs; gpuXIDs builds it on first use.
+	xidCache     *gpuhealth.XIDCache
+	xidCacheOnce sync.Once
 }
 
 // New creates an instance of the Determined master.
@@ -962,6 +967,7 @@ func (m *Master) restoreGenericTasks(ctx context.Context) error {
 				ResourcePool: *resourcePool,
 				FittingRequirements: sproto.FittingRequirements{
 					SingleAgent: isSingleNode,
+					GPUTopology: snapshots[i].GenericTaskSpec.GenericTaskConfig.Resources.GPUTopology(),
 				},
 
 				Restore: true,
@@ -1427,6 +1433,7 @@ func (m *Master) Run(ctx context.Context, gRPCLogInitDone chan struct{}) error {
 	}()
 	m.registerDynamicResourcePoolRoutes()
 	m.registerResourcePoolAccessRoutes()
+	m.shareGPUXIDs(poolWorkerCtx)
 
 	jobservice.SetDefaultService(m.rm)
 
@@ -1474,8 +1481,8 @@ func (m *Master) Run(ctx context.Context, gRPCLogInitDone chan struct{}) error {
 	}
 
 	// The below function call is intentionally made after the call to CloseOpenAllocations.
-	// This ensures that in the scenario where a cluster fails all open allocations are
-	// set to the last cluster heartbeat when the cluster was running.
+	// This ensures that in the scenario where a cluster fails the allocations that
+	// CloseOpenAllocations closes are set to the last cluster heartbeat when the cluster was running.
 	go updateClusterHeartbeat(ctx, m.db)
 	go trials.MarkLostTrialsWorker(ctx)
 

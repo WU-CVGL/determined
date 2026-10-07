@@ -86,7 +86,8 @@ message Slot {
   bool draining = 5;
 }
 
-// GpuTopology is what an agent measured with NVML when it started.
+// GpuTopology is what an agent measured with NVML when it started, and the
+// GPUs' recent critical XIDs from the master's Prometheus.
 message GpuTopology {
   option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
     json_schema: {
@@ -106,6 +107,14 @@ message GpuTopology {
   repeated GpuInfo gpus = 4;
   // The pairs of GPUs.
   repeated GpuLink links = 5;
+  // The result of the master's query for recent critical XIDs. Agent enable
+  // and disable responses never query: they carry the last result, or
+  // unspecified before the first query.
+  GpuXidQueryStatus xid_query_status = 6;
+  // Why the query failed, or empty.
+  string xid_query_error = 7;
+  // When the master queried, by the master's clock.
+  google.protobuf.Timestamp xid_queried_at = 8;
 }
 
 // GpuInfo describes one GPU of an agent: a slot, or a GPU left out by the
@@ -154,6 +163,23 @@ message GpuInfo {
   GpuHealth health = 10;
   // Whether the agent's exclude list left the GPU out. It is then not a slot.
   bool excluded = 11;
+  // The critical XIDs that the cluster's DCGM-Exporter reported for the GPU in
+  // the last 24 hours, by code.
+  repeated GpuXid recent_xids = 12;
+}
+
+// GpuXid is one critical XID code that a GPU reported recently.
+message GpuXid {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: { required: [ "xid", "first_observed", "last_observed" ] }
+  };
+  // The XID code.
+  int32 xid = 1;
+  // The end of the first 5-minute query window that saw the code. The XID
+  // happened before it, not at it.
+  google.protobuf.Timestamp first_observed = 2;
+  // The end of the last 5-minute query window that saw the code.
+  google.protobuf.Timestamp last_observed = 3;
 }
 
 // GpuP2pCaps holds the raw NVML P2P statuses of one direction of a pair.
@@ -251,14 +277,31 @@ enum GpuP2p {
   GPU_P2P_NOT_USABLE = 2;
 }
 
-// GpuHealth is a GPU's health from what the agent measured at its last start.
+// GpuHealth is a GPU's health from what the agent measured at its last start
+// and the GPU's recent critical XIDs.
 enum GpuHealth {
   // Unknown: no report, NVML did not run, or the link width is unknown.
   GPU_HEALTH_UNSPECIFIED = 0;
-  // No NVML error, and the link width was at its maximum at agent start.
+  // No NVML error, no recent critical XID, and the link width was at its
+  // maximum at agent start.
   GPU_HEALTH_OK = 1;
   // The link width was below its maximum at agent start.
   GPU_HEALTH_LINK_BELOW_MAX = 2;
-  // An NVML health call failed at agent start.
+  // An NVML health call failed at agent start, or the GPU has a recent
+  // critical XID.
   GPU_HEALTH_ERROR = 3;
+}
+
+// GpuXidQueryStatus is the result of the master's Prometheus query for recent
+// critical XIDs.
+enum GpuXidQueryStatus {
+  // Not queried.
+  GPU_XID_QUERY_STATUS_UNSPECIFIED = 0;
+  // The master has no Prometheus (integrations.task_resources).
+  GPU_XID_QUERY_STATUS_NOT_CONFIGURED = 1;
+  // The query succeeded. No XID can also mean that the exporter does not
+  // report the GPU.
+  GPU_XID_QUERY_STATUS_OK = 2;
+  // The query failed or timed out.
+  GPU_XID_QUERY_STATUS_FAILED = 3;
 }

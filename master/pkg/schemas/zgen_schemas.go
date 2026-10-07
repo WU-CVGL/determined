@@ -2054,6 +2054,30 @@ var (
             ],
             "default": false
         },
+        "prefer_gpu_topology": {
+            "type": [
+                "boolean",
+                "string",
+                "null"
+            ],
+            "checks": {
+                "prefer_gpu_topology must be false, \"soft\" or \"strong\"": {
+                    "enum": [
+                        null,
+                        false,
+                        true,
+                        "soft",
+                        "strong"
+                    ]
+                },
+                "prefer_gpu_topology must be false, \"soft\" or \"strong\", not true": {
+                    "not": {
+                        "const": true
+                    }
+                }
+            },
+            "default": null
+        },
         "priority": {
             "type": [
                 "integer",

@@ -368,6 +368,9 @@ func (a *apiServer) startGenericTaskResumeAllocation(
 ) error {
 	logCtx := logger.Context{"job-id": t.JobID, "task-id": t.TaskID, "task-type": model.TaskTypeGeneric}
 	singleNode := spec.GenericTaskConfig.Resources.IsSingleNode() != nil && *spec.GenericTaskConfig.Resources.IsSingleNode()
+	fitting := sproto.FittingRequirements{
+		SingleAgent: singleNode, GPUTopology: spec.GenericTaskConfig.Resources.GPUTopology(),
+	}
 	now := time.Now().UTC()
 	return task.DefaultService.StartAllocation(logCtx, sproto.AllocateRequest{
 		AllocationID: member.NewAllocationID, TaskID: member.TaskID, JobID: *t.JobID,
@@ -376,7 +379,7 @@ func (a *apiServer) startGenericTaskResumeAllocation(
 		ProxyPorts:          sproto.NewProxyPortConfig(spec.ProxyPorts(), member.TaskID),
 		SlotsNeeded:         *spec.GenericTaskConfig.Resources.Slots(),
 		ResourcePool:        spec.GenericTaskConfig.Resources.ResourcePool(),
-		FittingRequirements: sproto.FittingRequirements{SingleAgent: singleNode},
+		FittingRequirements: fitting,
 		Preemption: sproto.PreemptionConfig{GracefulStop: true,
 			TimeoutDuration: time.Duration(spec.GenericTaskConfig.PreemptionTimeout) * time.Second},
 		Restore: restore,

@@ -421,6 +421,7 @@ func (t *trial) maybeAllocateTask() error {
 			ResourcePool:      t.config.Resources().ResourcePool(),
 			FittingRequirements: sproto.FittingRequirements{
 				SingleAgent: isSingleNode,
+				GPUTopology: t.config.Resources().GPUTopology(),
 			},
 			Preemption: sproto.PreemptionConfig{
 				Preemptible:     true,
@@ -473,6 +474,7 @@ func (t *trial) maybeAllocateTask() error {
 		ResourcePool: t.config.Resources().ResourcePool(),
 		FittingRequirements: sproto.FittingRequirements{
 			SingleAgent: isSingleNode,
+			GPUTopology: t.config.Resources().GPUTopology(),
 		},
 
 		Preemption: sproto.PreemptionConfig{

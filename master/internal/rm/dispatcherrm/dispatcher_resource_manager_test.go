@@ -12,6 +12,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/config/provconfig"
 	"github.com/determined-ai/determined/master/internal/rm"
+	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/pkg/device"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
@@ -841,5 +842,21 @@ func Test_dispatcherResourceManager_getTaskContainerDefaults(t *testing.T) {
 				t.Errorf("getTaskContainerDefaults() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestValidateResourcesRefusesStrongGPUTopology(t *testing.T) {
+	m := &DispatcherResourceManager{}
+	_, err := m.ValidateResources(sproto.ValidateResourcesRequest{
+		Slots: 2, GPUTopology: expconf.GPUTopologyStrong,
+	})
+	require.EqualError(t, err, `prefer_gpu_topology "strong" is not available on Slurm or PBS`)
+	for _, req := range []sproto.ValidateResourcesRequest{
+		{Slots: 1, GPUTopology: expconf.GPUTopologyStrong},
+		{Slots: 2, GPUTopology: expconf.GPUTopologySoft},
+		{Slots: 2},
+	} {
+		_, err := m.ValidateResources(req)
+		require.NoError(t, err)
 	}
 }

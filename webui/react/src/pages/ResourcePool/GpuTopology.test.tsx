@@ -4,7 +4,7 @@ import { DefaultTheme, UIProvider } from 'hew/Theme';
 
 import { ThemeProvider } from 'components/ThemeProvider';
 import { gpuTopologyCase } from 'fixtures/gpuTopologyCases';
-import { V1GpuTopology } from 'services/api-ts-sdk';
+import { V1GpuHealth, V1GpuTopology, V1GpuXidQueryStatus } from 'services/api-ts-sdk';
 import { Agent, Resource, ResourceState, ResourceType } from 'types';
 import { GPU_EXCLUDED_TEXT, GPU_NARROW_LINK_TEXT } from 'utils/gpuTopology';
 
@@ -388,6 +388,63 @@ describe('GpuTopology', () => {
     expect(dialog).toHaveTextContent('Slotnone');
     expect(dialog).toHaveTextContent('StateExcluded');
     expect(dialog).not.toHaveTextContent(GPU_NARROW_LINK_TEXT);
+  });
+
+  it('lists recent critical XIDs in the details only when there are any', async () => {
+    const topo = gpuTopologyCase('recent critical XIDs');
+    setup(<GpuTopology agent={agentOf('a', topo)} />);
+    // A GPU with a recent critical XID has the error dot, also on a narrow link.
+    expect(
+      within(tile('Slot 1')).getByRole('img', { name: 'GPU health: error' }),
+    ).toBeInTheDocument();
+    await userEvent.click(within(tile('Slot 1')).getByRole('button'));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('Slot 1 on a: error');
+    expect(dialog).toHaveTextContent(
+      /Collected at\d{4}-\d{2}-\d{2}, \d{2}:\d{2}:\d{2}Recent critical XIDs48 \(.+\)79 \(.+ to .+\)$/,
+    );
+    expect(dialog).not.toHaveTextContent(GPU_NARROW_LINK_TEXT);
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Close details' }));
+
+    await userEvent.click(within(tile('Slot 2')).getByRole('button'));
+    const narrow = await screen.findByRole('dialog');
+    expect(narrow).toHaveTextContent('Slot 2 on a: link below max');
+    expect(narrow).not.toHaveTextContent(/XID/);
+  });
+
+  it.each([
+    ['not configured', V1GpuXidQueryStatus.NOTCONFIGURED, ''],
+    ['failed', V1GpuXidQueryStatus.FAILED, 'timeout'],
+    ['ok without XIDs', V1GpuXidQueryStatus.OK, ''],
+  ])('shows nothing about the XID query when it is %s', async (_, status, error) => {
+    const topo = gpuTopologyCase('recent critical XIDs');
+    topo.xidQueryStatus = status;
+    topo.xidQueryError = error;
+    topo.gpus.forEach((g) => {
+      g.recentXids = [];
+      g.health = g.pcieLinkWidth === 16 ? V1GpuHealth.OK : V1GpuHealth.LINKBELOWMAX;
+    });
+    setup(<GpuTopology agent={agentOf('a', topo)} />);
+    await userEvent.click(within(tile('Slot 0')).getByRole('button'));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('Slot 0 on a: ok');
+    expect(dialog).not.toHaveTextContent(/XID|timeout|query|Prometheus/i);
+  });
+
+  it('shows the XIDs that a failed query keeps and nothing about the failure', async () => {
+    const topo = gpuTopologyCase('recent critical XIDs');
+    topo.xidQueryStatus = V1GpuXidQueryStatus.FAILED;
+    topo.xidQueryError = 'timeout';
+    setup(<GpuTopology agent={agentOf('a', topo)} />);
+    expect(
+      within(tile('Slot 0')).getByRole('img', { name: 'GPU health: error' }),
+    ).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/timeout|Prometheus/i);
+    await userEvent.click(within(tile('Slot 0')).getByRole('button'));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('Slot 0 on a: error');
+    expect(dialog).toHaveTextContent(/Recent critical XIDs79 \(.+ to .+\)$/);
+    expect(dialog).not.toHaveTextContent(/timeout|query|Prometheus|failed/i);
   });
 
   it('keeps the inventory when the topology is unknown', () => {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/pkg/aproto"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 )
 
 func TestIsViable(t *testing.T) {
@@ -319,7 +320,7 @@ func TestFindFits(t *testing.T) {
 				))
 			}
 			agentsByHandler, agentsByIndex := byID(agents...)
-			fits := findFits(&tc.Task, agentsByHandler, tc.FittingMethod, false)
+			fits := findFits(&tc.Task, agentsByHandler, tc.FittingMethod, false, false)
 			assert.Assert(t, len(fits) > 0)
 			assert.Equal(t, fits[0].Agent, agentsByIndex[tc.ExpectedAgentFit])
 		})
@@ -479,7 +480,7 @@ func TestFindFitDisallowedNodes(t *testing.T) {
 		SlotsNeeded:  1,
 		TaskID:       "noAgents",
 	}
-	fits := findFits(task, agentsByHandler, BestFit, false)
+	fits := findFits(task, agentsByHandler, BestFit, false, false)
 	assert.Assert(t, len(fits) == 0)
 
 	task = &sproto.AllocateRequest{
@@ -488,7 +489,7 @@ func TestFindFitDisallowedNodes(t *testing.T) {
 		SlotsNeeded:  1,
 		TaskID:       "notOnAgent1",
 	}
-	fits = findFits(task, agentsByHandler, BestFit, false)
+	fits = findFits(task, agentsByHandler, BestFit, false, false)
 	assert.Assert(t, len(fits) == 1)
 	assert.Equal(t, fits[0].Agent, agents[1])
 
@@ -498,7 +499,7 @@ func TestFindFitDisallowedNodes(t *testing.T) {
 		SlotsNeeded:  1,
 		TaskID:       "notOnAgent2",
 	}
-	fits = findFits(task, agentsByHandler, BestFit, false)
+	fits = findFits(task, agentsByHandler, BestFit, false, false)
 	assert.Assert(t, len(fits) == 1)
 	assert.Equal(t, fits[0].Agent, agents[0])
 }
@@ -513,4 +514,73 @@ func byID(
 		index = append(index, agent)
 	}
 	return agents, index
+}
+
+func TestCandidateListLess(t *testing.T) {
+	// Less orders by OneNUMANode (set first), then the fitting score (higher first), then the hash
+	// distance (smaller first), then the agent ID. In each row, every key after the deciding one
+	// would order the two the other way.
+	type key struct {
+		oneNode bool
+		score   float64
+		hash    uint64
+		id      aproto.ID
+	}
+	fit := func(k key) *fittingState {
+		return &fittingState{
+			Agent: &agentState{id: k.id}, Score: k.score, HashDistance: k.hash, OneNUMANode: k.oneNode,
+		}
+	}
+	for _, c := range []struct {
+		name          string
+		first, second key
+	}{
+		{"one NUMA node before a better score", key{true, 0.25, 1, "b"}, key{false, 0.75, 0, "a"}},
+		{"both with a block: the score", key{true, 0.75, 1, "b"}, key{true, 0.25, 0, "a"}},
+		{"neither with a block: the score", key{false, 0.75, 1, "b"}, key{false, 0.25, 0, "a"}},
+		{"equal score: the hash distance", key{true, 0.5, 0, "b"}, key{true, 0.5, 1, "a"}},
+		{"equal hash distance: the agent ID", key{false, 0.5, 1, "a"}, key{false, 0.5, 1, "b"}},
+	} {
+		list := candidateList{fit(c.first), fit(c.second)}
+		assert.Assert(t, list.Less(0, 1), c.name)
+		assert.Assert(t, !list.Less(1, 0), c.name)
+	}
+
+	// All fields equal: neither is less.
+	same := key{true, 0.5, 1, "a"}
+	list := candidateList{fit(same), fit(same)}
+	assert.Assert(t, !list.Less(0, 1))
+	assert.Assert(t, !list.Less(1, 0))
+}
+
+func TestOneNUMANodeOnlyForSoft(t *testing.T) {
+	// OneNUMANode is set only for a request with prefer_gpu_topology "soft" and 2 or more slots,
+	// under the gate, on an agent where one NUMA node has its slots free.
+	idle := topologyAgentState(t, node02)
+	agents := map[aproto.ID]*agentState{idle.id: idle}
+	request := func(n int, pref expconf.GPUTopologyPreference) *sproto.AllocateRequest {
+		return &sproto.AllocateRequest{
+			AllocationID: "r", SlotsNeeded: n,
+			FittingRequirements: sproto.FittingRequirements{SingleAgent: true, GPUTopology: pref},
+		}
+	}
+	for _, c := range []struct {
+		n    int
+		pref expconf.GPUTopologyPreference
+		gate bool
+		want bool
+	}{
+		{4, expconf.GPUTopologySoft, true, true},
+		{2, expconf.GPUTopologySoft, true, true},
+		{4, expconf.GPUTopologySoft, false, false},
+		{5, expconf.GPUTopologySoft, true, false},
+		{1, expconf.GPUTopologySoft, true, false},
+		{0, expconf.GPUTopologySoft, true, false},
+		{4, "", true, false},
+		{4, expconf.GPUTopologyStrong, true, false},
+	} {
+		fit := findSharedAgentFit(request(c.n, c.pref), agents, BestFit, c.gate)
+		assert.Assert(t, fit != nil)
+		assert.Equal(t, c.want, fit.OneNUMANode, "%+v", c)
+	}
 }

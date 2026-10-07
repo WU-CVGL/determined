@@ -144,6 +144,9 @@ func (a *apiServer) getGenericTaskLaunchParameters(
 	if err := poolaccess.CanUseResourcePool(ctx, *userModel, poolName.String()); err != nil {
 		return nil, nil, nil, err
 	}
+	if err := validateGPUTopology(a.m.rm, poolName, resources.Slots, taskConfig.Resources.GPUTopology()); err != nil {
+		return nil, nil, nil, err
+	}
 
 	// Apply the scheduler's default priority.
 	if taskConfig.Resources.Priority() == nil {
@@ -404,6 +407,7 @@ func (a *apiServer) CreateGenericTask(
 		ResourcePool: genericTaskSpec.GenericTaskConfig.Resources.ResourcePool(),
 		FittingRequirements: sproto.FittingRequirements{
 			SingleAgent: isSingleNode,
+			GPUTopology: genericTaskSpec.GenericTaskConfig.Resources.GPUTopology(),
 		},
 
 		ProxyPorts: sproto.NewProxyPortConfig(genericTaskSpec.ProxyPorts(), taskID),

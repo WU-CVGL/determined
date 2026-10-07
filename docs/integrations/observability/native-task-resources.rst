@@ -41,6 +41,10 @@ metrics with ``det_cluster`` and ``gpu_uuid`` labels. The configured cluster mus
 ``det_cluster`` label. The existing Kubernetes dashboard's pod-label schema alone does not
 satisfy this contract.
 
+The same configuration lets the master read each GPU's recent critical XIDs for the GPU health view
+of agents (:ref:`agent-gpu-xids`). That needs DCGM-Exporter's ``DCGM_EXP_XID_ERRORS_COUNT``, which
+the exporter's counters file must enable, with the ``det_cluster`` and ``gpu_uuid`` labels above.
+
 An allocation's metrics, including its **Allocation lifecycle** chart, begin once it has run for
 :ref:`observability.task_mapping_delay <master-config-observability>` (5 minutes by default),
 counted from when its containers start, including image pulls. Allocations that end sooner have
@@ -49,7 +53,8 @@ no metrics, so their charts stay empty.
 The master runs a fixed set of queries after checking access to the task. It does not expose a
 general PromQL proxy. An optional allocation selector is checked against the task's allocations.
 Queries are limited to seven days, 1,440 points per series, a minimum 15-second step, and a shared
-10-second timeout. At most four resource requests run concurrently per master.
+10-second timeout. At most four resource requests run concurrently per master. The GPU health view
+adds one XID query of its own, at most every 30 seconds per master, with a 5-second timeout.
 
 Reading the Charts
 ==================

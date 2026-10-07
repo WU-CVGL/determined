@@ -1255,6 +1255,155 @@ shells, and commands, and cannot be modified.
 
    This option is currently not supported by Slurm RM.
 
+.. _exp-config-resources-prefer-gpu-topology:
+
+``prefer_gpu_topology``
+=======================
+
+Optional. Whether the agent resource manager chooses a task's GPUs by the :ref:`GPU topology
+<agent-gpu-topology>` that agents report: ``false``, ``"soft"`` or ``"strong"``. Unset is ``false``.
+``true`` is not a value and is rejected. An explicit value, also ``false``, wins over a template;
+for experiments, an invariant config policy can force a value. To force one with a template or a
+policy, use ``"soft"``: ``"strong"`` makes every task with 2 or more slots that it applies to wait
+until one NUMA node has that many free GPUs.
+
+With ``"soft"``, a task with 2 or more slots on one agent gets the set of free GPUs of that agent
+that ranks first:
+
+#. fewer GPUs in error: an NVML health call of the GPU failed at agent start, or the GPU has a
+   :ref:`recent critical XID <agent-gpu-xids>`;
+
+#. then its pairs of GPUs, worst pair first, each ranked:
+
+   -  P2P usable, with more NVLinks first;
+
+   -  P2P usable, by level: ``INTERNAL``, ``PIX``, ``PXB``, ``PHB``, ``NODE``, ``SYS``, unknown;
+
+   -  P2P not usable or unknown: one NUMA node (``INTERNAL`` to ``NODE``) before ``SYS`` before an
+      unknown level; then not usable before unknown P2P; then a pair on two PCIe switches before a
+      pair behind one (``PIX``), whose GPUs share one link to host memory;
+
+   and last, among pairs equal in all of that, by PCIe link width: both GPUs at their maximum width
+   before a pair with an unknown width before a narrow pair, one with a GPU whose current width was
+   below its maximum (``narrow`` in the CLI);
+
+#. equal sets go to :ref:`NUMA packing <master-config-numa-packing>` in pools that pack, and to the
+   lowest IDs otherwise.
+
+NVLinks count only with usable P2P, and a pair the agent did not report is unknown. An NVML error
+puts a GPU in error, as above; otherwise the ranking reads only the values that the agent reported,
+so a failed NVML query for a pair only leaves that pair unknown. NVML's ``NODE`` and ``SYS`` are
+NUMA levels: they are one socket and two sockets only with NPS1. Without usable P2P, the ranking
+uses only the NUMA class, PCIe switches and link width.
+
+The link width is the one the agent read at its start, as in the :ref:`GPU health
+<agent-gpu-topology>`; the link generation is never used. The width decides only between pairs equal
+in everything above, so locality comes first: with the same number of GPUs in error, when every pair
+has the same P2P state and none has NVLinks, a set on one NUMA node with a narrow GPU ranks before
+every set across NUMA nodes. An unknown width ranks before a narrow one, the one place where a
+missing value ranks before a reported one. Widths alone rank nothing: when every pair of free GPUs
+is unknown, the set is not ranked.
+
+The preference is soft: it never waits, never moves running tasks, and never changes the number of
+slots. It has no effect on a task with fewer than 2 slots or on several agents, or with the
+Kubernetes resource manager. Inside the agent, it has no effect when the agent's topology is unknown
+or every pair of its free GPUs is unknown, or with more than 20000 sets to compare; the task then
+gets its GPUs as without it, which in a pool without NUMA packing (``fitting_policy: worst`` or
+``numa_packing: false``) is in no particular order, GPUs in error included. A selection that fails,
+which the master logs as an error, also takes free GPUs in no particular order. The agent measures
+its topology when it starts, so restart agents after a driver change, and after a link's width
+changed.
+
+The task log gets one line for each such task, for example ``GPU topology preference: agent node02,
+slots 4,5,6,7; worst pair NODE, P2P usable``, with ``, narrow`` when a GPU of that pair is narrow,
+or the reason the set was not ranked.
+
+In a pool with :ref:`NUMA packing <master-config-numa-packing>` (``fitting_policy: best`` and
+``numa_packing`` not ``false``), ``"soft"`` also chooses the agent of a task that fits on one agent:
+the agents where one NUMA node has the task's slots free come first, and the fitting policy picks
+among them, or among the others when no agent has such a node, as for other tasks. Free GPUs count
+as for ``"strong"`` below: free GPUs in error count; GPUs without a known NUMA node never count, and
+an agent whose topology the master does not have counts as one without such a node. Which agents
+come first depends only on how many free GPUs each NUMA node has: on the chosen agent, the task
+still gets the set that ranks first above, fewer GPUs in error first, so ``"soft"`` does not
+guarantee a set on one NUMA node; ``"strong"`` does. For example, on an agent with GPUs 0-3 on NUMA
+node 0 and 4-7 on node 1, with GPUs 0 to 4 free and GPU 0 in error, a 4-slot task with ``"soft"``
+gets GPUs 1 to 4, and one with ``"strong"`` gets GPUs 0 to 3. Soft may take a pool's emptier agent,
+including an idle one: with one agent that has 2 free GPUs on each NUMA node and another, emptier
+one with 4 free GPUs on one node, a 4-slot task takes the emptier agent, where a task without the
+preference takes the fuller one. In other pools, ``"soft"`` never changes the agent the scheduler
+picks.
+
+With ``"strong"``, a task with 2 or more slots starts only when one NUMA node of one agent has that
+many free GPUs, and gets GPUs of that node. It waits for such a node without limit, uses one agent,
+and never falls back to GPUs across NUMA nodes.
+
+-  An agent can take the task when the scheduler's other conditions hold and one of its NUMA nodes
+   has the task's slots free. Free GPUs in error count. GPUs without a known NUMA node never count,
+   and neither do CPU slots, draining and disabled slots, or agents whose topology the master does
+   not have. Among the agents that can take the task, the fitting policy picks one as for other
+   tasks.
+
+-  Inside the agent, each NUMA node that can hold the task has a best set: GPUs in error last, then
+   the ``"soft"`` ranking above among the node's free GPUs, with ties to the lowest IDs. When every
+   pair of the node's free GPUs is unknown, or with more than 20000 sets, the best set is the lowest
+   IDs, GPUs in error last. The task gets the best set of the node that ranks first by:
+
+   #. fewer GPUs in error in the set;
+   #. fewer narrow GPUs in the set, then fewer GPUs with an unknown width;
+   #. fewer free healthy GPUs on the node: the node with the fewest free GPUs that can hold the
+      task, as in NUMA packing;
+   #. fewer allocatable healthy slots on the node;
+   #. the lower node number.
+
+   This holds under every fitting policy and ``numa_packing`` setting. A set with GPUs in error is
+   taken when no node has a better one. For example, on an idle agent with GPUs 0-3 on NUMA node 0
+   and 4-7 on node 1, where GPU 1 is narrow, a 4-slot task gets GPUs 4 to 7; with GPUs 0, 1 and 4 to
+   7 free and a recent critical XID on GPU 0, a 2-slot task gets GPUs 4 and 5.
+
+A waiting task shows ``QUEUED``, and its task log gets one line, for example ``GPU topology
+preference strong: waiting until one NUMA node of an agent in pool gpus has 4 free GPUs``. When it
+starts, the task log gets the line of ``"soft"``.
+
+A task with ``"strong"`` needs as many free GPUs as its slots on one NUMA node, not a whole free
+node: it gets only those GPUs and never reserves or holds the node's other GPUs. A long-running task
+keeps a strong task off a node for the long task's whole life only when the node's GPUs besides the
+long task's are fewer than the strong task's slots, for example when the strong task needs every GPU
+of the node: on a node with GPUs 0 to 3 and GPU 0 busy, a 4-slot task waits, and a 2-slot task can
+take two of GPUs 1, 2 and 3. Submit a strong task at the pool's usual priority. With preemption off,
+while it waits, no task of a lower priority that needs slots starts, as for any waiting task, and
+those tasks show no reason. With preemption on, the :ref:`backfilling and preemption <scheduling>`
+of the priority scheduler apply as for any waiting task: lower-priority tasks that are preemptible
+can start while it waits, and it preempts the preemptible tasks that need slots and are behind it in
+the queue, the last first, until one NUMA node can hold it, so it can preempt tasks whose GPUs it
+does not use; the GPUs it freed are not held for it. Moving the task ahead in the queue holds no
+GPUs for it, every restart of a trial waits again, and switching to ``"soft"`` means submitting the
+task again. Under the fair-share scheduler, a task that no agent can take does not count in its
+job's demand. A NUMA node equals a socket only with NPS1.
+
+A task is refused at creation when its pool has no agent or no agent with as many slots (a pool with
+a provider checks the slots of its instance type instead), or when every agent in its pool has
+reported its topology and no NUMA node has as many slots, disabled ones included: for example, in a
+pool of CPU agents or of agents that report no topology, or with more slots than any NUMA node has.
+Moving an experiment to another pool is checked the same way. While an agent has not reported, for
+example right after a master restart until it reconnects, the task is accepted. When no NUMA node of
+the pool can hold it later, for example once every agent has reported, after an ``exclude_gpus``
+change, or when a pool with other agents loses the only agent that could, the task fails with ``no
+NUMA node in pool gpus has 5 slots; use soft`` or ``no agent in pool gpus reports NUMA nodes; use
+soft``, and a trial fails without restarts. While its pool has no agent, a queued task waits. The
+master never refuses a task it restores. Only the agent resource manager runs ``"strong"``; the
+Kubernetes, Slurm and PBS resource managers refuse it. With fewer than 2 slots, ``"strong"`` is as
+``false``.
+
+A master without this option, after a rollback, treats a config that sets it, also to ``false``, as
+follows. Experiments that are not terminal move to ERROR when it starts, and their trials are
+killed; continuing or editing any experiment that sets it fails. New experiments and tasks that set
+it are refused, and so are creating an experiment from a template that sets it and saving a
+workspace config policy while the global policy sets it. The option is ignored in command, notebook,
+shell and TensorBoard templates, in invariant config policies, and in the commands and generic tasks
+that the master restores or resumes. Before rolling back, end the experiments that set it and remove
+it from templates and config policies.
+
 .. _exp-resources-devices:
 
 ``devices``

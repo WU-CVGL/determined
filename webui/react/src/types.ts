@@ -247,7 +247,10 @@ export interface Agent {
   /** The agent drains: disabled, with its running work allowed to finish. */
   draining?: boolean;
   enabled?: boolean;
-  /** What the agent measured with NVML at its last start; unset for agents without GPUs. */
+  /**
+   * What the agent measured with NVML at its last start, and the GPUs' recent critical XIDs; unset
+   * for agents without GPUs.
+   */
   gpuTopology?: Api.V1GpuTopology;
   id: string;
   registeredTime: number;
@@ -781,6 +784,8 @@ export const BulkExperimentItem = t.intersection([
     checkpointSize: t.number,
     config: ExperimentConfig,
     description: t.string,
+    /** The owner's display name, or the username when it has none, as the list API sends it. */
+    displayName: t.string,
     duration: t.number,
     endTime: t.string,
     externalExperimentId: t.string,
@@ -797,6 +802,7 @@ export const BulkExperimentItem = t.intersection([
     searcherMetricValue: t.number,
     trialIds: t.array(t.number),
     unmanaged: t.boolean,
+    username: t.string,
     workspaceId: t.number,
     workspaceName: t.string,
   }),
@@ -897,6 +903,8 @@ export type GenericTaskState = ValueOf<typeof GenericTaskState>;
 export interface GenericTask {
   allocationId?: string;
   description: string;
+  /** The owner's display name; unset without one. */
+  displayName?: string;
   endTime?: string;
   forkedFrom?: string;
   jobId: string;
@@ -1005,6 +1013,7 @@ export interface CommandTask extends Task {
   state: CommandState;
   type: CommandType;
   userId: number;
+  username?: string;
   workspaceId: number;
 }
 
