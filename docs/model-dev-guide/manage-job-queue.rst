@@ -46,13 +46,12 @@ For more CLI options, visit the CLI documentation or run the ``det job list -h``
 
 Both the WebUI and CLI display a table of jobs, ordered by scheduling order. The table includes job
 states and the number of slots allocated to each job. Note that scheduling order does not represent
-job priority.
-
-On the **Active** tab of a resource pool with GPUs, the WebUI's **GPUs** column lists the GPUs each
-job holds, one line per agent, such as ``node01: 0-3, 5``. The numbers are slot IDs, as on the
-pool's topology panel. They match the index ``nvidia-smi`` shows on the node when the agent sees all
-of the node's GPUs and leaves out a faulty one with ``exclude_gpus``. Click a job's GPUs, or press
-Enter on them, to outline its GPUs in the topology panel, and again to remove the outline.
+job priority. On the **Active** tab of a resource pool with GPUs, the WebUI's **GPUs** column lists
+the GPUs each job holds, one line per agent, such as ``node01: 0-3, 5``. The numbers are slot IDs,
+as on the pool's topology panel. They match the index ``nvidia-smi`` shows on the node when the
+agent sees all of the node's GPUs and leaves out a faulty one with ``exclude_gpus``. Click a job's
+GPUs, or press Enter on them, to outline its GPUs in the topology panel, and again to remove the
+outline.
 
 -  A job holds its GPUs from scheduling until it releases them, so the topology panel can show a
    listed GPU as Free while a container starts or exits.
