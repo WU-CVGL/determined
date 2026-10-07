@@ -1349,19 +1349,23 @@ node for the long task's whole life. In pools with long-running tasks, such as n
 use ``"soft"``. Submit it at the pool's usual priority: while a task waits, no task of a lower
 priority starts, as for any waiting task, and those tasks show no reason. Moving the task ahead in
 the queue holds no GPUs for it, every restart of a trial waits again, and switching to ``"soft"``
-means submitting the task again. With preemption on, it preempts lower-priority tasks as other tasks
-do, and the GPUs it freed are not held for it. Under the fair-share scheduler, a task that no agent
-can take does not count in its job's demand. A NUMA node equals a socket only with NPS1.
+means submitting the task again. With preemption on, it preempts lower-priority tasks, newest first,
+until one NUMA node can hold it, so it can preempt tasks whose GPUs it does not use; the GPUs it
+freed are not held for it. Under the fair-share scheduler, a task that no agent can take does not
+count in its job's demand. A NUMA node equals a socket only with NPS1.
 
-A task is refused at creation when every agent in its pool has reported its topology and no NUMA
-node has as many slots, disabled ones included: for example, in a pool of CPU agents or of agents
-that report no topology, or with more slots than any NUMA node has. While an agent has not reported,
-for example right after a master restart until it reconnects, the task is accepted. When no NUMA
-node of the pool can hold it later, for example once every agent has reported, after an
-``exclude_gpus`` change, or when the pool loses the only agent that could, the task fails with ``no
+A task is refused at creation when its pool has no agent or no agent with as many slots (a pool with
+a provider checks the slots of its instance type instead), or when every agent in its pool has
+reported its topology and no NUMA node has as many slots, disabled ones included: for example, in a
+pool of CPU agents or of agents that report no topology, or with more slots than any NUMA node has.
+Moving an experiment to another pool is checked the same way. While an agent has not reported, for
+example right after a master restart until it reconnects, the task is accepted. When no NUMA node of
+the pool can hold it later, for example once every agent has reported, after an ``exclude_gpus``
+change, or when a pool with other agents loses the only agent that could, the task fails with ``no
 NUMA node in pool gpus has 5 slots; use soft`` or ``no agent in pool gpus reports NUMA nodes; use
-soft``, and a trial fails without restarts. The master never refuses a task it restores. The
-Kubernetes resource manager refuses ``"strong"``. With fewer than 2 slots, ``"strong"`` is as
+soft``, and a trial fails without restarts. While its pool has no agent, a queued task waits. The
+master never refuses a task it restores. Only the agent resource manager runs ``"strong"``; the
+Kubernetes, Slurm and PBS resource managers refuse it. With fewer than 2 slots, ``"strong"`` is as
 ``false``.
 
 A master without this option, after a rollback, treats a config that sets it, also to ``false``, as
