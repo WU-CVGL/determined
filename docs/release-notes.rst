@@ -24,12 +24,17 @@ Version 0.41.1
 
 -  WebUI: Sort the Jobs page from its column headers, filter it there by kind, state, owner, slot
    count, and workspace, and share a view by its link.
+
 -  WebUI: Sort the jobs on a resource pool's **Active** tab by name, user, submission time, or
    slots.
+
 -  API: Sort experiments and generic tasks by more fields, and filter them by slot count with
    ``slots`` and ``slots_above``, which replace ``slots_filter``.
 
 **Bug Fixes**
+
+-  Tasks: Keep notebooks, shells, commands, TensorBoards, and generic tasks that wait for resources
+   queued after a master restart instead of terminating them.
 
 -  WebUI: Stop polling twice after a page stops and restarts its updates while a request is pending,
    such as on a change of filters or sort.
