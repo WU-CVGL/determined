@@ -345,7 +345,7 @@ behavior specified here. For more on scheduling behavior in Determined, see :ref
 
    -  ``worst``: The worst-fit policy ensures that tasks will be placed on under-utilized agents.
       Inside the agent, a task takes free GPUs in no particular order, unless it sets
-      ``prefer_gpu_topology: soft``.
+      ``prefer_gpu_topology``.
 
 .. _allow-uneven-slots:
 
@@ -364,9 +364,10 @@ behavior specified here. For more on scheduling behavior in Determined, see :ref
    Whether ``fitting_policy: best`` chooses each task's GPUs inside the agent by NUMA node. Defaults
    to ``true``. ``false`` takes free GPUs in no particular order, as ``worst`` does, so GPUs in
    error are not used last; only a task with :ref:`prefer_gpu_topology
-   <exp-config-resources-prefer-gpu-topology>` ``"soft"`` still gets a ranked set, with GPUs in
-   error last and ties to the lowest IDs. It never changes which agent a task gets or how many
-   slots, and it has no effect under ``worst``. Dynamic pool specs accept it as well.
+   <exp-config-resources-prefer-gpu-topology>` still gets a ranked set: with ``"soft"``, GPUs in
+   error last and ties to the lowest IDs; with ``"strong"``, the set of one NUMA node. It never
+   changes which agent a task gets or how many slots, and it has no effect under ``worst``. Dynamic
+   pool specs accept it as well.
 
    Packing applies to every task with 1 or more slots and reads the NUMA node that each agent
    reports for its GPUs (:ref:`GPU topology <agent-gpu-topology>`). Among the free GPUs, a task gets
@@ -383,13 +384,13 @@ behavior specified here. For more on scheduling behavior in Determined, see :ref
 
    Rows 3 to 5 count only healthy GPUs with a known NUMA node, so a task that has to take GPUs in
    error gets the lowest IDs among them. Packing never reads the PCIe link width; only
-   ``prefer_gpu_topology: soft`` ranks narrow GPUs after full-width ones, among pairs of equal
-   locality. On an agent with two NUMA nodes, a task that fits one node gets the lowest free IDs of
-   the node with the fewest free GPUs; a task that fits neither takes every free GPU of the node
-   with the most free GPUs, then the lowest free IDs of the other. For example, 1-slot tasks fill an
-   idle 8-GPU agent with GPUs 0-3 on node 0 and 4-7 on node 1 in the order 0 to 7, and with free
-   GPUs 0, 1, 4, 5 and 6 a 3-slot task gets 4, 5 and 6. The GPUs are passed to the task in ascending
-   order (``DET_SLOT_IDS``).
+   ``prefer_gpu_topology`` ranks narrow GPUs after full-width ones, among sets of equal locality. On
+   an agent with two NUMA nodes, a task that fits one node gets the lowest free IDs of the node with
+   the fewest free GPUs; a task that fits neither takes every free GPU of the node with the most
+   free GPUs, then the lowest free IDs of the other. For example, 1-slot tasks fill an idle 8-GPU
+   agent with GPUs 0-3 on node 0 and 4-7 on node 1 in the order 0 to 7, and with free GPUs 0, 1, 4,
+   5 and 6 a 3-slot task gets 4, 5 and 6. The GPUs are passed to the task in ascending order
+   (``DET_SLOT_IDS``).
 
    An agent whose topology the master does not have, for example right after a master restart until
    the agent reconnects, gives the lowest free IDs, GPUs with a recent critical XID last. Slots
