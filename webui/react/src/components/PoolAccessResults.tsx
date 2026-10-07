@@ -18,6 +18,8 @@ export type PoolAccessRunner = (
 ) => Promise<PoolAccessResult[] | undefined>;
 
 export const CHANGE_RUNNING_MESSAGE = 'Another change is being applied. Try again when it ends.';
+export const changeStoppedMessage = (error: string): string =>
+  `The change stopped: ${error}. Requests sent before it may have been applied.`;
 export const UNCONFIRMED_NOTE =
   'A failed request may still have been applied. Check the list; applying the change again is safe.';
 

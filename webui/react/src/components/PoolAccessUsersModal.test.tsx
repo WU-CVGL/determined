@@ -6,7 +6,11 @@ import { DefaultTheme, UIProvider } from 'hew/Theme';
 import { Loadable } from 'hew/utils/loadable';
 import React from 'react';
 
-import { PoolAccessRunner } from 'components/PoolAccessResults';
+import {
+  CHANGE_RUNNING_MESSAGE,
+  changeStoppedMessage,
+  PoolAccessRunner,
+} from 'components/PoolAccessResults';
 import { ThemeProvider } from 'components/ThemeProvider';
 import { resourcePoolAccessResponse } from 'fixtures/resourcePoolAccess';
 import { mapResourcePoolAccess, mapResourcePoolAccessChange } from 'services/decoder';
@@ -344,6 +348,29 @@ describe('PoolAccessUsersModal', () => {
     expansion.reject(new DetError(undefined, { publicMessage: 'group service down' }));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(screen.queryByText(/Unable to expand the groups/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Grant to 1 user' })).toBeEnabled();
+  });
+
+  it('sends nothing and says so while another change runs', async () => {
+    const { runChange } = await setup(poolsNamed('gpu-a100'), 'grant', () =>
+      Promise.resolve(undefined),
+    );
+    await choose('Users', 'alice');
+    await user.click(screen.getByRole('button', { name: 'Grant to 1 user' }));
+
+    expect(await screen.findByText(CHANGE_RUNNING_MESSAGE)).toBeInTheDocument();
+    expect(runChange).toHaveBeenCalledTimes(1);
+    expect(mocks.grantResourcePoolAccess).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('pool-access-results')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Grant to 1 user' })).toBeEnabled();
+  });
+
+  it('says why a change stopped when it throws', async () => {
+    await setup(poolsNamed('gpu-a100'), 'grant', () => Promise.reject(new Error('bug')));
+    await choose('Users', 'alice');
+    await user.click(screen.getByRole('button', { name: 'Grant to 1 user' }));
+
+    expect(await screen.findByText(changeStoppedMessage('bug'))).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Grant to 1 user' })).toBeEnabled();
   });
 

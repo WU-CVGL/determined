@@ -26,7 +26,7 @@ import {
   revokeResourcePoolAccess,
   setResourcePoolAccessMode,
 } from 'services/api';
-import poolAccessChange from 'stores/poolAccessChange';
+import poolAccessChange, { isChangeRunning } from 'stores/poolAccessChange';
 import userStore from 'stores/users';
 import { ResourcePoolAccess, ResourcePoolAccessMode, ResourcePoolAccessUser } from 'types';
 import handleError from 'utils/error';
@@ -268,8 +268,8 @@ const PoolAccess: React.FC = () => {
   useEffect(
     () =>
       poolAccessChange.change.subscribe((next, previous) => {
-        // A change ended, also one that started before the tab was opened.
-        if (next?.results && previous && !previous.results) fetchPools();
+        // A change ended, also one that started before the tab was opened or that threw.
+        if (isChangeRunning(previous) && !isChangeRunning(next)) fetchPools();
       }),
     [fetchPools],
   );

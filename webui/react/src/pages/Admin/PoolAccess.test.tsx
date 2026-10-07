@@ -18,7 +18,7 @@ import {
 import poolAccessChange from 'stores/poolAccessChange';
 import { DetailedUser, ResourcePoolAccessChange } from 'types';
 import { DetError } from 'utils/error';
-import { chunkUsernames } from 'utils/resourcePoolAccess';
+import { chunkUsernames, PoolAccessResult } from 'utils/resourcePoolAccess';
 
 import PoolAccess, {
   PENDING_DISMISSED_NOTE,
@@ -66,10 +66,12 @@ const changeOf = (poolName: string, warnings: string[] = []): ResourcePoolAccess
 /** A promise that the test settles. */
 function deferred<T>() {
   let resolve: (value: T) => void = () => undefined;
-  const promise = new Promise<T>((res) => {
+  let reject: (reason: unknown) => void = () => undefined;
+  const promise = new Promise<T>((res, rej) => {
     resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 const user = userEvent.setup();
@@ -439,11 +441,25 @@ describe('PoolAccess', () => {
 
     // hew's Button reads "Loading" while the change is applied.
     const loading = screen.getByRole('button', { name: 'Loading' });
+    expect(loading).toBeDisabled();
     fireEvent.click(loading);
     cpu.resolve(changeOf('cpu'));
     expect(await screen.findByText('Done for 2 pools.')).toBeInTheDocument();
     expect(mocks.setResourcePoolAccessMode).toHaveBeenCalledTimes(2);
-    expect(loading).toBeDisabled();
+  });
+
+  it('reads the list again when a change throws', async () => {
+    const change = deferred<PoolAccessResult[]>();
+    const running = poolAccessChange.run('grant', () => change.promise);
+    setup();
+    await waitFor(() => expect(mocks.getResourcePoolAccess).toHaveBeenCalledTimes(1));
+
+    change.reject(new Error('bug'));
+    await expect(running).rejects.toThrow('bug');
+    await waitFor(() => expect(mocks.getResourcePoolAccess).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(PENDING_DISMISSED_NOTE)).not.toBeInTheDocument();
+    await selectPools('cpu');
+    for (const name of ACTIONS) expect(screen.getByRole('button', { name })).toBeEnabled();
   });
 
   it('says that a failed request may still have been applied, and reads the list again', async () => {

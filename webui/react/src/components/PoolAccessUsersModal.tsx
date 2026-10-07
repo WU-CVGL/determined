@@ -9,6 +9,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import PoolAccessResults, {
   CHANGE_RUNNING_MESSAGE,
+  changeStoppedMessage,
   PoolAccessRunner,
 } from 'components/PoolAccessResults';
 import {
@@ -20,6 +21,7 @@ import {
 import { V1GroupSearchResult } from 'services/api-ts-sdk';
 import userStore from 'stores/users';
 import { ResourcePoolAccess, ResourcePoolAccessMode } from 'types';
+import handleError from 'utils/error';
 import { useObservable } from 'utils/observable';
 import {
   changeUsersInPools,
@@ -110,6 +112,8 @@ const PoolAccessUsersModalComponent: React.FC<Props> = ({
   /** Bumped by "Try again" after the groups could not be expanded. */
   const [expandAttempt, setExpandAttempt] = useState(0);
   const [notice, setNotice] = useState<string>();
+  /** Why the last change stopped, when it threw. */
+  const [stopped, setStopped] = useState<string>();
   const [isApplying, setIsApplying] = useState(false);
   const [results, setResults] = useState<PoolAccessResult[]>();
   /** Set when the modal is closed: a change that was not sent yet is then not sent. */
@@ -171,6 +175,7 @@ const PoolAccessUsersModalComponent: React.FC<Props> = ({
   const handleApply = useCallback(async () => {
     setIsApplying(true);
     setNotice(undefined);
+    setStopped(undefined);
     try {
       // Expand the groups again: the grant is made for their members at this moment.
       let fresh: Map<number, PoolAccessCandidate[]>;
@@ -204,6 +209,9 @@ const PoolAccessUsersModalComponent: React.FC<Props> = ({
       );
       if (answer) setResults(answer);
       else setNotice(CHANGE_RUNNING_MESSAGE);
+    } catch (e) {
+      setStopped(poolAccessErrorMessage(e));
+      handleError(e, { publicSubject: 'Pool access change stopped.', silent: true });
     } finally {
       setIsApplying(false);
     }
@@ -364,6 +372,7 @@ const PoolAccessUsersModalComponent: React.FC<Props> = ({
           />
         )}
         {notice && <Alert message={notice} type="warning" />}
+        {stopped && <Alert message={changeStoppedMessage(stopped)} type="error" />}
         {resolved.unknown.length > 0 && (
           <Alert
             description={resolved.unknown.join(', ')}

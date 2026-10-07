@@ -4,8 +4,16 @@ import { Modal } from 'hew/Modal';
 import Row from 'hew/Row';
 import React, { useCallback, useState } from 'react';
 
-import PoolAccessResults, { CHANGE_RUNNING_MESSAGE } from 'components/PoolAccessResults';
-import { PoolAccessAction, PoolAccessResult } from 'utils/resourcePoolAccess';
+import PoolAccessResults, {
+  CHANGE_RUNNING_MESSAGE,
+  changeStoppedMessage,
+} from 'components/PoolAccessResults';
+import handleError from 'utils/error';
+import {
+  PoolAccessAction,
+  poolAccessErrorMessage,
+  PoolAccessResult,
+} from 'utils/resourcePoolAccess';
 
 interface Props {
   action: PoolAccessAction;
@@ -36,14 +44,19 @@ const PoolAccessConfirmModalComponent: React.FC<Props> = ({
 }: Props) => {
   const [isApplying, setIsApplying] = useState(false);
   const [isRefused, setIsRefused] = useState(false);
+  const [stopped, setStopped] = useState<string>();
   const [results, setResults] = useState<PoolAccessResult[]>();
 
   const handleApply = useCallback(async () => {
     setIsApplying(true);
+    setStopped(undefined);
     try {
       const answer = await run();
       setIsRefused(!answer);
       if (answer) setResults(answer);
+    } catch (e) {
+      setStopped(poolAccessErrorMessage(e));
+      handleError(e, { publicSubject: 'Pool access change stopped.', silent: true });
     } finally {
       setIsApplying(false);
     }
@@ -79,6 +92,7 @@ const PoolAccessConfirmModalComponent: React.FC<Props> = ({
       ) : (
         <>
           {isRefused && <Alert message={CHANGE_RUNNING_MESSAGE} type="warning" />}
+          {stopped && <Alert message={changeStoppedMessage(stopped)} type="error" />}
           {content}
         </>
       )}
