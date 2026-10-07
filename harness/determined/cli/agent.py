@@ -1,11 +1,14 @@
 import argparse
 import collections
+import datetime
 import itertools
 import operator
 import os
 import sys
 import typing
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
+
+from dateutil import parser as date_parser
 
 import determined.cli.render
 from determined import cli
@@ -43,6 +46,9 @@ GPU_HEALTH_WORDS = {
 # what it does and does not mean.
 GPU_NARROW_LINK_TEXT = "A lower link width lowers this link's bandwidth cap."
 GPU_EXCLUDED_TEXT = "Left out by the agent's exclude list. No task runs on this GPU."
+# The length of the master's XID query windows. A recent XID's first and last observed times are
+# the ends of such windows.
+GPU_XID_WINDOW = datetime.timedelta(minutes=5)
 # An agent without NVIDIA GPUs, a master without GPU topology, or a user who may not view it.
 GPU_TOPOLOGY_NOT_REPORTED = (
     "not reported (no NVIDIA GPUs, an older master, or no permission to view agent details)"
@@ -408,13 +414,28 @@ def _cur_max(cur: int, cur_max: int, prefix: str) -> str:
     return f"{value(cur)}/{value(cur_max)}"
 
 
+def _xid_window(end: str) -> str:
+    """A query window of a recent XID by its end, in UTC: "2026-10-07 10:05-10:10+0000"."""
+    t = date_parser.parse(end).astimezone(datetime.timezone.utc)
+    return f"{t - GPU_XID_WINDOW:%Y-%m-%d %H:%M}-{t:%H:%M%z}"
+
+
+def gpu_xids_text(gpu: bindings.v1GpuInfo) -> str:
+    """A GPU's recent critical XIDs, each with its first and last observed windows, or ""."""
+    parts = []
+    for x in gpu.recentXids or []:
+        first, last = _xid_window(x.firstObserved), _xid_window(x.lastObserved)
+        parts.append(f"{x.xid} ({first})" if first == last else f"{x.xid} ({first} to {last})")
+    return "; ".join(parts)
+
+
 def _gpu_details(
     gpu: bindings.v1GpuInfo, topo: bindings.v1GpuTopology, collected_at: str
 ) -> List[str]:
     """The facts of a GPU's health, each on its own line, as in the WebUI's details.
 
-    The PCIe link and the NVML errors, both measured at agent start, and the collection time (the
-    agent's clock).
+    The PCIe link and the NVML errors, both measured at agent start, the collection time (the
+    agent's clock), and the recent critical XIDs when there are any.
     """
     known = not topo.unknownReason
     lines = []
@@ -436,6 +457,9 @@ def _gpu_details(
         nvml_errors = gpu.nvmlError or "none"
     lines.append(f"NVML errors: {nvml_errors}")
     lines.append(f"Collected at: {collected_at}")
+    xids = gpu_xids_text(gpu)
+    if xids:
+        lines.append(f"Recent critical XIDs: {xids}")
     return lines
 
 
@@ -502,7 +526,9 @@ def describe_agent(args: argparse.Namespace) -> None:
     agent = bindings.get_GetAgent(sess, agentId=args.agent_id).agent
     topo = agent.gpuTopology
     if args.json:
-        determined.cli.render.print_json(topo.to_json() if topo is not None else None)
+        determined.cli.render.print_json(
+            topo.to_json(omit_unset=True) if topo is not None else None
+        )
         return
 
     header = [

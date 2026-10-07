@@ -261,7 +261,7 @@ def test_describe_agent(capsys: pytest.CaptureFixture) -> None:
         "    Collected at: 2026-10-05 08:00:00+0000",
         "  Slot 5 (narrow):",
     ]
-    # Critical XIDs are not collected yet: the details leave them out.
+    # Without recent critical XIDs, the details leave them out.
     assert "XID" not in out
     excluded_details = lines.index("  Excluded GPU 0000:81:00.0 (ok):")
     assert lines[excluded_details + 1] == "    " + agent.GPU_EXCLUDED_TEXT
@@ -387,6 +387,89 @@ def test_describe_agent_unknown_link(capsys: pytest.CaptureFixture) -> None:
     assert lines[lines.index("  Slot 2 (narrow):") + 1] == "    PCIe link: x4 of x16, Gen?"
 
 
+def describe_lines(capsys: pytest.CaptureFixture, topology: Optional[Dict[str, Any]]) -> List[str]:
+    with util.standard_cli_rsps() as rsps:
+        rsps.get(f"{MASTER}/api/v1/agents/a", status=200, json={"agent": agent_json("a", topology)})
+        cli.main(["agent", "describe", "a"])
+    lines: List[str] = capsys.readouterr().out.splitlines()
+    return lines
+
+
+def details_of(lines: List[str], name: str) -> List[str]:
+    """The detail lines of one GPU in `det agent describe`."""
+    start = lines.index(name) + 1
+    end = start
+    while end < len(lines) and lines[end].startswith("    "):
+        end += 1
+    return [line.strip() for line in lines[start:end]]
+
+
+def test_describe_agent_recent_xids(capsys: pytest.CaptureFixture) -> None:
+    topology = topology_case("recent critical XIDs")
+    lines = describe_lines(capsys, topology)
+    assert [table_row(lines, s)[2] for s in ["0", "1", "2", "-"]] == [
+        "error",
+        "error",
+        "narrow",
+        "error",
+    ]
+    assert "GPU Health:      error: 0,1; narrow: 2 (x8 of x16); excluded: 81:00.0 (error)" in lines
+    # Each code with its first and last observed 5-minute windows, in UTC; one window when they
+    # are the same.
+    assert details_of(lines, "  Slot 0 (error):") == [
+        "PCIe link: x16 of x16, Gen4",
+        "NVML errors: none",
+        "Collected at: 2026-10-05 08:00:00+0000",
+        "Recent critical XIDs: 79 (2026-10-07 10:05-10:10+0000 to 2026-10-07 10:20-10:25+0000)",
+    ]
+    # A recent critical XID wins over a narrow link: no narrow-link text.
+    assert details_of(lines, "  Slot 1 (error):") == [
+        "PCIe link: x8 of x16, Gen4",
+        "NVML errors: none",
+        "Collected at: 2026-10-05 08:00:00+0000",
+        "Recent critical XIDs: 48 (2026-10-07 10:55-11:00+0000); "
+        "79 (2026-10-07 10:55-11:00+0000 to 2026-10-07 11:00-11:05+0000)",
+    ]
+    assert not any("XID" in line for line in details_of(lines, "  Slot 2 (narrow):"))
+    assert details_of(lines, "  Excluded GPU 0000:81:00.0 (error):")[-1] == (
+        "Recent critical XIDs: 94 (2026-10-07 12:25-12:30+0000)"
+    )
+
+
+@pytest.mark.parametrize(
+    "status,error",
+    [
+        ("GPU_XID_QUERY_STATUS_NOT_CONFIGURED", ""),
+        ("GPU_XID_QUERY_STATUS_FAILED", "timeout"),
+        ("GPU_XID_QUERY_STATUS_OK", ""),
+        (None, None),
+    ],
+)
+def test_describe_agent_without_recent_xids(
+    capsys: pytest.CaptureFixture, status: Optional[str], error: Optional[str]
+) -> None:
+    # Without XIDs, the details show no XID line and no query status, whatever the status.
+    topology = topology_case("recent critical XIDs")
+    assert topology is not None
+    for g in topology["gpus"]:
+        g["recentXids"] = []
+        g["health"] = "GPU_HEALTH_OK" if g["pcieLinkWidth"] == 16 else "GPU_HEALTH_LINK_BELOW_MAX"
+    if status is None:
+        # A master of an earlier version.
+        for g in topology["gpus"]:
+            del g["recentXids"]
+        for key in ["xidQueryStatus", "xidQueryError", "xidQueriedAt"]:
+            del topology[key]
+    else:
+        topology["xidQueryStatus"] = status
+        topology["xidQueryError"] = error
+    out = "\n".join(describe_lines(capsys, topology))
+    assert "Slot 0 (ok):" in out
+    assert "XID" not in out
+    assert "timeout" not in out
+    assert "QUERY" not in out
+
+
 def test_describe_agent_json(capsys: pytest.CaptureFixture) -> None:
     topology = topology_case("g292 today")
     with util.standard_cli_rsps() as rsps:
@@ -396,6 +479,13 @@ def test_describe_agent_json(capsys: pytest.CaptureFixture) -> None:
             json={"agent": agent_json("g292", topology)},
         )
         cli.main(["agent", "describe", "g292", "--json"])
+    assert json.loads(capsys.readouterr().out) == topology
+
+    # As the master sent it, with the recent XIDs.
+    topology = topology_case("recent critical XIDs")
+    with util.standard_cli_rsps() as rsps:
+        rsps.get(f"{MASTER}/api/v1/agents/a", status=200, json={"agent": agent_json("a", topology)})
+        cli.main(["agent", "describe", "a", "--json"])
     assert json.loads(capsys.readouterr().out) == topology
 
     with util.standard_cli_rsps() as rsps:
