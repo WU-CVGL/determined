@@ -691,8 +691,8 @@ func TestTopologyPreferenceComposition(t *testing.T) {
 }
 
 func TestTopologyPreferenceRanksWidthAfterLocality(t *testing.T) {
-	// The expected sets of follow-up 3/4 for idle nodes, n = 2, 3 and 4: "soft" avoids x8 GPUs
-	// among sets of equal locality; plain tasks get NUMA packing, which never reads the width.
+	// The expected sets for idle nodes, n = 2, 3 and 4: "soft" avoids x8 GPUs between
+	// otherwise equal pairs; plain tasks get NUMA packing, which never reads the width.
 	for _, c := range []struct {
 		name        string
 		f           topologyFixture
