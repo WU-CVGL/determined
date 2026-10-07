@@ -86,6 +86,7 @@ import settingsConfig, {
   DEFAULT_PAGE_SIZE,
   FILTER_KEYS,
   MAX_PAGE_SIZE,
+  MIN_COLUMN_WIDTH,
   normalizedLayout,
   Owner,
   Settings,
@@ -161,22 +162,18 @@ const RunLocation: React.FC<{
       ? row.experiment.workspaceName
       : workspaces.find((ws) => ws.id === row.workspaceId)?.name;
   let project: React.ReactNode = '—';
+  let projectName = '—';
   if (row.kind === RunKind.Experiment) {
-    project = (
-      <Link path={paths.projectDetails(row.experiment.projectId)}>
-        {row.experiment.projectName}
-      </Link>
-    );
+    projectName = row.experiment.projectName ?? '';
+    project = <Link path={paths.projectDetails(row.experiment.projectId)}>{projectName}</Link>;
   } else if (genericProjectId !== undefined) {
-    project = (
-      <Link path={paths.projectDetails(genericProjectId)}>
-        {genericProject?.name ?? `Project ${genericProjectId}`}
-      </Link>
-    );
+    projectName = genericProject?.name ?? `Project ${genericProjectId}`;
+    project = <Link path={paths.projectDetails(genericProjectId)}>{projectName}</Link>;
   }
-  if (!showWorkspace) return <span className={css.location}>{project}</span>;
+  // The cell cuts a long location short; its title shows the whole of it.
+  if (!showWorkspace) return <span title={projectName}>{project}</span>;
   return (
-    <span className={css.location}>
+    <span title={`${workspaceName ?? '—'} › ${projectName}`}>
       {workspaceName ? (
         <Link path={paths.workspaceDetails(row.workspaceId)}>{workspaceName}</Link>
       ) : (
@@ -625,6 +622,8 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
       {
         dataIndex: 'name',
         defaultWidth: DEFAULT_COLUMN_WIDTHS.name,
+        // A long name is cut short with an ellipsis, with the whole name in its title or tooltip.
+        ellipsis: true,
         key: 'name',
         render: (_: unknown, row: RunRow, index: number) => {
           if (row.kind === RunKind.Experiment)
@@ -632,7 +631,11 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
           if (row.kind === RunKind.GenericTask) {
             return <Link path={paths.genericTaskDetails(row.task.taskId)}>{row.name}</Link>;
           }
-          const name = taskNameRenderer(row.name, row.task, index);
+          const name = (
+            <div className={css.name} title={row.name}>
+              {taskNameRenderer(row.name, row.task, index)}
+            </div>
+          );
           if (row.task.type !== CommandType.TensorBoard || !row.task.misc) return name;
           const sources = sourcesOf(row.task);
           return (
@@ -664,6 +667,7 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
       {
         dataIndex: 'user',
         defaultWidth: DEFAULT_COLUMN_WIDTHS.user,
+        ellipsis: true,
         key: 'user',
         render: (_: unknown, row: RunRow) => {
           const user = users.find((u) => u.id === row.userId);
@@ -676,6 +680,7 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
       scope.type !== 'project' && {
         dataIndex: 'location',
         defaultWidth: DEFAULT_COLUMN_WIDTHS.location,
+        ellipsis: true,
         ...(scope.type === 'global'
           ? {
               filterDropdown: workspaceFilterDropdown,
@@ -697,6 +702,7 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
       {
         dataIndex: 'resourcePool',
         defaultWidth: DEFAULT_COLUMN_WIDTHS.resourcePool,
+        ellipsis: true,
         key: 'resourcePool',
         responsive: ['md'],
         title: 'Resource Pool',
@@ -742,7 +748,9 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         title: '',
       },
     ];
-    return cols.filter((col): col is ColumnDef<RunRow> => !!col);
+    return cols
+      .filter((col): col is ColumnDef<RunRow> => !!col)
+      .map((col) => ({ ...col, minWidth: Math.min(col.defaultWidth, MIN_COLUMN_WIDTH) }));
   }, [entityCopyMap, renderMenu, scope.type, users, workspaceFilterDropdown, workspaces]);
 
   /* Layout */
@@ -865,7 +873,9 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
               preserveSelectedRowKeys: true,
               selectedRowKeys: [...selected.keys()],
             }}
-            scroll={{ x: 'max-content' }}
+            // A definite width keeps the table's fixed layout: with 'max-content' the columns grew
+            // to their longest content.
+            scroll={{ x: '100%' }}
             settings={settings}
             showSorterTooltip={false}
             size="small"
