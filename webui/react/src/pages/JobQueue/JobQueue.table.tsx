@@ -4,6 +4,7 @@ import React, { ReactNode } from 'react';
 
 import Badge, { BadgeType } from 'components/Badge';
 import Link from 'components/Link';
+import { ColumnLayout, withColumn } from 'components/Table/columnLayout';
 import { ColumnDef } from 'components/Table/InteractiveTable';
 import { createOmitableRenderer, relativeTimeRenderer } from 'components/Table/Table';
 import { paths } from 'routes/utils';
@@ -69,6 +70,10 @@ const linkToEntityPage = (job: Job, label: ReactNode): ReactNode => {
       return label;
   }
 };
+
+/** The stored layout with the GPUs column, after Slots at its default width. */
+export const withGpusColumn = (layout: ColumnLayout): ColumnLayout =>
+  withColumn(layout, 'gpus', 'slots', DEFAULT_COLUMN_WIDTHS);
 
 /**
  * The GPUs a job holds, one line per agent. With `onToggle`, the lines are a toggle button that

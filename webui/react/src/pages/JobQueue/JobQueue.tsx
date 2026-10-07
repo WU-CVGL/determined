@@ -7,7 +7,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import ActionDropdown, { Triggers } from 'components/ActionDropdown';
 import Section from 'components/Section';
-import { withColumn } from 'components/Table/columnLayout';
 import InteractiveTable, { ColumnDef } from 'components/Table/InteractiveTable';
 import SkeletonTable from 'components/Table/SkeletonTable';
 import {
@@ -25,7 +24,12 @@ import usePermissions from 'hooks/usePermissions';
 import usePolling from 'hooks/usePolling';
 import { useSettings } from 'hooks/useSettings';
 import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
-import { columns as columnsFunc, JobGpus, SCHEDULING_VAL_KEY } from 'pages/JobQueue/JobQueue.table';
+import {
+  columns as columnsFunc,
+  JobGpus,
+  SCHEDULING_VAL_KEY,
+  withGpusColumn,
+} from 'pages/JobQueue/JobQueue.table';
 import { paths } from 'routes/utils';
 import {
   cancelExperiment,
@@ -64,7 +68,7 @@ import { numericSorter } from 'utils/sort';
 import { capitalize } from 'utils/string';
 
 import css from './JobQueue.module.scss';
-import settingsConfig, { DEFAULT_COLUMN_WIDTHS, Settings } from './JobQueue.settings';
+import settingsConfig, { Settings } from './JobQueue.settings';
 import ManageJobModalComponent from './ManageJob';
 
 interface Props {
@@ -352,7 +356,7 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState, onHighlight 
   const layoutUpdate = useMemo(() => {
     if (!showGpus || isLoading) return undefined;
     const layout = { columns: settings.columns, columnWidths: settings.columnWidths };
-    const update = withColumn(layout, 'gpus', 'slots', DEFAULT_COLUMN_WIDTHS);
+    const update = withGpusColumn(layout);
     return _.isEqual(update, layout) ? undefined : update;
   }, [isLoading, settings.columnWidths, settings.columns, showGpus]);
   useEffect(() => {
