@@ -1264,7 +1264,8 @@ Optional. Whether the agent resource manager chooses a task's GPUs by the :ref:`
 <agent-gpu-topology>` that agents report: ``false``, ``"soft"`` or ``"strong"``. Unset is ``false``.
 ``true`` is not a value and is rejected. An explicit value, also ``false``, wins over a template;
 for experiments, an invariant config policy can force a value. To force one with a template or a
-policy, use ``"soft"``: ``"strong"`` makes every task it applies to wait for a whole NUMA node.
+policy, use ``"soft"``: ``"strong"`` makes every task it applies to with 2 or more slots wait until
+one NUMA node has that many free GPUs.
 
 With ``"soft"``, a task with 2 or more slots on one agent gets the set of free GPUs of that agent
 that ranks first:
@@ -1347,15 +1348,20 @@ A waiting task shows ``QUEUED``, and its task log gets one line, for example ``G
 preference strong: waiting until one NUMA node of an agent in pool gpus has 4 free GPUs``. When it
 starts, the task log gets the line of ``"soft"``.
 
-A task with ``"strong"`` needs a whole NUMA node free: one long task on a node keeps it off that
-node for the long task's whole life. In pools with long-running tasks, such as notebooks and shells,
-use ``"soft"``. Submit it at the pool's usual priority: while a task waits, no task of a lower
-priority starts, as for any waiting task, and those tasks show no reason. Moving the task ahead in
-the queue holds no GPUs for it, every restart of a trial waits again, and switching to ``"soft"``
-means submitting the task again. With preemption on, it preempts lower-priority tasks, newest first,
-until one NUMA node can hold it, so it can preempt tasks whose GPUs it does not use; the GPUs it
-freed are not held for it. Under the fair-share scheduler, a task that no agent can take does not
-count in its job's demand. A NUMA node equals a socket only with NPS1.
+A task with ``"strong"`` needs as many free GPUs as its slots on one NUMA node, not a whole free
+node: it gets only those GPUs and never reserves or holds the node's other GPUs. A long-running task
+keeps it off a node for the long task's whole life only when the node's GPUs besides the long task's
+are fewer than its slots, as for a task that needs every GPU of the node: on a node with GPUs 0 to 3
+and GPU 0 busy, a 4-slot task waits, and a 2-slot task can take two of GPUs 1, 2 and 3. Submit it at
+the pool's usual priority. With preemption off, while it waits, no task of a lower priority starts,
+as for any waiting task, and those tasks show no reason. With preemption on, the :ref:`backfilling
+and preemption <scheduling>` of the priority scheduler apply as for any waiting task: lower-priority
+tasks that are preemptible can start while it waits, and it preempts lower-priority tasks, newest
+first, until one NUMA node can hold it, so it can preempt tasks whose GPUs it does not use; the GPUs
+it freed are not held for it. Moving the task ahead in the queue holds no GPUs for it, every restart
+of a trial waits again, and switching to ``"soft"`` means submitting the task again. Under the
+fair-share scheduler, a task that no agent can take does not count in its job's demand. A NUMA node
+equals a socket only with NPS1.
 
 A task is refused at creation when its pool has no agent or no agent with as many slots (a pool with
 a provider checks the slots of its instance type instead), or when every agent in its pool has
