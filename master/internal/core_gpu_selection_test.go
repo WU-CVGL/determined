@@ -25,6 +25,13 @@ func TestRefreshGPUXIDsKeepsLastOKCurrent(t *testing.T) {
 	require.Len(t, prom.got(), 1, "one query per XIDCacheTTL at most")
 }
 
+// The refresh asks just after the cache's TTL, so every tick refreshes: the XIDs that selection
+// reads are about 30 s old at most, plus a query.
+func TestGPUXIDRefreshEveryExceedsTheCacheTTL(t *testing.T) {
+	require.Greater(t, gpuXIDRefreshEvery, gpuhealth.XIDCacheTTL)
+	require.LessOrEqual(t, gpuXIDRefreshEvery, gpuhealth.XIDCacheTTL+5*time.Second)
+}
+
 // Without a Prometheus, nothing queries and only NVML errors count.
 func TestShareGPUXIDsWithoutPrometheus(t *testing.T) {
 	m := &Master{config: &config.Config{}}
