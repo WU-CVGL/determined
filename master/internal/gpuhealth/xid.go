@@ -49,9 +49,9 @@ const (
 // ignoredXIDCodes are the XIDs that never count: 13 (graphics engine exception), 31 (GPU memory
 // page fault), 43 (GPU stopped processing) and 45 (preemptive cleanup). This is an exclusion
 // policy, not a statement about their cause: it matches the cluster's gpu-xid-critical alert and
-// keeps out codes that applications commonly trigger, which would raise false alarms. Each can
-// also come from the driver or the GPU; NVIDIA says that XID 31 is usually an application error but
-// can be a driver or hardware error. So a fault that shows only as these codes does not count.
+// keeps out codes that applications commonly trigger, which would raise false alarms. It does not
+// mean that they always come from user code: NVIDIA says that XID 31 is usually an application
+// error but can be a driver or hardware error. A fault seen only as these codes does not count.
 var ignoredXIDCodes = map[int]bool{13: true, 31: true, 43: true, 45: true}
 
 // IsCriticalXID reports whether an XID code counts as GPU-side evidence: every code except 0 and
