@@ -3,8 +3,8 @@ import {
   Taskv1State,
   V1GenericTask,
   V1GenericTaskState,
+  V1GetGenericTasksRequestSortBy,
   V1GetGenericTasksResponse,
-  V1SlotsFilter,
 } from 'services/api-ts-sdk';
 import { GenericTaskState } from 'types';
 
@@ -80,17 +80,29 @@ describe('generic task services', () => {
       undefined,
       undefined,
       undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
     );
     expect(response.tasks[0].state).toBe(GenericTaskState.Active);
     expect(response.pagination.total).toBe(1);
   });
 
-  it('getGenericTasks passes the project, search and slots filters', async () => {
+  it('getGenericTasks passes the project, search, slots, workspaces and sort', async () => {
     const spy = vi.spyOn(detApi.Tasks, 'getGenericTasks').mockResolvedValue(listResponse([]));
     const signal = new AbortController().signal;
 
     await getGenericTasks(
-      { projectId: 5, search: 'sweep', slotsFilter: V1SlotsFilter.ZEROSLOTS },
+      {
+        orderBy: 'ORDER_BY_DESC',
+        projectId: 5,
+        search: 'sweep',
+        slots: [0, 2],
+        slotsAbove: 8,
+        sortBy: V1GetGenericTasksRequestSortBy.SLOTS,
+        workspaceIds: [3, 4],
+      },
       { signal },
     );
 
@@ -105,7 +117,11 @@ describe('generic task services', () => {
       undefined,
       5,
       'sweep',
-      V1SlotsFilter.ZEROSLOTS,
+      [0, 2],
+      8,
+      [3, 4],
+      V1GetGenericTasksRequestSortBy.SLOTS,
+      'ORDER_BY_DESC',
       { signal },
     );
   });
@@ -174,11 +190,11 @@ describe('dashboard list services', () => {
       .spyOn(detApi.Experiments, 'getExperiments')
       .mockResolvedValue({ experiments: [], pagination: { total: 0 } });
 
-    await getExperiments({ slotsFilter: V1SlotsFilter.HASSLOTS, workspaceId: 7 });
+    await getExperiments({ slots: [0], slotsAbove: 8, workspaceId: 7, workspaceIds: [3, 4] });
 
     const args = spy.mock.calls[0];
-    // workspaceId and slotsFilter come right before the request options.
-    expect(args.slice(-3, -1)).toStrictEqual([7, V1SlotsFilter.HASSLOTS]);
+    // workspaceId, slots, slotsAbove and workspaceIds come right before the request options.
+    expect(args.slice(-5, -1)).toStrictEqual([7, [0], 8, [3, 4]]);
   });
 
   it('getExperiments filters by user IDs, as given or as user strings', async () => {

@@ -95,7 +95,7 @@ export const fetchRunPage = async (query: RunQuery, signal?: AbortSignal): Promi
     ),
   );
 
-  const genericParams = { projectId, search: term, slotsFilter, userIds, workspaceId };
+  const genericParams = { projectId, search: term, ...slotsFilter, userIds, workspaceId };
   const withGeneric = pageKinds.includes(RunKind.GenericTask);
   const genericList: Promise<GenericTaskPagination | undefined> =
     withGeneric && kinds.includes(RunKind.GenericTask)
@@ -112,7 +112,7 @@ export const fetchRunPage = async (query: RunQuery, signal?: AbortSignal): Promi
     archived: false,
     orderBy: 'ORDER_BY_DESC' as const,
     projectId,
-    slotsFilter,
+    ...slotsFilter,
     sortBy: 'SORT_BY_START_TIME' as const,
     userIds,
     workspaceId,

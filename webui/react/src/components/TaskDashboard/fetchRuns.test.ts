@@ -6,7 +6,6 @@ import {
   getShells,
   getTensorBoards,
 } from 'services/api';
-import { V1SlotsFilter } from 'services/api-ts-sdk';
 import {
   BulkExperimentItem,
   CommandState,
@@ -240,22 +239,33 @@ describe('fetchRunPage', () => {
     it('filters experiments and generic tasks on the master', async () => {
       await fetchRunPage(globalJobs({ slots: SlotsFilter.Gpu }));
 
-      expect(listCall(getGenericTasks)?.slotsFilter).toBe(V1SlotsFilter.HASSLOTS);
-      expect(countCall(getGenericTasks)?.slotsFilter).toBe(V1SlotsFilter.HASSLOTS);
-      expect(listCall(getExperiments)?.slotsFilter).toBe(V1SlotsFilter.HASSLOTS);
-      expect(countCall(getExperiments)?.slotsFilter).toBe(V1SlotsFilter.HASSLOTS);
+      // GPU: more than 0 slots.
+      for (const call of [
+        listCall(getGenericTasks),
+        countCall(getGenericTasks),
+        listCall(getExperiments),
+        countCall(getExperiments),
+      ]) {
+        expect(call?.slotsAbove).toBe(0);
+        expect(call?.slots).toBeUndefined();
+      }
 
       vi.clearAllMocks();
       await fetchRunPage(globalJobs({ slots: SlotsFilter.CpuOnly }));
-      expect(listCall(getGenericTasks)?.slotsFilter).toBe(V1SlotsFilter.ZEROSLOTS);
-      expect(listCall(getExperiments)?.slotsFilter).toBe(V1SlotsFilter.ZEROSLOTS);
+      // CPU-only: 0 slots.
+      for (const call of [listCall(getGenericTasks), listCall(getExperiments)]) {
+        expect(call?.slots).toEqual([0]);
+        expect(call?.slotsAbove).toBeUndefined();
+      }
     });
 
     it('sends no filter by default', async () => {
       await fetchRunPage(globalJobs());
 
-      expect(listCall(getGenericTasks)?.slotsFilter).toBeUndefined();
-      expect(listCall(getExperiments)?.slotsFilter).toBeUndefined();
+      for (const call of [listCall(getGenericTasks), listCall(getExperiments)]) {
+        expect(call?.slots).toBeUndefined();
+        expect(call?.slotsAbove).toBeUndefined();
+      }
     });
 
     it('filters notebooks, shells, commands and TensorBoards by their slots here', async () => {
@@ -280,7 +290,8 @@ describe('fetchRunPage', () => {
       ]);
       expect(cpu.activeCounts[RunKind.Command]).toBe(0);
       // The task lists themselves are not filtered by the master.
-      expect(vi.mocked(getCommands).mock.calls[0][0]).not.toHaveProperty('slotsFilter');
+      expect(vi.mocked(getCommands).mock.calls[0][0]).not.toHaveProperty('slots');
+      expect(vi.mocked(getCommands).mock.calls[0][0]).not.toHaveProperty('slotsAbove');
     });
   });
 

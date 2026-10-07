@@ -10,7 +10,6 @@ import "protoc-gen-swagger/options/annotations.proto";
 
 import "determined/api/v1/command.proto";
 import "determined/api/v1/pagination.proto";
-import "determined/api/v1/slots_filter.proto";
 import "determined/common/v1/common.proto";
 import "determined/checkpoint/v1/checkpoint.proto";
 import "determined/metric/v1/metric.proto";
@@ -66,7 +65,7 @@ message GetExperimentsRequest {
     // Return experiments sorted by start time.
     SORT_BY_START_TIME = 4;
     // Return experiments sorted by end time. Experiments without end_time are
-    // returned after the ones with end_time.
+    // returned after the ones with end_time, in either order.
     SORT_BY_END_TIME = 5;
     // Return experiments sorted by state.
     SORT_BY_STATE = 6;
@@ -74,13 +73,15 @@ message GetExperimentsRequest {
     SORT_BY_NUM_TRIALS = 8;
     // Return experiments sorted by progress.
     SORT_BY_PROGRESS = 9;
-    // Return experiments sorted by user.
+    // Return experiments sorted by user: the owner's display name, or the
+    // username without one.
     SORT_BY_USER = 10;
     // Returns experiments sorted by name.
     SORT_BY_NAME = 11;
     // Returns experiments sorted by originating model.
     SORT_BY_FORKED_FROM = 12;
-    // Returns experiments sorted by resource pool.
+    // Returns experiments sorted by resource pool. Experiments without one are
+    // returned last, in either order.
     SORT_BY_RESOURCE_POOL = 13;
     // Returns experiments sorted by project.
     SORT_BY_PROJECT_ID = 14;
@@ -90,8 +91,18 @@ message GetExperimentsRequest {
     SORT_BY_CHECKPOINT_COUNT = 16;
     // Returns experiments sorted by searcher metric value..
     SORT_BY_SEARCHER_METRIC_VAL = 17;
+    // Return experiments sorted by the slot count each trial requests
+    // (resources.slots_per_trial, 1 when unset).
+    SORT_BY_SLOTS = 100;
+    // Return experiments sorted by state group: active, then paused
+    // (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED).
+    // Every other state is active.
+    SORT_BY_STATE_GROUP = 101;
   }
-  // Sort experiments by the given field.
+  // Sort experiments by the given field. Name, user and resource pool compare
+  // text with A-Z folded to a-z, by code point, then the text as is. Sorted by
+  // start time, end time, name, user, resource pool, slots or state group,
+  // experiments that tie go newest start first, then highest ID first.
   SortBy sort_by = 1;
   // Order experiments in either ascending or descending order.
   OrderBy order_by = 2;
@@ -129,9 +140,19 @@ message GetExperimentsRequest {
   // Limit experiments to those in projects of this workspace, or 0 for all
   // workspaces.
   int32 workspace_id = 100;
-  // Limit experiments by the slot count each trial requests
-  // (resources.slots_per_trial, 1 when unset): at least one slot, or none.
-  SlotsFilter slots_filter = 101;
+  reserved 101;
+  reserved "slots_filter";
+  // Limit experiments to those whose trials request one of these slot counts
+  // (resources.slots_per_trial, 1 when unset). With slots_above, an
+  // experiment that matches either is listed.
+  repeated int32 slots = 102;
+  // Limit experiments to those whose trials request more than this many
+  // slots. With slots, an experiment that matches either is listed.
+  optional int32 slots_above = 103;
+  // Limit experiments to those in projects of these workspaces. IDs of
+  // workspaces that are gone or that the user cannot view are skipped; if
+  // none remain, no experiments are listed.
+  repeated int32 workspace_ids = 104;
 }
 // Response to GetExperimentsRequest.
 message GetExperimentsResponse {
