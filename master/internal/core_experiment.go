@@ -403,7 +403,7 @@ func (m *Master) parseCreateExperiment(ctx context.Context, req *apiv1.CreateExp
 			rm.ResourcePoolName(config.Resources().ResourcePool()), workspaceID, slots); err != nil {
 			return nil, nil, config, nil, nil, status.Error(codes.InvalidArgument, err.Error())
 		}
-		if err = m.validateGPUTopology(runPool, slots, config.Resources().GPUTopology()); err != nil {
+		if err = validateGPUTopology(m.rm, runPool, slots, config.Resources().GPUTopology()); err != nil {
 			return nil, nil, config, nil, nil, err
 		}
 	}
