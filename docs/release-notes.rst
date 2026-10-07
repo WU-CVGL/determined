@@ -13,7 +13,7 @@
 Version 0.41.1
 ==============
 
-**Release Date:** October 7, 2026
+**Release Date:** October 8, 2026
 
 **New Features**
 
