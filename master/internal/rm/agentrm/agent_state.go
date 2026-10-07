@@ -425,11 +425,12 @@ func (a *agentState) freeDevice(d device.Device) {
 // unchanged between them (no preemption, every reservation succeeding), the pass's policy is the
 // same (gpuPolicy), placements come in the same order, and every earlier choice in the pass was
 // deterministic: ranked (NUMA packing, "soft" when it ranks, "strong"), not map order. Otherwise
-// later agent choices and which tasks can start may differ. With each agent's free count fixed, whether a plain or "soft" request fits does not depend on the NUMA
-// distribution of its free GPUs; that is no guarantee for the whole pass, since the agent choice
-// of "soft" under NUMA packing (preferOneNUMANode) reads that distribution and changes the free
-// counts that later requests see. The fit of prefer_gpu_topology "strong" reads it too; the check
-// after the pass then asks for one more pass (checkStrongRequests).
+// later agent choices and which tasks can start may differ. With each agent's free count fixed,
+// whether a plain or "soft" request fits does not depend on the NUMA distribution of its free
+// GPUs; that is no guarantee for the whole pass, since the agent choice of "soft" under NUMA
+// packing (preferOneNUMANode) reads that distribution and changes the free counts that later
+// requests see. The fit of prefer_gpu_topology "strong" reads it too; the check after the pass
+// then asks for one more pass (checkStrongRequests).
 func (a *agentState) deepCopy() *agentState {
 	copiedAgent := &agentState{
 		id:                    a.id,
