@@ -2,8 +2,6 @@
 // GPUs' recent critical XIDs, which it reads from the cluster's DCGM-Exporter in Prometheus.
 //
 // The agent API (GetAgent, and GetAgents without exclude_slots) queries through XIDCache.Get.
-// GPU selection does not read GPU health yet. When it does (PR B), it must never wait for
-// Prometheus: it reads XIDCache.LastOK, which never queries, and needs its own refresh rule.
 package gpuhealth
 
 import (
