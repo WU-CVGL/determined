@@ -485,8 +485,8 @@ describe('TaskDashboard', () => {
       );
       expect(lastListCall(getGenericTasks)).toMatchObject({ orderBy, sortBy: 'SORT_BY_NAME' });
       expect(urlParams().get('sortKey')).toBe('name');
-      // A default is left out of the URL.
-      expect(urlParams().get('sortDesc') ?? 'true').toBe(String(desc));
+      // A default is left out of the URL: a link without sortDesc sorts descending.
+      expect(urlParams().get('sortDesc')).toBe(desc ? null : 'false');
     }
     expect(header('Name')).toHaveAttribute('aria-sort', 'ascending');
     expect(header('Started')).not.toHaveAttribute('aria-sort');
