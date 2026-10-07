@@ -233,18 +233,22 @@ const PoolAccess: React.FC = () => {
   const isRunning = useObservable(poolAccessChange.isRunning);
   const pageRef = useRef<HTMLElement>(null);
   const canceler = useRef(new AbortController());
+  const lastRead = useRef(0);
   const { settings, updateSettings } = useSettings(settingsConfig);
 
   const UsersModal = useModal(PoolAccessUsersModalComponent);
   const ConfirmModal = useModal(PoolAccessConfirmModalComponent);
 
   const fetchPools = useCallback(async () => {
+    // Only the latest read shows: an older one can answer after it.
+    const read = ++lastRead.current;
     try {
       const response = await getResourcePoolAccess({}, { signal: canceler.current.signal });
+      if (read !== lastRead.current) return;
       setPools(Loaded(response));
       setLoadError(undefined);
     } catch (e) {
-      if (canceler.current.signal.aborted) return;
+      if (canceler.current.signal.aborted || read !== lastRead.current) return;
       setLoadError(`Unable to load resource pool access: ${poolAccessErrorMessage(e)}`);
       handleError(e, { publicSubject: 'Unable to load resource pool access.', silent: true });
     }
@@ -593,7 +597,7 @@ const PoolAccess: React.FC = () => {
                 </Button>
               }
               description={<PoolAccessResults action={change.action} results={change.results} />}
-              message={`${ACTION_TITLES[change.action]}: finished after its dialog was closed`}
+              message={`${ACTION_TITLES[change.action]}: finished`}
               type={change.results.every((result) => result.ok) ? 'success' : 'error'}
             />
           </div>

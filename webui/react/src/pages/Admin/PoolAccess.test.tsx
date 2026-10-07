@@ -16,7 +16,7 @@ import {
   RawResourcePoolAccess,
 } from 'services/decoder';
 import poolAccessChange from 'stores/poolAccessChange';
-import { DetailedUser, ResourcePoolAccessChange } from 'types';
+import { DetailedUser, ResourcePoolAccessChange, ResourcePoolAccessMode } from 'types';
 import { DetError } from 'utils/error';
 import { chunkUsernames, PoolAccessResult } from 'utils/resourcePoolAccess';
 
@@ -312,7 +312,7 @@ describe('PoolAccess', () => {
     cpu.resolve(changeOf('cpu'));
     const dismissed = await screen.findByTestId('pool-access-dismissed-results');
     expect(mocks.setResourcePoolAccessMode).toHaveBeenCalledTimes(2);
-    expect(dismissed).toHaveTextContent('Restrict: finished after its dialog was closed');
+    expect(dismissed).toHaveTextContent('Restrict: finished');
     expect(dismissed).toHaveTextContent('1 of 2 pools failed.');
     expect(within(dismissed).getByTestId('pool-access-result-cpu')).toHaveTextContent(
       'cpu: restricted',
@@ -382,7 +382,7 @@ describe('PoolAccess', () => {
 
     a100.resolve(changeOf('gpu-a100'));
     const results = await screen.findByTestId('pool-access-dismissed-results');
-    expect(results).toHaveTextContent('Grant: finished after its dialog was closed');
+    expect(results).toHaveTextContent('Grant: finished');
     expect(results).toHaveTextContent('Done for 2 pools.');
     expect(
       mocks.grantResourcePoolAccess.mock.calls.map(([params]) => [
@@ -418,7 +418,7 @@ describe('PoolAccess', () => {
 
     cpu.resolve(changeOf('cpu'));
     const results = await screen.findByTestId('pool-access-dismissed-results');
-    expect(results).toHaveTextContent('Restrict: finished after its dialog was closed');
+    expect(results).toHaveTextContent('Restrict: finished');
     expect(results).toHaveTextContent('Done for 1 pool.');
     for (const name of ACTIONS) expect(screen.getByRole('button', { name })).toBeEnabled();
     expect(revokeSelected).toBeEnabled();
@@ -446,6 +446,30 @@ describe('PoolAccess', () => {
     cpu.resolve(changeOf('cpu'));
     expect(await screen.findByText('Done for 2 pools.')).toBeInTheDocument();
     expect(mocks.setResourcePoolAccessMode).toHaveBeenCalledTimes(2);
+  });
+
+  it('reads the list again when a change ends, and shows only the latest read', async () => {
+    const stale = deferred<ReturnType<typeof pools>>();
+    const restricted = pools().map((pool) =>
+      pool.poolName === 'cpu' ? { ...pool, mode: ResourcePoolAccessMode.Restricted } : pool,
+    );
+    mocks.getResourcePoolAccess
+      .mockImplementationOnce(() => stale.promise)
+      .mockImplementation(() => Promise.resolve(restricted));
+    // A change started before the tab is shown, by a dialog of an earlier visit.
+    const change = deferred<PoolAccessResult[]>();
+    const running = poolAccessChange.run('restrict', () => change.promise);
+    setup();
+    expect(await screen.findByText(PENDING_DISMISSED_NOTE)).toBeInTheDocument();
+
+    change.resolve([]);
+    await running;
+    await waitFor(() => expect(mocks.getResourcePoolAccess).toHaveBeenCalledTimes(2));
+    expect(within(await rowOf('cpu')).getByText('Restricted')).toBeInTheDocument();
+    // The read made when the tab was shown answers last, with the access before the change.
+    stale.resolve(pools());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(within(await rowOf('cpu')).getByText('Restricted')).toBeInTheDocument();
   });
 
   it('reads the list again when a change throws', async () => {

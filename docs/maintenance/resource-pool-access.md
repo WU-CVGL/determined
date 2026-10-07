@@ -409,12 +409,13 @@ workspace defaults, and its warnings.
 pools, one pool after another, and show what the master answered for each
 pool, with its warnings. Restrict and Make public first say what the change
 means for each selected pool. Closing the dialog does not stop a change that is
-being sent: its progress and then its results show on the tab, and when the tab
-is not open at its end, a notification names the pools that failed. One change
+being sent: a note and then its results show on the tab, and when the tab is
+not open at its end, a notification names the pools that failed. One change
 runs at a time in each browser tab of the WebUI: until it ends, these actions
 and the revoke of an expanded row are unavailable, also after leaving the tab
-and coming back. Signing out ends a change: its remaining requests are not
-sent, and the ones sent are not undone.
+and coming back. Changes from other browser tabs, other administrators, or the
+CLI are not coordinated with it, and the last write wins. Signing out ends a
+change: its remaining requests are not sent, and the ones sent are not undone.
 
 A request without an answer within 60 seconds fails. A failed request may still
 have been applied: the master answers a change with the pool's access, read
