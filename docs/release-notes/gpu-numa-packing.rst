@@ -15,3 +15,8 @@
    it off per pool with ``scheduler.numa_packing: false``. An earlier master does not start while
    ``master.yaml`` or a pool spec sets the option. See :ref:`numa_packing
    <master-config-numa-packing>`.
+
+-  Experiments, tasks: With ``resources.prefer_gpu_topology: strong``, a task with 2 or more slots
+   waits until one NUMA node of an agent has its slots free and gets GPUs of that node. A task that
+   no NUMA node of its pool can hold is refused, or fails once every agent has reported. See
+   :ref:`prefer_gpu_topology <exp-config-resources-prefer-gpu-topology>`.

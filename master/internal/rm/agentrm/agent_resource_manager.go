@@ -29,6 +29,7 @@ import (
 	"github.com/determined-ai/determined/master/pkg/command"
 	"github.com/determined-ai/determined/master/pkg/device"
 	"github.com/determined-ai/determined/master/pkg/model"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/master/pkg/syncx/queue"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 	"github.com/determined-ai/determined/proto/pkg/jobv1"
@@ -653,7 +654,8 @@ func (a *ResourceManager) ValidateResources(
 		return nil, nil
 	}
 
-	if msg.IsSingleNode {
+	// prefer_gpu_topology "strong" uses one agent, whatever is_single_node says.
+	if msg.IsSingleNode || (msg.GPUTopology == expconf.GPUTopologyStrong && msg.Slots >= 2) {
 		pool, err := a.poolByName(msg.ResourcePool)
 		if err != nil {
 			a.syslog.WithError(err).Error("recovering job position")
@@ -661,7 +663,10 @@ func (a *ResourceManager) ValidateResources(
 				"validating request for (%s, %d): %w", msg.ResourcePool, msg.Slots, err)
 		}
 		resp := pool.ValidateResources(msg)
-		if !resp.Fulfillable {
+		switch {
+		case resp.Reason != "":
+			return nil, errors.New(resp.Reason)
+		case !resp.Fulfillable:
 			return nil, errors.New("request unfulfillable, please try requesting less slots")
 		}
 		return nil, nil

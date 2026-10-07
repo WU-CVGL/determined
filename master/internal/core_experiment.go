@@ -394,6 +394,19 @@ func (m *Master) parseCreateExperiment(ctx context.Context, req *apiv1.CreateExp
 	if err = schemas.IsComplete(config); err != nil {
 		return nil, nil, config, nil, nil, invalidExperimentConfig(err)
 	}
+	if slots := config.Resources().SlotsPerTrial(); !req.GetUnmanaged() &&
+		config.Resources().GPUTopology() == expconf.GPUTopologyStrong && slots >= 2 {
+		// The pool the experiment runs in, which newExperiment resolves from the final config: an
+		// invariant config policy can set it.
+		var runPool rm.ResourcePoolName
+		if runPool, err = m.rm.ResolveResourcePool(
+			rm.ResourcePoolName(config.Resources().ResourcePool()), workspaceID, slots); err != nil {
+			return nil, nil, config, nil, nil, status.Error(codes.InvalidArgument, err.Error())
+		}
+		if err = m.validateGPUTopology(runPool, slots, config.Resources().GPUTopology()); err != nil {
+			return nil, nil, config, nil, nil, err
+		}
+	}
 
 	// Disallow EOL searchers.
 	if err = config.Searcher().AssertCurrent(); err != nil {

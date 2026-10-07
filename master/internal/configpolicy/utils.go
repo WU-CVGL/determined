@@ -148,11 +148,6 @@ func ValidateExperimentConfig(
 		if cp.InvariantConfig.RawResources != nil {
 			checkAgainstGlobalPriority(priorityEnabledErr, cp.InvariantConfig.RawResources.RawPriority)
 
-			// "strong" decodes, but every experiment the policy applies to would then fail.
-			if errs := cp.InvariantConfig.RawResources.GPUTopology().Validate(); len(errs) > 0 {
-				return status.Errorf(codes.InvalidArgument, fmt.Sprintf(InvalidExperimentConfigPolicyErr+": %s.", errs[0]))
-			}
-
 			// Verify the workspace invariant config doesn't conflict with workspace constraints.
 			if err := checkConstraintConflicts(cp.Constraints, cp.InvariantConfig.RawResources.RawMaxSlots,
 				cp.InvariantConfig.RawResources.RawSlotsPerTrial, cp.InvariantConfig.RawResources.RawPriority); err != nil {

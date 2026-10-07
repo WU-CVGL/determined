@@ -38,6 +38,7 @@ import (
 	"github.com/determined-ai/determined/master/pkg/etc"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 	"github.com/determined-ai/determined/proto/pkg/jobv1"
 	"github.com/determined-ai/determined/proto/pkg/resourcepoolv1"
@@ -1402,6 +1403,23 @@ func TestRMValidateResources(t *testing.T) {
 			}
 		})
 	}
+
+	// prefer_gpu_topology "strong" is refused; below 2 slots it is as no preference.
+	for slots, refused := range map[int]bool{0: false, 1: false, 2: true, 4: true} {
+		_, err := kubernetesRM.ValidateResources(sproto.ValidateResourcesRequest{
+			IsSingleNode: true, Slots: slots, ResourcePool: "test-pool",
+			GPUTopology: expconf.GPUTopologyStrong,
+		})
+		if refused {
+			require.EqualError(t, err, `prefer_gpu_topology "strong" is not available on Kubernetes`)
+		} else {
+			require.NoError(t, err, slots)
+		}
+	}
+	_, err := kubernetesRM.ValidateResources(sproto.ValidateResourcesRequest{
+		IsSingleNode: true, Slots: 4, ResourcePool: "test-pool", GPUTopology: expconf.GPUTopologySoft,
+	})
+	require.NoError(t, err)
 }
 
 func TestROCMGetAgents(t *testing.T) {

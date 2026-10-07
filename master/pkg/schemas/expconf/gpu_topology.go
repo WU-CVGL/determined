@@ -17,8 +17,8 @@ const (
 	// GPUTopologySoft chooses the best-ranked set among the free GPUs of the agent that the
 	// scheduler picks. It never waits and never changes which agent the task gets.
 	GPUTopologySoft GPUTopologyPreference = "soft"
-	// GPUTopologyStrong waits for one NUMA node of an agent to hold the task. It is not available
-	// yet: Validate rejects it.
+	// GPUTopologyStrong waits until one NUMA node of an agent has the task's GPUs free, and gives
+	// the task GPUs of that node.
 	GPUTopologyStrong GPUTopologyPreference = "strong"
 )
 
@@ -35,8 +35,10 @@ func (p GPUTopologyPreference) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON reads false as off, and "soft" and "strong"; it rejects true and anything else.
-// null leaves the value unchanged, as for other types. Its error names only the values this
-// release accepts: Validate refuses "strong" with its own message.
+// null leaves a value unchanged. For null on the pointer fields that hold the value, encoding/json
+// does not call it but sets them to nil: in a command's config, an explicit null clears a
+// template's value; in an experiment's, schemas.Merge reads nil as unset, so a template's value
+// applies.
 func (p *GPUTopologyPreference) UnmarshalJSON(data []byte) error {
 	switch trimmed := bytes.TrimSpace(data); string(trimmed) {
 	case "null":
@@ -52,16 +54,8 @@ func (p *GPUTopologyPreference) UnmarshalJSON(data []byte) error {
 		return nil
 	default:
 		return fmt.Errorf(
-			`prefer_gpu_topology must be false or "soft", not %s`, string(trimmed))
+			`prefer_gpu_topology must be false, "soft" or "strong", not %s`, string(trimmed))
 	}
-}
-
-// Validate implements check.Validatable: "strong" is not available yet.
-func (p GPUTopologyPreference) Validate() []error {
-	if p == GPUTopologyStrong {
-		return []error{fmt.Errorf(`prefer_gpu_topology "strong" is not available yet; use "soft"`)}
-	}
-	return nil
 }
 
 // GPUTopology returns resources.prefer_gpu_topology, off when it is not set. Generic tasks never

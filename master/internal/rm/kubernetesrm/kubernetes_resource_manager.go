@@ -21,6 +21,7 @@ import (
 	"github.com/determined-ai/determined/master/pkg/aproto"
 	"github.com/determined-ai/determined/master/pkg/command"
 	"github.com/determined-ai/determined/master/pkg/model"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 	"github.com/determined-ai/determined/proto/pkg/jobv1"
 	"github.com/determined-ai/determined/proto/pkg/resourcepoolv1"
@@ -357,6 +358,9 @@ func (k *ResourceManager) ValidateResources(
 ) ([]command.LaunchWarning, error) {
 	if msg.Slots == 0 {
 		return nil, nil
+	}
+	if msg.GPUTopology == expconf.GPUTopologyStrong && msg.Slots >= 2 {
+		return nil, errors.New(`prefer_gpu_topology "strong" is not available on Kubernetes`)
 	}
 
 	rp, err := k.poolByName(msg.ResourcePool)

@@ -79,7 +79,8 @@ func findFits(
 	if fit := findSharedAgentFit(req, agents, fittingMethod); fit != nil {
 		return []*fittingState{fit}
 	}
-	if req.FittingRequirements.SingleAgent || req.SlotsNeeded <= 1 {
+	// prefer_gpu_topology "strong" uses one agent.
+	if req.FittingRequirements.SingleAgent || req.SlotsNeeded <= 1 || strongTopology(req) {
 		return nil
 	}
 	if fits := findDedicatedAgentFits(
@@ -224,7 +225,8 @@ func findSharedAgentFit(
 ) *fittingState {
 	var candidates candidateList
 	for _, agent := range agents {
-		if !isViable(req, agent, slotsSatisfied, maxZeroSlotContainersSatisfied, agentPermittedSatisfied) {
+		if !isViable(req, agent, slotsSatisfied, maxZeroSlotContainersSatisfied, agentPermittedSatisfied,
+			gpuTopologySatisfied) {
 			continue
 		}
 

@@ -20,7 +20,7 @@ type priorityScheduler struct {
 	allowHeterogeneousFits bool
 	// gpus is the pool's GPU selection for the pass that Schedule runs. The simulation selects
 	// devices on its copies with it, as the pass's live reservations do; deepCopy says when both
-	// choose the same devices. Its zero value takes devices in map order.
+	// choose the same devices. Its zero value takes a plain task's devices in map order.
 	gpus gpuPolicy
 }
 
@@ -157,13 +157,10 @@ func (p priorityScheduler) prioritySchedulerWithFilter(
 					localAgentsState,
 					fittingMethod,
 					p.allowHeterogeneousFits,
-				); len(
-					fits,
-				) > 0 {
+				); len(fits) > 0 && p.addTaskToAgents(prioritizedAllocation, fits) {
 					log.Debugf(
 						"Not preempting tasks for task %s as it will be able to launch "+
 							"once already scheduled preemptions complete", prioritizedAllocation.Name)
-					p.addTaskToAgents(prioritizedAllocation, fits)
 					continue
 				}
 
@@ -244,8 +241,7 @@ func (p priorityScheduler) trySchedulingTaskViaPreemption(
 				localAgentsState,
 				fittingMethod,
 				p.allowHeterogeneousFits,
-			); len(fits) > 0 {
-				p.addTaskToAgents(allocationRequest, fits)
+			); len(fits) > 0 && p.addTaskToAgents(allocationRequest, fits) {
 				return true, localAgentsState, preemptedTasks
 			}
 		}
@@ -267,11 +263,10 @@ func (p priorityScheduler) trySchedulingPendingTasksInPriority(
 
 	for _, allocationRequest := range allocationRequests {
 		fits := findFits(allocationRequest, agents, fittingMethod, p.allowHeterogeneousFits)
-		if len(fits) == 0 {
+		if len(fits) == 0 || !p.addTaskToAgents(allocationRequest, fits) {
 			unSuccessfulAllocations = append(unSuccessfulAllocations, allocationRequest)
 			continue
 		}
-		p.addTaskToAgents(allocationRequest, fits)
 		successfulAllocations = append(successfulAllocations, allocationRequest)
 	}
 
@@ -323,15 +318,29 @@ func deepCopyAgents(agents map[aproto.ID]*agentState) map[aproto.ID]*agentState 
 }
 
 // addTaskToAgents places a request on the scheduler's copies, choosing its devices as the live
-// reservation does (gpuPolicy.selection). A fit counts free devices and a selection that cannot
-// choose falls back to map order, so a reservation here does not fail.
-func (p priorityScheduler) addTaskToAgents(req *sproto.AllocateRequest, fits []*fittingState) {
+// reservation does (gpuPolicy.selection), and reports whether it placed it. A fit counts free
+// devices and a selection that cannot choose falls back to map order, so a reservation here does
+// not fail, except for prefer_gpu_topology "strong", which never takes map order. Its fit admits
+// only agents where one NUMA node holds the request, and a strong reservation that still fails is
+// a miss: the copies are left as they were.
+func (p priorityScheduler) addTaskToAgents(req *sproto.AllocateRequest, fits []*fittingState) bool {
 	sel := p.gpus.selection(req, fits)
-	for _, fit := range fits {
-		if _, err := fit.Agent.allocateFreeDevices(fit.Slots, cproto.NewID(), sel); err != nil {
-			panic(errors.Wrap(err, "can't add task to agents"))
+	placed := make([]cproto.ID, 0, len(fits))
+	for i, fit := range fits {
+		cid := cproto.NewID()
+		if _, err := fit.Agent.allocateFreeDevices(fit.Slots, cid, sel); err != nil {
+			if !sel.strong {
+				panic(errors.Wrap(err, "can't add task to agents"))
+			}
+			for j, id := range placed {
+				fits[j].Agent.deallocateContainer(id)
+			}
+			log.WithError(err).Debugf("task %s not placed on agent %s", req.Name, fits[i].Agent.id)
+			return false
 		}
+		placed = append(placed, cid)
 	}
+	return true
 }
 
 func removeTaskFromAgents(

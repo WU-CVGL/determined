@@ -181,23 +181,25 @@ func TestTrialAllocationThatDoesNotStartIsNotMapped(t *testing.T) {
 
 // A trial passes its prefer_gpu_topology to the resource manager.
 func TestTrialCarriesGPUTopologyPreference(t *testing.T) {
-	_, tr, alloc, _ := setupWithResources(t, &expconf.ResourcesConfig{
-		RawSlotsPerTrial:     ptrs.Ptr(2),
-		RawPreferGPUTopology: ptrs.Ptr(expconf.GPUTopologySoft),
-	})
-	alloc.ExpectedCalls = nil
-	var req sproto.AllocateRequest
-	alloc.On(
-		"StartAllocation", mock.Anything, mock.Anything, mock.Anything,
-		mock.Anything, mock.Anything, mock.Anything, mock.Anything,
-	).Run(func(args mock.Arguments) {
-		req = args.Get(1).(sproto.AllocateRequest)
-	}).Return(nil)
+	for _, pref := range []expconf.GPUTopologyPreference{expconf.GPUTopologySoft, expconf.GPUTopologyStrong} {
+		_, tr, alloc, _ := setupWithResources(t, &expconf.ResourcesConfig{
+			RawSlotsPerTrial:     ptrs.Ptr(2),
+			RawPreferGPUTopology: ptrs.Ptr(pref),
+		})
+		alloc.ExpectedCalls = nil
+		var req sproto.AllocateRequest
+		alloc.On(
+			"StartAllocation", mock.Anything, mock.Anything, mock.Anything,
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		).Run(func(args mock.Arguments) {
+			req = args.Get(1).(sproto.AllocateRequest)
+		}).Return(nil)
 
-	require.NoError(t, tr.PatchState(model.StateWithReason{State: model.ActiveState}))
-	require.NoError(t, tr.PatchSearcherState(experiment.TrialSearcherState{Create: searcher.Create{}}))
-	require.Equal(t, 2, req.SlotsNeeded)
-	require.Equal(t, expconf.GPUTopologySoft, req.FittingRequirements.GPUTopology)
+		require.NoError(t, tr.PatchState(model.StateWithReason{State: model.ActiveState}))
+		require.NoError(t, tr.PatchSearcherState(experiment.TrialSearcherState{Create: searcher.Create{}}))
+		require.Equal(t, 2, req.SlotsNeeded)
+		require.Equal(t, pref, req.FittingRequirements.GPUTopology)
+	}
 }
 
 func setup(t *testing.T) (

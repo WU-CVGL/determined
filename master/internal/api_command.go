@@ -144,6 +144,9 @@ func (a *apiServer) getCommandLaunchParams(ctx context.Context, req *protoComman
 	fillTaskConfig(resources.Slots, taskSpec, &config.Environment)
 	config.Resources.ResourcePool = poolName.String()
 	config.Resources.Slots = resources.Slots
+	if err := a.m.validateGPUTopology(poolName, resources.Slots, config.Resources.GPUTopology()); err != nil {
+		return nil, launchWarnings, err
+	}
 
 	// Apply the scheduler's default priority.
 	if config.Resources.Priority == nil {

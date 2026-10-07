@@ -355,7 +355,7 @@ func TestPrioritySchedulePassPlansTheLiveDevices(t *testing.T) {
 		require.Len(t, copyFits, 1)
 		require.Equal(t, fits[0].Agent.id, copyFits[0].Agent.id)
 		before := freeDeviceIDs(copyFits[0].Agent)
-		simulation.addTaskToAgents(req, copyFits)
+		require.True(t, simulation.addTaskToAgents(req, copyFits), "request %s", req.AllocationID)
 		planned := idsMinus(before, freeDeviceIDs(copyFits[0].Agent))
 
 		res, err := fits[0].Agent.allocateFreeDevices(fits[0].Slots, cproto.NewID(), sel)

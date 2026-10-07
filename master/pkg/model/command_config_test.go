@@ -112,9 +112,12 @@ func TestCommandConfigPreferGPUTopology(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(raw), "prefer_gpu_topology", "an unset key is not stored")
 
-	require.Error(t, decode(&config, `{"resources": {"prefer_gpu_topology": true}}`))
+	require.EqualError(t, decode(&config, `{"resources": {"prefer_gpu_topology": true}}`),
+		`prefer_gpu_topology must be false, "soft" or "strong", not true`)
 	require.NoError(t, decode(&config, `{"resources": {"prefer_gpu_topology": "strong"}}`))
-	require.ErrorContains(t, check.Validate(config.Resources), `"strong" is not available yet`)
+	require.Equal(t, expconf.GPUTopologyStrong, config.Resources.GPUTopology())
+	require.Equal(t, expconf.GPUTopologyStrong, config.Resources.ToExpconf().GPUTopology())
+	require.NoError(t, check.Validate(config.Resources))
 }
 
 func TestParseJustResourcesSkipsPreferGPUTopology(t *testing.T) {

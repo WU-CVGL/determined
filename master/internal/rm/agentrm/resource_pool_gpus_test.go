@@ -103,7 +103,7 @@ func TestGPUPolicySelectionPrefersTopologyOnOneAgent(t *testing.T) {
 	two := []*fittingState{{Slots: 8}, {Slots: 8}}
 	for pref, want := range map[expconf.GPUTopologyPreference]bool{
 		"": false, expconf.GPUTopologyOff: false, expconf.GPUTopologySoft: true,
-		// Strong is refused at submit in this release; the RM never treats it as soft.
+		// Strong has a selection of its own (TestGPUPolicySelectionStrong).
 		expconf.GPUTopologyStrong: false,
 	} {
 		req := &sproto.AllocateRequest{

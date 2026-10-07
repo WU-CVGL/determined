@@ -117,11 +117,12 @@ The following configuration settings are supported:
       ``kubernetes``. See :ref:`master configuration <master-config-reference>` for details about
       resource managers.
 
-   -  ``prefer_gpu_topology``: ``false`` or ``"soft"``: with ``"soft"``, a task with 2 or more slots
-      gets the best-ranked set of free GPUs of its agent by P2P, NVLinks, PCIe switches, NUMA nodes
-      and PCIe link width, for example ``det cmd run --config resources.slots=4 --config
-      resources.prefer_gpu_topology=soft 'echo $DET_SLOT_IDS'``. See :ref:`prefer_gpu_topology
-      <exp-config-resources-prefer-gpu-topology>`.
+   -  ``prefer_gpu_topology``: ``false``, ``"soft"`` or ``"strong"``: with ``"soft"``, a task with 2
+      or more slots gets the best-ranked set of free GPUs of its agent by P2P, NVLinks, PCIe
+      switches, NUMA nodes and PCIe link width, for example ``det cmd run --config resources.slots=4
+      --config resources.prefer_gpu_topology=soft 'echo $DET_SLOT_IDS'``. With ``"strong"``, it
+      waits until one NUMA node of an agent has its slots free and gets GPUs of that node. See
+      :ref:`prefer_gpu_topology <exp-config-resources-prefer-gpu-topology>`.
 
 -  ``bind_mounts``: Specifies a collection of directories that are bind-mounted into the Docker
    containers for execution. This can be used to allow commands to access additional data that is

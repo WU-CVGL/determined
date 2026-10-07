@@ -61,7 +61,9 @@ func TestNTSCCarriesGPUTopologyPreference(t *testing.T) {
 		{model.TaskTypeShell, model.JobTypeShell},
 		{model.TaskTypeTensorboard, model.JobTypeTensorboard},
 	} {
-		for _, pref := range []*expconf.GPUTopologyPreference{nil, ptrs.Ptr(expconf.GPUTopologySoft)} {
+		for _, pref := range []*expconf.GPUTopologyPreference{
+			nil, ptrs.Ptr(expconf.GPUTopologySoft), ptrs.Ptr(expconf.GPUTopologyStrong),
+		} {
 			req := CreateMockGenericReq(t, pgDB)
 			req.Spec.Config.Resources.Slots = 2
 			req.Spec.Config.Resources.PreferGPUTopology = pref

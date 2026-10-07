@@ -1261,9 +1261,10 @@ shells, and commands, and cannot be modified.
 =======================
 
 Optional. Whether the agent resource manager chooses a task's GPUs by the :ref:`GPU topology
-<agent-gpu-topology>` that agents report: ``false`` or ``"soft"``. Unset is ``false``. ``true`` is
-not a value, and ``"strong"`` is not available yet; both are rejected. An explicit value, also
-``false``, wins over a template; for experiments, an invariant config policy can force ``"soft"``.
+<agent-gpu-topology>` that agents report: ``false``, ``"soft"`` or ``"strong"``. Unset is ``false``.
+``true`` is not a value and is rejected. An explicit value, also ``false``, wins over a template;
+for experiments, an invariant config policy can force a value. To force one with a template or a
+policy, use ``"soft"``: ``"strong"`` makes every task it applies to wait for a whole NUMA node.
 
 With ``"soft"``, a task with 2 or more slots on one agent gets the set of free GPUs of that agent
 that ranks first:
@@ -1314,6 +1315,61 @@ changed.
 The task log gets one line for each such task, for example ``GPU topology preference: agent node02,
 slots 4,5,6,7; worst pair NODE, P2P usable``, with ``, narrow`` when a GPU of that pair is narrow,
 or the reason the set was not ranked.
+
+With ``"strong"``, a task with 2 or more slots starts only when one NUMA node of one agent has that
+many free GPUs, and gets GPUs of that node. It waits for such a node without limit, uses one agent,
+and never falls back to GPUs across NUMA nodes.
+
+-  An agent can take the task when the scheduler's other conditions hold and one of its NUMA nodes
+   has the task's slots free. Free GPUs in error count. GPUs without a known NUMA node never count,
+   and neither do CPU slots, draining and disabled slots, or agents whose topology the master does
+   not have. Among the agents that can take the task, the fitting policy picks one as for other
+   tasks.
+
+-  Inside the agent, each NUMA node that can hold the task has a best set: GPUs in error last, then
+   the ``"soft"`` ranking above among the node's free GPUs, with ties to the lowest IDs. When every
+   pair of the node's free GPUs is unknown, or with more than 20000 sets, the best set is the lowest
+   IDs, GPUs in error last. The task gets the best set of the node that ranks first by:
+
+   #. fewer GPUs in error in the set;
+   #. fewer narrow GPUs in the set, then fewer GPUs with an unknown width;
+   #. fewer free healthy GPUs on the node: the node with the fewest free GPUs that can hold the
+      task, as in NUMA packing;
+   #. fewer allocatable healthy slots on the node;
+   #. the lower node number.
+
+   This holds under every fitting policy and ``numa_packing`` setting. A set with GPUs in error is
+   taken when no node has a better one. For example, on an idle agent with GPUs 0-3 on NUMA node 0
+   and 4-7 on node 1, where GPU 1 is narrow, a 4-slot task gets GPUs 4 to 7; with GPUs 0, 1 and 4 to
+   7 free and a recent critical XID on GPU 0, a 2-slot task gets GPUs 4 and 5.
+
+A waiting task shows ``QUEUED``, and its task log gets one line, for example ``GPU topology
+preference strong: waiting until one NUMA node of an agent in pool gpus has 4 free GPUs``. When it
+starts, the task log gets the line of ``"soft"``.
+
+A task with ``"strong"`` needs a whole NUMA node free: one long task on a node keeps it off that
+node for the long task's whole life. In pools with long-running tasks, such as notebooks and shells,
+use ``"soft"``. Submit it at the pool's usual priority: while a task waits, no task of a lower
+priority starts, as for any waiting task, and those tasks show no reason. Moving the task ahead in
+the queue holds no GPUs for it, every restart of a trial waits again, and switching to ``"soft"``
+means submitting the task again. With preemption on, it preempts lower-priority tasks, newest first,
+until one NUMA node can hold it, so it can preempt tasks whose GPUs it does not use; the GPUs it
+freed are not held for it. Under the fair-share scheduler, a task that no agent can take does not
+count in its job's demand. A NUMA node equals a socket only with NPS1.
+
+A task is refused at creation when its pool has no agent or no agent with as many slots (a pool with
+a provider checks the slots of its instance type instead), or when every agent in its pool has
+reported its topology and no NUMA node has as many slots, disabled ones included: for example, in a
+pool of CPU agents or of agents that report no topology, or with more slots than any NUMA node has.
+Moving an experiment to another pool is checked the same way. While an agent has not reported, for
+example right after a master restart until it reconnects, the task is accepted. When no NUMA node of
+the pool can hold it later, for example once every agent has reported, after an ``exclude_gpus``
+change, or when a pool with other agents loses the only agent that could, the task fails with ``no
+NUMA node in pool gpus has 5 slots; use soft`` or ``no agent in pool gpus reports NUMA nodes; use
+soft``, and a trial fails without restarts. While its pool has no agent, a queued task waits. The
+master never refuses a task it restores. Only the agent resource manager runs ``"strong"``; the
+Kubernetes, Slurm and PBS resource managers refuse it. With fewer than 2 slots, ``"strong"`` is as
+``false``.
 
 A master without this option, after a rollback, treats a config that sets it, also to ``false``, as
 follows. Experiments that are not terminal move to ERROR when it starts, and their trials are

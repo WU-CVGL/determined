@@ -351,24 +351,23 @@
   case:
     prefer_gpu_topology: null
 
+- name: prefer_gpu_topology strong (valid)
+  complete_as:
+    - http://determined.ai/schemas/expconf/v0/resources.json
+  case:
+    prefer_gpu_topology: strong
+
 - name: prefer_gpu_topology true (invalid)
   sanity_errors:
     http://determined.ai/schemas/expconf/v0/resources.json:
-      - "<config>.prefer_gpu_topology: prefer_gpu_topology must be false or \"soft\""
+      - "<config>.prefer_gpu_topology: prefer_gpu_topology must be false, \"soft\" or \"strong\", not true"
   case:
     prefer_gpu_topology: true
-
-- name: prefer_gpu_topology strong (not available yet)
-  sanity_errors:
-    http://determined.ai/schemas/expconf/v0/resources.json:
-      - "<config>.prefer_gpu_topology: prefer_gpu_topology \"strong\" is not available yet; use \"soft\""
-  case:
-    prefer_gpu_topology: strong
 
 - name: prefer_gpu_topology other string (invalid)
   sanity_errors:
     http://determined.ai/schemas/expconf/v0/resources.json:
-      - "<config>.prefer_gpu_topology: prefer_gpu_topology must be false or \"soft\""
+      - "<config>.prefer_gpu_topology: prefer_gpu_topology must be false, \"soft\" or \"strong\""
   case:
     prefer_gpu_topology: "on"
 
@@ -382,6 +381,24 @@
   merged:
     prefer_gpu_topology: false
     slots_per_trial: 2
+    max_slots: null
+    weight: null
+    shm_size: null
+    resource_pool: null
+    priority: null
+    is_single_node: null
+    devices: []
+
+- name: prefer_gpu_topology false overrides a template's strong
+  merge_as: http://determined.ai/schemas/expconf/v0/resources.json
+  case:
+    prefer_gpu_topology: false
+  merge_src:
+    prefer_gpu_topology: strong
+    slots_per_trial: 4
+  merged:
+    prefer_gpu_topology: false
+    slots_per_trial: 4
     max_slots: null
     weight: null
     shm_size: null

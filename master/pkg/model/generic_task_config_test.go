@@ -40,5 +40,6 @@ func TestGenericTaskConfigPreferGPUTopology(t *testing.T) {
 		yaml.DisallowUnknownFields))
 	text = "entrypoint: [\"true\"]\nresources:\n  prefer_gpu_topology: strong\n"
 	require.NoError(t, yaml.UnmarshalStrict([]byte(text), &config, yaml.DisallowUnknownFields))
-	require.ErrorContains(t, check.Validate(config), `"strong" is not available yet`)
+	require.Equal(t, expconf.GPUTopologyStrong, config.Resources.GPUTopology())
+	require.NoError(t, check.Validate(config))
 }
