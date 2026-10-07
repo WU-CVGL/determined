@@ -243,9 +243,15 @@ func (a *agentState) gpuTopologyProto() *agentv1.GpuTopology {
 }
 
 // gpuHealth returns the health of each CUDA slot by device ID, classified as in the agent API
-// (gpuhealth.Apply): from the agent's last report and xids, the result of gpuhealth.XIDCache.Peek,
-// which never queries Prometheus (nil: no XIDs). GPU selection reads per-GPU health here, so that
-// it can rank the slots in GPU_HEALTH_ERROR last. An excluded GPU is not a slot and has no entry.
+// (gpuhealth.Apply), from the agent's last report and xids (nil: no XIDs). An excluded GPU is not a
+// slot and has no entry.
+//
+// Only tests call it so far. It is for GPU selection (PR B), which is to rank the slots in
+// GPU_HEALTH_ERROR last in allocateFreeDevices. For that, PR B still has to pass the master's
+// gpuhealth.XIDCache into the agent RM (agentrm can import gpuhealth, not internal), read its
+// LastOK, which never queries Prometheus and survives a failed query, and add a rule for how old
+// a result may be and how it is refreshed: the cache queries only when the agent API is asked for
+// slots, so without that rule it can be old, or empty after a master restart.
 func (a *agentState) gpuHealth(xids *gpuhealth.XIDSnapshot) map[device.ID]agentv1.GpuHealth {
 	health := map[device.ID]agentv1.GpuHealth{}
 	topo := a.gpuTopologyProto()
