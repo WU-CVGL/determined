@@ -1,13 +1,6 @@
 import fixture from 'fixtures/jobsSortOrder.json';
-import {
-  BulkExperimentItem,
-  CommandState,
-  CommandTask,
-  CommandType,
-  GenericTask,
-  GenericTaskState,
-  RunState,
-} from 'types';
+import * as Sdk from 'services/api-ts-sdk';
+import { mapV1Command, mapV1ExperimentList, mapV1GenericTasksResponse } from 'services/decoder';
 
 import {
   commandRow,
@@ -24,18 +17,21 @@ import {
 
 /*
  * The shared fixture of the Jobs page's order, which the master's tests check against Postgres
- * (experiments) and Go (generic tasks): the browser must merge in the same order.
+ * (experiments) and Go (generic tasks): the browser must merge in the same order. The rows go
+ * through the JSON the master sends and the decoders the page uses.
  */
 
 interface FixtureRow {
   end: string | null;
+  genericTaskOnly?: boolean;
   id: string;
   name: string;
-  owner: string;
+  owner: string | null;
   pool: string | null;
   slots: number;
+  slotsDefault?: boolean;
   start: string;
-  state: string;
+  state: string | null;
 }
 
 const rows = fixture.rows as FixtureRow[];
@@ -51,93 +47,164 @@ const fixtureKeys: Record<string, SortKey> = {
   stateGroup: SortKey.State,
 };
 
+/* A time as the master's JSON writes it: no fraction, or 3, 6 or 9 digits. */
+const protoTime = (time: string): string =>
+  time.replace(/\.(\d+)Z$/, (_, fraction: string) => {
+    const digits = fraction.padEnd(9, '0');
+    if (/^0+$/.test(digits)) return 'Z';
+    if (digits.endsWith('000000')) return `.${digits.slice(0, 3)}Z`;
+    if (digits.endsWith('000')) return `.${digits.slice(0, 6)}Z`;
+    return `.${digits}Z`;
+  });
+
+/*
+ * How the master sends the owner whose name the row sorts by, by turns: as the display name; as
+ * the username of a user whose display name is empty; and as the username of a user without a
+ * display name, where an experiment's display name falls back to the username.
+ */
+const owner = (row: FixtureRow, i: number, experiment: boolean) => {
+  if (row.owner === null) return { displayName: '', userId: 0, username: '' };
+  switch (i % 3) {
+    case 0:
+      return { displayName: row.owner, userId: 1, username: `user-${i}` };
+    case 1:
+      return { displayName: '', userId: 1, username: row.owner };
+    default:
+      return { displayName: experiment ? row.owner : '', userId: 1, username: row.owner };
+  }
+};
+
 /* The list shows the finer state of an active experiment, which the master fills in after it sorts. */
-const ACTIVE_STATES = [RunState.Running, RunState.Queued, RunState.Pulling, RunState.Starting];
+const ACTIVE_STATES: Sdk.Experimentv1State[] = [
+  Sdk.Experimentv1State.RUNNING,
+  Sdk.Experimentv1State.QUEUED,
+  Sdk.Experimentv1State.PULLING,
+  Sdk.Experimentv1State.STARTING,
+  Sdk.Experimentv1State.ACTIVE,
+];
+
+/* The source's rows and the fixture's ID of each. */
+interface Source {
+  ids: Map<RunRow, string>;
+  rows: RunRow[];
+}
+
+const source = (fixtureRows: FixtureRow[], toRow: (row: FixtureRow, i: number) => RunRow) => {
+  const ids = new Map<RunRow, string>();
+  const list = fixtureRows.map((row, i) => {
+    const run = toRow(row, i);
+    ids.set(run, row.id);
+    return run;
+  });
+  return { ids, rows: list };
+};
+
+const sharedRows = rows.filter((row) => !row.genericTaskOnly);
 
 /* Experiments: a row listed earlier has a higher ID, which wins a tie. */
-const experiments: RunRow[] = rows.map((row, i) => {
-  const item: BulkExperimentItem = {
+const experiments: Source = source(sharedRows, (row, i) => {
+  const wire = {
     archived: false,
     config: {
-      resources: { slots_per_trial: row.slots },
-    } as unknown as BulkExperimentItem['config'],
-    displayName: row.owner,
-    endTime: row.end ?? undefined,
-    hyperparameters: {},
+      name: row.name,
+      resources: {
+        ...(row.pool === null ? {} : { resource_pool: row.pool }),
+        ...(row.slotsDefault ? {} : { slots_per_trial: row.slots }),
+      },
+    },
+    endTime: row.end === null ? null : protoTime(row.end),
     id: 1000 - i,
     jobId: `job-${i}`,
-    labels: [],
     name: row.name,
     numTrials: 1,
+    originalConfig: '',
     projectId: 1,
+    projectOwnerId: 1,
     resourcePool: row.pool ?? '',
     searcherType: 'single',
-    startTime: row.start,
+    startTime: protoTime(row.start),
     state:
-      row.state === RunState.Active
+      row.state === 'ACTIVE'
         ? ACTIVE_STATES[i % ACTIVE_STATES.length]
-        : (row.state as RunState),
-    userId: 1,
-    username: `user-${i}`,
-  };
-  return experimentRow(item);
+        : (`STATE_${row.state}` as Sdk.Experimentv1State),
+    workspaceId: 1,
+    ...owner(row, i, true),
+  } as unknown as Sdk.V1Experiment;
+  return experimentRow(mapV1ExperimentList([wire])[0]);
 });
 
 /* Generic tasks: a row listed earlier has a lower task ID, which wins a tie. */
 const taskId = (i: number) => `task-${String(i).padStart(2, '0')}`;
-const genericTasks: RunRow[] = rows.map((row, i) => {
-  const task: GenericTask = {
+const genericTasks: Source = source(rows, (row, i) => {
+  const wire = {
     description: '',
-    displayName: row.owner,
-    endTime: row.end ?? undefined,
+    endTime: row.end === null ? null : protoTime(row.end),
     jobId: `job-${i}`,
     name: row.name,
     noPause: false,
     projectId: 1,
     resourcePool: row.pool ?? '',
     slots: row.slots,
-    startTime: row.start,
-    state: row.state as GenericTaskState,
+    startTime: protoTime(row.start),
+    state: (row.state === null
+      ? Sdk.V1GenericTaskState.UNSPECIFIED
+      : `GENERIC_TASK_STATE_${row.state}`) as Sdk.V1GenericTaskState,
     taskId: taskId(i),
-    userId: 1,
-    username: `user-${i}`,
     workspaceId: 1,
-  };
-  return genericTaskRow(task);
+    ...owner(row, i, false),
+  } as unknown as Sdk.V1GenericTask;
+  return genericTaskRow(mapV1GenericTasksResponse({ pagination: {}, tasks: [wire] }).tasks[0]);
 });
 
 /* Commands have no end time and never pause, so they take the other keys. */
-const commands: RunRow[] = rows.map((row, i) => {
-  const task: CommandTask = {
-    displayName: row.owner,
+const commands: Source = source(sharedRows, (row, i) => {
+  const wire = {
+    description: row.name,
     id: taskId(i),
-    name: row.name,
+    jobId: `job-${i}`,
     resourcePool: row.pool ?? '',
     slots: row.slots,
-    startTime: row.start,
-    state: CommandState.Running,
-    type: CommandType.Command,
-    userId: 1,
-    username: `user-${i}`,
+    startTime: protoTime(row.start),
+    state: Sdk.Taskv1State.RUNNING,
     workspaceId: 1,
-  };
-  return commandRow(task);
+    ...owner(row, i, false),
+  } as unknown as Sdk.V1Command;
+  return commandRow(mapV1Command(wire));
 });
 
-const label = (list: RunRow[], source: RunRow[]) => list.map((row) => rows[source.indexOf(row)].id);
+/* The fixture's order of a source: without the rows the source does not have. */
+const orderOf = (src: Source, fixtureKey: string, direction: 'ascend' | 'descend') => {
+  const has = new Set(src.ids.values());
+  return orders[fixtureKey][direction].filter((id) => has.has(id));
+};
 
-const sorted = (source: RunRow[], key: SortKey, desc: boolean) =>
-  label([...source].sort(runComparator({ desc, key })), source);
+const sorted = (src: Source, key: SortKey, desc: boolean) =>
+  [...src.rows].sort(runComparator({ desc, key })).map((row) => src.ids.get(row));
 
 describe('the Jobs page order', () => {
+  it('decodes what the master sends', () => {
+    // A time to the microsecond, an empty display name, no slots_per_trial, no state, no owner.
+    expect(protoTime('2026-01-01T00:03:20.000001Z')).toBe('2026-01-01T00:03:20.000001Z');
+    expect(protoTime('2026-01-01T00:00:10.000000Z')).toBe('2026-01-01T00:00:10Z');
+    const byId = (src: Source, id: string) =>
+      src.rows.find((row) => src.ids.get(row) === id) as RunRow;
+    expect(timeKey(byId(experiments, 'r22').startTime)).not.toEqual(
+      timeKey(byId(experiments, 'r21').startTime),
+    );
+    expect(byId(experiments, 'r02').ownerName).toBe('Alice');
+    expect(byId(genericTasks, 'r02').ownerName).toBe('Alice');
+    expect(byId(experiments, 'r09').slots).toBe(1);
+    expect(byId(genericTasks, 'r23').ownerName).toBeUndefined();
+    expect(byId(genericTasks, 'r24').stateGroup).toBeUndefined();
+  });
+
   describe.each(Object.entries(fixtureKeys))('by %s', (fixtureKey, key) => {
     it.each([
       ['ascend', false],
       ['descend', true],
     ] as const)('%s, as the master lists experiments and generic tasks', (direction, desc) => {
-      const want = orders[fixtureKey][direction];
-      expect(sorted(experiments, key, desc)).toEqual(want);
-      expect(sorted(genericTasks, key, desc)).toEqual(want);
+      expect(sorted(experiments, key, desc)).toEqual(orderOf(experiments, fixtureKey, direction));
+      expect(sorted(genericTasks, key, desc)).toEqual(orderOf(genericTasks, fixtureKey, direction));
     });
   });
 
@@ -150,7 +217,7 @@ describe('the Jobs page order', () => {
       ['ascend', false],
       ['descend', true],
     ] as const)('%s, as the generic tasks', (direction, desc) => {
-      expect(sorted(commands, key, desc)).toEqual(orders[fixtureKey][direction]);
+      expect(sorted(commands, key, desc)).toEqual(orderOf(commands, fixtureKey, direction));
     });
   });
 
@@ -158,9 +225,11 @@ describe('the Jobs page order', () => {
     Object.values(fixtureKeys).flatMap((key) => [true, false].map((desc) => ({ desc, key }))),
   )('pages the merge of the three sources with no run twice and none left out: %o', (sort) => {
     const compare = runComparator(sort);
-    const lists = [commands, genericTasks, experiments].map((list) => [...list].sort(compare));
+    const lists = [commands, genericTasks, experiments].map((src) => [...src.rows].sort(compare));
     const whole = mergeRuns(lists, sort);
-    expect(whole).toHaveLength(rows.length * 3);
+    expect(whole).toHaveLength(
+      commands.rows.length + genericTasks.rows.length + experiments.rows.length,
+    );
     const pages: RunRow[] = [];
     for (let offset = 0; offset < whole.length; offset += 5) {
       // Each source sends its first offset + limit runs.
