@@ -1255,6 +1255,72 @@ shells, and commands, and cannot be modified.
 
    This option is currently not supported by Slurm RM.
 
+.. _exp-config-resources-prefer-gpu-topology:
+
+``prefer_gpu_topology``
+=======================
+
+Optional. Whether the agent resource manager chooses a task's GPUs by the :ref:`GPU topology
+<agent-gpu-topology>` that agents report: ``false`` or ``"soft"``. Unset is ``false``. ``true`` is
+not a value, and ``"strong"`` is not available yet; both are rejected. An explicit value, also
+``false``, wins over a template; for experiments, an invariant config policy can force ``"soft"``.
+
+With ``"soft"``, a task with 2 or more slots on one agent gets the set of free GPUs of that agent
+that ranks first:
+
+#. fewer GPUs in error: an NVML health call of the GPU failed at agent start, or the GPU has a
+   :ref:`recent critical XID <agent-gpu-xids>`;
+
+#. then its pairs of GPUs, worst pair first, each ranked:
+
+   -  P2P usable, with more NVLinks first;
+
+   -  P2P usable, by level: ``INTERNAL``, ``PIX``, ``PXB``, ``PHB``, ``NODE``, ``SYS``, unknown;
+
+   -  P2P not usable or unknown: one NUMA node (``INTERNAL`` to ``NODE``) before ``SYS`` before an
+      unknown level; then not usable before unknown P2P; then a pair on two PCIe switches before a
+      pair behind one (``PIX``), whose GPUs share one link to host memory;
+
+   and last, among pairs equal in all of that, by PCIe link width: both GPUs at their maximum width
+   before a pair with an unknown width before a narrow pair, one with a GPU whose current width was
+   below its maximum (``narrow`` in the CLI);
+
+#. equal sets go to :ref:`NUMA packing <master-config-numa-packing>` in pools that pack, and to the
+   lowest IDs otherwise.
+
+NVLinks count only with usable P2P, and a pair the agent did not report is unknown. An NVML error
+ranks a GPU last, as above; otherwise the ranking reads only the values that the agent reported, so
+a failed NVML query for a pair only leaves that pair unknown. NVML's ``NODE`` and ``SYS`` are NUMA
+levels: they are one socket and two sockets only with NPS1. Without usable P2P, the ranking uses
+only the NUMA class, PCIe switches and link width.
+
+The link width is the one the agent read at its start, as in the :ref:`GPU health
+<agent-gpu-topology>`; the link generation is never used. The width decides only between pairs equal
+in everything above, so locality comes first: when every pair has the same P2P state and none has
+NVLinks, a set on one NUMA node with a narrow GPU ranks before every set across NUMA nodes. An
+unknown width ranks before a narrow one, the one place where a missing value ranks before a reported
+one. Widths alone rank nothing: when every pair of free GPUs is unknown, the set is not ranked.
+
+The preference is soft: it never waits, never moves running tasks, and never changes the agent the
+scheduler picks or the number of slots. It has no effect on a task with fewer than 2 slots or on
+several agents, with the Kubernetes resource manager, when the agent's topology is unknown or every
+pair of its free GPUs is unknown, or with more than 20000 sets to compare; the task then gets its
+GPUs as without it. The agent measures its topology when it starts, so restart agents after a driver
+change, and after a link's width changed.
+
+The task log gets one line for each such task, for example ``GPU topology preference: agent node02,
+slots 4,5,6,7; worst pair NODE, P2P usable``, with ``, narrow`` when a GPU of that pair is narrow,
+or the reason the set was not ranked.
+
+A master without this option, after a rollback, treats a config that sets it, also to ``false``, as
+follows. Experiments that are not terminal move to ERROR when it starts, and their trials are
+killed; continuing or editing any experiment that sets it fails. New experiments and tasks that set
+it are refused, and so are creating an experiment from a template that sets it and saving a
+workspace config policy while the global policy sets it. The option is ignored in command, notebook,
+shell and TensorBoard templates, in invariant config policies, and in the commands and generic tasks
+that the master restores or resumes. Before rolling back, end the experiments that set it and remove
+it from templates and config policies.
+
 .. _exp-resources-devices:
 
 ``devices``

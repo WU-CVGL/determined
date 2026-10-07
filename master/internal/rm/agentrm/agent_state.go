@@ -3,6 +3,8 @@ package agentrm
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
+	"sort"
 	"strconv"
 
 	"github.com/google/uuid"
@@ -65,7 +67,8 @@ type agentState struct {
 
 	// gpuTopology is what the agent reported at its last start. It is nil after a restore from the
 	// snapshot until the agent's AgentStarted arrives. It is never mutated, only replaced
-	// (setGPUTopology), and it stays out of device.Device, deepCopy and the snapshot.
+	// (setGPUTopology), so copies share it (deepCopy); it stays out of device.Device and the
+	// snapshot.
 	gpuTopology *gpuTopology
 }
 
@@ -164,35 +167,164 @@ func (a *agentState) idle() bool {
 	return a.numUsedZeroSlots() == 0 && a.numUsedSlots() == 0
 }
 
-// allocateFreeDevices allocates container.
-func (a *agentState) allocateFreeDevices(slots int, cid cproto.ID) ([]device.Device, error) {
+// deviceReservation is what allocateFreeDevices reserved, and how it chose the devices.
+type deviceReservation struct {
+	devices []device.Device
+	// choice is the selection's result; its devices are the reserved ones, or nil for map order.
+	choice gpuChoice
+	// failure is why a selection was dropped for map order: its set was invalid, it gave neither a
+	// set nor a reason, or it panicked.
+	failure string
+}
+
+// selectFreeDevicesFunc is the selection of allocateFreeDevices; tests replace it to inject
+// failures.
+var selectFreeDevicesFunc = selectFreeDevices
+
+// allocateFreeDevices reserves slots devices for the container cid. Its one change of state comes
+// last: chooseFreeDevices picks a full set and validates it whole without changing anything, then
+// every device of the set is reserved at once. With fewer than slots free devices it returns an
+// error and changes nothing. A zero-slot container takes no devices, and the topology is never
+// read. The scheduler's copies run this too, so it must not log: a copy has no syslog.
+func (a *agentState) allocateFreeDevices(
+	slots int, cid cproto.ID, sel deviceSelection,
+) (deviceReservation, error) {
 	// TODO(ilia): Rename to AllocateContainer.
-	a.containerState[cid] = &cproto.Container{ID: cid}
 	if slots == 0 {
-		return nil, nil
+		a.containerState[cid] = &cproto.Container{ID: cid}
+		return deviceReservation{}, nil
+	}
+	res, err := a.chooseFreeDevices(slots, sel)
+	if err != nil {
+		return deviceReservation{}, err
+	}
+	for _, d := range res.devices {
+		a.Devices[d] = &cid
+	}
+	a.containerState[cid] = &cproto.Container{ID: cid, Devices: res.devices}
+	return res, nil
+}
+
+// chooseFreeDevices returns a full set of slots free devices, validated whole (checkFreeDevices),
+// and how it was chosen; it changes nothing. When sel ranks, the selection (selectFreeDevices) runs
+// first and its set is taken if it is valid. Otherwise the set is the free devices in map order, as
+// before GPU selection existed, and goes through the same validation:
+//   - for the zero selection, which never runs the selection;
+//   - when the selection chooses no devices and says why (gpuChoice.mapOrder);
+//   - when the selection fails: its set is invalid, it gives neither a set nor a reason, or it
+//     panics. The reservation reports the failure, so it succeeds exactly when one in map order
+//     would.
+//
+// Only the selection runs under recover: it has no side effects.
+func (a *agentState) chooseFreeDevices(slots int, sel deviceSelection) (deviceReservation, error) {
+	if a.numFreeDevices() < slots {
+		return deviceReservation{}, errors.New("not enough devices")
+	}
+	var res deviceReservation
+	if sel.ranks() {
+		res.choice, res.failure = a.selectRankedDevices(slots, sel)
+		switch {
+		case res.failure != "":
+			// It panicked.
+		case res.choice.devices != nil:
+			err := a.checkFreeDevices(res.choice.devices, slots)
+			if err == nil {
+				res.devices = res.choice.devices
+				return res, nil
+			}
+			res.failure = err.Error()
+		case res.choice.mapOrder == "":
+			res.failure = "no devices and no reason"
+		}
+		if res.failure != "" {
+			res.choice = gpuChoice{}
+		}
 	}
 
+	// The one fallback to map order. prefer_gpu_topology "strong" (not available yet) must never
+	// take it, and an error here alone is not enough: the scheduler's simulation (addTaskToAgents)
+	// panics on a reservation error. So strong's fit admits only an agent where the selection can
+	// choose a set, and a strong reservation that still gets here returns an error with the
+	// selection's reason or failure and changes nothing.
+	devices := a.mapOrderDevices(slots)
+	if err := a.checkFreeDevices(devices, slots); err != nil {
+		return deviceReservation{}, err
+	}
+	res.devices = devices
+	return res, nil
+}
+
+// mapOrderDevices returns up to slots free devices in the order of the Devices map.
+func (a *agentState) mapOrderDevices(slots int) []device.Device {
 	devices := make([]device.Device, 0, slots)
-	for d, dcid := range a.Devices {
-		if dcid == nil {
-			devices = append(devices, d)
-		}
+	for d, cid := range a.Devices {
 		if len(devices) == slots {
 			break
 		}
+		if cid == nil {
+			devices = append(devices, d)
+		}
 	}
+	return devices
+}
 
+// numFreeDevices returns the number of devices without a container.
+func (a *agentState) numFreeDevices() int {
+	free := 0
+	for _, cid := range a.Devices {
+		if cid == nil {
+			free++
+		}
+	}
+	return free
+}
+
+// selectRankedDevices runs the selection, recovering a panic as a failure.
+func (a *agentState) selectRankedDevices(slots int, sel deviceSelection) (c gpuChoice, failure string) {
+	defer func() {
+		if r := recover(); r != nil {
+			c, failure = gpuChoice{}, fmt.Sprintf("panic: %v\n%s", r, debug.Stack())
+		}
+	}()
+	return selectFreeDevicesFunc(a.gpuSelectionInput(), slots, sel), ""
+}
+
+// gpuSelectionInput returns what a GPU selection reads of the agent.
+func (a *agentState) gpuSelectionInput() gpuSelectionInput {
+	in := gpuSelectionInput{topology: a.gpuTopology}
+	for d, cid := range a.Devices {
+		if cid == nil {
+			in.free = append(in.free, d)
+		}
+		if s, ok := a.slotStates[d.ID]; !ok || s.enabled.allocatable() {
+			in.allocatable = append(in.allocatable, d)
+		}
+	}
+	sort.Slice(in.free, func(i, j int) bool { return in.free[i].ID < in.free[j].ID })
+	sort.Slice(in.allocatable, func(i, j int) bool { return in.allocatable[i].ID < in.allocatable[j].ID })
+	return in
+}
+
+// checkFreeDevices validates a selection: exactly slots devices, no duplicates, each a free device
+// of the agent.
+func (a *agentState) checkFreeDevices(devices []device.Device, slots int) error {
 	if len(devices) != slots {
-		return nil, errors.New("not enough devices")
+		return fmt.Errorf("selected %d devices for %d slots", len(devices), slots)
 	}
-
+	seen := map[device.Device]bool{}
 	for _, d := range devices {
-		a.Devices[d] = &cid
+		cid, ok := a.Devices[d]
+		switch {
+		case seen[d]:
+			return fmt.Errorf("selected device %d twice", d.ID)
+		case !ok:
+			return fmt.Errorf("selected device %d is not a device of the agent", d.ID)
+		case cid != nil:
+			return fmt.Errorf("selected device %d is in use", d.ID)
+		}
+		seen[d] = true
 	}
-
-	a.containerState[cid].Devices = devices
-
-	return devices, nil
+	return nil
 }
 
 // deallocateContainer deallocates containers.
@@ -217,8 +349,12 @@ func (a *agentState) freeDevice(d device.Device) {
 }
 
 // deepCopy returns a copy of agentState for scheduler internals. Each copy gets its own slot
-// states, since the scheduler's simulation frees devices on it. It leaves out gpuTopology: the
-// copies feed the scheduler's fit and the pool's count queries, which use counts only.
+// states, since the scheduler's simulation frees devices on it. It shares gpuTopology, which is
+// never mutated, only replaced: the scheduler's simulation selects GPUs on the copies as the live
+// reservation does on the agent. So the two choose the same devices when every placement of the
+// simulation is also reserved live, in the same order, on unchanged agents: without preemption and
+// with every reservation succeeding. Otherwise they can differ; fits use counts only, so that
+// changes no fit.
 func (a *agentState) deepCopy() *agentState {
 	copiedAgent := &agentState{
 		id:                    a.id,
@@ -232,6 +368,7 @@ func (a *agentState) deepCopy() *agentState {
 		// slot states, so a copy needs its own.
 		slotStates:       make(map[device.ID]*slot, len(a.slotStates)),
 		resourcePoolName: a.resourcePoolName,
+		gpuTopology:      a.gpuTopology,
 	}
 	for id, s := range a.slotStates {
 		copied := *s

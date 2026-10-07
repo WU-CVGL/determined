@@ -474,6 +474,11 @@ func (a *apiServer) LaunchTensorboard(
 	if err = check.Validate(req.Config); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid TensorBoard config: %s", err.Error())
 	}
+	// Nothing else validates the decoded config of a TensorBoard; refuse "strong" as the other
+	// command types do.
+	if err = check.Validate(launchReq.Spec.Config.Resources.PreferGPUTopology); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid TensorBoard config: %s", err.Error())
+	}
 
 	// Launch a TensorBoard.
 	cmd, err := command.DefaultCmdService.LaunchGenericCommand(model.TaskTypeTensorboard,

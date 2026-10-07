@@ -752,10 +752,11 @@ func AllocateTasks(
 
 		for _, fit := range fits {
 			containerID := cproto.NewID()
-			devices, err := fit.Agent.allocateFreeDevices(fit.Slots, containerID)
+			res, err := fit.Agent.allocateFreeDevices(fit.Slots, containerID, deviceSelection{})
 			if err != nil {
 				panic(err)
 			}
+			devices := res.devices
 			allocated := &sproto.ResourcesAllocated{
 				ID: req.AllocationID,
 				Resources: map[sproto.ResourcesID]sproto.Resources{

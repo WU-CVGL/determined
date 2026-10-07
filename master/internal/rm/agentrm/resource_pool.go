@@ -43,10 +43,14 @@ type resourcePool struct {
 
 	agentService     *agents
 	agentStatesCache map[aproto.ID]*agentState
-	taskList         *tasklist.TaskList
-	groups           map[model.JobID]*tasklist.Group
-	queuePositions   tasklist.JobSortState // secondary sort key based on job submission time
-	scalingInfo      *sproto.ScalingInfo
+	// gpuPolicy is the GPU selection of the running scheduling pass, read once per pass.
+	gpuPolicy gpuPolicy
+	// gpuXIDs is where the pool reads the GPUs' recent critical XIDs; nil reads none.
+	gpuXIDs        *gpuXIDReader
+	taskList       *tasklist.TaskList
+	groups         map[model.JobID]*tasklist.Group
+	queuePositions tasklist.JobSortState // secondary sort key based on job submission time
+	scalingInfo    *sproto.ScalingInfo
 
 	reschedule      bool
 	rescheduleTimer *time.Timer
@@ -360,8 +364,10 @@ func (rp *resourcePool) schedulerTick() {
 	if rp.reschedule {
 		rp.syslog.Trace("scheduling")
 		rp.agentStatesCache = rp.agentService.list(rp.config.PoolName)
+		rp.gpuPolicy = rp.newGPUPolicy()
 		defer func() {
 			rp.agentStatesCache = nil
+			rp.gpuPolicy = gpuPolicy{}
 		}()
 
 		rp.pruneTaskList()
@@ -399,6 +405,7 @@ func (rp *resourcePool) allocateResources(req *sproto.AllocateRequest) bool {
 	}
 
 	resources := make([]*containerResources, 0, len(fits))
+	reservations := make([]gpuReservation, 0, len(fits))
 	rollback := false
 
 	defer func() {
@@ -418,11 +425,13 @@ func (rp *resourcePool) allocateResources(req *sproto.AllocateRequest) bool {
 		}
 	}()
 
+	selection := rp.gpuPolicy.selection(req, fits)
 	for _, fit := range fits {
 		containerID := cproto.NewID()
 		resp, err := fit.Agent.handler.AllocateFreeDevices(allocateFreeDevices{
 			slots:       fit.Slots,
 			containerID: containerID,
+			selection:   selection,
 		})
 		if err != nil {
 			// Rollback previous allocations.
@@ -437,6 +446,7 @@ func (rp *resourcePool) allocateResources(req *sproto.AllocateRequest) bool {
 			containerID: containerID,
 			devices:     resp.devices,
 		})
+		reservations = append(reservations, gpuReservation{fit: fit, containerID: containerID, resp: resp})
 	}
 
 	// persist allocation_resources and container_resources.
@@ -467,6 +477,7 @@ func (rp *resourcePool) allocateResources(req *sproto.AllocateRequest) bool {
 	}
 	rp.taskList.AddAllocation(req.AllocationID, &allocated)
 	rmevents.Publish(req.AllocationID, allocated.Clone())
+	rp.logGPUChoices(req, reservations)
 
 	// Refresh state for the updated agents.
 	allocatedAgents := make([]*agent, 0, len(resources))

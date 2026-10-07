@@ -967,6 +967,7 @@ func (m *Master) restoreGenericTasks(ctx context.Context) error {
 				ResourcePool: *resourcePool,
 				FittingRequirements: sproto.FittingRequirements{
 					SingleAgent: isSingleNode,
+					GPUTopology: snapshots[i].GenericTaskSpec.GenericTaskConfig.Resources.GPUTopology(),
 				},
 
 				Restore: true,
@@ -1431,6 +1432,7 @@ func (m *Master) Run(ctx context.Context, gRPCLogInitDone chan struct{}) error {
 		}
 	}()
 	m.registerDynamicResourcePoolRoutes()
+	m.shareGPUXIDs(poolWorkerCtx)
 
 	jobservice.SetDefaultService(m.rm)
 

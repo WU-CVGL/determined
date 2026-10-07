@@ -44,7 +44,9 @@ func Apply(topo *agentv1.GpuTopology, xids *XIDSnapshot) {
 //
 // The link generation never changes the state, and an excluded GPU gets its own state by the same
 // rules. A task that fails is no evidence: user code fails the same way. It is the only place the
-// state is computed, so the CLI and the WebUI never disagree.
+// state is computed, so the CLI and the WebUI never disagree. GPU selection in the agent resource
+// manager applies the conditions of ERROR and LINK_BELOW_MAX to the agent's report itself
+// (gpuInError, gpuWidth): keep them the same.
 func Classify(topo *agentv1.GpuTopology) {
 	if topo == nil {
 		return

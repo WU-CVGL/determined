@@ -230,7 +230,9 @@ off. The master keeps the report in memory and serves it in the agent API (``gpu
 out of agent lists requested with ``exclude_slots``), in ``det agent list``, in ``det agent describe
 AGENT_ID``, and on the resource pool page of the WebUI, with each GPU's :ref:`recent critical XIDs
 <agent-gpu-xids>` when the master has a Prometheus. Users without permission to view sensitive agent
-information see no topology.
+information see no topology. The master also uses it to choose GPUs inside an agent: :ref:`NUMA
+packing <master-config-numa-packing>` and :ref:`prefer_gpu_topology
+<exp-config-resources-prefer-gpu-topology>`.
 
 NVML
 ====
@@ -325,12 +327,16 @@ A failed NVML query for a pair of GPUs makes only that pair's value unknown. The
 never changes the state. Green means that there was no NVML error and the link width was at its
 maximum at agent start, and that no recent critical XID was found; it does not mean that the GPU is
 verified to be healthy. Only GPU-side evidence turns a GPU red: a task that fails is no evidence,
-since faulty user code fails the same way.
+since faulty user code fails the same way. NUMA packing and ``prefer_gpu_topology: soft`` use a GPU
+in error last when they choose GPUs inside an agent.
 
 The link width is an observation at agent start, not a confirmed fault. A GPU can reduce its link
 width while it is idle, and a link can train to a different width after a reboot. A lower link width
 lowers the bandwidth cap of the GPU's link; the actual collective throughput depends on the
-workload.
+workload. ``prefer_gpu_topology: soft`` ranks a pair with a narrow GPU after the otherwise equal
+pair; NUMA packing does not read the width. After a replay-number rollover, an AER recovery, a GPU
+reset or a change of a link's state, check the width with ``nvidia-smi -q -d PCIE``, and restart the
+agent only if it changed. A burst of PCIe replays alone is a reason to check, not to restart.
 
 The details of each GPU (``det agent describe`` and the WebUI's details) list its facts separately:
 ``PCIe link``, the current and maximum link width at agent start and the highest link generation
@@ -411,6 +417,12 @@ there is no result yet or the last one is 5 minutes old: the first request after
 after a quiet period. So a slow Prometheus can delay such a request, but never a client that polls,
 and ``xid_queried_at`` can be up to 5 minutes old. Agent enable and disable responses carry the last
 result without querying.
+
+GPU selection never queries and never waits for Prometheus: each scheduling pass reads the last
+successful result once and uses it for every task it places. It counts the XIDs whose last window is
+in the 24 hours that a query at the time of the pass covers, the XIDs that a failed query then
+keeps. So that this result stays current, the master with a Prometheus asks for the XIDs itself
+about every 30 seconds. Until its first query succeeds after a master start, only NVML errors count.
 
 CLI and WebUI
 =============

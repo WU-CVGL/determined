@@ -1,7 +1,9 @@
 // Package gpuhealth classifies the health of an agent's GPUs and keeps the master's view of the
 // GPUs' recent critical XIDs, which it reads from the cluster's DCGM-Exporter in Prometheus.
 //
-// The agent API (GetAgent, and GetAgents without exclude_slots) queries through XIDCache.Get.
+// The agent API (GetAgent, and GetAgents without exclude_slots) queries through XIDCache.Get. GPU
+// selection in the agent resource manager reads XIDCache.LastOK once per scheduling pass, never
+// queries, and ages its XIDs by XIDRange as a failed query does.
 package gpuhealth
 
 import (

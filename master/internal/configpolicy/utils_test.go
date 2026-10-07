@@ -402,6 +402,22 @@ constraints:
 		require.NoError(t, err)
 	})
 
+	t.Run("exp invariant config prefer_gpu_topology", func(t *testing.T) {
+		for value, want := range map[string]string{
+			"soft": "", "false": "", "strong": `"strong" is not available yet`,
+		} {
+			err := ValidateExperimentConfig(nil, `
+invariant_config:
+  resources:
+    prefer_gpu_topology: `+value+"\n", nil)
+			if want == "" {
+				require.NoError(t, err, value)
+			} else {
+				require.ErrorContains(t, err, want, value)
+			}
+		}
+	})
+
 	t.Run("ntsc global config complies with constraints", func(t *testing.T) {
 		err := ValidateNTSCConfig(nil,
 			`
