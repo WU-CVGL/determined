@@ -109,6 +109,7 @@ const mocks = vi.hoisted(() => ({
 }));
 const permissions = vi.hoisted(() => ({ canModify: true }));
 const launched = vi.hoisted(() => ({ response: undefined as CommandResponse | undefined }));
+const features = vi.hoisted(() => ({ flatRuns: true }));
 
 vi.mock('services/api', () => ({
   cancelExperiment: vi.fn(),
@@ -146,7 +147,10 @@ vi.mock('hooks/usePermissions', () => {
   return { default: () => checks };
 });
 vi.mock('hooks/useTaskResourcesEnabled', () => ({ default: () => true }));
-vi.mock('hooks/useFeature', () => ({ default: () => ({ isOn: () => true }) }));
+// Every feature switch is on, but flat_runs as the test sets it.
+vi.mock('hooks/useFeature', () => ({
+  default: () => ({ isOn: (feature: string) => feature !== 'flat_runs' || features.flatRuns }),
+}));
 // The launch form itself is tested in NtscLaunchModal.test.tsx and useLaunchForm.test.tsx. The
 // stand-in is a modal, so it shows only once Launch Again opens it, and its title shows the task
 // and the type the form opens with.
@@ -182,29 +186,31 @@ const pool = (schedulerType: Api.V1SchedulerType, name: string) =>
 let testPool = '';
 let testCount = 0;
 
+const page = (selectedRp: ResourcePool, jobState: JobState) => (
+  <UIProvider theme={DefaultTheme.Light}>
+    <ThemeProvider>
+      <DndProvider backend={HTML5Backend}>
+        <SettingsProvider>
+          <BrowserRouter>
+            <ConfirmationProvider>
+              <JobQueue jobState={jobState} rpStats={[]} selectedRp={selectedRp} />
+            </ConfirmationProvider>
+          </BrowserRouter>
+        </SettingsProvider>
+      </DndProvider>
+    </ThemeProvider>
+  </UIProvider>
+);
+
+/** Renders the page; rerenderPage renders it again with the same pool. */
 const setup = (
   schedulerType: Api.V1SchedulerType = Api.V1SchedulerType.PRIORITY,
   jobState: JobState = JobState.SCHEDULED,
-) =>
-  render(
-    <UIProvider theme={DefaultTheme.Light}>
-      <ThemeProvider>
-        <DndProvider backend={HTML5Backend}>
-          <SettingsProvider>
-            <BrowserRouter>
-              <ConfirmationProvider>
-                <JobQueue
-                  jobState={jobState}
-                  rpStats={[]}
-                  selectedRp={pool(schedulerType, testPool)}
-                />
-              </ConfirmationProvider>
-            </BrowserRouter>
-          </SettingsProvider>
-        </DndProvider>
-      </ThemeProvider>
-    </UIProvider>,
-  );
+) => {
+  const selectedRp = pool(schedulerType, testPool);
+  const view = render(page(selectedRp, jobState));
+  return { ...view, rerenderPage: () => view.rerender(page(selectedRp, jobState)) };
+};
 
 const openRowMenu = async (rowText: string | RegExp) => {
   const row = (await screen.findByText(rowText)).closest('tr');
@@ -349,6 +355,7 @@ describe('JobQueue', () => {
     mocks.jobs = [shellJob];
     mocks.hold = undefined;
     permissions.canModify = true;
+    features.flatRuns = true;
     launched.response = {
       command: { ...runningShell, id: 'shell-2', state: CommandState.Queued },
       warnings: [],
@@ -464,6 +471,18 @@ describe('JobQueue', () => {
     // Experiments have no View Logs in the job menu.
     expect(menuLabels()).toEqual(['View Resources', 'Manage Job', 'Cancel', 'Kill']);
     expect(getTask).not.toHaveBeenCalled();
+  });
+
+  it('calls an experiment’s ID a search ID with flat runs on, also once the switch changes', async () => {
+    mocks.jobs = [experimentJob];
+    const { rerenderPage } = setup();
+    await userEvent.hover(await screen.findByText('(12)'));
+    expect(await screen.findByText('Search ID')).toBeInTheDocument();
+
+    features.flatRuns = false;
+    rerenderPage();
+    expect(await screen.findByText('Experiment ID')).toBeInTheDocument();
+    expect(screen.queryByText('Search ID')).not.toBeInTheDocument();
   });
 
   it('shows Kill in red in an experiment’s job menu, and Cancel not', async () => {
