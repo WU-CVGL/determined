@@ -116,8 +116,11 @@ func TestRecentXIDsFirstAndLastObserved(t *testing.T) {
 	}
 }
 
+// fakeQuery is a RangeQuery that records its calls. A query with a gate waits for the gate to
+// close; a blocking one waits for its context to end.
 type fakeQuery struct {
 	calls  atomic.Int32
+	mu     sync.Mutex
 	result []Series
 	err    error
 	block  bool
@@ -125,7 +128,13 @@ type fakeQuery struct {
 	exprs  []string
 	ranges [][2]time.Time
 	steps  []time.Duration
-	mu     sync.Mutex
+}
+
+// set changes the answer of the next queries.
+func (f *fakeQuery) set(result []Series, err error, block bool, gate chan struct{}) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.result, f.err, f.block, f.gate = result, err, block, gate
 }
 
 func (f *fakeQuery) query(
@@ -136,71 +145,149 @@ func (f *fakeQuery) query(
 	f.exprs = append(f.exprs, expr)
 	f.ranges = append(f.ranges, [2]time.Time{start, end})
 	f.steps = append(f.steps, step)
+	result, err, block, gate := f.result, f.err, f.block, f.gate
 	f.mu.Unlock()
-	if f.gate != nil {
-		<-f.gate
+	if gate != nil {
+		<-gate
 	}
-	if f.block {
+	if block {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
-	return f.result, f.err
+	return result, err
 }
 
-func newTestCache(f *fakeQuery, now *time.Time) *XIDCache {
-	c := NewXIDCache("lab-a", f.query)
-	c.now = func() time.Time { return *now }
+// testClock is the cache's clock in tests; background queries read it too.
+type testClock struct{ ns atomic.Int64 }
+
+func newTestClock(t time.Time) *testClock {
+	c := &testClock{}
+	c.ns.Store(t.UnixNano())
 	return c
 }
 
-func TestXIDCacheHitMissAndFailure(t *testing.T) {
-	now := time.Date(2026, 10, 7, 12, 27, 13, 0, time.UTC)
-	f := &fakeQuery{result: []Series{series("GPU-a", "79", 3)}}
-	c := newTestCache(f, &now)
-	require.Nil(t, c.Peek())
+func (c *testClock) now() time.Time      { return time.Unix(0, c.ns.Load()).UTC() }
+func (c *testClock) add(d time.Duration) { c.ns.Add(int64(d)) }
+func (c *testClock) set(t time.Time)     { c.ns.Store(t.UnixNano()) }
 
+func newTestCache(f *fakeQuery, clock *testClock) *XIDCache {
+	c := NewXIDCache("lab-a", f.query)
+	c.now = clock.now
+	return c
+}
+
+// waitForQuery waits until no query runs, in the background either.
+func waitForQuery(c *XIDCache) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+}
+
+func TestXIDCacheHitMissAndFailure(t *testing.T) {
+	clock := newTestClock(time.Date(2026, 10, 7, 12, 27, 13, 0, time.UTC))
+	f := &fakeQuery{result: []Series{series("GPU-a", "79", 3)}}
+	c := newTestCache(f, clock)
+	require.Nil(t, c.Peek())
+	require.Nil(t, c.LastOK())
+
+	// The first query: the caller waits for it.
 	ctx := context.Background()
 	s := c.Get(ctx)
 	require.Equal(t, int32(1), f.calls.Load())
 	require.Equal(t, agentv1.GpuXidQueryStatus_GPU_XID_QUERY_STATUS_OK, s.Status)
-	require.Equal(t, now, s.QueriedAt)
+	require.Equal(t, clock.now(), s.QueriedAt)
 	require.Equal(t, []XID{{Code: 79, FirstObserved: step(3), LastObserved: step(3)}}, s.ByUUID["GPU-a"])
 	require.Equal(t, XIDQuery("lab-a"), f.exprs[0])
-	start, end := XIDRange(now)
+	start, end := XIDRange(clock.now())
 	require.Equal(t, [2]time.Time{start, end}, f.ranges[0])
 	require.Equal(t, XIDStep, f.steps[0])
 	require.Same(t, s, c.Peek())
+	require.Same(t, s, c.LastOK())
 
 	// A hit within the TTL.
-	now = now.Add(XIDCacheTTL - time.Second)
+	clock.add(XIDCacheTTL - time.Second)
 	require.Same(t, s, c.Get(ctx))
 	require.Equal(t, int32(1), f.calls.Load())
 
-	// A miss after it; a failure is cached too.
-	now = now.Add(time.Second)
-	f.err = errors.New(`Get "http://prometheus:9090/api/v1/query_range?query=...": connection refused`)
-	failed := c.Get(ctx)
+	// After it, the last result at once and a refresh in the background; a failure is cached too.
+	clock.add(time.Second)
+	f.set(nil, errors.New(`Get "http://prometheus:9090/api/v1/query_range?query=...": connection refused`),
+		false, nil)
+	require.Same(t, s, c.Get(ctx))
+	waitForQuery(c)
 	require.Equal(t, int32(2), f.calls.Load())
+	failed := c.Peek()
 	require.Equal(t, agentv1.GpuXidQueryStatus_GPU_XID_QUERY_STATUS_FAILED, failed.Status)
 	require.Equal(t, errRequestFailed, failed.Error, "never the URL")
-	require.Equal(t, now, failed.QueriedAt)
+	require.Equal(t, clock.now(), failed.QueriedAt)
 	require.Empty(t, failed.ByUUID)
-	now = now.Add(XIDCacheTTL - time.Second)
+	require.Same(t, s, c.LastOK(), "a failure keeps the last successful result")
+	clock.add(XIDCacheTTL - time.Second)
 	require.Same(t, failed, c.Get(ctx))
 	require.Equal(t, int32(2), f.calls.Load())
 
 	// An invalid result fails too.
-	now = now.Add(time.Second)
-	f.err = nil
-	f.result = []Series{{Labels: map[string]string{"xid": "79"}}}
-	require.Equal(t, errInvalidResponse, c.Get(ctx).Error)
+	clock.add(time.Second)
+	f.set([]Series{{Labels: map[string]string{"xid": "79"}}}, nil, false, nil)
+	require.Same(t, failed, c.Get(ctx))
+	waitForQuery(c)
 	require.Equal(t, int32(3), f.calls.Load())
+	require.Equal(t, errInvalidResponse, c.Peek().Error)
+
+	// A result XIDMaxStale old: the caller waits for the new one.
+	clock.add(XIDMaxStale)
+	f.set([]Series{series("GPU-b", "94", 4)}, nil, false, nil)
+	fresh := c.Get(ctx)
+	require.Equal(t, int32(4), f.calls.Load())
+	require.Equal(t, agentv1.GpuXidQueryStatus_GPU_XID_QUERY_STATUS_OK, fresh.Status)
+	require.Equal(t, clock.now(), fresh.QueriedAt)
+	require.Same(t, fresh, c.Peek())
+	require.Same(t, fresh, c.LastOK())
+}
+
+// A slow Prometheus never delays a request that has a result to reuse.
+func TestXIDCacheStaleWhileQuerying(t *testing.T) {
+	t0 := time.Date(2026, 10, 7, 12, 27, 13, 0, time.UTC)
+	clock := newTestClock(t0)
+	f := &fakeQuery{result: []Series{series("GPU-a", "79", 3)}}
+	c := newTestCache(f, clock)
+	ctx := context.Background()
+	old := c.Get(ctx)
+
+	// Past the TTL, with a query that hangs until the gate closes: the last result at once, also
+	// for a second caller, and one query.
+	gate := make(chan struct{})
+	f.set([]Series{series("GPU-a", "79", 3, 4)}, nil, false, gate)
+	clock.set(t0.Add(XIDMaxStale - 2*time.Second))
+	require.Same(t, old, c.Get(ctx))
+	require.Same(t, old, c.Get(ctx))
+	require.Eventually(t, func() bool { return f.calls.Load() == 2 }, 5*time.Second, time.Millisecond)
+
+	// A caller whose result is XIDMaxStale old waits for the running query and gets its result,
+	// without a query of its own.
+	clock.set(t0.Add(XIDMaxStale))
+	got := make(chan *XIDSnapshot, 1)
+	go func() { got <- c.Get(ctx) }()
+	select {
+	case <-got:
+		t.Fatal("a caller with a result XIDMaxStale old did not wait")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(gate)
+	refreshed := <-got
+	require.Equal(t, int32(2), f.calls.Load())
+	require.Same(t, refreshed, c.Peek())
+	require.Equal(t, t0.Add(XIDMaxStale-2*time.Second), refreshed.QueriedAt)
+	require.Equal(t, step(4), refreshed.ByUUID["GPU-a"][0].LastObserved)
+
+	// Within the TTL of the new result: a hit.
+	require.Same(t, refreshed, c.Get(ctx))
+	require.Equal(t, int32(2), f.calls.Load())
 }
 
 func TestXIDCacheTimeout(t *testing.T) {
-	now := time.Now()
+	clock := newTestClock(time.Now())
 	f := &fakeQuery{block: true}
-	c := newTestCache(f, &now)
+	c := newTestCache(f, clock)
 	c.timeout = 20 * time.Millisecond
 
 	began := time.Now()
@@ -214,13 +301,22 @@ func TestXIDCacheTimeout(t *testing.T) {
 	require.Equal(t, errTimeout, s.Error)
 	require.Same(t, s, c.Get(context.Background()))
 	require.Equal(t, int32(1), f.calls.Load())
+
+	// A background query times out the same way.
+	clock.add(XIDCacheTTL)
+	require.Same(t, s, c.Get(context.Background()))
+	waitForQuery(c)
+	require.Equal(t, int32(2), f.calls.Load())
+	require.Equal(t, errTimeout, c.Peek().Error)
+	require.NotSame(t, s, c.Peek())
 }
 
-// Callers that arrive during a query wait for it: one query for all of them.
+// Callers that arrive during the first query wait for it: one query for all of them.
 func TestXIDCacheOneQueryAtATime(t *testing.T) {
-	now := time.Now()
-	f := &fakeQuery{gate: make(chan struct{})}
-	c := newTestCache(f, &now)
+	clock := newTestClock(time.Now())
+	gate := make(chan struct{})
+	f := &fakeQuery{gate: gate}
+	c := newTestCache(f, clock)
 	var wg sync.WaitGroup
 	results := make([]*XIDSnapshot, 8)
 	for i := range results {
@@ -231,7 +327,7 @@ func TestXIDCacheOneQueryAtATime(t *testing.T) {
 		}(i)
 	}
 	require.Eventually(t, func() bool { return f.calls.Load() == 1 }, 5*time.Second, time.Millisecond)
-	close(f.gate)
+	close(gate)
 	wg.Wait()
 	require.Equal(t, int32(1), f.calls.Load())
 	for _, r := range results {
@@ -246,7 +342,10 @@ func TestXIDCacheNotConfigured(t *testing.T) {
 	require.True(t, s.QueriedAt.IsZero())
 	require.Same(t, s, c.Peek())
 
+	require.Nil(t, c.LastOK())
+
 	var none *XIDCache
 	require.Equal(t, agentv1.GpuXidQueryStatus_GPU_XID_QUERY_STATUS_NOT_CONFIGURED,
 		none.Get(context.Background()).Status)
+	require.Nil(t, none.LastOK())
 }

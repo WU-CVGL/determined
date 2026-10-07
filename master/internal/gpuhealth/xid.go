@@ -2,8 +2,8 @@
 // GPUs' recent critical XIDs, which it reads from the cluster's DCGM-Exporter in Prometheus.
 //
 // The agent API (GetAgent, and GetAgents without exclude_slots) queries through XIDCache.Get.
-// GPU selection reads per-GPU health with the agent's own report and XIDCache.Peek, which never
-// queries, so a scheduling pass never waits for Prometheus.
+// GPU selection does not read GPU health yet. When it does (PR B), it must never wait for
+// Prometheus: it reads XIDCache.LastOK, which never queries, and needs its own refresh rule.
 package gpuhealth
 
 import (
@@ -28,8 +28,12 @@ const (
 	// XIDStep is the step of the range query. It equals the lookback of max_over_time in the
 	// query, so the windows of consecutive steps cover every sample.
 	XIDStep = 5 * time.Minute
-	// XIDCacheTTL is how long a query result, successful or not, is reused.
+	// XIDCacheTTL is how long a query result, successful or not, is reused without a refresh.
 	XIDCacheTTL = 30 * time.Second
+	// XIDMaxStale is the age from which a request waits for a new result instead of getting the
+	// last one while the cache refreshes in the background. It is one step: a result reused
+	// before then misses less than one window of samples.
+	XIDMaxStale = XIDStep
 	// XIDQueryTimeout bounds one query.
 	XIDQueryTimeout = 5 * time.Second
 
@@ -160,17 +164,22 @@ func recentXIDs(series []Series) (map[string][]XID, error) {
 
 // XIDCache is the master's one cache of recent critical XIDs. Every result, successful or not, is
 // reused for XIDCacheTTL, and one query runs at a time, so a master sends at most one query per
-// TTL.
+// TTL. After the TTL, a request gets the last result at once and starts a refresh in the
+// background, unless the result is XIDMaxStale old: then it waits for the new one, at most
+// XIDQueryTimeout. So a slow Prometheus delays a request only at the first query and after a quiet
+// period, never while a client polls.
 type XIDCache struct {
 	query      RangeQuery
 	detCluster string
 	ttl        time.Duration
+	maxStale   time.Duration
 	timeout    time.Duration
 	now        func() time.Time
 
-	// mu serializes queries; last is read without it.
-	mu   sync.Mutex
-	last atomic.Pointer[XIDSnapshot]
+	// mu is held while a query runs, in the background too; last and lastOK are read without it.
+	mu     sync.Mutex
+	last   atomic.Pointer[XIDSnapshot]
+	lastOK atomic.Pointer[XIDSnapshot]
 }
 
 // NewXIDCache returns a cache that queries with query for the GPUs of detCluster. A nil query means
@@ -178,27 +187,45 @@ type XIDCache struct {
 func NewXIDCache(detCluster string, query RangeQuery) *XIDCache {
 	return &XIDCache{
 		query: query, detCluster: detCluster,
-		ttl: XIDCacheTTL, timeout: XIDQueryTimeout, now: time.Now,
+		ttl: XIDCacheTTL, maxStale: XIDMaxStale, timeout: XIDQueryTimeout, now: time.Now,
 	}
 }
 
-// Get returns the recent critical XIDs, querying when the last result is older than the TTL.
-// Callers that arrive during a query wait for its result. The query does not end with ctx: its
-// result serves every caller.
+// Get returns the recent critical XIDs. A result younger than the TTL is returned as it is. An
+// older one is returned at once while one background query refreshes it, unless it is XIDMaxStale
+// old or there is none yet: then Get queries and waits, and callers that arrive during a query
+// wait for its result. A query does not end with ctx: its result serves every caller.
 func (c *XIDCache) Get(ctx context.Context) *XIDSnapshot {
 	if c == nil || c.query == nil {
 		return notConfigured
 	}
-	if s := c.fresh(); s != nil {
-		return s
+	seen := c.last.Load()
+	if seen != nil {
+		age := c.now().Sub(seen.QueriedAt)
+		if age < c.ttl {
+			return seen
+		}
+		if age < c.maxStale {
+			// A failed TryLock means a query is running already.
+			if c.mu.TryLock() {
+				go func() {
+					defer c.mu.Unlock()
+					if c.last.Load() == seen {
+						c.store(c.fetch(context.Background()))
+					}
+				}()
+			}
+			return seen
+		}
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if s := c.fresh(); s != nil {
+	// A query that ended while this caller waited serves it too.
+	if s := c.last.Load(); s != seen {
 		return s
 	}
 	s := c.fetch(ctx)
-	c.last.Store(s)
+	c.store(s)
 	return s
 }
 
@@ -210,12 +237,21 @@ func (c *XIDCache) Peek() *XIDSnapshot {
 	return c.last.Load()
 }
 
-func (c *XIDCache) fresh() *XIDSnapshot {
-	s := c.last.Load()
-	if s == nil || c.now().Sub(s.QueriedAt) >= c.ttl {
+// LastOK returns the last successful result without querying, whatever its age, or nil if no
+// query has succeeded: a failed query leaves it as it was. GPU selection is meant to read it
+// (PR B), and has to decide how old a result it accepts.
+func (c *XIDCache) LastOK() *XIDSnapshot {
+	if c == nil {
 		return nil
 	}
-	return s
+	return c.lastOK.Load()
+}
+
+func (c *XIDCache) store(s *XIDSnapshot) {
+	c.last.Store(s)
+	if s.Status == agentv1.GpuXidQueryStatus_GPU_XID_QUERY_STATUS_OK {
+		c.lastOK.Store(s)
+	}
 }
 
 func (c *XIDCache) fetch(ctx context.Context) *XIDSnapshot {
