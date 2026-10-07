@@ -1297,10 +1297,11 @@ uses only the NUMA class, PCIe switches and link width.
 
 The link width is the one the agent read at its start, as in the :ref:`GPU health
 <agent-gpu-topology>`; the link generation is never used. The width decides only between pairs equal
-in everything above, so locality comes first: when every pair has the same P2P state and none has
-NVLinks, a set on one NUMA node with a narrow GPU ranks before every set across NUMA nodes. An
-unknown width ranks before a narrow one, the one place where a missing value ranks before a reported
-one. Widths alone rank nothing: when every pair of free GPUs is unknown, the set is not ranked.
+in everything above, so locality comes first: with the same number of GPUs in error, when every pair
+has the same P2P state and none has NVLinks, a set on one NUMA node with a narrow GPU ranks before
+every set across NUMA nodes. An unknown width ranks before a narrow one, the one place where a
+missing value ranks before a reported one. Widths alone rank nothing: when every pair of free GPUs
+is unknown, the set is not ranked.
 
 The preference is soft: it never waits, never moves running tasks, and never changes the number of
 slots. It has no effect on a task with fewer than 2 slots or on several agents, or with the
@@ -1321,11 +1322,15 @@ In a pool with :ref:`NUMA packing <master-config-numa-packing>` (``fitting_polic
 the agents where one NUMA node has the task's slots free come first, and the fitting policy picks
 among them, or among the others when no agent has such a node, as for other tasks. Free GPUs count
 as for ``"strong"`` below: free GPUs in error count; GPUs without a known NUMA node never count, and
-an agent whose topology the master does not have counts as one without such a node. Soft may take a
-pool's emptier agent, including an idle one: with one agent that has 2 free GPUs on each NUMA node
-and another, emptier one with 4 free GPUs on one node, a 4-slot task takes the emptier agent, where
-a task without the preference takes the fuller one. In other pools, ``"soft"`` never changes the
-agent the scheduler picks.
+an agent whose topology the master does not have counts as one without such a node. The choice reads
+only how many free GPUs each NUMA node has: on the chosen agent, the task still gets the set that
+ranks first above, fewer GPUs in error first, so ``"soft"`` does not guarantee a set on one NUMA
+node; ``"strong"`` does. For example, on an agent with GPUs 0-3 on NUMA node 0 and 4-7 on node 1,
+with GPUs 0 to 4 free and GPU 0 in error, a 4-slot task with ``"soft"`` gets GPUs 1 to 4, and one
+with ``"strong"`` gets GPUs 0 to 3. Soft may take a pool's emptier agent, including an idle one:
+with one agent that has 2 free GPUs on each NUMA node and another, emptier one with 4 free GPUs on
+one node, a 4-slot task takes the emptier agent, where a task without the preference takes the
+fuller one. In other pools, ``"soft"`` never changes the agent the scheduler picks.
 
 With ``"strong"``, a task with 2 or more slots starts only when one NUMA node of one agent has that
 many free GPUs, and gets GPUs of that node. It waits for such a node without limit, uses one agent,
