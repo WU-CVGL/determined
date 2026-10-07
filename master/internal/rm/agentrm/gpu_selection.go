@@ -132,9 +132,8 @@ func rankGPUs(devices []device.Device, g *gpuTopology, xids map[string]bool) []r
 
 // selectFreeDevices chooses a full set of n free devices, or no devices with the reason for map
 // order: n is 0, fewer than n are free, no rule applies, or prefer_gpu_topology without NUMA
-// packing does not rank (fewer than 2 slots, unknown topology, every pair unknown, above
-// maxTopologySets). It is the one selection of both the live reservation and the scheduler's
-// copies.
+// packing does not rank (fewer than 2 slots, unknown topology, above maxTopologySets, every pair
+// unknown). It is the one selection of both the live reservation and the scheduler's copies.
 func selectFreeDevices(in gpuSelectionInput, n int, sel deviceSelection) gpuChoice {
 	switch {
 	case n <= 0 || len(in.free) < n:
@@ -567,20 +566,23 @@ func (g *gpuTopology) describeLink(a, b device.ID) string {
 // C(n,2) pair ranks sorted worst first, compared lexicographically. Exact ties go to the packing
 // key when tie is set (NUMA packing), then to the smallest sorted list of IDs.
 //
-// It returns no set, with the reason, when the topology is unknown, when the level and P2P of every
-// pair of free GPUs are unknown (the report holds no link to rank; widths alone do not rank), or
-// above maxTopologySets sets.
+// It returns no set, with the reason, when the topology is unknown, above maxTopologySets sets, or
+// when the level and P2P of every pair of free GPUs are unknown (the report holds no link to rank;
+// widths alone do not rank). The set cap depends only on the counts, so it is checked before the
+// pair ranks and wins when both of the last two hold.
 func selectByTopology(
 	free []rankedGPU, g *gpuTopology, n int, tie *numaLayout,
 ) (set []device.Device, worstPair string, unranked string) {
+	f := len(free)
 	switch {
 	case topologyUnknownReason(g) != "":
 		return nil, "", "topology unknown: " + topologyUnknownReason(g)
-	case n < 2 || len(free) < n:
+	case n < 2 || f < n:
 		return nil, "", fewerThanTwoSlots
+	case binomial(f, n) > maxTopologySets:
+		return nil, "", fmt.Sprintf("more than %d sets of free GPUs", maxTopologySets)
 	}
 
-	f := len(free)
 	ranks := make([][]pairRank, f)
 	rankable := false
 	for i := range ranks {
@@ -597,9 +599,6 @@ func selectByTopology(
 	}
 	if !rankable {
 		return nil, "", "every pair of free GPUs unknown"
-	}
-	if binomial(f, n) > maxTopologySets {
-		return nil, "", fmt.Sprintf("more than %d sets of free GPUs", maxTopologySets)
 	}
 
 	type setKey struct {
