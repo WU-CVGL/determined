@@ -12,6 +12,7 @@ import {
   RunState,
   ValueOf,
 } from 'types';
+import { compareCodePoints, compareText } from 'utils/textOrder';
 
 /*
  * The rows of the Jobs dashboard and how they are filtered, merged and paged. Kept free of React so
@@ -409,37 +410,6 @@ export interface RunSort {
 /** Newest first. */
 export const DEFAULT_SORT: RunSort = { desc: true, key: SortKey.StartTime };
 
-/*
- * UTF-16 code units in the order of the code points they encode: surrogates, which encode the code
- * points above U+FFFF, after U+E000-U+FFFF.
- */
-const codeUnitRank = (unit: number): number => {
-  if (unit >= 0xd800 && unit <= 0xdfff) return unit + 0x2000;
-  if (unit >= 0xe000) return unit - 0x800;
-  return unit;
-};
-
-/** Compares by code point, as Go compares strings and Postgres under the C collation. */
-export const compareCodePoints = (a: string, b: string): number => {
-  const length = Math.min(a.length, b.length);
-  for (let i = 0; i < length; i++) {
-    const unitA = a.charCodeAt(i);
-    const unitB = b.charCodeAt(i);
-    if (unitA !== unitB) return codeUnitRank(unitA) < codeUnitRank(unitB) ? -1 : 1;
-  }
-  return Math.sign(a.length - b.length);
-};
-
-const foldAZ = (text: string): string => text.replace(/[A-Z]+/g, (upper) => upper.toLowerCase());
-
-/**
- * The order of names, owners and pools: by code point with A-Z folded to a-z, then by code point as
- * is. The master's order: Postgres's lower(x COLLATE "C"), x COLLATE "C", and Go's alike. Neither
- * localeCompare nor < give it.
- */
-export const compareJobsText = (a: string, b: string): number =>
-  compareCodePoints(foldAZ(a), foldAZ(b)) || compareCodePoints(a, b);
-
 const TIME = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:?\d{2})?$/i;
 
 /**
@@ -496,7 +466,7 @@ const sortValue = (row: RunRow, key: SortKey): SortValue | undefined => {
 };
 
 const compareSortValues = (a: SortValue, b: SortValue): number => {
-  if (typeof a === 'string' && typeof b === 'string') return compareJobsText(a, b);
+  if (typeof a === 'string' && typeof b === 'string') return compareText(a, b);
   if (Array.isArray(a) && Array.isArray(b)) return compareTimeKeys(a, b);
   return compareNumbers(a as number, b as number);
 };

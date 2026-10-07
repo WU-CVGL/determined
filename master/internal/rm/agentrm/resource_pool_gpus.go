@@ -140,9 +140,9 @@ func (rp *resourcePool) logGPUChoices(req *sproto.AllocateRequest, reservations 
 				r.fit.Agent.id, r.resp.failure)
 		case r.resp.choice.rule != "":
 			log.Debugf("agent %s: slots %s (%s)", r.fit.Agent.id, idList(r.resp.devices), r.resp.choice.rule)
-		case r.resp.choice.mapOrder != "":
+		case r.resp.choice.noSelectionReason != "":
 			log.Debugf("agent %s: slots %s (map order: %s)",
-				r.fit.Agent.id, idList(r.resp.devices), r.resp.choice.mapOrder)
+				r.fit.Agent.id, idList(r.resp.devices), r.resp.choice.noSelectionReason)
 		}
 	}
 }

@@ -45,7 +45,9 @@ const (
 	// fewerThanTwoSlots is why prefer_gpu_topology does not rank a reservation of 1 slot.
 	fewerThanTwoSlots = "fewer than 2 slots"
 	// maxTopologySets bounds the sets of free GPUs that prefer_gpu_topology compares in one
-	// reservation; above it, the reservation takes the pool's default (C(16,8) = 12870 fits).
+	// ranking (C(16,8) = 12870 fits): of the agent's free GPUs for "soft", of each NUMA node's free
+	// GPUs for "strong". Above it, "soft" gets the pool's default choice; "strong" takes that NUMA
+	// node's GPUs in error last, then the lowest IDs, keeping its one-node constraint.
 	maxTopologySets = 20000
 	// maxPackingNUMANodes bounds the NUMA nodes that NUMA packing compares; above it, packing takes
 	// the lowest free IDs. Two sockets at NPS4 give 8.
@@ -82,13 +84,15 @@ type gpuSelectionInput struct {
 	topology    *gpuTopology
 }
 
-// gpuChoice is the result of a selection: a full set of devices, or the reason for map order.
+// gpuChoice is the result of a selection: the selector returns a full set or says why it chose
+// none; the reservation then falls back to map order (plain, "soft") or returns an error
+// ("strong").
 type gpuChoice struct {
-	// devices are the chosen devices sorted by ID, or nil for map order.
+	// devices are the chosen devices sorted by ID, or nil when the selection chose none.
 	devices []device.Device
-	// mapOrder is why the selection chose no devices, so that the reservation takes map order. It
-	// is set exactly when devices is nil.
-	mapOrder string
+	// noSelectionReason is why the selection chose no devices. It is set exactly when devices is
+	// nil.
+	noSelectionReason string
 	// rule says how the devices were chosen, for the pool's Debug line.
 	rule string
 	// worstPair describes the worst pair of a set chosen by prefer_gpu_topology, for the task log.
@@ -149,9 +153,9 @@ func rankGPUs(devices []device.Device, g *gpuTopology, xids map[string]bool) []r
 func selectFreeDevices(in gpuSelectionInput, n int, sel deviceSelection) gpuChoice {
 	switch {
 	case n <= 0 || len(in.free) < n:
-		return gpuChoice{mapOrder: fmt.Sprintf("%d free devices for %d slots", len(in.free), n)}
+		return gpuChoice{noSelectionReason: fmt.Sprintf("%d free devices for %d slots", len(in.free), n)}
 	case !sel.ranks():
-		return gpuChoice{mapOrder: "no rule ranks the devices"}
+		return gpuChoice{noSelectionReason: "no rule ranks the devices"}
 	case sel.strong && n >= 2:
 		return selectOnOneNUMANode(in, n, sel.xids)
 	}
@@ -174,9 +178,9 @@ func selectFreeDevices(in gpuSelectionInput, n int, sel deviceSelection) gpuChoi
 		out.unranked = unranked
 	}
 	if layout == nil {
-		out.mapOrder = out.unranked
-		if out.mapOrder == "" {
-			out.mapOrder = fewerThanTwoSlots
+		out.noSelectionReason = out.unranked
+		if out.noSelectionReason == "" {
+			out.noSelectionReason = fewerThanTwoSlots
 		}
 		return out
 	}
@@ -807,9 +811,9 @@ func selectOnOneNUMANode(in gpuSelectionInput, n int, xids map[string]bool) gpuC
 		return best
 	}
 	if reason := topologyUnknownReason(in.topology); reason != "" {
-		return gpuChoice{mapOrder: "topology unknown: " + reason}
+		return gpuChoice{noSelectionReason: "topology unknown: " + reason}
 	}
-	return gpuChoice{mapOrder: fmt.Sprintf("no NUMA node has %d free GPUs", n)}
+	return gpuChoice{noSelectionReason: fmt.Sprintf("no NUMA node has %d free GPUs", n)}
 }
 
 // bestOnNUMANode returns the best set of n of one NUMA node's free GPUs, sorted by ID, with its

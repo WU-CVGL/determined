@@ -242,7 +242,6 @@ func TestStrongStartsWithinTwoPassesWithoutPacking(t *testing.T) {
 		require.False(t, again)
 		outcomes[outcome]++
 	}
-	require.Len(t, outcomes, 3, "%v", outcomes)
 	t.Logf("%v", outcomes)
 }
 

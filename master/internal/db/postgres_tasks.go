@@ -286,12 +286,6 @@ func UpdateAllocationProxyAddress(ctx context.Context, a model.Allocation) error
 // CloseOpenAllocations finds all allocations that were open when the master crashed
 // and adds an end time.
 func CloseOpenAllocations(ctx context.Context, exclude []model.AllocationID) error {
-	if _, err := Bun().NewRaw(`UPDATE allocations SET start_time = cluster_heartbeat FROM cluster_id
-	WHERE start_time is NULL`).Exec(ctx); err != nil {
-		return errors.Wrap(err,
-			"setting start time to cluster heartbeat when it's assigned to zero value")
-	}
-
 	excludedFilter := ""
 	if len(exclude) > 0 {
 		excludeStr := make([]string, 0, len(exclude))
@@ -299,6 +293,15 @@ func CloseOpenAllocations(ctx context.Context, exclude []model.AllocationID) err
 			excludeStr = append(excludeStr, v.String())
 		}
 		excludedFilter = strings.Join(excludeStr, ",")
+	}
+
+	// Excluded allocations are still live and set their start time when they get resources.
+	if _, err := Bun().NewRaw(`UPDATE allocations SET start_time = cluster_heartbeat FROM cluster_id
+	WHERE start_time is NULL
+	AND (? = '' OR allocation_id NOT IN (SELECT unnest(string_to_array(?, ','))))`,
+		excludedFilter, excludedFilter).Exec(ctx); err != nil {
+		return errors.Wrap(err,
+			"setting start time to cluster heartbeat when it's assigned to zero value")
 	}
 
 	if _, err := Bun().NewRaw(` UPDATE allocations 

@@ -125,7 +125,7 @@ func TestStrongExpectedChoices(t *testing.T) {
 	c = strongSelect(t, node07, node02IDs, 4, true, nil)
 	require.Equal(t, "worst pair NODE, P2P usable", c.worstPair)
 	require.Equal(t, "GPU topology preference strong; NUMA node 1; worst pair NODE, P2P usable", c.rule)
-	require.Empty(t, c.mapOrder)
+	require.Empty(t, c.noSelectionReason)
 }
 
 func TestStrongTakesGPUsInErrorWithoutABetterNode(t *testing.T) {
@@ -181,18 +181,18 @@ func TestStrongOneNodeSetWhenEveryPairIsUnknown(t *testing.T) {
 func TestStrongWithoutAOneNodeSetChoosesNothing(t *testing.T) {
 	c := strongSelect(t, node02, []int{0, 1, 2, 4, 5, 6}, 4, true, nil)
 	require.Nil(t, c.devices)
-	require.Equal(t, "no NUMA node has 4 free GPUs", c.mapOrder)
+	require.Equal(t, "no NUMA node has 4 free GPUs", c.noSelectionReason)
 
 	c = selectFreeDevices(selection(node02IDs, node02IDs, nil), 2, deviceSelection{strong: true})
 	require.Nil(t, c.devices)
-	require.Equal(t, "topology unknown: "+reasonNotReportedSinceMasterStart, c.mapOrder)
+	require.Equal(t, "topology unknown: "+reasonNotReportedSinceMasterStart, c.noSelectionReason)
 
 	// Below 2 slots, strong is as no preference: packing, or map order.
 	c = strongSelect(t, node01, node01IDs, 1, true, nil)
 	require.Equal(t, []int{5}, deviceIDs(c.devices))
 	c = selectFreeDevices(selection(node02IDs, node02IDs, nil), 1, deviceSelection{strong: true})
 	require.Nil(t, c.devices)
-	require.NotEmpty(t, c.mapOrder)
+	require.NotEmpty(t, c.noSelectionReason)
 }
 
 func TestStrongFit(t *testing.T) {
@@ -304,8 +304,10 @@ func TestStrongReservationNeverTakesMapOrder(t *testing.T) {
 		"unknown NUMA node": func(in gpuSelectionInput, _ int, _ deviceSelection) gpuChoice {
 			return gpuChoice{devices: gpuDeviceList(0, 8)}
 		},
-		"short":     func(gpuSelectionInput, int, deviceSelection) gpuChoice { return gpuChoice{devices: gpuDeviceList(0)} },
-		"reason":    func(gpuSelectionInput, int, deviceSelection) gpuChoice { return gpuChoice{mapOrder: "injected"} },
+		"short": func(gpuSelectionInput, int, deviceSelection) gpuChoice { return gpuChoice{devices: gpuDeviceList(0)} },
+		"reason": func(gpuSelectionInput, int, deviceSelection) gpuChoice {
+			return gpuChoice{noSelectionReason: "injected"}
+		},
 		"no reason": func(gpuSelectionInput, int, deviceSelection) gpuChoice { return gpuChoice{} },
 		"panic":     func(gpuSelectionInput, int, deviceSelection) gpuChoice { panic("injected") },
 	}
@@ -586,7 +588,7 @@ func TestStrongEqualsBruteForce(t *testing.T) {
 				require.Equal(t, want != nil, holdsOnOneNUMANode(in, n))
 				if want == nil {
 					none++
-					require.NotEmpty(t, c.mapOrder)
+					require.NotEmpty(t, c.noSelectionReason)
 					continue
 				}
 				cases++

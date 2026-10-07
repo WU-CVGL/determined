@@ -1480,8 +1480,8 @@ func (m *Master) Run(ctx context.Context, gRPCLogInitDone chan struct{}) error {
 	}
 
 	// The below function call is intentionally made after the call to CloseOpenAllocations.
-	// This ensures that in the scenario where a cluster fails all open allocations are
-	// set to the last cluster heartbeat when the cluster was running.
+	// This ensures that in the scenario where a cluster fails the allocations that
+	// CloseOpenAllocations closes are set to the last cluster heartbeat when the cluster was running.
 	go updateClusterHeartbeat(ctx, m.db)
 	go trials.MarkLostTrialsWorker(ctx)
 
