@@ -3040,9 +3040,9 @@ func TestContinueAndActivateCheckPool(t *testing.T) {
 }
 
 // TestContinueChecksTheContinuersPool covers a user who may edit another user's experiment, as
-// RBAC allows: continuing it checks the continuer's access to its pool, never the owner's. Today
-// the continuer is also the user whose identity the continued experiment runs with; the test keeps
-// the check on the continuer when the experiment keeps running as its owner instead.
+// RBAC allows: continuing it checks the continuer's access to its pool, never the owner's. The
+// continued experiment runs as its owner, so this pins that access is checked for the continuer,
+// the user who makes the request, and never for the owner.
 func TestContinueChecksTheContinuersPool(t *testing.T) {
 	mockRM := MockRM()
 	mockRM.On("SmallerValueIsHigherPriority", mock.Anything).Return(true, nil)

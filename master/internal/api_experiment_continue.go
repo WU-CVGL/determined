@@ -79,7 +79,8 @@ func (a *apiServer) parseAndMergeContinueConfig(expID, projectID int, overrideCo
 		return nil, status.Errorf(codes.InvalidArgument,
 			fmt.Sprintf("override config must have single searcher type got '%s' instead", overrideName))
 	}
-	// Compared before the invariant configs are merged in: they are the cluster's, not the override's.
+	// Compared before the invariant configs are merged in: the workspace's and the cluster's config
+	// policies set them, not the override.
 	ownerOnlyChanges, err := continueOwnerOnlyChanges(activeConfig, mergedConfig)
 	if err != nil {
 		return nil, fmt.Errorf("comparing the override config: %w", err)
