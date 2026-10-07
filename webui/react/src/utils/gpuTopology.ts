@@ -409,20 +409,24 @@ export const xidWindowText = (end: Date | string, withOffset = false): string =>
 /**
  * A GPU's recent critical XIDs, one text per code with its first and last observed windows, for
  * example "79 (2026-10-07, 10:05–10:10 to 2026-10-07, 10:20–10:25)"; one window when they are the
- * same time. When the windows of a code span a change of UTC offset, every window shows its offset,
- * so the repeated hour at the end of daylight saving time gives two windows. Empty without XIDs.
+ * same time. When the windows of the GPU's XIDs span a change of UTC offset, every window shows its
+ * offset, so windows in the repeated hour at the end of daylight saving time stay apart, also of
+ * two codes. Empty without XIDs.
  */
-export const recentXidTexts = (gpu: V1GpuInfo): string[] =>
-  (gpu.recentXids ?? []).map((x) => {
-    const ends = [dayjs(x.firstObserved), dayjs(x.lastObserved)];
-    const offsets = new Set(
-      ends.flatMap((e) => [
+export const recentXidTexts = (gpu: V1GpuInfo): string[] => {
+  const xids = gpu.recentXids ?? [];
+  const offsets = new Set(
+    xids.flatMap((x) =>
+      [dayjs(x.firstObserved), dayjs(x.lastObserved)].flatMap((e) => [
         e.utcOffset(),
         e.subtract(GPU_XID_WINDOW_MINUTES, 'minute').utcOffset(),
       ]),
-    );
-    const withOffset = offsets.size > 1;
+    ),
+  );
+  const withOffset = offsets.size > 1;
+  return xids.map((x) => {
     const first = xidWindowText(x.firstObserved, withOffset);
-    if (ends[0].isSame(ends[1])) return `${x.xid} (${first})`;
+    if (dayjs(x.firstObserved).isSame(x.lastObserved)) return `${x.xid} (${first})`;
     return `${x.xid} (${first} to ${xidWindowText(x.lastObserved, withOffset)})`;
   });
+};

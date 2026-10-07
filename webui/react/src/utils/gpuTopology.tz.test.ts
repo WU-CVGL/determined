@@ -16,11 +16,13 @@ afterAll(() => {
   else process.env.TZ = savedTZ;
 });
 
-// The texts of one GPU with one recent XID, its first and last observed times in UTC.
-const texts = (xid: number, firstObserved: string, lastObserved: string): string[] => {
-  const recentXids: V1GpuXid[] = [
-    { firstObserved: new Date(firstObserved), lastObserved: new Date(lastObserved), xid },
-  ];
+// The texts of one GPU with recent XIDs, each a code and its first and last observed times in UTC.
+const textsOf = (...xids: [number, string, string][]): string[] => {
+  const recentXids: V1GpuXid[] = xids.map(([xid, firstObserved, lastObserved]) => ({
+    firstObserved: new Date(firstObserved),
+    lastObserved: new Date(lastObserved),
+    xid,
+  }));
   const gpu: V1GpuInfo = {
     deviceId: 0,
     excluded: false,
@@ -38,6 +40,10 @@ const texts = (xid: number, firstObserved: string, lastObserved: string): string
   return recentXidTexts(gpu);
 };
 
+// The texts of one GPU with one recent XID.
+const texts = (xid: number, firstObserved: string, lastObserved: string): string[] =>
+  textsOf([xid, firstObserved, lastObserved]);
+
 describe('recent critical XIDs in a fixed time zone', () => {
   it('keeps the windows of the repeated hour apart at the end of daylight saving time', () => {
     // 01:25–01:30 EDT and 01:25–01:30 EST are an hour apart: never one window.
@@ -53,6 +59,16 @@ describe('recent critical XIDs in a fixed time zone', () => {
     expect(texts(94, '2026-11-01T08:00:00Z', '2026-11-01T08:10:00Z')).toEqual([
       '94 (2026-11-01, 02:55–03:00 to 2026-11-01, 03:05–03:10)',
     ]);
+  });
+
+  it('keeps the windows of two codes in the repeated hour apart', () => {
+    // When a GPU's windows span the change, every window of the GPU shows its offset.
+    expect(
+      textsOf(
+        [48, '2026-11-01T05:30:00Z', '2026-11-01T05:30:00Z'],
+        [79, '2026-11-01T06:30:00Z', '2026-11-01T06:30:00Z'],
+      ),
+    ).toEqual(['48 (2026-11-01, 01:25–01:30 -04:00)', '79 (2026-11-01, 01:25–01:30 -05:00)']);
   });
 
   it('shows the date of a window end on another date', () => {

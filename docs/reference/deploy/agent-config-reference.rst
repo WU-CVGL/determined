@@ -355,7 +355,7 @@ critical XIDs of the last 24 hours from the cluster's DCGM-Exporter. A GPU with 
 its details list each code with the first and last 5-minute window in which the master saw it, for
 example ``79 (2026-10-07 10:05-10:10+0000 to 2026-10-07 10:10-10:15+0000)`` in ``det agent
 describe`` (in UTC) and the same in local time in the WebUI. The WebUI adds the date to a window
-that ends on another date, and the UTC offset to the windows of a code that span a change of
+that ends on another date, and the UTC offset to the windows of a GPU when they span a change of
 daylight saving time. A GPU stays in error until its XIDs leave the 24 hours, also after a reboot
 that fixed it. A CLI older than this release shows such a GPU as ``error`` without its XIDs.
 
