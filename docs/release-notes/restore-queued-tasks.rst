@@ -2,5 +2,5 @@
 
 **Bug Fixes**
 
--  Master: Keep queued commands, shells, notebooks, TensorBoards, and generic tasks queued across a
-   master restart instead of terminating them.
+-  Master: Keep queued tasks queued across a master restart instead of terminating them, and count
+   their usage only from when they get resources.
