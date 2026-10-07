@@ -25,9 +25,8 @@ import (
 //     equal pair (pairRank); NUMA packing never reads the width.
 //
 // Both rank GPUs in error last: an NVML health call of the GPU failed at agent start, or the GPU has
-// a recent critical XID (gpuhealth.IsCriticalXID: 13, 31, 43 and 45 never count). This supersedes
-// PR B's earlier rule "No NVML error affects ranking by itself": an NVML error ranks a GPU last, and
-// otherwise the keys read only reported values.
+// a recent critical XID (gpuhealth.IsCriticalXID: 13, 31, 43 and 45 never count). Apart from that,
+// the keys read only reported values.
 //
 // Every function here is pure and never logs: the scheduler's copies, which have no syslog, run
 // them too.

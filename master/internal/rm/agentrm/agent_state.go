@@ -242,8 +242,10 @@ func (a *agentState) chooseFreeDevices(slots int, sel deviceSelection) (deviceRe
 	}
 
 	// The one fallback to map order. prefer_gpu_topology "strong" (not available yet) must never
-	// take it: its reservation is to return an error here, with the selection's reason or failure,
-	// and change nothing.
+	// take it, and an error here alone is not enough: the scheduler's simulation (addTaskToAgents)
+	// panics on a reservation error. So strong's fit admits only an agent where the selection can
+	// choose a set, and a strong reservation that still gets here returns an error with the
+	// selection's reason or failure and changes nothing.
 	devices := a.mapOrderDevices(slots)
 	if err := a.checkFreeDevices(devices, slots); err != nil {
 		return deviceReservation{}, err

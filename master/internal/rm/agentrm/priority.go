@@ -324,7 +324,9 @@ func deepCopyAgents(agents map[aproto.ID]*agentState) map[aproto.ID]*agentState 
 }
 
 // addTaskToAgents places a request on the scheduler's copies, choosing its devices as the live
-// reservation does (gpuPolicy.selection).
+// reservation does (gpuPolicy.selection). A fit counts free devices and a selection that cannot
+// choose falls back to map order, so a reservation here does not fail; strong must keep that true
+// (chooseFreeDevices).
 func (p priorityScheduler) addTaskToAgents(req *sproto.AllocateRequest, fits []*fittingState) {
 	sel := p.gpus.selection(req, fits)
 	for _, fit := range fits {
