@@ -10,6 +10,32 @@
  Version 0.41
 **************
 
+Version 0.41.1
+==============
+
+**Release Date:** October 8, 2026
+
+**New Features**
+
+-  WebUI, CLI: Show a GPU with a critical XID in the last 24 hours as error and list its XIDs, read
+   from the Prometheus of ``integrations.task_resources``.
+
+**Improvements**
+
+-  WebUI: Sort the Jobs page from its column headers, filter it there by kind, state, owner, slot
+   count, and workspace, and share a view by its link.
+-  WebUI: Sort the jobs on a resource pool's **Active** tab by name, user, submission time, or
+   slots.
+-  API: Sort experiments and generic tasks by more fields, and filter them by slot count with
+   ``slots`` and ``slots_above``, which replace ``slots_filter``.
+
+**Bug Fixes**
+
+-  WebUI: Stop polling twice after a page stops and restarts its updates while a request is pending,
+   such as on a change of filters or sort.
+
+Reload open WebUI tabs after the upgrade. See :ref:`GPU XIDs <agent-gpu-xids>` for the setup.
+
 Version 0.41.0
 ==============
 
