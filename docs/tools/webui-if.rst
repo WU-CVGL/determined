@@ -111,10 +111,10 @@ use, follow these steps:
    This view displays a visual representation of each node, including its unique identifier, and the
    number of available slots on each node.
 
-#. View Active and Used Slots.
+#. View Slot States and Job GPUs.
 
-   In the topology visualization, all active or used slots will be highlighted in blue, making it
-   easy to distinguish between available and occupied resources.
+   The topology visualization shows the state of each slot. The pool's **Active** tab lists the GPUs
+   each job holds; click a job's GPUs to outline them in the topology visualization.
 
 ***********************************
  Managing User Accounts and Groups
