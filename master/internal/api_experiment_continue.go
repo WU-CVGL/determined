@@ -79,7 +79,8 @@ func (a *apiServer) parseAndMergeContinueConfig(expID, projectID int, overrideCo
 		return nil, status.Errorf(codes.InvalidArgument,
 			fmt.Sprintf("override config must have single searcher type got '%s' instead", overrideName))
 	}
-	// Compared before the invariant configs are merged in: they are the cluster's, not the override's.
+	// Compared before the invariant configs are merged in: the workspace's and the cluster's config
+	// policies set them, not the override.
 	ownerOnlyChanges, err := continueOwnerOnlyChanges(activeConfig, mergedConfig)
 	if err != nil {
 		return nil, fmt.Errorf("comparing the override config: %w", err)
@@ -410,8 +411,9 @@ func (a *apiServer) ContinueExperiment(
 	}
 	started = true
 
-	_, err = a.ActivateExperiment(ctx, &apiv1.ActivateExperimentRequest{Id: int32(e.ID)})
-	if err != nil {
+	// The request was authorized to edit this experiment and admitted to its pool above, so it
+	// activates the experiment it started rather than deciding again through the RPC.
+	if err = e.ActivateExperiment(); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to activate experiment: %s", err)
 	}
 

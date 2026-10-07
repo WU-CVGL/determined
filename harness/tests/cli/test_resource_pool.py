@@ -1,5 +1,6 @@
 import json
 import pathlib
+from typing import Any, Dict, List
 
 import pytest
 from responses import matchers
@@ -11,6 +12,7 @@ MASTER = "http://localhost:8080"
 DYNAMIC_POOLS_URL = f"{MASTER}/api/v1/resource-pools/dynamic"
 # The master refuses dynamic-pool request bodies that are not labelled as JSON.
 JSON_CONTENT_TYPE = matchers.header_matcher({"Content-Type": "application/json"})
+ACCESS_URL = f"{MASTER}/api/v1/resource-pool-access"
 
 
 def dynamic_pool_response(state: str = "Ready") -> dict:
@@ -375,3 +377,272 @@ def test_dynamic_pool_create_help_and_required_idempotency_key(
         cli.main(["resource-pool", "create", str(config_path)])
     assert parse_exit.value.code == 2
     assert "--idempotency-key" in capsys.readouterr().err
+
+
+def test_job_list_without_pool_reports_a_hidden_default_pool(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The pool list holds only the pools the user may use: a restricted default is not in it.
+    fixture = pathlib.Path(__file__).resolve().parent.parent / "fixtures" / "resource_pool.json"
+    pool = json.loads(fixture.read_text(encoding="utf-8"))["resourcePool"]
+    pool.update(
+        name="public-pool",
+        defaultComputePool=False,
+        defaultAuxPool=False,
+        agentFluentImage="",
+        clusterName="default",
+        details={},
+        resourceManagerMetadata={},
+    )
+
+    with util.standard_cli_rsps() as rsps:
+        rsps.get(
+            f"{MASTER}/api/v1/resource-pools",
+            status=200,
+            json={"resourcePools": [pool], "pagination": {"total": 1}},
+        )
+        with pytest.raises(SystemExit) as failed_exit:
+            cli.main(["job", "list"])
+        assert failed_exit.value.code == 1
+
+    assert (
+        "the default compute pool is not available to you; name a pool with -r"
+        in capsys.readouterr().err
+    )
+
+
+def access_item(pool_name: str, **fields: Any) -> Dict[str, Any]:
+    item: Dict[str, Any] = {
+        "pool_name": pool_name,
+        "mode": "public",
+        "exists": True,
+        "default_compute": False,
+        "default_aux": False,
+        "workspace_defaults": [],
+        "users": [],
+        "restricted_at": None,
+        "restricted_by": None,
+    }
+    item.update(fields)
+    return item
+
+
+def written(pool_name: str, warnings: List[str], **fields: Any) -> Dict[str, Any]:
+    return {**access_item(pool_name, **fields), "warnings": warnings}
+
+
+def default_warning(pool_name: str) -> str:
+    return (
+        f'"{pool_name}" is the cluster\'s default compute pool: submissions that omit '
+        f'resources.resource_pool are refused for users without a grant on "{pool_name}"'
+    )
+
+
+def test_access_list_renders_mode_exists_defaults_and_users(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    response = {
+        "resource_pools": [
+            access_item("cpu"),
+            access_item(
+                "gpu",
+                mode="restricted",
+                default_compute=True,
+                default_aux=True,
+                workspace_defaults=[
+                    {"workspace_id": 2, "workspace": "vision", "kind": "compute"},
+                    {"workspace_id": 2, "workspace": "vision", "kind": "aux"},
+                ],
+                users=[
+                    {"id": 3, "username": "alice", "active": True, "admin": False},
+                    {"id": 4, "username": "carol", "active": False, "admin": False},
+                    {"id": 1, "username": "root", "active": True, "admin": True},
+                ],
+                restricted_at="2026-10-06T00:00:00Z",
+                restricted_by="root",
+            ),
+            access_item("retired", mode="restricted", exists=False),
+        ]
+    }
+    with util.standard_cli_rsps() as rsps:
+        rsps.get(ACCESS_URL, status=200, json=response)
+        cli.main(["rp", "access", "list"])
+
+    lines = capsys.readouterr().out.splitlines()
+    assert [column.strip() for column in lines[0].split("|")] == [
+        "Pool",
+        "Mode",
+        "Exists",
+        "Defaults",
+        "Users",
+    ]
+    rows = {
+        cells[0]: cells
+        for cells in ([cell.strip() for cell in line.split("|")] for line in lines[2:])
+    }
+    assert rows == {
+        "cpu": ["cpu", "public", "True", "", ""],
+        "gpu": [
+            "gpu",
+            "restricted",
+            "True",
+            "cluster compute, cluster aux, vision compute, vision aux",
+            "alice, carol (inactive), root (admin)",
+        ],
+        "retired": ["retired", "restricted", "False", "", ""],
+    }
+
+
+def test_access_list_json_prints_the_response(capsys: pytest.CaptureFixture[str]) -> None:
+    response = {"resource_pools": [access_item("gpu", mode="restricted")]}
+    with util.standard_cli_rsps() as rsps:
+        rsps.get(ACCESS_URL, status=200, json=response)
+        cli.main(["resource-pool", "access", "list", "--json"])
+
+    assert json.loads(capsys.readouterr().out) == response
+
+
+def test_access_set_puts_each_pool_and_prints_server_warnings(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    missing_warning = (
+        'no resource pool named "new/pool" exists; the setting applies to a pool created with '
+        "this name"
+    )
+    with util.standard_cli_rsps() as rsps:
+        for path, pool_name, warnings in [
+            ("gpu", "gpu", [default_warning("gpu")]),
+            ("new%2Fpool", "new/pool", [missing_warning]),
+        ]:
+            rsps.put(
+                f"{ACCESS_URL}/{path}",
+                status=200,
+                match=[JSON_CONTENT_TYPE, matchers.json_params_matcher({"mode": "restricted"})],
+                json=written(pool_name, warnings, mode="restricted"),
+            )
+        cli.main(["rp", "access", "set", "gpu", "new/pool", "--mode", "restricted"])
+
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == [
+        'resource pool "gpu": restricted',
+        'resource pool "new/pool": restricted',
+    ]
+    assert captured.err.splitlines() == [
+        f"warning: {default_warning('gpu')}",
+        f"warning: {missing_warning}",
+    ]
+
+
+def test_access_set_continues_past_a_failure_and_exits_1(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with util.standard_cli_rsps() as rsps:
+        rsps.put(
+            f"{ACCESS_URL}/broken",
+            status=500,
+            match=[matchers.json_params_matcher({"mode": "public"})],
+            json={"message": "listing resource pool restrictions: connection refused"},
+        )
+        rsps.put(
+            f"{ACCESS_URL}/gpu",
+            status=200,
+            match=[matchers.json_params_matcher({"mode": "public"})],
+            json=written("gpu", []),
+        )
+        with pytest.raises(SystemExit) as failed_exit:
+            cli.main(["rp", "access", "set", "broken", "gpu", "--mode", "public"])
+        assert failed_exit.value.code == 1
+
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == ['resource pool "gpu": public']
+    assert captured.err.splitlines() == [
+        'resource pool "broken": listing resource pool restrictions: connection refused'
+    ]
+
+
+def test_access_set_requires_a_mode(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as parse_exit:
+        cli.main(["rp", "access", "set", "gpu", "--mode", "admins"])
+    assert parse_exit.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as parse_exit:
+        cli.main(["rp", "access", "set", "gpu"])
+    assert parse_exit.value.code == 2
+    assert "--mode" in capsys.readouterr().err
+
+
+def test_access_grant_posts_usernames_and_prints_server_warnings(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    users = [
+        {"id": 3, "username": "alice", "active": True, "admin": False},
+        {"id": 5, "username": "bob", "active": True, "admin": False},
+    ]
+    with util.standard_cli_rsps() as rsps:
+        rsps.post(
+            f"{ACCESS_URL}/gpu/grant",
+            status=200,
+            match=[
+                JSON_CONTENT_TYPE,
+                matchers.json_params_matcher({"usernames": ["alice", "bob"]}),
+            ],
+            json=written(
+                "gpu",
+                [default_warning("gpu")],
+                mode="restricted",
+                default_compute=True,
+                users=users,
+            ),
+        )
+        cli.main(["rp", "access", "grant", "gpu", "alice", "bob"])
+
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == ['resource pool "gpu" (restricted): granted alice, bob']
+    assert captured.err.splitlines() == [f"warning: {default_warning('gpu')}"]
+
+
+def test_access_revoke_posts_usernames(capsys: pytest.CaptureFixture[str]) -> None:
+    with util.standard_cli_rsps() as rsps:
+        rsps.post(
+            f"{ACCESS_URL}/gpu/revoke",
+            status=200,
+            match=[JSON_CONTENT_TYPE, matchers.json_params_matcher({"usernames": ["bob"]})],
+            json=written("gpu", []),
+        )
+        cli.main(["rp", "access", "revoke", "gpu", "bob"])
+
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == ['resource pool "gpu" (public): revoked bob']
+    assert captured.err == ""
+
+
+def test_access_grant_prints_the_server_error_and_exits_1(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with util.standard_cli_rsps() as rsps:
+        rsps.post(
+            f"{ACCESS_URL}/gpu/grant",
+            status=404,
+            json={"message": "unknown users: bob, carol; nothing was changed"},
+        )
+        with pytest.raises(SystemExit) as failed_exit:
+            cli.main(["rp", "access", "grant", "gpu", "alice", "bob", "carol"])
+        assert failed_exit.value.code == 1
+
+    assert capsys.readouterr().err.strip() == (
+        'resource pool "gpu": unknown users: bob, carol; nothing was changed'
+    )
+
+
+def test_access_revoke_prints_a_bad_request_message(capsys: pytest.CaptureFixture[str]) -> None:
+    with util.standard_cli_rsps() as rsps:
+        rsps.post(
+            f"{ACCESS_URL}/gpu/revoke",
+            status=400,
+            json={"message": "usernames must not be empty"},
+        )
+        with pytest.raises(SystemExit) as failed_exit:
+            cli.main(["rp", "access", "revoke", "gpu", ""])
+        assert failed_exit.value.code == 1
+
+    assert capsys.readouterr().err.strip() == ('resource pool "gpu": usernames must not be empty')

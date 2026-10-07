@@ -164,7 +164,7 @@ func TestActivateExperiments(t *testing.T) {
 			}
 
 			actual, err := ActivateExperiments(ctx, tt.args.projectID, tt.args.experimentIds,
-				tt.args.filters)
+				tt.args.filters, admitAll)
 			if (err != nil) != tt.expectedErr {
 				t.Errorf("ActivateExperiments() error = %v, expectedErr %v", err, tt.expectedErr)
 				return
@@ -172,6 +172,46 @@ func TestActivateExperiments(t *testing.T) {
 			require.ElementsMatch(t, actual, tt.expectedResults)
 		})
 	}
+}
+
+func admitAll(context.Context, Experiment) error { return nil }
+
+func TestActivateExperimentsAdmit(t *testing.T) {
+	ctx := context.Background()
+	editable := bulkActorMock{}
+	editable.On("experimentsEditableByUser", ctx, int32(1), []int32{1, 2},
+		(*apiv1.BulkExperimentFilters)(nil)).Return([]int32{1, 2}, nil)
+	experimentsEditableByUser = editable.experimentsEditableByUser
+
+	admitted := &experimentMock{}
+	admitted.On("ActivateExperiment").Return(nil).Once()
+	refused := &experimentMock{}
+	for id, exp := range map[int]*experimentMock{1: admitted, 2: refused} {
+		require.NoError(t, ExperimentRegistry.Add(id, exp))
+		defer ExperimentRegistry.Delete(id) //nolint:errcheck
+	}
+
+	denied := status.Error(codes.PermissionDenied, "the pool is restricted")
+	var seen []Experiment
+	results, err := ActivateExperiments(ctx, 1, []int32{1, 2}, nil,
+		func(_ context.Context, e Experiment) error {
+			seen = append(seen, e)
+			if e == refused {
+				return denied
+			}
+			return nil
+		})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []ExperimentActionResult{{ID: 1}, {ID: 2, Error: denied}}, results)
+	require.ElementsMatch(t, []Experiment{admitted, refused}, seen)
+	admitted.AssertExpectations(t)
+	refused.AssertNotCalled(t, "ActivateExperiment")
+
+	// Without an admission check nothing is activated.
+	results, err = ActivateExperiments(ctx, 1, []int32{1, 2}, nil, nil)
+	require.Equal(t, codes.Internal, status.Code(err))
+	require.Nil(t, results)
+	admitted.AssertNumberOfCalls(t, "ActivateExperiment", 1)
 }
 
 func TestCancelExperiments(t *testing.T) {

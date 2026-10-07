@@ -81,6 +81,15 @@ deleted, and an update cannot change its name or its resource manager. Dynamic
 pools do not support provider-backed, Kubernetes, Slurm, or PBS pools. Creating
 or updating a pool does not move agents or allocations.
 
+## Access
+
+A new dynamic pool is public: every user may use it once it is `Ready`, until
+an administrator restricts it. To avoid a public window, restrict the name
+before creating the pool, with
+`det resource-pool access set <name> --mode restricted`; a name can be
+restricted before it is a pool. Access is recorded by pool name, so updating
+or adopting a pool keeps it. See [resource pool access](resource-pool-access.md).
+
 ## REST API
 
 These endpoints require an authenticated session cookie or bearer token.

@@ -1,13 +1,16 @@
 import argparse
+import json
+import sys
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 from urllib import parse
 
 from determined import cli
 from determined.cli import errors, render
-from determined.common import util
+from determined.common import api, util
 from determined.common.api import bindings
 
 DYNAMIC_RESOURCE_POOLS_PATH = "/api/v1/resource-pools/dynamic"
+RESOURCE_POOL_ACCESS_PATH = "/api/v1/resource-pool-access"
 # The session sends json= bodies without a Content-Type, and the master refuses dynamic-pool
 # request bodies that are not labelled as JSON.
 _JSON_HEADERS = {"Content-Type": "application/json"}
@@ -141,6 +144,122 @@ def retry_dynamic(args: argparse.Namespace) -> None:
     else:
         _render_dynamic_pools([resource_pool])
     _fail_for_failed_pool(resource_pool)
+
+
+def _access_path(pool_name: str, *action: str) -> str:
+    return "/".join([RESOURCE_POOL_ACCESS_PATH, parse.quote(pool_name, safe=""), *action])
+
+
+def _server_message(e: api.errors.BadRequestException) -> str:
+    """Return the message that the master sent with an error.
+
+    The access routes answer an error with {"message": ...}, which an APIException keeps as the
+    raw response body.
+    """
+    try:
+        body = json.loads(e.message)
+    except ValueError:
+        return e.message
+    if isinstance(body, dict) and isinstance(body.get("message"), str):
+        return str(body["message"])
+    return e.message
+
+
+def _print_access_warnings(resource_pool: Mapping[str, Any]) -> None:
+    for warning in resource_pool.get("warnings") or []:
+        print(f"warning: {warning}", file=sys.stderr)
+
+
+def _access_defaults(resource_pool: Mapping[str, Any]) -> str:
+    defaults = []
+    if resource_pool.get("default_compute"):
+        defaults.append("cluster compute")
+    if resource_pool.get("default_aux"):
+        defaults.append("cluster aux")
+    for workspace_default in resource_pool.get("workspace_defaults") or []:
+        defaults.append(f"{workspace_default.get('workspace')} {workspace_default.get('kind')}")
+    return ", ".join(defaults)
+
+
+def _access_users(resource_pool: Mapping[str, Any]) -> str:
+    users = []
+    for user in resource_pool.get("users") or []:
+        notes = []
+        if not user.get("active", True):
+            notes.append("inactive")
+        if user.get("admin"):
+            notes.append("admin")
+        username = user.get("username", "")
+        users.append(f"{username} ({', '.join(notes)})" if notes else username)
+    return ", ".join(users)
+
+
+def list_access(args: argparse.Namespace) -> None:
+    sess = cli.setup_session(args)
+    try:
+        response = sess.get(RESOURCE_POOL_ACCESS_PATH).json()
+    except api.errors.BadRequestException as e:
+        raise errors.CliError(_server_message(e))
+    if args.json:
+        render.print_json(response)
+        return
+    render.tabulate_or_csv(
+        headers=["Pool", "Mode", "Exists", "Defaults", "Users"],
+        values=[
+            [
+                pool.get("pool_name", ""),
+                pool.get("mode", ""),
+                bool(pool.get("exists", False)),
+                _access_defaults(pool),
+                _access_users(pool),
+            ]
+            for pool in response.get("resource_pools", [])
+        ],
+        as_csv=False,
+    )
+
+
+def set_access(args: argparse.Namespace) -> None:
+    sess = cli.setup_session(args)
+    failed = False
+    for pool_name in args.pool_names:
+        try:
+            resource_pool = sess.put(
+                _access_path(pool_name), json={"mode": args.mode}, headers=_JSON_HEADERS
+            ).json()
+        except api.errors.BadRequestException as e:
+            print(f'resource pool "{pool_name}": {_server_message(e)}', file=sys.stderr)
+            failed = True
+            continue
+        print(f'resource pool "{pool_name}": {resource_pool.get("mode")}')
+        _print_access_warnings(resource_pool)
+    if failed:
+        sys.exit(1)
+
+
+def _change_access(args: argparse.Namespace, action: str, done: str) -> None:
+    sess = cli.setup_session(args)
+    try:
+        resource_pool = sess.post(
+            _access_path(args.pool_name, action),
+            json={"usernames": args.usernames},
+            headers=_JSON_HEADERS,
+        ).json()
+    except api.errors.BadRequestException as e:
+        raise errors.CliError(f'resource pool "{args.pool_name}": {_server_message(e)}')
+    print(
+        f'resource pool "{args.pool_name}" ({resource_pool.get("mode")}): '
+        f'{done} {", ".join(args.usernames)}'
+    )
+    _print_access_warnings(resource_pool)
+
+
+def grant_access(args: argparse.Namespace) -> None:
+    _change_access(args, "grant", "granted")
+
+
+def revoke_access(args: argparse.Namespace) -> None:
+    _change_access(args, "revoke", "revoked")
 
 
 def add_binding(args: argparse.Namespace) -> None:
@@ -304,6 +423,68 @@ args_description = [
                         help="target agent resource manager cluster",
                     ),
                     cli.Arg("--json", action="store_true", help="print as JSON"),
+                ],
+            ),
+            cli.Cmd(
+                "access",
+                None,
+                "manage who may use resource pools",
+                [
+                    cli.Cmd(
+                        "list ls",
+                        list_access,
+                        "list the access of every resource pool and of every name with access "
+                        "records",
+                        [cli.Arg("--json", action="store_true", help="print as JSON")],
+                        is_default=True,
+                    ),
+                    cli.Cmd(
+                        "set",
+                        set_access,
+                        "make resource pools public or restricted",
+                        [
+                            cli.Arg(
+                                "pool_names",
+                                nargs=argparse.ONE_OR_MORE,
+                                help="names of the resource pools; a name does not need to be a "
+                                "pool yet",
+                            ),
+                            cli.Arg(
+                                "--mode",
+                                required=True,
+                                choices=["public", "restricted"],
+                                help="public: anyone may use the pool; restricted: only "
+                                "administrators and the users granted access",
+                            ),
+                        ],
+                    ),
+                    cli.Cmd(
+                        "grant",
+                        grant_access,
+                        "grant users access to a resource pool; a grant applies while the pool "
+                        "is restricted",
+                        [
+                            cli.Arg("pool_name", help="name of the resource pool"),
+                            cli.Arg(
+                                "usernames",
+                                nargs=argparse.ONE_OR_MORE,
+                                help="users to grant access to",
+                            ),
+                        ],
+                    ),
+                    cli.Cmd(
+                        "revoke",
+                        revoke_access,
+                        "revoke users' access to a resource pool",
+                        [
+                            cli.Arg("pool_name", help="name of the resource pool"),
+                            cli.Arg(
+                                "usernames",
+                                nargs=argparse.ONE_OR_MORE,
+                                help="users whose access to revoke",
+                            ),
+                        ],
+                    ),
                 ],
             ),
             cli.Cmd(

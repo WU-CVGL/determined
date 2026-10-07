@@ -18,6 +18,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/job"
 	"github.com/determined-ai/determined/master/internal/job/jobservice"
+	"github.com/determined-ai/determined/master/internal/poolaccess"
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/internal/user"
 	"github.com/determined-ai/determined/master/pkg/model"
@@ -65,6 +66,59 @@ func TestJobQueueUpdatesPreflightEveryOwner(t *testing.T) {
 	// The RBAC provider still relies on the existing queue-level permission.
 	require.NoError(t, (&job.JobAuthZRBAC{}).CanControlJobQueueUpdate(
 		context.Background(), owner, foreignJob))
+}
+
+// Moving a job to another pool is an admission into the target pool; priority and weight changes
+// manage accepted work and are not checked.
+func TestUpdateJobQueuePoolMoveChecksTarget(t *testing.T) {
+	_, admin, ctx := setupAPITest(t, nil)
+	owner := db.RequireMockUser(t, db.SingleDB())
+	ownedJob := db.RequireMockJob(t, db.SingleDB(), &owner.ID)
+	restricted := accessTestPool(t, "restricted", admin, true)
+	open := accessTestPool(t, "open", admin, false)
+	move := func(pool string) *jobv1.QueueControl {
+		return &jobv1.QueueControl{
+			JobId: ownedJob.String(), Action: &jobv1.QueueControl_ResourcePool{ResourcePool: pool},
+		}
+	}
+	priority := &jobv1.QueueControl{
+		JobId: ownedJob.String(), Action: &jobv1.QueueControl_Priority{Priority: 10},
+	}
+	weight := &jobv1.QueueControl{
+		JobId: ownedJob.String(), Action: &jobv1.QueueControl_Weight{Weight: 2},
+	}
+	authorize := job.AuthZProvider.Get().CanControlJobQueueUpdate
+	var applied [][]*jobv1.QueueControl
+	apply := func(updates []*jobv1.QueueControl) error {
+		applied = append(applied, updates)
+		return nil
+	}
+
+	err := updateJobQueueAuthorized(ctx, owner,
+		[]*jobv1.QueueControl{priority, move(restricted)}, authorize, apply)
+	requirePoolDenied(t, err, owner, restricted)
+	require.Empty(t, applied, "no update of a refused batch is applied")
+
+	err = updateJobQueueAuthorized(ctx, owner, []*jobv1.QueueControl{priority, move("")}, authorize, apply)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.Equal(t, "moving a job to another resource pool requires the target pool name",
+		status.Convert(err).Message())
+	require.Empty(t, applied)
+
+	// Priority and weight updates are not checked, whatever pools are restricted.
+	require.NoError(t, updateJobQueueAuthorized(ctx, owner,
+		[]*jobv1.QueueControl{priority, weight}, authorize, apply))
+	require.NoError(t, updateJobQueueAuthorized(ctx, owner,
+		[]*jobv1.QueueControl{move(open)}, authorize, apply))
+	require.NoError(t, updateJobQueueAuthorized(ctx, admin,
+		[]*jobv1.QueueControl{move(restricted)}, authorize, apply))
+	require.Len(t, applied, 3)
+
+	_, err = poolaccess.Grant(ctx, restricted, []model.UserID{owner.ID}, admin.ID)
+	require.NoError(t, err)
+	require.NoError(t, updateJobQueueAuthorized(ctx, owner,
+		[]*jobv1.QueueControl{move(restricted)}, authorize, apply))
+	require.Len(t, applied, 4)
 }
 
 // A generic task's invalid priority or weight in a job queue update is the caller's error (HTTP

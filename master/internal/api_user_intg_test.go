@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 
 	apiPkg "github.com/determined-ai/determined/master/internal/api"
 	authz2 "github.com/determined-ai/determined/master/internal/authz"
+	"github.com/determined-ai/determined/master/internal/cluster"
 	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
@@ -46,7 +48,15 @@ import (
 var (
 	thePgDB   *db.PgDB
 	authzUser *mocks.UserAuthZ
+
+	// Tests that select the mock authz type still reach the resource pool access check, which
+	// asks the cluster authz for the admin predicate. The basic implementation answers it from
+	// users.admin, so the admin user of setupAPITest passes without reading the access tables.
+	registerClusterMockAuthZ sync.Once
 )
+
+// mockRMDefaultPool is the pool that MockRM resolves an omitted resource pool to.
+const mockRMDefaultPool = "default"
 
 // MockRM returns a mock resource manager that basically returns OK on every call. We should update this to an
 // RM that makes sure callers uphold expected invariants (release, kill not called before allocate, release not
@@ -58,6 +68,10 @@ func MockRM() *mocks.ResourceManager {
 	}, nil)
 	mockRM.On("ResolveResourcePool", mock.Anything, mock.Anything, mock.Anything).Return(
 		func(name rm.ResourcePoolName, _, _ int) rm.ResourcePoolName {
+			// As a real resource manager, resolve an omitted pool to a default pool, never to "".
+			if name == "" {
+				return mockRMDefaultPool
+			}
 			return name
 		},
 		nil,
@@ -106,6 +120,9 @@ func setupAPITest(t *testing.T, pgdb *db.PgDB,
 		thePgDB = nil
 	}
 	jobservice.SetDefaultService(mockRM)
+	registerClusterMockAuthZ.Do(func() {
+		cluster.AuthZProvider.Register("mock", &cluster.MiscAuthZBasic{})
+	})
 
 	api := &apiServer{
 		m: &Master{
