@@ -24,9 +24,12 @@ import (
 //     pair with a GPU whose link was below its maximum width at agent start after the otherwise
 //     equal pair (pairRank); NUMA packing never reads the width.
 //
-// Both rank GPUs in error last: an NVML health call of the GPU failed at agent start, or the GPU has
-// a recent critical XID (gpuhealth.IsCriticalXID: 13, 31, 43 and 45 never count). Apart from that,
-// the keys read only reported values.
+// NUMA packing, and "soft" when it ranks, prefer fewer GPUs in error: an NVML health call of the
+// GPU failed at agent start, or the GPU has a recent critical XID (gpuhealth.IsCriticalXID: 13, 31,
+// 43 and 45 never count). Apart from that, the keys read only reported values. Map order does not
+// put GPUs in error last; a reservation takes it without either rule (fitting_policy worst,
+// numa_packing false), for "soft" without NUMA packing when it does not rank, and when the
+// selection fails.
 //
 // Every function here is pure and never logs: the scheduler's copies, which have no syslog, run
 // them too.

@@ -240,11 +240,9 @@ func (a *agentState) chooseFreeDevices(
 		}
 	}
 
-	// The one fallback to map order. prefer_gpu_topology "strong" (not available yet) must never
-	// take it, and an error here alone is not enough: the scheduler's simulation (addTaskToAgents)
-	// panics on a reservation error. So strong's fit admits only an agent where the selection can
-	// choose a set, and a strong reservation that still gets here returns an error with the
-	// selection's reason or failure and changes nothing.
+	// The one fallback to map order, for the zero selection and for a plain or "soft" selection
+	// that chooses no set or fails. Every path selects a full set and validates it whole;
+	// allocateFreeDevices changes state once, after the validation.
 	devices := a.mapOrderDevices(slots)
 	if err := a.checkFreeDevices(devices, slots); err != nil {
 		return deviceReservation{}, err
@@ -351,11 +349,11 @@ func (a *agentState) freeDevice(d device.Device) {
 
 // deepCopy returns a copy of agentState for scheduler internals. Each copy gets its own slot
 // states, since the scheduler's simulation frees devices on it. It shares gpuTopology, which is
-// never mutated, only replaced: the scheduler's simulation selects GPUs on the copies as the live
-// reservation does on the agent. So the two choose the same devices when every placement of the
-// simulation is also reserved live, in the same order, on unchanged agents: without preemption and
-// with every reservation succeeding. Otherwise they can differ; fits use counts only, so that
-// changes no fit.
+// never mutated, only replaced, so the simulation selects GPUs on the copies from the inputs the
+// live reservation reads on the agent. A ranked selection (NUMA packing, "soft" when it ranks) is
+// deterministic: with the pass's policy and the same placements in the same order on unchanged
+// agents (no preemption, every reservation succeeding), the two choose the same devices. Map order
+// gives no such guarantee. Fits use counts only, so a difference never changes which tasks fit.
 func (a *agentState) deepCopy() *agentState {
 	copiedAgent := &agentState{
 		id:                    a.id,

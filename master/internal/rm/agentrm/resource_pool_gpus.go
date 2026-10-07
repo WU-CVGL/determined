@@ -56,9 +56,11 @@ func (r *gpuXIDReader) recent(now time.Time) map[string]bool {
 }
 
 // gpuPolicy is a pool's GPU selection for one scheduling pass, with one aged XID result for the
-// whole pass. The scheduler's simulation and the pass's live reservations use the same one, so
-// they choose the same devices for the same state and the same placements (see deepCopy), and no
-// reservation reads the XIDs under the agent's lock. Its zero value takes devices in map order.
+// whole pass. The scheduler's simulation and the pass's live reservations use the same one, and no
+// reservation reads the XIDs under the agent's lock. A ranked selection (NUMA packing, "soft" when
+// it ranks) then chooses the same devices in both for the same state and the same placements in
+// the same order; map order gives no such guarantee (see deepCopy). Fits use counts only, so a
+// difference never changes which tasks fit. Its zero value takes devices in map order.
 type gpuPolicy struct {
 	// packNUMA packs every task's GPUs by NUMA node: fitting_policy best, numa_packing not false.
 	packNUMA bool
