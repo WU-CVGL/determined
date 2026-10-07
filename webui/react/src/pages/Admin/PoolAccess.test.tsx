@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DefaultTheme, UIProvider } from 'hew/Theme';
 import { DndProvider } from 'react-dnd';
@@ -10,7 +10,8 @@ import { ThemeProvider } from 'components/ThemeProvider';
 import { resourcePoolAccessResponse } from 'fixtures/resourcePoolAccess';
 import { SettingsProvider } from 'hooks/useSettingsProvider';
 import { mapResourcePoolAccess, mapResourcePoolAccessChange } from 'services/decoder';
-import { ResourcePoolAccessChange } from 'types';
+import poolAccessChange from 'stores/poolAccessChange';
+import { DetailedUser, ResourcePoolAccessChange } from 'types';
 import { DetError } from 'utils/error';
 
 import PoolAccess, {
@@ -22,17 +23,20 @@ import PoolAccess, {
 
 const mocks = vi.hoisted(() => ({
   getResourcePoolAccess: vi.fn(),
+  grantResourcePoolAccess: vi.fn(),
   handleError: vi.fn(),
   revokeResourcePoolAccess: vi.fn(),
   setResourcePoolAccessMode: vi.fn(),
+  users: [] as DetailedUser[],
 }));
 
 vi.mock('services/api', () => ({
   getGroup: vi.fn(),
   getGroups: () => Promise.resolve({ groups: [], pagination: { total: 0 } }),
   getResourcePoolAccess: mocks.getResourcePoolAccess,
-  getUsers: () => Promise.resolve({ pagination: { total: 0 }, users: [] }),
-  grantResourcePoolAccess: vi.fn(),
+  getUsers: () =>
+    Promise.resolve({ pagination: { total: mocks.users.length }, users: mocks.users }),
+  grantResourcePoolAccess: mocks.grantResourcePoolAccess,
   revokeResourcePoolAccess: mocks.revokeResourcePoolAccess,
   setResourcePoolAccessMode: mocks.setResourcePoolAccessMode,
 }));
@@ -43,7 +47,7 @@ vi.mock('utils/error', async (importOriginal) => ({
 }));
 
 // Table and modal tests render antd components, which is slow when the whole suite runs.
-vi.setConfig({ testTimeout: 15_000 });
+vi.setConfig({ testTimeout: 30_000 });
 
 const pools = () => resourcePoolAccessResponse.resource_pools.map(mapResourcePoolAccess);
 
@@ -94,12 +98,37 @@ const selectPools = async (...poolNames: string[]) => {
   }
 };
 
+const ACTIONS = ['Grant…', 'Revoke…', 'Restrict', 'Make public'];
+
+/** Expands the row of gpu-a100 and selects carol, one of its granted users. */
+const selectCarolInDetail = async (): Promise<HTMLElement> => {
+  await user.click(within(await rowOf('gpu-a100')).getByRole('button', { name: /expand row/i }));
+  const detail = await screen.findByTestId('pool-access-detail-gpu-a100');
+  const carol = within(detail).getByText('carol').closest('tr');
+  if (!carol) throw new Error('no row for carol');
+  await user.click(within(carol).getByRole('checkbox'));
+  return within(detail).getByRole('button', { name: 'Revoke selected (1)' });
+};
+
+const choose = async (label: string, option: string) => {
+  await user.click(screen.getByLabelText(label));
+  const options = (await screen.findAllByTitle(option)).filter(
+    (element) => !element.closest('.ant-select-dropdown-hidden'),
+  );
+  await user.click(options[options.length - 1]);
+  await user.keyboard('{Escape}');
+};
+
 describe('PoolAccess', () => {
   beforeEach(() => {
     mocks.getResourcePoolAccess.mockReset().mockImplementation(() => Promise.resolve(pools()));
+    mocks.grantResourcePoolAccess.mockReset();
     mocks.handleError.mockReset();
     mocks.setResourcePoolAccessMode.mockReset();
     mocks.revokeResourcePoolAccess.mockReset();
+    mocks.users = [{ id: 7, isActive: true, isAdmin: false, username: 'alice' }];
+    // The change of the app outlives the tab: forget the one of the last test.
+    poolAccessChange.dismiss();
   });
 
   it('renders each pool of the API response', async () => {
@@ -320,6 +349,95 @@ describe('PoolAccess', () => {
         silent: false,
       }),
     );
+  });
+
+  it('runs one change at a time: a grant still being sent blocks a newer revoke', async () => {
+    const a100 = deferred<ResourcePoolAccessChange>();
+    mocks.grantResourcePoolAccess.mockImplementation(({ poolName }) =>
+      poolName === 'gpu-a100' ? a100.promise : Promise.resolve(changeOf(poolName)),
+    );
+    setup();
+    await selectPools('gpu-a100', 'gpu-h100');
+    await user.click(screen.getByRole('button', { name: 'Grant…' }));
+    await choose('Users', 'alice');
+    await user.click(await screen.findByRole('button', { name: 'Grant to 1 user' }));
+    await waitFor(() => expect(mocks.grantResourcePoolAccess).toHaveBeenCalledTimes(1));
+
+    // The dialog is closed while the grant to gpu-a100 waits; the grant to gpu-h100 is not sent
+    // yet, so a revoke from gpu-h100 sent now would be undone by it.
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    expect(await screen.findByText(PENDING_DISMISSED_NOTE)).toBeInTheDocument();
+    expect(screen.getByText('2 pools selected')).toBeInTheDocument();
+    for (const name of ACTIONS) expect(screen.getByRole('button', { name })).toBeDisabled();
+    const revokeSelected = await selectCarolInDetail();
+    expect(revokeSelected).toBeDisabled();
+
+    a100.resolve(changeOf('gpu-a100'));
+    const results = await screen.findByTestId('pool-access-dismissed-results');
+    expect(results).toHaveTextContent('Grant: finished after its dialog was closed');
+    expect(results).toHaveTextContent('Done for 2 pools.');
+    expect(
+      mocks.grantResourcePoolAccess.mock.calls.map(([params]) => [
+        params.poolName,
+        params.usernames,
+      ]),
+    ).toEqual([
+      ['gpu-a100', ['alice']],
+      ['gpu-h100', ['alice']],
+    ]);
+    for (const name of ACTIONS) expect(screen.getByRole('button', { name })).toBeEnabled();
+    expect(revokeSelected).toBeEnabled();
+    expect(mocks.revokeResourcePoolAccess).not.toHaveBeenCalled();
+  });
+
+  it('keeps the actions waiting when the tab is left and opened again during a change', async () => {
+    const cpu = deferred<ResourcePoolAccessChange>();
+    mocks.setResourcePoolAccessMode.mockImplementation(() => cpu.promise);
+    const first = setup();
+    await selectPools('cpu');
+    await user.click(screen.getByRole('button', { name: 'Restrict' }));
+    await user.click(await screen.findByRole('button', { name: 'Restrict 1 pool' }));
+    await waitFor(() => expect(mocks.setResourcePoolAccessMode).toHaveBeenCalledTimes(1));
+
+    // Admin Settings unmounts the tab when another tab is chosen, and mounts it when it is back.
+    first.unmount();
+    setup();
+    await selectPools('cpu', 'gpu-a100');
+    for (const name of ACTIONS) expect(screen.getByRole('button', { name })).toBeDisabled();
+    expect(screen.getByText(PENDING_DISMISSED_NOTE)).toBeInTheDocument();
+    const revokeSelected = await selectCarolInDetail();
+    expect(revokeSelected).toBeDisabled();
+
+    cpu.resolve(changeOf('cpu'));
+    const results = await screen.findByTestId('pool-access-dismissed-results');
+    expect(results).toHaveTextContent('Restrict: finished after its dialog was closed');
+    expect(results).toHaveTextContent('Done for 1 pool.');
+    for (const name of ACTIONS) expect(screen.getByRole('button', { name })).toBeEnabled();
+    expect(revokeSelected).toBeEnabled();
+    // The tab that is shown reads the list again, and the results show there, not in a toast.
+    await waitFor(() => expect(mocks.getResourcePoolAccess).toHaveBeenCalledTimes(3));
+    expect(mocks.handleError).not.toHaveBeenCalled();
+    expect(mocks.setResourcePoolAccessMode).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not start a second change from a confirmation being applied', async () => {
+    const cpu = deferred<ResourcePoolAccessChange>();
+    mocks.setResourcePoolAccessMode.mockImplementation(({ poolName }) =>
+      poolName === 'cpu' ? cpu.promise : Promise.resolve(changeOf(poolName)),
+    );
+    setup();
+    await selectPools('cpu', 'gpu-h100');
+    await user.click(screen.getByRole('button', { name: 'Restrict' }));
+    await user.click(await screen.findByRole('button', { name: 'Restrict 2 pools' }));
+    await waitFor(() => expect(mocks.setResourcePoolAccessMode).toHaveBeenCalledTimes(1));
+
+    // hew's Button reads "Loading" while the change is applied.
+    const loading = screen.getByRole('button', { name: 'Loading' });
+    fireEvent.click(loading);
+    cpu.resolve(changeOf('cpu'));
+    expect(await screen.findByText('Done for 2 pools.')).toBeInTheDocument();
+    expect(mocks.setResourcePoolAccessMode).toHaveBeenCalledTimes(2);
+    expect(loading).toBeDisabled();
   });
 
   it('shows why the list could not be loaded', async () => {

@@ -7,7 +7,10 @@ import Select, { Option } from 'hew/Select';
 import { Loadable } from 'hew/utils/loadable';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import PoolAccessResults, { PoolAccessRunner } from 'components/PoolAccessResults';
+import PoolAccessResults, {
+  CHANGE_RUNNING_MESSAGE,
+  PoolAccessRunner,
+} from 'components/PoolAccessResults';
 import {
   getGroup,
   getGroups,
@@ -49,7 +52,10 @@ interface Props {
   action: PoolAccessUsersAction;
   closeModal: () => void;
   pools: ResourcePoolAccess[];
-  /** Sends the change, which goes on and keeps its results when the modal is closed. */
+  /**
+   * Sends the change, unless another change runs. The change goes on and keeps its results when
+   * the modal is closed.
+   */
   runChange: PoolAccessRunner;
 }
 
@@ -186,16 +192,16 @@ const PoolAccessUsersModalComponent: React.FC<Props> = ({
         return;
       }
       if (applied.unknown.length > 0 || applied.usernames.length === 0) return;
-      setResults(
-        await runChange(action, () =>
-          changeUsersInPools(
-            poolNames,
-            applied.usernames,
-            isGrant ? grantResourcePoolAccess : revokeResourcePoolAccess,
-            RESOURCE_POOL_ACCESS_BODY_BUDGET,
-          ),
+      const answer = await runChange(action, () =>
+        changeUsersInPools(
+          poolNames,
+          applied.usernames,
+          isGrant ? grantResourcePoolAccess : revokeResourcePoolAccess,
+          RESOURCE_POOL_ACCESS_BODY_BUDGET,
         ),
       );
+      if (answer) setResults(answer);
+      else setNotice(CHANGE_RUNNING_MESSAGE);
     } finally {
       setIsApplying(false);
     }

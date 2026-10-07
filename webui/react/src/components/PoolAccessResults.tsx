@@ -1,21 +1,22 @@
 import Icon from 'hew/Icon';
 import React from 'react';
 
-import { PoolAccessResult } from 'utils/resourcePoolAccess';
+import { PoolAccessAction, PoolAccessResult } from 'utils/resourcePoolAccess';
 import { pluralizer } from 'utils/string';
 
 import css from './PoolAccessResults.module.scss';
 
-export type PoolAccessResultAction = 'grant' | 'revoke' | 'restrict' | 'public';
-
 /**
- * Sends a change and answers with its results. The Pool Access tab passes it to its dialogs, so
- * that a change keeps its results when its dialog is closed before the master answered.
+ * Sends a change and answers with its results, or with undefined, sending nothing, while another
+ * change runs. The Pool Access tab passes it to its dialogs: one change runs at a time, and it
+ * keeps its results when its dialog is closed before the master answered.
  */
 export type PoolAccessRunner = (
-  action: PoolAccessResultAction,
+  action: PoolAccessAction,
   run: () => Promise<PoolAccessResult[]>,
-) => Promise<PoolAccessResult[]>;
+) => Promise<PoolAccessResult[] | undefined>;
+
+export const CHANGE_RUNNING_MESSAGE = 'Another change is being applied. Try again when it ends.';
 
 const usernames = (count: number): string => `${count} ${pluralizer(count, 'username')}`;
 
@@ -23,7 +24,7 @@ const usernames = (count: number): string => `${count} ${pluralizer(count, 'user
  * A grant or revoke counts the usernames sent, not the users whose access changed: the master
  * does not say which users already had a grant or had none to revoke.
  */
-const doneText = (action: PoolAccessResultAction, result: PoolAccessResult): string => {
+const doneText = (action: PoolAccessAction, result: PoolAccessResult): string => {
   switch (action) {
     case 'grant':
       return `grant applied for ${usernames(result.totalUsernames)}`;
@@ -46,13 +47,11 @@ const failedText = (result: PoolAccessResult): string => {
 };
 
 /** What the master answered for one pool, as the results list it. */
-export const poolAccessResultText = (
-  action: PoolAccessResultAction,
-  result: PoolAccessResult,
-): string => (result.ok ? doneText(action, result) : failedText(result));
+export const poolAccessResultText = (action: PoolAccessAction, result: PoolAccessResult): string =>
+  result.ok ? doneText(action, result) : failedText(result);
 
 interface Props {
-  action: PoolAccessResultAction;
+  action: PoolAccessAction;
   results: PoolAccessResult[];
 }
 

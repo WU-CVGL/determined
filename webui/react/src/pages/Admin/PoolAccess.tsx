@@ -12,7 +12,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import PoolAccessConfirmModalComponent from 'components/PoolAccessConfirmModal';
 import PoolAccessResults, {
-  PoolAccessResultAction,
   poolAccessResultText,
   PoolAccessRunner,
 } from 'components/PoolAccessResults';
@@ -27,12 +26,15 @@ import {
   revokeResourcePoolAccess,
   setResourcePoolAccessMode,
 } from 'services/api';
+import poolAccessChange from 'stores/poolAccessChange';
 import userStore from 'stores/users';
 import { ResourcePoolAccess, ResourcePoolAccessMode, ResourcePoolAccessUser } from 'types';
 import handleError from 'utils/error';
+import { useObservable } from 'utils/observable';
 import {
   changeUsersInPools,
   matchesPoolSearch,
+  PoolAccessAction,
   poolAccessErrorMessage,
   PoolAccessResult,
   PoolAccessUsersAction,
@@ -60,7 +62,7 @@ export const REVOKE_RUNNING_NOTE =
   'Revoking applies from the next request: work that already runs or is queued in the pool is ' +
   'not stopped.';
 
-const ACTION_TITLES: Record<PoolAccessResultAction, string> = {
+const ACTION_TITLES: Record<PoolAccessAction, string> = {
   grant: 'Grant',
   public: 'Make public',
   restrict: 'Restrict',
@@ -91,12 +93,14 @@ const restrictedAccessText = (pool: ResourcePoolAccess): string => {
 };
 
 interface DetailProps {
+  /** Another change runs. */
+  disabled: boolean;
   onRevoke: (pool: ResourcePoolAccess, usernames: string[]) => void;
   pool: ResourcePoolAccess;
 }
 
 /** The expanded row of a pool: its granted users, its workspace defaults, and its warnings. */
-const PoolAccessDetail: React.FC<DetailProps> = ({ onRevoke, pool }: DetailProps) => {
+const PoolAccessDetail: React.FC<DetailProps> = ({ disabled, onRevoke, pool }: DetailProps) => {
   const [selected, setSelected] = useState<string[]>([]);
   const warnings = resourcePoolAccessWarnings(pool);
   const granted = useMemo(
@@ -120,7 +124,10 @@ const PoolAccessDetail: React.FC<DetailProps> = ({ onRevoke, pool }: DetailProps
               pool.users.length > 0 &&
               ': no effect while the pool is public'}
           </strong>
-          <Button danger disabled={selected.length === 0} onClick={() => onRevoke(pool, selected)}>
+          <Button
+            danger
+            disabled={disabled || selected.length === 0}
+            onClick={() => onRevoke(pool, selected)}>
             {`Revoke selected (${selected.length})`}
           </Button>
         </Row>
@@ -185,21 +192,8 @@ const PoolAccessDetail: React.FC<DetailProps> = ({ onRevoke, pool }: DetailProps
   );
 };
 
-/** A change sent from a dialog. */
-interface ChangeRun {
-  /** The dialog was closed before the master answered. */
-  dismissed: boolean;
-}
-
-/** The results of a change whose dialog was closed before the master answered. */
-interface DismissedResults {
-  action: PoolAccessResultAction;
-  id: number;
-  results: PoolAccessResult[];
-}
-
-/** Tells about the failed pools of a change that finished after the tab was left. */
-const notifyFailures = (action: PoolAccessResultAction, results: PoolAccessResult[]): void => {
+/** Tells about the failed pools of a change that finished while no Pool Access tab was shown. */
+const notifyFailures = (action: PoolAccessAction, results: PoolAccessResult[]): void => {
   const failed = results.filter((result) => !result.ok);
   if (failed.length === 0) return;
   handleError(new Error(`${failed.length} ${pluralizer(failed.length, 'pool')} failed`), {
@@ -214,7 +208,7 @@ const notifyFailures = (action: PoolAccessResultAction, results: PoolAccessResul
 };
 
 interface ConfirmConfig {
-  action: PoolAccessResultAction;
+  action: PoolAccessAction;
   content: React.ReactNode;
   danger?: boolean;
   okText: string;
@@ -224,7 +218,8 @@ interface ConfirmConfig {
 
 /**
  * The Admin "Pool Access" tab: who may use each resource pool, with bulk changes for the selected
- * pools. Every change goes through the master's resource pool access API.
+ * pools. Every change goes through the master's resource pool access API, one change at a time.
+ * A change goes on when its dialog is closed or the tab is left; the tab then shows it.
  */
 const PoolAccess: React.FC = () => {
   const [pools, setPools] = useState<Loadable<ResourcePoolAccess[]>>(NotLoaded);
@@ -234,13 +229,8 @@ const PoolAccess: React.FC = () => {
   // The modals are mounted only while open, so they load their data when they open.
   const [usersAction, setUsersAction] = useState<PoolAccessUsersAction>();
   const [confirm, setConfirm] = useState<ConfirmConfig>();
-  // The changes in flight. A change goes on when its dialog is closed or the tab is left.
-  const runs = useRef(new Set<ChangeRun>());
-  const [dismissed, setDismissed] = useState<DismissedResults[]>([]);
-  const dismissedId = useRef(0);
-  /** The changes whose dialog was closed and whose results have not come back yet. */
-  const [pendingDismissed, setPendingDismissed] = useState(0);
-  const isMounted = useRef(true);
+  const change = useObservable(poolAccessChange.change);
+  const isRunning = useObservable(poolAccessChange.isRunning);
   const pageRef = useRef<HTMLElement>(null);
   const canceler = useRef(new AbortController());
   const { settings, updateSettings } = useSettings(settingsConfig);
@@ -267,52 +257,31 @@ const PoolAccess: React.FC = () => {
   }, [fetchPools]);
 
   useEffect(() => {
-    isMounted.current = true;
     const current = canceler.current;
+    const hideTab = poolAccessChange.showTab();
     return () => {
-      isMounted.current = false;
+      hideTab();
       current.abort();
     };
   }, []);
 
-  /**
-   * Sends a change for a dialog and answers with its results. When the dialog was closed before
-   * the master answered, the results show on the tab; when the tab was left, a notification names
-   * the failed pools.
-   */
-  const runChange: PoolAccessRunner = useCallback(
-    async (action, run) => {
-      const current: ChangeRun = { dismissed: false };
-      runs.current.add(current);
-      try {
-        const results = await run();
-        if (!isMounted.current) {
-          notifyFailures(action, results);
-        } else if (current.dismissed) {
-          const id = ++dismissedId.current;
-          setDismissed((prev) => [...prev, { action, id, results }]);
-        }
-        return results;
-      } finally {
-        runs.current.delete(current);
-        if (isMounted.current) {
-          if (current.dismissed) setPendingDismissed((n) => n - 1);
-          fetchPools();
-        }
-      }
-    },
+  useEffect(
+    () =>
+      poolAccessChange.change.subscribe((next, previous) => {
+        // A change ended, also one that started before the tab was opened.
+        if (next?.results && previous && !previous.results) fetchPools();
+      }),
     [fetchPools],
   );
 
-  /** Marks the changes in flight as dismissed, when their dialog is closed. */
-  const dismissRuns = useCallback(() => {
-    let count = 0;
-    runs.current.forEach((run) => {
-      if (run.dismissed) return;
-      run.dismissed = true;
-      count += 1;
-    });
-    if (count > 0) setPendingDismissed((n) => n + count);
+  /**
+   * Sends a change for a dialog unless another one runs. When no Pool Access tab is shown at its
+   * end, a notification names the failed pools.
+   */
+  const runChange: PoolAccessRunner = useCallback(async (action, run) => {
+    const results = await poolAccessChange.run(action, run);
+    if (results && !poolAccessChange.isTabShown) notifyFailures(action, results);
+    return results;
   }, []);
 
   const allPools = useMemo(() => Loadable.getOrElse([], pools), [pools]);
@@ -342,8 +311,11 @@ const PoolAccess: React.FC = () => {
     [updateSettings],
   );
 
+  // A dialog opens only while no change runs. Opening one forgets the results of the last change,
+  // and closing it forgets the results it showed; a change that still runs shows on the tab.
   const openUsersModal = useCallback(
     (action: PoolAccessUsersAction) => {
+      poolAccessChange.dismiss();
       setUsersAction(action);
       UsersModal.open();
     },
@@ -351,19 +323,20 @@ const PoolAccess: React.FC = () => {
   );
 
   const closeUsersModal = useCallback(() => {
-    dismissRuns();
+    poolAccessChange.dismiss();
     UsersModal.close('cancel');
     setUsersAction(undefined);
-  }, [UsersModal, dismissRuns]);
+  }, [UsersModal]);
 
   const closeConfirm = useCallback(() => {
-    dismissRuns();
+    poolAccessChange.dismiss();
     ConfirmModal.close('cancel');
     setConfirm(undefined);
-  }, [ConfirmModal, dismissRuns]);
+  }, [ConfirmModal]);
 
   const openConfirm = useCallback(
     (config: ConfirmConfig) => {
+      poolAccessChange.dismiss();
       setConfirm(config);
       ConfirmModal.open();
     },
@@ -569,7 +542,8 @@ const PoolAccess: React.FC = () => {
     [],
   );
 
-  const noSelection = selectedPools.length === 0;
+  const noAction = selectedPools.length === 0 || isRunning;
+  const isDialogOpen = usersAction !== undefined || confirm !== undefined;
 
   return (
     <>
@@ -587,42 +561,40 @@ const PoolAccess: React.FC = () => {
             <span className={css.selection}>
               {selectedPools.length} {pluralizer(selectedPools.length, 'pool')} selected
             </span>
-            <Button disabled={noSelection} onClick={() => openUsersModal('grant')}>
+            <Button disabled={noAction} onClick={() => openUsersModal('grant')}>
               Grant…
             </Button>
-            <Button disabled={noSelection} onClick={() => openUsersModal('revoke')}>
+            <Button disabled={noAction} onClick={() => openUsersModal('revoke')}>
               Revoke…
             </Button>
-            <Button disabled={noSelection} onClick={handleRestrict}>
+            <Button disabled={noAction} onClick={handleRestrict}>
               Restrict
             </Button>
-            <Button disabled={noSelection} onClick={handleMakePublic}>
+            <Button disabled={noAction} onClick={handleMakePublic}>
               Make public
             </Button>
           </Row>
         </div>
         {loadError && <Alert message={loadError} type="error" />}
-        {pendingDismissed > 0 && (
+        {isRunning && !isDialogOpen && (
           <div className={css.notice}>
             <Alert message={PENDING_DISMISSED_NOTE} type="info" />
           </div>
         )}
-        {dismissed.map(({ action, id, results }) => (
-          <div className={css.notice} data-testid="pool-access-dismissed-results" key={id}>
+        {change?.results && !isDialogOpen && (
+          <div className={css.notice} data-testid="pool-access-dismissed-results">
             <Alert
               action={
-                <Button
-                  size="small"
-                  onClick={() => setDismissed((prev) => prev.filter((item) => item.id !== id))}>
+                <Button size="small" onClick={() => poolAccessChange.dismiss()}>
                   Dismiss
                 </Button>
               }
-              description={<PoolAccessResults action={action} results={results} />}
-              message={`${ACTION_TITLES[action]}: finished after its dialog was closed`}
-              type={results.every((result) => result.ok) ? 'success' : 'error'}
+              description={<PoolAccessResults action={change.action} results={change.results} />}
+              message={`${ACTION_TITLES[change.action]}: finished after its dialog was closed`}
+              type={change.results.every((result) => result.ok) ? 'success' : 'error'}
             />
           </div>
-        ))}
+        )}
         {settings ? (
           <InteractiveTable<ResourcePoolAccess>
             columns={columns}
@@ -630,7 +602,7 @@ const PoolAccess: React.FC = () => {
             dataSource={filteredPools}
             expandable={{
               expandedRowRender: (pool: ResourcePoolAccess) => (
-                <PoolAccessDetail pool={pool} onRevoke={handleDetailRevoke} />
+                <PoolAccessDetail disabled={isRunning} pool={pool} onRevoke={handleDetailRevoke} />
               ),
             }}
             interactiveColumns={false}

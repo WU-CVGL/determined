@@ -17,6 +17,7 @@ export const RESOURCE_POOL_ACCESS_MAX_BODY_BYTES = 64 * 1024;
 export const RESOURCE_POOL_ACCESS_BODY_BUDGET = 60 * 1024;
 
 export type PoolAccessUsersAction = 'grant' | 'revoke';
+export type PoolAccessAction = PoolAccessUsersAction | 'restrict' | 'public';
 
 /** A user as the picker knows them: from the user list, or a group member. */
 export interface PoolAccessCandidate {

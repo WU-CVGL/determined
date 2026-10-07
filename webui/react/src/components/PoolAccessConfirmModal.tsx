@@ -1,19 +1,23 @@
+import Alert from 'hew/Alert';
 import Button from 'hew/Button';
 import { Modal } from 'hew/Modal';
 import Row from 'hew/Row';
 import React, { useCallback, useState } from 'react';
 
-import PoolAccessResults, { PoolAccessResultAction } from 'components/PoolAccessResults';
-import { PoolAccessResult } from 'utils/resourcePoolAccess';
+import PoolAccessResults, { CHANGE_RUNNING_MESSAGE } from 'components/PoolAccessResults';
+import { PoolAccessAction, PoolAccessResult } from 'utils/resourcePoolAccess';
 
 interface Props {
-  action: PoolAccessResultAction;
+  action: PoolAccessAction;
   closeModal: () => void;
   content: React.ReactNode;
   danger?: boolean;
   okText: string;
-  /** Sends the change. It goes on, and its results are kept, when the modal is closed. */
-  run: () => Promise<PoolAccessResult[]>;
+  /**
+   * Sends the change, or answers undefined while another change runs. The change goes on, and
+   * its results are kept, when the modal is closed.
+   */
+  run: () => Promise<PoolAccessResult[] | undefined>;
   title: string;
 }
 
@@ -31,12 +35,15 @@ const PoolAccessConfirmModalComponent: React.FC<Props> = ({
   title,
 }: Props) => {
   const [isApplying, setIsApplying] = useState(false);
+  const [isRefused, setIsRefused] = useState(false);
   const [results, setResults] = useState<PoolAccessResult[]>();
 
   const handleApply = useCallback(async () => {
     setIsApplying(true);
     try {
-      setResults(await run());
+      const answer = await run();
+      setIsRefused(!answer);
+      if (answer) setResults(answer);
     } finally {
       setIsApplying(false);
     }
@@ -53,7 +60,13 @@ const PoolAccessConfirmModalComponent: React.FC<Props> = ({
       <Button disabled={isApplying} onClick={closeModal}>
         Cancel
       </Button>
-      <Button danger={danger} loading={isApplying} type="primary" onClick={handleApply}>
+      {/* hew's Button does not disable itself while loading. */}
+      <Button
+        danger={danger}
+        disabled={isApplying}
+        loading={isApplying}
+        type="primary"
+        onClick={handleApply}>
         {okText}
       </Button>
     </Row>
@@ -61,7 +74,14 @@ const PoolAccessConfirmModalComponent: React.FC<Props> = ({
 
   return (
     <Modal footer={footer} size="medium" title={title} onClose={closeModal}>
-      {results ? <PoolAccessResults action={action} results={results} /> : content}
+      {results ? (
+        <PoolAccessResults action={action} results={results} />
+      ) : (
+        <>
+          {isRefused && <Alert message={CHANGE_RUNNING_MESSAGE} type="warning" />}
+          {content}
+        </>
+      )}
     </Modal>
   );
 };
