@@ -106,7 +106,6 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
   const pageTaskIds = useRef<Set<string>>(new Set());
   const taskLookups = useRef<Set<string>>(new Set());
   const isMounted = useRef(true);
-  const [topJob, setTopJob] = useState<Job>();
   const [total, setTotal] = useState(0);
   const [canceler] = useState(new AbortController());
   const [pageState, setPageState] = useState<{ isLoading: boolean }>({ isLoading: true });
@@ -213,20 +212,8 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
         },
         { signal: canceler.signal },
       );
-
-      const firstJobResp = await getJobQ(
-        {
-          limit: 1,
-          offset: 0,
-          resourcePool: selectedRp.name,
-        },
-        { signal: canceler.signal },
-      );
-      const firstJob = firstJobResp.jobs[0];
       if (fetchId !== latestFetch.current) return;
 
-      // Process jobs response.
-      if (firstJob && !_.isEqual(firstJob, topJob)) setTopJob(firstJob);
       const newJobs = jobState ? jobs.jobs.filter((j) => j.summary.state === jobState) : jobs.jobs;
       setJobs(newJobs);
       if (sortedInBrowser) {
@@ -258,7 +245,6 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState }) => {
     fetchOffset,
     selectedRp.name,
     jobState,
-    topJob,
     updateSettings,
     sortedInBrowser,
     sortDesc,

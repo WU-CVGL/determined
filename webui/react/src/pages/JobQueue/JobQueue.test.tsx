@@ -309,12 +309,12 @@ const saved = (jobState: JobState, key: string): unknown => {
   return value === undefined ? undefined : JSON.parse(value);
 };
 
-/** The listings of the tab's jobs in the pool: not the lookups of the first job of the pool. */
+/** The page's requests of the jobs in the pool. */
 const listings = (poolName = 'default') =>
   vi
     .mocked(getJobQ)
     .mock.calls.map(([params]) => params)
-    .filter((params) => params.states !== undefined && params.resourcePool === poolName);
+    .filter((params) => params.resourcePool === poolName);
 
 const lastListing = (poolName = 'default') => listings(poolName).at(-1);
 
@@ -345,6 +345,30 @@ describe('JobQueue', () => {
     // Unmounted first: a page still mounted would call the cleared mocks with its next rows.
     cleanup();
     vi.clearAllMocks();
+  });
+
+  it('sends one request a poll: the jobs of the tab', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mocks.jobs = [experimentJob];
+      setup(Api.V1SchedulerType.PRIORITY, JobState.SCHEDULED, 'poll');
+      await screen.findByText('mnist');
+      const listing = {
+        limit: 10,
+        offset: 0,
+        orderBy: 'ORDER_BY_ASC',
+        resourcePool: 'poll',
+        states: [JobState.SCHEDULED],
+      };
+      await waitFor(() => expect(listings('poll')).toEqual([listing]));
+
+      await act(() => vi.advanceTimersByTimeAsync(5000));
+      await waitFor(() => expect(listings('poll')).toHaveLength(2));
+      await act(() => vi.advanceTimersByTimeAsync(100));
+      expect(listings('poll')).toEqual([listing, listing]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('names a task job by its name and short task ID', async () => {
