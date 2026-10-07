@@ -1,24 +1,38 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DefaultTheme, UIProvider } from 'hew/Theme';
 import { ConfirmationProvider } from 'hew/useConfirm';
+import { Loaded } from 'hew/utils/loadable';
+import { Map } from 'immutable';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { BrowserRouter } from 'react-router-dom';
 
 import { ThemeProvider } from 'components/ThemeProvider';
 import { SettingsProvider } from 'hooks/useSettingsProvider';
-import { getJobQ, getJupyterLab, getShell, getShells, getTask } from 'services/api';
+import {
+  getJobQ,
+  getJupyterLab,
+  getShell,
+  getShells,
+  getTask,
+  getUsers,
+  updateUserSetting,
+} from 'services/api';
 import * as Api from 'services/api-ts-sdk';
 import userStore from 'stores/users';
+import userSettings from 'stores/userSettings';
 import {
   CommandResponse,
   CommandState,
   CommandTask,
   CommandType,
   FullJob,
+  Job,
   JobState,
   JobType,
+  JsonObject,
+  LimitedJob,
   ResourcePool,
   TaskItem,
 } from 'types';
@@ -95,18 +109,26 @@ const launched = vi.hoisted(() => ({ response: undefined as CommandResponse | un
 vi.mock('services/api', () => ({
   cancelExperiment: vi.fn(),
   getCommands: vi.fn(() => Promise.resolve([])),
-  getJobQ: vi.fn(() =>
-    Promise.resolve({ jobs: mocks.jobs, pagination: { total: mocks.jobs.length } }),
-  ),
+  // The jobs in queue order, or the reverse, paged as the master pages them.
+  getJobQ: vi.fn(({ limit, offset, orderBy }) => {
+    const jobs = orderBy === 'ORDER_BY_DESC' ? [...mocks.jobs].reverse() : mocks.jobs;
+    const start = offset ?? 0;
+    return Promise.resolve({
+      jobs: jobs.slice(start, start + (limit || 100)),
+      pagination: { total: jobs.length },
+    });
+  }),
   getJupyterLab: vi.fn(),
   getJupyterLabs: vi.fn(() => Promise.resolve([])),
   getShell: vi.fn(),
   getShells: vi.fn(() => Promise.resolve([])),
   getTask: vi.fn(),
   getTensorBoards: vi.fn(() => Promise.resolve([])),
+  getUsers: vi.fn(() => Promise.resolve({ pagination: {}, users: [] })),
   killExperiment: vi.fn(),
   killGenericTask: vi.fn(),
   killTask: vi.fn(),
+  updateUserSetting: vi.fn(() => Promise.resolve()),
 }));
 vi.mock('hooks/usePermissions', () => ({
   default: () => ({
@@ -145,7 +167,10 @@ vi.mock('components/NtscLaunchModal', async () => {
 const pool = (schedulerType: Api.V1SchedulerType) =>
   ({ name: 'default', schedulerType }) as unknown as ResourcePool;
 
-const setup = (schedulerType: Api.V1SchedulerType = Api.V1SchedulerType.PRIORITY) =>
+const setup = (
+  schedulerType: Api.V1SchedulerType = Api.V1SchedulerType.PRIORITY,
+  jobState: JobState = JobState.SCHEDULED,
+) =>
   render(
     <UIProvider theme={DefaultTheme.Light}>
       <ThemeProvider>
@@ -153,11 +178,7 @@ const setup = (schedulerType: Api.V1SchedulerType = Api.V1SchedulerType.PRIORITY
           <SettingsProvider>
             <BrowserRouter>
               <ConfirmationProvider>
-                <JobQueue
-                  jobState={JobState.SCHEDULED}
-                  rpStats={[]}
-                  selectedRp={pool(schedulerType)}
-                />
+                <JobQueue jobState={jobState} rpStats={[]} selectedRp={pool(schedulerType)} />
               </ConfirmationProvider>
             </BrowserRouter>
           </SettingsProvider>
@@ -180,12 +201,113 @@ const waitForShells = async () => {
   });
 };
 
-describe('JobQueue', () => {
-  beforeAll(() => {
-    userStore.updateCurrentUser({ id: OWNER_ID, isActive: true, isAdmin: false, username: 'a' });
-  });
+const jan = (day: number) => new Date(`2026-01-0${day}T00:00:00Z`);
 
+/** An experiment job, the given number of jobs into the queue. */
+const queued = (index: number, fields: Partial<FullJob>): FullJob => ({
+  ...experimentJob,
+  entityId: `${100 + index}`,
+  jobId: `q${index}`,
+  summary: { jobsAhead: index, state: JobState.SCHEDULED },
+  ...fields,
+});
+
+/** A job the user may not see: without its name, owner and submission time. */
+const limitedJob = (index: number, slots: number): LimitedJob => ({
+  allocatedSlots: slots,
+  isPreemptible: true,
+  jobId: `q${index}`,
+  requestedSlots: slots,
+  resourcePool: 'default',
+  summary: { jobsAhead: index, state: JobState.SCHEDULED },
+  type: JobType.EXPERIMENT,
+  workspaceId: 1,
+});
+
+/** Active jobs in queue order, with equal values (q0 and q4) and a job without most values. */
+const activeJobs: Job[] = [
+  queued(0, {
+    allocatedSlots: 2,
+    name: 'beta',
+    requestedSlots: 2,
+    submissionTime: jan(3),
+    username: 'bob',
+  }),
+  queued(1, {
+    allocatedSlots: 8,
+    name: 'Alpha',
+    requestedSlots: 8,
+    submissionTime: jan(1),
+    username: 'carol',
+  }),
+  limitedJob(2, 4),
+  queued(3, {
+    allocatedSlots: 1,
+    name: 'alpha_2',
+    requestedSlots: 1,
+    submissionTime: jan(2),
+    username: 'Alice',
+  }),
+  queued(4, {
+    allocatedSlots: 2,
+    name: 'beta',
+    requestedSlots: 2,
+    submissionTime: jan(3),
+    username: 'bob',
+  }),
+  queued(5, {
+    allocatedSlots: 1,
+    name: 'alpha2',
+    requestedSlots: 1,
+    submissionTime: jan(4),
+    username: 'alice',
+  }),
+];
+
+const QUEUE_ORDER = ['q0', 'q1', 'q2', 'q3', 'q4', 'q5'];
+
+/** The job IDs of the rows, from the top. */
+const rowOrder = () =>
+  Array.from(document.querySelectorAll('tbody tr[data-row-key]')).map((row) =>
+    row.getAttribute('data-row-key'),
+  );
+
+const settingsPath = (jobState: JobState) => `job-queue-${jobState}`;
+
+/** Loaded user settings, with these settings stored for the tab. */
+const storeSettings = (jobState: JobState, settings: JsonObject = {}) =>
+  userSettings._forUseSettingsOnly().set(Loaded(Map({ [settingsPath(jobState)]: settings })));
+
+/** The last value of this tab's setting that the page sent to the master. */
+const saved = (jobState: JobState, key: string): unknown => {
+  const value = vi
+    .mocked(updateUserSetting)
+    .mock.calls.flatMap(([params]) => params.settings ?? [])
+    .filter((setting) => setting.storagePath === settingsPath(jobState) && setting.key === key)
+    .at(-1)?.value;
+  return value === undefined ? undefined : JSON.parse(value);
+};
+
+/** The last listing of the tab's jobs: not the lookup of the first job of the pool. */
+const lastListing = () =>
+  vi
+    .mocked(getJobQ)
+    .mock.calls.map(([params]) => params)
+    .filter((params) => params.states !== undefined)
+    .at(-1);
+
+/** The largest limit the API takes, which the Active tab asks for to sort all its jobs. */
+const ALL_JOBS = 2 ** 31 - 1;
+
+const clickHeader = (title: string) => userEvent.click(screen.getByTestId(title));
+
+describe('JobQueue', () => {
   beforeEach(() => {
+    userStore.reset();
+    userStore.updateCurrentUser({ id: OWNER_ID, isActive: true, isAdmin: false, username: 'a' });
+    // No settings from an earlier test, in the store or in the URL.
+    userSettings.reset();
+    window.history.replaceState(null, '', '/');
     mocks.jobs = [shellJob];
     permissions.canModify = true;
     launched.response = {
@@ -196,7 +318,11 @@ describe('JobQueue', () => {
     vi.mocked(getTask).mockImplementation(({ taskId }) => Promise.resolve(taskRecord(taskId)));
   });
 
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    // Unmounted first: a page still mounted would call the cleared mocks with its next rows.
+    cleanup();
+    vi.clearAllMocks();
+  });
 
   it('names a task job by its name and short task ID', async () => {
     setup();
@@ -369,6 +495,199 @@ describe('JobQueue', () => {
           .getAllByRole('menuitem')
           .map((item) => item.textContent),
       ).toEqual(['View Logs', 'View Resources', 'Manage Job', 'Kill']);
+    });
+  });
+
+  describe('the column sorts of the Active tab', () => {
+    beforeEach(() => {
+      mocks.jobs = activeJobs;
+      storeSettings(JobState.SCHEDULED);
+    });
+
+    it('opens in queue order, a page at a time', async () => {
+      setup();
+      await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
+      expect(screen.getByTestId('#')).toHaveAttribute('aria-sort', 'ascending');
+      expect(lastListing()).toMatchObject({ limit: 10, offset: 0, orderBy: 'ORDER_BY_ASC' });
+    });
+
+    it.each([
+      {
+        ascending: ['q1', 'q5', 'q3', 'q0', 'q4', 'q2'],
+        descending: ['q0', 'q4', 'q3', 'q5', 'q1', 'q2'],
+        firstClick: 'ascending',
+        title: 'Job Name',
+      },
+      {
+        ascending: ['q3', 'q5', 'q0', 'q4', 'q1', 'q2'],
+        descending: ['q1', 'q0', 'q4', 'q5', 'q3', 'q2'],
+        firstClick: 'ascending',
+        title: 'User',
+      },
+      {
+        ascending: ['q3', 'q5', 'q0', 'q4', 'q2', 'q1'],
+        descending: ['q1', 'q2', 'q0', 'q4', 'q3', 'q5'],
+        firstClick: 'descending',
+        title: 'Slots',
+      },
+      {
+        ascending: ['q1', 'q3', 'q0', 'q4', 'q5', 'q2'],
+        descending: ['q5', 'q0', 'q4', 'q3', 'q1', 'q2'],
+        firstClick: 'descending',
+        title: 'Submitted',
+      },
+    ])(
+      'sorts by $title both ways, with missing values last and ties in queue order, then goes back to the queue order',
+      async ({ ascending, descending, firstClick, title }) => {
+        const [first, second] =
+          firstClick === 'ascending' ? [ascending, descending] : [descending, ascending];
+        const secondClick = firstClick === 'ascending' ? 'descending' : 'ascending';
+        setup();
+        await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
+
+        await clickHeader(title);
+        await waitFor(() => expect(rowOrder()).toEqual(first));
+        expect(screen.getByTestId(title)).toHaveAttribute('aria-sort', firstClick);
+        expect(screen.getByTestId('#')).not.toHaveAttribute('aria-sort');
+        // All jobs of the tab, in queue order, for the browser to sort.
+        await waitFor(() =>
+          expect(lastListing()).toMatchObject({
+            limit: ALL_JOBS,
+            offset: 0,
+            orderBy: 'ORDER_BY_ASC',
+          }),
+        );
+
+        await clickHeader(title);
+        await waitFor(() => expect(rowOrder()).toEqual(second));
+        expect(screen.getByTestId(title)).toHaveAttribute('aria-sort', secondClick);
+
+        await clickHeader(title);
+        await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
+        expect(screen.getByTestId(title)).not.toHaveAttribute('aria-sort');
+        expect(screen.getByTestId('#')).toHaveAttribute('aria-sort', 'ascending');
+        await waitFor(() =>
+          expect(lastListing()).toMatchObject({ limit: 10, offset: 0, orderBy: 'ORDER_BY_ASC' }),
+        );
+      },
+    );
+
+    it('sorts users by the name their avatar shows', async () => {
+      vi.mocked(getUsers).mockResolvedValue({
+        pagination: {},
+        users: [
+          {
+            displayName: 'Aaron',
+            id: OWNER_ID + 1,
+            isActive: true,
+            isAdmin: false,
+            username: 'carol',
+          },
+        ],
+      });
+      userStore.fetchUsers();
+      mocks.jobs = activeJobs.map((job) =>
+        job.jobId === 'q1' ? { ...job, userId: OWNER_ID + 1 } : job,
+      );
+      setup();
+      await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
+      // carol, shown as Aaron, comes first.
+      await clickHeader('User');
+      await waitFor(() => expect(rowOrder()).toEqual(['q1', 'q3', 'q5', 'q0', 'q4', 'q2']));
+      await clickHeader('User');
+      await waitFor(() => expect(rowOrder()).toEqual(['q0', 'q4', 'q5', 'q3', 'q1', 'q2']));
+    });
+
+    it('goes back to the queue order without a queue position column', async () => {
+      setup(Api.V1SchedulerType.FAIRSHARE);
+      await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
+      expect(screen.getByTestId('Preemptible')).not.toHaveAttribute('aria-sort');
+      for (let click = 0; click < 3; click++) await clickHeader('Job Name');
+      await waitFor(() => expect(saved(JobState.SCHEDULED, 'sortKey')).toBe('jobsAhead'));
+      await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
+      expect(screen.getByTestId('Job Name')).not.toHaveAttribute('aria-sort');
+    });
+
+    it('sorts all jobs of the tab, not the page, and starts a new sort on the first page', async () => {
+      // Twelve jobs, named in the reverse of the queue order: q0 is "n11", q11 is "n00".
+      mocks.jobs = Array.from({ length: 12 }, (_, index) =>
+        queued(index, { name: `n${String(11 - index).padStart(2, '0')}` }),
+      );
+      storeSettings(JobState.SCHEDULED, { tableOffset: 10 });
+      setup();
+      await waitFor(() => expect(rowOrder()).toEqual(['q10', 'q11']));
+
+      await clickHeader('Job Name');
+      await waitFor(() =>
+        expect(rowOrder()).toEqual(['q11', 'q10', 'q9', 'q8', 'q7', 'q6', 'q5', 'q4', 'q3', 'q2']),
+      );
+      await waitFor(() => expect(saved(JobState.SCHEDULED, 'tableOffset')).toBe(0));
+
+      await userEvent.click(screen.getByTitle('2'));
+      await waitFor(() => expect(rowOrder()).toEqual(['q1', 'q0']));
+      expect(saved(JobState.SCHEDULED, 'sortKey')).toBe('name');
+    });
+
+    it('keeps the sort for the next visit', async () => {
+      const { unmount } = setup();
+      await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
+      await clickHeader('Slots');
+      await waitFor(() => expect(rowOrder()).toEqual(['q1', 'q2', 'q0', 'q4', 'q3', 'q5']));
+      await waitFor(() => expect(saved(JobState.SCHEDULED, 'sortKey')).toBe('slots'));
+      expect(saved(JobState.SCHEDULED, 'sortDesc')).toBe(true);
+      unmount();
+
+      // Not from the URL: from the stored settings.
+      window.history.replaceState(null, '', '/');
+      setup();
+      await waitFor(() => expect(rowOrder()).toEqual(['q1', 'q2', 'q0', 'q4', 'q3', 'q5']));
+      expect(screen.getByTestId('Slots')).toHaveAttribute('aria-sort', 'descending');
+    });
+  });
+
+  describe('the Queued tab', () => {
+    const queuedJobs = activeJobs.map((job) => ({
+      ...job,
+      summary: { ...job.summary, state: JobState.QUEUED },
+    }));
+
+    beforeEach(() => {
+      mocks.jobs = queuedJobs;
+    });
+
+    it('has no column sorts', async () => {
+      storeSettings(JobState.QUEUED);
+      setup(Api.V1SchedulerType.PRIORITY, JobState.QUEUED);
+      await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
+      for (const title of ['Job Name', 'User', 'Slots', 'Submitted', 'State', 'Type', 'Priority']) {
+        await clickHeader(title);
+        expect(screen.getByTestId(title)).not.toHaveAttribute('aria-sort');
+      }
+      expect(rowOrder()).toEqual(QUEUE_ORDER);
+      expect(saved(JobState.QUEUED, 'sortKey')).toBeUndefined();
+      expect(vi.mocked(getJobQ).mock.calls.every(([params]) => params.limit !== ALL_JOBS)).toBe(
+        true,
+      );
+    });
+
+    it('shows the queue order for a sort key of the Active tab', async () => {
+      storeSettings(JobState.QUEUED, { sortDesc: true, sortKey: 'name' });
+      setup(Api.V1SchedulerType.PRIORITY, JobState.QUEUED);
+      await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
+      expect(lastListing()).toMatchObject({ limit: 10, offset: 0, orderBy: 'ORDER_BY_ASC' });
+      expect(screen.getByTestId('#')).toHaveAttribute('aria-sort', 'ascending');
+    });
+
+    it('still reverses the queue from the queue position column', async () => {
+      storeSettings(JobState.QUEUED);
+      setup(Api.V1SchedulerType.PRIORITY, JobState.QUEUED);
+      await waitFor(() => expect(rowOrder()).toEqual(QUEUE_ORDER));
+      await clickHeader('#');
+      await waitFor(() =>
+        expect(lastListing()).toMatchObject({ limit: 10, offset: 0, orderBy: 'ORDER_BY_DESC' }),
+      );
+      await waitFor(() => expect(rowOrder()).toEqual([...QUEUE_ORDER].reverse()));
+      expect(screen.getByTestId('#')).toHaveAttribute('aria-sort', 'descending');
     });
   });
 });
