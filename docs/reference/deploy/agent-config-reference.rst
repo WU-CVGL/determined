@@ -375,7 +375,7 @@ records in the exporter's sliding window. The exporter's counters file must enab
 Prometheus must give it the ``det_cluster`` label of ``integrations.task_resources`` and a
 ``gpu_uuid`` label with the GPU's UUID, which the master matches against the agent's GPUs; the
 agent's excluded GPUs and GPUs of an unknown topology match too. Each step looks back exactly one
-step, so the steps see every sample once.
+step, so the steps see every sample.
 
 The windows are when the master saw an XID, not when it happened: a record stays in the exporter's
 window (5 minutes in cluster-setup), so the XID happened up to that long, plus the scrape interval,
