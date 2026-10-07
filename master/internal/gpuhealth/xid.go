@@ -111,7 +111,8 @@ type XIDSnapshot struct {
 	Error string
 	// QueriedAt is when the master queried, or zero when it did not.
 	QueriedAt time.Time
-	// ByUUID holds the critical XIDs of each GPU by its UUID, by code.
+	// ByUUID holds the critical XIDs of each GPU by its UUID, by code. A failed query holds those of
+	// the last successful one that are still recent (stillRecent).
 	ByUUID map[string][]XID
 }
 
@@ -238,8 +239,8 @@ func (c *XIDCache) Peek() *XIDSnapshot {
 }
 
 // LastOK returns the last successful result without querying, whatever its age, or nil if no
-// query has succeeded: a failed query leaves it as it was. GPU selection is meant to read it
-// (PR B), and has to decide how old a result it accepts.
+// query has succeeded: a failed query leaves it as it was, and keeps its XIDs that are still
+// recent.
 func (c *XIDCache) LastOK() *XIDSnapshot {
 	if c == nil {
 		return nil
@@ -265,6 +266,7 @@ func (c *XIDCache) fetch(ctx context.Context) *XIDSnapshot {
 		log.WithField("component", "gpu-xids").Debugf("the Prometheus query for GPU XIDs failed: %s", text)
 		return &XIDSnapshot{
 			Status: agentv1.GpuXidQueryStatus_GPU_XID_QUERY_STATUS_FAILED, Error: text, QueriedAt: queriedAt,
+			ByUUID: stillRecent(c.lastOK.Load(), queriedAt),
 		}
 	}
 	series, err := c.query(ctx, XIDQuery(c.detCluster), start, end, XIDStep)
@@ -281,4 +283,33 @@ func (c *XIDCache) fetch(ctx context.Context) *XIDSnapshot {
 	return &XIDSnapshot{
 		Status: agentv1.GpuXidQueryStatus_GPU_XID_QUERY_STATUS_OK, QueriedAt: queriedAt, ByUUID: byUUID,
 	}
+}
+
+// stillRecent returns the XIDs of ok, the last successful result, that a query at now would still
+// see: those whose last window is in XIDRange(now). A failed query keeps them, so a GPU in error
+// does not turn green while Prometheus cannot be reached, and drops each one when it leaves the 24
+// hours, however old ok is. It returns new maps and slices and nil when none is left, or no query
+// has succeeded.
+func stillRecent(ok *XIDSnapshot, now time.Time) map[string][]XID {
+	if ok == nil {
+		return nil
+	}
+	start, _ := XIDRange(now)
+	var byUUID map[string][]XID
+	for uuid, xids := range ok.ByUUID {
+		var kept []XID
+		for _, x := range xids {
+			if !x.LastObserved.Before(start) {
+				kept = append(kept, x)
+			}
+		}
+		if len(kept) == 0 {
+			continue
+		}
+		if byUUID == nil {
+			byUUID = map[string][]XID{}
+		}
+		byUUID[uuid] = kept
+	}
+	return byUUID
 }
