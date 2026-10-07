@@ -170,8 +170,10 @@ func (a *agentState) idle() bool {
 // deviceReservation is what allocateFreeDevices reserved, and how it chose the devices.
 type deviceReservation struct {
 	devices []device.Device
-	choice  gpuChoice
-	// failure is why a selection was dropped for map order: it failed validation or panicked.
+	// choice is the selection's result; its devices are the reserved ones, or nil for map order.
+	choice gpuChoice
+	// failure is why a selection was dropped for map order: its set was invalid, it gave neither a
+	// set nor a reason, or it panicked.
 	failure string
 }
 
@@ -179,15 +181,11 @@ type deviceReservation struct {
 // failures.
 var selectFreeDevicesFunc = selectFreeDevices
 
-// allocateFreeDevices reserves slots devices for the container cid in three steps: select,
-// validate the whole selection, then mutate once. With fewer than slots free devices it returns an
+// allocateFreeDevices reserves slots devices for the container cid. Its one change of state comes
+// last: chooseFreeDevices picks a full set and validates it whole without changing anything, then
+// every device of the set is reserved at once. With fewer than slots free devices it returns an
 // error and changes nothing. A zero-slot container takes no devices, and the topology is never
-// read.
-//
-// The selection ranks the free devices as sel says (selectFreeDevices), or takes them in map order
-// for the zero value. A ranked selection that fails validation or panics falls back to map order,
-// and the reservation reports why; so a reservation succeeds exactly when one in map order would.
-// The scheduler's copies run this too, so it must not log: a copy has no syslog.
+// read. The scheduler's copies run this too, so it must not log: a copy has no syslog.
 func (a *agentState) allocateFreeDevices(
 	slots int, cid cproto.ID, sel deviceSelection,
 ) (deviceReservation, error) {
@@ -196,41 +194,75 @@ func (a *agentState) allocateFreeDevices(
 		a.containerState[cid] = &cproto.Container{ID: cid}
 		return deviceReservation{}, nil
 	}
+	res, err := a.chooseFreeDevices(slots, sel)
+	if err != nil {
+		return deviceReservation{}, err
+	}
+	for _, d := range res.devices {
+		a.Devices[d] = &cid
+	}
+	a.containerState[cid] = &cproto.Container{ID: cid, Devices: res.devices}
+	return res, nil
+}
+
+// chooseFreeDevices returns a full set of slots free devices, validated whole (checkFreeDevices),
+// and how it was chosen; it changes nothing. When sel ranks, the selection (selectFreeDevices) runs
+// first and its set is taken if it is valid. Otherwise the set is the free devices in map order, as
+// before GPU selection existed, and goes through the same validation:
+//   - for the zero selection, which never runs the selection;
+//   - when the selection chooses no devices and says why (gpuChoice.mapOrder);
+//   - when the selection fails: its set is invalid, it gives neither a set nor a reason, or it
+//     panics. The reservation reports the failure, so it succeeds exactly when one in map order
+//     would.
+//
+// Only the selection runs under recover: it has no side effects.
+func (a *agentState) chooseFreeDevices(slots int, sel deviceSelection) (deviceReservation, error) {
 	if a.numFreeDevices() < slots {
 		return deviceReservation{}, errors.New("not enough devices")
 	}
-
 	var res deviceReservation
 	if sel.ranks() {
 		res.choice, res.failure = a.selectRankedDevices(slots, sel)
-		if res.failure == "" && res.choice.devices != nil {
-			if err := a.checkFreeDevices(res.choice.devices, slots); err != nil {
-				res.failure = err.Error()
+		switch {
+		case res.failure != "":
+		case res.choice.devices != nil:
+			err := a.checkFreeDevices(res.choice.devices, slots)
+			if err == nil {
+				res.devices = res.choice.devices
+				return res, nil
 			}
+			res.failure = err.Error()
+		case res.choice.mapOrder == "":
+			res.failure = "no devices and no reason"
 		}
 		if res.failure != "" {
 			res.choice = gpuChoice{}
 		}
 	}
-	devices := res.choice.devices
-	if devices == nil {
-		devices = make([]device.Device, 0, slots)
-		for d, dcid := range a.Devices {
-			if dcid == nil {
-				devices = append(devices, d)
-			}
-			if len(devices) == slots {
-				break
-			}
-		}
-	}
 
-	for _, d := range devices {
-		a.Devices[d] = &cid
+	// The one fallback to map order. prefer_gpu_topology "strong" (not available yet) must never
+	// take it: its reservation is to return an error here, with the selection's reason or failure,
+	// and change nothing.
+	devices := a.mapOrderDevices(slots)
+	if err := a.checkFreeDevices(devices, slots); err != nil {
+		return deviceReservation{}, err
 	}
-	a.containerState[cid] = &cproto.Container{ID: cid, Devices: devices}
 	res.devices = devices
 	return res, nil
+}
+
+// mapOrderDevices returns up to slots free devices in the order of the Devices map.
+func (a *agentState) mapOrderDevices(slots int) []device.Device {
+	devices := make([]device.Device, 0, slots)
+	for d, cid := range a.Devices {
+		if len(devices) == slots {
+			break
+		}
+		if cid == nil {
+			devices = append(devices, d)
+		}
+	}
+	return devices
 }
 
 // numFreeDevices returns the number of devices without a container.

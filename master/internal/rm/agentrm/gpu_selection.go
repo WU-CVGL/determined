@@ -68,10 +68,13 @@ type gpuSelectionInput struct {
 	topology    *gpuTopology
 }
 
-// gpuChoice is the result of a selection.
+// gpuChoice is the result of a selection: a full set of devices, or the reason for map order.
 type gpuChoice struct {
 	// devices are the chosen devices sorted by ID, or nil for map order.
 	devices []device.Device
+	// mapOrder is why the selection chose no devices, so that the reservation takes map order. It
+	// is set exactly when devices is nil.
+	mapOrder string
 	// rule says how the devices were chosen, for the pool's Debug line.
 	rule string
 	// worstPair describes the worst pair of a set chosen by prefer_gpu_topology, for the task log.
@@ -124,12 +127,17 @@ func rankGPUs(devices []device.Device, g *gpuTopology, xids map[string]bool) []r
 	return out
 }
 
-// selectFreeDevices chooses n of the free devices, or returns no devices for map order: n is 0,
-// fewer than n are free, or neither rule applies. It is the one selection of both the live
-// reservation and the scheduler's copies.
+// selectFreeDevices chooses a full set of n free devices, or no devices with the reason for map
+// order: n is 0, fewer than n are free, no rule applies, or prefer_gpu_topology without NUMA
+// packing does not rank (fewer than 2 slots, unknown topology, every pair unknown, above
+// maxTopologySets). It is the one selection of both the live reservation and the scheduler's
+// copies.
 func selectFreeDevices(in gpuSelectionInput, n int, sel deviceSelection) gpuChoice {
-	if n <= 0 || len(in.free) < n || !sel.ranks() {
-		return gpuChoice{}
+	switch {
+	case n <= 0 || len(in.free) < n:
+		return gpuChoice{mapOrder: fmt.Sprintf("%d free devices for %d slots", len(in.free), n)}
+	case !sel.ranks():
+		return gpuChoice{mapOrder: "no rule ranks the devices"}
 	}
 	free := rankGPUs(in.free, in.topology, sel.xids)
 	var layout *numaLayout
@@ -150,6 +158,10 @@ func selectFreeDevices(in gpuSelectionInput, n int, sel deviceSelection) gpuChoi
 		out.unranked = unranked
 	}
 	if layout == nil {
+		out.mapOrder = out.unranked
+		if out.mapOrder == "" {
+			out.mapOrder = "fewer than 2 slots"
+		}
 		return out
 	}
 	out.devices, out.rule = packByNUMA(free, *layout, n, topologyUnknownReason(in.topology))

@@ -151,6 +151,17 @@ func TestReservationFallsBackToMapOrder(t *testing.T) {
 		})
 	}
 
+	t.Run("no set and no reason", func(t *testing.T) {
+		defer replaceSelection(func(gpuSelectionInput, int, deviceSelection) gpuChoice {
+			return gpuChoice{}
+		})()
+		state := topologyAgentState(t, node02)
+		res, err := state.allocateFreeDevices(2, cproto.NewID(), packing)
+		require.NoError(t, err)
+		require.Equal(t, "no devices and no reason", res.failure)
+		require.Len(t, res.devices, 2)
+	})
+
 	t.Run("panic", func(t *testing.T) {
 		defer replaceSelection(func(gpuSelectionInput, int, deviceSelection) gpuChoice {
 			panic("injected")
@@ -161,6 +172,61 @@ func TestReservationFallsBackToMapOrder(t *testing.T) {
 		require.Contains(t, res.failure, "panic: injected")
 		require.Len(t, res.devices, 3)
 	})
+}
+
+func TestReservationUnrankedTakesMapOrderWithItsReason(t *testing.T) {
+	// "soft" without packing on an agent without a topology, or above the set cap: map order, with
+	// the reason and no failure.
+	state := topologyAgentState(t, node02)
+	state.gpuTopology = nil
+	soft := deviceSelection{preferTopology: true}
+	res, err := state.allocateFreeDevices(3, cproto.NewID(), soft)
+	require.NoError(t, err)
+	require.Empty(t, res.failure)
+	require.Nil(t, res.choice.devices)
+	require.Equal(t, "topology unknown: "+reasonNotReportedSinceMasterStart, res.choice.mapOrder)
+	require.Equal(t, res.choice.mapOrder, res.choice.unranked)
+	require.Len(t, res.devices, 3)
+	require.Equal(t, 3, state.numUsedSlots())
+
+	ids := intRange(0, 17)
+	state = topologyAgentState(t, topologyFixture{ids: ids, numa: twoSockets(ids), p2p: allP2P(p2pOK)})
+	res, err = state.allocateFreeDevices(8, cproto.NewID(), soft)
+	require.NoError(t, err)
+	require.Empty(t, res.failure)
+	require.Equal(t, "more than 20000 sets of free GPUs", res.choice.mapOrder)
+	require.Len(t, res.devices, 8)
+
+	// 1 slot: "soft" does not apply.
+	res, err = state.allocateFreeDevices(1, cproto.NewID(), soft)
+	require.NoError(t, err)
+	require.Equal(t, "fewer than 2 slots", res.choice.mapOrder)
+	require.Empty(t, res.choice.unranked)
+}
+
+func TestChooseFreeDevicesChangesNothing(t *testing.T) {
+	// The reservation's one change of state comes after the choice: choosing, whatever the
+	// selection does, changes nothing and gives a full set of free devices.
+	selections := map[string]func(gpuSelectionInput, int, deviceSelection) gpuChoice{
+		"ranked":  selectFreeDevices,
+		"invalid": func(in gpuSelectionInput, _ int, _ deviceSelection) gpuChoice { return gpuChoice{devices: in.free[:1]} },
+		"reason":  func(gpuSelectionInput, int, deviceSelection) gpuChoice { return gpuChoice{mapOrder: "injected"} },
+		"panic":   func(gpuSelectionInput, int, deviceSelection) gpuChoice { panic("injected") },
+	}
+	for name, selectFunc := range selections {
+		restore := replaceSelection(selectFunc)
+		for _, sel := range []deviceSelection{{}, packing, {preferTopology: true}} {
+			state := topologyAgentState(t, node02)
+			busy := cproto.NewID()
+			state.Devices[gpuDevice(2)] = &busy
+			before := snapshotOf(state)
+			res, err := state.chooseFreeDevices(4, sel)
+			require.NoError(t, err, name)
+			require.Equal(t, before, snapshotOf(state), name)
+			require.NoError(t, state.checkFreeDevices(res.devices, 4), name)
+		}
+		restore()
+	}
 }
 
 func TestReservationInMapOrderNeverSelects(t *testing.T) {

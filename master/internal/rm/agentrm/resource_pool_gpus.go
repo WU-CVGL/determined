@@ -92,9 +92,9 @@ type gpuReservation struct {
 }
 
 // logGPUChoices logs how each reservation of an allocation chose its devices, once the allocation
-// is published: a selection that fell back to map order at Error, the rule at Debug. For a task
-// with prefer_gpu_topology "soft" and 2 or more slots, it also publishes one line to the task log
-// and logs it at Info.
+// is published: a failed selection at Error, the rule or the reason for map order at Debug. For a
+// task with prefer_gpu_topology "soft" and 2 or more slots, it also publishes one line to the task
+// log and logs it at Info.
 func (rp *resourcePool) logGPUChoices(req *sproto.AllocateRequest, reservations []gpuReservation) {
 	if req.FittingRequirements.GPUTopology == expconf.GPUTopologySoft && req.SlotsNeeded >= 2 &&
 		len(reservations) > 0 {
@@ -116,6 +116,9 @@ func (rp *resourcePool) logGPUChoices(req *sproto.AllocateRequest, reservations 
 				r.fit.Agent.id, r.resp.failure)
 		case r.resp.choice.rule != "":
 			log.Debugf("agent %s: slots %s (%s)", r.fit.Agent.id, idList(r.resp.devices), r.resp.choice.rule)
+		case r.resp.choice.mapOrder != "":
+			log.Debugf("agent %s: slots %s (map order: %s)",
+				r.fit.Agent.id, idList(r.resp.devices), r.resp.choice.mapOrder)
 		}
 	}
 }
