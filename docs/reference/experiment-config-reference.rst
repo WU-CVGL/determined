@@ -1302,15 +1302,26 @@ NVLinks, a set on one NUMA node with a narrow GPU ranks before every set across 
 unknown width ranks before a narrow one, the one place where a missing value ranks before a reported
 one. Widths alone rank nothing: when every pair of free GPUs is unknown, the set is not ranked.
 
-The preference is soft: it never waits, never moves running tasks, and never changes the agent the
-scheduler picks or the number of slots. It has no effect on a task with fewer than 2 slots or on
-several agents, with the Kubernetes resource manager, when the agent's topology is unknown or every
-pair of its free GPUs is unknown, or with more than 20000 sets to compare; the task then gets its
-GPUs as without it, which in a pool without NUMA packing (``fitting_policy: worst`` or
+The preference is soft: it never waits, never moves running tasks, and never changes the number of
+slots. It has no effect on a task with fewer than 2 slots or on several agents, or with the
+Kubernetes resource manager. Inside the agent, it has no effect when the agent's topology is unknown
+or every pair of its free GPUs is unknown, or with more than 20000 sets to compare; the task then
+gets its GPUs as without it, which in a pool without NUMA packing (``fitting_policy: worst`` or
 ``numa_packing: false``) is in no particular order, GPUs in error included. A selection that fails,
 which the master logs as an error, also takes free GPUs in no particular order. The agent measures
 its topology when it starts, so restart agents after a driver change, and after a link's width
 changed.
+
+In a pool with :ref:`NUMA packing <master-config-numa-packing>` (``fitting_policy: best`` and
+``numa_packing`` not ``false``), ``"soft"`` also chooses the agent of a task that fits on one agent:
+the agents where one NUMA node has the task's slots free come first, and the fitting policy picks
+among them, or among the others when no agent has such a node, as for other tasks. Free GPUs count
+as for ``"strong"`` below: free GPUs in error count; GPUs without a known NUMA node never count, and
+an agent whose topology the master does not have counts as one without such a node. Soft may take a
+pool's emptier agent, including an idle one: with one agent that has 2 free GPUs on each NUMA node
+and another, emptier one with 4 free GPUs on one node, a 4-slot task takes the emptier agent, where
+a task without the preference takes the fuller one. In other pools, ``"soft"`` never changes the
+agent the scheduler picks.
 
 The task log gets one line for each such task, for example ``GPU topology preference: agent node02,
 slots 4,5,6,7; worst pair NODE, P2P usable``, with ``, narrow`` when a GPU of that pair is narrow,

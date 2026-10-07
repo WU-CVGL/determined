@@ -4,7 +4,8 @@
 
 -  Experiments, tasks: Give a task with 2 or more slots the best set of free GPUs of its agent by
    P2P, NVLinks, PCIe switches, NUMA nodes, and PCIe link width with
-   ``resources.prefer_gpu_topology: soft``. After a rollback, an earlier master moves running and
+   ``resources.prefer_gpu_topology: soft``; in pools with NUMA packing, it also prefers an agent
+   where one NUMA node has its slots free. After a rollback, an earlier master moves running and
    paused experiments whose config sets it, even to ``false``, to ERROR when it starts. See
    :ref:`prefer_gpu_topology <exp-config-resources-prefer-gpu-topology>`.
 
