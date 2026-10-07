@@ -5,7 +5,6 @@ import Icon, { IconName } from 'hew/Icon';
 import Input from 'hew/Input';
 import { useModal } from 'hew/Modal';
 import Select, { Option, SelectValue } from 'hew/Select';
-import Tooltip from 'hew/Tooltip';
 import { Loadable } from 'hew/utils/loadable';
 import _ from 'lodash';
 import { useObservable } from 'micro-observables';
@@ -87,6 +86,8 @@ import settingsConfig, {
   DEFAULT_PAGE_SIZE,
   FILTER_KEYS,
   MAX_PAGE_SIZE,
+  MIN_COLUMN_WIDTH,
+  normalizedLayout,
   Owner,
   Settings,
 } from './TaskDashboard.settings';
@@ -161,22 +162,18 @@ const RunLocation: React.FC<{
       ? row.experiment.workspaceName
       : workspaces.find((ws) => ws.id === row.workspaceId)?.name;
   let project: React.ReactNode = '—';
+  let projectName = '—';
   if (row.kind === RunKind.Experiment) {
-    project = (
-      <Link path={paths.projectDetails(row.experiment.projectId)}>
-        {row.experiment.projectName}
-      </Link>
-    );
+    projectName = row.experiment.projectName ?? '';
+    project = <Link path={paths.projectDetails(row.experiment.projectId)}>{projectName}</Link>;
   } else if (genericProjectId !== undefined) {
-    project = (
-      <Link path={paths.projectDetails(genericProjectId)}>
-        {genericProject?.name ?? `Project ${genericProjectId}`}
-      </Link>
-    );
+    projectName = genericProject?.name ?? `Project ${genericProjectId}`;
+    project = <Link path={paths.projectDetails(genericProjectId)}>{projectName}</Link>;
   }
-  if (!showWorkspace) return <span className={css.location}>{project}</span>;
+  // The cell cuts a long location short; its title shows the whole of it.
+  if (!showWorkspace) return <span title={projectName}>{project}</span>;
   return (
-    <span className={css.location}>
+    <span title={`${workspaceName ?? '—'} › ${projectName}`}>
       {workspaceName ? (
         <Link path={paths.workspaceDetails(row.workspaceId)}>{workspaceName}</Link>
       ) : (
@@ -249,6 +246,38 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
     if (isLoading || urlKinds.length === 0 || _.isEqual(urlKinds, settings.type)) return;
     updateSettings({ tableOffset: 0, type: urlKinds });
   }, [isLoading, settings.type, updateSettings, urlKinds]);
+
+  // Stored columns and widths, also from before the Slots column, get one width for each column.
+  const layoutUpdate = useMemo(
+    () =>
+      isLoading
+        ? undefined
+        : normalizedLayout({ columns: settings.columns, columnWidths: settings.columnWidths }),
+    [isLoading, settings.columns, settings.columnWidths],
+  );
+  useEffect(() => {
+    if (layoutUpdate) updateSettings(layoutUpdate);
+  }, [layoutUpdate, updateSettings]);
+  /*
+   * The table takes the widths it mounts with, and later ones only when their count changes. It
+   * mounts again once the stored layout has loaded and has one width for each column, so that it
+   * shows (and a resize keeps) the stored widths, not the default ones. It shows no rows before,
+   * as a click on one could land on a row about to be replaced.
+   */
+  const layoutReady = !isLoading && !layoutUpdate;
+  /*
+   * The table stores only the widths on a resize. The columns they belong to are stored with them,
+   * so that the widths still find their columns once the default columns change.
+   */
+  const updateTableSettings = useCallback(
+    (update: Partial<Settings>) =>
+      updateSettings(
+        update.columnWidths && !update.columns
+          ? { ...update, columns: [...settings.columns] }
+          : update,
+      ),
+    [settings.columns, updateSettings],
+  );
 
   const selectedKinds = useMemo(
     () => (settings.type ?? []).filter((kind) => pageKinds.includes(kind)),
@@ -593,6 +622,8 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
       {
         dataIndex: 'name',
         defaultWidth: DEFAULT_COLUMN_WIDTHS.name,
+        // A long name is cut short with an ellipsis, with the whole name in its title or tooltip.
+        ellipsis: true,
         key: 'name',
         render: (_: unknown, row: RunRow, index: number) => {
           if (row.kind === RunKind.Experiment)
@@ -600,7 +631,11 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
           if (row.kind === RunKind.GenericTask) {
             return <Link path={paths.genericTaskDetails(row.task.taskId)}>{row.name}</Link>;
           }
-          const name = taskNameRenderer(row.name, row.task, index);
+          const name = (
+            <div className={css.name} title={row.name}>
+              {taskNameRenderer(row.name, row.task, index)}
+            </div>
+          );
           if (row.task.type !== CommandType.TensorBoard || !row.task.misc) return name;
           const sources = sourcesOf(row.task);
           return (
@@ -632,6 +667,7 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
       {
         dataIndex: 'user',
         defaultWidth: DEFAULT_COLUMN_WIDTHS.user,
+        ellipsis: true,
         key: 'user',
         render: (_: unknown, row: RunRow) => {
           const user = users.find((u) => u.id === row.userId);
@@ -644,6 +680,7 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
       scope.type !== 'project' && {
         dataIndex: 'location',
         defaultWidth: DEFAULT_COLUMN_WIDTHS.location,
+        ellipsis: true,
         ...(scope.type === 'global'
           ? {
               filterDropdown: workspaceFilterDropdown,
@@ -665,9 +702,23 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
       {
         dataIndex: 'resourcePool',
         defaultWidth: DEFAULT_COLUMN_WIDTHS.resourcePool,
+        ellipsis: true,
         key: 'resourcePool',
         responsive: ['md'],
         title: 'Resource Pool',
+      },
+      {
+        align: 'right',
+        dataIndex: 'slots',
+        defaultWidth: DEFAULT_COLUMN_WIDTHS.slots,
+        key: 'slots',
+        onCell: () => ({ 'data-testid': 'slots-cell' }),
+        render: (_: unknown, row: RunRow) => {
+          if (row.slots === undefined) return '—';
+          if (row.kind !== RunKind.Experiment) return row.slots;
+          return <span title="Slots per trial">{row.slots}</span>;
+        },
+        title: 'Slots',
       },
       {
         dataIndex: 'startTime',
@@ -697,7 +748,9 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         title: '',
       },
     ];
-    return cols.filter((col): col is ColumnDef<RunRow> => !!col);
+    return cols
+      .filter((col): col is ColumnDef<RunRow> => !!col)
+      .map((col) => ({ ...col, minWidth: Math.min(col.defaultWidth, MIN_COLUMN_WIDTH) }));
   }, [entityCopyMap, renderMenu, scope.type, users, workspaceFilterDropdown, workspaces]);
 
   /* Layout */
@@ -761,20 +814,18 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
               </Option>
             ))}
           </Select>
-          <Tooltip content={SLOTS_TOOLTIP}>
-            <div>
-              <Select
-                data-testid="slots"
-                searchable={false}
-                value={settings.slots ?? ANY_SLOTS}
-                width={150}
-                onChange={handleSlotsChange}>
-                <Option value={ANY_SLOTS}>GPU and CPU</Option>
-                <Option value={SlotsFilter.Gpu}>{slotsFilterLabel[SlotsFilter.Gpu]}</Option>
-                <Option value={SlotsFilter.CpuOnly}>{slotsFilterLabel[SlotsFilter.CpuOnly]}</Option>
-              </Select>
-            </div>
-          </Tooltip>
+          <Select
+            data-testid="slots"
+            searchable={false}
+            value={settings.slots ?? ANY_SLOTS}
+            width={150}
+            onChange={handleSlotsChange}>
+            <Option value={ANY_SLOTS}>GPU and CPU</Option>
+            <Option value={SlotsFilter.Gpu}>{slotsFilterLabel[SlotsFilter.Gpu]}</Option>
+            <Option value={SlotsFilter.CpuOnly}>{slotsFilterLabel[SlotsFilter.CpuOnly]}</Option>
+          </Select>
+          {/* On an icon, not around the select: a tooltip there covered the open options. */}
+          <Icon name="info" showTooltip title={SLOTS_TOOLTIP} />
           <FilterCounter activeFilterCount={filterCount} onReset={resetFilters} />
           {showLaunch && (
             <>
@@ -809,7 +860,8 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
             ContextMenu={RowContextMenu}
             dataSource={page?.rows}
             defaultColumns={DEFAULT_COLUMNS}
-            loading={page === undefined}
+            key={layoutReady ? 'layout-ready' : 'layout-pending'}
+            loading={page === undefined || !layoutReady}
             pagination={{
               ...getFullPaginationConfig({ limit, offset }, page?.total ?? 0),
               pageSizeOptions: PAGE_SIZE_OPTIONS,
@@ -821,11 +873,13 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
               preserveSelectedRowKeys: true,
               selectedRowKeys: [...selected.keys()],
             }}
-            scroll={{ x: 'max-content' }}
+            // A definite width keeps the table's fixed layout: with 'max-content' the columns grew
+            // to their longest content.
+            scroll={{ x: '100%' }}
             settings={settings}
             showSorterTooltip={false}
             size="small"
-            updateSettings={updateSettings}
+            updateSettings={updateTableSettings}
           />
         </GenericTaskActionStateContext.Provider>
       </div>

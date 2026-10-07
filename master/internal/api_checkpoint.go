@@ -25,8 +25,6 @@ import (
 	modelauth "github.com/determined-ai/determined/master/internal/model"
 	"github.com/determined-ai/determined/master/internal/storage"
 	"github.com/determined-ai/determined/master/internal/trials"
-	"github.com/determined-ai/determined/master/internal/user"
-	"github.com/determined-ai/determined/master/internal/workspace"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/protoutils/protoconverter"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
@@ -398,15 +396,6 @@ func (a *apiServer) CheckpointsRemoveFiles(
 
 	taskSpec := *a.m.taskSpec
 
-	var expIDs []int
-	for _, g := range groupCUUIDsByEIDs {
-		expIDs = append(expIDs, g.ExperimentID)
-	}
-	workspaceIDs, err := workspace.WorkspacesIDsByExperimentIDs(ctx, expIDs)
-	if err != nil {
-		return nil, err
-	}
-
 	jobID := model.NewJobID()
 	if err = internaldb.AddJob(&model.Job{
 		JobID:   jobID,
@@ -416,13 +405,9 @@ func (a *apiServer) CheckpointsRemoveFiles(
 		return nil, fmt.Errorf("persisting new job: %w", err)
 	}
 
-	// Submit checkpoint GC tasks for all checkpoints.
+	// Submit checkpoint GC tasks for all checkpoints. Each runs as its experiment's owner, not as
+	// curUser, who was only checked to be allowed to ask.
 	for i, expIDcUUIDs := range groupCUUIDsByEIDs {
-		agentUserGroup, err := user.GetAgentUserGroup(ctx, curUser.ID, workspaceIDs[i])
-		if err != nil {
-			return nil, err
-		}
-
 		jobSubmissionTime := time.Now().UTC().Truncate(time.Millisecond)
 		taskID := model.NewTaskID()
 		conv := &protoconverter.ProtoConverter{}
@@ -439,7 +424,7 @@ func (a *apiServer) CheckpointsRemoveFiles(
 				err = runCheckpointGCTask(
 					a.m.rm, a.m.db, taskID, jobID, jobSubmissionTime, taskSpec, exps[i].ID,
 					exps[i].Config, g.StorageID, g.Checkpoints, req.CheckpointGlobs,
-					false, agentUserGroup, curUser, nil,
+					false, nil,
 				)
 				if err != nil {
 					log.WithError(err).Error("failed to start checkpoint GC task")

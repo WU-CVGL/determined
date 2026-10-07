@@ -1,5 +1,5 @@
 {
-  "description": "Agent GPU topologies as the master's API returns them, with the summary strings they give in the GPU Topology and GPU Health columns of det agent list. Shared by harness/tests/cli/test_agent.py and webui/react/src/utils/gpuTopology.test.ts, so the CLI and the WebUI show the same strings.",
+  "description": "Agent GPU topologies as the master's API returns them, with the summary strings they give in the GPU Topology and GPU Health columns of det agent list and, where pcieLink is given, the PCIe link of each GPU in its details, in the order of gpuTopology.gpus. Shared by harness/tests/cli/test_agent.py and webui/react/src/utils/gpuTopology.test.ts, so the CLI and the WebUI show the same strings.",
   "cases": [
     {
       "name": "node02: 8 GPUs, P2P usable everywhere",
@@ -54,7 +54,7 @@
     {
       "name": "node01 today: 7 slots, slots 3 and 4 at x8",
       "topology": "4+3 NODE/SYS p2p",
-      "health": "narrow: 3,4 (x8 of x16 at start)",
+      "health": "narrow: 3,4 (x8 of x16)",
       "gpuTopology": {
         "unknownReason": "",
         "collectedAt": "2026-10-05T08:00:00Z",
@@ -94,22 +94,23 @@
       }
     },
     {
-      "name": "node01 with the exclude list: 81:00.0 excluded",
+      "name": "node01 with the exclude list: 81:00.0 excluded, idle GPUs at Gen1",
       "topology": "4+3 NODE/SYS p2p",
-      "health": "narrow: 3,5 (x8 of x16 at start); excluded: 81:00.0",
+      "health": "narrow: 3,5 (x8 of x16); excluded: 81:00.0",
+      "pcieLink": ["x16 of x16, Gen4", "x16 of x16, Gen4", "x16 of x16, Gen4", "x8 of x16, Gen4", "x8 of x16, Gen4", "x16 of x16, Gen4", "x16 of x16, Gen4", "x16 of x16, Gen4"],
       "gpuTopology": {
         "unknownReason": "",
         "collectedAt": "2026-10-05T08:00:00Z",
         "driverVersion": "610.57.04",
         "gpus": [
-          {"deviceId": 0, "uuid": "GPU-0e000000-0000-0000-0000-000000000000", "pciBusId": "0000:01:00.0", "numaNode": 0, "pcieLinkWidth": 16, "pcieLinkWidthMax": 16, "pcieLinkGen": 4, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_OK", "excluded": false},
-          {"deviceId": 1, "uuid": "GPU-0e000000-0000-0000-0000-000000000001", "pciBusId": "0000:25:00.0", "numaNode": 0, "pcieLinkWidth": 16, "pcieLinkWidthMax": 16, "pcieLinkGen": 4, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_OK", "excluded": false},
-          {"deviceId": 2, "uuid": "GPU-0e000000-0000-0000-0000-000000000002", "pciBusId": "0000:41:00.0", "numaNode": 0, "pcieLinkWidth": 16, "pcieLinkWidthMax": 16, "pcieLinkGen": 4, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_OK", "excluded": false},
-          {"deviceId": 3, "uuid": "GPU-0e000000-0000-0000-0000-000000000003", "pciBusId": "0000:61:00.0", "numaNode": 0, "pcieLinkWidth": 8, "pcieLinkWidthMax": 16, "pcieLinkGen": 4, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_LINK_BELOW_MAX", "excluded": false},
-          {"deviceId": 5, "uuid": "GPU-0e000000-0000-0000-0000-000000000005", "pciBusId": "0000:a1:00.0", "numaNode": 1, "pcieLinkWidth": 8, "pcieLinkWidthMax": 16, "pcieLinkGen": 4, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_LINK_BELOW_MAX", "excluded": false},
-          {"deviceId": 6, "uuid": "GPU-0e000000-0000-0000-0000-000000000006", "pciBusId": "0000:c1:00.0", "numaNode": 1, "pcieLinkWidth": 16, "pcieLinkWidthMax": 16, "pcieLinkGen": 4, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_OK", "excluded": false},
-          {"deviceId": 7, "uuid": "GPU-0e000000-0000-0000-0000-000000000007", "pciBusId": "0000:e1:00.0", "numaNode": 1, "pcieLinkWidth": 16, "pcieLinkWidthMax": 16, "pcieLinkGen": 4, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_OK", "excluded": false},
-          {"deviceId": -1, "uuid": "GPU-0e000000-0000-0000-0000-000000000004", "pciBusId": "0000:81:00.0", "numaNode": 1, "pcieLinkWidth": 16, "pcieLinkWidthMax": 16, "pcieLinkGen": 4, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_OK", "excluded": true}
+          {"deviceId": 0, "uuid": "GPU-0e000000-0000-0000-0000-000000000000", "pciBusId": "0000:01:00.0", "numaNode": 0, "pcieLinkWidth": 16, "pcieLinkWidthMax": 16, "pcieLinkGen": 1, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_OK", "excluded": false},
+          {"deviceId": 1, "uuid": "GPU-0e000000-0000-0000-0000-000000000001", "pciBusId": "0000:25:00.0", "numaNode": 0, "pcieLinkWidth": 16, "pcieLinkWidthMax": 16, "pcieLinkGen": 1, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_OK", "excluded": false},
+          {"deviceId": 2, "uuid": "GPU-0e000000-0000-0000-0000-000000000002", "pciBusId": "0000:41:00.0", "numaNode": 0, "pcieLinkWidth": 16, "pcieLinkWidthMax": 16, "pcieLinkGen": 1, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_OK", "excluded": false},
+          {"deviceId": 3, "uuid": "GPU-0e000000-0000-0000-0000-000000000003", "pciBusId": "0000:61:00.0", "numaNode": 0, "pcieLinkWidth": 8, "pcieLinkWidthMax": 16, "pcieLinkGen": 1, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_LINK_BELOW_MAX", "excluded": false},
+          {"deviceId": 5, "uuid": "GPU-0e000000-0000-0000-0000-000000000005", "pciBusId": "0000:a1:00.0", "numaNode": 1, "pcieLinkWidth": 8, "pcieLinkWidthMax": 16, "pcieLinkGen": 1, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_LINK_BELOW_MAX", "excluded": false},
+          {"deviceId": 6, "uuid": "GPU-0e000000-0000-0000-0000-000000000006", "pciBusId": "0000:c1:00.0", "numaNode": 1, "pcieLinkWidth": 16, "pcieLinkWidthMax": 16, "pcieLinkGen": 1, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_OK", "excluded": false},
+          {"deviceId": 7, "uuid": "GPU-0e000000-0000-0000-0000-000000000007", "pciBusId": "0000:e1:00.0", "numaNode": 1, "pcieLinkWidth": 16, "pcieLinkWidthMax": 16, "pcieLinkGen": 1, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_OK", "excluded": false},
+          {"deviceId": -1, "uuid": "GPU-0e000000-0000-0000-0000-000000000004", "pciBusId": "0000:81:00.0", "numaNode": 1, "pcieLinkWidth": 16, "pcieLinkWidthMax": 16, "pcieLinkGen": 1, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_OK", "excluded": true}
         ],
         "links": [
           {"deviceA": 0, "deviceB": 1, "uuidA": "GPU-0e000000-0000-0000-0000-000000000000", "uuidB": "GPU-0e000000-0000-0000-0000-000000000001", "level": "GPU_LINK_LEVEL_NODE", "nvlinks": 0, "p2pAToB": {"read": "GPU_P2P_STATUS_OK", "write": "GPU_P2P_STATUS_OK"}, "p2pBToA": {"read": "GPU_P2P_STATUS_OK", "write": "GPU_P2P_STATUS_OK"}, "p2p": "GPU_P2P_USABLE"},
@@ -323,6 +324,7 @@
       "name": "NVML init failed: 7 slots and 1 excluded GPU stay listed",
       "topology": "unknown: NVML init: ERROR_LIBRARY_NOT_FOUND (12)",
       "health": "unknown; excluded: GPU-0c000000-0000-0000-0000-000000000007 (unknown)",
+      "pcieLink": ["unknown", "unknown", "unknown", "unknown", "unknown", "unknown", "unknown", "unknown"],
       "gpuTopology": {
         "unknownReason": "NVML init: ERROR_LIBRARY_NOT_FOUND (12)",
         "driverVersion": "",
@@ -430,9 +432,10 @@
       }
     },
     {
-      "name": "every pair unknown; error, two narrow widths and unknown width",
+      "name": "every pair unknown; error, two narrow widths and unknown width; idle and unknown max generations",
       "topology": "5 PXB p2p?",
-      "health": "error: 0; narrow: 1,4 (x8 of x16 at start), 2 (x4 of x16 at start); unknown: 3",
+      "health": "error: 0; narrow: 1,4 (x8 of x16), 2 (x4 of x16); unknown: 3",
+      "pcieLink": ["unknown", "x8 of x16, Gen4", "x4 of x16, Gen?", "x? of x16, Gen4", "x8 of x16, Gen4"],
       "gpuTopology": {
         "unknownReason": "",
         "collectedAt": "2026-10-05T08:00:00Z",
@@ -440,7 +443,7 @@
         "gpus": [
           {"deviceId": 0, "uuid": "GPU-10000000-0000-0000-0000-000000000000", "pciBusId": "0000:01:00.0", "numaNode": 0, "pcieLinkWidth": 0, "pcieLinkWidthMax": 0, "pcieLinkGen": 0, "pcieLinkGenMax": 0, "nvmlError": "GetPciInfo: ERROR_GPU_IS_LOST (15)", "health": "GPU_HEALTH_ERROR", "excluded": false},
           {"deviceId": 1, "uuid": "GPU-10000000-0000-0000-0000-000000000001", "pciBusId": "0000:25:00.0", "numaNode": 0, "pcieLinkWidth": 8, "pcieLinkWidthMax": 16, "pcieLinkGen": 1, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_LINK_BELOW_MAX", "excluded": false},
-          {"deviceId": 2, "uuid": "GPU-10000000-0000-0000-0000-000000000002", "pciBusId": "0000:41:00.0", "numaNode": 0, "pcieLinkWidth": 4, "pcieLinkWidthMax": 16, "pcieLinkGen": 4, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_LINK_BELOW_MAX", "excluded": false},
+          {"deviceId": 2, "uuid": "GPU-10000000-0000-0000-0000-000000000002", "pciBusId": "0000:41:00.0", "numaNode": 0, "pcieLinkWidth": 4, "pcieLinkWidthMax": 16, "pcieLinkGen": 3, "pcieLinkGenMax": 0, "nvmlError": "", "health": "GPU_HEALTH_LINK_BELOW_MAX", "excluded": false},
           {"deviceId": 3, "uuid": "GPU-10000000-0000-0000-0000-000000000003", "pciBusId": "0000:61:00.0", "numaNode": 0, "pcieLinkWidth": 0, "pcieLinkWidthMax": 16, "pcieLinkGen": 4, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_UNSPECIFIED", "excluded": false},
           {"deviceId": 4, "uuid": "GPU-10000000-0000-0000-0000-000000000004", "pciBusId": "0000:81:00.0", "numaNode": 0, "pcieLinkWidth": 8, "pcieLinkWidthMax": 16, "pcieLinkGen": 4, "pcieLinkGenMax": 4, "nvmlError": "", "health": "GPU_HEALTH_LINK_BELOW_MAX", "excluded": false}
         ],

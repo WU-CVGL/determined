@@ -462,8 +462,7 @@ func (e *internalExperiment) stop() error {
 			if err := runCheckpointGCForCheckpoints(
 				e.rm, e.db, e.JobID, e.StartTime, taskSpec,
 				e.Experiment.ID, e.activeConfig.AsLegacy(), checkpoints,
-				[]string{fullDeleteGlob},
-				false, taskSpec.AgentUserGroup, taskSpec.Owner, e.logCtx,
+				[]string{fullDeleteGlob}, false, e.logCtx,
 			); err != nil {
 				e.syslog.WithError(err).Error("failed to GC experiment checkpoints")
 			}
@@ -938,8 +937,9 @@ func (e *internalExperiment) setPriority(priority *int, forward bool) (err error
 }
 
 func (e *internalExperiment) setWeight(weight float64) error {
-	// Only set requested weight if it is not set in an invariant config.
-	w, err := getWorkspaceByConfig(e.activeConfig)
+	// Only set requested weight if it is not set in an invariant config. The workspace is the
+	// project's, as for the invariant merge: the config's names can be missing or stale.
+	w, err := workspace.WorkspaceByProjectID(context.TODO(), e.ProjectID)
 	if err != nil {
 		return fmt.Errorf("error getting workspace: %w", err)
 	}

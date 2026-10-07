@@ -39,11 +39,9 @@ GPU_HEALTH_WORDS = {
     bindings.v1GpuHealth.ERROR: "error",
 }
 
-# The width is an observation at agent start, not a confirmed fault.
-GPU_NARROW_LINK_TEXT = (
-    "A lower link width lowers this link's bandwidth cap. "
-    "Actual collective throughput depends on the workload."
-)
+# Shown with a narrow link. The width is the one measured at agent start; the agent docs explain
+# what it does and does not mean.
+GPU_NARROW_LINK_TEXT = "A lower link width lowers this link's bandwidth cap."
 GPU_EXCLUDED_TEXT = "Left out by the agent's exclude list. No task runs on this GPU."
 # An agent without NVIDIA GPUs, a master without GPU topology, or a user who may not view it.
 GPU_TOPOLOGY_NOT_REPORTED = (
@@ -202,8 +200,8 @@ def gpu_health_summary(topo: Optional[bindings.v1GpuTopology]) -> str:
 
     "ok" when every GPU is ok and none is excluded. Otherwise the slots that are not ok, grouped
     as error, narrow and unknown, then the excluded GPUs with their state when it is not ok, for
-    example "narrow: 3,5 (x8 of x16 at start); excluded: 81:00.0". The WebUI shows the same
-    string (utils/gpuTopology.ts).
+    example "narrow: 3,5 (x8 of x16); excluded: 81:00.0". The widths are the ones measured at agent
+    start. The WebUI shows the same string (utils/gpuTopology.ts).
     """
     if topo is None:
         return ""
@@ -220,7 +218,7 @@ def gpu_health_summary(topo: Optional[bindings.v1GpuTopology]) -> str:
     narrow: Dict[str, List[int]] = {}
     for g in slots:
         if words[g.deviceId] == "narrow":
-            width = f"x{g.pcieLinkWidth} of x{g.pcieLinkWidthMax} at start"
+            width = f"x{g.pcieLinkWidth} of x{g.pcieLinkWidthMax}"
             narrow.setdefault(width, []).append(g.deviceId)
     if narrow:
         parts.append(
@@ -386,12 +384,21 @@ def list_slots(args: argparse.Namespace) -> None:
 
 
 def _link_text(cur: int, cur_max: int, prefix: str) -> str:
-    """A link width or generation as "<cur> of <max>", with ? for an unknown value (0)."""
+    """A link width as "<cur> of <max>", with ? for an unknown value (0)."""
 
     def value(v: int) -> str:
         return f"{prefix}{v}" if v > 0 else f"{prefix}?"
 
     return f"{value(cur)} of {value(cur_max)}"
+
+
+def _link_gen_text(gen_max: int, unknown: str = "Gen?") -> str:
+    """A GPU's PCIe link generation: the highest that the GPU and its slot support.
+
+    `unknown` is shown when it is unknown (0). The current generation drops while a GPU is idle, so
+    it is left out, as in the WebUI.
+    """
+    return f"Gen{gen_max}" if gen_max > 0 else unknown
 
 
 def _cur_max(cur: int, cur_max: int, prefix: str) -> str:
@@ -404,32 +411,30 @@ def _cur_max(cur: int, cur_max: int, prefix: str) -> str:
 def _gpu_details(
     gpu: bindings.v1GpuInfo, topo: bindings.v1GpuTopology, collected_at: str
 ) -> List[str]:
-    """The four facts of a GPU's health, each on its own line.
+    """The facts of a GPU's health, each on its own line, as in the WebUI's details.
 
-    The link at agent start, the NVML errors at agent start, recent critical XIDs (not collected
-    yet) and the collection time.
+    The PCIe link and the NVML errors, both measured at agent start, and the collection time (the
+    agent's clock).
     """
     known = not topo.unknownReason
     lines = []
     if gpu.excluded:
         lines.append(GPU_EXCLUDED_TEXT)
-    if gpu.pcieLinkWidth or gpu.pcieLinkWidthMax or gpu.pcieLinkGen or gpu.pcieLinkGenMax:
+    if gpu.pcieLinkWidth or gpu.pcieLinkWidthMax or gpu.pcieLinkGenMax:
         link = (
             f"{_link_text(gpu.pcieLinkWidth, gpu.pcieLinkWidthMax, 'x')}, "
-            f"{_link_text(gpu.pcieLinkGen, gpu.pcieLinkGenMax, 'Gen')}"
-            " (an observation, not a confirmed fault)"
+            f"{_link_gen_text(gpu.pcieLinkGenMax)}"
         )
     else:
         link = "unknown"
-    lines.append(f"Link at agent start: {link}")
+    lines.append(f"PCIe link: {link}")
     if gpu.health == bindings.v1GpuHealth.LINK_BELOW_MAX:
         lines.append(GPU_NARROW_LINK_TEXT)
     if not known:
         nvml_errors = "not collected"
     else:
         nvml_errors = gpu.nvmlError or "none"
-    lines.append(f"NVML errors at agent start: {nvml_errors}")
-    lines.append("Recent critical XIDs: not collected")
+    lines.append(f"NVML errors: {nvml_errors}")
     lines.append(f"Collected at: {collected_at}")
     return lines
 
@@ -513,10 +518,9 @@ def describe_agent(args: argparse.Namespace) -> None:
             print(f"{key + ':':<17}{value}")
         return
 
+    collected_at = "unknown"
     if topo.collectedAt:
-        collected_at = f"{render.format_time(topo.collectedAt)} (agent clock, at agent start)"
-    else:
-        collected_at = "unknown"
+        collected_at = render.format_time(topo.collectedAt) or collected_at
     header += [
         ("Driver Version", topo.driverVersion or "unknown"),
         ("Collected At", collected_at),
@@ -567,13 +571,13 @@ def describe_agent(args: argparse.Namespace) -> None:
             g.pciBusId or "?",
             g.numaNode if g.numaNode >= 0 else "?",
             _cur_max(g.pcieLinkWidth, g.pcieLinkWidthMax, "x"),
-            _cur_max(g.pcieLinkGen, g.pcieLinkGenMax, "Gen"),
+            _link_gen_text(g.pcieLinkGenMax, "?"),
         ]
         for g in gpus
     ]
     print()
     render.tabulate_or_csv(
-        ["Slot", "State", "Health", "UUID", "PCI Bus ID", "NUMA", "Width cur/max", "Gen cur/max"],
+        ["Slot", "State", "Health", "UUID", "PCI Bus ID", "NUMA", "Width cur/max", "Gen max"],
         rows,
         False,
     )

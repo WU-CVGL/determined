@@ -161,6 +161,7 @@ func DefaultConfig() *Config {
 		ResourceConfig:  *DefaultResourceConfig(),
 		Observability: ObservabilityConfig{
 			EnablePrometheus: true,
+			TaskMappingDelay: model.Duration(DefaultTaskMappingDelay),
 		},
 		OIDC: OIDCConfig{
 			AuthenticationClaim:         "email",
@@ -645,10 +646,26 @@ func (i *InternalConfig) Validate() []error {
 	return errs
 }
 
+// DefaultTaskMappingDelay is the default of observability.task_mapping_delay.
+const DefaultTaskMappingDelay = 5 * time.Minute
+
 // ObservabilityConfig is the configuration for observability metrics.
 // Defaulted to true.
 type ObservabilityConfig struct {
 	EnablePrometheus bool `json:"enable_prometheus"`
+	// TaskMappingDelay is how long an allocation's resources run before the master exports its
+	// task mappings (allocation to task, container to allocation, container to runtime container
+	// ID, GPU to container) on /prom/det-state-metrics. Allocations that end sooner are never
+	// exported, so Prometheus attributes no metrics to them. Zero exports them from the start.
+	TaskMappingDelay model.Duration `json:"task_mapping_delay"`
+}
+
+// Validate implements the check.Validatable interface.
+func (c ObservabilityConfig) Validate() []error {
+	if c.TaskMappingDelay < 0 {
+		return []error{errors.New("observability.task_mapping_delay must not be negative")}
+	}
+	return nil
 }
 
 func readPriorityFromScheduler(conf *SchedulerConfig) *int {

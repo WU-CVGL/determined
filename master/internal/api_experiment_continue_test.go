@@ -102,13 +102,31 @@ checkpoint_storage:
 		{"new hyperparameter", `hyperparameters: {model_version: 2}`, "hyperparameters"},
 		{"data", `data: {url: https://example.com/other.tar}`, "data"},
 		{"image", `environment: {image: other/image:1}`, "environment"},
+		{
+			"registry credentials",
+			`environment: {registry_auth: {username: other, password: other-password}}`, "environment",
+		},
 		{"environment variable", `environment: {environment_variables: [B=3]}`, "environment"},
+		{
+			"new environment variable", `environment: {environment_variables: [LD_PRELOAD=/x.so]}`,
+			"environment",
+		},
+		{
+			"pod spec",
+			`environment: {pod_spec: {spec: {initContainers: [{name: x, image: other/image:1}]}}}`,
+			"environment",
+		},
 		{"bind mount", `bind_mounts: [{host_path: /x, container_path: /x}]`, "bind_mounts"},
 		{
 			"checkpoint location", `checkpoint_storage: {type: shared_fs, host_path: /x}`,
 			"checkpoint_storage",
 		},
 		{"warm start", `searcher: {name: single, metric: loss, source_trial_id: 1}`, "searcher"},
+		{
+			"warm start checkpoint", `searcher: {name: single, metric: loss, ` +
+				`source_checkpoint_uuid: 7e0bad9e-8c1b-4f4e-9d2a-3a0f1f6b0c01}`,
+			"searcher",
+		},
 		{"searcher metric", `searcher: {name: single, metric: accuracy}`, "searcher"},
 		{"slurm.sbatch_args", `slurm: {sbatch_args: [--export=ALL]}`, "slurm"},
 		{"pbs.pbsbatch_args", `pbs: {pbsbatch_args: [-V]}`, "pbs"},

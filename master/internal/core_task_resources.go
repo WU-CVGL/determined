@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -47,6 +48,14 @@ type taskResourceLabels struct {
 	AllocationID string `json:"allocation_id,omitempty"`
 	Node         string `json:"node,omitempty"`
 	GPUUUID      string `json:"gpu_uuid,omitempty"`
+	// GPUIndex is the GPU's number in nvidia-smi inside the task's container: its position in
+	// the GPU list the container recorded. It is omitted unless the lists of the allocation's
+	// containers add up to its slots (see taskResourceGPUIndexes).
+	GPUIndex *int `json:"gpu_index,omitempty"`
+	// DCGM's labels: the PCI bus ID, the host's NVML index (nvidia-smi on the node) and model.
+	PCIBusID     string `json:"pci_bus_id,omitempty"`
+	HostGPUIndex string `json:"host_gpu_index,omitempty"`
+	ModelName    string `json:"model_name,omitempty"`
 }
 
 type taskResourceSeries struct {
@@ -64,6 +73,24 @@ type taskResourceResponse struct {
 	Enabled  bool                  `json:"enabled"`
 	Series   []taskResourceSeries  `json:"series"`
 	Warnings []taskResourceWarning `json:"warnings"`
+}
+
+// taskResourceAllocation is one allocation of a task with the times its resources were held.
+// ContainerStart is when the allocation got its resources: the end of its first QUEUED
+// task_stats row (a restored allocation records another QUEUED row when the master restarts).
+// Every allocation writes that row before it can start, so ContainerStart is null for one that
+// never got resources. allocations.start_time is not used: on master start, CloseOpenAllocations
+// sets it to the last cluster heartbeat for every allocation that is still queued. Image pulling
+// comes after ContainerStart on purpose, since the devices are held while pulling. End is null
+// while the allocation has not been released.
+type taskResourceAllocation struct {
+	AllocationID   string     `json:"allocation_id" bun:"allocation_id"`
+	ContainerStart *time.Time `json:"container_start" bun:"container_start"`
+	End            *time.Time `json:"end" bun:"end_time"`
+}
+
+type taskResourceAllocationsResponse struct {
+	Allocations []taskResourceAllocation `json:"allocations"`
 }
 
 type taskResourceRange struct {
@@ -93,6 +120,14 @@ func (m *Master) getTaskResources(c echo.Context) error {
 	return serveTaskResources(c, conf, m.taskResourceDependencies())
 }
 
+func (m *Master) getTaskResourceAllocations(c echo.Context) error {
+	c.Response().Header().Set("Cache-Control", "no-store")
+	if !m.config.Integrations.TaskResources.Enabled() {
+		return echo.NewHTTPError(http.StatusNotFound, "task resources are disabled")
+	}
+	return serveTaskResourceAllocations(c, m.taskResourceDependencies())
+}
+
 func (m *Master) taskResourceDependencies() taskResourceDependencies {
 	conf := m.config.Integrations.TaskResources
 	return taskResourceDependencies{
@@ -110,6 +145,8 @@ func (m *Master) taskResourceDependencies() taskResourceDependencies {
 		query: func(ctx context.Context, expr string, r taskResourceRange) ([]prometheusTaskSeries, error) {
 			return queryTaskPrometheus(ctx, conf.PrometheusURL, expr, r)
 		},
+		allocations: queryTaskResourceAllocations,
+		gpuSets:     queryTaskResourceGPUSets,
 	}
 }
 
@@ -117,6 +154,55 @@ type taskResourceDependencies struct {
 	authorize         func(context.Context, model.User, string) error
 	allocationBelongs func(context.Context, string, string) (bool, error)
 	query             func(context.Context, string, taskResourceRange) ([]prometheusTaskSeries, error)
+	allocations       func(context.Context, string) ([]taskResourceAllocation, error)
+	// gpuSets reads the recorded GPU sets of a task's allocations; nil skips GPU numbering.
+	gpuSets func(context.Context, string, []string) ([]taskResourceGPUSet, error)
+}
+
+// queryTaskResourceAllocations reads a task's allocations and their container start in one query.
+func queryTaskResourceAllocations(ctx context.Context, taskID string) ([]taskResourceAllocation, error) {
+	allocations := []taskResourceAllocation{}
+	err := db.Bun().NewRaw(`
+SELECT a.allocation_id, q.queued_end AS container_start, a.end_time
+FROM allocations a
+LEFT JOIN (
+	SELECT ts.allocation_id, min(ts.end_time) AS queued_end
+	FROM task_stats ts
+	JOIN allocations qa ON qa.allocation_id = ts.allocation_id
+	WHERE qa.task_id = ? AND ts.event_type = 'QUEUED'
+	GROUP BY ts.allocation_id
+) q ON q.allocation_id = a.allocation_id
+WHERE a.task_id = ?
+ORDER BY container_start ASC NULLS LAST, a.allocation_id ASC`, taskID, taskID).Scan(ctx, &allocations)
+	if err != nil {
+		return nil, fmt.Errorf("reading task resource allocations: %w", err)
+	}
+	return allocations, nil
+}
+
+// serveTaskResourceAllocations lists a task's allocations for the resources view. Like the
+// resources endpoint it authorizes the task before reading anything else.
+func serveTaskResourceAllocations(c echo.Context, deps taskResourceDependencies) error {
+	user := c.(*detcontext.DetContext).MustGetUser()
+	ctx := c.Request().Context()
+	taskID := c.Param("task_id")
+	if err := authorizeTaskResources(ctx, user, taskID, deps); err != nil {
+		return err
+	}
+	if len(c.QueryParams()) > 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "unsupported or repeated query parameter")
+	}
+	// The WebUI waits for this list before it asks for the series, so the read gets the same
+	// budget as the metric queries. A failed or slow read makes the WebUI fall back to the task
+	// start.
+	ctx, cancel := context.WithTimeout(ctx, taskResourceTimeout)
+	defer cancel()
+	allocations, err := deps.allocations(ctx, taskID)
+	if err != nil {
+		log.WithError(err).Warn("task resources: the allocation list is unavailable")
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "task resource allocations are unavailable")
+	}
+	return c.JSON(http.StatusOK, taskResourceAllocationsResponse{Allocations: allocations})
 }
 
 func serveTaskResources(c echo.Context, conf config.TaskResourcesConfig, deps taskResourceDependencies) error {
@@ -134,14 +220,8 @@ func serveTaskResources(c echo.Context, conf config.TaskResourcesConfig, deps ta
 func collectTaskResources(ctx context.Context, user model.User, taskID string, params url.Values,
 	conf config.TaskResourcesConfig, deps taskResourceDependencies,
 ) (taskResourceResponse, error) {
-	if taskID == "" {
-		return taskResourceResponse{}, echo.NewHTTPError(http.StatusBadRequest, "task_id is required")
-	}
 	// Authorize before inspecting query parameters, allocation ownership, or Prometheus.
-	if err := deps.authorize(ctx, user, taskID); err != nil {
-		if code := grpcTaskResourcesAuthCode(err); code != 0 {
-			return taskResourceResponse{}, echo.NewHTTPError(code, api.NotFoundErrMsg("task", taskID))
-		}
+	if err := authorizeTaskResources(ctx, user, taskID, deps); err != nil {
 		return taskResourceResponse{}, err
 	}
 	r, allocationID, err := parseTaskResourceRange(params, time.Now())
@@ -186,16 +266,58 @@ func collectTaskResources(ctx context.Context, user model.User, taskID string, p
 				AllocationID: result.Metric["allocation_id"], Node: result.Metric["node"],
 				GPUUUID: result.Metric["gpu_uuid"],
 			}, Samples: result.Samples}
+			if strings.HasPrefix(q.Metric, "gpu_") {
+				// The GPU queries keep DCGM's own labels from the left-hand side of the join.
+				series.Labels.PCIBusID = result.Metric["pci_bus_id"]
+				series.Labels.HostGPUIndex = result.Metric["gpu"]
+				series.Labels.ModelName = result.Metric["modelName"]
+			}
 			resp.Series = append(resp.Series, series)
 		}
 	}
-	sort.Slice(resp.Series, func(i, j int) bool {
-		a, b := resp.Series[i], resp.Series[j]
-		return a.Metric+"/"+a.Labels.AllocationID+"/"+a.Labels.Node+"/"+a.Labels.GPUUUID <
-			b.Metric+"/"+b.Labels.AllocationID+"/"+b.Labels.Node+"/"+b.Labels.GPUUUID
+	setTaskResourceGPUIndexes(ctx, taskID, resp.Series, deps)
+	sort.SliceStable(resp.Series, func(i, j int) bool {
+		return taskResourceSeriesLess(resp.Series[i], resp.Series[j])
 	})
 	resp.Warnings = taskResourceWarnings(resp.Series)
 	return resp, nil
+}
+
+// taskResourceSeriesLess orders series by metric, allocation, node and then GPUs as numbered
+// in the container, so that a legend lists GPU 0, GPU 1 and so on.
+func taskResourceSeriesLess(a, b taskResourceSeries) bool {
+	if a.Metric != b.Metric {
+		return a.Metric < b.Metric
+	}
+	if a.Labels.AllocationID != b.Labels.AllocationID {
+		return a.Labels.AllocationID < b.Labels.AllocationID
+	}
+	if a.Labels.Node != b.Labels.Node {
+		return a.Labels.Node < b.Labels.Node
+	}
+	ai, bi := a.Labels.GPUIndex, b.Labels.GPUIndex
+	if (ai == nil) != (bi == nil) {
+		return ai != nil
+	}
+	if ai != nil && *ai != *bi {
+		return *ai < *bi
+	}
+	return a.Labels.GPUUUID < b.Labels.GPUUUID
+}
+
+func authorizeTaskResources(ctx context.Context, user model.User, taskID string,
+	deps taskResourceDependencies,
+) error {
+	if taskID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "task_id is required")
+	}
+	if err := deps.authorize(ctx, user, taskID); err != nil {
+		if code := grpcTaskResourcesAuthCode(err); code != 0 {
+			return echo.NewHTTPError(code, api.NotFoundErrMsg("task", taskID))
+		}
+		return err
+	}
+	return nil
 }
 
 func grpcTaskResourcesAuthCode(err error) int {

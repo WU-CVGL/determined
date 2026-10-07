@@ -34,10 +34,13 @@
   align-items: center;
   display: flex;
 }
-.location {
+
+/* The name of a notebook, shell, command or TensorBoard, cut short with an ellipsis. */
+
+.name,
+.name > div {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .separator {
   color: var(--theme-surface-on-weak);

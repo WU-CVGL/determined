@@ -37,3 +37,9 @@ func ErrCount(counter prometheus.Counter, err *error) {
 		counter.Inc()
 	}
 }
+
+// TaskMappingDelay is how long an allocation's resources run before its task mappings are
+// exported (observability.task_mapping_delay).
+func TaskMappingDelay() time.Duration {
+	return time.Duration(config.GetMasterConfig().Observability.TaskMappingDelay)
+}
