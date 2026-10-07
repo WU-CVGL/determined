@@ -183,8 +183,9 @@ var selectFreeDevicesFunc = selectFreeDevices
 
 // allocateFreeDevices reserves slots devices for the container cid. Its one change of state comes
 // last: chooseFreeDevices picks a full set and validates it whole without changing anything, then
-// every device of the set is reserved at once. With fewer than slots free devices it returns an
-// error and changes nothing. A zero-slot container takes no devices, and the topology is never
+// every device of the set is reserved at once. With fewer than slots free devices, or for
+// prefer_gpu_topology "strong" without a set on one NUMA node, it returns an error and changes
+// nothing. A zero-slot container takes no devices, and the topology is never
 // read. The scheduler's copies run this too, so it must not log: a copy has no syslog.
 func (a *agentState) allocateFreeDevices(
 	slots int, cid cproto.ID, sel deviceSelection,
@@ -215,10 +216,14 @@ func (a *agentState) allocateFreeDevices(
 //     panics. The reservation reports the failure, so it succeeds exactly when one in map order
 //     would.
 //
-// Only the selection runs under recover: it has no side effects.
+// Only the selection runs under recover: it has no side effects. prefer_gpu_topology "strong"
+// never takes map order (chooseOnOneNUMANode).
 func (a *agentState) chooseFreeDevices(slots int, sel deviceSelection) (deviceReservation, error) {
 	if a.numFreeDevices() < slots {
 		return deviceReservation{}, errors.New("not enough devices")
+	}
+	if sel.strong {
+		return a.chooseOnOneNUMANode(slots, sel)
 	}
 	var res deviceReservation
 	if sel.ranks() {
@@ -241,17 +246,73 @@ func (a *agentState) chooseFreeDevices(slots int, sel deviceSelection) (deviceRe
 		}
 	}
 
-	// The one fallback to map order. prefer_gpu_topology "strong" (not available yet) must never
-	// take it, and an error here alone is not enough: the scheduler's simulation (addTaskToAgents)
-	// panics on a reservation error. So strong's fit admits only an agent where the selection can
-	// choose a set, and a strong reservation that still gets here returns an error with the
-	// selection's reason or failure and changes nothing.
+	// The one fallback to map order. prefer_gpu_topology "strong" never gets here.
 	devices := a.mapOrderDevices(slots)
 	if err := a.checkFreeDevices(devices, slots); err != nil {
 		return deviceReservation{}, err
 	}
 	res.devices = devices
 	return res, nil
+}
+
+// chooseOnOneNUMANode is chooseFreeDevices for prefer_gpu_topology "strong": the selection's set,
+// validated whole and on one known NUMA node, or an error that changes nothing. It never takes map
+// order: the selection's reason for choosing nothing, its failure and an invalid set are errors.
+// Its fit admits only agents where the selection chooses a set (holdsOnOneNUMANode), so an error
+// means the agent changed after the fit; the scheduler's simulation counts it as a miss
+// (addTaskToAgents).
+func (a *agentState) chooseOnOneNUMANode(slots int, sel deviceSelection) (deviceReservation, error) {
+	choice, failure := a.selectRankedDevices(slots, sel)
+	switch {
+	case failure != "":
+		return deviceReservation{}, fmt.Errorf("GPU topology preference strong: selection failed: %s", failure)
+	case choice.devices == nil && choice.mapOrder == "":
+		return deviceReservation{}, errors.New("GPU topology preference strong: no devices and no reason")
+	case choice.devices == nil:
+		return deviceReservation{}, fmt.Errorf("GPU topology preference strong: %s", choice.mapOrder)
+	}
+	if err := a.checkFreeDevices(choice.devices, slots); err != nil {
+		return deviceReservation{}, fmt.Errorf("GPU topology preference strong: %w", err)
+	}
+	if err := a.checkOneNUMANode(choice.devices); err != nil {
+		return deviceReservation{}, fmt.Errorf("GPU topology preference strong: %w", err)
+	}
+	return deviceReservation{devices: choice.devices, choice: choice}, nil
+}
+
+// checkOneNUMANode validates the set of prefer_gpu_topology "strong": every device on one known
+// NUMA node.
+func (a *agentState) checkOneNUMANode(devices []device.Device) error {
+	node := numaNodeOf(a.gpuTopology, devices[0])
+	for _, d := range devices {
+		switch n := numaNodeOf(a.gpuTopology, d); {
+		case n < 0:
+			return fmt.Errorf("selected device %d has no known NUMA node", d.ID)
+		case n != node:
+			return fmt.Errorf("selected devices on NUMA nodes %d and %d", node, n)
+		}
+	}
+	return nil
+}
+
+// slotsByNUMA counts the agent's slots with a known NUMA node, by node, whether they take new work
+// or not; a device without a slot state counts too.
+func (a *agentState) slotsByNUMA() map[int]int {
+	out := map[int]int{}
+	count := func(d device.Device) {
+		if node := numaNodeOf(a.gpuTopology, d); node >= 0 {
+			out[node]++
+		}
+	}
+	for _, s := range a.slotStates {
+		count(s.device)
+	}
+	for d := range a.Devices {
+		if _, ok := a.slotStates[d.ID]; !ok {
+			count(d)
+		}
+	}
+	return out
 }
 
 // mapOrderDevices returns up to slots free devices in the order of the Devices map.

@@ -394,6 +394,12 @@ func (m *Master) parseCreateExperiment(ctx context.Context, req *apiv1.CreateExp
 	if err = schemas.IsComplete(config); err != nil {
 		return nil, nil, config, nil, nil, invalidExperimentConfig(err)
 	}
+	if !req.GetUnmanaged() {
+		if err = m.validateGPUTopology(poolName, config.Resources().SlotsPerTrial(),
+			config.Resources().GPUTopology()); err != nil {
+			return nil, nil, config, nil, nil, err
+		}
+	}
 
 	// Disallow EOL searchers.
 	if err = config.Searcher().AssertCurrent(); err != nil {

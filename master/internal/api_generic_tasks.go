@@ -138,6 +138,9 @@ func (a *apiServer) getGenericTaskLaunchParameters(
 	rawResourcePool := poolName.String()
 	taskConfig.Resources.RawResourcePool = &rawResourcePool
 	taskConfig.Resources.RawSlots = &resources.Slots
+	if err := a.m.validateGPUTopology(poolName, resources.Slots, taskConfig.Resources.GPUTopology()); err != nil {
+		return nil, nil, nil, err
+	}
 
 	// Apply the scheduler's default priority.
 	if taskConfig.Resources.Priority() == nil {

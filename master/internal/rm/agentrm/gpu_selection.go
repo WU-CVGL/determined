@@ -13,18 +13,21 @@ import (
 
 // GPU selection chooses which free devices of the agent the scheduler picked a reservation gets.
 // It never changes how many devices a task gets or on which agent: the fit and the agent choice
-// are made before it, from counts only.
+// are made before it, from counts only, except for prefer_gpu_topology "strong", whose fit also
+// counts the free GPUs of each NUMA node (holdsOnOneNUMANode).
 //
-// Two rules rank the free devices; without either, a reservation takes them in map order, as before
+// Three rules rank the free devices; without any, a reservation takes them in map order, as before
 // GPU selection existed:
 //   - NUMA packing (packingKey), for every task in a pool with fitting_policy best and numa_packing
 //     not false;
 //   - prefer_gpu_topology "soft" (topology set key), for a task on one agent with 2 or more slots.
 //     Under NUMA packing, packing breaks its ties; otherwise the lowest IDs do. It also ranks a
 //     pair with a GPU whose link was below its maximum width at agent start after the otherwise
-//     equal pair (pairRank); NUMA packing never reads the width.
+//     equal pair (pairRank); NUMA packing never reads the width;
+//   - prefer_gpu_topology "strong" (selectOnOneNUMANode), for a task with 2 or more slots: the set
+//     of one NUMA node, under every fitting policy and packing switch. It never takes map order.
 //
-// Both rank GPUs in error last: an NVML health call of the GPU failed at agent start, or the GPU has
+// All rank GPUs in error last: an NVML health call of the GPU failed at agent start, or the GPU has
 // a recent critical XID (gpuhealth.IsCriticalXID: 13, 31, 43 and 45 never count). Apart from that,
 // the keys read only reported values.
 //
@@ -52,12 +55,15 @@ type deviceSelection struct {
 	// preferTopology ranks GPU sets by the topology: the task asks for prefer_gpu_topology "soft"
 	// and the fit is on one agent.
 	preferTopology bool
+	// strong takes the GPUs of one NUMA node: the task asks for prefer_gpu_topology "strong" with
+	// 2 or more slots, and its fit is on one agent where one NUMA node holds them.
+	strong bool
 	// xids holds the UUIDs of GPUs with a recent critical XID, read once per scheduling pass.
 	xids map[string]bool
 }
 
 func (s deviceSelection) ranks() bool {
-	return s.packNUMA || s.preferTopology
+	return s.packNUMA || s.preferTopology || s.strong
 }
 
 // gpuSelectionInput is what a selection reads of an agent.
@@ -133,14 +139,17 @@ func rankGPUs(devices []device.Device, g *gpuTopology, xids map[string]bool) []r
 // selectFreeDevices chooses a full set of n free devices, or no devices with the reason for map
 // order: n is 0, fewer than n are free, no rule applies, or prefer_gpu_topology without NUMA
 // packing does not rank (fewer than 2 slots, unknown topology, every pair unknown, above
-// maxTopologySets). It is the one selection of both the live reservation and the scheduler's
-// copies.
+// maxTopologySets). For "strong", the reason is why no NUMA node holds the set, and the
+// reservation fails instead. It is the one selection of both the live reservation and the
+// scheduler's copies.
 func selectFreeDevices(in gpuSelectionInput, n int, sel deviceSelection) gpuChoice {
 	switch {
 	case n <= 0 || len(in.free) < n:
 		return gpuChoice{mapOrder: fmt.Sprintf("%d free devices for %d slots", len(in.free), n)}
 	case !sel.ranks():
 		return gpuChoice{mapOrder: "no rule ranks the devices"}
+	case sel.strong && n >= 2:
+		return selectOnOneNUMANode(in, n, sel.xids)
 	}
 	free := rankGPUs(in.free, in.topology, sel.xids)
 	var layout *numaLayout
@@ -686,18 +695,129 @@ func selectByTopology(
 		}
 	}
 
-	chosen := append([]rankedGPU(nil), gpusOf(best)...)
-	worstA, worstB := chosen[0].device.ID, chosen[1].device.ID
-	worst := ranks[best[0]][best[1]]
-	for a := range best {
-		for _, j := range best[a+1:] {
-			if comparePairRanks(ranks[best[a]][j], worst) > 0 {
-				worst = ranks[best[a]][j]
-				worstA, worstB = free[best[a]].device.ID, free[j].device.ID
+	set = sortedDevices(gpusOf(best))
+	return set, g.worstPair(set), ""
+}
+
+// worstPair describes the pair of a set, sorted by ID, with the largest pairRank, the first in ID
+// order on ties, for example "worst pair NODE, P2P usable".
+func (g *gpuTopology) worstPair(set []device.Device) string {
+	worstA, worstB := set[0].ID, set[1].ID
+	worst := g.pairRank(worstA, worstB)
+	for i, a := range set {
+		for _, b := range set[i+1:] {
+			if r := g.pairRank(a.ID, b.ID); comparePairRanks(r, worst) > 0 {
+				worst, worstA, worstB = r, a.ID, b.ID
 			}
 		}
 	}
-	return sortedDevices(chosen), "worst pair " + g.describePair(worstA, worstB), ""
+	return "worst pair " + g.describePair(worstA, worstB)
+}
+
+// freeByNUMA returns the free devices with a known NUMA node (numaNodeOf), by NUMA node, sorted by
+// ID. GPUs in error count: an error only ranks a set last. It is the one count of both the fit of
+// prefer_gpu_topology "strong" (holdsOnOneNUMANode) and its selection (selectOnOneNUMANode), so the
+// selection chooses a set on every agent the fit admits.
+func freeByNUMA(in gpuSelectionInput) map[int][]device.Device {
+	out := map[int][]device.Device{}
+	for _, d := range in.free {
+		if node := numaNodeOf(in.topology, d); node >= 0 {
+			out[node] = append(out[node], d)
+		}
+	}
+	return out
+}
+
+// holdsOnOneNUMANode reports whether one NUMA node has n free GPUs: the fit of prefer_gpu_topology
+// "strong" on an agent. An agent without a known topology holds none.
+func holdsOnOneNUMANode(in gpuSelectionInput, n int) bool {
+	for _, devices := range freeByNUMA(in) {
+		if len(devices) >= n {
+			return true
+		}
+	}
+	return false
+}
+
+// strongNodeKey orders the NUMA nodes that hold the set of prefer_gpu_topology "strong", each by its
+// best set (bestOnNUMANode). Smaller is better, row by row:
+//  0. fewer GPUs in error in the set;
+//  1. fewer narrow GPUs in the set;
+//  2. fewer GPUs of unknown width in the set, so unknown ranks between full and narrow (gpuWidth);
+//  3. fewer free healthy GPUs on the node: the fullest node that holds the set, as row 3 of
+//     packingKey;
+//  4. fewer allocatable healthy slots on the node, as row 4 of packingKey;
+//  5. the lower node number.
+//
+// Rows 3 and 4 count as numaLayout does: healthy GPUs with a known NUMA node.
+type strongNodeKey [6]int
+
+func compareStrongNodeKeys(a, b strongNodeKey) int {
+	for i := range a {
+		if a[i] != b[i] {
+			return cmpInt(a[i], b[i])
+		}
+	}
+	return 0
+}
+
+// selectOnOneNUMANode chooses the set of prefer_gpu_topology "strong": n free GPUs of one NUMA
+// node, the best set of the node with the smallest strongNodeKey among the nodes with n free GPUs
+// with a known NUMA node. The fitting policy and the packing switch do not change it. Without such
+// a node it chooses nothing and says why; the fit (holdsOnOneNUMANode) admits only agents with
+// one.
+func selectOnOneNUMANode(in gpuSelectionInput, n int, xids map[string]bool) gpuChoice {
+	layout := newNUMALayout(rankGPUs(in.free, in.topology, xids), rankGPUs(in.allocatable, in.topology, xids))
+	var best gpuChoice
+	var bestKey strongNodeKey
+	for node, devices := range freeByNUMA(in) {
+		if len(devices) < n {
+			continue
+		}
+		set, worst := bestOnNUMANode(rankGPUs(devices, in.topology, xids), in.topology, n)
+		key := strongNodeKey{3: len(layout.free[node]), 4: layout.capacity[node], 5: node}
+		var faulty []device.Device
+		for _, d := range set {
+			if gpuInError(in.topology, d, xids) {
+				key[0]++
+				faulty = append(faulty, d)
+			}
+			switch in.topology.gpuWidth(d.ID) {
+			case widthNarrow:
+				key[1]++
+			case widthUnknown:
+				key[2]++
+			}
+		}
+		if best.devices == nil || compareStrongNodeKeys(key, bestKey) < 0 {
+			rule := fmt.Sprintf("GPU topology preference strong; NUMA node %d; %s", node, worst)
+			if len(faulty) > 0 {
+				rule += "; in error: " + idList(faulty)
+			}
+			best, bestKey = gpuChoice{devices: set, rule: rule, worstPair: worst}, key
+		}
+	}
+	if best.devices != nil {
+		return best
+	}
+	if reason := topologyUnknownReason(in.topology); reason != "" {
+		return gpuChoice{mapOrder: "topology unknown: " + reason}
+	}
+	return gpuChoice{mapOrder: fmt.Sprintf("no NUMA node has %d free GPUs", n)}
+}
+
+// bestOnNUMANode returns the best set of n of one NUMA node's free GPUs, sorted by ID, with its
+// worst pair described: by prefer_gpu_topology's set key (GPUs in error, then the pair ranks worst
+// first, then the lowest IDs) when a free pair of the node is rankable and there are at most
+// maxTopologySets sets; otherwise GPUs in error last, then the lowest IDs.
+func bestOnNUMANode(gpus []rankedGPU, g *gpuTopology, n int) ([]device.Device, string) {
+	if set, worst, _ := selectByTopology(gpus, g, n, nil); set != nil {
+		return set, worst
+	}
+	ordered := slices.Clone(gpus)
+	sort.SliceStable(ordered, func(i, j int) bool { return !ordered[i].faulty && ordered[j].faulty })
+	set := sortedDevices(ordered[:n])
+	return set, g.worstPair(set)
 }
 
 func binomial(n, k int) int {

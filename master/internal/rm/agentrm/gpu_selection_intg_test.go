@@ -16,6 +16,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/rm/tasklist"
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/pkg/aproto"
+	"github.com/determined-ai/determined/master/pkg/device"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
@@ -49,6 +50,14 @@ func ensureTestDB(t *testing.T) {
 
 func newGPUHarness(t *testing.T, f topologyFixture, scheduler *config.SchedulerConfig) *gpuHarness {
 	t.Helper()
+	return newDevicesHarness(t, gpuDeviceList(f.ids...), f.build(), scheduler)
+}
+
+// newDevicesHarness is newGPUHarness for an agent with these devices and this topology.
+func newDevicesHarness(
+	t *testing.T, devices []device.Device, topology *gpuTopology, scheduler *config.SchedulerConfig,
+) *gpuHarness {
+	t.Helper()
 	ensureTestDB(t)
 	poolName := "gpus-" + uuid.NewString()[:8]
 	poolConfig := config.ResourcePoolConfig{
@@ -79,9 +88,9 @@ func newGPUHarness(t *testing.T, f topologyFixture, scheduler *config.SchedulerC
 	)
 	a.mu.Lock()
 	a.agentStarted(&aproto.AgentStarted{
-		Version: "test", ResourcePoolName: poolName, Devices: gpuDeviceList(f.ids...),
+		Version: "test", ResourcePoolName: poolName, Devices: devices,
 	})
-	a.agentState.setGPUTopology(f.build())
+	a.agentState.setGPUTopology(topology)
 	a.started = true
 	a.mu.Unlock()
 	require.NoError(t, agentService.agents.Add(a.id, a))
@@ -97,6 +106,15 @@ func newGPUHarness(t *testing.T, f topologyFixture, scheduler *config.SchedulerC
 func (h *gpuHarness) request(
 	t *testing.T, slots int, pref expconf.GPUTopologyPreference,
 ) *sproto.ResourcesSubscription {
+	t.Helper()
+	_, sub := h.requestWithID(t, slots, pref)
+	return sub
+}
+
+// requestWithID is request that also returns the task's allocation ID.
+func (h *gpuHarness) requestWithID(
+	t *testing.T, slots int, pref expconf.GPUTopologyPreference,
+) (model.AllocationID, *sproto.ResourcesSubscription) {
 	t.Helper()
 	ctx := context.Background()
 	taskID := model.TaskID(uuid.NewString())
@@ -121,7 +139,12 @@ func (h *gpuHarness) request(
 	})
 	require.NoError(t, err)
 	t.Cleanup(sub.Close)
-	return sub
+	return allocationID, sub
+}
+
+// release ends a task: the pool releases its resources.
+func (h *gpuHarness) release(id model.AllocationID) {
+	h.rm.Release(sproto.ResourcesReleased{AllocationID: id, ResourcePool: h.pool})
 }
 
 // allocate requests slots and returns the slot IDs the task gets.

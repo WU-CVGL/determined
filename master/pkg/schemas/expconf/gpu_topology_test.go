@@ -25,15 +25,11 @@ func TestGPUTopologyPreferenceJSON(t *testing.T) {
 	// true must never silently mean one of the modes.
 	for _, text := range []string{`true`, `"off"`, `"true"`, `1`, `{}`} {
 		var p GPUTopologyPreference
-		require.ErrorContains(t, json.Unmarshal([]byte(text), &p),
-			`prefer_gpu_topology must be false or "soft"`, text)
+		require.EqualError(t, json.Unmarshal([]byte(text), &p),
+			`prefer_gpu_topology must be false, "soft" or "strong", not `+text, text)
 	}
 	_, err := json.Marshal(GPUTopologyPreference("bogus"))
 	require.Error(t, err)
-
-	require.Empty(t, GPUTopologySoft.Validate())
-	require.Empty(t, GPUTopologyOff.Validate())
-	require.Len(t, GPUTopologyStrong.Validate(), 1)
 }
 
 func TestResourcesConfigPreferGPUTopology(t *testing.T) {
@@ -52,6 +48,8 @@ func TestResourcesConfigPreferGPUTopology(t *testing.T) {
 
 	require.NoError(t, json.Unmarshal([]byte(`{"prefer_gpu_topology": "soft"}`), &r))
 	require.Equal(t, GPUTopologySoft, r.GPUTopology())
+	require.NoError(t, json.Unmarshal([]byte(`{"prefer_gpu_topology": "strong"}`), &r))
+	require.Equal(t, GPUTopologyStrong, r.GPUTopology())
 	require.Error(t, json.Unmarshal([]byte(`{"prefer_gpu_topology": true}`), &r))
 
 	// An explicit false wins over a template's soft; an invariant config policy, merged over the
@@ -68,4 +66,16 @@ func TestResourcesConfigPreferGPUTopology(t *testing.T) {
 	copied := schemas.Copy(template)
 	require.Equal(t, GPUTopologySoft, copied.GPUTopology())
 	require.NotSame(t, template.RawPreferGPUTopology, copied.RawPreferGPUTopology)
+
+	// The same for a template's strong.
+	strong := ResourcesConfigV0{RawPreferGPUTopology: ptrs.Ptr(GPUTopologyStrong)}
+	require.Equal(t, GPUTopologyOff, schemas.Merge(user, strong).GPUTopology())
+	require.Equal(t, GPUTopologyStrong, schemas.Merge(ResourcesConfigV0{}, strong).GPUTopology())
+	require.Equal(t, GPUTopologySoft, schemas.Merge(template, strong).GPUTopology())
+	copied = schemas.Copy(strong)
+	require.Equal(t, GPUTopologyStrong, copied.GPUTopology())
+	require.NotSame(t, strong.RawPreferGPUTopology, copied.RawPreferGPUTopology)
+	raw, err = json.Marshal(schemas.WithDefaults(strong))
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"prefer_gpu_topology":"strong"`)
 }

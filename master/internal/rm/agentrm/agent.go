@@ -659,6 +659,12 @@ func (a *agent) HandleIncomingWebsocketMessage(msg *aproto.MasterMessage) {
 		a.agentState.setGPUTopology(newGPUTopology(
 			msg.AgentStarted.GPUTopology, msg.AgentStarted.Devices, msg.AgentStarted.Version, a.syslog,
 		))
+		if a.started {
+			// A fresh agent told the pool in agentStarted. An agent restored from its snapshot told
+			// it on reconnect, before its topology arrived: tasks with prefer_gpu_topology "strong"
+			// wait for it.
+			a.notifyListeners()
+		}
 
 		a.started = true
 
