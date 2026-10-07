@@ -292,12 +292,12 @@ func TestSimulationChoosesTheLiveDevices(t *testing.T) {
 				FittingRequirements: sproto.FittingRequirements{SingleAgent: true},
 			}
 			before := freeDeviceIDs(copies["a"])
-			fits := findFits(req, copies, BestFit, false)
+			fits := findFits(req, copies, BestFit, false, policy.packNUMA)
 			require.Len(t, fits, 1)
 			p.addTaskToAgents(req, fits)
 			planned := idsMinus(before, freeDeviceIDs(copies["a"]))
 
-			liveFits := findFits(req, live, BestFit, false)
+			liveFits := findFits(req, live, BestFit, false, policy.packNUMA)
 			res, err := live["a"].allocateFreeDevices(n, cproto.NewID(), policy.selection(req, liveFits))
 			require.NoError(t, err)
 			require.Equal(t, planned, deviceIDs(res.devices), "request %d", i)
@@ -348,12 +348,12 @@ func TestPrioritySchedulePassPlansTheLiveDevices(t *testing.T) {
 	simulation := priorityScheduler{gpus: rp.gpuPolicy}
 	sawSoft := false
 	for _, req := range toAllocate {
-		fits := findFits(req, live, rp.fittingMethod, false)
+		fits := findFits(req, live, rp.fittingMethod, false, rp.gpuPolicy.packNUMA)
 		require.Len(t, fits, 1)
 		sel := rp.gpuPolicy.selection(req, fits)
 		sawSoft = sawSoft || sel.preferTopology
 
-		copyFits := findFits(req, copies, rp.fittingMethod, false)
+		copyFits := findFits(req, copies, rp.fittingMethod, false, rp.gpuPolicy.packNUMA)
 		require.Len(t, copyFits, 1)
 		require.Equal(t, fits[0].Agent.id, copyFits[0].Agent.id)
 		before := freeDeviceIDs(copyFits[0].Agent)
@@ -383,8 +383,9 @@ func idsMinus(before, after []device.ID) []int {
 }
 
 func TestFitsDependOnCountsOnly(t *testing.T) {
-	// Packing changes which devices are free, never how many: the fits of two states that differ
-	// only in which devices are free are the same.
+	// Packing changes which devices are free, never how many: for a request without
+	// prefer_gpu_topology, the fits of two states that differ only in which devices are free are the
+	// same, with the pool's gate on too.
 	agentsWith := func(busy ...int) map[aproto.ID]*agentState {
 		out := map[aproto.ID]*agentState{}
 		for _, id := range []aproto.ID{"a", "b"} {
@@ -400,8 +401,8 @@ func TestFitsDependOnCountsOnly(t *testing.T) {
 	}
 	for _, n := range []int{1, 2, 4, 6, 12} {
 		req := &sproto.AllocateRequest{AllocationID: "r", SlotsNeeded: n}
-		x := findFits(req, agentsWith(0, 1), BestFit, false)
-		y := findFits(req, agentsWith(3, 6), BestFit, false)
+		x := findFits(req, agentsWith(0, 1), BestFit, false, true)
+		y := findFits(req, agentsWith(3, 6), BestFit, false, true)
 		require.Equal(t, len(x), len(y), "n=%d", n)
 		for i := range x {
 			require.Equal(t, x[i].Agent.id, y[i].Agent.id)

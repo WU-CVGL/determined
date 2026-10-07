@@ -127,7 +127,7 @@ func (s *strongPool) pass(t *testing.T) (map[string][]int, []model.AllocationID,
 	allocated := map[string][]int{}
 	reserved := false
 	for _, req := range toAllocate {
-		fits := findFits(req, s.live, s.rp.fittingMethod, false)
+		fits := findFits(req, s.live, s.rp.fittingMethod, false, s.policy.packNUMA)
 		if len(fits) == 0 {
 			continue
 		}
@@ -333,9 +333,9 @@ func TestStrongPlanMatchesTheReservations(t *testing.T) {
 		if strongTopology(req) {
 			strongPlanned++
 		}
-		fits := findFits(req, s.live, s.rp.fittingMethod, false)
+		fits := findFits(req, s.live, s.rp.fittingMethod, false, s.policy.packNUMA)
 		require.Len(t, fits, 1)
-		copyFits := findFits(req, copies, s.rp.fittingMethod, false)
+		copyFits := findFits(req, copies, s.rp.fittingMethod, false, s.policy.packNUMA)
 		require.Len(t, copyFits, 1)
 		require.Equal(t, fits[0].Agent.id, copyFits[0].Agent.id)
 		before := freeDeviceIDs(copyFits[0].Agent)

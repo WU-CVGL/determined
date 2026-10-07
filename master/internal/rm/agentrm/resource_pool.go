@@ -427,6 +427,7 @@ func (rp *resourcePool) allocateResources(req *sproto.AllocateRequest) reservati
 		rp.agentStatesCache,
 		rp.fittingMethod,
 		rp.config.Scheduler.AllowHeterogeneousFits,
+		rp.gpuPolicy.packNUMA,
 	)
 
 	if len(fits) == 0 {

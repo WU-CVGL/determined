@@ -368,8 +368,9 @@ entirely. For more on scheduling behavior in Determined, see :ref:`scheduling`.
    ranks, with fewer GPUs in error first and ties to the lowest IDs; when it does not rank (an
    unknown topology, every pair of free GPUs unknown, more than 20000 sets), it also takes free GPUs
    in no particular order. A task with ``"strong"`` still gets the set of one NUMA node. It never
-   changes which agent a task gets or how many slots, and it has no effect under ``worst``. Dynamic
-   pool specs accept it as well.
+   changes how many slots a task gets, and it has no effect under ``worst``. It changes which agent
+   a task gets only for ``"soft"``, which in a pool that packs prefers an agent where one NUMA node
+   has the task's slots free; ``false`` turns that off too. Dynamic pool specs accept it as well.
 
    Packing applies to every task with 1 or more slots and reads the NUMA node that each agent
    reports for its GPUs (:ref:`GPU topology <agent-gpu-topology>`). Among the free GPUs, a task gets
