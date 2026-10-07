@@ -5503,7 +5503,7 @@ export interface V1GetWorkspacesWithDefaultNamespaceBindingsResponse {
     workspaceIds?: Array<number>;
 }
 /**
- * GpuHealth is a GPU's health from what the agent measured at its last start.   - GPU_HEALTH_UNSPECIFIED: Unknown: no report, NVML did not run, or the link width is unknown.  - GPU_HEALTH_OK: No NVML error, and the link width was at its maximum at agent start.  - GPU_HEALTH_LINK_BELOW_MAX: The link width was below its maximum at agent start.  - GPU_HEALTH_ERROR: An NVML health call failed at agent start.
+ * GpuHealth is a GPU's health from what the agent measured at its last start and the GPU's recent critical XIDs.   - GPU_HEALTH_UNSPECIFIED: Unknown: no report, NVML did not run, or the link width is unknown.  - GPU_HEALTH_OK: No NVML error, no recent critical XID, and the link width was at its maximum at agent start.  - GPU_HEALTH_LINK_BELOW_MAX: The link width was below its maximum at agent start.  - GPU_HEALTH_ERROR: An NVML health call failed at agent start, or the GPU has a recent critical XID.
  * @export
  * @enum {string}
  */
@@ -5586,6 +5586,12 @@ export interface V1GpuInfo {
      * @memberof V1GpuInfo
      */
     excluded: boolean;
+    /**
+     * The critical XIDs that the cluster's DCGM-Exporter reported for the GPU in the last 24 hours, by code.
+     * @type {Array<V1GpuXid>}
+     * @memberof V1GpuInfo
+     */
+    recentXids?: Array<V1GpuXid>;
 }
 /**
  * GpuLink describes one pair of GPUs of an agent.
@@ -5709,7 +5715,7 @@ export const V1GpuP2pStatus = {
 } as const
 export type V1GpuP2pStatus = ValueOf<typeof V1GpuP2pStatus>
 /**
- * GpuTopology is what an agent measured with NVML when it started.
+ * GpuTopology is what an agent measured with NVML when it started, and the GPUs' recent critical XIDs from the master's Prometheus.
  * @export
  * @interface V1GpuTopology
  */
@@ -5744,7 +5750,62 @@ export interface V1GpuTopology {
      * @memberof V1GpuTopology
      */
     links: Array<V1GpuLink>;
+    /**
+     * The result of the master's query for recent critical XIDs. Agent enable and disable responses never query: they carry the last result, or unspecified before the first query.
+     * @type {V1GpuXidQueryStatus}
+     * @memberof V1GpuTopology
+     */
+    xidQueryStatus?: V1GpuXidQueryStatus;
+    /**
+     * Why the query failed, or empty.
+     * @type {string}
+     * @memberof V1GpuTopology
+     */
+    xidQueryError?: string;
+    /**
+     * When the master queried, by the master's clock.
+     * @type {Date | DateString}
+     * @memberof V1GpuTopology
+     */
+    xidQueriedAt?: Date | DateString;
 }
+/**
+ * GpuXid is one critical XID code that a GPU reported recently.
+ * @export
+ * @interface V1GpuXid
+ */
+export interface V1GpuXid {
+    /**
+     * The XID code.
+     * @type {number}
+     * @memberof V1GpuXid
+     */
+    xid: number;
+    /**
+     * The end of the first 5-minute query window that saw the code. The XID happened before it, not at it.
+     * @type {Date | DateString}
+     * @memberof V1GpuXid
+     */
+    firstObserved: Date | DateString;
+    /**
+     * The end of the last 5-minute query window that saw the code.
+     * @type {Date | DateString}
+     * @memberof V1GpuXid
+     */
+    lastObserved: Date | DateString;
+}
+/**
+ * GpuXidQueryStatus is the result of the master's Prometheus query for recent critical XIDs.   - GPU_XID_QUERY_STATUS_UNSPECIFIED: Not queried.  - GPU_XID_QUERY_STATUS_NOT_CONFIGURED: The master has no Prometheus (integrations.task_resources).  - GPU_XID_QUERY_STATUS_OK: The query succeeded. No XID can also mean that the exporter does not report the GPU.  - GPU_XID_QUERY_STATUS_FAILED: The query failed or timed out.
+ * @export
+ * @enum {string}
+ */
+export const V1GpuXidQueryStatus = {
+    UNSPECIFIED: 'GPU_XID_QUERY_STATUS_UNSPECIFIED',
+    NOTCONFIGURED: 'GPU_XID_QUERY_STATUS_NOT_CONFIGURED',
+    OK: 'GPU_XID_QUERY_STATUS_OK',
+    FAILED: 'GPU_XID_QUERY_STATUS_FAILED',
+} as const
+export type V1GpuXidQueryStatus = ValueOf<typeof V1GpuXidQueryStatus>
 /**
  * 
  * @export

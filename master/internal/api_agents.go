@@ -11,6 +11,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/api"
 	"github.com/determined-ai/determined/master/internal/authz"
 	"github.com/determined-ai/determined/master/internal/cluster"
+	"github.com/determined-ai/determined/master/internal/gpuhealth"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
 	"github.com/determined-ai/determined/master/internal/rm/rmerrors"
 	"github.com/determined-ai/determined/master/pkg/model"
@@ -44,6 +45,7 @@ func (a *apiServer) GetAgents(
 	}
 
 	// PERF: can perhaps be done before RBAC.
+	withTopology := false
 	for _, agent := range resp.Agents {
 		if agent.SlotStats == nil {
 			agent.SlotStats = model.SummarizeSlots(agent.Slots)
@@ -51,11 +53,17 @@ func (a *apiServer) GetAgents(
 		if req.ExcludeSlots {
 			agent.Slots = nil
 			agent.GpuTopology = nil
-		} else {
-			classifyGPUHealth(agent.GpuTopology)
 		}
 		if req.ExcludeContainers {
 			agent.Containers = nil
+		}
+		withTopology = withTopology || agent.GpuTopology != nil
+	}
+	// Only a topology left after obfuscation and exclude_slots queries the recent XIDs.
+	if withTopology {
+		xids := a.m.gpuXIDs().Get(ctx)
+		for _, agent := range resp.Agents {
+			gpuhealth.Apply(agent.GpuTopology, xids)
 		}
 	}
 
@@ -85,37 +93,10 @@ func (a *apiServer) GetAgent(
 			return nil, err
 		}
 	}
-	classifyGPUHealth(resp.Agent.GetGpuTopology())
+	if topo := resp.Agent.GetGpuTopology(); topo != nil {
+		gpuhealth.Apply(topo, a.m.gpuXIDs().Get(ctx))
+	}
 	return resp, nil
-}
-
-// classifyGPUHealth sets the health of every GPU of an agent. The first matching row wins:
-//   - ERROR: an NVML health call failed at the agent's last start;
-//   - LINK_BELOW_MAX: at agent start, the current and maximum link widths were both known and
-//     current < max;
-//   - OK: the topology is known, and at agent start both widths were known and equal;
-//   - UNKNOWN (unspecified): anything else.
-//
-// The link generation never changes the state, and an excluded GPU gets its own state by the same
-// rules. It is the only place the state is computed, so the CLI and the WebUI never disagree.
-func classifyGPUHealth(topo *agentv1.GpuTopology) {
-	if topo == nil {
-		return
-	}
-	known := topo.UnknownReason == ""
-	for _, g := range topo.Gpus {
-		widthsKnown := g.PcieLinkWidth > 0 && g.PcieLinkWidthMax > 0
-		switch {
-		case g.NvmlError != "":
-			g.Health = agentv1.GpuHealth_GPU_HEALTH_ERROR
-		case widthsKnown && g.PcieLinkWidth < g.PcieLinkWidthMax:
-			g.Health = agentv1.GpuHealth_GPU_HEALTH_LINK_BELOW_MAX
-		case known && widthsKnown && g.PcieLinkWidth == g.PcieLinkWidthMax:
-			g.Health = agentv1.GpuHealth_GPU_HEALTH_OK
-		default:
-			g.Health = agentv1.GpuHealth_GPU_HEALTH_UNSPECIFIED
-		}
-	}
 }
 
 func (a *apiServer) GetSlots(
@@ -189,8 +170,8 @@ func (a *apiServer) canUpdateAgents(ctx context.Context) error {
 // gpuTopologyForUser prepares the GPU topology of an agent enable or disable response. Updating
 // agents and viewing sensitive agent information are separate permissions, and GPU UUIDs and bus
 // ids are sensitive (authz.ObfuscateAgent): a user without that permission gets no topology, as
-// from GetAgents and GetAgent. Otherwise the health is classified. The rest of these responses is
-// left as it was.
+// from GetAgents and GetAgent. Otherwise the health is classified with the last XID result, if
+// any: these responses never query Prometheus. The rest of these responses is left as it was.
 func (a *apiServer) gpuTopologyForUser(ctx context.Context, agent *agentv1.Agent) error {
 	if agent.GetGpuTopology() == nil {
 		return nil
@@ -206,7 +187,7 @@ func (a *apiServer) gpuTopologyForUser(ctx context.Context, agent *agentv1.Agent
 	case permErr != nil:
 		agent.GpuTopology = nil
 	default:
-		classifyGPUHealth(agent.GpuTopology)
+		gpuhealth.Apply(agent.GpuTopology, a.m.gpuXIDs().Peek())
 	}
 	return nil
 }

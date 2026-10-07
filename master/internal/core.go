@@ -47,6 +47,7 @@ import (
 	detContext "github.com/determined-ai/determined/master/internal/context"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/elastic"
+	"github.com/determined-ai/determined/master/internal/gpuhealth"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
 	"github.com/determined-ai/determined/master/internal/job/jobservice"
 	"github.com/determined-ai/determined/master/internal/license"
@@ -119,6 +120,10 @@ type Master struct {
 
 	trialLogBackend TrialLogBackend
 	taskLogBackend  TaskLogBackend
+
+	// xidCache holds the GPUs' recent critical XIDs; gpuXIDs builds it on first use.
+	xidCache     *gpuhealth.XIDCache
+	xidCacheOnce sync.Once
 }
 
 // New creates an instance of the Determined master.

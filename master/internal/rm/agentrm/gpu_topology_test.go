@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/determined-ai/determined/master/internal/gpuhealth"
 	"github.com/determined-ai/determined/master/pkg/aproto"
 	"github.com/determined-ai/determined/master/pkg/device"
 	"github.com/determined-ai/determined/proto/pkg/agentv1"
@@ -164,6 +165,46 @@ func TestSummarizeReportsGPUTopology(t *testing.T) {
 
 	// Before the AgentStarted, no agent state and so no topology.
 	require.Nil(t, (&agent{id: "agent"}).summarize().GPUTopology)
+}
+
+// The per-GPU health for GPU selection: the agent's report and the XIDs, by device ID.
+func TestAgentStateGPUHealth(t *testing.T) {
+	devices := cudaSlots("GPU-a", "GPU-b", "GPU-c", "GPU-d")
+	state := stateWithSlots(devices)
+	// Restored from the snapshot, before the AgentStarted: unknown, but XIDs join by UUID.
+	observed := time.Date(2026, 10, 7, 12, 30, 0, 0, time.UTC)
+	xids := &gpuhealth.XIDSnapshot{
+		Status:    agentv1.GpuXidQueryStatus_GPU_XID_QUERY_STATUS_OK,
+		QueriedAt: observed,
+		ByUUID: map[string][]gpuhealth.XID{
+			"GPU-b": {{Code: 79, FirstObserved: observed, LastObserved: observed}},
+			"GPU-c": {{Code: 13, FirstObserved: observed, LastObserved: observed}},
+			"GPU-x": {{Code: 48, FirstObserved: observed, LastObserved: observed}},
+		},
+	}
+	require.Equal(t, map[device.ID]agentv1.GpuHealth{
+		0: agentv1.GpuHealth_GPU_HEALTH_UNSPECIFIED,
+		1: agentv1.GpuHealth_GPU_HEALTH_ERROR,
+		2: agentv1.GpuHealth_GPU_HEALTH_UNSPECIFIED,
+		3: agentv1.GpuHealth_GPU_HEALTH_UNSPECIFIED,
+	}, state.gpuHealth(xids))
+
+	state.setGPUTopology(newGPUTopology(&aproto.GPUTopology{
+		GPUs: []aproto.GPUInfo{
+			{UUID: "GPU-a", PCIeLinkWidth: 16, PCIeLinkWidthMax: 16},
+			{UUID: "GPU-b", PCIeLinkWidth: 16, PCIeLinkWidthMax: 16},
+			{UUID: "GPU-c", PCIeLinkWidth: 16, PCIeLinkWidthMax: 16},
+			{UUID: "GPU-d", PCIeLinkWidth: 16, PCIeLinkWidthMax: 16, NVMLError: "GetPciInfo: ERROR_UNKNOWN (999)"},
+			{UUID: "GPU-x", PCIeLinkWidth: 16, PCIeLinkWidthMax: 16, Excluded: true},
+		},
+	}, devices, "0.42.0", testGPULog))
+	ok := agentv1.GpuHealth_GPU_HEALTH_OK
+	failed := agentv1.GpuHealth_GPU_HEALTH_ERROR
+	require.Equal(t, map[device.ID]agentv1.GpuHealth{0: ok, 1: failed, 2: ok, 3: failed},
+		state.gpuHealth(xids), "XID 13 never counts; the excluded GPU is not a slot")
+	require.Equal(t, map[device.ID]agentv1.GpuHealth{0: ok, 1: ok, 2: ok, 3: failed}, state.gpuHealth(nil))
+
+	require.Empty(t, stateWithSlots(nil).gpuHealth(xids))
 }
 
 // stateWithSlots returns an agent state with the given devices as slots, as agentStarted builds it.

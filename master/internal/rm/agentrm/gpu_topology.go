@@ -7,6 +7,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"github.com/determined-ai/determined/master/internal/gpuhealth"
 	"github.com/determined-ai/determined/master/pkg/aproto"
 	"github.com/determined-ai/determined/master/pkg/device"
 	"github.com/determined-ai/determined/master/pkg/protoutils"
@@ -142,7 +143,7 @@ func newGPUTopology(
 // gpuTopologyProto assembles the agent's GPU topology for the API: one entry per CUDA slot, with
 // device_id and uuid from the slots, so the shape is the same when the topology is unknown; then
 // the excluded GPUs, also when the topology is unknown. It is nil only for agents with neither
-// CUDA slots nor excluded GPUs. Health is left to the API layer (classifyGPUHealth).
+// CUDA slots nor excluded GPUs. Health is left to gpuhealth.Apply.
 func (a *agentState) gpuTopologyProto() *agentv1.GpuTopology {
 	var slots []device.Device
 	slotOf := map[string]device.ID{}
@@ -239,6 +240,25 @@ func (a *agentState) gpuTopologyProto() *agentv1.GpuTopology {
 		out.Links = append(out.Links, gpuLinkProto(deviceOf(l.UUIDA), deviceOf(l.UUIDB), l))
 	}
 	return out
+}
+
+// gpuHealth returns the health of each CUDA slot by device ID, classified as in the agent API
+// (gpuhealth.Apply): from the agent's last report and xids, the result of gpuhealth.XIDCache.Peek,
+// which never queries Prometheus (nil: no XIDs). GPU selection reads per-GPU health here, so that
+// it can rank the slots in GPU_HEALTH_ERROR last. An excluded GPU is not a slot and has no entry.
+func (a *agentState) gpuHealth(xids *gpuhealth.XIDSnapshot) map[device.ID]agentv1.GpuHealth {
+	health := map[device.ID]agentv1.GpuHealth{}
+	topo := a.gpuTopologyProto()
+	if topo == nil {
+		return health
+	}
+	gpuhealth.Apply(topo, xids)
+	for _, g := range topo.Gpus {
+		if !g.Excluded {
+			health[device.ID(g.DeviceId)] = g.Health
+		}
+	}
+	return health
 }
 
 func gpuInfoProto(deviceID int32, uuid string, info aproto.GPUInfo, excluded bool) *agentv1.GpuInfo {
