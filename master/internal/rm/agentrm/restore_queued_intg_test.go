@@ -240,7 +240,10 @@ func detach(t *testing.T, ids ...model.AllocationID) {
 // reattaches the running task, keeps the waiting one queued, and starts it on the slot once the
 // running task ends.
 func TestQueuedAllocationStaysQueuedAcrossMasterRestart(t *testing.T) {
-	owner := db.RequireMockUser(t, db.SingleDB())
+	database, dropDB := db.MustResolveNewPostgresDatabase(t)
+	t.Cleanup(dropDB)
+	db.MustMigrateTestPostgres(t, database, "file://../../../static/migrations", "up")
+	owner := db.RequireMockUser(t, database)
 	poolName := "restore-" + uuid.NewString()[:8]
 	agentID := aproto.ID(poolName + "-agent")
 	agentStarted := func(reattached ...aproto.ContainerReattachAck) *aproto.AgentStarted {

@@ -57,6 +57,13 @@ func (s stoppingMasterAllocations) StartAllocation(
 // A shell that waits for resources when the master stops still waits after the master restarts,
 // with its allocation, job, submission time, and priority, and starts when it gets resources.
 func TestRestoreQueuedShell(t *testing.T) {
+	// The restore picks up every command in the database that has not ended.
+	newDB, dropDB := internaldb.MustResolveNewPostgresDatabase(t)
+	t.Cleanup(func() {
+		internaldb.MustResolveTestPostgres(t) // the package's other tests use its database
+		dropDB()
+	})
+	internaldb.MustMigrateTestPostgres(t, newDB, "file://../../static/migrations")
 	pgDB := setupTest(t)
 	allocations := task.DefaultService
 	task.DefaultService = stoppingMasterAllocations{allocations}
