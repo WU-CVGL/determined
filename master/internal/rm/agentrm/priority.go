@@ -20,8 +20,8 @@ type priorityScheduler struct {
 	allowHeterogeneousFits bool
 	// gpus is the pool's GPU selection for the pass that Schedule runs. The simulation selects
 	// devices on its copies with it, and its fits order the agents with its packNUMA, as the pass's
-	// live reservations do; deepCopy says when both choose the same devices. Its zero value takes a
-	// plain task's devices in map order.
+	// live reservations do; deepCopy says when both agree. Its zero value takes a plain task's
+	// devices in map order.
 	gpus gpuPolicy
 }
 

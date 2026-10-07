@@ -96,6 +96,32 @@ func TestSoftPrefersAnAgentWithAOneNodeBlock(t *testing.T) {
 	require.Equal(t, aproto.ID("b"), agentUnder(t, topologyRequest("r", 4, soft), agents, BestFit, true))
 }
 
+func TestSoftAgentChoiceGivesNoOneNodeSet(t *testing.T) {
+	// GPUs 0 to 4 free and GPU 0 in error, by an NVML error or a recent critical XID: the choice
+	// counts GPU 0, so NUMA node 0 holds 4 GPUs, but soft 4 still ranks fewer GPUs in error first and
+	// gets 1 to 4, across NUMA nodes. Strong gets node 0's set, 0 to 3.
+	nvml := node02
+	nvml.nvmlError = map[int]bool{0: true}
+	for name, c := range map[string]struct {
+		fixture topologyFixture
+		policy  gpuPolicy
+	}{
+		"NVML error": {nvml, gpuPolicy{packNUMA: true}},
+		"XID":        {node02, gpuPolicy{packNUMA: true, xids: map[string]bool{gpuDevice(0).UUID: true}}},
+	} {
+		for mode, want := range map[expconf.GPUTopologyPreference][]int{soft: {1, 2, 3, 4}, strong: {0, 1, 2, 3}} {
+			agents := choiceAgents(choiceAgent(t, "a", c.fixture, 5, 6, 7))
+			req := topologyRequest("r", 4, mode)
+			fits := fitsUnder(req, agents, BestFit, c.policy.packNUMA)
+			require.Len(t, fits, 1, "%s, %s", name, mode)
+			require.Equal(t, mode == soft, fits[0].OneNUMANode, "%s, %s", name, mode)
+			res, err := fits[0].Agent.allocateFreeDevices(4, cproto.NewID(), c.policy.selection(req, fits))
+			require.NoError(t, err, "%s, %s", name, mode)
+			require.Equal(t, want, deviceIDs(res.devices), "%s, %s", name, mode)
+		}
+	}
+}
+
 func TestSoftAgentChoiceWithEqualCounts(t *testing.T) {
 	// Both agents with a one-node block: BestFit takes the fuller one.
 	agents := choiceAgents(
@@ -314,9 +340,14 @@ func TestSoftAgentChoiceInAPass(t *testing.T) {
 	}
 }
 
-func TestFairShareAgentChoiceUnchanged(t *testing.T) {
-	// The fair-share scheduler checks only whether a request fits; the gate never changes which
-	// requests it starts or releases. The reservation then chooses the agent.
+func TestFairShareRequestsUnchangedByAgentPreference(t *testing.T) {
+	// Schedule()'s output for the same snapshot, the requests to allocate, is the same with the gate
+	// on and off: the fair-share scheduler only checks whether a request fits, so its demand, quotas
+	// and request list do not change. Every request is pending, so the empty release list is not a
+	// check of release behavior. The reservations are not checked: they run one by one, and the
+	// agent choice changes the free counts that later requests see, so which requests actually
+	// start can change. With soft 4 then plain 6 on agents with 2+3 and 3+4 free, the preference
+	// puts the soft task on the 3+4 agent, and the plain 6 no longer fits.
 	for trial := 0; trial < 50; trial++ {
 		rng := rand.New(rand.NewSource(int64(trial))) //nolint:gosec
 		var tasks []*MockTask
@@ -331,7 +362,7 @@ func TestFairShareAgentChoiceUnchanged(t *testing.T) {
 			tasks = append(tasks, &MockTask{ID: id, SlotsNeeded: 1 + rng.Intn(5), Group: groups[i%3]})
 			modes[id] = []expconf.GPUTopologyPreference{"", soft, strong}[rng.Intn(3)]
 		}
-		var outcomes [2][2][]model.AllocationID
+		var outcomes [2][]model.AllocationID
 		for g, gate := range []bool{false, true} {
 			rp := setupResourcePool(t, nil, nil, tasks, groups, nil)
 			t.Cleanup(rp.stop)
@@ -357,13 +388,12 @@ func TestFairShareAgentChoiceUnchanged(t *testing.T) {
 			rp.gpuPolicy = gpuPolicy{packNUMA: gate}
 			toAllocate, toRelease := rp.scheduler.Schedule(rp)
 			rp.mu.Unlock()
+			require.Empty(t, toRelease, "trial %d", trial)
 			for _, req := range toAllocate {
-				outcomes[g][0] = append(outcomes[g][0], req.AllocationID)
+				outcomes[g] = append(outcomes[g], req.AllocationID)
 			}
-			outcomes[g][1] = toRelease
 		}
-		require.ElementsMatch(t, outcomes[0][0], outcomes[1][0], "trial %d", trial)
-		require.ElementsMatch(t, outcomes[0][1], outcomes[1][1], "trial %d", trial)
+		require.ElementsMatch(t, outcomes[0], outcomes[1], "trial %d", trial)
 	}
 }
 

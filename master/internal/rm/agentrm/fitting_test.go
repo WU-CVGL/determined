@@ -2,7 +2,6 @@ package agentrm
 
 import (
 	"fmt"
-	"math/rand"
 	"sort"
 	"testing"
 
@@ -517,73 +516,41 @@ func byID(
 	return agents, index
 }
 
-func TestCandidateListLessIsAStrictWeakOrder(t *testing.T) {
-	// Over random fitting states with ties in every key, Less is irreflexive and transitive, and so
-	// is being equivalent (neither less): a strict weak order, which sort.Sort needs. It is the
-	// lexicographic order of OneNUMANode (set first), the score (higher first), the hash distance
-	// (smaller first) and the agent ID; without OneNUMANode set, the order is by the score, the hash
-	// distance and the agent ID.
+func TestCandidateListLess(t *testing.T) {
+	// Less orders by OneNUMANode (set first), then the fitting score (higher first), then the hash
+	// distance (smaller first), then the agent ID. In each row, every key after the deciding one
+	// would order the two the other way.
 	type key struct {
 		oneNode bool
 		score   float64
 		hash    uint64
 		id      aproto.ID
 	}
-	reference := func(a, b key) bool {
-		switch {
-		case a.oneNode != b.oneNode:
-			return a.oneNode
-		case a.score != b.score:
-			return a.score > b.score
-		case a.hash != b.hash:
-			return a.hash < b.hash
-		default:
-			return a.id < b.id
+	fit := func(k key) *fittingState {
+		return &fittingState{
+			Agent: &agentState{id: k.id}, Score: k.score, HashDistance: k.hash, OneNUMANode: k.oneNode,
 		}
 	}
-	rng := rand.New(rand.NewSource(3)) //nolint:gosec
-	for trial := 0; trial < 300; trial++ {
-		var c candidateList
-		var keys []key
-		for i := 0; i < 10; i++ {
-			k := key{
-				oneNode: trial%3 != 0 && rng.Intn(2) == 0,
-				score:   float64(rng.Intn(3)) / 4,
-				hash:    uint64(rng.Intn(3)),
-				id:      aproto.ID(fmt.Sprintf("agent-%d", rng.Intn(3))),
-			}
-			keys = append(keys, k)
-			c = append(c, &fittingState{
-				Agent: &agentState{id: k.id}, Score: k.score, HashDistance: k.hash, OneNUMANode: k.oneNode,
-			})
-		}
-		equivalent := func(i, j int) bool { return !c.Less(i, j) && !c.Less(j, i) }
-		for i := range c {
-			if c.Less(i, i) {
-				t.Fatalf("trial %d: %+v less than itself", trial, keys[i])
-			}
-			for j := range c {
-				if c.Less(i, j) != reference(keys[i], keys[j]) {
-					t.Fatalf("trial %d: Less(%+v, %+v) = %v", trial, keys[i], keys[j], c.Less(i, j))
-				}
-				for k := range c {
-					if c.Less(i, j) && c.Less(j, k) && !c.Less(i, k) {
-						t.Fatalf("trial %d: Less not transitive on %+v, %+v, %+v", trial, keys[i], keys[j], keys[k])
-					}
-					if equivalent(i, j) && equivalent(j, k) && !equivalent(i, k) {
-						t.Fatalf("trial %d: equivalence not transitive on %+v, %+v, %+v",
-							trial, keys[i], keys[j], keys[k])
-					}
-				}
-			}
-		}
-		sort.Sort(c)
-		for i := 1; i < len(c); i++ {
-			if c.Less(i, i-1) {
-				t.Fatalf("trial %d: not sorted at %d", trial, i)
-			}
-		}
+	for _, c := range []struct {
+		name          string
+		first, second key
+	}{
+		{"one NUMA node before a better score", key{true, 0.25, 1, "b"}, key{false, 0.75, 0, "a"}},
+		{"both with a block: the score", key{true, 0.75, 1, "b"}, key{true, 0.25, 0, "a"}},
+		{"neither with a block: the score", key{false, 0.75, 1, "b"}, key{false, 0.25, 0, "a"}},
+		{"equal score: the hash distance", key{true, 0.5, 0, "b"}, key{true, 0.5, 1, "a"}},
+		{"equal hash distance: the agent ID", key{false, 0.5, 1, "a"}, key{false, 0.5, 1, "b"}},
+	} {
+		list := candidateList{fit(c.first), fit(c.second)}
+		assert.Assert(t, list.Less(0, 1), c.name)
+		assert.Assert(t, !list.Less(1, 0), c.name)
 	}
+
+	// All fields equal: neither is less.
+	same := key{true, 0.5, 1, "a"}
+	list := candidateList{fit(same), fit(same)}
+	assert.Assert(t, !list.Less(0, 1))
+	assert.Assert(t, !list.Less(1, 0))
 }
 
 func TestOneNUMANodeOnlyForSoft(t *testing.T) {

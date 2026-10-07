@@ -121,10 +121,10 @@ The following configuration settings are supported:
       or more slots gets the best-ranked set of free GPUs of its agent by P2P, NVLinks, PCIe
       switches, NUMA nodes and PCIe link width, for example ``det cmd run --config resources.slots=4
       --config resources.prefer_gpu_topology=soft 'echo $DET_SLOT_IDS'``. In a pool with NUMA
-      packing, it also prefers an agent where one NUMA node has its slots free: soft may take a
-      pool's emptier agent, including an idle one. With ``"strong"``, it waits until one NUMA node
-      of an agent has its slots free and gets GPUs of that node. See :ref:`prefer_gpu_topology
-      <exp-config-resources-prefer-gpu-topology>`.
+      packing, it also prefers an agent where one NUMA node has as many free GPUs as the task has
+      slots: soft may take a pool's emptier agent, including an idle one. With ``"strong"``, it
+      waits until one NUMA node of an agent has as many free GPUs as the task has slots and gets
+      GPUs of that node. See :ref:`prefer_gpu_topology <exp-config-resources-prefer-gpu-topology>`.
 
 -  ``bind_mounts``: Specifies a collection of directories that are bind-mounted into the Docker
    containers for execution. This can be used to allow commands to access additional data that is

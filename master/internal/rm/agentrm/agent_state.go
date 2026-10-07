@@ -418,16 +418,19 @@ func (a *agentState) freeDevice(d device.Device) {
 // deepCopy returns a copy of agentState for scheduler internals. Each copy gets its own slot
 // states, since the scheduler's simulation frees devices on it. It shares gpuTopology, which is
 // never mutated, only replaced, so the simulation selects GPUs on the copies from the inputs the
-// live reservation reads on the agent. A ranked selection (NUMA packing, "soft" when it ranks,
-// "strong") is deterministic: with the pass's policy and the same placements in the same order on
-// unchanged agents (no preemption, every reservation succeeding), the two choose the same devices
-// while every earlier placement on the agent in the pass ranked too, as under NUMA packing. Map
-// order gives no such guarantee: a map-order placement can make the agent's later choices differ,
-// ranked ones included. Fits use counts only, so a difference never changes which tasks fit, except
-// for prefer_gpu_topology "strong", whose fit counts the free GPUs of each NUMA node; the check
-// after the pass then asks for one more pass (checkStrongRequests). The agent choice of "soft"
-// counts them too, but only under NUMA packing (preferOneNUMANode): with every placement ranked,
-// the copies and the live agents keep the same free GPUs under the conditions above.
+// live reservation reads on the agent.
+//
+// The simulation and the pass's live reservations choose the same agent for each placement, and
+// the same devices for each placement whose own selection is ranked, when the agents' state is
+// unchanged between them (no preemption, every reservation succeeding), the pass's policy is the
+// same (gpuPolicy), placements come in the same order, and every earlier choice in the pass was
+// deterministic: ranked (NUMA packing, "soft" when it ranks, "strong"), not map order. Otherwise
+// later agent choices and which tasks can start may differ. With each agent's free count fixed,
+// whether a plain or "soft" request fits does not depend on the NUMA distribution of its free
+// GPUs; that is no guarantee for the whole pass, since the agent choice of "soft" under NUMA
+// packing (preferOneNUMANode) reads that distribution and changes the free counts that later
+// requests see. The fit of prefer_gpu_topology "strong" reads it too; the check after the pass
+// then asks for one more pass (checkStrongRequests).
 func (a *agentState) deepCopy() *agentState {
 	copiedAgent := &agentState{
 		id:                    a.id,
