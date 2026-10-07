@@ -328,9 +328,9 @@ never changes the state. Green means that there was no NVML error and the link w
 maximum at agent start, and that no recent critical XID was found; it does not mean that the GPU is
 verified to be healthy. Only GPU-side evidence turns a GPU red: a task that fails is no evidence,
 since faulty user code fails the same way. NUMA packing, and ``prefer_gpu_topology: soft`` when it
-ranks, prefer fewer GPUs in error when they choose GPUs inside an agent. Otherwise, as in a pool
-with ``fitting_policy: worst`` or ``numa_packing: false``, and when the selection fails, a task
-takes free GPUs in no particular order, GPUs in error included.
+ranks, prefer fewer GPUs in error when they choose GPUs inside an agent. In a pool with
+``fitting_policy: worst`` or ``numa_packing: false``, a task that ``soft`` does not rank takes free
+GPUs in no particular order, GPUs in error included, as does any task whose selection fails.
 
 The link width is an observation at agent start, not a confirmed fault. A GPU can reduce its link
 width while it is idle, and a link can train to a different width after a reboot. A lower link width
