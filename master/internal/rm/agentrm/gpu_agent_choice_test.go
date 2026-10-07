@@ -96,6 +96,32 @@ func TestSoftPrefersAnAgentWithAOneNodeBlock(t *testing.T) {
 	require.Equal(t, aproto.ID("b"), agentUnder(t, topologyRequest("r", 4, soft), agents, BestFit, true))
 }
 
+func TestSoftAgentChoiceGivesNoOneNodeSet(t *testing.T) {
+	// GPUs 0 to 4 free and GPU 0 in error, by an NVML error or a recent critical XID: the choice
+	// counts GPU 0, so NUMA node 0 holds 4 GPUs, but soft 4 still ranks fewer GPUs in error first and
+	// gets 1 to 4, across NUMA nodes. Strong gets node 0's set, 0 to 3.
+	nvml := node02
+	nvml.nvmlError = map[int]bool{0: true}
+	for name, c := range map[string]struct {
+		fixture topologyFixture
+		policy  gpuPolicy
+	}{
+		"NVML error": {nvml, gpuPolicy{packNUMA: true}},
+		"XID":        {node02, gpuPolicy{packNUMA: true, xids: map[string]bool{gpuDevice(0).UUID: true}}},
+	} {
+		for mode, want := range map[expconf.GPUTopologyPreference][]int{soft: {1, 2, 3, 4}, strong: {0, 1, 2, 3}} {
+			agents := choiceAgents(choiceAgent(t, "a", c.fixture, 5, 6, 7))
+			req := topologyRequest("r", 4, mode)
+			fits := fitsUnder(req, agents, BestFit, c.policy.packNUMA)
+			require.Len(t, fits, 1, "%s, %s", name, mode)
+			require.Equal(t, mode == soft, fits[0].OneNUMANode, "%s, %s", name, mode)
+			res, err := fits[0].Agent.allocateFreeDevices(4, cproto.NewID(), c.policy.selection(req, fits))
+			require.NoError(t, err, "%s, %s", name, mode)
+			require.Equal(t, want, deviceIDs(res.devices), "%s, %s", name, mode)
+		}
+	}
+}
+
 func TestSoftAgentChoiceWithEqualCounts(t *testing.T) {
 	// Both agents with a one-node block: BestFit takes the fuller one.
 	agents := choiceAgents(
