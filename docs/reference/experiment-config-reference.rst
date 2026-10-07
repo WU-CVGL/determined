@@ -1285,8 +1285,10 @@ that ranks first:
    lowest IDs otherwise.
 
 NVLinks count only with usable P2P, link width is not used, and a pair the agent did not report is
-unknown. NVML's ``NODE`` and ``SYS`` are NUMA levels: they are one socket and two sockets only with
-NPS1. Without usable P2P, the ranking uses only the NUMA class and PCIe switches.
+unknown. An NVML error ranks a GPU last, as above; otherwise the ranking reads only the values that
+the agent reported, so a failed NVML query for a pair only leaves that pair unknown. NVML's ``NODE``
+and ``SYS`` are NUMA levels: they are one socket and two sockets only with NPS1. Without usable P2P,
+the ranking uses only the NUMA class and PCIe switches.
 
 The preference is soft: it never waits, never moves running tasks, and never changes the agent the
 scheduler picks or the number of slots. It has no effect on a task with fewer than 2 slots or on
