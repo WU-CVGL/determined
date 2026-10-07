@@ -297,35 +297,35 @@ func TestStrongPlanMatchesTheReservations(t *testing.T) {
 	require.True(t, ok)
 	soft.FittingRequirements.GPUTopology = expconf.GPUTopologySoft
 
-	type selected struct {
-		strong  bool
-		devices []int
-	}
-	var planned []selected
-	restore := replaceSelection(func(in gpuSelectionInput, n int, sel deviceSelection) gpuChoice {
-		c := selectFreeDevices(in, n, sel)
-		planned = append(planned, selected{strong: sel.strong, devices: deviceIDs(c.devices)})
-		return c
-	})
 	s.rp.mu.Lock()
 	s.rp.agentStatesCache = s.live
 	s.rp.gpuPolicy = s.policy
 	toAllocate, toRelease := s.rp.scheduler.Schedule(s.rp)
 	s.rp.mu.Unlock()
-	restore()
 	require.Empty(t, toRelease)
-	require.Len(t, planned, len(toAllocate))
+	require.NotEmpty(t, toAllocate)
+
+	// The simulation (addTaskToAgents) on copies of the agents with the pass's policy plans each
+	// request's GPUs; the live reservation must choose the same.
+	copies := deepCopyAgents(s.live)
+	simulation := priorityScheduler{gpus: s.policy}
 	strongPlanned := 0
-	for i, req := range toAllocate {
-		require.Equal(t, strongTopology(req), planned[i].strong, "request %s", req.AllocationID)
-		if planned[i].strong {
+	for _, req := range toAllocate {
+		if strongTopology(req) {
 			strongPlanned++
 		}
 		fits := findFits(req, s.live, s.rp.fittingMethod, false)
 		require.Len(t, fits, 1)
+		copyFits := findFits(req, copies, s.rp.fittingMethod, false)
+		require.Len(t, copyFits, 1)
+		require.Equal(t, fits[0].Agent.id, copyFits[0].Agent.id)
+		before := freeDeviceIDs(copyFits[0].Agent)
+		require.True(t, simulation.addTaskToAgents(req, copyFits), "request %s", req.AllocationID)
+		planned := idsMinus(before, freeDeviceIDs(copyFits[0].Agent))
+
 		res, err := fits[0].Agent.allocateFreeDevices(fits[0].Slots, cproto.NewID(), s.policy.selection(req, fits))
 		require.NoError(t, err)
-		require.Equal(t, planned[i].devices, deviceIDs(res.devices), "request %s", req.AllocationID)
+		require.Equal(t, planned, deviceIDs(res.devices), "request %s", req.AllocationID)
 		if strongTopology(req) {
 			require.NoError(t, fits[0].Agent.checkOneNUMANode(res.devices))
 		}

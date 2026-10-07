@@ -845,6 +845,16 @@ func TestTopologyPreferenceSubsetCap(t *testing.T) {
 	require.Equal(t, "more than 20000 sets of free GPUs", c.unranked)
 	c = topologySelect(t, f, ids[:16], 8, false)
 	require.Equal(t, intRange(0, 8), deviceIDs(c.devices))
+
+	// With every pair unknown too, the cap is the reason; under the cap, the unknown pairs are.
+	f.level = func(int, int) aproto.GPULinkLevel { return "" }
+	f.p2p = allP2P(p2pUnknown)
+	for _, packNUMA := range []bool{false, true} {
+		c = topologySelect(t, f, ids, 8, packNUMA)
+		require.Equal(t, "more than 20000 sets of free GPUs", c.unranked, "packing %v", packNUMA)
+		c = topologySelect(t, f, ids[:16], 8, packNUMA)
+		require.Equal(t, "every pair of free GPUs unknown", c.unranked, "packing %v", packNUMA)
+	}
 }
 
 func TestTopologyPreferenceEqualsBruteForce(t *testing.T) {

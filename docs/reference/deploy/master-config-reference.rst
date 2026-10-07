@@ -309,9 +309,9 @@ The agent resource manager includes static and dynamic agents.
 ``scheduler``
 -------------
 
-Specifies how Determined schedules tasks to agents on resource pools. If a resource pool is
-specified with an individual scheduler configuration, that will override the default scheduling
-behavior specified here. For more on scheduling behavior in Determined, see :ref:`scheduling`.
+Specifies how Determined schedules tasks to agents on resource pools. A resource pool with its own
+:ref:`scheduler <master-config-pool-scheduler>` does not use this one at all: the pool's replaces it
+entirely. For more on scheduling behavior in Determined, see :ref:`scheduling`.
 
 ``type``
 ^^^^^^^^
@@ -344,8 +344,8 @@ behavior specified here. For more on scheduling behavior in Determined, see :ref
       (:ref:`numa_packing <master-config-numa-packing>`).
 
    -  ``worst``: The worst-fit policy ensures that tasks will be placed on under-utilized agents.
-      Inside the agent, a task takes free GPUs in no particular order, unless it sets
-      ``prefer_gpu_topology``.
+      Inside the agent, a task takes free GPUs in no particular order, unless its
+      ``prefer_gpu_topology`` chooses them.
 
 .. _allow-uneven-slots:
 
@@ -363,9 +363,11 @@ behavior specified here. For more on scheduling behavior in Determined, see :ref
 
    Whether ``fitting_policy: best`` chooses each task's GPUs inside the agent by NUMA node. Defaults
    to ``true``. ``false`` takes free GPUs in no particular order, as ``worst`` does, so GPUs in
-   error are not used last; only a task with :ref:`prefer_gpu_topology
-   <exp-config-resources-prefer-gpu-topology>` still gets a ranked set: with ``"soft"``, GPUs in
-   error last and ties to the lowest IDs; with ``"strong"``, the set of one NUMA node. It never
+   error are not used last. A task with :ref:`prefer_gpu_topology
+   <exp-config-resources-prefer-gpu-topology>` ``"soft"`` still gets a ranked set when ``"soft"``
+   ranks, with fewer GPUs in error first and ties to the lowest IDs; when it does not rank (an
+   unknown topology, every pair of free GPUs unknown, more than 20000 sets), it also takes free GPUs
+   in no particular order. A task with ``"strong"`` still gets the set of one NUMA node. It never
    changes which agent a task gets or how many slots, and it has no effect under ``worst``. Dynamic
    pool specs accept it as well.
 
@@ -394,9 +396,10 @@ behavior specified here. For more on scheduling behavior in Determined, see :ref
 
    An agent whose topology the master does not have, for example right after a master restart until
    the agent reconnects, gives the lowest free IDs, GPUs with a recent critical XID last. Slots
-   without a NUMA node, such as CPU slots, are taken lowest IDs first too. A NUMA node equals a
-   socket only with NPS1: with NPS2 or NPS4, packing can choose GPUs on two sockets while a set on
-   one socket is free.
+   without a NUMA node, such as CPU slots, are taken lowest IDs first too. A selection that fails,
+   which the master logs as an error, takes free GPUs in no particular order; a task with
+   ``prefer_gpu_topology: strong`` waits instead. A NUMA node equals a socket only with NPS1: with
+   NPS2 or NPS4, packing can choose GPUs on two sockets while a set on one socket is free.
 
    A GPU that fails tasks without an NVML error or a critical XID still takes every task whose set
    includes it, restarts included. Leave it out with :ref:`exclude_gpus <agent-exclude-gpus>`: ``det
@@ -871,18 +874,34 @@ When the Kubernetes resource manager is in use, this specifies a `namespace
 <https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/>`__ that tasks in
 this resource pool will be launched into.
 
+.. _master-config-pool-scheduler:
+
 ``scheduler``
 =============
 
-Specifies how Determined schedules tasks to agents. The scheduler configuration on each resource
-pool will override the global one. For more on scheduling behavior in Determined, see
-:ref:`scheduling`.
+Specifies how Determined schedules tasks to agents. For more on scheduling behavior in Determined,
+see :ref:`scheduling`.
+
+A pool without ``scheduler`` uses the global one. A pool's ``scheduler`` replaces the global one
+entirely: every field it leaves out takes its default, not the global value. A pool that sets only
+``numa_packing: false`` gets ``type: priority`` with ``default_priority: 42``, no preemption and
+``fitting_policy: best``, whatever the global scheduler sets. So repeat the global fields that the
+pool keeps:
+
+.. code:: yaml
+
+   resource_pools:
+     - pool_name: default
+       scheduler:
+         type: priority
+         fitting_policy: best
+         numa_packing: false
 
 ``type``
 --------
 
 The scheduling policy to use when allocating resources between different tasks (experiments,
-Notebooks, etc.). Defaults to ``fair_share``.
+Notebooks, etc.). Defaults to ``priority``.
 
 ``fair_share``
 ^^^^^^^^^^^^^^
@@ -925,11 +944,8 @@ The scheduling policy to use when assigning tasks to agents in the cluster. Defa
 ----------------
 
 Whether ``fitting_policy: best`` chooses each task's GPUs inside the agent by NUMA node. Defaults to
-``true``. See :ref:`numa_packing <master-config-numa-packing>`. A pool's ``scheduler`` replaces the
-global one as a whole: a pool that sets any scheduler field and leaves this one out packs, and a
-pool that sets only ``numa_packing`` gets the defaults for every other field (``priority`` with
-``default_priority: 42``, no preemption, ``fitting_policy: best``), so repeat the global settings
-there.
+``true``, also when the global scheduler sets ``false``: a pool's ``scheduler`` that leaves it out
+packs (see ``scheduler`` above). See :ref:`numa_packing <master-config-numa-packing>`.
 
 ``provider``
 ============

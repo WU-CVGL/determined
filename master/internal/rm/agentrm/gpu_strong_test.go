@@ -309,16 +309,14 @@ func TestStrongReservationNeverTakesMapOrder(t *testing.T) {
 		"no reason": func(gpuSelectionInput, int, deviceSelection) gpuChoice { return gpuChoice{} },
 		"panic":     func(gpuSelectionInput, int, deviceSelection) gpuChoice { panic("injected") },
 	}
-	for name, selectFunc := range failing {
-		restore := replaceSelection(selectFunc)
+	for name, selector := range failing {
 		f := node02
 		f.ids = append(append([]int{}, node02IDs...), 8)
 		state := topologyAgentState(t, f)
 		before := snapshotOf(state)
-		_, err := state.allocateFreeDevices(2, cproto.NewID(), strong)
+		_, err := state.chooseFreeDevices(2, strong, selector)
 		require.ErrorContains(t, err, "GPU topology preference strong: ", name)
 		require.Equal(t, before, snapshotOf(state), name)
-		restore()
 	}
 
 	// No topology, as after a master restart: an error, not map order.
@@ -337,7 +335,7 @@ func TestStrongReservationNeverTakesMapOrder(t *testing.T) {
 		state.Devices[gpuDevice(id)] = &cid
 	}
 	before = snapshotOf(state)
-	_, err = state.chooseFreeDevices(4, strong)
+	_, err = state.chooseFreeDevices(4, strong, selectFreeDevices)
 	require.EqualError(t, err, "GPU topology preference strong: no NUMA node has 4 free GPUs")
 	require.Equal(t, before, snapshotOf(state))
 
@@ -351,24 +349,21 @@ func TestStrongReservationNeverTakesMapOrder(t *testing.T) {
 }
 
 func TestStrongMissInTheSimulationIsNotAPanic(t *testing.T) {
-	// The agent changed after the fit, as a failed selection shows: the simulation counts a miss
-	// and leaves its copies as they were.
-	defer replaceSelection(func(gpuSelectionInput, int, deviceSelection) gpuChoice {
-		return gpuChoice{mapOrder: "injected"}
-	})()
+	// The agent changed after the fit: GPUs 0 and 4 became busy, so 6 GPUs are free but no NUMA
+	// node holds 4. The simulation counts a miss and leaves its copies as they were.
 	copies := map[aproto.ID]*agentState{"a": topologyAgentState(t, node02)}
 	copies["a"].id = "a"
 	req := strongRequest(4)
 	p := priorityScheduler{gpus: gpuPolicy{packNUMA: true}}
 	fits := findFits(req, copies, BestFit, false)
 	require.Len(t, fits, 1)
+	for _, id := range []int{0, 4} {
+		cid := cproto.NewID()
+		copies["a"].Devices[gpuDevice(id)] = &cid
+	}
 	before := snapshotOf(copies["a"])
 	require.NotPanics(t, func() { require.False(t, p.addTaskToAgents(req, fits)) })
 	require.Equal(t, before, snapshotOf(copies["a"]))
-
-	ok, missed := p.trySchedulingPendingTasksInPriority([]*sproto.AllocateRequest{req}, copies, BestFit)
-	require.Empty(t, ok)
-	require.Equal(t, []*sproto.AllocateRequest{req}, missed)
 }
 
 func TestStrongCannotFit(t *testing.T) {

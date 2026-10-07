@@ -104,25 +104,14 @@ func TestReservationShortCountChangesNothing(t *testing.T) {
 }
 
 func TestReservationZeroSlotsReadsNoTopology(t *testing.T) {
-	called := 0
-	defer replaceSelection(func(gpuSelectionInput, int, deviceSelection) gpuChoice {
-		called++
-		return gpuChoice{}
-	})()
 	state := topologyAgentState(t, node02)
 	cid := cproto.NewID()
 	res, err := state.allocateFreeDevices(0, cid, deviceSelection{packNUMA: true, preferTopology: true})
 	require.NoError(t, err)
-	require.Empty(t, res.devices)
+	// No selection ran: one gives a set or a reason.
+	require.Equal(t, deviceReservation{}, res)
 	require.Equal(t, &cproto.Container{ID: cid}, state.containerState[cid])
 	require.Equal(t, 1, state.numUsedZeroSlots())
-	require.Zero(t, called)
-}
-
-func replaceSelection(f func(gpuSelectionInput, int, deviceSelection) gpuChoice) func() {
-	old := selectFreeDevicesFunc
-	selectFreeDevicesFunc = f
-	return func() { selectFreeDevicesFunc = old }
 }
 
 func TestReservationFallsBackToMapOrder(t *testing.T) {
@@ -136,41 +125,38 @@ func TestReservationFallsBackToMapOrder(t *testing.T) {
 	}
 	for name, devices := range invalid {
 		t.Run(name, func(t *testing.T) {
-			defer replaceSelection(func(in gpuSelectionInput, _ int, _ deviceSelection) gpuChoice {
-				return gpuChoice{devices: devices(in), rule: "injected"}
-			})()
 			state := topologyAgentState(t, node02)
 			busy := cproto.NewID()
 			state.Devices[gpuDevice(0)] = &busy
-			res, err := state.allocateFreeDevices(2, cproto.NewID(), packing)
+			res, err := state.chooseFreeDevices(2, packing,
+				func(in gpuSelectionInput, _ int, _ deviceSelection) gpuChoice {
+					return gpuChoice{devices: devices(in), rule: "injected"}
+				})
 			require.NoError(t, err)
 			require.NotEmpty(t, res.failure)
 			require.Empty(t, res.choice.rule)
-			require.Len(t, res.devices, 2)
-			require.Equal(t, 3, state.numUsedSlots())
+			require.NoError(t, state.checkFreeDevices(res.devices, 2))
 		})
 	}
 
 	t.Run("no set and no reason", func(t *testing.T) {
-		defer replaceSelection(func(gpuSelectionInput, int, deviceSelection) gpuChoice {
-			return gpuChoice{}
-		})()
 		state := topologyAgentState(t, node02)
-		res, err := state.allocateFreeDevices(2, cproto.NewID(), packing)
+		res, err := state.chooseFreeDevices(2, packing, func(gpuSelectionInput, int, deviceSelection) gpuChoice {
+			return gpuChoice{}
+		})
 		require.NoError(t, err)
 		require.Equal(t, "no devices and no reason", res.failure)
-		require.Len(t, res.devices, 2)
+		require.NoError(t, state.checkFreeDevices(res.devices, 2))
 	})
 
 	t.Run("panic", func(t *testing.T) {
-		defer replaceSelection(func(gpuSelectionInput, int, deviceSelection) gpuChoice {
-			panic("injected")
-		})()
 		state := topologyAgentState(t, node02)
-		res, err := state.allocateFreeDevices(3, cproto.NewID(), packing)
+		res, err := state.chooseFreeDevices(3, packing, func(gpuSelectionInput, int, deviceSelection) gpuChoice {
+			panic("injected")
+		})
 		require.NoError(t, err)
 		require.Contains(t, res.failure, "panic: injected")
-		require.Len(t, res.devices, 3)
+		require.NoError(t, state.checkFreeDevices(res.devices, 3))
 	})
 }
 
@@ -213,38 +199,35 @@ func TestChooseFreeDevicesChangesNothing(t *testing.T) {
 		"reason":  func(gpuSelectionInput, int, deviceSelection) gpuChoice { return gpuChoice{mapOrder: "injected"} },
 		"panic":   func(gpuSelectionInput, int, deviceSelection) gpuChoice { panic("injected") },
 	}
-	for name, selectFunc := range selections {
-		restore := replaceSelection(selectFunc)
+	for name, selector := range selections {
 		for _, sel := range []deviceSelection{{}, packing, {preferTopology: true}} {
 			state := topologyAgentState(t, node02)
 			busy := cproto.NewID()
 			state.Devices[gpuDevice(2)] = &busy
 			before := snapshotOf(state)
-			res, err := state.chooseFreeDevices(4, sel)
+			res, err := state.chooseFreeDevices(4, sel, selector)
 			require.NoError(t, err, name)
 			require.Equal(t, before, snapshotOf(state), name)
 			require.NoError(t, state.checkFreeDevices(res.devices, 4), name)
 		}
-		restore()
 	}
 }
 
 func TestReservationInMapOrderNeverSelects(t *testing.T) {
-	// Under worst, or with numa_packing off, a plain task takes map order: no selection runs.
-	called := 0
-	defer replaceSelection(func(in gpuSelectionInput, n int, sel deviceSelection) gpuChoice {
-		called++
-		return selectFreeDevices(in, n, sel)
-	})()
+	// Under worst, or with numa_packing off, a plain task takes map order: no selection runs (a
+	// selection here panics, which would be a failure).
+	panics := func(gpuSelectionInput, int, deviceSelection) gpuChoice { panic("selected") }
 	state := topologyAgentState(t, node02)
 	for i := 0; i < 4; i++ {
-		res, err := state.allocateFreeDevices(2, cproto.NewID(), gpuPolicy{}.selection(
-			&sproto.AllocateRequest{SlotsNeeded: 2}, []*fittingState{{Agent: state, Slots: 2}}))
+		sel := gpuPolicy{}.selection(
+			&sproto.AllocateRequest{SlotsNeeded: 2}, []*fittingState{{Agent: state, Slots: 2}})
+		res, err := state.chooseFreeDevices(2, sel, panics)
 		require.NoError(t, err)
+		require.Equal(t, deviceReservation{devices: res.devices}, res)
 		require.Len(t, res.devices, 2)
-		require.Empty(t, res.choice.rule)
+		_, err = state.allocateFreeDevices(2, cproto.NewID(), sel)
+		require.NoError(t, err)
 	}
-	require.Zero(t, called)
 	require.Zero(t, state.numEmptySlots())
 }
 
@@ -320,10 +303,11 @@ func TestSimulationChoosesTheLiveDevices(t *testing.T) {
 	}
 }
 
-func TestPrioritySchedulePassSelectsWithThePoolPolicy(t *testing.T) {
-	// A pass through the pool's priority scheduler simulates with the pass's GPU policy (packing,
-	// the pass's XIDs, "soft"), and the live reservations of the planned requests, in the order the
-	// pass returns them, choose the devices the simulation chose. Preemption is off.
+func TestPrioritySchedulePassPlansTheLiveDevices(t *testing.T) {
+	// The live reservations of the requests that a pass through the pool's priority scheduler
+	// plans, in the order the pass returns them and with the pass's GPU policy (packing, the pass's
+	// XIDs, "soft"), choose the devices that the simulation (addTaskToAgents) chooses on copies of
+	// the agents with that policy. Preemption is off.
 	conf := &config.ResourcePoolConfig{PoolName: "pool", Scheduler: &config.SchedulerConfig{
 		Priority:      &config.PrioritySchedulerConfig{DefaultPriority: ptrs.Ptr(42)},
 		FittingPolicy: best,
@@ -354,36 +338,32 @@ func TestPrioritySchedulePassSelectsWithThePoolPolicy(t *testing.T) {
 	rp.agentStatesCache = live
 	rp.gpuPolicy = gpuPolicy{packNUMA: true, xids: map[string]bool{gpuDevice(1).UUID: true}}
 
-	type selected struct {
-		sel     deviceSelection
-		devices []int
-	}
-	var planned []selected
-	restore := replaceSelection(func(in gpuSelectionInput, n int, sel deviceSelection) gpuChoice {
-		c := selectFreeDevices(in, n, sel)
-		planned = append(planned, selected{sel: sel, devices: deviceIDs(c.devices)})
-		return c
-	})
 	toAllocate, toRelease := rp.scheduler.Schedule(rp)
-	restore()
 	require.Empty(t, toRelease)
 	require.NotEmpty(t, toAllocate)
-	require.Len(t, planned, len(toAllocate), "one selection per planned single-agent request")
-	for i, p := range planned {
-		require.True(t, p.sel.packNUMA, "selection %d", i)
-		require.Equal(t, rp.gpuPolicy.xids, p.sel.xids, "selection %d", i)
-		require.Equal(t, toAllocate[i].AllocationID == "task-1", p.sel.preferTopology, "selection %d", i)
-	}
 
-	for i, req := range toAllocate {
+	copies := deepCopyAgents(live)
+	simulation := priorityScheduler{gpus: rp.gpuPolicy}
+	sawSoft := false
+	for _, req := range toAllocate {
 		fits := findFits(req, live, rp.fittingMethod, false)
 		require.Len(t, fits, 1)
-		res, err := fits[0].Agent.allocateFreeDevices(fits[0].Slots, cproto.NewID(),
-			rp.gpuPolicy.selection(req, fits))
+		sel := rp.gpuPolicy.selection(req, fits)
+		sawSoft = sawSoft || sel.preferTopology
+
+		copyFits := findFits(req, copies, rp.fittingMethod, false)
+		require.Len(t, copyFits, 1)
+		require.Equal(t, fits[0].Agent.id, copyFits[0].Agent.id)
+		before := freeDeviceIDs(copyFits[0].Agent)
+		require.True(t, simulation.addTaskToAgents(req, copyFits), "request %s", req.AllocationID)
+		planned := idsMinus(before, freeDeviceIDs(copyFits[0].Agent))
+
+		res, err := fits[0].Agent.allocateFreeDevices(fits[0].Slots, cproto.NewID(), sel)
 		require.NoError(t, err)
 		require.Empty(t, res.failure)
-		require.Equal(t, planned[i].devices, deviceIDs(res.devices), "request %s", req.AllocationID)
+		require.Equal(t, planned, deviceIDs(res.devices), "request %s", req.AllocationID)
 	}
+	require.True(t, sawSoft, "the pass plans the request with \"soft\"")
 }
 
 func idsMinus(before, after []device.ID) []int {

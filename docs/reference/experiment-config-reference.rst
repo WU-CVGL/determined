@@ -1290,10 +1290,10 @@ that ranks first:
    lowest IDs otherwise.
 
 NVLinks count only with usable P2P, and a pair the agent did not report is unknown. An NVML error
-ranks a GPU last, as above; otherwise the ranking reads only the values that the agent reported, so
-a failed NVML query for a pair only leaves that pair unknown. NVML's ``NODE`` and ``SYS`` are NUMA
-levels: they are one socket and two sockets only with NPS1. Without usable P2P, the ranking uses
-only the NUMA class, PCIe switches and link width.
+puts a GPU in error, as above; otherwise the ranking reads only the values that the agent reported,
+so a failed NVML query for a pair only leaves that pair unknown. NVML's ``NODE`` and ``SYS`` are
+NUMA levels: they are one socket and two sockets only with NPS1. Without usable P2P, the ranking
+uses only the NUMA class, PCIe switches and link width.
 
 The link width is the one the agent read at its start, as in the :ref:`GPU health
 <agent-gpu-topology>`; the link generation is never used. The width decides only between pairs equal
@@ -1306,8 +1306,11 @@ The preference is soft: it never waits, never moves running tasks, and never cha
 scheduler picks or the number of slots. It has no effect on a task with fewer than 2 slots or on
 several agents, with the Kubernetes resource manager, when the agent's topology is unknown or every
 pair of its free GPUs is unknown, or with more than 20000 sets to compare; the task then gets its
-GPUs as without it. The agent measures its topology when it starts, so restart agents after a driver
-change, and after a link's width changed.
+GPUs as without it, which in a pool without NUMA packing (``fitting_policy: worst`` or
+``numa_packing: false``) is in no particular order, GPUs in error included. A selection that fails,
+which the master logs as an error, also takes free GPUs in no particular order. The agent measures
+its topology when it starts, so restart agents after a driver change, and after a link's width
+changed.
 
 The task log gets one line for each such task, for example ``GPU topology preference: agent node02,
 slots 4,5,6,7; worst pair NODE, P2P usable``, with ``, narrow`` when a GPU of that pair is narrow,

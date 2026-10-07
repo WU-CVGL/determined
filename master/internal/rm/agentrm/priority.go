@@ -19,9 +19,8 @@ type priorityScheduler struct {
 	preemptionEnabled      bool
 	allowHeterogeneousFits bool
 	// gpus is the pool's GPU selection for the pass that Schedule runs. The simulation selects
-	// devices on its copies with it, as the pass's live reservations do, so both choose the same
-	// devices unless preemption or a failed reservation makes them place different tasks (see
-	// deepCopy). Its zero value takes devices in map order.
+	// devices on its copies with it, as the pass's live reservations do; deepCopy says when both
+	// choose the same devices. Its zero value takes a plain task's devices in map order.
 	gpus gpuPolicy
 }
 

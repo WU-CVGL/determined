@@ -27,9 +27,13 @@ import (
 //   - prefer_gpu_topology "strong" (selectOnOneNUMANode), for a task with 2 or more slots: the set
 //     of one NUMA node, under every fitting policy and packing switch. It never takes map order.
 //
-// All rank GPUs in error last: an NVML health call of the GPU failed at agent start, or the GPU has
-// a recent critical XID (gpuhealth.IsCriticalXID: 13, 31, 43 and 45 never count). Apart from that,
-// the keys read only reported values.
+// NUMA packing, and "soft" when it ranks, prefer fewer GPUs in error: an NVML health call of the
+// GPU failed at agent start, or the GPU has a recent critical XID (gpuhealth.IsCriticalXID: 13, 31,
+// 43 and 45 never count); "strong" takes the NUMA node whose best set has the fewest first
+// (strongNodeKey). Apart from that, the keys read only reported values. Map order does not put GPUs
+// in error last; a reservation takes it without any rule (fitting_policy worst, numa_packing
+// false), for "soft" without NUMA packing when it does not rank, and when a plain or "soft"
+// selection fails. "strong" never takes map order.
 //
 // Every function here is pure and never logs: the scheduler's copies, which have no syslog, run
 // them too.
@@ -138,10 +142,9 @@ func rankGPUs(devices []device.Device, g *gpuTopology, xids map[string]bool) []r
 
 // selectFreeDevices chooses a full set of n free devices, or no devices with the reason for map
 // order: n is 0, fewer than n are free, no rule applies, or prefer_gpu_topology without NUMA
-// packing does not rank (fewer than 2 slots, unknown topology, every pair unknown, above
-// maxTopologySets). For "strong", the reason is why no NUMA node holds the set, and the
-// reservation fails instead. It is the one selection of both the live reservation and the
-// scheduler's copies.
+// packing does not rank (fewer than 2 slots, unknown topology, above maxTopologySets, every pair
+// unknown). For "strong", the reason is why no NUMA node holds the set, and the reservation fails
+// instead. It is the one selection of both the live reservation and the scheduler's copies.
 func selectFreeDevices(in gpuSelectionInput, n int, sel deviceSelection) gpuChoice {
 	switch {
 	case n <= 0 || len(in.free) < n:
@@ -576,20 +579,23 @@ func (g *gpuTopology) describeLink(a, b device.ID) string {
 // C(n,2) pair ranks sorted worst first, compared lexicographically. Exact ties go to the packing
 // key when tie is set (NUMA packing), then to the smallest sorted list of IDs.
 //
-// It returns no set, with the reason, when the topology is unknown, when the level and P2P of every
-// pair of free GPUs are unknown (the report holds no link to rank; widths alone do not rank), or
-// above maxTopologySets sets.
+// It returns no set, with the reason, when the topology is unknown, above maxTopologySets sets, or
+// when the level and P2P of every pair of free GPUs are unknown (the report holds no link to rank;
+// widths alone do not rank). The set cap depends only on the counts, so it is checked before the
+// pair ranks and wins when both of the last two hold.
 func selectByTopology(
 	free []rankedGPU, g *gpuTopology, n int, tie *numaLayout,
 ) (set []device.Device, worstPair string, unranked string) {
+	f := len(free)
 	switch {
 	case topologyUnknownReason(g) != "":
 		return nil, "", "topology unknown: " + topologyUnknownReason(g)
-	case n < 2 || len(free) < n:
+	case n < 2 || f < n:
 		return nil, "", fewerThanTwoSlots
+	case binomial(f, n) > maxTopologySets:
+		return nil, "", fmt.Sprintf("more than %d sets of free GPUs", maxTopologySets)
 	}
 
-	f := len(free)
 	ranks := make([][]pairRank, f)
 	rankable := false
 	for i := range ranks {
@@ -606,9 +612,6 @@ func selectByTopology(
 	}
 	if !rankable {
 		return nil, "", "every pair of free GPUs unknown"
-	}
-	if binomial(f, n) > maxTopologySets {
-		return nil, "", fmt.Sprintf("more than %d sets of free GPUs", maxTopologySets)
 	}
 
 	type setKey struct {

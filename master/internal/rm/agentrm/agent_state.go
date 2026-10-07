@@ -177,10 +177,6 @@ type deviceReservation struct {
 	failure string
 }
 
-// selectFreeDevicesFunc is the selection of allocateFreeDevices; tests replace it to inject
-// failures.
-var selectFreeDevicesFunc = selectFreeDevices
-
 // allocateFreeDevices reserves slots devices for the container cid. Its one change of state comes
 // last: chooseFreeDevices picks a full set and validates it whole without changing anything, then
 // every device of the set is reserved at once. With fewer than slots free devices, or for
@@ -195,7 +191,7 @@ func (a *agentState) allocateFreeDevices(
 		a.containerState[cid] = &cproto.Container{ID: cid}
 		return deviceReservation{}, nil
 	}
-	res, err := a.chooseFreeDevices(slots, sel)
+	res, err := a.chooseFreeDevices(slots, sel, selectFreeDevices)
 	if err != nil {
 		return deviceReservation{}, err
 	}
@@ -207,9 +203,10 @@ func (a *agentState) allocateFreeDevices(
 }
 
 // chooseFreeDevices returns a full set of slots free devices, validated whole (checkFreeDevices),
-// and how it was chosen; it changes nothing. When sel ranks, the selection (selectFreeDevices) runs
-// first and its set is taken if it is valid. Otherwise the set is the free devices in map order, as
-// before GPU selection existed, and goes through the same validation:
+// and how it was chosen; it changes nothing. When sel ranks, the selection (selector:
+// selectFreeDevices, or a fake in tests) runs first and its set is taken if it is valid. Otherwise
+// the set is the free devices in map order, as before GPU selection existed, and goes through the
+// same validation:
 //   - for the zero selection, which never runs the selection;
 //   - when the selection chooses no devices and says why (gpuChoice.mapOrder);
 //   - when the selection fails: its set is invalid, it gives neither a set nor a reason, or it
@@ -218,16 +215,18 @@ func (a *agentState) allocateFreeDevices(
 //
 // Only the selection runs under recover: it has no side effects. prefer_gpu_topology "strong"
 // never takes map order (chooseOnOneNUMANode).
-func (a *agentState) chooseFreeDevices(slots int, sel deviceSelection) (deviceReservation, error) {
+func (a *agentState) chooseFreeDevices(
+	slots int, sel deviceSelection, selector func(gpuSelectionInput, int, deviceSelection) gpuChoice,
+) (deviceReservation, error) {
 	if a.numFreeDevices() < slots {
 		return deviceReservation{}, errors.New("not enough devices")
 	}
 	if sel.strong {
-		return a.chooseOnOneNUMANode(slots, sel)
+		return a.chooseOnOneNUMANode(slots, sel, selector)
 	}
 	var res deviceReservation
 	if sel.ranks() {
-		res.choice, res.failure = a.selectRankedDevices(slots, sel)
+		res.choice, res.failure = a.selectRankedDevices(slots, sel, selector)
 		switch {
 		case res.failure != "":
 			// It panicked.
@@ -246,7 +245,10 @@ func (a *agentState) chooseFreeDevices(slots int, sel deviceSelection) (deviceRe
 		}
 	}
 
-	// The one fallback to map order. prefer_gpu_topology "strong" never gets here.
+	// The one fallback to map order, for the zero selection and for a plain or "soft" selection
+	// that chooses no set or fails; prefer_gpu_topology "strong" never gets here
+	// (chooseOnOneNUMANode). Every path selects a full set and validates it whole;
+	// allocateFreeDevices changes state once, after the validation.
 	devices := a.mapOrderDevices(slots)
 	if err := a.checkFreeDevices(devices, slots); err != nil {
 		return deviceReservation{}, err
@@ -255,14 +257,16 @@ func (a *agentState) chooseFreeDevices(slots int, sel deviceSelection) (deviceRe
 	return res, nil
 }
 
-// chooseOnOneNUMANode is chooseFreeDevices for prefer_gpu_topology "strong": the selection's set,
-// validated whole and on one known NUMA node, or an error that changes nothing. It never takes map
-// order: the selection's reason for choosing nothing, its failure and an invalid set are errors.
-// Its fit admits only agents where the selection chooses a set (holdsOnOneNUMANode), so an error
-// means the agent changed after the fit; the scheduler's simulation counts it as a miss
-// (addTaskToAgents).
-func (a *agentState) chooseOnOneNUMANode(slots int, sel deviceSelection) (deviceReservation, error) {
-	choice, failure := a.selectRankedDevices(slots, sel)
+// chooseOnOneNUMANode is chooseFreeDevices for prefer_gpu_topology "strong": the selection's
+// (selector's) set, validated whole and on one known NUMA node, or an error that changes nothing.
+// It never takes map order: the selection's reason for choosing nothing, its failure and an invalid
+// set are errors. Its fit admits only agents where the selection chooses a set
+// (holdsOnOneNUMANode), so an error means the agent changed after the fit; the scheduler's
+// simulation counts it as a miss (addTaskToAgents).
+func (a *agentState) chooseOnOneNUMANode(
+	slots int, sel deviceSelection, selector func(gpuSelectionInput, int, deviceSelection) gpuChoice,
+) (deviceReservation, error) {
+	choice, failure := a.selectRankedDevices(slots, sel, selector)
 	switch {
 	case failure != "":
 		return deviceReservation{}, fmt.Errorf("GPU topology preference strong: selection failed: %s", failure)
@@ -341,13 +345,15 @@ func (a *agentState) numFreeDevices() int {
 }
 
 // selectRankedDevices runs the selection, recovering a panic as a failure.
-func (a *agentState) selectRankedDevices(slots int, sel deviceSelection) (c gpuChoice, failure string) {
+func (a *agentState) selectRankedDevices(
+	slots int, sel deviceSelection, selector func(gpuSelectionInput, int, deviceSelection) gpuChoice,
+) (c gpuChoice, failure string) {
 	defer func() {
 		if r := recover(); r != nil {
 			c, failure = gpuChoice{}, fmt.Sprintf("panic: %v\n%s", r, debug.Stack())
 		}
 	}()
-	return selectFreeDevicesFunc(a.gpuSelectionInput(), slots, sel), ""
+	return selector(a.gpuSelectionInput(), slots, sel), ""
 }
 
 // gpuSelectionInput returns what a GPU selection reads of the agent.
@@ -411,11 +417,15 @@ func (a *agentState) freeDevice(d device.Device) {
 
 // deepCopy returns a copy of agentState for scheduler internals. Each copy gets its own slot
 // states, since the scheduler's simulation frees devices on it. It shares gpuTopology, which is
-// never mutated, only replaced: the scheduler's simulation selects GPUs on the copies as the live
-// reservation does on the agent. So the two choose the same devices when every placement of the
-// simulation is also reserved live, in the same order, on unchanged agents: without preemption and
-// with every reservation succeeding. Otherwise they can differ; fits use counts only, so that
-// changes no fit.
+// never mutated, only replaced, so the simulation selects GPUs on the copies from the inputs the
+// live reservation reads on the agent. A ranked selection (NUMA packing, "soft" when it ranks,
+// "strong") is deterministic: with the pass's policy and the same placements in the same order on
+// unchanged agents (no preemption, every reservation succeeding), the two choose the same devices
+// while every earlier placement on the agent in the pass ranked too, as under NUMA packing. Map
+// order gives no such guarantee: a map-order placement can make the agent's later choices differ,
+// ranked ones included. Fits use counts only, so a difference never changes which tasks fit, except
+// for prefer_gpu_topology "strong", whose fit counts the free GPUs of each NUMA node; the check
+// after the pass then asks for one more pass (checkStrongRequests).
 func (a *agentState) deepCopy() *agentState {
 	copiedAgent := &agentState{
 		id:                    a.id,
