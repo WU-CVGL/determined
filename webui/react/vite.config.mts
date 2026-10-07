@@ -211,6 +211,10 @@ export default defineConfig(({ mode }) => ({
     environment: 'jsdom',
     exclude: [...configDefaults.exclude, './src/e2e/**/*'],
     globals: true,
+    // Node applies a change of process.env.TZ in a child process, not in a worker thread, so tests
+    // that set their own time zone run in the forks pool. The glob is absolute: ** skips a
+    // checkout under a dot directory.
+    poolMatchGlobs: [[path.resolve(__dirname, 'src/**/*.tz.test.ts'), 'forks']],
     setupFiles: ['./src/setupTests.ts'],
     testNamePattern: process.env.INCLUDE_FLAKY === 'true' ? /@flaky/ : /^(?!.*@flaky)/,
   },
