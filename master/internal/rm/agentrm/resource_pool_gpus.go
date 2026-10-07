@@ -100,7 +100,9 @@ func strongTopology(req *sproto.AllocateRequest) bool {
 // node has its slots free (holdsOnOneNUMANode) before the others: prefer_gpu_topology "soft" with 2
 // or more slots, in a pool that packs GPUs by NUMA node (packNUMA). An agent with an unknown
 // topology holds none, so it is with the agents that would split the task; the fitting score
-// decides within each group. deepCopy says when the simulation and the reservations agree on it.
+// decides within each group. Packing is the gate because under it every placement is ranked, so the
+// free GPUs per NUMA node that the key reads agree between the copies and the live agents
+// (deepCopy).
 func preferOneNUMANode(req *sproto.AllocateRequest, packNUMA bool) bool {
 	return packNUMA && req.FittingRequirements.GPUTopology == expconf.GPUTopologySoft && req.SlotsNeeded >= 2
 }
