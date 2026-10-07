@@ -491,6 +491,11 @@ describe('TaskDashboard', () => {
     expect(header('Name')).toHaveAttribute('aria-sort', 'ascending');
     expect(header('Started')).not.toHaveAttribute('aria-sort');
 
+    // Back to the default sort, which the URL still holds.
+    await user.click(within(header('Started')).getByText('Started'));
+    await waitFor(() => expect(window.location.search).toBe('?sortKey=startTime'));
+    expect(header('Started')).toHaveAttribute('aria-sort', 'descending');
+
     // Slots sorts most first; the state sort is by state group.
     await user.click(within(header('Slots')).getByText('Slots'));
     await waitFor(() =>
@@ -689,6 +694,7 @@ describe('TaskDashboard', () => {
         sortBy: 'SORT_BY_START_TIME',
       }),
     );
+    await waitFor(() => expect(window.location.search).toBe('?sortKey=startTime'));
     const link = `${window.location.pathname}${window.location.search}`;
     sender.unmount();
 
@@ -750,6 +756,26 @@ describe('TaskDashboard', () => {
 
     await waitFor(() => expect(stored().state).toBeUndefined());
     await waitFor(() => expect(window.location.search).toBe('?sortKey=startTime'));
+
+    // Back to the plain page.
+    act(() => {
+      window.history.pushState(null, '', '/jobs');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await waitFor(() => expect(window.location.search).toBe('?sortKey=startTime'));
+  }, 30_000);
+
+  it('leaves the default sort key out of the URL once another key shows the view', async () => {
+    // A first load with nothing saved, which stores no sort.
+    storeBeforeLoad({});
+    setup({}, '/jobs', { browser: true });
+    await waitFor(() => expect(window.location.search).toBe('?sortKey=startTime'), AFTER_LOAD);
+
+    await user.type(screen.getByPlaceholderText('Search name or ID'), 'sweep');
+
+    await waitFor(() => expect(stored().search).toBe('sweep'));
+    await waitFor(() => expect(lastListCall(getGenericTasks)?.search).toBe('sweep'));
+    expect(window.location.search).toBe('?search=sweep');
   }, 30_000);
 
   it('turns what 0.41.0 saved into the filters of now, before the first fetch, and saves them once', async () => {

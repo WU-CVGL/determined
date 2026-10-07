@@ -367,20 +367,33 @@ describe('useSettings and the URL', () => {
     expect(query().getAll('type')).toStrictEqual(['b']);
   });
 
-  it('holds the fallback setting, also at its default, in a URL without any other setting', () => {
-    const sortConfig: hook.SettingsConfig<PageSettings & { sort: string }> = {
-      settings: {
-        ...pageConfig.settings,
-        sort: { defaultValue: 'start', storageKey: 'sort', type: string, urlFallback: true },
-      },
-      storagePath: pageConfig.storagePath,
-    };
+  const sortConfig: hook.SettingsConfig<PageSettings & { sort: string }> = {
+    settings: {
+      ...pageConfig.settings,
+      sort: { defaultValue: 'start', storageKey: 'sort', type: string, urlFallback: true },
+    },
+    storagePath: pageConfig.storagePath,
+  };
 
+  it('holds the fallback setting, also at its default, in a URL without any other setting', () => {
     expect(hook.settingsToQuery(sortConfig, {})).toBe('sort=start');
     expect(hook.settingsToQuery(sortConfig, layout)).toBe('sort=start');
     expect(hook.settingsToQuery(sortConfig, { sort: 'name' })).toBe('sort=name');
     expect(hook.settingsToQuery(sortConfig, { state: ['active'] })).toBe('state=active');
     // Without a fallback, the URL of the default settings is empty.
     expect(hook.settingsToQuery(pageConfig, layout)).toBe('');
+  });
+
+  it('drops the fallback that the URL holds once another setting is in the URL', () => {
+    // As the page wrote it for the default settings, which store no sort.
+    window.history.replaceState(null, '', '/?sort=start');
+
+    expect(hook.settingsToQuery(sortConfig, { state: ['active'] })).toBe('state=active');
+    expect(hook.settingsToQuery(sortConfig, {})).toBe('sort=start');
+    expect(hook.settingsToQuery(sortConfig, { sort: 'name' })).toBe('sort=name');
+
+    // A setting that the URL leaves out is no other setting.
+    window.history.replaceState(null, '', '/?columns=name');
+    expect(hook.settingsToQuery(sortConfig, {})).toBe('columns=name&sort=start');
   });
 });

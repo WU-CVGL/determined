@@ -19,7 +19,10 @@ export interface SettingsConfigProp<A> {
   skipUrlEncoding?: boolean;
   storageKey: string;
   type: t.Type<A>;
-  /** The URL holds this setting, also at its default, when it holds no other setting. */
+  /**
+   * For one setting of a plain value with a default, such as a sort key: the URL holds it, also at
+   * its default, when the URL holds no other setting that it shows.
+   */
   urlFallback?: boolean;
 }
 
@@ -47,17 +50,19 @@ export type UseSettingsReturn<T> = {
 export const settingsToQuery = <T>(config: SettingsConfig<T>, settings: Settings): string => {
   const retVal = new URLSearchParams();
   const qParams = new URLSearchParams(window.location.search);
+  const props = Object.values(config.settings) as SettingsConfigProp<T>[];
+  const fallback = props.find((setting) => setting.urlFallback);
 
   if (qParams.toString().length !== 0) {
     for (const param of qParams.keys()) {
-      if (!(param in settings)) {
+      // The fallback below sets its own key.
+      if (!(param in settings) && param !== fallback?.storageKey) {
         // passing all non-setting param into the retval
         retVal.append(param, qParams.get(param) as string);
       }
     }
   }
 
-  const props = Object.values(config.settings) as SettingsConfigProp<T>[];
   props.forEach((setting) => {
     const value = settings[setting.storageKey];
     // A setting never stored is its default.
@@ -72,8 +77,10 @@ export const settingsToQuery = <T>(config: SettingsConfig<T>, settings: Settings
     }
   });
 
-  const fallback = props.find((setting) => setting.urlFallback);
-  if (fallback && !props.some((setting) => retVal.has(setting.storageKey))) {
+  if (
+    fallback &&
+    !props.some((setting) => !setting.skipUrlEncoding && retVal.has(setting.storageKey))
+  ) {
     retVal.set(fallback.storageKey, String(settings[fallback.storageKey] ?? fallback.defaultValue));
   }
 
