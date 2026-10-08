@@ -141,11 +141,18 @@ describe('useModalHyperparameterSearch', () => {
     await waitFor(() => expect(next).toBeDisabled());
     expect(view.queryByText('default', { selector: '.ant-select-selection-item' })).toBeNull();
 
+    const slots = view.getByLabelText(/Slots per/);
+    await user.click(slots);
+    await user.tab();
+    expect(slots).toHaveValue('1');
+    expect(view.queryByText(/max slots/)).toBeNull();
+
     await user.click(view.getByRole('combobox', { name: 'Resource pool' }));
     await user.click(
       await view.findByText('default', { selector: '.ant-select-item-option-content' }),
     );
     await waitFor(() => expect(next).toBeEnabled());
+    expect(view.getByText('1 max slots')).toBeInTheDocument();
   });
 
   it('should only allow current on constant hyperparameter', async () => {

@@ -303,13 +303,14 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
      * zeroes, and this would at least unblock experiments, and the backend would be able
      * to return capacity issues.
      */
-    () => (resourcePool ? maxPoolSlotCapacity(resourcePool) || Infinity : 0),
+    () => (resourcePool && maxPoolSlotCapacity(resourcePool)) || Infinity,
     [resourcePool],
   );
 
   useEffect(() => {
     if (resourcePool) return;
-    setResourcePool(resourcePools.find((pool) => pool.name === experiment.resourcePool));
+    const pool = resourcePools.find((pool) => pool.name === experiment.resourcePool);
+    if (pool) setResourcePool(pool);
   }, [experiment.resourcePool, resourcePool, resourcePools]);
 
   const validateForm = useCallback(() => {
@@ -508,7 +509,7 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
               ))}
             </Select>
           </Form.Item>
-          <p>{maxSlots} max slots</p>
+          {resourcePool && <p>{maxSlots} max slots</p>}
         </div>
         <h2 className={css.sectionTitle}>Configure Trials</h2>
         <div className={css.inputRow}>
@@ -597,7 +598,7 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
     handleSelectSearcher,
     maxSlots,
     modalError,
-    resourcePool?.name,
+    resourcePool,
     resourcePools,
     searcher,
   ]);
