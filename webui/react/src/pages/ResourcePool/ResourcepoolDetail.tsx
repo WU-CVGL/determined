@@ -13,6 +13,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import JsonGlossary from 'components/JsonGlossary';
 import ManageNodesModalComponent from 'components/ManageNodesModal';
 import Page from 'components/Page';
+import PageNotFound from 'components/PageNotFound';
 import ResourcePoolBindings from 'components/ResourcePoolBindings';
 import { RenderAllocationBarResourcePool } from 'components/ResourcePoolCard';
 import Section from 'components/Section';
@@ -326,10 +327,12 @@ const ResourcepoolDetailInner: React.FC = () => {
     [ManageNodesModal],
   );
 
-  if (!pool || Loadable.isNotLoaded(resourcePools)) {
+  if (Loadable.isNotLoaded(resourcePools)) {
     return <Spinner center spinning />;
   } else if (Loadable.isFailed(resourcePools)) {
     return null; // TODO inform user here if resource pools fail to load
+  } else if (!pool) {
+    return <PageNotFound />;
   }
 
   return (

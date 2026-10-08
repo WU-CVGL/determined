@@ -61,10 +61,13 @@ or, for a continued experiment, the experiment's owner.
 
 `GET /api/v1/resource-pools` lists only the pools that the user may use, so the
 WebUI's pool pickers and cluster pages, the CLI, and the SDK show only those.
-Administrators see every pool. Other lists that name pools, such as workspace
-bindings, the job queue, jobs, and agents, are not filtered. `det job list`
-without `-r` fails with "the default compute pool is not available to you; name
-a pool with -r" when the user may not use the default compute pool.
+Administrators see every pool. The WebUI page of a pool outside that list
+shows the not found page, and the hyperparameter search dialog of an experiment
+whose pool is outside it leaves the pool empty until the user picks one. Other
+lists that name pools, such as workspace bindings, the job queue, jobs, and
+agents, are not filtered. `det job list` without `-r` fails with "the default
+compute pool is not available to you; name a pool with -r" when the user may
+not use the default compute pool.
 
 ## What is not checked
 

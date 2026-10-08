@@ -96,7 +96,7 @@ const agentOf = (gpuTopology?: Api.V1GpuTopology): Agent => ({
   slotStats: { brandStats: {}, typeStats: {} },
 });
 
-const setup = async (agent: Agent) => {
+const setup = async (agent: Agent, poolName = 'gpus') => {
   mocks.agents = [agent];
   clusterStore.fetchAgents();
   clusterStore.fetchResourcePools();
@@ -110,7 +110,7 @@ const setup = async (agent: Agent) => {
         <HelmetProvider>
           <DndProvider backend={HTML5Backend}>
             <SettingsProvider>
-              <MemoryRouter initialEntries={['/resourcepool/gpus/active']}>
+              <MemoryRouter initialEntries={[`/resourcepool/${poolName}/active`]}>
                 <ConfirmationProvider>
                   <Routes>
                     <Route element={<ResourcepoolDetail />} path="/resourcepool/:poolname/:tab" />
@@ -169,5 +169,10 @@ describe('ResourcepoolDetail', () => {
     await screen.findByText('node01: 0, 1');
     expect(screen.queryByRole('button', { name: 'node01: 0, 1' })).toBeNull();
     expect(screen.queryByRole('article', { name: 'GPU topology of agent node01' })).toBeNull();
+  });
+
+  it('shows the not found page for a pool that is not in the pool list', async () => {
+    await setup(agentOf(undefined), 'hidden');
+    expect(await screen.findByText("Page not found or you don't have access")).toBeInTheDocument();
   });
 });

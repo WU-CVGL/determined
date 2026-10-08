@@ -7,6 +7,7 @@ import React from 'react';
 
 import { ThemeProvider } from 'components/ThemeProvider';
 import { createExperiment as mockCreateExperiment } from 'services/api';
+import { FullExperimentItem } from 'types';
 import { generateTestExperimentData } from 'utils/tests/generateTestData';
 
 import HyperparameterSearchModalComponent from './HyperparameterSearchModal';
@@ -77,7 +78,7 @@ vi.mock('services/api', () => ({
 
 const { experiment } = generateTestExperimentData();
 
-const ModalTrigger: React.FC = () => {
+const ModalTrigger: React.FC<{ experiment: FullExperimentItem }> = ({ experiment }) => {
   const HyperparameterSearchModal = useModal(HyperparameterSearchModalComponent);
 
   return (
@@ -91,17 +92,13 @@ const ModalTrigger: React.FC = () => {
   );
 };
 
-const Container: React.FC = () => {
-  return <ModalTrigger />;
-};
-
 const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
 
-const setup = async () => {
+const setup = async (exp: FullExperimentItem = experiment) => {
   const view = render(
     <UIProvider theme={DefaultTheme.Light}>
       <ThemeProvider>
-        <Container />
+        <ModalTrigger experiment={exp} />
       </ThemeProvider>
     </UIProvider>,
   );
@@ -135,6 +132,27 @@ describe('useModalHyperparameterSearch', () => {
     await user.click(view.getByRole('button', { name: /Run/ }));
 
     expect(mockCreateExperiment).toHaveBeenCalled();
+  });
+
+  it('leaves the pool empty when the experiment pool is not in the pool list', async () => {
+    const { view } = await setup({ ...experiment, resourcePool: 'hidden' });
+    const next = view.getByRole('button', { name: 'Select Hyperparameters' });
+
+    await waitFor(() => expect(next).toBeDisabled());
+    expect(view.queryByText('default', { selector: '.ant-select-selection-item' })).toBeNull();
+
+    const slots = view.getByLabelText(/Slots per/);
+    await user.click(slots);
+    await user.tab();
+    expect(slots).toHaveValue('1');
+    expect(view.queryByText(/max slots/)).toBeNull();
+
+    await user.click(view.getByRole('combobox', { name: 'Resource pool' }));
+    await user.click(
+      await view.findByText('default', { selector: '.ant-select-item-option-content' }),
+    );
+    await waitFor(() => expect(next).toBeEnabled());
+    expect(view.getByText('1 max slots')).toBeInTheDocument();
   });
 
   it('should only allow current on constant hyperparameter', async () => {

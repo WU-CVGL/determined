@@ -102,8 +102,9 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
   );
   const canceler = useRef<AbortController>(new AbortController());
   const resourcePools = Loadable.getOrElse([], useObservable(clusterStore.resourcePools));
-  const [resourcePool, setResourcePool] = useState<ResourcePool>(
-    resourcePools.find((pool) => pool.name === experiment.resourcePool) ?? resourcePools[0],
+  // Empty when the experiment's pool is not in the list, so the user picks one.
+  const [resourcePool, setResourcePool] = useState<ResourcePool | undefined>(
+    resourcePools.find((pool) => pool.name === experiment.resourcePool),
   );
   const [form] = Form.useForm();
   const [currentPage, setCurrentPage] = useState(0);
@@ -285,7 +286,7 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
 
   const handleSelectPool = useCallback(
     (value: SelectValue) => {
-      setResourcePool(resourcePools.find((pool) => pool.name === value) ?? resourcePools[0]);
+      setResourcePool(resourcePools.find((pool) => pool.name === value));
     },
     [resourcePools],
   );
@@ -302,14 +303,15 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
      * zeroes, and this would at least unblock experiments, and the backend would be able
      * to return capacity issues.
      */
-    () => (resourcePool ? maxPoolSlotCapacity(resourcePool) || Infinity : 0),
+    () => (resourcePool && maxPoolSlotCapacity(resourcePool)) || Infinity,
     [resourcePool],
   );
 
   useEffect(() => {
-    if (resourcePool || resourcePools.length === 0) return;
-    setResourcePool(resourcePools[0]);
-  }, [resourcePool, resourcePools]);
+    if (resourcePool) return;
+    const pool = resourcePools.find((pool) => pool.name === experiment.resourcePool);
+    if (pool) setResourcePool(pool);
+  }, [experiment.resourcePool, resourcePool, resourcePools]);
 
   const validateForm = useCallback(() => {
     if (!formValues) return;
@@ -507,7 +509,7 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
               ))}
             </Select>
           </Form.Item>
-          <p>{maxSlots} max slots</p>
+          {resourcePool && <p>{maxSlots} max slots</p>}
         </div>
         <h2 className={css.sectionTitle}>Configure Trials</h2>
         <div className={css.inputRow}>
@@ -596,7 +598,7 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
     handleSelectSearcher,
     maxSlots,
     modalError,
-    resourcePool?.name,
+    resourcePool,
     resourcePools,
     searcher,
   ]);
