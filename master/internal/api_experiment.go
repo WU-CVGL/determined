@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	structpb "github.com/golang/protobuf/ptypes/struct"
@@ -949,16 +950,23 @@ func (a *apiServer) ActivateExperiment(
 // admitExperimentPools returns the admission check of one request that activates experiments: the
 // request user must be able to use the pool that each experiment allocates in when it is
 // activated, its current pool, which a job-queue move may have changed. It decides each pool once
-// within the request (poolaccess.Memo). Its calls must not overlap.
+// within the request (poolaccess.Memo).
 func admitExperimentPools() func(context.Context, experiment.Experiment) error {
-	var pools *poolaccess.Memo
+	var (
+		once    sync.Once
+		pools   *poolaccess.Memo
+		userErr error
+	)
 	return func(ctx context.Context, e experiment.Experiment) error {
-		if pools == nil {
-			curUser, _, err := grpcutil.GetUser(ctx)
-			if err != nil {
-				return err
+		once.Do(func() {
+			var curUser *model.User
+			curUser, _, userErr = grpcutil.GetUser(ctx)
+			if userErr == nil {
+				pools = poolaccess.NewMemo(*curUser)
 			}
-			pools = poolaccess.NewMemo(*curUser)
+		})
+		if userErr != nil {
+			return userErr
 		}
 		return pools.CanUseResourcePool(ctx, e.ResourcePool())
 	}
