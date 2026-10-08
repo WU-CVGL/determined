@@ -78,17 +78,14 @@ type resourcePoolAccessItem struct {
 	// RestrictedBy is the username of the administrator who restricted the pool, since the API
 	// names users by username. It is null for a public pool and once that user is deleted.
 	RestrictedBy *string `json:"restricted_by"`
+	// Warnings name what the pool's access refuses that an administrator may not expect, and
+	// WarningsIfRestricted what it would refuse once restricted; see resourcePoolAccessWarnings.
+	Warnings             []string `json:"warnings"`
+	WarningsIfRestricted []string `json:"warnings_if_restricted"`
 }
 
 type resourcePoolAccessListResponse struct {
 	ResourcePools []resourcePoolAccessItem `json:"resource_pools"`
-}
-
-// resourcePoolAccessWriteResponse is a pool's access after a write, with warnings about what the
-// access now refuses.
-type resourcePoolAccessWriteResponse struct {
-	resourcePoolAccessItem
-	Warnings []string `json:"warnings"`
 }
 
 func (m *Master) registerResourcePoolAccessRoutes() {
@@ -220,17 +217,13 @@ func (m *Master) resourcePoolAccessWritten(c echo.Context, pool string) error {
 	if err != nil {
 		return err
 	}
-	item := *items[pool]
-	return c.JSON(http.StatusOK, resourcePoolAccessWriteResponse{
-		resourcePoolAccessItem: item,
-		Warnings:               resourcePoolAccessWarnings(item),
-	})
+	return c.JSON(http.StatusOK, items[pool])
 }
 
-// resourcePoolAccessWarnings names what an item's access refuses that an administrator may not
-// expect: a setting for a name that is not a pool, and the submissions that omit a pool and are
-// refused because the restricted pool is a default.
-func resourcePoolAccessWarnings(item resourcePoolAccessItem) []string {
+// resourcePoolAccessWarnings names what an item's access refuses in mode that an administrator
+// may not expect: a setting for a name that is not a pool and, in restricted mode, the
+// submissions that omit a pool and are refused because the pool is a default.
+func resourcePoolAccessWarnings(item resourcePoolAccessItem, mode string) []string {
 	warnings := []string{}
 	pool := item.PoolName
 	if !item.Exists {
@@ -239,7 +232,7 @@ func resourcePoolAccessWarnings(item resourcePoolAccessItem) []string {
 			pool,
 		))
 	}
-	if item.Mode != resourcePoolModeRestricted {
+	if mode != resourcePoolModeRestricted {
 		return warnings
 	}
 	refused := fmt.Sprintf(
@@ -283,7 +276,8 @@ func (items resourcePoolAccessItems) add(pool string) *resourcePoolAccessItem {
 }
 
 // readResourcePoolAccess reads the item of pool or, when pool is "", the items of every name that
-// is a known pool or has access records. Default pools fill in those items and add none.
+// is a known pool or has access records. Default pools fill in those items and add none. Every
+// response of the admin API shows items read here, with their warnings.
 func (m *Master) readResourcePoolAccess(
 	ctx context.Context, pool string,
 ) (resourcePoolAccessItems, error) {
@@ -344,6 +338,10 @@ func (m *Master) readResourcePoolAccess(
 				WorkspaceID: row.WorkspaceID, Workspace: row.Workspace, Kind: row.Kind,
 			})
 		}
+	}
+	for _, item := range items {
+		item.Warnings = resourcePoolAccessWarnings(*item, item.Mode)
+		item.WarningsIfRestricted = resourcePoolAccessWarnings(*item, resourcePoolModeRestricted)
 	}
 	return items, nil
 }

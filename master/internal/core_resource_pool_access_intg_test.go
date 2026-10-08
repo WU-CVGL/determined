@@ -87,14 +87,14 @@ func (r poolAccessRoutes) sendAs(
 	return recorder.Code, recorder.Body.Bytes()
 }
 
-// write sends a write as user and returns the pool's access and the warnings.
+// write sends a write as user and returns the pool's access.
 func (r poolAccessRoutes) write(
 	user model.User, method, path, body string,
-) resourcePoolAccessWriteResponse {
+) resourcePoolAccessItem {
 	r.t.Helper()
 	code, response := r.sendAs(&user, method, path, echo.MIMEApplicationJSON, body)
 	require.Equal(r.t, http.StatusOK, code, string(response))
-	var written resourcePoolAccessWriteResponse
+	var written resourcePoolAccessItem
 	require.NoError(r.t, json.Unmarshal(response, &written), string(response))
 	return written
 }
@@ -246,8 +246,10 @@ func TestResourcePoolAccessRoutes(t *testing.T) {
 		items := routes.list(admin)
 		require.Equal(t, resourcePoolAccessItem{
 			PoolName: known, Mode: resourcePoolModePublic, Exists: true,
-			WorkspaceDefaults: []resourcePoolAccessWorkspaceDefault{},
-			Users:             []resourcePoolAccessUser{},
+			WorkspaceDefaults:    []resourcePoolAccessWorkspaceDefault{},
+			Users:                []resourcePoolAccessUser{},
+			Warnings:             []string{},
+			WarningsIfRestricted: []string{},
 		}, items[known])
 		require.True(t, items[compute].DefaultCompute)
 		require.False(t, items[compute].DefaultAux)
@@ -453,13 +455,56 @@ func TestResourcePoolAccessRoutes(t *testing.T) {
 	})
 
 	t.Run("a write answers with the pool's list item", func(t *testing.T) {
-		// A write reads only its pool; the list reads every pool. Both show the same item: a
-		// default pool, a workspace default, a dynamic pool, a name with a dormant grant only.
+		// A write reads only its pool; the list reads every pool. Both show the same item, with
+		// the same warnings: a default pool, a workspace default, a dynamic pool, a name with a
+		// dormant grant only.
 		for _, pool := range []string{compute, aux, known, shared, dynamic, missing, slashed} {
 			written := routes.write(admin, http.MethodPost, poolAccessPath(pool, "grant"),
 				fmt.Sprintf(`{"usernames":[%q]}`, bob.Username))
 			require.Contains(t, usernamesOf(written.Users), bob.Username, pool)
-			require.Equal(t, routes.list(admin)[pool], written.resourcePoolAccessItem, pool)
+			require.Equal(t, routes.list(admin)[pool], written, pool)
 		}
+	})
+
+	t.Run("the list carries each pool's warnings", func(t *testing.T) {
+		code, response := routes.sendAs(&admin, http.MethodGet, resourcePoolAccessPath, "", "")
+		require.Equal(t, http.StatusOK, code, string(response))
+		var listed struct {
+			ResourcePools []map[string]any `json:"resource_pools"`
+		}
+		require.NoError(t, json.Unmarshal(response, &listed), string(response))
+		warnings := map[string][]any{}
+		ifRestricted := map[string][]any{}
+		for _, item := range listed.ResourcePools {
+			name, _ := item["pool_name"].(string)
+			require.IsType(t, []any{}, item["warnings"], name)
+			require.IsType(t, []any{}, item["warnings_if_restricted"], name)
+			warnings[name], _ = item["warnings"].([]any)
+			ifRestricted[name], _ = item["warnings_if_restricted"].([]any)
+		}
+		refused := func(pool string) string {
+			return fmt.Sprintf("that omit resources.resource_pool are refused for users "+
+				"without a grant on %q", pool)
+		}
+		computeWarning := fmt.Sprintf("%q is the cluster's default compute pool: submissions %s",
+			compute, refused(compute))
+		auxWarning := fmt.Sprintf("%q is the cluster's default aux pool: submissions %s",
+			aux, refused(aux))
+
+		// The default compute pool is public again: it warns only once restricted.
+		require.Empty(t, warnings[compute])
+		require.Equal(t, []any{computeWarning}, ifRestricted[compute])
+		// The default aux pool is restricted: it warns now.
+		require.Equal(t, []any{auxWarning}, warnings[aux])
+		require.Equal(t, []any{auxWarning}, ifRestricted[aux])
+		require.Len(t, warnings[shared], 2)
+		require.Equal(t, warnings[shared], ifRestricted[shared])
+		require.Empty(t, warnings[dynamic])
+		require.Empty(t, ifRestricted[dynamic])
+		// A name with records but no pool warns in either mode.
+		missingWarning := fmt.Sprintf("no resource pool named %q exists; the setting applies to "+
+			"a pool created with this name", missing)
+		require.Equal(t, []any{missingWarning}, warnings[missing])
+		require.Equal(t, []any{missingWarning}, ifRestricted[missing])
 	})
 }

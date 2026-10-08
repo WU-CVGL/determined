@@ -3121,6 +3121,70 @@ func TestActivateOnCreateAndContinueReadsAccessOnce(t *testing.T) {
 	require.Equal(t, model.ActiveState, experimentStateForAccessTest(adminCtx, t, ended))
 }
 
+func TestBulkActivateAndResumeReadEachPoolOnce(t *testing.T) {
+	mockRM := MockRM()
+	mockRM.On("SmallerValueIsHigherPriority", mock.Anything).Return(true, nil)
+	mockRM.On("Release", mock.Anything).Return()
+	api, admin, adminCtx := setupAPITest(t, nil, mockRM)
+	owner := db.RequireMockUser(t, api.m.db)
+	ownerCtx := ntscUserCtx(t, owner)
+	granted := accessTestPool(t, "bulkgranted", admin, true, owner)
+	public := accessTestPool(t, "bulkpublic", admin, false)
+
+	var ids []int32
+	for _, pool := range []string{granted, granted, public, granted} {
+		resp, err := createExperimentForAccessTest(ownerCtx, t, api,
+			&apiv1.CreateExperimentRequest{Config: accessTestExperimentConfig(pool)})
+		require.NoError(t, err)
+		ids = append(ids, resp.Experiment.Id)
+	}
+	requireStates := func(state model.State) {
+		t.Helper()
+		for _, id := range ids {
+			require.Equal(t, state, experimentStateForAccessTest(adminCtx, t, id), id)
+		}
+	}
+	requireStates(model.PausedState)
+
+	var asked [][]string
+	var readRestrictions poolaccess.RestrictionReader
+	readRestrictions = poolaccess.SetReaderForTest(t, func(
+		ctx context.Context, userID model.UserID, pools []string,
+	) (map[string]bool, error) {
+		asked = append(asked, pools)
+		return readRestrictions(ctx, userID, pools)
+	})
+
+	bulk, err := api.ActivateExperiments(ownerCtx,
+		&apiv1.ActivateExperimentsRequest{ProjectId: 1, ExperimentIds: ids})
+	require.NoError(t, err)
+	require.Len(t, bulk.Results, len(ids))
+	for _, result := range bulk.Results {
+		require.Empty(t, result.Error, result.Id)
+	}
+	require.ElementsMatch(t, [][]string{{granted}, {public}}, asked, "one read per pool")
+	requireStates(model.ActiveState)
+
+	_, err = api.PauseExperiments(ownerCtx,
+		&apiv1.PauseExperimentsRequest{ProjectId: 1, ExperimentIds: ids})
+	require.NoError(t, err)
+	requireStates(model.PausedState)
+	var runIDs []int32
+	require.NoError(t, db.Bun().NewSelect().Table("runs").Column("id").
+		Where("experiment_id IN (?)", bun.In(ids)).Scan(adminCtx, &runIDs))
+	require.Len(t, runIDs, len(ids))
+
+	asked = nil
+	runs, err := api.ResumeRuns(ownerCtx, &apiv1.ResumeRunsRequest{ProjectId: 1, RunIds: runIDs})
+	require.NoError(t, err)
+	require.Len(t, runs.Results, len(runIDs))
+	for _, result := range runs.Results {
+		require.Empty(t, result.Error, result.Id)
+	}
+	require.ElementsMatch(t, [][]string{{granted}, {public}}, asked, "one read per pool")
+	requireStates(model.ActiveState)
+}
+
 func TestGetExperimentsFiltersByWorkspaceAndSlots(t *testing.T) {
 	api, curUser, ctx := setupAPITest(t, nil)
 	workspaceID, projectID := createProjectAndWorkspace(ctx, t, api)

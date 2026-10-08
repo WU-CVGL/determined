@@ -38,7 +38,6 @@ import {
   poolAccessErrorMessage,
   PoolAccessResult,
   PoolAccessUsersAction,
-  resourcePoolAccessWarnings,
   setModeInPools,
 } from 'utils/resourcePoolAccess';
 import { alphaNumericSorter, numericSorter } from 'utils/sort';
@@ -102,7 +101,6 @@ interface DetailProps {
 /** The expanded row of a pool: its granted users, its workspace defaults, and its warnings. */
 const PoolAccessDetail: React.FC<DetailProps> = ({ disabled, onRevoke, pool }: DetailProps) => {
   const [selected, setSelected] = useState<string[]>([]);
-  const warnings = resourcePoolAccessWarnings(pool);
   const granted = useMemo(
     () => [...pool.users].sort((a, b) => alphaNumericSorter(a.username, b.username)),
     [pool.users],
@@ -178,11 +176,11 @@ const PoolAccessDetail: React.FC<DetailProps> = ({ disabled, onRevoke, pool }: D
           </span>
         )}
       </div>
-      {warnings.length > 0 && (
+      {pool.warnings.length > 0 && (
         <div className={css.detailSection}>
           <strong>Warnings</strong>
           <ul className={css.warnings}>
-            {warnings.map((warning) => (
+            {pool.warnings.map((warning) => (
               <li key={warning}>{warning}</li>
             ))}
           </ul>
@@ -349,9 +347,7 @@ const PoolAccess: React.FC = () => {
 
   const handleRestrict = useCallback(() => {
     const targets = selectedPools;
-    const warnings = targets.flatMap((pool) =>
-      resourcePoolAccessWarnings(pool, ResourcePoolAccessMode.Restricted),
-    );
+    const warnings = targets.flatMap((pool) => pool.warningsIfRestricted);
     openConfirm({
       action: 'restrict',
       content: (
@@ -523,13 +519,12 @@ const PoolAccess: React.FC = () => {
         key: 'warnings',
         onCell: onRightClickableCell,
         render: (_: string, pool: ResourcePoolAccess) => {
-          const warnings = resourcePoolAccessWarnings(pool);
-          if (warnings.length === 0) return null;
+          if (pool.warnings.length === 0) return null;
           return (
             <Tooltip
               content={
                 <ul className={css.tooltipList}>
-                  {warnings.map((warning) => (
+                  {pool.warnings.map((warning) => (
                     <li key={warning}>{warning}</li>
                   ))}
                 </ul>
@@ -538,7 +533,7 @@ const PoolAccess: React.FC = () => {
                 className={css.warningCount}
                 data-testid={`pool-access-warnings-${pool.poolName}`}>
                 <Icon decorative name="warning" size="small" />
-                {warnings.length}
+                {pool.warnings.length}
               </span>
             </Tooltip>
           );

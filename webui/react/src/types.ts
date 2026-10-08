@@ -1160,12 +1160,11 @@ export interface ResourcePoolAccess {
   restrictedBy?: string;
   /** The users granted access, also while the pool is public. */
   users: ResourcePoolAccessUser[];
-  workspaceDefaults: ResourcePoolAccessWorkspaceDefault[];
-}
-
-/** A pool's access after a change, with the master's warnings about what it now refuses. */
-export interface ResourcePoolAccessChange extends ResourcePoolAccess {
+  /** The master's warnings about what the pool's access refuses. */
   warnings: string[];
+  /** The master's warnings about what the pool's access refuses once restricted. */
+  warningsIfRestricted: string[];
+  workspaceDefaults: ResourcePoolAccessWorkspaceDefault[];
 }
 
 /* Jobs */

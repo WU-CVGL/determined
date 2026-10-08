@@ -10,13 +10,13 @@
 // with no grants at all is for admins only), access tables that cannot be read (Unavailable, never
 // treated as "no record"), and an empty pool name (Internal). The check never picks another pool.
 //
-// Invariant: CanUseResourcePool is called only from the admission check sites (command, shell,
-// notebook and TensorBoard launch; generic task create and unpause; experiment create, continue
-// and activate; job-queue pool moves) and when a workspace default pool or the pool of an
-// experiment config policy is set. UsablePools is called only by the resource pool list
-// (GetResourcePools). Nothing at or below task.DefaultService.StartAllocation or rm.Allocate
-// calls either. Continuations (experiment, trial, command and generic task restore; trial
-// allocations and restarts; generic task resume recovery and retried resume plans) are not
+// Invariant: CanUseResourcePool, directly or through a Memo, is called only from the admission
+// check sites (command, shell, notebook and TensorBoard launch; generic task create and unpause;
+// experiment create, continue and activate; job-queue pool moves) and when a workspace default pool
+// or the pool of an experiment config policy is set. UsablePools is called only by the resource
+// pool list (GetResourcePools). Nothing at or below task.DefaultService.StartAllocation or
+// rm.Allocate calls either. Continuations (experiment, trial, command and generic task restore;
+// trial allocations and restarts; generic task resume recovery and retried resume plans) are not
 // checked, because they continue work that a pool has accepted. Checkpoint GC is not checked
 // either: it always runs in the cluster's default aux pool, also when a user's request starts it,
 // as the experiment's owner in a fixed environment that takes only the experiment's checkpoint
@@ -27,6 +27,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -49,11 +50,13 @@ type RestrictionReader func(
 // Checker decides access from the restrictions that its reader returns.
 type Checker struct {
 	read RestrictionReader
+	// isAdmin is the admin predicate.
+	isAdmin func(ctx context.Context, user model.User) (bool, error)
 }
 
 // NewChecker returns a Checker that reads restrictions with read.
 func NewChecker(read RestrictionReader) *Checker {
-	return &Checker{read: read}
+	return &Checker{read: read, isAdmin: isAdmin}
 }
 
 // defaultChecker reads the access tables. CanUseResourcePool and UsablePools use it, so that the
@@ -70,22 +73,67 @@ func UsablePools(ctx context.Context, user model.User, pools []string) (map[stri
 	return defaultChecker.UsablePools(ctx, user, pools)
 }
 
+// NewMemo returns a Memo of user that reads the access tables; see Checker.NewMemo.
+func NewMemo(user model.User) *Memo {
+	return defaultChecker.NewMemo(user)
+}
+
 // CanUseResourcePool returns nil when user may start new work in pool, PermissionDenied when
 // not, and Unavailable or Internal when access could not be decided. pool must be the final,
 // resolved name.
 func (c *Checker) CanUseResourcePool(ctx context.Context, user model.User, pool string) error {
+	return c.NewMemo(user).CanUseResourcePool(ctx, pool)
+}
+
+// Memo decides the access of one user within one request that admits work into many pools, such
+// as a bulk activation: it checks the admin predicate at most once and reads each pool's access at
+// most once, and answers a pool again with its first decision, an error included. It is safe for
+// concurrent use. A Memo must not outlive its request, so that a change of access applies from
+// the next request.
+type Memo struct {
+	checker *Checker
+	user    model.User
+
+	mu           sync.Mutex
+	adminChecked bool
+	admin        bool
+	adminErr     error
+	decided      map[string]error
+}
+
+// NewMemo returns a Memo of user that decides with c.
+func (c *Checker) NewMemo(user model.User) *Memo {
+	return &Memo{checker: c, user: user, decided: map[string]error{}}
+}
+
+// CanUseResourcePool decides like Checker.CanUseResourcePool, once per pool.
+func (m *Memo) CanUseResourcePool(ctx context.Context, pool string) error {
 	if pool == "" {
 		return status.Error(codes.Internal,
 			"resource pool access checked before the pool was resolved")
 	}
-	admin, err := isAdmin(ctx, user)
-	if err != nil {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err, ok := m.decided[pool]; ok {
 		return err
 	}
-	if admin {
+	err := m.decide(ctx, pool)
+	m.decided[pool] = err
+	return err
+}
+
+func (m *Memo) decide(ctx context.Context, pool string) error {
+	if !m.adminChecked {
+		m.admin, m.adminErr = m.checker.isAdmin(ctx, m.user)
+		m.adminChecked = true
+	}
+	if m.adminErr != nil {
+		return m.adminErr
+	}
+	if m.admin {
 		return nil
 	}
-	restricted, err := c.read(ctx, user.ID, []string{pool})
+	restricted, err := m.checker.read(ctx, m.user.ID, []string{pool})
 	if err != nil {
 		return status.Errorf(codes.Unavailable,
 			"could not check access to resource pool %q: %s; try again", pool, err)
@@ -93,11 +141,12 @@ func (c *Checker) CanUseResourcePool(ctx context.Context, user model.User, pool 
 	if granted, ok := restricted[pool]; !ok || granted {
 		return nil
 	}
-	log.Infof("resource pool access: refused user %q in restricted pool %q", user.Username, pool)
+	log.Infof("resource pool access: refused user %q in restricted pool %q",
+		m.user.Username, pool)
 	return status.Errorf(codes.PermissionDenied,
 		"user %q may not use resource pool %q: the pool is restricted; choose another pool or ask "+
 			"an administrator for access (if resources.resource_pool was not set, %q is the "+
-			"default pool for this workspace or the cluster)", user.Username, pool, pool)
+			"default pool for this workspace or the cluster)", m.user.Username, pool, pool)
 }
 
 // UsablePools returns, for each name, whether user may use it (admins: all true, no read).
@@ -105,7 +154,7 @@ func (c *Checker) CanUseResourcePool(ctx context.Context, user model.User, pool 
 func (c *Checker) UsablePools(
 	ctx context.Context, user model.User, pools []string,
 ) (map[string]bool, error) {
-	admin, err := isAdmin(ctx, user)
+	admin, err := c.isAdmin(ctx, user)
 	if err != nil {
 		return nil, err
 	}

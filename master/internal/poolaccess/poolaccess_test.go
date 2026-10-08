@@ -136,3 +136,67 @@ func TestCheckerUsablePools(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, usable)
 }
+
+func TestMemoDecidesEachPoolOnce(t *testing.T) {
+	ctx := context.Background()
+	restrictions := &fakeRestrictions{grants: map[string][]model.UserID{
+		"admins-only": nil, "granted": {fakeAlice.ID},
+	}}
+	checker := NewChecker(restrictions.read)
+	adminChecks := 0
+	checker.isAdmin = func(_ context.Context, user model.User) (bool, error) {
+		adminChecks++
+		return user.Admin, nil
+	}
+
+	memo := checker.NewMemo(fakeAlice)
+	for i := 0; i < 3; i++ {
+		require.NoError(t, memo.CanUseResourcePool(ctx, "public"))
+		require.NoError(t, memo.CanUseResourcePool(ctx, "granted"))
+		err := memo.CanUseResourcePool(ctx, "admins-only")
+		require.Equal(t, codes.PermissionDenied, status.Code(err), "%v", err)
+		require.Equal(t, deniedMessage(fakeAlice, "admins-only"), status.Convert(err).Message())
+		// An empty pool name is a bug of the caller, never an answer to keep.
+		require.Equal(t, codes.Internal, status.Code(memo.CanUseResourcePool(ctx, "")))
+	}
+	require.Equal(t, 1, adminChecks)
+	require.Equal(t, [][]string{{"public"}, {"granted"}, {"admins-only"}}, restrictions.asked)
+
+	// Another request decides again.
+	require.NoError(t, checker.NewMemo(fakeAlice).CanUseResourcePool(ctx, "public"))
+	require.Equal(t, 2, adminChecks)
+	require.Equal(t, 4, restrictions.reads)
+
+	// An administrator is checked once and reads nothing.
+	adminChecks = 0
+	adminMemo := checker.NewMemo(fakeAdmin)
+	require.NoError(t, adminMemo.CanUseResourcePool(ctx, "admins-only"))
+	require.NoError(t, adminMemo.CanUseResourcePool(ctx, "granted"))
+	require.Equal(t, 1, adminChecks)
+	require.Equal(t, 4, restrictions.reads)
+}
+
+func TestMemoKeepsErrors(t *testing.T) {
+	ctx := context.Background()
+	restrictions := &fakeRestrictions{err: errors.New("connection refused")}
+	checker := NewChecker(restrictions.read)
+	memo := checker.NewMemo(fakeAlice)
+	for i := 0; i < 2; i++ {
+		err := memo.CanUseResourcePool(ctx, "public")
+		require.Equal(t, codes.Unavailable, status.Code(err), "%v", err)
+	}
+	require.Equal(t, 1, restrictions.reads, "a failed read is not repeated within the request")
+
+	// A failed admin check fails every pool of the request, with one check and no read.
+	adminChecks := 0
+	checker.isAdmin = func(context.Context, model.User) (bool, error) {
+		adminChecks++
+		return false, status.Error(codes.Internal, "authz down")
+	}
+	memo = checker.NewMemo(fakeAlice)
+	for _, pool := range []string{"public", "granted"} {
+		require.Equal(t, codes.Internal, status.Code(memo.CanUseResourcePool(ctx, pool)))
+	}
+	require.Equal(t, 1, adminChecks)
+	require.Equal(t, 1, restrictions.reads)
+}

@@ -932,12 +932,14 @@ func (a *apiServer) UnpauseGenericTask(
 }
 
 // admitGenericTaskResume checks that the request user may use the pool that each paused member
-// resumes in. A member whose spec cannot be read fails the request; none is skipped.
+// resumes in, deciding each pool once (poolaccess.Memo). A member whose spec cannot be read fails
+// the request; none is skipped.
 func admitGenericTaskResume(ctx context.Context, members []model.Task) error {
 	curUser, _, err := grpcutil.GetUser(ctx)
 	if err != nil {
 		return err
 	}
+	pools := poolaccess.NewMemo(*curUser)
 	for _, member := range members {
 		if member.State == nil || *member.State != model.TaskStatePaused {
 			continue
@@ -953,7 +955,7 @@ func admitGenericTaskResume(ctx context.Context, members []model.Task) error {
 		if spec.GenericTaskConfig.Resources.RawResourcePool != nil {
 			pool = *spec.GenericTaskConfig.Resources.RawResourcePool
 		}
-		if err := poolaccess.CanUseResourcePool(ctx, *curUser, pool); err != nil {
+		if err := pools.CanUseResourcePool(ctx, pool); err != nil {
 			return err
 		}
 	}
