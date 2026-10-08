@@ -2,15 +2,7 @@ import { Popover } from 'antd';
 import dayjs from 'dayjs';
 import Icon from 'hew/Icon';
 import { useTheme } from 'hew/Theme';
-import React, {
-  CSSProperties,
-  useCallback,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { CSSProperties, useId, useMemo } from 'react';
 
 import Link from 'components/Link';
 import { slotStateToLabel } from 'constants/states';
@@ -51,6 +43,7 @@ import {
 } from 'utils/gpuTopology';
 
 import css from './GpuTopology.module.scss';
+import useGpuDetailsPopup from './useGpuDetailsPopup';
 
 /** The agent docs section that explains the GPU topology and health. */
 export const GPU_TOPOLOGY_DOCS_PATH = paths.docs(
@@ -182,17 +175,11 @@ export const GpuDetails: React.FC<GpuProps> = ({ agentId, agentOff, gpu, resourc
   );
 };
 
-/** How long the pointer rests on the button before the details show, as antd's tooltips wait. */
-const HOVER_DELAY_MS = 100;
-
 /**
  * The details of a GPU in one popup below its button, for hover, focus and pin alike, so that a
- * pin keeps the popup where it is. Hover or focus shows it as a tooltip that takes no pointer
- * events, so it never covers a click on the tiles under it; leaving the button or a blur hides it.
- * A click pins it as a dialog with a close button. Escape, the close button, a click outside or a
- * second click on the button close it. The popup is portalled to the end of the page, so a pin
- * from the keyboard moves focus into it, and closing it with focus inside gives focus back to the
- * button.
+ * pin keeps the popup where it is. Peeking, the popup is a tooltip that takes no pointer events,
+ * so it never covers a click on the tiles under it; pinned, it is a dialog with a close button. The
+ * popup is portalled to the end of the page.
  *
  * The popup takes no trigger of antd: with a click trigger, antd would toggle the open state on the
  * click that pins a popup that hover already opened, and close it.
@@ -201,90 +188,23 @@ const GpuInfoButton: React.FC<GpuProps> = (props) => {
   const {
     themeSettings: { className: themeClass },
   } = useTheme();
-  const [pinned, setPinned] = useState(false);
-  // Shown by hover or focus, until the pointer or focus leaves the button or the popup closes.
-  const [peeking, setPeeking] = useState(false);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const popupRef = useRef<HTMLDivElement>(null);
-  const hoverTimer = useRef<number>();
-  const pinnedFromKeyboard = useRef(false);
+  const {
+    buttonRef,
+    close,
+    onClick,
+    onKeyDown,
+    onMouseEnter,
+    onOpenChange,
+    peek,
+    peeking,
+    pinned,
+    popupRef,
+    unpeek,
+  } = useGpuDetailsPopup();
   const tooltipId = useId();
   const { gpu } = props;
   const what = gpu.excluded ? `excluded GPU ${gpuLabel(gpu)}` : `slot ${gpu.deviceId}`;
   const label = `Details for ${what} on ${props.agentId}`;
-
-  const stopHoverTimer = useCallback(() => window.clearTimeout(hoverTimer.current), []);
-  const peek = useCallback(() => setPeeking(true), []);
-  const unpeek = useCallback(() => {
-    stopHoverTimer();
-    setPeeking(false);
-  }, [stopHoverTimer]);
-  const onMouseEnter = useCallback(() => {
-    stopHoverTimer();
-    hoverTimer.current = window.setTimeout(peek, HOVER_DELAY_MS);
-  }, [peek, stopHoverTimer]);
-  const close = useCallback(() => {
-    if (popupRef.current?.contains(document.activeElement)) buttonRef.current?.focus();
-    // After the focus moves: focus on the button would show the details again.
-    setPinned(false);
-    unpeek();
-  }, [unpeek]);
-  const onKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Escape') close();
-    },
-    [close],
-  );
-  // Enter and Space click a button with detail 0; a pointer click has detail 1 or more.
-  const onClick = useCallback(
-    (e: React.MouseEvent) => {
-      if (pinned) {
-        close();
-        return;
-      }
-      pinnedFromKeyboard.current = e.detail === 0;
-      setPinned(true);
-    },
-    [close, pinned],
-  );
-  // antd still closes a popup on a touch outside it.
-  const onOpenChange = useCallback(
-    (open: boolean) => {
-      if (!open) close();
-    },
-    [close],
-  );
-
-  // No hover timer outlives the button.
-  useEffect(() => stopHoverTimer, [stopHoverTimer]);
-
-  // A pinned popup closes on a press outside it and its button.
-  useEffect(() => {
-    if (!pinned) return;
-    const onMouseDown = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (!buttonRef.current?.contains(target) && !popupRef.current?.contains(target)) close();
-    };
-    document.addEventListener('mousedown', onMouseDown);
-    return () => document.removeEventListener('mousedown', onMouseDown);
-  }, [close, pinned]);
-
-  useEffect(() => {
-    if (!pinned || !pinnedFromKeyboard.current) return;
-    pinnedFromKeyboard.current = false;
-    // The popup may still be hidden for a frame or two while it appears.
-    let frame = 0;
-    let tries = 0;
-    const focusDialog = () => {
-      const dialog = popupRef.current;
-      dialog?.focus();
-      if (document.activeElement !== dialog && tries++ < 10) {
-        frame = requestAnimationFrame(focusDialog);
-      }
-    };
-    focusDialog();
-    return () => cancelAnimationFrame(frame);
-  }, [pinned]);
 
   return (
     <Popover
