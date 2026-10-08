@@ -275,8 +275,10 @@ messages. The REST API returns the HTTP status in parentheses.
   `only admins may set other user's workspaces default resource pools`.
 
 Activating experiments in bulk and resuming runs report a refusal in the result
-of each refused experiment and activate the others. The admin API's errors are
-listed with its endpoints below.
+of each refused experiment and activate the others. Such a request checks each
+pool once, so when the access records cannot be read, every experiment in that
+pool is refused with `Unavailable`. The admin API's errors are listed with its
+endpoints below.
 
 ## REST API
 
