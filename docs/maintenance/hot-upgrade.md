@@ -20,11 +20,12 @@ large database were not part of it.
   records the version that an agent reports, which `det agent list` shows. The
   CLI prints a warning when its version differs from the master's and works
   on. The agent's code and its messages to and from the master (`agent/`,
-  `master/pkg/aproto`, `master/pkg/cproto`) are the same in 0.40.1 and 0.41.0.
-  A rolling agent upgrade runs with mixed versions: 0.40.1 agents ran under a
-  0.41.0 master and reattached running tasks after agent and master restarts,
-  and a 0.41.0 agent kept its running tasks under the 0.40.1 master after a
-  rollback.
+  `master/pkg/aproto`, `master/pkg/cproto`) are the same in 0.41.0, 0.41.1 and
+  0.42.0. 0.41.0 added the GPU topology to the message an agent sends when it
+  connects, which a 0.40.1 master ignores. A rolling agent upgrade runs with
+  mixed versions: 0.40.1 agents ran under a 0.41.0 master and reattached
+  running tasks after agent and master restarts, and a 0.41.0 agent kept its
+  running tasks under the 0.40.1 master after a rollback.
 - **Running tasks keep their SDK.** An upgrade does not replace the SDK inside a
   running task container. Trials with the 0.40.1 SDK continued across the
   master and agent upgrade.
@@ -96,6 +97,17 @@ The migration adds nullable columns, one column with a default, and a
 constraint that the inserts of 0.40.1 satisfy. 0.40.1 starts against the
 migrated database, logs `no migrations to apply; version: 20261005000000`,
 and ignores the new columns, so a rollback is a binary swap.
+
+## Migration in 0.42.0
+
+0.42.0 adds one schema migration,
+`master/static/migrations/20261006061744_add-resource-pool-access.tx.up.sql`:
+it creates the tables `resource_pool_restrictions` and `resource_pool_grants`,
+which hold pool access, start empty, and have foreign keys to `users`. No
+existing table changes, and the database views stay the same. The 0.42.0
+release notes list what to remove before a rollback to 0.41.
+
+ROLLBACK: <to be filled after the rollback test>
 
 ## Before the upgrade
 
