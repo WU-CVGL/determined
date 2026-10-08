@@ -13,6 +13,7 @@ export type JobColumnName =
   | 'name'
   | 'status'
   | 'slots'
+  | 'gpus'
   | 'priority'
   | 'weight'
   | 'resourcePool'
@@ -31,6 +32,7 @@ export const DEFAULT_COLUMNS: JobColumnName[] = [
 
 export const DEFAULT_COLUMN_WIDTHS: Record<JobColumnName, number> = {
   action: 46,
+  gpus: 170,
   name: 150,
   preemptible: 106,
   priority: 107,

@@ -741,7 +741,9 @@ func (rp *resourcePool) GetJobQStats() *jobv1.QueueStats {
 func (rp *resourcePool) GetJobQ() map[model.JobID]*sproto.RMJobInfo {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
-	return rp.scheduler.JobQInfo(rp)
+	jobQ := rp.scheduler.JobQInfo(rp)
+	tasklist.AddPlacement(jobQ, rp.taskList)
+	return jobQ
 }
 
 func (rp *resourcePool) JobStopped(jobID model.JobID) {

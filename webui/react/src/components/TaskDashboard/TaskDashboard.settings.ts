@@ -1,6 +1,7 @@
 import { array, boolean, literal, number, string, undefined as undefinedType, union } from 'io-ts';
 import _ from 'lodash';
 
+import { ColumnLayout as Layout, withColumn } from 'components/Table/columnLayout';
 import { InteractiveTableSettings } from 'components/Table/InteractiveTable';
 import { SettingsConfig } from 'hooks/useSettings';
 import { ValueOf } from 'types';
@@ -82,16 +83,7 @@ export const MIN_SORT_FILTER_WIDTHS: Partial<Record<TaskDashboardColumnName, num
 export const defaultWidths = (): number[] =>
   DEFAULT_COLUMNS.map((col) => DEFAULT_COLUMN_WIDTHS[col]);
 
-export interface ColumnLayout {
-  columns: TaskDashboardColumnName[];
-  columnWidths: number[];
-}
-
-const withSlotsAt = <T>(items: T[], at: number, slots: T): T[] => [
-  ...items.slice(0, at),
-  slots,
-  ...items.slice(at),
-];
+export type ColumnLayout = Layout<TaskDashboardColumnName>;
 
 /**
  * The stored columns of a dashboard with one width for each, as the table binds them by place, or
@@ -109,21 +101,20 @@ export const normalizedLayout = ({
   columns,
   columnWidths,
 }: ColumnLayout): ColumnLayout | undefined => {
-  let cols = columns.length > 0 ? columns : DEFAULT_COLUMNS;
-  let widths = _.isEqual(columnWidths, defaultWidths())
+  const cols = columns.length > 0 ? columns : DEFAULT_COLUMNS;
+  const widths = _.isEqual(columnWidths, defaultWidths())
     ? cols.map((col) => DEFAULT_COLUMN_WIDTHS[col])
     : columnWidths;
-  if (!cols.includes('slots')) {
-    const at = cols.includes('resourcePool') ? cols.indexOf('resourcePool') + 1 : cols.length;
-    const own = cols.map((col, i) => widths[i] ?? DEFAULT_COLUMN_WIDTHS[col]);
-    cols = withSlotsAt(cols, at, 'slots');
-    widths = withSlotsAt(own, at, DEFAULT_COLUMN_WIDTHS.slots);
-  } else if (widths.length === cols.length - 1) {
-    widths = withSlotsAt(widths, cols.indexOf('slots'), DEFAULT_COLUMN_WIDTHS.slots);
+  const layout = withColumn(
+    { columns: cols, columnWidths: widths },
+    'slots',
+    'resourcePool',
+    DEFAULT_COLUMN_WIDTHS,
+  );
+  if (_.isEqual(layout.columns, columns) && _.isEqual(layout.columnWidths, columnWidths)) {
+    return undefined;
   }
-  widths = cols.map((col, i) => widths[i] ?? DEFAULT_COLUMN_WIDTHS[col]);
-  if (_.isEqual(cols, columns) && _.isEqual(widths, columnWidths)) return undefined;
-  return { columns: cols, columnWidths: widths };
+  return layout;
 };
 
 /** The page size, by default and at most: each experiment row carries its whole config. */

@@ -6083,6 +6083,31 @@ export interface V1Job {
      * @memberof V1Job
      */
     workspaceId: number;
+    /**
+     * The slots the job holds, one entry per agent where it holds any, by agent ID. Agent resource manager only.
+     * @type {Array<V1JobPlacement>}
+     * @memberof V1Job
+     */
+    placement?: Array<V1JobPlacement>;
+}
+/**
+ * The slots a job holds on one agent.
+ * @export
+ * @interface V1JobPlacement
+ */
+export interface V1JobPlacement {
+    /**
+     * The agent ID.
+     * @type {string}
+     * @memberof V1JobPlacement
+     */
+    agentId: string;
+    /**
+     * The slots' device IDs, ascending. For an NVIDIA GPU, the index nvidia-smi shows on the agent's node.
+     * @type {Array<number>}
+     * @memberof V1JobPlacement
+     */
+    deviceIds: Array<number>;
 }
 /**
  * Job summary.

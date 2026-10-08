@@ -1,7 +1,7 @@
 import { IconName } from 'hew/Icon';
 
 import * as Api from 'services/api-ts-sdk';
-import { CommandType, Job, JobType, ResourcePool } from 'types';
+import { CommandType, Job, JobType, ResourcePool, ResourceType } from 'types';
 import { capitalize } from 'utils/string';
 
 export const jobTypeIconName = (jobType: JobType): IconName => {
@@ -76,3 +76,34 @@ export const canManageJob = (job: Job, rp?: ResourcePool): boolean => {
   if (!rp) return false;
   return !(rp.schedulerType === Api.V1SchedulerType.KUBERNETES && job.type !== JobType.EXPERIMENT);
 };
+
+/** A pool whose Active tab lists the GPUs each job holds: an agent pool with GPU slots. */
+export const poolListsJobGpus = (rp: ResourcePool): boolean =>
+  (rp.schedulerType === Api.V1SchedulerType.PRIORITY ||
+    rp.schedulerType === Api.V1SchedulerType.FAIRSHARE) &&
+  (rp.slotType === ResourceType.CUDA || rp.slotType === ResourceType.ROCM);
+
+/** Device IDs ascending, each once, with runs of three or more as `a-b`: `0-3, 5, 6`. */
+export const deviceIdsText = (ids: number[]): string => {
+  const sorted = [...new Set(ids)].sort((a, b) => a - b);
+  const parts: string[] = [];
+  let start = 0;
+  while (start < sorted.length) {
+    let end = start;
+    while (end + 1 < sorted.length && sorted[end + 1] === sorted[end] + 1) end++;
+    if (end - start >= 2) {
+      parts.push(`${sorted[start]}-${sorted[end]}`);
+    } else {
+      parts.push(...sorted.slice(start, end + 1).map(String));
+    }
+    start = end + 1;
+  }
+  return parts.join(', ');
+};
+
+/** One line per agent where the job holds a slot, by agent ID: `node01: 0-3, 5`. */
+export const placementLines = (placement?: Api.V1JobPlacement[]): string[] =>
+  (placement ?? [])
+    .filter(({ deviceIds }) => deviceIds.length > 0)
+    .sort((a, b) => (a.agentId < b.agentId ? -1 : a.agentId > b.agentId ? 1 : 0))
+    .map(({ agentId, deviceIds }) => `${agentId}: ${deviceIdsText(deviceIds)}`);

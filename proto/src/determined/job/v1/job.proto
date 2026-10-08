@@ -90,6 +90,18 @@ message LimitedJob {
   int32 workspace_id = 16;
 }
 
+// The slots a job holds on one agent.
+message JobPlacement {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: { required: [ "agent_id", "device_ids" ] }
+  };
+  // The agent ID.
+  string agent_id = 1;
+  // The slots' device IDs, ascending. For an NVIDIA GPU, the index nvidia-smi
+  // shows on the agent's node.
+  repeated int32 device_ids = 2;
+}
+
 // Job represents a user submitted work that is not in a terminal
 // state.
 message Job {
@@ -142,6 +154,9 @@ message Job {
   float progress = 14;
   // Job's workspace id.
   int32 workspace_id = 16;
+  // The slots the job holds, one entry per agent where it holds any, by agent
+  // ID. Agent resource manager only.
+  repeated JobPlacement placement = 17;
 }
 
 // RBACJob is a job that can have either a limited or a full
