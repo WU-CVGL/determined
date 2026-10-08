@@ -1,4 +1,5 @@
-import { CommandType, JobType } from 'types';
+import * as Api from 'services/api-ts-sdk';
+import { CommandType, JobType, ResourcePool, ResourceType } from 'types';
 
 import * as utils from './job';
 
@@ -57,6 +58,60 @@ describe('Job Utilities', () => {
     });
     it('should return undefined for non command types', () => {
       expect(utils.jobTypeToCommandType(JobType.EXPERIMENT)).toBeUndefined();
+    });
+  });
+
+  describe('deviceIdsText', () => {
+    it('writes runs of three or more as ranges', () => {
+      expect(utils.deviceIdsText([0, 1, 2, 3, 5, 6, 7])).toEqual('0-3, 5-7');
+    });
+    it('lists pairs and gaps one by one', () => {
+      expect(utils.deviceIdsText([0, 1, 5, 6])).toEqual('0, 1, 5, 6');
+      expect(utils.deviceIdsText([0, 1, 3, 4, 6, 7])).toEqual('0, 1, 3, 4, 6, 7');
+      expect(utils.deviceIdsText([2])).toEqual('2');
+      expect(utils.deviceIdsText([])).toEqual('');
+    });
+    it('sorts the IDs and lists each once', () => {
+      expect(utils.deviceIdsText([7, 3, 5, 6, 3, 10, 4])).toEqual('3-7, 10');
+    });
+  });
+
+  describe('placementLines', () => {
+    it('gives one line per agent, by agent ID', () => {
+      expect(
+        utils.placementLines([
+          { agentId: 'node04', deviceIds: [0, 1, 2, 3, 4, 5, 6, 7] },
+          { agentId: 'node03', deviceIds: [0, 1, 2, 3, 4, 5, 6, 7] },
+        ]),
+      ).toEqual(['node03: 0-7', 'node04: 0-7']);
+    });
+    it('leaves out agents without a slot, and has no line without a placement', () => {
+      expect(utils.placementLines([{ agentId: 'node01', deviceIds: [] }])).toEqual([]);
+      expect(utils.placementLines(undefined)).toEqual([]);
+    });
+  });
+
+  describe('poolListsJobGpus', () => {
+    const pool = (schedulerType: Api.V1SchedulerType, slotType: ResourceType) =>
+      ({ schedulerType, slotType }) as ResourcePool;
+    it('is true for an agent pool with GPU slots', () => {
+      expect(utils.poolListsJobGpus(pool(Api.V1SchedulerType.PRIORITY, ResourceType.CUDA))).toBe(
+        true,
+      );
+      expect(utils.poolListsJobGpus(pool(Api.V1SchedulerType.FAIRSHARE, ResourceType.ROCM))).toBe(
+        true,
+      );
+    });
+    it('is false for Kubernetes, CPU slots, and a pool without an agent', () => {
+      expect(utils.poolListsJobGpus(pool(Api.V1SchedulerType.KUBERNETES, ResourceType.CUDA))).toBe(
+        false,
+      );
+      expect(utils.poolListsJobGpus(pool(Api.V1SchedulerType.PRIORITY, ResourceType.CPU))).toBe(
+        false,
+      );
+      expect(
+        utils.poolListsJobGpus(pool(Api.V1SchedulerType.PRIORITY, ResourceType.UNSPECIFIED)),
+      ).toBe(false);
     });
   });
 });

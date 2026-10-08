@@ -40,6 +40,7 @@ import {
   nvmlErrorsText,
   OffLabel,
   pairLevels,
+  recentXidTexts,
   shortPciBusId,
   slotFillColor,
   slotFillEdgeColor,
@@ -58,6 +59,8 @@ export const GPU_TOPOLOGY_DOCS_PATH = paths.docs(
 
 interface Props {
   agent: Agent;
+  /** The device IDs of the slots whose tiles to highlight. */
+  highlighted?: Set<number>;
 }
 
 interface GpuProps {
@@ -120,10 +123,12 @@ export const HealthDot: React.FC<{ word: GpuHealthWord; decorative?: boolean }> 
 
 /**
  * The GPU's identity and the facts of its health: the PCIe link and the NVML errors, both measured
- * at agent start, and the collection time (the agent's clock).
+ * at agent start, the collection time (the agent's clock), and the recent critical XIDs when there
+ * are any.
  */
 export const GpuDetails: React.FC<GpuProps> = ({ agentId, agentOff, gpu, resource, topo }) => {
   const word = gpuHealthWord(gpu.health);
+  const xids = recentXidTexts(gpu);
   const collectedAt = topo.collectedAt
     ? dayjs(topo.collectedAt).format(DEFAULT_DATETIME_FORMAT)
     : 'unknown';
@@ -152,6 +157,16 @@ export const GpuDetails: React.FC<GpuProps> = ({ agentId, agentOff, gpu, resourc
         <dd>{nvmlErrorsText(topo, gpu)}</dd>
         <dt>Collected at</dt>
         <dd>{collectedAt}</dd>
+        {xids.length > 0 && (
+          <>
+            <dt>Recent critical XIDs</dt>
+            <dd>
+              {xids.map((text) => (
+                <div key={text}>{text}</div>
+              ))}
+            </dd>
+          </>
+        )}
       </dl>
       {gpu.excluded && <p>{GPU_EXCLUDED_TEXT}</p>}
       {word === 'narrow' && (
@@ -318,7 +333,7 @@ const GpuInfoButton: React.FC<GpuProps> = (props) => {
   );
 };
 
-const GpuTile: React.FC<GpuProps> = (props) => {
+const GpuTile: React.FC<GpuProps & { highlighted: boolean }> = ({ highlighted, ...props }) => {
   const { agentOff, gpu, resource } = props;
   const fill = gpu.excluded ? SlotState.Free : slotFillState(resource);
   const off = offLabel(gpu, resource, agentOff);
@@ -330,11 +345,13 @@ const GpuTile: React.FC<GpuProps> = (props) => {
     : `${gpuName(gpu)}, ${fillLabel(resource)}${off ? `, ${off}` : ''}`;
   const classes = [css.tile];
   if (off) classes.push(css.striped);
+  if (highlighted) classes.push(css.highlighted);
   return (
     <div
       aria-label={name}
       className={classes.join(' ')}
       data-fill={fill}
+      data-highlighted={highlighted || undefined}
       role="group"
       style={fillStyle(fill)}>
       {/* An excluded GPU is not a slot: it has no slot id, as in `det agent describe`. */}
@@ -448,7 +465,7 @@ export const GpuTopologyLegend: React.FC = () => (
   </div>
 );
 
-const GpuTopology: React.FC<Props> = ({ agent }) => {
+const GpuTopology: React.FC<Props> = ({ agent, highlighted }) => {
   const topo = agent.gpuTopology;
   const resources = useMemo(
     () => new Map(agent.resources.map((r) => [String(r.id), r])),
@@ -465,6 +482,7 @@ const GpuTopology: React.FC<Props> = ({ agent }) => {
       agentId={agent.id}
       agentOff={agentOff}
       gpu={gpu}
+      highlighted={!gpu.excluded && !!highlighted?.has(gpu.deviceId)}
       key={gpu.uuid}
       resource={resourceOf(gpu)}
       topo={topo}

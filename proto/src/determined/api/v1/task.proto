@@ -8,7 +8,6 @@ import "google/protobuf/wrappers.proto";
 import "determined/checkpoint/v1/checkpoint.proto";
 import "determined/api/v1/command.proto";
 import "determined/api/v1/pagination.proto";
-import "determined/api/v1/slots_filter.proto";
 import "determined/task/v1/task.proto";
 import "determined/api/v1/trial.proto";
 import "determined/log/v1/log.proto";
@@ -369,8 +368,30 @@ message GetAllocationResponse {
   determined.task.v1.Allocation allocation = 1;
 }
 
-// List generic tasks, newest first.
+// List generic tasks, newest first unless sorted otherwise.
 message GetGenericTasksRequest {
+  // Sorts generic tasks by the given field.
+  enum SortBy {
+    // Sort by start time, newest first unless order_by is ascending.
+    SORT_BY_UNSPECIFIED = 0;
+    // Sort by start time.
+    SORT_BY_START_TIME = 1;
+    // Sort by end time. Tasks without one come last, in either order.
+    SORT_BY_END_TIME = 2;
+    // Sort by name, as the task's name field shows it.
+    SORT_BY_NAME = 3;
+    // Sort by state group: active, then paused (PAUSED), then ended
+    // (COMPLETED, CANCELED, ERROR). Every other state is active. Tasks without
+    // a state come last, in either order.
+    SORT_BY_STATE_GROUP = 4;
+    // Sort by user: the owner's display name, or the username without one.
+    // Tasks without an owner come last, in either order.
+    SORT_BY_USER = 5;
+    // Sort by resource pool. Tasks without one come last, in either order.
+    SORT_BY_RESOURCE_POOL = 6;
+    // Sort by the slot count the task requests.
+    SORT_BY_SLOTS = 7;
+  }
   // Skip this many tasks before returning results.
   int32 offset = 1;
   // Limit the number of tasks. A value of 0 denotes no limit.
@@ -392,9 +413,25 @@ message GetGenericTasksRequest {
   // Limit tasks to those whose name or task ID contains this text, ignoring
   // case.
   string search = 10;
-  // Limit tasks by the slot count they request (resources.slots): at least
-  // one slot, or none.
-  SlotsFilter slots_filter = 11;
+  reserved 11;
+  reserved "slots_filter";
+  // Limit tasks to those that request one of these slot counts
+  // (resources.slots, 0 when unset). With slots_above, a task that matches
+  // either is listed.
+  repeated int32 slots = 12;
+  // Limit tasks to those that request more than this many slots. With slots,
+  // a task that matches either is listed.
+  optional int32 slots_above = 13;
+  // Limit tasks to these workspaces. IDs of workspaces that are gone or that
+  // the user cannot view are skipped; if none remain, no tasks are listed.
+  repeated int32 workspace_ids = 14;
+  // Sort tasks by the given field. Name, user and resource pool compare text
+  // with A-Z folded to a-z, by code point, then the text as is. Tasks that tie
+  // go newest start first, then by task ID (A to Z, by code point).
+  SortBy sort_by = 15;
+  // Order tasks in either ascending or descending order. Unspecified is
+  // ascending, or descending with SORT_BY_UNSPECIFIED.
+  OrderBy order_by = 16;
 }
 // Response to GetGenericTasksRequest.
 message GetGenericTasksResponse {

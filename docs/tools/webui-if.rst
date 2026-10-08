@@ -111,10 +111,10 @@ use, follow these steps:
    This view displays a visual representation of each node, including its unique identifier, and the
    number of available slots on each node.
 
-#. View Active and Used Slots.
+#. View Slot States and Job GPUs.
 
-   In the topology visualization, all active or used slots will be highlighted in blue, making it
-   easy to distinguish between available and occupied resources.
+   The topology visualization shows the state of each slot. The pool's **Active** tab lists the GPUs
+   each job holds; click a job's GPUs to outline them in the topology visualization.
 
 ***********************************
  Managing User Accounts and Groups
@@ -177,6 +177,53 @@ should not turn it on.
 
 To find what kind of anonymous information the WebUI collects, visit
 :ref:`common-configuration-options`.
+
+.. _web-ui-jobs:
+
+***************
+ The Jobs Page
+***************
+
+The Jobs page lists experiments, generic tasks, JupyterLabs, shells, commands, and TensorBoards
+together, newest first. A workspace's and a project's **Jobs** tabs list theirs, and **Tasks** lists
+all but experiments. Each keeps its own sort and filters for each user.
+
+**Sorting.** Select a column title to sort by it, and again to reverse the sort. The first select
+sorts Name, Owner, and Resource Pool A to Z, Kind with experiments first, State with active runs
+first, and Slots, Started, and Ended most or newest first.
+
+-  Names, owners, and pools compare by Unicode code point with only A to Z read as a to z: a space,
+   digits, and ``_`` come before letters, ``128c`` before ``48c``, and accented letters after ``z``.
+-  A missing value sorts last in either direction: no end time, no resource pool, no owner.
+-  Runs with the same value sort newest first, then by kind, then by ID.
+-  The list refreshes every 5 seconds, so a run that starts or changes state can move rows from one
+   page to the next.
+
+**Filtering.** Select a column's funnel to tick what to list, then **OK**. **All** and **None** tick
+or untick the options shown, and Ctrl+click or Cmd+click ticks all but one. Ticking every option or
+none lists everything. **Clear Filters** shows while a filter is on and clears them all. The search
+box finds a name or an ID.
+
+-  **State** has three groups. Paused is a paused experiment or generic task. Ended is completed,
+   canceled, errored, or, for an experiment, failed to delete; a JupyterLab, shell, command, or
+   TensorBoard has ended once it is terminated. Every other state is Active, including queued,
+   pulling, starting, running, and stopping.
+
+-  **Slots** is the number of slots a run asks for, per trial for an experiment (1 when its
+   configuration does not say). 0 is a CPU-only run. The filter lists 0 to the most slots of any
+   connected agent, then **Multi-node**: more slots than that, which takes more than one agent.
+   Multi-node keeps the number it was saved with, so agents that join or leave do not change a saved
+   filter.
+
+-  **Owner** lists you first, then everyone else.
+
+**Links.** The page's address holds its filters, sort, and page, so a copied link opens the same
+view, which is then saved as yours; ``/jobs`` alone opens your saved view. In a link, a missing
+filter is no filter, a missing ``sortKey`` sorts by Started, and a missing ``sortDesc`` sorts
+descending.
+
+JupyterLabs, shells, commands, and TensorBoards have no end time. They are listed for 24 hours after
+they end, and not after the master restarts.
 
 ************************************
  Viewing and Managing the Job Queue

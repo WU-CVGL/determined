@@ -46,7 +46,32 @@ For more CLI options, visit the CLI documentation or run the ``det job list -h``
 
 Both the WebUI and CLI display a table of jobs, ordered by scheduling order. The table includes job
 states and the number of slots allocated to each job. Note that scheduling order does not represent
-job priority.
+job priority. On the **Active** tab of a resource pool with GPUs, the WebUI's **GPUs** column lists
+the GPUs each job holds, one line per agent, such as ``node01: 0-3, 5``. The numbers are slot IDs,
+as on the pool's topology panel. They match the index ``nvidia-smi`` shows on the node when the
+agent sees all of the node's GPUs and leaves out any faulty GPU only with ``exclude_gpus``, not with
+``--gpus`` or ``CUDA_VISIBLE_DEVICES``. Where the topology panel shows GPU tiles, click a job's
+GPUs, or press Enter on them, to outline its tiles, and again to remove the outline.
+
+-  A job holds its GPUs from scheduling until it releases them, so the topology panel can show a
+   listed GPU as Free while a container starts or exits.
+-  An experiment lists the GPUs of all its trials together.
+-  A job that the priority scheduler has only backfilled, with preemption on, is not on the
+   **Active** tab, though the topology panel shows its GPUs as Running.
+-  Every user who can view a job sees its GPUs, which ``GetJobs`` and ``GetJobsV2`` return as the
+   job's ``placement``.
+-  **View Resources** numbers the GPUs as ``nvidia-smi`` in the container does, with the node's
+   index on hover.
+-  Kubernetes pools have no **GPUs** column.
+
+On a resource pool's **Active** tab, the WebUI also sorts the jobs by **Job Name**, **User**,
+**Submitted**, or **Slots**. A sort covers all jobs of the tab, not only the page. Names and users
+sort from A to Z first, submission times and slots from newest and most first, and a third click on
+the column returns to scheduling order. Text compares by character code with A to Z read as a to z,
+so digits and underscores come before letters, letters with accents after z, and capitals before
+lowercase between texts that differ only in case. Users sort by the name the WebUI shows, and slots
+by allocated slots, then requested slots. Jobs without a value, such as jobs you cannot view, come
+last in both directions, and jobs with equal values keep their scheduling order.
 
 *************************
  Modifying the Job Queue

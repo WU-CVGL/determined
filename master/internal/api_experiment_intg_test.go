@@ -3183,28 +3183,32 @@ func TestGetExperimentsFiltersByWorkspaceAndSlots(t *testing.T) {
 	_, err = api.GetExperiments(ctx, &apiv1.GetExperimentsRequest{WorkspaceId: 1 << 30})
 	require.Equal(t, apiPkg.NotFoundErrs("workspace", strconv.Itoa(1<<30), true).Error(), err.Error())
 
-	// Slot count per trial: HAS_SLOTS is above 0, the unset default of 1 included; ZERO_SLOTS is 0.
+	// Slot count per trial, the unset default of 1 included: one of the counts, above
+	// slots_above, or either with both.
 	require.ElementsMatch(t, ids(twoSlots, unsetSlots), list(&apiv1.GetExperimentsRequest{
-		WorkspaceId: wid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_HAS_SLOTS,
+		WorkspaceId: wid, SlotsAbove: ptrs.Ptr(int32(0)),
 	}))
 	require.Equal(t, ids(zeroSlots), list(&apiv1.GetExperimentsRequest{
-		WorkspaceId: wid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_ZERO_SLOTS,
+		WorkspaceId: wid, Slots: []int32{0},
+	}))
+	require.Equal(t, ids(unsetSlots), list(&apiv1.GetExperimentsRequest{
+		WorkspaceId: wid, Slots: []int32{1},
+	}))
+	require.ElementsMatch(t, ids(zeroSlots, twoSlots), list(&apiv1.GetExperimentsRequest{
+		WorkspaceId: wid, Slots: []int32{0}, SlotsAbove: ptrs.Ptr(int32(1)),
 	}))
 	require.Equal(t, ids(zeroSlots), list(&apiv1.GetExperimentsRequest{
 		ExperimentIdFilter: &commonv1.Int32FieldFilter{Incl: ids(twoSlots, zeroSlots, unsetSlots)},
-		SlotsFilter:        apiv1.SlotsFilter_SLOTS_FILTER_ZERO_SLOTS,
+		Slots:              []int32{0},
 	}))
 
 	// Paging counts only the matching experiments.
 	resp, err := api.GetExperiments(ctx, &apiv1.GetExperimentsRequest{
-		WorkspaceId: wid, SlotsFilter: apiv1.SlotsFilter_SLOTS_FILTER_HAS_SLOTS, Limit: 1,
+		WorkspaceId: wid, SlotsAbove: ptrs.Ptr(int32(0)), Limit: 1,
 	})
 	require.NoError(t, err)
 	require.Len(t, resp.Experiments, 1)
 	require.Equal(t, int32(2), resp.Pagination.Total)
-
-	_, err = api.GetExperiments(ctx, &apiv1.GetExperimentsRequest{SlotsFilter: 99})
-	require.Equal(t, codes.InvalidArgument, status.Code(err), "%v", err)
 }
 
 func TestAuthZGetExperimentsInWorkspace(t *testing.T) {

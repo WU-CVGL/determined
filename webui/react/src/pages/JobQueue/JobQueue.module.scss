@@ -15,3 +15,26 @@
   gap: 8px;
   justify-content: center;
 }
+.gpus {
+  background: none;
+  border: 0;
+  border-radius: var(--theme-border-radius, 4px);
+  color: inherit;
+  cursor: pointer;
+  display: block;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+.gpus[aria-pressed='true'] {
+  box-shadow:
+    0 0 0 2px var(--theme-surface),
+    0 0 0 4px var(--theme-surface-on);
+}
+.gpuLine {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

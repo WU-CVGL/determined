@@ -16,6 +16,8 @@ import (
 	"github.com/determined-ai/determined/master/internal/rm"
 	"github.com/determined-ai/determined/master/internal/rm/rmerrors"
 	"github.com/determined-ai/determined/master/internal/sproto"
+	"github.com/determined-ai/determined/master/pkg/aproto"
+	"github.com/determined-ai/determined/master/pkg/device"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/proto/pkg/jobv1"
 )
@@ -259,6 +261,7 @@ func updateJobQInfo(job *jobv1.Job, rmInfo *sproto.RMJobInfo) {
 		job.Summary = nil
 		job.RequestedSlots = 0
 		job.AllocatedSlots = 0
+		job.Placement = nil
 		return
 	}
 
@@ -269,4 +272,30 @@ func updateJobQInfo(job *jobv1.Job, rmInfo *sproto.RMJobInfo) {
 	}
 	job.Summary.State = rmInfo.State.Proto()
 	job.Summary.JobsAhead = int32(rmInfo.JobsAhead)
+	job.Placement = placementProto(rmInfo.Placement)
+}
+
+// placementProto lists the devices a job holds per agent, by agent ID, each agent's device IDs
+// ascending and once. Agents without a device are left out.
+func placementProto(placement map[aproto.ID][]device.ID) []*jobv1.JobPlacement {
+	agentIDs := make([]aproto.ID, 0, len(placement))
+	for agentID, ids := range placement {
+		if len(ids) > 0 {
+			agentIDs = append(agentIDs, agentID)
+		}
+	}
+	if len(agentIDs) == 0 {
+		return nil
+	}
+	slices.Sort(agentIDs)
+	out := make([]*jobv1.JobPlacement, 0, len(agentIDs))
+	for _, agentID := range agentIDs {
+		ids := make([]int32, 0, len(placement[agentID]))
+		for _, id := range placement[agentID] {
+			ids = append(ids, int32(id))
+		}
+		slices.Sort(ids)
+		out = append(out, &jobv1.JobPlacement{AgentId: string(agentID), DeviceIds: slices.Compact(ids)})
+	}
+	return out
 }

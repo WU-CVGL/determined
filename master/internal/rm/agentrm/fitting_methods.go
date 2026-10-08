@@ -28,6 +28,13 @@ func maxZeroSlotContainersSatisfied(req *sproto.AllocateRequest, agent *agentSta
 	return true
 }
 
+// gpuTopologySatisfied admits an agent for a request with prefer_gpu_topology "strong" when one
+// NUMA node of the agent has the request's slots free (holdsOnOneNUMANode). It admits every agent
+// for other requests.
+func gpuTopologySatisfied(req *sproto.AllocateRequest, agent *agentState) bool {
+	return !strongTopology(req) || holdsOnOneNUMANode(agent.gpuSelectionInput(), req.SlotsNeeded)
+}
+
 func agentSlotUnusedSatisfied(_ *sproto.AllocateRequest, agent *agentState) bool {
 	return agent.numUsedSlots() == 0
 }

@@ -54,6 +54,26 @@ func (m *Master) ResolveResources(
 	return poolName, launchWarnings, nil
 }
 
+// validateGPUTopology refuses a task with prefer_gpu_topology "strong" that no agent of the pool
+// can ever hold: every agent has reported its topology, and no NUMA node has the slots. The
+// paths that create a task call it once the task's config is final, and so does moving an
+// experiment to another pool; a restore does not, so it never fails on the topology.
+func validateGPUTopology(
+	rm rm.ResourceManager, pool rm.ResourcePoolName, slots int, pref expconf.GPUTopologyPreference,
+) error {
+	if pref != expconf.GPUTopologyStrong || slots < 2 {
+		return nil
+	}
+	if _, err := rm.ValidateResources(sproto.ValidateResourcesRequest{
+		ResourcePool: pool.String(),
+		Slots:        slots,
+		GPUTopology:  pref,
+	}); err != nil {
+		return status.Errorf(codes.InvalidArgument, "validating resources: %s", err)
+	}
+	return nil
+}
+
 // Fill and return TaskSpec.
 func (m *Master) fillTaskSpec(
 	poolName rm.ResourcePoolName,

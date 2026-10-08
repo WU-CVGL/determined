@@ -1,15 +1,14 @@
-import { FilterDropdownProps } from 'antd/es/table/interface';
+import { ColumnFilterItem, FilterDropdownProps, SortOrder } from 'antd/es/table/interface';
 import Alert from 'hew/Alert';
 import Button from 'hew/Button';
 import Icon, { IconName } from 'hew/Icon';
 import Input from 'hew/Input';
 import { useModal } from 'hew/Modal';
-import Select, { Option, SelectValue } from 'hew/Select';
 import { Loadable } from 'hew/utils/loadable';
 import _ from 'lodash';
 import { useObservable } from 'micro-observables';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 import Badge, { BadgeType } from 'components/Badge';
 import BatchActionConfirmModalComponent from 'components/BatchActionConfirmModal';
@@ -41,7 +40,6 @@ import TaskActionDropdown from 'components/TaskActionDropdown';
 import TensorBoardSourcesModalComponent, {
   TensorBoardSource,
 } from 'components/TensorBoardSourcesModal';
-import WorkspaceFilter from 'components/WorkspaceFilter';
 import useFeature from 'hooks/useFeature';
 import {
   GenericTaskActionStateContext,
@@ -50,34 +48,43 @@ import {
 import { useLaunchAgain } from 'hooks/useLaunchAgain';
 import usePermissions from 'hooks/usePermissions';
 import usePolling from 'hooks/usePolling';
-import { useSettings } from 'hooks/useSettings';
+import { settingsToQuery, useSettings } from 'hooks/useSettings';
 import { paths } from 'routes/utils';
 import { killExperiment, killGenericTask, killTask } from 'services/api';
+import clusterStore from 'stores/cluster';
 import projectStore from 'stores/projects';
 import userStore from 'stores/users';
 import workspaceStore from 'stores/workspaces';
-import { CommandTask, CommandType, ExperimentAction, Workspace } from 'types';
+import { CommandTask, CommandType, DetailedUser, ExperimentAction, Workspace } from 'types';
 import handleError, { ErrorLevel, ErrorType, isDetError } from 'utils/error';
 import { getActionsForExperiment } from 'utils/experiment';
 import { alphaNumericSorter, numericSorter } from 'utils/sort';
 import { pluralizer } from 'utils/string';
 import { canKillGenericTask, isTaskKillable } from 'utils/task';
+import { compareText } from 'utils/textOrder';
+import { getDisplayName } from 'utils/user';
 
 import { fetchRunPage, RunPage, RunQuery } from './fetchRuns';
 import {
   DashboardScope,
-  isCommandKind,
+  DEFAULT_SORT,
   kindsOf,
+  mostAgentSlots,
+  MULTI_NODE,
   RUN_KINDS,
   RunKind,
   runKindLabel,
   runKindPluralLabel,
   RunRow,
-  SlotsFilter,
-  slotsFilterLabel,
+  RunSort,
+  savedSlots,
+  slotsOptions,
+  slotsQuery,
+  SORT_KEYS,
   STATE_GROUPS,
   StateGroup,
   stateGroupLabel,
+  tickedSlots,
 } from './runRows';
 import css from './TaskDashboard.module.scss';
 import settingsConfig, {
@@ -87,9 +94,13 @@ import settingsConfig, {
   FILTER_KEYS,
   MAX_PAGE_SIZE,
   MIN_COLUMN_WIDTH,
+  MIN_SORT_FILTER_WIDTHS,
+  NO_FILTERS,
   normalizedLayout,
-  Owner,
+  readFilters,
   Settings,
+  TaskDashboardColumnName,
+  urlView,
 } from './TaskDashboard.settings';
 
 interface Props {
@@ -138,10 +149,15 @@ const errorMessage = (error: unknown): string | undefined => {
 /* A generic task's Kill kills its descendants too, as its menu says. */
 const GENERIC_TASK_KILL_NOTE = 'Each generic task is killed together with all its descendants.';
 
-const ANY_SLOTS = 'any';
-const SLOTS_TOOLTIP = 'GPU: asks for at least one slot. CPU-only: asks for none.';
 const PAGE_SIZE_OPTIONS = [10, 20, 50, MAX_PAGE_SIZE];
 const SEARCH_DELAY_MS = 400;
+
+/*
+ * Three directions, so that every click flips the sort: with two, antd clears the sort on the third
+ * click, and the column then keeps its direction.
+ */
+const DESCEND_FIRST: SortOrder[] = ['descend', 'ascend', 'descend'];
+const ASCEND_FIRST: SortOrder[] = ['ascend', 'descend', 'ascend'];
 
 const ExperimentEntityCopyMap = { Experiment: 'Experiment', Trial: 'Trial' } as const;
 const RunEntityCopyMap = { Experiment: 'Search', Trial: 'Run' } as const;
@@ -186,11 +202,85 @@ const RunLocation: React.FC<{
 };
 
 /**
+ * A column's funnel: a button that Enter or Space opens without sorting the column. It is pressed
+ * while the column is filtered.
+ */
+const FilterButton: React.FC<{ filtered: boolean; label: string }> = ({ filtered, label }) => (
+  <span
+    aria-haspopup="listbox"
+    aria-label={label}
+    aria-pressed={filtered}
+    className={css.funnel}
+    role="button"
+    tabIndex={0}
+    onKeyDown={(e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      // The column header sorts on Enter.
+      e.preventDefault();
+      e.stopPropagation();
+      e.currentTarget.click();
+    }}>
+    <Icon decorative name="filter" />
+  </span>
+);
+
+/** The signed-in user first, then everyone else A to Z, as the Owner sort orders names. */
+const ownersMeFirst = (users: DetailedUser[], me?: DetailedUser): DetailedUser[] => [
+  ...(me ? [me] : []),
+  ...users
+    .filter((user) => user.id !== me?.id)
+    .sort((a, b) => compareText(getDisplayName(a), getDisplayName(b))),
+];
+
+interface ChecklistFilter {
+  /** Whether the column's filter is on. */
+  filtered: boolean;
+  /** What the column filters by: "Owner". */
+  name: string;
+  onFilter: (keys: string[]) => void;
+  options: ColumnFilterItem[];
+  searchable?: boolean;
+  ticked: string[];
+  width: number;
+}
+
+/** A column's tick list filter. */
+const checklistFilter = ({
+  filtered,
+  name,
+  onFilter,
+  options,
+  searchable,
+  ticked,
+  width,
+}: ChecklistFilter): Pick<
+  ColumnDef<RunRow>,
+  'filterDropdown' | 'filterIcon' | 'filters' | 'isFiltered'
+> => ({
+  filterDropdown: (filterProps: FilterDropdownProps) => (
+    <TableFilterDropdown
+      {...filterProps}
+      checklist
+      label={name}
+      multiple
+      searchable={searchable}
+      values={ticked}
+      width={width}
+      onFilter={onFilter}
+    />
+  ),
+  filterIcon: <FilterButton filtered={filtered} label={`Filter by ${name.toLowerCase()}`} />,
+  filters: options,
+  isFiltered: () => filtered,
+});
+
+/**
  * One table of the runs of every kind: experiments, generic tasks, notebooks (JupyterLab), shells,
- * commands and TensorBoards, newest first.
+ * commands and TensorBoards, newest first by default.
  * - All workspaces (no props), a workspace, or a project (experiments and generic tasks only).
- * - Filters: kind chips that count the active runs of each kind, search, owner, state, GPU or
- *   CPU-only, and on the global page one workspace. Each dashboard stores them on its own.
+ * - The column headers sort and filter: kind, state, owner, slots and, on the global page,
+ *   workspaces; the toolbar searches. Each dashboard stores them on its own, and a URL with any of
+ *   them sets them all.
  * - Each row has its kind's action menu, in the actions column and on a right click; Kill works on
  *   a selection of any kinds.
  */
@@ -203,14 +293,34 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
   }, [projectId, workspaceId]);
   const experiments = !tasksOnly;
   const pageKinds = useMemo(() => kindsOf(scope, experiments), [experiments, scope]);
-  const listsCommands = pageKinds.some(isCommandKind);
   const config = useMemo(() => settingsConfig(scope, experiments), [experiments, scope]);
-  const { activeSettings, isLoading, resetSettings, settings, updateSettings } =
-    useSettings<Settings>(config);
+  const { isLoading, settings, updateSettings } = useSettings<Settings>(config);
+  /*
+   * The updates of the settings since the settings last changed. The settings store takes an update
+   * a tick after the update writes the URL, from the store and the update: each update goes with
+   * those before it, so that its URL has them too. An update that changes nothing is dropped.
+   */
+  const written = useRef<Partial<Settings>>({});
+  useEffect(() => {
+    written.current = {};
+  }, [settings]);
+  const writeSettings = useCallback(
+    (update: Partial<Settings>) => {
+      const view: Partial<Settings> = { ...settings, ...written.current };
+      const changes = Object.keys(update).some(
+        (key) => !_.isEqual(update[key as keyof Settings], view[key as keyof Settings]),
+      );
+      if (!changes) return;
+      written.current = { ...written.current, ...update };
+      updateSettings(written.current);
+    },
+    [settings, updateSettings],
+  );
 
   const currentUser = Loadable.getOrElse(undefined, useObservable(userStore.currentUser));
   const users = Loadable.getOrElse([], useObservable(userStore.getUsers()));
   const workspaces = Loadable.getOrElse([], useObservable(workspaceStore.workspaces));
+  const agents = Loadable.getOrElse([], useObservable(clusterStore.agents));
   const permissions = usePermissions();
   const { canCreateNSC, canCreateWorkspaceNSC, canModifyWorkspaceNSC } = permissions;
   const f_flat_runs = useFeature().isOn('flat_runs');
@@ -228,24 +338,61 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
   const containerRef = useRef<HTMLDivElement>(null);
   const canceler = useRef<AbortController>();
   const requestedProjects = useRef(new Set<number>());
+  const appliedSearch = useRef<string>();
   const location = useLocation();
+  const navigate = useNavigate();
+  const currentUserId = currentUser?.id;
 
-  /*
-   * The URL's kinds win over the stored ones, also after an in-app redirect such as /tasks/generic,
-   * which the settings read only on the first page load.
-   */
-  const urlKinds = useMemo(
-    () =>
-      new URLSearchParams(location.search)
-        .getAll('type')
-        .filter((value): value is RunKind => (RUN_KINDS as string[]).includes(value)),
-    [location.search],
+  // The filters, cleaned of what 0.41.0 saved before the first fetch.
+  const read = useMemo(() => readFilters(settings, currentUserId), [currentUserId, settings]);
+  const { cleanup, waitsForUser } = read;
+  // The same filters keep their object, so that a change of another setting fetches nothing.
+  const filtersRef = useRef(read.filters);
+  const filters = useMemo(
+    () => (_.isEqual(read.filters, filtersRef.current) ? filtersRef.current : read.filters),
+    [read.filters],
   );
   useEffect(() => {
-    // Settings that are still loading would drop the update.
-    if (isLoading || urlKinds.length === 0 || _.isEqual(urlKinds, settings.type)) return;
-    updateSettings({ tableOffset: 0, type: urlKinds });
-  }, [isLoading, settings.type, updateSettings, urlKinds]);
+    filtersRef.current = filters;
+  }, [filters]);
+
+  /*
+   * A URL with any filter, sort or page key sets the whole view, once: on the first load, and after
+   * an in-app link or redirect such as /tasks/generic, which the settings read only on the first
+   * page load. The URL's view and the clean-up of the saved filters go in one update. Each update
+   * writes the URL, whose view is then the one of the settings. A URL without any of the keys, as
+   * the app's links to the page are, opens the saved view and then shows it, the default view with
+   * its sort key, so that a copied link shows the same rows.
+   */
+  useEffect(() => {
+    // Settings that are still loading would drop the update; "Mine" needs the signed-in user.
+    if (isLoading || currentUserId === undefined) return;
+    let wanted: Partial<Settings> = { ...cleanup };
+    if (location.search !== appliedSearch.current) {
+      appliedSearch.current = location.search;
+      const view = urlView(location.search, currentUserId);
+      if (view) {
+        wanted = { ...wanted, ...view };
+      } else {
+        const query = settingsToQuery(config, { ...settings, ...written.current, ...wanted });
+        const search = query ? `?${query}` : '';
+        if (search !== location.search) {
+          appliedSearch.current = search;
+          navigate({ search }, { replace: true });
+        }
+      }
+    }
+    writeSettings(wanted);
+  }, [
+    cleanup,
+    config,
+    currentUserId,
+    isLoading,
+    location.search,
+    navigate,
+    settings,
+    writeSettings,
+  ]);
 
   // Stored columns and widths, also from before the Slots column, get one width for each column.
   const layoutUpdate = useMemo(
@@ -256,8 +403,8 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
     [isLoading, settings.columns, settings.columnWidths],
   );
   useEffect(() => {
-    if (layoutUpdate) updateSettings(layoutUpdate);
-  }, [layoutUpdate, updateSettings]);
+    if (layoutUpdate) writeSettings(layoutUpdate);
+  }, [layoutUpdate, writeSettings]);
   /*
    * The table takes the widths it mounts with, and later ones only when their count changes. It
    * mounts again once the stored layout has loaded and has one width for each column, so that it
@@ -265,58 +412,67 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
    * as a click on one could land on a row about to be replaced.
    */
   const layoutReady = !isLoading && !layoutUpdate;
-  /*
-   * The table stores only the widths on a resize. The columns they belong to are stored with them,
-   * so that the widths still find their columns once the default columns change.
-   */
-  const updateTableSettings = useCallback(
-    (update: Partial<Settings>) =>
-      updateSettings(
-        update.columnWidths && !update.columns
-          ? { ...update, columns: [...settings.columns] }
-          : update,
-      ),
-    [settings.columns, updateSettings],
-  );
 
   const selectedKinds = useMemo(
-    () => (settings.type ?? []).filter((kind) => pageKinds.includes(kind)),
-    [pageKinds, settings.type],
+    () => (filters.type ?? []).filter((kind) => pageKinds.includes(kind)),
+    [filters.type, pageKinds],
   );
-  const kinds = selectedKinds.length > 0 ? selectedKinds : pageKinds;
+  // Kinds of other pages, as a link can have, filter nothing here, and neither do all of the page's.
+  const kindFiltered = selectedKinds.length > 0 && selectedKinds.length < pageKinds.length;
+  const kinds = kindFiltered ? selectedKinds : pageKinds;
   const limit = Math.min(Math.max(settings.tableLimit || DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
   const offset = Math.max(settings.tableOffset || 0, 0);
-  const mine = settings.owner === Owner.Mine;
-  const currentUserId = currentUser?.id;
+  const sortKey = SORT_KEYS.includes(settings.sortKey) ? settings.sortKey : DEFAULT_SORT.key;
+  const sortDesc = typeof settings.sortDesc === 'boolean' ? settings.sortDesc : DEFAULT_SORT.desc;
+  /*
+   * The Slots filter's N: the most slots of any agent, or the N that Multi-node was saved with if
+   * larger, so that an agent that leaves, or agents still loading, never widen a saved filter.
+   */
+  const maxSlots = useMemo(
+    () => Math.max(mostAgentSlots(agents), slotsQuery(filters.slots)?.above ?? 0),
+    [agents, filters.slots],
+  );
+
+  // The settings the table shows: its sort arrows are those of the sort the page fetches.
+  const tableSettings = useMemo(
+    () => ({ ...settings, sortDesc, sortKey }),
+    [settings, sortDesc, sortKey],
+  );
+  /*
+   * The table stores only the widths on a resize. The columns they belong to are stored with them,
+   * so that the widths still find their columns once the default columns change. A new sort goes to
+   * the first page; a page click sends the sort too, unchanged.
+   */
+  const updateTableSettings = useCallback(
+    (update: Partial<Settings>) => {
+      const next = { ...update };
+      if (next.columnWidths && !next.columns) next.columns = [...settings.columns];
+      const sortChanged =
+        ('sortKey' in next && next.sortKey !== sortKey) ||
+        ('sortDesc' in next && next.sortDesc !== sortDesc);
+      if (sortChanged) next.tableOffset = 0;
+      writeSettings(next);
+    },
+    [settings.columns, sortDesc, sortKey, writeSettings],
+  );
 
   const query: RunQuery | undefined = useMemo(() => {
-    // "Mine" waits for the signed-in user instead of listing everyone's runs.
-    if (mine && currentUserId === undefined) return undefined;
+    // The saved filters first; "Mine" waits for the signed-in user instead of listing everyone's.
+    if (isLoading || waitsForUser) return undefined;
+    const sort: RunSort = { desc: sortDesc, key: sortKey };
     return {
       kinds,
       limit,
       offset,
-      pageKinds,
       scope,
-      search: settings.search,
-      slots: settings.slots,
-      states: settings.state,
-      userId: mine ? currentUserId : undefined,
-      workspaceId: scope.type === 'global' ? settings.workspace : undefined,
+      search: filters.search,
+      slots: slotsQuery(filters.slots),
+      sort,
+      states: filters.state,
+      userIds: filters.user,
+      workspaceIds: scope.type === 'global' ? filters.workspace : undefined,
     };
-  }, [
-    currentUserId,
-    kinds,
-    limit,
-    mine,
-    offset,
-    pageKinds,
-    scope,
-    settings.search,
-    settings.slots,
-    settings.state,
-    settings.workspace,
-  ]);
+  }, [filters, isLoading, kinds, limit, offset, scope, sortDesc, sortKey, waitsForUser]);
 
   const fetchRuns = useCallback(async () => {
     if (!query) return;
@@ -364,74 +520,101 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
 
   /* Filters */
 
-  const filterCount = useMemo(() => activeSettings(FILTER_KEYS).length, [activeSettings]);
+  // The filters that the page applies: the workspaces only on the global page.
+  const workspaceFiltered = scope.type === 'global' && filters.workspace !== undefined;
+  const filterCount = FILTER_KEYS.filter((key) => {
+    if (key === 'type') return kindFiltered;
+    if (key === 'workspace') return workspaceFiltered;
+    return filters[key] !== undefined;
+  }).length;
 
-  const resetFilters = useCallback(() => {
-    resetSettings([...FILTER_KEYS, 'tableOffset']);
+  const clearFilters = useCallback(() => {
+    // Not a reset of the settings, which would also drop the columns, their widths and the sort.
+    writeSettings({ ...NO_FILTERS, tableOffset: 0 });
     setSelected(new Map());
-  }, [resetSettings]);
+  }, [writeSettings]);
 
-  const handleKindToggle = useCallback(
-    (kind: RunKind) => {
-      const next = selectedKinds.includes(kind)
-        ? selectedKinds.filter((k) => k !== kind)
-        : pageKinds.filter((k) => k === kind || selectedKinds.includes(k));
-      updateSettings({
-        tableOffset: 0,
-        type: next.length === 0 || next.length === pageKinds.length ? undefined : next,
-      });
-    },
-    [pageKinds, selectedKinds, updateSettings],
-  );
-
-  const [searchInput, setSearchInput] = useState(settings.search ?? '');
-  useEffect(() => setSearchInput(settings.search ?? ''), [settings.search]);
+  const [searchInput, setSearchInput] = useState(filters.search ?? '');
+  useEffect(() => setSearchInput(filters.search ?? ''), [filters.search]);
   useEffect(() => {
     const search = searchInput || undefined;
-    if (search === (settings.search || undefined)) return;
-    const timer = setTimeout(() => updateSettings({ search, tableOffset: 0 }), SEARCH_DELAY_MS);
+    if (search === filters.search) return;
+    const timer = setTimeout(() => writeSettings({ search, tableOffset: 0 }), SEARCH_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [searchInput, settings.search, updateSettings]);
+  }, [filters.search, searchInput, writeSettings]);
 
-  const handleOwnerChange = useCallback(
-    (value: SelectValue) => updateSettings({ owner: value as Owner, tableOffset: 0 }),
-    [updateSettings],
-  );
+  const owners = useMemo(() => ownersMeFirst(users, currentUser), [currentUser, users]);
 
-  const handleStateChange = useCallback(
-    (value: SelectValue) => {
-      const states = (Array.isArray(value) ? value : []) as StateGroup[];
-      updateSettings({ state: states.length ? states : undefined, tableOffset: 0 });
-    },
-    [updateSettings],
-  );
-
-  const handleSlotsChange = useCallback(
-    (value: SelectValue) =>
-      updateSettings({
-        slots: value === ANY_SLOTS ? undefined : (value as SlotsFilter),
-        tableOffset: 0,
+  const columnFilters = useMemo(() => {
+    const apply = (update: Partial<Settings>) => writeSettings({ ...update, tableOffset: 0 });
+    const ids = (keys: string[]) => (keys.length > 0 ? keys.map(Number) : undefined);
+    return {
+      kind: checklistFilter({
+        filtered: kindFiltered,
+        name: 'Kind',
+        onFilter: (keys) => apply({ type: keys.length > 0 ? (keys as RunKind[]) : undefined }),
+        options: pageKinds.map((kind) => ({
+          text: (
+            <span className={css.kindOption}>
+              <Icon decorative name={runKindIcon[kind]} size="small" />
+              {runKindLabel[kind]}
+            </span>
+          ),
+          value: kind,
+        })),
+        ticked: selectedKinds,
+        width: 180,
       }),
-    [updateSettings],
-  );
-
-  const workspaceFilterDropdown = useCallback(
-    (filterProps: FilterDropdownProps) => (
-      <TableFilterDropdown
-        {...filterProps}
-        values={settings.workspace !== undefined ? [String(settings.workspace)] : []}
-        width={220}
-        onFilter={(values: string[]) =>
-          updateSettings({
-            tableOffset: 0,
-            workspace: values.length ? Number(values[values.length - 1]) : undefined,
-          })
-        }
-        onReset={() => updateSettings({ tableOffset: 0, workspace: undefined })}
-      />
-    ),
-    [settings.workspace, updateSettings],
-  );
+      location: checklistFilter({
+        filtered: workspaceFiltered,
+        name: 'Workspace',
+        onFilter: (keys) => apply({ workspace: ids(keys) }),
+        options: workspaces.map((ws) => ({ text: ws.name, value: String(ws.id) })),
+        searchable: true,
+        ticked: (filters.workspace ?? []).map(String),
+        width: 240,
+      }),
+      slots: checklistFilter({
+        filtered: filters.slots !== undefined,
+        name: 'Slots',
+        onFilter: (keys) =>
+          apply({ slots: keys.length > 0 ? savedSlots(maxSlots, keys) : undefined }),
+        options: slotsOptions(maxSlots, filters.slots).map((option) => ({
+          text: option === MULTI_NODE ? 'Multi-node' : option,
+          value: option,
+        })),
+        ticked: tickedSlots(maxSlots, filters.slots),
+        width: 160,
+      }),
+      state: checklistFilter({
+        filtered: filters.state !== undefined,
+        name: 'State',
+        onFilter: (keys) => apply({ state: keys.length > 0 ? (keys as StateGroup[]) : undefined }),
+        options: STATE_GROUPS.map((group) => ({ text: stateGroupLabel[group], value: group })),
+        ticked: filters.state ?? [],
+        width: 160,
+      }),
+      user: checklistFilter({
+        filtered: filters.user !== undefined,
+        name: 'Owner',
+        onFilter: (keys) => apply({ user: ids(keys) }),
+        options: owners.map((user) => ({ text: getDisplayName(user), value: String(user.id) })),
+        searchable: true,
+        ticked: (filters.user ?? []).map(String),
+        width: 220,
+      }),
+    };
+  }, [
+    filters,
+    kindFiltered,
+    maxSlots,
+    owners,
+    pageKinds,
+    selectedKinds,
+    workspaceFiltered,
+    workspaces,
+    writeSettings,
+  ]);
 
   /* Actions */
 
@@ -591,12 +774,16 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
       {
         dataIndex: 'kind',
         defaultWidth: DEFAULT_COLUMN_WIDTHS.kind,
-        key: 'kind',
+        ...columnFilters.kind,
+        // The sort key of the old task list's Type column.
+        key: 'type',
         render: (_: unknown, row: RunRow) => (
           <div className={css.kind}>
             <Icon name={runKindIcon[row.kind]} title={runKindLabel[row.kind]} />
           </div>
         ),
+        sortDirections: ASCEND_FIRST,
+        sorter: true,
         title: 'Kind',
       },
       {
@@ -647,11 +834,14 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
             </div>
           );
         },
+        sortDirections: ASCEND_FIRST,
+        sorter: true,
         title: 'Name',
       },
       {
         dataIndex: 'state',
         defaultWidth: DEFAULT_COLUMN_WIDTHS.state,
+        ...columnFilters.state,
         key: 'state',
         onCell: () => ({ 'data-testid': 'state' }),
         render: (_: unknown, row: RunRow) => {
@@ -662,41 +852,34 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
             return <GenericTaskStateBadge state={row.task.state} />;
           return <Badge state={row.task.state} type={BadgeType.State} />;
         },
+        sortDirections: ASCEND_FIRST,
+        sorter: true,
         title: 'State',
       },
       {
         dataIndex: 'user',
         defaultWidth: DEFAULT_COLUMN_WIDTHS.user,
         ellipsis: true,
+        ...columnFilters.user,
         key: 'user',
         render: (_: unknown, row: RunRow) => {
           const user = users.find((u) => u.id === row.userId);
           if (user) return userRenderer(user);
-          return row.kind === RunKind.GenericTask ? row.task.username : '—';
+          return row.ownerName ?? '—';
         },
-        responsive: ['md'],
+        sortDirections: ASCEND_FIRST,
+        sorter: true,
         title: 'Owner',
       },
       scope.type !== 'project' && {
         dataIndex: 'location',
         defaultWidth: DEFAULT_COLUMN_WIDTHS.location,
         ellipsis: true,
-        ...(scope.type === 'global'
-          ? {
-              filterDropdown: workspaceFilterDropdown,
-              filterIcon: <Icon name="filter" title="Filter by workspace" />,
-              filters: workspaces.map((ws) => ({
-                text: <WorkspaceFilter workspace={ws} />,
-                value: ws.id,
-              })),
-              isFiltered: (s: unknown) => (s as Settings).workspace !== undefined,
-            }
-          : {}),
+        ...(scope.type === 'global' ? columnFilters.location : {}),
         key: 'location',
         render: (_: unknown, row: RunRow) => (
           <RunLocation row={row} showWorkspace={scope.type === 'global'} workspaces={workspaces} />
         ),
-        responsive: ['md'],
         title: scope.type === 'global' ? 'Workspace › Project' : 'Project',
       },
       {
@@ -705,12 +888,15 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         ellipsis: true,
         key: 'resourcePool',
         responsive: ['md'],
+        sortDirections: ASCEND_FIRST,
+        sorter: true,
         title: 'Resource Pool',
       },
       {
         align: 'right',
         dataIndex: 'slots',
         defaultWidth: DEFAULT_COLUMN_WIDTHS.slots,
+        ...columnFilters.slots,
         key: 'slots',
         onCell: () => ({ 'data-testid': 'slots-cell' }),
         render: (_: unknown, row: RunRow) => {
@@ -718,6 +904,8 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
           if (row.kind !== RunKind.Experiment) return row.slots;
           return <span title="Slots per trial">{row.slots}</span>;
         },
+        sortDirections: DESCEND_FIRST,
+        sorter: true,
         title: 'Slots',
       },
       {
@@ -725,6 +913,8 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         defaultWidth: DEFAULT_COLUMN_WIDTHS.startTime,
         key: 'startTime',
         render: (_: unknown, row: RunRow) => timeRenderer(row.startTime),
+        sortDirections: DESCEND_FIRST,
+        sorter: true,
         title: 'Started',
       },
       {
@@ -734,6 +924,8 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         // Notebooks, shells, commands and TensorBoards have no end time in their API.
         render: (_: unknown, row: RunRow) => timeRenderer(row.endTime),
         responsive: ['md'],
+        sortDirections: DESCEND_FIRST,
+        sorter: true,
         title: 'Ended',
       },
       {
@@ -750,8 +942,14 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
     ];
     return cols
       .filter((col): col is ColumnDef<RunRow> => !!col)
-      .map((col) => ({ ...col, minWidth: Math.min(col.defaultWidth, MIN_COLUMN_WIDTH) }));
-  }, [entityCopyMap, renderMenu, scope.type, users, workspaceFilterDropdown, workspaces]);
+      .map((col) => ({
+        ...col,
+        minWidth:
+          (col.sorter || col.filterDropdown
+            ? MIN_SORT_FILTER_WIDTHS[col.dataIndex as TaskDashboardColumnName]
+            : undefined) ?? Math.min(col.defaultWidth, MIN_COLUMN_WIDTH),
+      }));
+  }, [columnFilters, entityCopyMap, renderMenu, scope.type, users, workspaces]);
 
   /* Layout */
 
@@ -762,26 +960,6 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
   return (
     <div className={css.base} ref={containerRef}>
       <div className={css.toolbar}>
-        <div aria-label="Kinds" className={css.kinds} role="group">
-          {pageKinds.map((kind) => {
-            const count = page?.activeCounts[kind];
-            const isSelected = selectedKinds.includes(kind);
-            return (
-              <Button
-                aria-pressed={isSelected}
-                data-testid={`kind-${kind}`}
-                icon={<Icon decorative name={runKindIcon[kind]} size="small" />}
-                key={kind}
-                selected={isSelected}
-                size="small"
-                tooltip={count !== undefined ? `${count} active` : undefined}
-                onClick={() => handleKindToggle(kind)}>
-                {runKindLabel[kind]}
-                {count !== undefined && <span className={css.count}>{count}</span>}
-              </Button>
-            );
-          })}
-        </div>
         <div className={css.filters}>
           <Input
             allowClear
@@ -791,49 +969,14 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
             width={200}
             onChange={(e) => setSearchInput(e.target.value)}
           />
-          <Select
-            data-testid="owner"
-            searchable={false}
-            value={settings.owner}
-            width={120}
-            onChange={handleOwnerChange}>
-            <Option value={Owner.All}>All users</Option>
-            <Option value={Owner.Mine}>Mine</Option>
-          </Select>
-          <Select
-            data-testid="state"
-            mode="multiple"
-            placeholder="All states"
-            searchable={false}
-            value={settings.state ?? []}
-            width={200}
-            onChange={handleStateChange}>
-            {STATE_GROUPS.map((group) => (
-              <Option key={group} value={group}>
-                {stateGroupLabel[group]}
-              </Option>
-            ))}
-          </Select>
-          <Select
-            data-testid="slots"
-            searchable={false}
-            value={settings.slots ?? ANY_SLOTS}
-            width={150}
-            onChange={handleSlotsChange}>
-            <Option value={ANY_SLOTS}>GPU and CPU</Option>
-            <Option value={SlotsFilter.Gpu}>{slotsFilterLabel[SlotsFilter.Gpu]}</Option>
-            <Option value={SlotsFilter.CpuOnly}>{slotsFilterLabel[SlotsFilter.CpuOnly]}</Option>
-          </Select>
-          {/* On an icon, not around the select: a tooltip there covered the open options. */}
-          <Icon name="info" showTooltip title={SLOTS_TOOLTIP} />
-          <FilterCounter activeFilterCount={filterCount} onReset={resetFilters} />
-          {showLaunch && (
-            <>
-              <JupyterLabButton enabled={launchEnabled} workspace={workspace} />
-              <ShellButton enabled={launchEnabled} workspace={workspace} />
-            </>
-          )}
+          <FilterCounter activeFilterCount={filterCount} onReset={clearFilters} />
         </div>
+        {showLaunch && (
+          <div className={css.launch}>
+            <JupyterLabButton enabled={launchEnabled} workspace={workspace} />
+            <ShellButton enabled={launchEnabled} workspace={workspace} />
+          </div>
+        )}
       </div>
       {RUN_KINDS.filter((kind) => page?.errors[kind] !== undefined).map((kind) => (
         <Alert
@@ -876,19 +1019,13 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
             // A definite width keeps the table's fixed layout: with 'max-content' the columns grew
             // to their longest content.
             scroll={{ x: '100%' }}
-            settings={settings}
+            settings={tableSettings}
             showSorterTooltip={false}
             size="small"
             updateSettings={updateTableSettings}
           />
         </GenericTaskActionStateContext.Provider>
       </div>
-      {listsCommands && (
-        <p className={css.note}>
-          Notebooks, shells, commands and TensorBoards are listed for 24 hours after they end, and
-          not after the master restarts.
-        </p>
-      )}
       <BatchActionConfirmModal.Component
         batchAction={ExperimentAction.Kill}
         itemName={itemName}

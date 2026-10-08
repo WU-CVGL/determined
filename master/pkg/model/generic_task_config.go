@@ -22,6 +22,8 @@ func DefaultConfigGenericTaskConfig(
 			RawResourcePool:   nil,
 			RawPriority:       nil,
 			RawDevices:        expconf.DevicesConfigV0{},
+
+			RawPreferGPUTopology: nil,
 		},
 		Environment: DefaultEnvConfig(taskContainerDefaults),
 	}

@@ -4482,6 +4482,7 @@ class v1GenericTask(Printable):
     GetGenericTasks.
     """
     allocationId: "typing.Optional[str]" = None
+    displayName: "typing.Optional[str]" = None
     endTime: "typing.Optional[str]" = None
     forkedFrom: "typing.Optional[str]" = None
     parentId: "typing.Optional[str]" = None
@@ -4503,6 +4504,7 @@ class v1GenericTask(Printable):
         username: str,
         workspaceId: int,
         allocationId: "typing.Union[str, None, Unset]" = _unset,
+        displayName: "typing.Union[str, None, Unset]" = _unset,
         endTime: "typing.Union[str, None, Unset]" = _unset,
         forkedFrom: "typing.Union[str, None, Unset]" = _unset,
         parentId: "typing.Union[str, None, Unset]" = _unset,
@@ -4522,6 +4524,8 @@ class v1GenericTask(Printable):
         self.workspaceId = workspaceId
         if not isinstance(allocationId, Unset):
             self.allocationId = allocationId
+        if not isinstance(displayName, Unset):
+            self.displayName = displayName
         if not isinstance(endTime, Unset):
             self.endTime = endTime
         if not isinstance(forkedFrom, Unset):
@@ -4548,6 +4552,8 @@ class v1GenericTask(Printable):
         }
         if "allocationId" in obj:
             kwargs["allocationId"] = obj["allocationId"]
+        if "displayName" in obj:
+            kwargs["displayName"] = obj["displayName"]
         if "endTime" in obj:
             kwargs["endTime"] = obj["endTime"]
         if "forkedFrom" in obj:
@@ -4574,6 +4580,8 @@ class v1GenericTask(Printable):
         }
         if not omit_unset or "allocationId" in vars(self):
             out["allocationId"] = self.allocationId
+        if not omit_unset or "displayName" in vars(self):
+            out["displayName"] = self.displayName
         if not omit_unset or "endTime" in vars(self):
             out["endTime"] = self.endTime
         if not omit_unset or "forkedFrom" in vars(self):
@@ -5112,18 +5120,25 @@ class v1GetExperimentsRequestSortBy(DetEnum):
     - SORT_BY_DESCRIPTION: Returns experiments sorted by description.
     - SORT_BY_START_TIME: Return experiments sorted by start time.
     - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are
-    returned after the ones with end_time.
+    returned after the ones with end_time, in either order.
     - SORT_BY_STATE: Return experiments sorted by state.
     - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.
     - SORT_BY_PROGRESS: Return experiments sorted by progress.
-    - SORT_BY_USER: Return experiments sorted by user.
+    - SORT_BY_USER: Return experiments sorted by user: the owner's display name, or the
+    username without one.
     - SORT_BY_NAME: Returns experiments sorted by name.
     - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.
-    - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool.
+    - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool. Experiments without one are
+    returned last, in either order.
     - SORT_BY_PROJECT_ID: Returns experiments sorted by project.
     - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.
     - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.
     - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..
+    - SORT_BY_SLOTS: Return experiments sorted by the slot count each trial requests
+    (resources.slots_per_trial, 1 when unset).
+    - SORT_BY_STATE_GROUP: Return experiments sorted by state group: active, then paused
+    (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED).
+    Every other state is active.
     """
     UNSPECIFIED = "SORT_BY_UNSPECIFIED"
     ID = "SORT_BY_ID"
@@ -5141,6 +5156,8 @@ class v1GetExperimentsRequestSortBy(DetEnum):
     CHECKPOINT_SIZE = "SORT_BY_CHECKPOINT_SIZE"
     CHECKPOINT_COUNT = "SORT_BY_CHECKPOINT_COUNT"
     SEARCHER_METRIC_VAL = "SORT_BY_SEARCHER_METRIC_VAL"
+    SLOTS = "SORT_BY_SLOTS"
+    STATE_GROUP = "SORT_BY_STATE_GROUP"
 
 class v1GetExperimentsResponse(Printable):
     """Response to GetExperimentsRequest."""
@@ -5190,6 +5207,29 @@ class v1GetGenericTaskConfigResponse(Printable):
             "config": self.config,
         }
         return out
+
+class v1GetGenericTasksRequestSortBy(DetEnum):
+    """Sorts generic tasks by the given field.
+    - SORT_BY_UNSPECIFIED: Sort by start time, newest first unless order_by is ascending.
+    - SORT_BY_START_TIME: Sort by start time.
+    - SORT_BY_END_TIME: Sort by end time. Tasks without one come last, in either order.
+    - SORT_BY_NAME: Sort by name, as the task's name field shows it.
+    - SORT_BY_STATE_GROUP: Sort by state group: active, then paused (PAUSED), then ended
+    (COMPLETED, CANCELED, ERROR). Every other state is active. Tasks without
+    a state come last, in either order.
+    - SORT_BY_USER: Sort by user: the owner's display name, or the username without one.
+    Tasks without an owner come last, in either order.
+    - SORT_BY_RESOURCE_POOL: Sort by resource pool. Tasks without one come last, in either order.
+    - SORT_BY_SLOTS: Sort by the slot count the task requests.
+    """
+    UNSPECIFIED = "SORT_BY_UNSPECIFIED"
+    START_TIME = "SORT_BY_START_TIME"
+    END_TIME = "SORT_BY_END_TIME"
+    NAME = "SORT_BY_NAME"
+    STATE_GROUP = "SORT_BY_STATE_GROUP"
+    USER = "SORT_BY_USER"
+    RESOURCE_POOL = "SORT_BY_RESOURCE_POOL"
+    SLOTS = "SORT_BY_SLOTS"
 
 class v1GetGenericTasksResponse(Printable):
     """Response to GetGenericTasksRequest."""
@@ -7382,11 +7422,14 @@ class v1GetWorkspacesWithDefaultNamespaceBindingsResponse(Printable):
         return out
 
 class v1GpuHealth(DetEnum):
-    """GpuHealth is a GPU's health from what the agent measured at its last start.
+    """GpuHealth is a GPU's health from what the agent measured at its last start
+    and the GPU's recent critical XIDs.
     - GPU_HEALTH_UNSPECIFIED: Unknown: no report, NVML did not run, or the link width is unknown.
-    - GPU_HEALTH_OK: No NVML error, and the link width was at its maximum at agent start.
+    - GPU_HEALTH_OK: No NVML error, no recent critical XID, and the link width was at its
+    maximum at agent start.
     - GPU_HEALTH_LINK_BELOW_MAX: The link width was below its maximum at agent start.
-    - GPU_HEALTH_ERROR: An NVML health call failed at agent start.
+    - GPU_HEALTH_ERROR: An NVML health call failed at agent start, or the GPU has a recent
+    critical XID.
     """
     UNSPECIFIED = "GPU_HEALTH_UNSPECIFIED"
     OK = "GPU_HEALTH_OK"
@@ -7397,6 +7440,7 @@ class v1GpuInfo(Printable):
     """GpuInfo describes one GPU of an agent: a slot, or a GPU left out by the
     agent's exclude list.
     """
+    recentXids: "typing.Optional[typing.Sequence[v1GpuXid]]" = None
 
     def __init__(
         self,
@@ -7412,6 +7456,7 @@ class v1GpuInfo(Printable):
         pcieLinkWidth: int,
         pcieLinkWidthMax: int,
         uuid: str,
+        recentXids: "typing.Union[typing.Sequence[v1GpuXid], None, Unset]" = _unset,
     ):
         self.deviceId = deviceId
         self.excluded = excluded
@@ -7424,6 +7469,8 @@ class v1GpuInfo(Printable):
         self.pcieLinkWidth = pcieLinkWidth
         self.pcieLinkWidthMax = pcieLinkWidthMax
         self.uuid = uuid
+        if not isinstance(recentXids, Unset):
+            self.recentXids = recentXids
 
     @classmethod
     def from_json(cls, obj: Json) -> "v1GpuInfo":
@@ -7440,6 +7487,8 @@ class v1GpuInfo(Printable):
             "pcieLinkWidthMax": obj["pcieLinkWidthMax"],
             "uuid": obj["uuid"],
         }
+        if "recentXids" in obj:
+            kwargs["recentXids"] = [v1GpuXid.from_json(x) for x in obj["recentXids"]] if obj["recentXids"] is not None else None
         return cls(**kwargs)
 
     def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
@@ -7456,6 +7505,8 @@ class v1GpuInfo(Printable):
             "pcieLinkWidthMax": self.pcieLinkWidthMax,
             "uuid": self.uuid,
         }
+        if not omit_unset or "recentXids" in vars(self):
+            out["recentXids"] = None if self.recentXids is None else [x.to_json(omit_unset) for x in self.recentXids]
         return out
 
 class v1GpuLink(Printable):
@@ -7587,8 +7638,13 @@ class v1GpuP2pStatus(DetEnum):
     NOT_SUPPORTED = "GPU_P2P_STATUS_NOT_SUPPORTED"
 
 class v1GpuTopology(Printable):
-    """GpuTopology is what an agent measured with NVML when it started."""
+    """GpuTopology is what an agent measured with NVML when it started, and the
+    GPUs' recent critical XIDs from the master's Prometheus.
+    """
     collectedAt: "typing.Optional[str]" = None
+    xidQueriedAt: "typing.Optional[str]" = None
+    xidQueryError: "typing.Optional[str]" = None
+    xidQueryStatus: "typing.Optional[v1GpuXidQueryStatus]" = None
 
     def __init__(
         self,
@@ -7598,6 +7654,9 @@ class v1GpuTopology(Printable):
         links: "typing.Sequence[v1GpuLink]",
         unknownReason: str,
         collectedAt: "typing.Union[str, None, Unset]" = _unset,
+        xidQueriedAt: "typing.Union[str, None, Unset]" = _unset,
+        xidQueryError: "typing.Union[str, None, Unset]" = _unset,
+        xidQueryStatus: "typing.Union[v1GpuXidQueryStatus, None, Unset]" = _unset,
     ):
         self.driverVersion = driverVersion
         self.gpus = gpus
@@ -7605,6 +7664,12 @@ class v1GpuTopology(Printable):
         self.unknownReason = unknownReason
         if not isinstance(collectedAt, Unset):
             self.collectedAt = collectedAt
+        if not isinstance(xidQueriedAt, Unset):
+            self.xidQueriedAt = xidQueriedAt
+        if not isinstance(xidQueryError, Unset):
+            self.xidQueryError = xidQueryError
+        if not isinstance(xidQueryStatus, Unset):
+            self.xidQueryStatus = xidQueryStatus
 
     @classmethod
     def from_json(cls, obj: Json) -> "v1GpuTopology":
@@ -7616,6 +7681,12 @@ class v1GpuTopology(Printable):
         }
         if "collectedAt" in obj:
             kwargs["collectedAt"] = obj["collectedAt"]
+        if "xidQueriedAt" in obj:
+            kwargs["xidQueriedAt"] = obj["xidQueriedAt"]
+        if "xidQueryError" in obj:
+            kwargs["xidQueryError"] = obj["xidQueryError"]
+        if "xidQueryStatus" in obj:
+            kwargs["xidQueryStatus"] = v1GpuXidQueryStatus(obj["xidQueryStatus"]) if obj["xidQueryStatus"] is not None else None
         return cls(**kwargs)
 
     def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
@@ -7627,7 +7698,58 @@ class v1GpuTopology(Printable):
         }
         if not omit_unset or "collectedAt" in vars(self):
             out["collectedAt"] = self.collectedAt
+        if not omit_unset or "xidQueriedAt" in vars(self):
+            out["xidQueriedAt"] = self.xidQueriedAt
+        if not omit_unset or "xidQueryError" in vars(self):
+            out["xidQueryError"] = self.xidQueryError
+        if not omit_unset or "xidQueryStatus" in vars(self):
+            out["xidQueryStatus"] = None if self.xidQueryStatus is None else self.xidQueryStatus.value
         return out
+
+class v1GpuXid(Printable):
+    """GpuXid is one critical XID code that a GPU reported recently."""
+
+    def __init__(
+        self,
+        *,
+        firstObserved: str,
+        lastObserved: str,
+        xid: int,
+    ):
+        self.firstObserved = firstObserved
+        self.lastObserved = lastObserved
+        self.xid = xid
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1GpuXid":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "firstObserved": obj["firstObserved"],
+            "lastObserved": obj["lastObserved"],
+            "xid": obj["xid"],
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "firstObserved": self.firstObserved,
+            "lastObserved": self.lastObserved,
+            "xid": self.xid,
+        }
+        return out
+
+class v1GpuXidQueryStatus(DetEnum):
+    """GpuXidQueryStatus is the result of the master's Prometheus query for recent
+    critical XIDs.
+    - GPU_XID_QUERY_STATUS_UNSPECIFIED: Not queried.
+    - GPU_XID_QUERY_STATUS_NOT_CONFIGURED: The master has no Prometheus (integrations.task_resources).
+    - GPU_XID_QUERY_STATUS_OK: The query succeeded. No XID can also mean that the exporter does not
+    report the GPU.
+    - GPU_XID_QUERY_STATUS_FAILED: The query failed or timed out.
+    """
+    UNSPECIFIED = "GPU_XID_QUERY_STATUS_UNSPECIFIED"
+    NOT_CONFIGURED = "GPU_XID_QUERY_STATUS_NOT_CONFIGURED"
+    OK = "GPU_XID_QUERY_STATUS_OK"
+    FAILED = "GPU_XID_QUERY_STATUS_FAILED"
 
 class v1Group(Printable):
     groupId: "typing.Optional[int]" = None
@@ -7872,6 +7994,7 @@ class v1Job(Printable):
     """Job represents a user submitted work that is not in a terminal
     state.
     """
+    placement: "typing.Optional[typing.Sequence[v1JobPlacement]]" = None
     priority: "typing.Optional[int]" = None
     progress: "typing.Optional[float]" = None
     summary: "typing.Optional[v1JobSummary]" = None
@@ -7892,6 +8015,7 @@ class v1Job(Printable):
         type: "jobv1Type",
         username: str,
         workspaceId: int,
+        placement: "typing.Union[typing.Sequence[v1JobPlacement], None, Unset]" = _unset,
         priority: "typing.Union[int, None, Unset]" = _unset,
         progress: "typing.Union[float, None, Unset]" = _unset,
         summary: "typing.Union[v1JobSummary, None, Unset]" = _unset,
@@ -7909,6 +8033,8 @@ class v1Job(Printable):
         self.type = type
         self.username = username
         self.workspaceId = workspaceId
+        if not isinstance(placement, Unset):
+            self.placement = placement
         if not isinstance(priority, Unset):
             self.priority = priority
         if not isinstance(progress, Unset):
@@ -7935,6 +8061,8 @@ class v1Job(Printable):
             "username": obj["username"],
             "workspaceId": obj["workspaceId"],
         }
+        if "placement" in obj:
+            kwargs["placement"] = [v1JobPlacement.from_json(x) for x in obj["placement"]] if obj["placement"] is not None else None
         if "priority" in obj:
             kwargs["priority"] = obj["priority"]
         if "progress" in obj:
@@ -7961,6 +8089,8 @@ class v1Job(Printable):
             "username": self.username,
             "workspaceId": self.workspaceId,
         }
+        if not omit_unset or "placement" in vars(self):
+            out["placement"] = None if self.placement is None else [x.to_json(omit_unset) for x in self.placement]
         if not omit_unset or "priority" in vars(self):
             out["priority"] = self.priority
         if not omit_unset or "progress" in vars(self):
@@ -7971,6 +8101,33 @@ class v1Job(Printable):
             out["userId"] = self.userId
         if not omit_unset or "weight" in vars(self):
             out["weight"] = None if self.weight is None else dump_float(self.weight)
+        return out
+
+class v1JobPlacement(Printable):
+    """The slots a job holds on one agent."""
+
+    def __init__(
+        self,
+        *,
+        agentId: str,
+        deviceIds: "typing.Sequence[int]",
+    ):
+        self.agentId = agentId
+        self.deviceIds = deviceIds
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1JobPlacement":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "agentId": obj["agentId"],
+            "deviceIds": obj["deviceIds"],
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "agentId": self.agentId,
+            "deviceIds": self.deviceIds,
+        }
         return out
 
 class v1JobSummary(Printable):
@@ -15497,22 +15654,6 @@ class v1SlotStats(Printable):
         }
         return out
 
-class v1SlotsFilter(DetEnum):
-    """Filter workloads by the slot count they request: experiments by
-    resources.slots_per_trial (1 when the config leaves it out, its default),
-    generic tasks by the resources.slots stored with the task (0 when the stored
-    config has none, as the task's slots field reports it). The filter counts
-    slots of any type. A slot is a GPU only in a resource pool whose slot type
-    is cuda or rocm; in a pool whose slot type is cpu, a slot is a CPU, so a
-    workload with slots does not necessarily use a GPU.
-    - SLOTS_FILTER_UNSPECIFIED: No filter.
-    - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.
-    - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
-    """
-    UNSPECIFIED = "SLOTS_FILTER_UNSPECIFIED"
-    HAS_SLOTS = "SLOTS_FILTER_HAS_SLOTS"
-    ZERO_SLOTS = "SLOTS_FILTER_ZERO_SLOTS"
-
 class v1StartTrialRequest(Printable):
     """Start a trial."""
     resume: "typing.Optional[bool]" = None
@@ -19817,12 +19958,14 @@ def get_GetExperiments(
     orderBy: "typing.Optional[v1OrderBy]" = None,
     projectId: "typing.Optional[int]" = None,
     showTrialData: "typing.Optional[bool]" = None,
-    slotsFilter: "typing.Optional[v1SlotsFilter]" = None,
+    slots: "typing.Optional[typing.Sequence[int]]" = None,
+    slotsAbove: "typing.Optional[int]" = None,
     sortBy: "typing.Optional[v1GetExperimentsRequestSortBy]" = None,
     states: "typing.Optional[typing.Sequence[experimentv1State]]" = None,
     userIds: "typing.Optional[typing.Sequence[int]]" = None,
     users: "typing.Optional[typing.Sequence[str]]" = None,
     workspaceId: "typing.Optional[int]" = None,
+    workspaceIds: "typing.Optional[typing.Sequence[int]]" = None,
 ) -> "v1GetExperimentsResponse":
     """Get a list of experiments.
 
@@ -19850,31 +19993,40 @@ denote number of experiments to skip from the end before returning results.
     - projectId: Limit experiments to those within a specified project, or 0 for all
 projects.
     - showTrialData: whether to surface trial specific data from the best trial.
-    - slotsFilter: Limit experiments by the slot count each trial requests
-(resources.slots_per_trial, 1 when unset): at least one slot, or none.
-
- - SLOTS_FILTER_UNSPECIFIED: No filter.
- - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.
- - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
-    - sortBy: Sort experiments by the given field.
+    - slots: Limit experiments to those whose trials request one of these slot counts
+(resources.slots_per_trial, 1 when unset). With slots_above, an
+experiment that matches either is listed.
+    - slotsAbove: Limit experiments to those whose trials request more than this many
+slots. With slots, an experiment that matches either is listed.
+    - sortBy: Sort experiments by the given field. Name, user and resource pool compare
+text with A-Z folded to a-z, by code point, then the text as is. Sorted by
+start time, end time, name, user, resource pool, slots or state group,
+experiments that tie go newest start first, then highest ID first.
 
  - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.
  - SORT_BY_ID: Returns experiments sorted by id.
  - SORT_BY_DESCRIPTION: Returns experiments sorted by description.
  - SORT_BY_START_TIME: Return experiments sorted by start time.
  - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are
-returned after the ones with end_time.
+returned after the ones with end_time, in either order.
  - SORT_BY_STATE: Return experiments sorted by state.
  - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.
  - SORT_BY_PROGRESS: Return experiments sorted by progress.
- - SORT_BY_USER: Return experiments sorted by user.
+ - SORT_BY_USER: Return experiments sorted by user: the owner's display name, or the
+username without one.
  - SORT_BY_NAME: Returns experiments sorted by name.
  - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.
- - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool.
+ - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool. Experiments without one are
+returned last, in either order.
  - SORT_BY_PROJECT_ID: Returns experiments sorted by project.
  - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.
  - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.
  - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..
+ - SORT_BY_SLOTS: Return experiments sorted by the slot count each trial requests
+(resources.slots_per_trial, 1 when unset).
+ - SORT_BY_STATE_GROUP: Return experiments sorted by state group: active, then paused
+(PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED).
+Every other state is active.
     - states: Limit experiments to those that match the provided state.
 
  - STATE_UNSPECIFIED: The state of the experiment is unknown.
@@ -19904,6 +20056,9 @@ userIds.
 usernames.
     - workspaceId: Limit experiments to those in projects of this workspace, or 0 for all
 workspaces.
+    - workspaceIds: Limit experiments to those in projects of these workspaces. IDs of
+workspaces that are gone or that the user cannot view are skipped; if
+none remain, no experiments are listed.
     """
     _params = {
         "archived": str(archived).lower() if archived is not None else None,
@@ -19921,12 +20076,14 @@ workspaces.
         "orderBy": orderBy.value if orderBy is not None else None,
         "projectId": projectId,
         "showTrialData": str(showTrialData).lower() if showTrialData is not None else None,
-        "slotsFilter": slotsFilter.value if slotsFilter is not None else None,
+        "slots": slots,
+        "slotsAbove": slotsAbove,
         "sortBy": sortBy.value if sortBy is not None else None,
         "states": [x.value for x in states] if states is not None else None,
         "userIds": userIds,
         "users": users,
         "workspaceId": workspaceId,
+        "workspaceIds": workspaceIds,
     }
     _resp = session._do_request(
         method="GET",
@@ -19973,31 +20130,55 @@ def get_GetGenericTasks(
     *,
     limit: "typing.Optional[int]" = None,
     offset: "typing.Optional[int]" = None,
+    orderBy: "typing.Optional[v1OrderBy]" = None,
     parentId: "typing.Optional[str]" = None,
     projectId: "typing.Optional[int]" = None,
     search: "typing.Optional[str]" = None,
-    slotsFilter: "typing.Optional[v1SlotsFilter]" = None,
+    slots: "typing.Optional[typing.Sequence[int]]" = None,
+    slotsAbove: "typing.Optional[int]" = None,
+    sortBy: "typing.Optional[v1GetGenericTasksRequestSortBy]" = None,
     states: "typing.Optional[typing.Sequence[v1GenericTaskState]]" = None,
     taskIds: "typing.Optional[typing.Sequence[str]]" = None,
     userIds: "typing.Optional[typing.Sequence[int]]" = None,
     users: "typing.Optional[typing.Sequence[str]]" = None,
     workspaceId: "typing.Optional[int]" = None,
+    workspaceIds: "typing.Optional[typing.Sequence[int]]" = None,
 ) -> "v1GetGenericTasksResponse":
     """Get a list of generic tasks, optionally filtered by owner, workspace,
     project, state, parent, name or slot count.
 
     - limit: Limit the number of tasks. A value of 0 denotes no limit.
     - offset: Skip this many tasks before returning results.
+    - orderBy: Order tasks in either ascending or descending order. Unspecified is
+ascending, or descending with SORT_BY_UNSPECIFIED.
+
+ - ORDER_BY_UNSPECIFIED: Returns records in no specific order.
+ - ORDER_BY_ASC: Returns records in ascending order.
+ - ORDER_BY_DESC: Returns records in descending order.
     - parentId: Limit tasks to the direct children of this task.
     - projectId: Limit tasks to this project; 0 for all projects.
     - search: Limit tasks to those whose name or task ID contains this text, ignoring
 case.
-    - slotsFilter: Limit tasks by the slot count they request (resources.slots): at least
-one slot, or none.
+    - slots: Limit tasks to those that request one of these slot counts
+(resources.slots, 0 when unset). With slots_above, a task that matches
+either is listed.
+    - slotsAbove: Limit tasks to those that request more than this many slots. With slots,
+a task that matches either is listed.
+    - sortBy: Sort tasks by the given field. Name, user and resource pool compare text
+with A-Z folded to a-z, by code point, then the text as is. Tasks that tie
+go newest start first, then by task ID (A to Z, by code point).
 
- - SLOTS_FILTER_UNSPECIFIED: No filter.
- - SLOTS_FILTER_HAS_SLOTS: Workloads that request at least one slot.
- - SLOTS_FILTER_ZERO_SLOTS: Workloads that request no slots: a slot count of 0.
+ - SORT_BY_UNSPECIFIED: Sort by start time, newest first unless order_by is ascending.
+ - SORT_BY_START_TIME: Sort by start time.
+ - SORT_BY_END_TIME: Sort by end time. Tasks without one come last, in either order.
+ - SORT_BY_NAME: Sort by name, as the task's name field shows it.
+ - SORT_BY_STATE_GROUP: Sort by state group: active, then paused (PAUSED), then ended
+(COMPLETED, CANCELED, ERROR). Every other state is active. Tasks without
+a state come last, in either order.
+ - SORT_BY_USER: Sort by user: the owner's display name, or the username without one.
+Tasks without an owner come last, in either order.
+ - SORT_BY_RESOURCE_POOL: Sort by resource pool. Tasks without one come last, in either order.
+ - SORT_BY_SLOTS: Sort by the slot count the task requests.
     - states: Limit tasks to these states.
 
  - GENERIC_TASK_STATE_UNSPECIFIED: The task state unknown
@@ -20014,19 +20195,25 @@ one slot, or none.
     - userIds: Limit tasks to those owned by users with these IDs.
     - users: Limit tasks to those owned by users with these usernames.
     - workspaceId: Limit tasks to this workspace; 0 for all accessible workspaces.
+    - workspaceIds: Limit tasks to these workspaces. IDs of workspaces that are gone or that
+the user cannot view are skipped; if none remain, no tasks are listed.
     """
     _params = {
         "limit": limit,
         "offset": offset,
+        "orderBy": orderBy.value if orderBy is not None else None,
         "parentId": parentId,
         "projectId": projectId,
         "search": search,
-        "slotsFilter": slotsFilter.value if slotsFilter is not None else None,
+        "slots": slots,
+        "slotsAbove": slotsAbove,
+        "sortBy": sortBy.value if sortBy is not None else None,
         "states": [x.value for x in states] if states is not None else None,
         "taskIds": taskIds,
         "userIds": userIds,
         "users": users,
         "workspaceId": workspaceId,
+        "workspaceIds": workspaceIds,
     }
     _resp = session._do_request(
         method="GET",

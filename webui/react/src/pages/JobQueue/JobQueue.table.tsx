@@ -1,15 +1,22 @@
 import Icon from 'hew/Icon';
 import Tooltip from 'hew/Tooltip';
-import { ReactNode } from 'react';
+import React, { ReactNode } from 'react';
 
 import Badge, { BadgeType } from 'components/Badge';
 import Link from 'components/Link';
+import { ColumnLayout, withColumn } from 'components/Table/columnLayout';
 import { ColumnDef } from 'components/Table/InteractiveTable';
 import { createOmitableRenderer, relativeTimeRenderer } from 'components/Table/Table';
 import { paths } from 'routes/utils';
 import { getJupyterLabs, getTensorBoards } from 'services/api';
 import { CommandTask, FullJob, Job, JobType } from 'types';
-import { genericJobLabel, jobTypeIconName, jobTypeLabel, taskJobLabel } from 'utils/job';
+import {
+  genericJobLabel,
+  jobTypeIconName,
+  jobTypeLabel,
+  placementLines,
+  taskJobLabel,
+} from 'utils/job';
 import { floatToPercent } from 'utils/string';
 import { openCommand } from 'utils/wait';
 
@@ -62,6 +69,37 @@ const linkToEntityPage = (job: Job, label: ReactNode): ReactNode => {
     default:
       return label;
   }
+};
+
+/** The stored layout with the GPUs column, after Slots at its default width. */
+export const withGpusColumn = (layout: ColumnLayout): ColumnLayout =>
+  withColumn(layout, 'gpus', 'slots', DEFAULT_COLUMN_WIDTHS);
+
+/**
+ * The GPUs a job holds, one line per agent. With `onToggle`, the lines are a toggle button that
+ * highlights the job's tiles in the topology panel.
+ */
+export const JobGpus: React.FC<{
+  job: FullJob;
+  onToggle?: (jobId: string) => void;
+  pressed: boolean;
+}> = ({ job, onToggle, pressed }) => {
+  const lines = placementLines(job.placement).map((line) => (
+    <span className={css.gpuLine} key={line}>
+      {line}
+    </span>
+  ));
+  if (lines.length === 0) return null;
+  if (!onToggle) return <div>{lines}</div>;
+  return (
+    <button
+      aria-pressed={pressed}
+      className={css.gpus}
+      type="button"
+      onClick={() => onToggle(job.jobId)}>
+      {lines}
+    </button>
+  );
 };
 
 export const columns: (f_flat_runs: boolean) => ColumnDef<Job>[] = (f_flat_runs) => [
@@ -160,6 +198,12 @@ export const columns: (f_flat_runs: boolean) => ColumnDef<Job>[] = (f_flat_runs)
       return cell;
     },
     title: 'Slots',
+  },
+  {
+    dataIndex: 'gpus',
+    defaultWidth: DEFAULT_COLUMN_WIDTHS['gpus'],
+    key: 'gpus',
+    title: 'GPUs',
   },
   {
     align: 'center',

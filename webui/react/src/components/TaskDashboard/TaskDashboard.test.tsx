@@ -8,14 +8,17 @@ import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { BrowserRouter, MemoryRouter } from 'react-router-dom';
 
+import { ARIA_LABEL_CONTAINER } from 'components/Table/TableFilterDropdown';
 import { ThemeProvider } from 'components/ThemeProvider';
 import { SettingsProvider } from 'hooks/useSettingsProvider';
 import {
+  getAgents,
   getExperiments,
   getGenericTasks,
   getJupyterLabs,
   getShells,
   getTensorBoards,
+  getUsers,
   getUserSetting,
   killExperiment,
   killGenericTask,
@@ -23,11 +26,12 @@ import {
   unpauseGenericTask,
   updateUserSetting,
 } from 'services/api';
-import { V1SlotsFilter } from 'services/api-ts-sdk';
 import authStore from 'stores/auth';
+import clusterStore from 'stores/cluster';
 import userStore from 'stores/users';
 import userSettings from 'stores/userSettings';
 import {
+  Agent,
   BulkExperimentItem,
   CommandState,
   CommandTask,
@@ -44,7 +48,7 @@ import { isDangerMenuItem, isDisabledMenuItem, menuLabels, openMenuItem } from '
 
 import { fetchRunPage } from './fetchRuns';
 import TaskDashboard from './TaskDashboard';
-import { MIN_COLUMN_WIDTH } from './TaskDashboard.settings';
+import { MIN_SORT_FILTER_WIDTHS } from './TaskDashboard.settings';
 
 // The menu and bulk Kill tests take many steps, which can outlast 5 s when the whole suite runs.
 vi.setConfig({ testTimeout: 15_000 });
@@ -134,6 +138,7 @@ const WORKSPACE: Workspace = {
 };
 
 vi.mock('services/api', () => ({
+  getAgents: vi.fn(() => Promise.resolve([])),
   getCommands: vi.fn(() => Promise.resolve([])),
   getCurrentUser: () => Promise.resolve({ id: 3, isActive: true, isAdmin: false, username: 'me' }),
   getExperiments: vi.fn(),
@@ -141,7 +146,7 @@ vi.mock('services/api', () => ({
   getJupyterLabs: vi.fn(),
   getShells: vi.fn(),
   getTensorBoards: vi.fn(() => Promise.resolve([])),
-  getUsers: () => Promise.resolve({ users: [] }),
+  getUsers: vi.fn(() => Promise.resolve({ users: [] })),
   getUserSetting: vi.fn(() => Promise.resolve({ settings: [] })),
   getWorkspaceProjects: () => Promise.resolve({ pagination: { total: 0 }, projects: [] }),
   getWorkspaces: () => Promise.resolve({ pagination: { total: 0 }, workspaces: [] }),
@@ -281,7 +286,7 @@ const OLD_WIDTHS = [301, 302, 303, 304, 305, 306, 307, 308, 309];
 
 /* The same with the Slots column, as this version stores them. */
 const NEW_COLUMNS = [...OLD_COLUMNS.slice(0, 7), 'slots', ...OLD_COLUMNS.slice(7)];
-const NEW_WIDTHS = [...OLD_WIDTHS.slice(0, 7), 72, ...OLD_WIDTHS.slice(7)];
+const NEW_WIDTHS = [...OLD_WIDTHS.slice(0, 7), 92, ...OLD_WIDTHS.slice(7)];
 
 /* The width of each stored column: the table binds the stored widths to the columns by place. */
 const storedWidths = () => {
@@ -342,14 +347,10 @@ const moveRight = async (title: string, onto: string) => {
 
 const user = userEvent.setup();
 
-/** The parameters of the latest list call of a paged source (not its count call, limit 1). */
-const lastListCall = <P extends { limit?: number }>(
+/** The parameters of the latest list call of a paged source. */
+const lastListCall = <P extends object>(
   fn: (params: P, options?: FetchOptions) => Promise<unknown>,
-): P | undefined =>
-  vi
-    .mocked(fn)
-    .mock.calls.filter(([params]) => params.limit !== 1)
-    .at(-1)?.[0];
+): P | undefined => vi.mocked(fn).mock.calls.at(-1)?.[0];
 
 const row = async (name: string) => (await screen.findByText(name)).closest('tr') as HTMLElement;
 
@@ -359,14 +360,60 @@ const settingsLoaded = () =>
 
 const STALE_EXPERIMENT: BulkExperimentItem = { ...EXPERIMENT, id: 41, name: 'stale-run' };
 
-/** Picks an option of the Select with this test ID. */
-const choose = async (testId: string, label: string) => {
-  await user.click(within(screen.getByTestId(testId)).getByRole('combobox'));
-  const options = (await screen.findAllByTitle(label)).filter(
-    (option) => !option.closest('.ant-select-dropdown-hidden'),
-  );
-  await user.click(options[options.length - 1]);
+/** The open filter dropdown, shown at once instead of after its animation. */
+const openDropdown = async (): Promise<HTMLElement> => {
+  const container = await waitFor(() => {
+    const open = screen
+      .getAllByLabelText(ARIA_LABEL_CONTAINER)
+      .find((el) => !el.closest('.ant-dropdown-hidden'));
+    expect(open).toBeDefined();
+    return open as HTMLElement;
+  });
+  const dropdown = container.closest('.ant-dropdown') as HTMLElement;
+  dropdown.style.removeProperty('opacity');
+  dropdown.style.removeProperty('pointer-events');
+  return container;
 };
+
+/** Opens the filter of a column by its funnel. */
+const openFilter = async (label: string): Promise<HTMLElement> => {
+  await user.click(screen.getByRole('button', { name: label }));
+  return await openDropdown();
+};
+
+const options = (dropdown: HTMLElement) =>
+  within(dropdown)
+    .getAllByRole('option')
+    .map((option) => option.textContent);
+
+const ticked = (dropdown: HTMLElement) =>
+  within(dropdown)
+    .getAllByRole('option')
+    .filter((option) => option.getAttribute('aria-selected') === 'true')
+    .map((option) => option.textContent);
+
+/** Ticks or unticks options of the open filter by their text, then applies it with OK. */
+const filterBy = async (label: string, texts: string[]) => {
+  const dropdown = await openFilter(label);
+  for (const text of texts) {
+    await user.click(within(dropdown).getByRole('option', { name: text }));
+  }
+  await user.click(within(dropdown).getByRole('button', { name: 'OK' }));
+};
+
+const AGENT = (id: string, slots: number): Agent => ({
+  id,
+  registeredTime: 0,
+  resourcePools: ['default'],
+  resources: [],
+  slotStats: {
+    brandStats: {},
+    typeStats: { TYPE_CUDA: { disabled: 0, draining: 0, states: {}, total: slots } },
+  },
+});
+
+/** The keys of the Jobs page's view in the URL of the browser. */
+const urlParams = () => new URLSearchParams(window.location.search);
 
 describe('TaskDashboard', () => {
   beforeEach(() => {
@@ -409,27 +456,106 @@ describe('TaskDashboard', () => {
     expect(names).toEqual(['gpu-shell', 'eval-sweep', 'cpu-notebook', 'bert-finetune']);
     expect(screen.getByTestId('jupyter-lab-button')).toBeInTheDocument();
     expect(screen.getByTestId('shell-button')).toBeInTheDocument();
-    expect(screen.getByText(/listed for 24 hours after they end/)).toBeInTheDocument();
+    // The toolbar has the search and the launch buttons only.
+    for (const testId of ['owner', 'slots', 'kind-experiment']) {
+      expect(screen.queryByTestId(testId)).not.toBeInTheDocument();
+    }
+    expect(screen.queryByText('Clear Filters', { exact: false })).not.toBeInTheDocument();
+    expect(screen.queryByText(/listed for 24 hours/)).not.toBeInTheDocument();
   });
 
-  it('counts the active runs of each kind on its chip', async () => {
-    setup();
+  it('sorts from the column headers, newest first by default, each click flipping the sort', async () => {
+    setup({}, '/jobs', { browser: true });
+    expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+    await settingsLoaded();
+    expect(lastListCall(getExperiments)).toMatchObject({
+      orderBy: 'ORDER_BY_DESC',
+      sortBy: 'SORT_BY_START_TIME',
+    });
+    expect(header('Started')).toHaveAttribute('aria-sort', 'descending');
 
+    for (const [desc, orderBy] of [
+      [false, 'ORDER_BY_ASC'],
+      [true, 'ORDER_BY_DESC'],
+      [false, 'ORDER_BY_ASC'],
+    ] as const) {
+      await user.click(within(header('Name')).getByText('Name'));
+      await waitFor(() =>
+        expect(lastListCall(getExperiments)).toMatchObject({ orderBy, sortBy: 'SORT_BY_NAME' }),
+      );
+      expect(lastListCall(getGenericTasks)).toMatchObject({ orderBy, sortBy: 'SORT_BY_NAME' });
+      expect(urlParams().get('sortKey')).toBe('name');
+      // A default is left out of the URL: a link without sortDesc sorts descending.
+      expect(urlParams().get('sortDesc')).toBe(desc ? null : 'false');
+    }
+    expect(header('Name')).toHaveAttribute('aria-sort', 'ascending');
+    expect(header('Started')).not.toHaveAttribute('aria-sort');
+
+    // Back to the default sort, which the URL still holds.
+    await user.click(within(header('Started')).getByText('Started'));
+    await waitFor(() => expect(window.location.search).toBe('?sortKey=startTime'));
+    expect(header('Started')).toHaveAttribute('aria-sort', 'descending');
+
+    // Slots sorts most first; the state sort is by state group.
+    await user.click(within(header('Slots')).getByText('Slots'));
     await waitFor(() =>
-      expect(screen.getByTestId('kind-experiment')).toHaveTextContent('Experiment2'),
+      expect(lastListCall(getExperiments)).toMatchObject({
+        orderBy: 'ORDER_BY_DESC',
+        sortBy: 'SORT_BY_SLOTS',
+      }),
     );
-    expect(screen.getByTestId('kind-generic-task')).toHaveTextContent('Generic Task5');
-    expect(screen.getByTestId('kind-shell')).toHaveTextContent('Shell1');
-    expect(screen.getByTestId('kind-command')).toHaveTextContent('Command0');
-  });
+    await user.click(within(header('State')).getByText('State'));
+    await waitFor(() =>
+      expect(lastListCall(getGenericTasks)).toMatchObject({
+        orderBy: 'ORDER_BY_ASC',
+        sortBy: 'SORT_BY_STATE_GROUP',
+      }),
+    );
+  }, 30_000);
+
+  it('keeps a page under a non-default sort, and goes to the first page on a new sort', async () => {
+    storeBeforeLoad({ sortDesc: false, sortKey: 'name', tableLimit: 2 });
+    setup({}, '/jobs', { browser: true });
+    expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+    await waitFor(
+      () =>
+        expect(lastListCall(getExperiments)).toMatchObject({ limit: 2, sortBy: 'SORT_BY_NAME' }),
+      AFTER_LOAD,
+    );
+    // By name: bert-finetune, cpu-notebook | eval-sweep, gpu-shell.
+    expect(screen.queryByText('eval-sweep')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTitle('2'));
+
+    await waitFor(() => expect(screen.getByText('eval-sweep')).toBeInTheDocument());
+    expect(screen.getByText('gpu-shell')).toBeInTheDocument();
+    expect(screen.queryByText('bert-finetune')).not.toBeInTheDocument();
+    // Each paged source sends its first offset + limit runs in the sort's order.
+    expect(lastListCall(getExperiments)).toMatchObject({
+      limit: 4,
+      offset: 0,
+      orderBy: 'ORDER_BY_ASC',
+      sortBy: 'SORT_BY_NAME',
+    });
+    expect(stored()).toMatchObject({ sortKey: 'name', tableOffset: 2 });
+
+    await user.click(within(header('Name')).getByText('Name'));
+    await waitFor(() => expect(stored()).toMatchObject({ sortDesc: true, tableOffset: 0 }));
+  }, 30_000);
 
   it('leaves experiments out of the tasks-only view', async () => {
     setup({ tasksOnly: true }, '/tasks');
 
     expect(await screen.findByText('eval-sweep')).toBeInTheDocument();
     expect(getExperiments).not.toHaveBeenCalled();
-    expect(screen.queryByTestId('kind-experiment')).not.toBeInTheDocument();
     expect(screen.queryByText('bert-finetune')).not.toBeInTheDocument();
+    expect(options(await openFilter('Filter by kind'))).toEqual([
+      'Generic Task',
+      'JupyterLab',
+      'Shell',
+      'Command',
+      'TensorBoard',
+    ]);
   });
 
   it("lists a workspace's runs, with the launch buttons", async () => {
@@ -452,37 +578,47 @@ describe('TaskDashboard', () => {
     expect(getShells).not.toHaveBeenCalled();
     expect(getJupyterLabs).not.toHaveBeenCalled();
     expect(screen.queryByText('gpu-shell')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('kind-shell')).not.toBeInTheDocument();
     expect(screen.queryByTestId('shell-button')).not.toBeInTheDocument();
-    expect(screen.queryByText(/listed for 24 hours after they end/)).not.toBeInTheDocument();
+    expect(options(await openFilter('Filter by kind'))).toEqual(['Experiment', 'Generic Task']);
+    expect(screen.queryByRole('button', { name: 'Filter by workspace' })).not.toBeInTheDocument();
   });
 
-  it('lists only the kind of a chip after a click on it', async () => {
+  it('lists only the kinds ticked in the Kind filter, and fetches only those', async () => {
     setup();
     expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+    await settingsLoaded();
 
-    const before = vi.mocked(getExperiments).mock.calls.length;
-    await user.click(screen.getByTestId('kind-generic-task'));
+    await filterBy('Filter by kind', ['Generic Task']);
 
     await waitFor(() => expect(screen.queryByText('bert-finetune')).not.toBeInTheDocument());
     expect(screen.getByText('eval-sweep')).toBeInTheDocument();
     expect(screen.queryByText('gpu-shell')).not.toBeInTheDocument();
-    expect(screen.getByTestId('kind-generic-task')).toHaveAttribute('aria-pressed', 'true');
-    // The chips still count experiments, but no experiment list is asked for.
-    const after = vi.mocked(getExperiments).mock.calls.slice(before);
-    expect(after.length).toBeGreaterThan(0);
-    expect(after.every(([params]) => params.limit === 1)).toBe(true);
+    expect(header('Kind').className).toMatch(/headerFilterOn/);
+    const experimentCalls = vi.mocked(getExperiments).mock.calls.length;
+    const shellCalls = vi.mocked(getShells).mock.calls.length;
+    await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
+    expect(vi.mocked(getExperiments).mock.calls).toHaveLength(experimentCalls);
+    expect(vi.mocked(getShells).mock.calls).toHaveLength(shellCalls);
+    expect(screen.getByRole('button', { name: 'Clear Filters (1)' })).toBeInTheDocument();
+
+    // Every kind ticked is no filter, so that no kind is ever left out.
+    const dropdown = await openFilter('Filter by kind');
+    await user.click(within(dropdown).getByRole('button', { name: 'All' }));
+    await user.click(within(dropdown).getByRole('button', { name: 'OK' }));
+    await waitFor(() => expect(screen.getByText('bert-finetune')).toBeInTheDocument());
+    await waitFor(() => expect(stored().type).toBeUndefined());
+    await waitFor(() =>
+      expect(screen.queryByText('Clear Filters', { exact: false })).not.toBeInTheDocument(),
+    );
   });
 
   it("applies the URL's kind filter, as /tasks/generic redirects with it", async () => {
     setup({ tasksOnly: true }, '/tasks?type=generic-task');
 
     expect(await screen.findByText('eval-sweep')).toBeInTheDocument();
-    await waitFor(() =>
-      expect(screen.getByTestId('kind-generic-task')).toHaveAttribute('aria-pressed', 'true'),
-    );
     await waitFor(() => expect(screen.queryByText('gpu-shell')).not.toBeInTheDocument());
     expect(screen.queryByText('cpu-notebook')).not.toBeInTheDocument();
+    expect(ticked(await openFilter('Filter by kind'))).toEqual(['Generic Task']);
   });
 
   it("keeps the URL's kinds over the stored ones while it moves the stored columns", async () => {
@@ -495,8 +631,6 @@ describe('TaskDashboard', () => {
     await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
     expect(new URLSearchParams(window.location.search).getAll('type')).toEqual(['shell']);
     expect(stored().type).toEqual(['shell']);
-    expect(screen.getByTestId('kind-shell')).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByTestId('kind-experiment')).toHaveAttribute('aria-pressed', 'false');
     await waitFor(
       () => expect(screen.queryByText('bert-finetune')).not.toBeInTheDocument(),
       AFTER_LOAD,
@@ -507,63 +641,370 @@ describe('TaskDashboard', () => {
   it('keeps old ?type values of the task list working', async () => {
     setup({ tasksOnly: true }, '/tasks?type=jupyter-lab');
 
-    await waitFor(() =>
-      expect(screen.getByTestId('kind-jupyter-lab')).toHaveAttribute('aria-pressed', 'true'),
-    );
+    expect(await screen.findByText('cpu-notebook', {}, AFTER_LOAD)).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText('gpu-shell')).not.toBeInTheDocument());
-    expect(screen.getByText('cpu-notebook')).toBeInTheDocument();
   });
 
-  it("asks for the current user's runs with Mine, everyone's by default", async () => {
+  it('sets the whole view from a URL with any of its keys: no filter or the default sort where it has none', async () => {
+    storeBeforeLoad({ sortDesc: false, sortKey: 'name', type: ['shell'], user: [4] });
+    setup({}, '/jobs?state=paused', { browser: true });
+
+    await waitFor(() => expect(stored().state).toEqual(['paused']), AFTER_LOAD);
+    expect(stored()).toMatchObject({ sortDesc: true, sortKey: 'startTime' });
+    expect(stored().type).toBeUndefined();
+    expect(stored().user).toBeUndefined();
+    await waitFor(() =>
+      expect(lastListCall(getExperiments)).toMatchObject({
+        sortBy: 'SORT_BY_START_TIME',
+        states: ['STATE_PAUSED'],
+      }),
+    );
+    expect(lastListCall(getExperiments)?.userIds).toBeUndefined();
+    expect(urlParams().getAll('state')).toEqual(['paused']);
+  }, 30_000);
+
+  it('opens the saved view at a URL without its keys, and then shows it in the URL', async () => {
+    storeBeforeLoad({ sortDesc: false, sortKey: 'name', state: ['ended'] });
+    setup({}, '/jobs', { browser: true });
+
+    await waitFor(
+      () =>
+        expect(lastListCall(getExperiments)).toMatchObject({
+          orderBy: 'ORDER_BY_ASC',
+          sortBy: 'SORT_BY_NAME',
+          states: ['STATE_COMPLETED', 'STATE_CANCELED', 'STATE_ERROR', 'STATE_DELETE_FAILED'],
+        }),
+      AFTER_LOAD,
+    );
+    expect(stored()).toMatchObject({ sortKey: 'name', state: ['ended'] });
+    // A copied link shows the same rows.
+    await waitFor(() => expect(urlParams().getAll('state')).toEqual(['ended']));
+    expect(urlParams().get('sortKey')).toBe('name');
+    expect(urlParams().get('sortDesc')).toBe('false');
+  }, 30_000);
+
+  it("opens a link to the default view at the default view, not the recipient's saved one", async () => {
+    // The sender's page has the default view: no filters, newest first.
+    const sender = setup({}, '/jobs', { browser: true });
+    expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+    await settingsLoaded();
+    await waitFor(() =>
+      expect(lastListCall(getExperiments)).toMatchObject({
+        orderBy: 'ORDER_BY_DESC',
+        sortBy: 'SORT_BY_START_TIME',
+      }),
+    );
+    await waitFor(() => expect(window.location.search).toBe('?sortKey=startTime'));
+    const link = `${window.location.pathname}${window.location.search}`;
+    sender.unmount();
+
+    // The recipient saved an owner, a state and a sort of their own.
+    await userSettings.clear();
+    vi.clearAllMocks();
+    window.history.replaceState(null, '', '/');
+    storeBeforeLoad({ sortDesc: false, sortKey: 'name', state: ['paused'], user: [4] });
+    setup({}, link, { browser: true });
+
+    await waitFor(() => expect(stored()).toMatchObject({ sortKey: 'startTime' }), AFTER_LOAD);
+    expect(stored()).toMatchObject({ sortDesc: true });
+    expect(stored().state).toBeUndefined();
+    expect(stored().user).toBeUndefined();
+    await waitFor(() =>
+      expect(lastListCall(getExperiments)).toMatchObject({
+        orderBy: 'ORDER_BY_DESC',
+        sortBy: 'SORT_BY_START_TIME',
+      }),
+    );
+    expect(lastListCall(getExperiments)?.userIds).toBeUndefined();
+    expect(lastListCall(getGenericTasks)).toMatchObject({
+      orderBy: 'ORDER_BY_DESC',
+      sortBy: 'SORT_BY_START_TIME',
+    });
+    expect(lastListCall(getGenericTasks)?.states).toBeUndefined();
+    expect(lastListCall(getGenericTasks)?.userIds).toBeUndefined();
+    expect(urlParams().get('sortKey')).toBe('startTime');
+    expect(urlParams().has('state')).toBe(false);
+    expect(urlParams().has('user')).toBe(false);
+  }, 30_000);
+
+  it('shows the view in the URL again when the browser goes to the plain page', async () => {
+    setup({}, '/jobs?state=active', { browser: true });
+    await waitFor(() => expect(stored().state).toEqual(['active']), AFTER_LOAD);
+
+    // As after the sidebar's link to the page, or Back to it.
+    act(() => {
+      window.history.pushState(null, '', '/jobs');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+
+    await waitFor(() => expect(urlParams().getAll('state')).toEqual(['active']));
+    expect(stored().state).toEqual(['active']);
+    expect(lastListCall(getExperiments)?.states).toEqual([
+      'STATE_ACTIVE',
+      'STATE_STOPPING_COMPLETED',
+      'STATE_STOPPING_CANCELED',
+      'STATE_STOPPING_ERROR',
+      'STATE_STOPPING_KILLED',
+    ]);
+  }, 30_000);
+
+  it('keeps the sort key in the URL once Clear Filters leaves the default view', async () => {
+    setup({}, '/jobs?state=active', { browser: true });
+    const clear = await screen.findByRole('button', { name: 'Clear Filters (1)' }, AFTER_LOAD);
+
+    await user.click(clear);
+
+    await waitFor(() => expect(stored().state).toBeUndefined());
+    await waitFor(() => expect(window.location.search).toBe('?sortKey=startTime'));
+
+    // Back to the plain page.
+    act(() => {
+      window.history.pushState(null, '', '/jobs');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await waitFor(() => expect(window.location.search).toBe('?sortKey=startTime'));
+  }, 30_000);
+
+  it('leaves the default sort key out of the URL once another key shows the view', async () => {
+    // A first load with nothing saved, which stores no sort.
+    storeBeforeLoad({});
+    setup({}, '/jobs', { browser: true });
+    await waitFor(() => expect(window.location.search).toBe('?sortKey=startTime'), AFTER_LOAD);
+
+    await user.type(screen.getByPlaceholderText('Search name or ID'), 'sweep');
+
+    await waitFor(() => expect(stored().search).toBe('sweep'));
+    await waitFor(() => expect(lastListCall(getGenericTasks)?.search).toBe('sweep'));
+    expect(window.location.search).toBe('?search=sweep');
+  }, 30_000);
+
+  it('turns what 0.41.0 saved into the filters of now, before the first fetch, and saves them once', async () => {
+    storeBeforeLoad({ owner: 'mine', slots: 'gpu', workspace: 7 });
+    setup();
+
+    await waitFor(() => expect(getExperiments).toHaveBeenCalled(), AFTER_LOAD);
+    await waitFor(() => expect(saved('slots')).toEqual(['multi:0']), AFTER_LOAD);
+    for (const [params] of vi.mocked(getExperiments).mock.calls) {
+      expect(params).toMatchObject({
+        slotsAbove: 0,
+        userIds: [CURRENT_USER_ID],
+        workspaceIds: [7],
+      });
+    }
+    expect(saved('user')).toEqual([CURRENT_USER_ID]);
+    expect(saved('workspace')).toEqual([7]);
+    expect(saved('owner')).toBeUndefined();
+    expect(stored().owner).toBeUndefined();
+    expect(screen.getByRole('button', { name: 'Clear Filters (3)' })).toBeInTheDocument();
+    // Once: a later load reads the saved values as they are.
+    const updates = vi.mocked(updateUserSetting).mock.calls.length;
+    await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+    expect(vi.mocked(updateUserSetting).mock.calls).toHaveLength(updates);
+  }, 30_000);
+
+  it('filters by owner, the signed-in user first, on the master and here for tasks', async () => {
+    vi.mocked(getUsers).mockResolvedValue({
+      pagination: { total: 3 },
+      // Users of no listed run, whose owners stay without a user record.
+      users: [
+        { displayName: 'Zoe', id: 9, isActive: true, isAdmin: false, username: 'zoe' },
+        { displayName: 'alice', id: 11, isActive: true, isAdmin: false, username: 'al' },
+      ],
+    });
+    userStore.fetchUsers();
     setup();
     expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+    await settingsLoaded();
     expect(lastListCall(getGenericTasks)?.userIds).toBeUndefined();
 
-    await choose('owner', 'Mine');
+    const funnel = screen.getByRole('button', { name: 'Filter by owner' });
+    expect(funnel).toHaveAttribute('aria-haspopup', 'listbox');
+    expect(funnel).toHaveAttribute('aria-pressed', 'false');
+    const dropdown = await openFilter('Filter by owner');
+    expect(within(dropdown).getByRole('listbox', { name: 'Owner' })).toBeInTheDocument();
+    await waitFor(() => expect(options(dropdown)).toEqual(['me', 'alice', 'Zoe']));
+    // A name cut short shows in full on hover.
+    expect(within(dropdown).getByRole('option', { name: 'alice' })).toHaveAttribute(
+      'title',
+      'alice',
+    );
+    await user.click(within(dropdown).getByRole('option', { name: 'me' }));
+    await user.click(within(dropdown).getByRole('button', { name: 'OK' }));
 
     await waitFor(() => expect(lastListCall(getGenericTasks)?.userIds).toEqual([CURRENT_USER_ID]));
     expect(lastListCall(getExperiments)?.userIds).toEqual([CURRENT_USER_ID]);
     expect(vi.mocked(getShells).mock.calls.at(-1)?.[0]).toMatchObject({
       users: [String(CURRENT_USER_ID)],
     });
+    expect(header('Owner').className).toMatch(/headerFilterOn/);
+    expect(screen.getByRole('button', { name: 'Filter by owner' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
   });
 
-  it('filters GPU runs on the master for experiments and generic tasks, here for tasks', async () => {
+  it('filters by slot counts and Multi-node, listing 0 to the most slots of any agent', async () => {
+    vi.mocked(getAgents).mockResolvedValue([AGENT('a', 8), AGENT('b', 2)]);
+    clusterStore.fetchAgents();
     setup();
     expect(await screen.findByText('cpu-notebook')).toBeInTheDocument();
+    await settingsLoaded();
 
-    await choose('slots', 'GPU');
+    const dropdown = await openFilter('Filter by slots');
+    await waitFor(() =>
+      expect(options(dropdown)).toEqual([
+        '0',
+        '1',
+        '2',
+        '3',
+        '4',
+        '5',
+        '6',
+        '7',
+        '8',
+        'Multi-node',
+      ]),
+    );
+    await user.click(within(dropdown).getByRole('option', { name: '0' }));
+    await user.click(within(dropdown).getByRole('option', { name: 'Multi-node' }));
+    await user.click(within(dropdown).getByRole('button', { name: 'OK' }));
 
     await waitFor(() =>
-      expect(lastListCall(getGenericTasks)?.slotsFilter).toBe(V1SlotsFilter.HASSLOTS),
+      expect(lastListCall(getGenericTasks)).toMatchObject({ slots: [0], slotsAbove: 8 }),
     );
-    expect(lastListCall(getExperiments)?.slotsFilter).toBe(V1SlotsFilter.HASSLOTS);
-    await waitFor(() => expect(screen.queryByText('cpu-notebook')).not.toBeInTheDocument());
-    expect(screen.getByText('gpu-shell')).toBeInTheDocument();
-
-    await choose('slots', 'CPU-only');
-
-    await waitFor(() =>
-      expect(lastListCall(getGenericTasks)?.slotsFilter).toBe(V1SlotsFilter.ZEROSLOTS),
-    );
+    expect(lastListCall(getExperiments)).toMatchObject({ slots: [0], slotsAbove: 8 });
     await waitFor(() => expect(screen.queryByText('gpu-shell')).not.toBeInTheDocument());
     expect(screen.getByText('cpu-notebook')).toBeInTheDocument();
+    await waitFor(() => expect(stored().slots).toEqual(['0', 'multi:8']));
   });
 
-  it('explains GPU and CPU-only in a tooltip on an icon, never over the open options', async () => {
-    const hint = 'GPU: asks for at least one slot. CPU-only: asks for none.';
+  it('keeps the N of a saved Multi-node once the agent with the most slots has left', async () => {
+    vi.mocked(getAgents).mockResolvedValue([AGENT('a', 4)]);
+    clusterStore.fetchAgents();
+    storeBeforeLoad({ slots: ['multi:8'] });
+    setup();
+    expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+    await waitFor(() => expect(lastListCall(getExperiments)).toMatchObject({ slotsAbove: 8 }));
+
+    const dropdown = await openFilter('Filter by slots');
+    await waitFor(() =>
+      expect(options(dropdown)).toEqual([
+        '0',
+        '1',
+        '2',
+        '3',
+        '4',
+        '5',
+        '6',
+        '7',
+        '8',
+        'Multi-node',
+      ]),
+    );
+    expect(ticked(dropdown)).toEqual(['Multi-node']);
+    await user.click(within(dropdown).getByRole('option', { name: '0' }));
+    await user.click(within(dropdown).getByRole('button', { name: 'OK' }));
+
+    await waitFor(() => expect(stored().slots).toEqual(['0', 'multi:8']));
+    expect(lastListCall(getExperiments)).toMatchObject({ slots: [0], slotsAbove: 8 });
+  }, 30_000);
+
+  it('opens a funnel with Enter without sorting, and goes round the filter with Tab', async () => {
     setup();
     expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+    await settingsLoaded();
 
-    await user.click(within(screen.getByTestId('slots')).getByRole('combobox'));
-    expect((await screen.findAllByTitle('CPU-only')).length).toBeGreaterThan(0);
-    // Longer than the tooltip's 0.1 s open delay.
-    await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    screen.getByRole('button', { name: 'Filter by state' }).focus();
+    await user.keyboard('{Enter}');
+    const dropdown = await openDropdown();
+    const list = within(dropdown).getByRole('listbox');
+    await waitFor(() => expect(list).toHaveFocus());
+    // The header sorts on Enter, but not from its funnel.
+    expect(stored().sortKey).toBeUndefined();
+    expect(
+      vi
+        .mocked(getExperiments)
+        .mock.calls.every(([params]) => params.sortBy === 'SORT_BY_START_TIME'),
+    ).toBe(true);
 
-    await user.hover(screen.getByLabelText(hint));
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(hint);
+    // Active, Paused, Ended: Down to Paused, Space ticks it.
+    await user.keyboard('{ArrowDown}{ }');
+    expect(ticked(dropdown)).toEqual(['Paused']);
+    await user.keyboard('{Tab}');
+    expect(within(dropdown).getByRole('button', { name: 'All' })).toHaveFocus();
+    await user.keyboard('{Tab}');
+    expect(within(dropdown).getByRole('button', { name: 'None' })).toHaveFocus();
+    await user.keyboard('{Tab}');
+    expect(within(dropdown).getByRole('button', { name: 'OK' })).toHaveFocus();
+    await user.keyboard('{Tab}');
+    expect(list).toHaveFocus();
+    await user.keyboard('{Shift>}{Tab}{/Shift}');
+    expect(within(dropdown).getByRole('button', { name: 'OK' })).toHaveFocus();
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(lastListCall(getExperiments)?.states).toEqual(['STATE_PAUSED']));
+    expect(stored().state).toEqual(['paused']);
   });
+
+  it('drops the ticks on Escape, and ticks all but one on a Ctrl+click', async () => {
+    setup();
+    expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+    await settingsLoaded();
+
+    let dropdown = await openFilter('Filter by state');
+    await user.click(within(dropdown).getByRole('option', { name: 'Ended' }));
+    expect(ticked(dropdown)).toEqual(['Ended']);
+    await user.keyboard('{Escape}');
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(stored().state).toBeUndefined();
+
+    dropdown = await openFilter('Filter by state');
+    expect(ticked(dropdown)).toEqual([]);
+    await user.keyboard('{Control>}');
+    await user.click(within(dropdown).getByRole('option', { name: 'Ended' }));
+    await user.keyboard('{/Control}');
+    expect(ticked(dropdown)).toEqual(['Active', 'Paused']);
+    await user.click(within(dropdown).getByRole('button', { name: 'None' }));
+    expect(ticked(dropdown)).toEqual([]);
+  });
+
+  it('counts no filter that the page does not apply', async () => {
+    const project = setup({ projectId: 1 }, '/projects/1/jobs?type=shell');
+    expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+    await waitFor(() => expect(stored('jobs-dashboard-project-1').type).toEqual(['shell']));
+    expect(screen.queryByText('Clear Filters', { exact: false })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Filter by kind' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    project.unmount();
+
+    setup({ workspace: WORKSPACE }, '/workspaces/7/jobs?workspace=3');
+    expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+    await waitFor(() => expect(stored('jobs-dashboard-ws-7').workspace).toEqual([3]));
+    expect(screen.queryByText('Clear Filters', { exact: false })).not.toBeInTheDocument();
+  }, 30_000);
+
+  it('clears the filters, and only them, with Clear Filters', async () => {
+    storeBeforeLoad({
+      columns: NEW_COLUMNS,
+      columnWidths: NEW_WIDTHS,
+      sortKey: 'name',
+      state: ['active'],
+      type: ['shell', 'experiment'],
+    });
+    setup();
+    const clear = await screen.findByRole('button', { name: 'Clear Filters (2)' }, AFTER_LOAD);
+
+    await user.click(clear);
+
+    await waitFor(() => expect(stored().state).toBeUndefined());
+    expect(stored().type).toBeUndefined();
+    expect(stored()).toMatchObject({ columnWidths: NEW_WIDTHS, sortKey: 'name' });
+    await waitFor(() =>
+      expect(screen.queryByText('Clear Filters', { exact: false })).not.toBeInTheDocument(),
+    );
+  }, 30_000);
 
   it('shows the slots each run asks for between Resource Pool and Started', async () => {
     const configOf = (config: unknown) => config as BulkExperimentItem['config'];
@@ -616,14 +1057,14 @@ describe('TaskDashboard', () => {
           location: 306,
           name: 303,
           resourcePool: 307,
-          slots: 72,
+          slots: 90,
           startTime: 308,
           state: 304,
           user: 305,
         });
-        // ID, User, Location, Resource Pool and Ended are hidden below the md breakpoint, as in
-        // tests. The table takes the new widths a render later, which takes seconds in a full run.
-        await waitFor(() => expect(shownWidths()).toMatchObject({ Slots: '72px' }), AFTER_LOAD);
+        // ID, Resource Pool and Ended are hidden below the md breakpoint, as in tests. The table
+        // takes the new widths a render later, which takes seconds in a full run.
+        await waitFor(() => expect(shownWidths()).toMatchObject({ Slots: '90px' }), AFTER_LOAD);
         expect(shownWidths()).toMatchObject({
           Kind: '301px',
           Name: '303px',
@@ -645,10 +1086,10 @@ describe('TaskDashboard', () => {
       expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
 
       await waitFor(() => expect(stored().columns).toContain('slots'), AFTER_LOAD);
-      expect(storedWidths()).toMatchObject({ id: 100, kind: 64, name: 240, slots: 72 });
+      expect(storedWidths()).toMatchObject({ id: 100, kind: 84, name: 240, slots: 90 });
       // The widths keep their count, which the table alone would not take up.
-      await waitFor(() => expect(shownWidths()).toMatchObject({ Kind: '64px' }), AFTER_LOAD);
-      expect(shownWidths()).toMatchObject({ Name: '240px', Slots: '72px', State: '120px' });
+      await waitFor(() => expect(shownWidths()).toMatchObject({ Kind: '84px' }), AFTER_LOAD);
+      expect(shownWidths()).toMatchObject({ Name: '240px', Slots: '90px', State: '120px' });
     }, 30_000);
   });
 
@@ -667,7 +1108,7 @@ describe('TaskDashboard', () => {
         await waitFor(() => expect(shownWidths()).toMatchObject({ Kind: '301px' }), AFTER_LOAD);
         expect(shownWidths()).toMatchObject({
           Name: '303px',
-          Slots: '72px',
+          Slots: '92px',
           Started: '308px',
           State: '304px',
         });
@@ -685,7 +1126,7 @@ describe('TaskDashboard', () => {
       // The resize changes the table's own widths in place, not the stored ones it started from,
       // so the settings see a change and store it.
       await waitFor(() =>
-        expect(saved('columnWidths')).toEqual([301, 302, 450, 304, 305, 306, 307, 72, 308, 309]),
+        expect(saved('columnWidths')).toEqual([301, 302, 450, 304, 305, 306, 307, 92, 308, 309]),
       );
       expect(shownWidths()).toMatchObject({ Kind: '301px', Name: '450px' });
     }, 30_000);
@@ -700,13 +1141,13 @@ describe('TaskDashboard', () => {
       await waitFor(() =>
         expect(saved('columns')).toEqual(['kind', 'id', 'state', 'name', ...NEW_COLUMNS.slice(4)]),
       );
-      expect(saved('columnWidths')).toEqual([301, 302, 304, 303, 305, 306, 307, 72, 308, 309]);
+      expect(saved('columnWidths')).toEqual([301, 302, 304, 303, 305, 306, 307, 92, 308, 309]);
 
       // The move gives the table and the settings one array of widths; the resize changes the
       // table's own.
       await resize('Kind', 500);
       await waitFor(() =>
-        expect(saved('columnWidths')).toEqual([500, 302, 304, 303, 305, 306, 307, 72, 308, 309]),
+        expect(saved('columnWidths')).toEqual([500, 302, 304, 303, 305, 306, 307, 92, 308, 309]),
       );
       expect(shownWidths()).toMatchObject({ Kind: '500px', Name: '303px', State: '304px' });
     }, 30_000);
@@ -717,13 +1158,26 @@ describe('TaskDashboard', () => {
     userSettings.reset();
     vi.mocked(getUserSetting).mockReturnValueOnce(new Promise((resolve) => (load = resolve)));
     setup();
-    await waitFor(() => expect(getExperiments).toHaveBeenCalled());
     await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
-    // The table mounts again once they have, which would replace a row being clicked.
+    // Nothing is fetched before the saved filters are known.
+    expect(getExperiments).not.toHaveBeenCalled();
     expect(screen.queryByText('bert-finetune')).not.toBeInTheDocument();
 
     load({ settings: [] });
     expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
+  });
+
+  it('fetches nothing on a column resize', async () => {
+    setup();
+    expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+    await settingsLoaded();
+    const calls = vi.mocked(getExperiments).mock.calls.length;
+
+    await resize('Name', 450);
+    await waitFor(() => expect(storedWidths()).toMatchObject({ name: 450 }));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 200)));
+
+    expect(vi.mocked(getExperiments).mock.calls).toHaveLength(calls);
   });
 
   it('stores the columns with the widths of a resize', async () => {
@@ -734,10 +1188,10 @@ describe('TaskDashboard', () => {
     await resize('Name', 450);
     // Widths stored alone would be bound by place to the default columns of a later version.
     await waitFor(() =>
-      expect(saved('columnWidths')).toEqual([64, 100, 450, 120, 85, 230, 128, 72, 117, 117]),
+      expect(saved('columnWidths')).toEqual([84, 100, 450, 120, 115, 230, 130, 90, 117, 117]),
     );
     expect(saved('columns')).toEqual(NEW_COLUMNS);
-    expect(storedWidths()).toMatchObject({ kind: 64, name: 450, slots: 72 });
+    expect(storedWidths()).toMatchObject({ kind: 84, name: 450, slots: 90 });
   });
 
   it('resizes a column narrower than its default width, down to the minimum', async () => {
@@ -749,9 +1203,12 @@ describe('TaskDashboard', () => {
     await waitFor(() => expect(storedWidths()).toMatchObject({ name: 120 }));
     expect(shownWidths()).toMatchObject({ Name: '120px' });
 
+    // Wide enough for the title and its sort arrows.
     await resize('Name', 10);
-    await waitFor(() => expect(storedWidths()).toMatchObject({ name: MIN_COLUMN_WIDTH }));
-    expect(shownWidths()).toMatchObject({ Name: `${MIN_COLUMN_WIDTH}px` });
+    await waitFor(() =>
+      expect(storedWidths()).toMatchObject({ name: MIN_SORT_FILTER_WIDTHS.name }),
+    );
+    expect(shownWidths()).toMatchObject({ Name: `${MIN_SORT_FILTER_WIDTHS.name}px` });
   });
 
   it('shows a stored width narrower than the default', async () => {
@@ -840,42 +1297,48 @@ describe('TaskDashboard', () => {
     const jobs = setup();
     expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
     await settingsLoaded();
-    await choose('owner', 'Mine');
+    await filterBy('Filter by owner', ['me']);
     await waitFor(() => expect(lastListCall(getGenericTasks)?.userIds).toEqual([CURRENT_USER_ID]));
     jobs.unmount();
 
     vi.mocked(getGenericTasks).mockClear();
     const tasks = setup({ tasksOnly: true }, '/tasks');
-    expect(await screen.findByText('eval-sweep')).toBeInTheDocument();
+    expect(await screen.findByText('eval-sweep', {}, AFTER_LOAD)).toBeInTheDocument();
     expect(lastListCall(getGenericTasks)?.userIds).toBeUndefined();
-    expect(screen.getByTestId('owner')).toHaveTextContent('All users');
+    expect(header('Owner').className).not.toMatch(/headerFilterOn/);
     tasks.unmount();
 
     // The Jobs page kept its own filter.
     vi.mocked(getGenericTasks).mockClear();
     setup();
     await waitFor(() => expect(lastListCall(getGenericTasks)?.userIds).toEqual([CURRENT_USER_ID]));
-    expect(screen.getByTestId('owner')).toHaveTextContent('Mine');
+    expect(await screen.findByText('eval-sweep', {}, AFTER_LOAD)).toBeInTheDocument();
+    expect(header('Owner').className).toMatch(/headerFilterOn/);
   });
 
   it('drops the reply of a fetch that a newer one replaced, and aborts it', async () => {
-    // Everyone's experiments are held until the list of the user's own (Mine) is shown.
+    // After the first list, everyone's experiments are held until the user's own are shown.
     const held: { release: () => void; signal?: AbortSignal }[] = [];
+    let hold = false;
     vi.mocked(getExperiments).mockImplementation((params, options) => {
       const page = (experiment: BulkExperimentItem) => ({
         experiments: [experiment],
         pagination: { limit: 0, offset: 0, total: 1 },
       });
       if (params.userIds) return Promise.resolve(page(EXPERIMENT));
+      if (!hold) return Promise.resolve(page({ ...EXPERIMENT, id: 40, name: 'first-run' }));
       return new Promise((resolve) =>
         held.push({ release: () => resolve(page(STALE_EXPERIMENT)), signal: options?.signal }),
       );
     });
     setup();
-    await waitFor(() => expect(held.length).toBeGreaterThan(0));
+    expect(await screen.findByText('first-run')).toBeInTheDocument();
     await settingsLoaded();
+    hold = true;
+    await user.type(screen.getByPlaceholderText('Search name or ID'), 'run');
+    await waitFor(() => expect(held.length).toBeGreaterThan(0));
 
-    await choose('owner', 'Mine');
+    await filterBy('Filter by owner', ['me']);
 
     expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
     expect(held.every(({ signal }) => signal?.aborted)).toBe(true);
@@ -889,22 +1352,26 @@ describe('TaskDashboard', () => {
   });
 
   it('reports no error for a fetch that fails after a newer one replaced it', async () => {
-    // Everyone's runs are held until the list of the user's own (Mine) is shown, then fail.
+    // After the first list, everyone's runs are held until the user's own are shown, then fail.
     const held: { fail: () => void; signal?: AbortSignal }[] = [];
+    let hold = false;
     vi.mocked(fetchRunPage).mockImplementation((query, signal) => {
-      if (query.userId !== undefined) return real.fetchRunPage(query, signal);
+      if (query.userIds !== undefined || !hold) return real.fetchRunPage(query, signal);
       return new Promise((_resolve, reject) =>
         held.push({ fail: () => reject(new Error('late failure')), signal }),
       );
     });
     setup();
-    await waitFor(() => expect(held.length).toBeGreaterThan(0));
+    expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
     await settingsLoaded();
+    hold = true;
+    await user.type(screen.getByPlaceholderText('Search name or ID'), 'bert');
+    await waitFor(() => expect(held.length).toBeGreaterThan(0));
 
-    await choose('owner', 'Mine');
+    await filterBy('Filter by owner', ['me']);
 
     expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
-    expect(held.every(({ signal }) => signal?.aborted)).toBe(true);
+    await waitFor(() => expect(held.every(({ signal }) => signal?.aborted)).toBe(true));
     await act(async () => {
       held.forEach(({ fail }) => fail());
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -956,20 +1423,18 @@ describe('TaskDashboard', () => {
     expect(screen.queryByText('gpu-shell')).not.toBeInTheDocument();
   });
 
-  it('shows no alert for a failed list of a kind that the chips leave out', async () => {
+  it('shows no alert for a failed list of a kind that the Kind filter leaves out', async () => {
     vi.mocked(getShells).mockRejectedValue(new Error('shells are down'));
     setup();
     expect(await screen.findByText(/Unable to load shells/)).toBeInTheDocument();
     await settingsLoaded();
 
-    await user.click(screen.getByTestId('kind-generic-task'));
+    await filterBy('Filter by kind', ['Generic Task']);
 
     await waitFor(() =>
       expect(screen.queryByText(/Unable to load shells/)).not.toBeInTheDocument(),
     );
     expect(screen.getByText('eval-sweep')).toBeInTheDocument();
-    // Its chip goes without a count.
-    expect(screen.getByTestId('kind-shell')).toHaveTextContent(/^Shell$/);
   });
 
   describe('row menus', () => {

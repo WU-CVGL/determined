@@ -5,6 +5,8 @@ import (
 
 	"github.com/shopspring/decimal"
 
+	"github.com/determined-ai/determined/master/pkg/aproto"
+	"github.com/determined-ai/determined/master/pkg/device"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/proto/pkg/jobv1"
 )
@@ -32,6 +34,9 @@ type RMJobInfo struct { // rename ?
 	State          SchedulingState
 	RequestedSlots int
 	AllocatedSlots int
+	// Placement lists the slots the job holds, by agent: the devices of its allocated requests.
+	// Only the agent resource manager fills it.
+	Placement map[aproto.ID][]device.ID
 }
 
 // DeleteJob instructs the RM to clean up all metadata associated with a job external to

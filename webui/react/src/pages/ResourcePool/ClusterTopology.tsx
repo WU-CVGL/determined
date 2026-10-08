@@ -2,6 +2,7 @@ import Tooltip from 'hew/Tooltip';
 import React, { PropsWithChildren, useEffect, useMemo, useRef, useState } from 'react';
 
 import Section from 'components/Section';
+import { V1JobPlacement } from 'services/api-ts-sdk';
 import { Agent, Resource, SlotsRecord } from 'types';
 
 import css from './ClusterTopology.module.scss';
@@ -14,6 +15,8 @@ interface NodeElementProps {
 }
 
 interface Props {
+  /** The GPUs whose tiles to highlight, by agent. */
+  highlight?: V1JobPlacement[];
   nodes: Agent[];
 }
 
@@ -59,15 +62,21 @@ const NodeElement: React.FC<PropsWithChildren<NodeElementProps>> = ({ name, slot
   );
 };
 
-const Topology: React.FC<PropsWithChildren<Props>> = ({ nodes }) => {
+const Topology: React.FC<PropsWithChildren<Props>> = ({ highlight, nodes }) => {
   // Agents that report a GPU topology get the GPU panel instead of the slot strip.
   const withGpuTopology = nodes.some((node) => node.gpuTopology);
+  const highlighted = useMemo(
+    () => new Map((highlight ?? []).map(({ agentId, deviceIds }) => [agentId, new Set(deviceIds)])),
+    [highlight],
+  );
   return (
     <Section title="Topology">
       <div className={`${css.mainContainer} ${css.nodesContainer}`}>
         {nodes.map((node) => {
           const { id, resources, slots } = node;
-          if (node.gpuTopology) return <GpuTopology agent={node} key={id} />;
+          if (node.gpuTopology) {
+            return <GpuTopology agent={node} highlighted={highlighted.get(id)} key={id} />;
+          }
           return <NodeElement key={id} name={id} resources={resources} slots={slots} />;
         })}
         {withGpuTopology && <GpuTopologyLegend />}

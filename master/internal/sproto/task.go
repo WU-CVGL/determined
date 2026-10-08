@@ -109,6 +109,9 @@ type (
 		Slots        int
 		IsSingleNode bool
 		TaskID       *model.TaskID
+		// GPUTopology is the task's resources.prefer_gpu_topology. Only paths that create a task
+		// set it, so a restore never fails on the topology.
+		GPUTopology expconf.GPUTopologyPreference
 	}
 
 	// ValidateResourcesResponse is the response to ValidateResourcesRequest.
@@ -117,6 +120,8 @@ type (
 		// - false: impossible to fulfill
 		// - true: ok or unknown
 		Fulfillable bool
+		// Reason is why the request is impossible to fulfill, when the pool says.
+		Reason string
 	}
 )
 

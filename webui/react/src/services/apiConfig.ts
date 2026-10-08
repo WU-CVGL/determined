@@ -748,7 +748,9 @@ export const getExperiments: DetApi<
       params.experimentIdFilter?.notIn,
       true,
       params.workspaceId,
-      params.slotsFilter,
+      params.slots,
+      params.slotsAbove,
+      params.workspaceIds,
       options,
     );
   },
@@ -1410,7 +1412,11 @@ export const getGenericTasks: DetApi<
       params.taskIds,
       params.projectId,
       params.search,
-      params.slotsFilter,
+      params.slots,
+      params.slotsAbove,
+      params.workspaceIds,
+      params.sortBy,
+      params.orderBy,
       options,
     ),
 };
