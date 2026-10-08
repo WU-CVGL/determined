@@ -5,13 +5,13 @@ and its tag as the version reference. The matching master and agent images are
 published to GHCR under `ghcr.io/wu-cvgl/determined-master:0.42.0` and
 `ghcr.io/wu-cvgl/determined-agent:0.42.0`. Pin the images to the release's
 published digests when preparing a deployment. Master and agent do not check
-each other's version. The agent's code and its messages to and from the master
+each other's version. The agent's own code and its messages to and from the master
 are the same in 0.41.0, 0.41.1 and 0.42.0, so agents can stay on 0.41.0 under a
 0.42.0 master. 0.41.0 changed the agent: it reads the GPU topology through NVML
 and sends it when it connects, which a 0.40.1 master ignores. 0.40.1 agents ran
-under a 0.41.0 master during a rolling agent upgrade, and a 0.41.0 agent under
-the 0.40.1 master after a rollback. 0.42.0 adds one database migration, for
-resource pool access. ROLLBACK: <to be filled after the rollback test>
+under a 0.41.0 master during a rolling agent upgrade. 0.42.0 adds one database
+migration, for resource pool access, and a 0.41.1 master starts on the migrated
+database.
 
 ## Install the CLI from the repository
 
@@ -72,9 +72,8 @@ disposable diagnostic.
 ## Rollback and source builds
 
 Keep the previous image references and a database backup taken before the
-upgrade. When the previous master starts against the migrated database (for
-0.41.1 after the 0.42.0 migration, ROLLBACK: <to be filled after the rollback
-test>), a rollback is a binary swap that keeps tasks running; [upgrade with
+upgrade. When the previous master starts against the migrated database, as
+0.41.1 does after the 0.42.0 migration, a rollback is a binary swap that keeps tasks running; [upgrade with
 running tasks](hot-upgrade.md) lists its conditions. Otherwise, stop agents and
 the master, restore the compatible backup, then start the previous master and
 agents. Switching images does not reverse database migrations. Test backup

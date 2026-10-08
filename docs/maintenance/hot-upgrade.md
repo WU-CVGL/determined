@@ -107,7 +107,11 @@ which hold pool access, start empty, and have foreign keys to `users`. No
 existing table changes, and the database views stay the same. The 0.42.0
 release notes list what to remove before a rollback to 0.41.
 
-ROLLBACK: <to be filled after the rollback test>
+A 0.41.1 master starts on the migrated database: it reports no migrations to
+apply and leaves the two tables as they are. So a rollback to 0.41.1 needs no
+restore. While 0.41.1 runs, pool restrictions are not enforced; they apply
+again, unchanged, when 0.42.0 runs. An unfinished experiment that sets
+`resources.prefer_gpu_topology` cannot be restored by 0.41.1 and ends in ERROR.
 
 ## Before the upgrade
 
