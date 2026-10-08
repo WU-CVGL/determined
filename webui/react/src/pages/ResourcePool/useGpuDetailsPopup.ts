@@ -20,10 +20,10 @@ interface GpuDetailsPopup {
 
 /**
  * The open state of the GPU details popup of an info button. Hover or focus on the button peeks at
- * the details; leaving the button or a blur hides them. A click pins them. Escape, `close`, a click
- * outside the popup and its button, or a second click on the button closes the popup. A pin from
- * the keyboard moves focus into the popup, and closing the popup with focus inside gives focus back
- * to the button.
+ * the details; leaving the button, a blur or Escape hides them. A click pins them. Escape, `close`,
+ * a click outside the popup and its button, or a second click on the button closes the popup. A pin
+ * from the keyboard moves focus into the popup, and closing the popup with focus inside gives focus
+ * back to the button.
  */
 const useGpuDetailsPopup = (): GpuDetailsPopup => {
   const [pinned, setPinned] = useState(false);
@@ -77,6 +77,16 @@ const useGpuDetailsPopup = (): GpuDetailsPopup => {
 
   // No hover timer outlives the button.
   useEffect(() => stopHoverTimer, [stopHoverTimer]);
+
+  // Hover leaves focus where it was, so details that only peek hide on Escape wherever focus is.
+  useEffect(() => {
+    if (!peeking || pinned) return;
+    const onDocumentKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') unpeek();
+    };
+    document.addEventListener('keydown', onDocumentKeyDown);
+    return () => document.removeEventListener('keydown', onDocumentKeyDown);
+  }, [peeking, pinned, unpeek]);
 
   // A pinned popup closes on a press outside it and its button.
   useEffect(() => {

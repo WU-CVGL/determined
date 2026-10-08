@@ -50,6 +50,8 @@ export const GPU_TOPOLOGY_DOCS_PATH = paths.docs(
   '/reference/deploy/agent-config-reference.html#agent-gpu-topology',
 );
 
+const GPU_TOPOLOGY_DOCS_TEXT = 'GPU topology and health';
+
 interface Props {
   agent: Agent;
   /** The device IDs of the slots whose tiles to highlight. */
@@ -117,9 +119,16 @@ export const HealthDot: React.FC<{ word: GpuHealthWord; decorative?: boolean }> 
 /**
  * The GPU's identity and the facts of its health: the PCIe link and the NVML errors, both measured
  * at agent start, the collection time (the agent's clock), and the recent critical XIDs when there
- * are any.
+ * are any. The docs are a link only in pinned details: details that only peek take no clicks.
  */
-export const GpuDetails: React.FC<GpuProps> = ({ agentId, agentOff, gpu, resource, topo }) => {
+export const GpuDetails: React.FC<GpuProps & { pinned: boolean }> = ({
+  agentId,
+  agentOff,
+  gpu,
+  pinned,
+  resource,
+  topo,
+}) => {
   const word = gpuHealthWord(gpu.health);
   const xids = recentXidTexts(gpu);
   const collectedAt = topo.collectedAt
@@ -165,9 +174,13 @@ export const GpuDetails: React.FC<GpuProps> = ({ agentId, agentOff, gpu, resourc
       {word === 'narrow' && (
         <p>
           {GPU_NARROW_LINK_TEXT}{' '}
-          <Link external path={GPU_TOPOLOGY_DOCS_PATH} popout>
-            GPU topology and health
-          </Link>
+          {pinned ? (
+            <Link external path={GPU_TOPOLOGY_DOCS_PATH} popout>
+              {GPU_TOPOLOGY_DOCS_TEXT}
+            </Link>
+          ) : (
+            GPU_TOPOLOGY_DOCS_TEXT
+          )}
         </p>
       )}
       {topo.unknownReason && <p>GPU topology unknown: {topo.unknownReason}</p>}
@@ -221,14 +234,12 @@ const GpuInfoButton: React.FC<GpuProps> = (props) => {
               <Icon decorative name="close" size="small" />
             </button>
           )}
-          <GpuDetails {...props} />
+          <GpuDetails {...props} pinned={pinned} />
         </div>
       }
       id={tooltipId}
       open={pinned || peeking}
-      overlayClassName={themeClass}
-      // The popup has the padding, so a click anywhere in the box is a click in the popup.
-      overlayInnerStyle={{ padding: 0 }}
+      overlayClassName={`${css.popover} ${themeClass}`}
       overlayStyle={pinned ? undefined : { pointerEvents: 'none' }}
       placement="bottomLeft"
       showArrow={false}
