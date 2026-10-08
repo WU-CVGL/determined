@@ -7,6 +7,57 @@
 ###############
 
 **************
+ Version 0.42
+**************
+
+Version 0.42.0
+==============
+
+**Release Date:** October 8, 2026
+
+**New Features**
+
+-  Resource pools: Restrict a pool to administrators and the users granted access, with ``det rp
+   access`` or the new **Pool Access** tab of Admin Settings. Pools stay public until an
+   administrator restricts them.
+
+-  Experiments, tasks: Get the best-connected set of free GPUs with
+   ``resources.prefer_gpu_topology: soft``, or wait until one NUMA node has as many free GPUs as
+   the task has slots with ``resources.prefer_gpu_topology: strong``.
+
+-  WebUI: List the GPUs each job holds on a resource pool's **Active** tab, and outline a job's GPUs
+   in the topology panel on a click.
+
+-  WebUI: Show the **Groups** tab of Admin Settings to administrators also with basic
+   authorization.
+
+**Improvements**
+
+-  Resource pools: Pack each task's GPUs by NUMA node under ``fitting_policy: best``, preferring
+   GPUs that are not in error, instead of taking free GPUs in no particular order; turn it off per
+   pool with ``scheduler.numa_packing: false``.
+
+-  Workspaces: With basic authorization, let only a workspace's owner and administrators change its
+   default pools.
+
+-  API: Return the slots each job holds, by agent, as ``placement`` in ``GetJobs`` and
+   ``GetJobsV2``.
+
+**Bug Fixes**
+
+-  API: Reject a job queue move without a target pool with ``400 Bad Request`` instead of moving
+   the job to a default pool.
+
+-  Experiments: Refuse a zero-slot experiment whose default aux pool is not ready before saving it,
+   and check the pool that an invariant config policy sets also with ``validate_only``.
+
+Reload open WebUI tabs after the upgrade. Before rolling back to 0.41, remove ``numa_packing``
+from ``master.yaml`` and pool specs and end the experiments that set ``prefer_gpu_topology``; an
+earlier master makes every pool public again. See :doc:`resource pool access
+</maintenance/resource-pool-access>`, :ref:`prefer_gpu_topology
+<exp-config-resources-prefer-gpu-topology>`, and :ref:`numa_packing <master-config-numa-packing>`.
+
+**************
  Version 0.41
 **************
 
