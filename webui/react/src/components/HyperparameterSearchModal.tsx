@@ -102,8 +102,9 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
   );
   const canceler = useRef<AbortController>(new AbortController());
   const resourcePools = Loadable.getOrElse([], useObservable(clusterStore.resourcePools));
-  const [resourcePool, setResourcePool] = useState<ResourcePool>(
-    resourcePools.find((pool) => pool.name === experiment.resourcePool) ?? resourcePools[0],
+  // Empty when the experiment's pool is not in the list, so the user picks one.
+  const [resourcePool, setResourcePool] = useState<ResourcePool | undefined>(
+    resourcePools.find((pool) => pool.name === experiment.resourcePool),
   );
   const [form] = Form.useForm();
   const [currentPage, setCurrentPage] = useState(0);
@@ -285,7 +286,7 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
 
   const handleSelectPool = useCallback(
     (value: SelectValue) => {
-      setResourcePool(resourcePools.find((pool) => pool.name === value) ?? resourcePools[0]);
+      setResourcePool(resourcePools.find((pool) => pool.name === value));
     },
     [resourcePools],
   );
@@ -307,9 +308,9 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
   );
 
   useEffect(() => {
-    if (resourcePool || resourcePools.length === 0) return;
-    setResourcePool(resourcePools[0]);
-  }, [resourcePool, resourcePools]);
+    if (resourcePool) return;
+    setResourcePool(resourcePools.find((pool) => pool.name === experiment.resourcePool));
+  }, [experiment.resourcePool, resourcePool, resourcePools]);
 
   const validateForm = useCallback(() => {
     if (!formValues) return;
