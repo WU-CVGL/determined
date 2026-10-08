@@ -463,14 +463,14 @@ prints the agent's ``gpu_topology``.
 The WebUI's resource pool page groups each agent's GPUs by NUMA node and PCIe switch. A switch group
 holds GPUs whose pairs are ``PIX``, one switch between them; ``PXB`` and the other levels show only
 in the pairwise matrix. A tile's colour is the slot state, its dot is the GPU's health, stripes mark
-disabled, draining and excluded GPUs, and the details of a GPU show on hover or focus and stay open
-after a click. Each agent's slot count splits its slots into running, pending and unoccupied, and
-the unoccupied slots into allocatable (enabled and not draining, so they can take new work),
-disabled and draining. A slot of a disabled or draining agent is never allocatable, whatever its own
-state, since the scheduler gives such an agent no new work: it is striped as disabled or draining,
-and counts so when unoccupied. A running or pending slot counts as running or pending also when it
-is disabled or draining, and a slot of the topology without a matching slot record counts and shows
-as unknown.
+disabled, draining and excluded GPUs, and the details of a GPU show on hover or focus, hide on
+Escape, and stay open after a click. Each agent's slot count splits its slots into running, pending
+and unoccupied, and the unoccupied slots into allocatable (enabled and not draining, so they can
+take new work), disabled and draining. A slot of a disabled or draining agent is never allocatable,
+whatever its own state, since the scheduler gives such an agent no new work: it is striped as
+disabled or draining, and counts so when unoccupied. A running or pending slot counts as running or
+pending also when it is disabled or draining, and a slot of the topology without a matching slot
+record counts and shows as unknown.
 
 Coverage
 ========
