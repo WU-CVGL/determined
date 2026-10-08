@@ -85,7 +85,7 @@ export const JobGpus: React.FC<{
   pressed: boolean;
 }> = ({ job, onToggle, pressed }) => {
   const lines = placementLines(job.placement).map((line) => (
-    <span className={css.gpuLine} key={line}>
+    <span className={css.gpuLine} key={line} title={line}>
       {line}
     </span>
   ));

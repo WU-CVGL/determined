@@ -208,6 +208,12 @@ describe('JobQueue GPUs', () => {
     expect(
       Array.from(gpusCell('job-2').querySelectorAll('.gpuLine')).map((l) => l.textContent),
     ).toEqual(['node03: 0-7', 'node04: 0-7']);
+    // A line cut off by the column's width shows in full on hover.
+    expect(
+      Array.from(gpusCell('job-2').querySelectorAll('.gpuLine')).map((l) =>
+        l.getAttribute('title'),
+      ),
+    ).toEqual(['node03: 0-7', 'node04: 0-7']);
     // A job without a GPU has an empty cell; a job the user cannot view has the omitted mark.
     expect(gpusCell('job-3')).toBeEmptyDOMElement();
     expect(gpusCell('job-4')).toHaveTextContent(/^\*\*\*$/);

@@ -101,7 +101,7 @@ const PoolAccessUsersModalComponent: React.FC<Props> = ({
   runChange,
 }: Props) => {
   const isGrant = action === 'grant';
-  const users = Loadable.getOrElse([], useObservable(userStore.getUsers()));
+  const users = Loadable.getOrElse([], useObservable(useMemo(() => userStore.getUsers(), [])));
   const [groups, setGroups] = useState<V1GroupSearchResult[]>([]);
   const [groupsError, setGroupsError] = useState<string>();
   const [pickedUserIds, setPickedUserIds] = useState<number[]>([]);
