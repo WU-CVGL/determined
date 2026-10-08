@@ -82,6 +82,7 @@ export interface PermissionsHook {
   canModifyTemplate: (arg0: TemplatePermissionArgs) => boolean;
   canEditWebhooks: (args0: Workspace[], args1: Webhook) => boolean;
   canCreateWebhooks: (args0: Workspace[]) => Workspace[];
+  canManageResourcePoolAccess: boolean;
   canManageResourcePoolBindings: boolean;
   canModifyExperiment: (arg0: WorkspacePermissionsArgs) => boolean;
   canModifyFlatRun: (arg0: WorkspacePermissionsArgs) => boolean;
@@ -176,6 +177,7 @@ const usePermissions = (): PermissionsHook => {
         canDeleteWorkspace(rbacOpts, args.workspace),
       canEditWebhooks: (args: Workspace[], args1: Webhook) =>
         canEditWebhooks(rbacOpts, args, args1),
+      canManageResourcePoolAccess: canManageResourcePoolAccess(rbacOpts),
       canManageResourcePoolBindings: canManageResourcePoolBindings(rbacOpts),
       canModifyExperiment: (args: WorkspacePermissionsArgs) =>
         canModifyExperiment(rbacOpts, args.workspace, args.userId),
@@ -776,6 +778,20 @@ const canCreateWebhooks = (
 };
 
 /* Resource Pools */
+
+// The resource pool access API requires the permission to update the master configuration,
+// which with basic authorization only administrators have.
+const canManageResourcePoolAccess = ({
+  currentUser,
+  rbacEnabled,
+  userAssignments,
+  userRoles,
+}: RbacOptsProps): boolean => {
+  const permitted = relevantPermissions(userAssignments, userRoles);
+  return rbacEnabled
+    ? permitted.has(V1PermissionType.UPDATEMASTERCONFIG)
+    : !!currentUser && currentUser.isAdmin;
+};
 
 const canManageResourcePoolBindings = ({
   currentUser,

@@ -5,7 +5,7 @@ import * as Api from 'services/api-ts-sdk';
 import * as decoder from 'services/decoder';
 import * as Service from 'services/types';
 import { DeterminedInfo, Telemetry } from 'stores/determinedInfo';
-import { DetApi, EmptyParams, RawJson, SingleEntityParams } from 'types';
+import { DetApi, EmptyParams, FetchOptions, RawJson, SingleEntityParams } from 'types';
 import * as Type from 'types';
 import { ensureArray } from 'utils/data';
 import { identity, noOp } from 'utils/service';
@@ -119,6 +119,93 @@ export const storeSessionToken: DetApi<Service.StoreSessionTokenParams, Response
     if (!response.ok) throw response;
     return response;
   },
+};
+
+/*
+ * Resource pool access. These are Echo routes of the master without a proto, so they have no
+ * generated client: listing needs the permission to read the master configuration, changes the
+ * permission to update it. Request bodies must be labeled as JSON and be at most 64 KiB.
+ */
+export const RESOURCE_POOL_ACCESS_PATH = '/api/v1/resource-pool-access';
+
+const resourcePoolAccessFetch = async (
+  path: string,
+  options: FetchOptions | undefined,
+  body?: unknown,
+  method = 'GET',
+): Promise<
+  decoder.RawResourcePoolAccess & { resource_pools?: decoder.RawResourcePoolAccess[] }
+> => {
+  const response = await apiFetch(serverAddress(`${RESOURCE_POOL_ACCESS_PATH}${path}`), {
+    ...options,
+    ...(body === undefined
+      ? {}
+      : { body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }),
+    method,
+  });
+  if (!response.ok) throw response;
+  return response.json();
+};
+
+const resourcePoolAccessPoolPath = (poolName: string, action = ''): string =>
+  `/${encodeURIComponent(poolName)}${action}`;
+
+export const getResourcePoolAccess: DetApi<
+  EmptyParams,
+  { resource_pools?: decoder.RawResourcePoolAccess[] },
+  Type.ResourcePoolAccess[]
+> = {
+  name: 'getResourcePoolAccess',
+  postProcess: (response) => (response.resource_pools ?? []).map(decoder.mapResourcePoolAccess),
+  request: (_params, options) => resourcePoolAccessFetch('', options),
+};
+
+export const setResourcePoolAccessMode: DetApi<
+  Service.SetResourcePoolAccessModeParams,
+  decoder.RawResourcePoolAccess,
+  Type.ResourcePoolAccessChange
+> = {
+  name: 'setResourcePoolAccessMode',
+  postProcess: decoder.mapResourcePoolAccessChange,
+  request: (params, options) =>
+    resourcePoolAccessFetch(
+      resourcePoolAccessPoolPath(params.poolName),
+      options,
+      { mode: params.mode },
+      'PUT',
+    ),
+};
+
+export const grantResourcePoolAccess: DetApi<
+  Service.ChangeResourcePoolAccessUsersParams,
+  decoder.RawResourcePoolAccess,
+  Type.ResourcePoolAccessChange
+> = {
+  name: 'grantResourcePoolAccess',
+  postProcess: decoder.mapResourcePoolAccessChange,
+  request: (params, options) =>
+    resourcePoolAccessFetch(
+      resourcePoolAccessPoolPath(params.poolName, '/grant'),
+      options,
+      { usernames: params.usernames },
+      'POST',
+    ),
+};
+
+export const revokeResourcePoolAccess: DetApi<
+  Service.ChangeResourcePoolAccessUsersParams,
+  decoder.RawResourcePoolAccess,
+  Type.ResourcePoolAccessChange
+> = {
+  name: 'revokeResourcePoolAccess',
+  postProcess: decoder.mapResourcePoolAccessChange,
+  request: (params, options) =>
+    resourcePoolAccessFetch(
+      resourcePoolAccessPoolPath(params.poolName, '/revoke'),
+      options,
+      { usernames: params.usernames },
+      'POST',
+    ),
 };
 
 export const getCurrentUser: DetApi<EmptyParams, Api.V1CurrentUserResponse, Type.DetailedUser> = {

@@ -1,8 +1,8 @@
-import { screen } from '@testing-library/react';
+import { renderHook, screen } from '@testing-library/react';
 
 import { V1PermissionType } from 'services/api-ts-sdk/api';
 
-import { setup } from './usePermissions.common';
+import { setup, usePermissionsHook } from './usePermissions.common';
 
 vi.mock('stores/determinedInfo', async (importOriginal) => {
   const observable = await import('utils/observable');
@@ -63,5 +63,10 @@ describe('usePermissions for RBAC read-only user', () => {
     expect(screen.queryByText('canCreateProject')).not.toBeInTheDocument();
     expect(screen.queryByText('canModifyWorkspace')).not.toBeInTheDocument();
     expect(screen.queryByText('canDeleteWorkspace')).not.toBeInTheDocument();
+  });
+
+  it('does not let a user without the master configuration permission manage pool access', () => {
+    const { result } = renderHook(() => usePermissionsHook());
+    expect(result.current.canManageResourcePoolAccess).toBe(false);
   });
 });

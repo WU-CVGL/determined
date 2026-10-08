@@ -2,6 +2,7 @@ import { terminalCommandStates } from 'constants/states';
 import * as Api from 'services/api-ts-sdk';
 import { V1LaunchWarning } from 'services/api-ts-sdk';
 import * as Config from 'services/apiConfig';
+import { RawResourcePoolAccess } from 'services/decoder';
 import * as Service from 'services/types';
 import { DeterminedInfo, Telemetry } from 'stores/determinedInfo';
 import { EmptyParams, RawJson, SingleEntityParams } from 'types';
@@ -33,6 +34,32 @@ export const logout = generateDetApi<EmptyParams, Api.V1LogoutResponse, void>(Co
 export const storeSessionToken = generateDetApi<Service.StoreSessionTokenParams, Response, void>(
   Config.storeSessionToken,
 );
+
+/* Resource pool access */
+
+export const getResourcePoolAccess = generateDetApi<
+  EmptyParams,
+  { resource_pools?: RawResourcePoolAccess[] },
+  Type.ResourcePoolAccess[]
+>(Config.getResourcePoolAccess);
+
+export const setResourcePoolAccessMode = generateDetApi<
+  Service.SetResourcePoolAccessModeParams,
+  RawResourcePoolAccess,
+  Type.ResourcePoolAccessChange
+>(Config.setResourcePoolAccessMode);
+
+export const grantResourcePoolAccess = generateDetApi<
+  Service.ChangeResourcePoolAccessUsersParams,
+  RawResourcePoolAccess,
+  Type.ResourcePoolAccessChange
+>(Config.grantResourcePoolAccess);
+
+export const revokeResourcePoolAccess = generateDetApi<
+  Service.ChangeResourcePoolAccessUsersParams,
+  RawResourcePoolAccess,
+  Type.ResourcePoolAccessChange
+>(Config.revokeResourcePoolAccess);
 
 export const getCurrentUser = generateDetApi<
   EmptyParams,

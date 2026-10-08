@@ -8,6 +8,7 @@ import { logout } from 'services/api';
 import authStore from 'stores/auth';
 import determinedStore from 'stores/determinedInfo';
 import permissionStore from 'stores/permissions';
+import poolAccessChange from 'stores/poolAccessChange';
 import roleStore from 'stores/roles';
 import userStore from 'stores/users';
 import userSettings from 'stores/userSettings';
@@ -26,6 +27,8 @@ const SignOut: React.FC = () => {
   useEffect(() => {
     const signOut = async (): Promise<void> => {
       setIsSigningOut(true);
+      // A pool access change still being sent sends no more requests with the next session.
+      poolAccessChange.reset();
       roleStore.reset();
       permissionStore.reset();
       userStore.reset();

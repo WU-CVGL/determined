@@ -1,3 +1,6 @@
+import { poolAccessErrorMessage } from 'utils/resourcePoolAccess';
+import { generateDetApi } from 'utils/service';
+
 import { Taskv1State, V1LaunchWarning } from './api-ts-sdk';
 import * as utils from './apiConfig';
 
@@ -178,5 +181,59 @@ describe('requests to the master', () => {
     await expect(utils.storeSessionToken.request({ token: 'bad' })).rejects.toBeInstanceOf(
       Response,
     );
+  });
+
+  it('lists resource pool access with the session cookie', async () => {
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ resource_pools: [] }), { status: 200 })),
+    );
+    await expect(utils.getResourcePoolAccess.request({})).resolves.toStrictEqual({
+      resource_pools: [],
+    });
+    const { headers, init, url } = sent();
+    expect(url).toMatch(/\/api\/v1\/resource-pool-access$/);
+    expect(init.method).toBe('GET');
+    expect(init.body).toBeUndefined();
+    expect(headers).not.toHaveProperty('Authorization');
+  });
+
+  it('sends resource pool access changes as JSON to the escaped pool name', async () => {
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ pool_name: 'a/b' }), { status: 200 })),
+    );
+    await utils.grantResourcePoolAccess.request({ poolName: 'a/b', usernames: ['x', 'y'] });
+    await utils.revokeResourcePoolAccess.request({ poolName: 'gpu a100', usernames: ['x'] });
+    await utils.setResourcePoolAccessMode.request({ mode: 'restricted', poolName: 'p?#' });
+
+    const calls = fetchMock.mock.calls as [string, RequestInit][];
+    expect(calls.map(([url, init]) => [url.replace(/^.*\/api\/v1/, ''), init.method])).toEqual([
+      ['/resource-pool-access/a%2Fb/grant', 'POST'],
+      ['/resource-pool-access/gpu%20a100/revoke', 'POST'],
+      ['/resource-pool-access/p%3F%23', 'PUT'],
+    ]);
+    calls.forEach(([, init]) =>
+      expect(init.headers).toStrictEqual({ 'Content-Type': 'application/json' }),
+    );
+    expect(calls.map(([, init]) => init.body)).toEqual([
+      '{"usernames":["x","y"]}',
+      '{"usernames":["x"]}',
+      '{"mode":"restricted"}',
+    ]);
+  });
+
+  it('rejects with the response when the master refuses a resource pool access change', async () => {
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ message: 'unknown users: z' }), { status: 404 }),
+      ),
+    );
+    await expect(
+      utils.grantResourcePoolAccess.request({ poolName: 'p', usernames: ['z'] }),
+    ).rejects.toBeInstanceOf(Response);
+
+    // The service call keeps the master's message and status for the per-pool results.
+    const grant = generateDetApi(utils.grantResourcePoolAccess);
+    const error = await grant({ poolName: 'p', usernames: ['z'] }).catch((e: unknown) => e);
+    expect(poolAccessErrorMessage(error)).toBe('404 unknown users: z');
   });
 });

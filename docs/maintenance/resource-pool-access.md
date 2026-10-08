@@ -131,9 +131,10 @@ An experiment config policy whose invariant config sets
 experiment in its workspace, or in the cluster for a global policy, runs in
 that pool, also one that names another pool. When that pool is restricted, every
 experiment there is refused for users without a grant. The response to a
-restriction does not warn about such policies, and `det resource-pool access
-list` does not show them; `det config-policies describe experiment` with
-`--workspace-name`, or without it for the cluster, does.
+restriction does not warn about such policies, and neither `det resource-pool
+access list` nor the WebUI's **Pool Access** tab shows them;
+`det config-policies describe experiment` with `--workspace-name`, or without
+it for the cluster, does.
 
 ### Who may change workspace defaults
 
@@ -370,8 +371,8 @@ over 64 KiB `413`.
 
 ## CLI
 
-`det resource-pool access`, or `det rp access`, manages access. The WebUI has
-no page for it.
+`det resource-pool access`, or `det rp access`, manages access, as does the
+WebUI (see "WebUI" below).
 
 ```sh
 det resource-pool access list
@@ -388,3 +389,58 @@ and the `Users` granted access, marking inactive users and administrators.
 `--json` prints the API response. `set`, `grant`, and `revoke` print the
 master's warnings to standard error. `set` changes each pool in turn, continues
 past a pool that fails, and exits with status 1 if any failed.
+
+## WebUI
+
+The **Pool Access** tab of **Admin Settings** (`/admin/pool-access`) is shown
+to the users who may change access: administrators with basic authorization,
+and with RBAC the users who may update the master configuration. The
+**Admin Settings** link is shown only to users who may administer users, so
+other users open the address directly.
+
+The tab lists the same names as `det rp access list`: each pool's mode, its
+number of granted users, marking the inactive ones, the workspaces that use it
+as a default, and a name with records but no pool as "no pool". The warnings
+column shows the warnings that the master gives when the pool is changed. A row
+expands to the pool's granted users, which can be revoked together, its
+workspace defaults, and its warnings.
+
+**Grant…**, **Revoke…**, **Restrict**, and **Make public** change the selected
+pools, one pool after another, and show what the master answered for each
+pool, with its warnings. Restrict and Make public first say what the change
+means for each selected pool. Closing the dialog does not stop a change that is
+being sent: a note and then its results show on the tab, and when the tab is
+not open at its end, a notification names the pools that failed. One change
+runs at a time in each browser tab of the WebUI: until it ends, these actions
+and the revoke of an expanded row are unavailable, also after leaving the tab
+and coming back. Changes from other browser tabs, other administrators, or the
+CLI are not coordinated with it, and the last write wins. Signing out ends a
+change: its remaining requests are not sent, and the ones sent are not undone.
+
+A request without an answer within 60 seconds fails. A failed request may still
+have been applied: the master answers a change with the pool's access, read
+after the write, so a failed read or a lost or late answer fails a request whose
+change was stored. The tab reads the list again after every change, and every
+change is idempotent, so applying it again is safe.
+
+Grant and revoke take users, user groups, and pasted usernames together, and
+show the resulting usernames without duplicates before anything is sent:
+
+- A group is expanded to its members when the change is applied. A grant
+  gives each member a grant of their own, and a revoke revokes each member's
+  own grant. Later changes to the group's membership change no grant: users who
+  join the group later are not affected. When the members changed since the
+  preview, nothing is sent and the new list is shown.
+- Every pasted username must be a known user; one per line, or separated by
+  commas or spaces. A username that contains a space goes on a line of its own.
+- The usernames go to each pool in requests below the 64 KiB body limit. A
+  failed request ends that pool, while the requests before it stay applied, and
+  nothing is retried; the other pools go on. The result of a pool that failed
+  counts the requests that the master confirmed.
+- Each pool's result counts the usernames sent, not the users whose access
+  changed: a user who already had a grant, or had none to revoke, is counted
+  but unchanged.
+
+Administrators manage user groups on the **Groups** tab of **Admin Settings**,
+also with basic authorization. A group grants nothing by itself. The CLI's
+`det user-group` still requires RBAC.
