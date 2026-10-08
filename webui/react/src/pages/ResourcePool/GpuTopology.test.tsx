@@ -184,6 +184,8 @@ describe('GpuTopology', () => {
     const overlay = overlayOf(tooltip);
     expect(overlay.querySelector('.ant-popover-arrow')).toBeNull();
     expect(overlay.className).toMatch(/\bui-provider-/);
+    // The panel's styles draw the box: its rule reaches the popover's inner box.
+    expect(tooltip.matches('.popover .ant-popover-content > .ant-popover-inner')).toBe(true);
     expect(overlay).toHaveStyle({ pointerEvents: 'none' });
     expect(within(popup).queryByRole('button')).toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -225,16 +227,46 @@ describe('GpuTopology', () => {
 
     await userEvent.hover(button);
     const tooltip = await screen.findByRole('tooltip');
-    // The link inherits the popup's pointer-events: none, so user-event refuses to click it.
-    await expect(
-      userEvent.click(within(tooltip).getByRole('link', { name: 'GPU topology and health' })),
-    ).rejects.toThrow(/pointer-events/);
+    // The popup's text inherits its pointer-events: none, so user-event refuses to click it.
+    await expect(userEvent.click(within(tooltip).getByText('UUID'))).rejects.toThrow(
+      /pointer-events/,
+    );
 
     await userEvent.hover(button);
     await userEvent.unhover(button);
     await waitFor(() => expect(overlayOf(tooltip)).toHaveClass('ant-popover-hidden'));
     expect(button).not.toHaveAttribute('aria-describedby');
     expect(button).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('hides the details that hover shows on Escape, wherever focus is', async () => {
+    const agent = agentOf('node01', gpuTopologyCase('node01 with the exclude list'));
+    setup(<GpuTopology agent={agent} />);
+    const button = within(tile('Slot 3')).getByRole('button');
+
+    await userEvent.hover(button);
+    const tooltip = await screen.findByRole('tooltip');
+    expect(button).not.toHaveFocus();
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(overlayOf(tooltip)).toHaveClass('ant-popover-hidden'));
+    expect(button).not.toHaveAttribute('aria-describedby');
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('links the docs only from the pinned details, which take clicks', async () => {
+    const agent = agentOf('node01', gpuTopologyCase('node01 with the exclude list'));
+    setup(<GpuTopology agent={agent} />);
+    const button = within(tile('Slot 3')).getByRole('button');
+
+    await userEvent.hover(button);
+    const tooltip = await screen.findByRole('tooltip');
+    expect(tooltip).toHaveTextContent(`${GPU_NARROW_LINK_TEXT} GPU topology and health`);
+    expect(within(tooltip).queryByRole('link')).toBeNull();
+
+    await userEvent.click(button);
+    const dialog = await screen.findByRole('dialog', { name: 'Details for slot 3 on node01' });
+    const docs = within(dialog).getByRole('link', { name: 'GPU topology and health' });
+    expect(docs.getAttribute('href')).toContain(GPU_TOPOLOGY_DOCS_PATH);
   });
 
   it('closes the pinned details with their close button and gives focus back', async () => {

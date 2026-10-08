@@ -250,9 +250,15 @@
   margin: 0 0 6px;
 }
 
-// The details popup, the same box on hover, on focus and pinned. It has the popover's padding
-// itself (the popover's inner padding is 0), so a click anywhere in the box is a click in it.
+// The details popup, the same box on hover, on focus and pinned. This module draws the popover's
+// box: its border, its radius and its padding, which the popup inside has itself (the popover's
+// inner padding is 0), so a click anywhere in the box is a click in the popup.
 
+.popover :global(.ant-popover-content > .ant-popover-inner) {
+  border: var(--theme-stroke-width, 1px) solid var(--theme-float-border);
+  border-radius: var(--theme-border-radius, 4px);
+  padding: 0;
+}
 .popup {
   padding: 12px;
   position: relative;
