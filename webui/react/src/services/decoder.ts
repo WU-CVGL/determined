@@ -1023,6 +1023,7 @@ export interface RawResourcePoolAccess {
   restricted_by?: string | null;
   users?: RawResourcePoolAccessUser[] | null;
   warnings?: string[] | null;
+  warnings_if_restricted?: string[] | null;
   workspace_defaults?: RawResourcePoolAccessWorkspaceDefault[] | null;
 }
 
@@ -1044,16 +1045,11 @@ export const mapResourcePoolAccess = (data: RawResourcePoolAccess): types.Resour
     id: user.id ?? 0,
     username: user.username ?? '',
   })),
+  warnings: data.warnings ?? [],
+  warningsIfRestricted: data.warnings_if_restricted ?? [],
   workspaceDefaults: (data.workspace_defaults ?? []).map((workspaceDefault) => ({
     kind: workspaceDefault.kind ?? '',
     workspace: workspaceDefault.workspace ?? '',
     workspaceId: workspaceDefault.workspace_id ?? 0,
   })),
-});
-
-export const mapResourcePoolAccessChange = (
-  data: RawResourcePoolAccess,
-): types.ResourcePoolAccessChange => ({
-  ...mapResourcePoolAccess(data),
-  warnings: data.warnings ?? [],
 });

@@ -1,5 +1,5 @@
 import { resourcePoolAccessResponse } from 'fixtures/resourcePoolAccess';
-import { mapResourcePoolAccess, mapResourcePoolAccessChange } from 'services/decoder';
+import { mapResourcePoolAccess } from 'services/decoder';
 import { DetailedUser } from 'types';
 import { DetError } from 'utils/error';
 
@@ -12,7 +12,6 @@ import {
   resolveUsernames,
   RESOURCE_POOL_ACCESS_BODY_BUDGET,
   RESOURCE_POOL_ACCESS_MAX_BODY_BYTES,
-  resourcePoolAccessWarnings,
   setModeInPools,
   usernamesBodyBytes,
 } from './resourcePoolAccess';
@@ -33,11 +32,17 @@ const users: DetailedUser[] = [
 ];
 
 const accepted = ({ poolName }: { poolName: string }) =>
-  Promise.resolve(mapResourcePoolAccessChange({ pool_name: poolName, warnings: ['w'] }));
+  Promise.resolve(mapResourcePoolAccess({ pool_name: poolName, warnings: ['w'] }));
 
 describe('resourcePoolAccess', () => {
   describe('the decoded API response', () => {
     it('keeps every field of an item', () => {
+      const a100Warnings = [
+        '"gpu-a100" is the cluster\'s default compute pool: submissions that omit ' +
+          'resources.resource_pool are refused for users without a grant on "gpu-a100"',
+        '"gpu-a100" is the default compute pool of workspace "vision": submissions there that ' +
+          'omit resources.resource_pool are refused for users without a grant on "gpu-a100"',
+      ];
       expect(pool('gpu-a100')).toEqual({
         defaultAux: false,
         defaultCompute: true,
@@ -50,30 +55,19 @@ describe('resourcePoolAccess', () => {
           { active: true, admin: false, id: 7, username: 'alice' },
           { active: false, admin: false, id: 9, username: 'carol' },
         ],
+        warnings: a100Warnings,
+        warningsIfRestricted: a100Warnings,
         workspaceDefaults: [{ kind: 'compute', workspace: 'vision', workspaceId: 4 }],
       });
       expect(pool('cpu').restrictedBy).toBeUndefined();
-    });
-  });
-
-  describe('resourcePoolAccessWarnings', () => {
-    it('words the warnings like the master', () => {
-      expect(resourcePoolAccessWarnings(pool('gpu-a100'))).toEqual([
-        '"gpu-a100" is the cluster\'s default compute pool: submissions that omit ' +
-          'resources.resource_pool are refused for users without a grant on "gpu-a100"',
-        '"gpu-a100" is the default compute pool of workspace "vision": submissions there that ' +
-          'omit resources.resource_pool are refused for users without a grant on "gpu-a100"',
-      ]);
-      expect(resourcePoolAccessWarnings(pool('old-pool'))).toEqual([
-        'no resource pool named "old-pool" exists; the setting applies to a pool created with ' +
-          'this name',
-      ]);
+      expect(pool('cpu').warnings).toEqual([]);
+      expect(pool('cpu').warningsIfRestricted).toHaveLength(1);
     });
 
-    it('warns about defaults only while the pool is restricted', () => {
-      expect(resourcePoolAccessWarnings(pool('cpu'))).toEqual([]);
-      expect(resourcePoolAccessWarnings(pool('cpu'), 'restricted')).toHaveLength(1);
-      expect(resourcePoolAccessWarnings(pool('gpu-a100'), 'public')).toEqual([]);
+    it('reads missing lists as empty', () => {
+      const decoded = mapResourcePoolAccess({ pool_name: 'gpu', warnings: null });
+      expect(decoded.warnings).toEqual([]);
+      expect(decoded.warningsIfRestricted).toEqual([]);
     });
   });
 

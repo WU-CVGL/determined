@@ -1,10 +1,4 @@
-import {
-  DetailedUser,
-  FetchOptions,
-  ResourcePoolAccess,
-  ResourcePoolAccessChange,
-  ResourcePoolAccessMode,
-} from 'types';
+import { DetailedUser, FetchOptions, ResourcePoolAccess } from 'types';
 import { DetError } from 'utils/error';
 import { isApiResponse } from 'utils/service';
 
@@ -28,43 +22,6 @@ export interface PoolAccessCandidate {
   admin?: boolean;
   username: string;
 }
-
-const quote = (s: string): string => JSON.stringify(s);
-
-/**
- * The warnings the master gives when it answers a change of the pool, worded like the master's
- * (resourcePoolAccessWarnings): a name that is not a pool, and, while the pool is restricted, each
- * default it is. The list response has no warnings, so the table derives them here; the results of
- * a change show the master's own. With mode, the warnings are those of the pool in that mode.
- */
-export const resourcePoolAccessWarnings = (
-  pool: ResourcePoolAccess,
-  mode: ResourcePoolAccess['mode'] = pool.mode,
-): string[] => {
-  const name = quote(pool.poolName);
-  const warnings: string[] = [];
-  if (!pool.exists) {
-    warnings.push(
-      `no resource pool named ${name} exists; the setting applies to a pool created with this name`,
-    );
-  }
-  if (mode !== ResourcePoolAccessMode.Restricted) return warnings;
-  const refused = `that omit resources.resource_pool are refused for users without a grant on ${name}`;
-  if (pool.defaultCompute) {
-    warnings.push(`${name} is the cluster's default compute pool: submissions ${refused}`);
-  }
-  if (pool.defaultAux) {
-    warnings.push(`${name} is the cluster's default aux pool: submissions ${refused}`);
-  }
-  pool.workspaceDefaults.forEach((workspaceDefault) => {
-    warnings.push(
-      `${name} is the default ${workspaceDefault.kind} pool of workspace ${quote(
-        workspaceDefault.workspace,
-      )}: submissions there ${refused}`,
-    );
-  });
-  return warnings;
-};
 
 /** Whether a pool matches the search text by its name, a granted username, or a workspace. */
 export const matchesPoolSearch = (pool: ResourcePoolAccess, search: string): boolean => {
@@ -226,7 +183,7 @@ export interface PoolAccessResult {
 type UsersRequest = (
   params: { poolName: string; usernames: string[] },
   options?: FetchOptions,
-) => Promise<ResourcePoolAccessChange>;
+) => Promise<ResourcePoolAccess>;
 
 export interface PoolAccessSendOptions {
   /** Aborting it ends the change: the request being sent is given up and no other is sent. */
@@ -319,7 +276,7 @@ export const changeUsersInPools = async (
 type ModeRequest = (
   params: { mode: ResourcePoolAccess['mode']; poolName: string },
   options?: FetchOptions,
-) => Promise<ResourcePoolAccessChange>;
+) => Promise<ResourcePoolAccess>;
 
 /**
  * Restricts each pool or makes it public, in turn; a failure does not stop the other pools. An
