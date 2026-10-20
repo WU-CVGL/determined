@@ -467,7 +467,37 @@ func TestResourcePoolAccessRoutes(t *testing.T) {
 	})
 
 	t.Run("the list carries each pool's warnings", func(t *testing.T) {
-		code, response := routes.sendAs(&admin, http.MethodGet, resourcePoolAccessPath, "", "")
+		ownSuffix := uuid.NewString()
+		publicDefault := "acl-warn-compute-" + ownSuffix
+		restrictedDefault := "acl-warn-aux-" + ownSuffix
+		orphan := "acl-warn-missing-" + ownSuffix
+		t.Cleanup(func() {
+			for _, pool := range []string{publicDefault, restrictedDefault, orphan} {
+				_, err := db.Bun().NewRaw(
+					`DELETE FROM resource_pool_restrictions WHERE pool_name = ?`, pool).Exec(ctx)
+				require.NoError(t, err)
+			}
+		})
+		defaults := newPoolAccessRoutes(t, pgDB, &config.ResourceManagerWithPoolsConfig{
+			ResourceManager: &config.ResourceManagerConfig{AgentRM: &config.AgentResourceManagerConfig{
+				ClusterName:                "agent-cluster",
+				DefaultComputeResourcePool: publicDefault,
+				DefaultAuxResourcePool:     restrictedDefault,
+			}},
+			ResourcePools: []config.ResourcePoolConfig{
+				{PoolName: publicDefault}, {PoolName: restrictedDefault},
+			},
+		}, admin)
+		written := map[string]resourcePoolAccessItem{
+			publicDefault: defaults.write(admin, http.MethodPut, poolAccessPath(publicDefault),
+				`{"mode":"public"}`),
+			restrictedDefault: defaults.write(admin, http.MethodPut,
+				poolAccessPath(restrictedDefault), `{"mode":"restricted"}`),
+			orphan: defaults.write(admin, http.MethodPut, poolAccessPath(orphan),
+				`{"mode":"restricted"}`),
+		}
+
+		code, response := defaults.sendAs(&admin, http.MethodGet, resourcePoolAccessPath, "", "")
 		require.Equal(t, http.StatusOK, code, string(response))
 		var listed struct {
 			ResourcePools []map[string]any `json:"resource_pools"`
@@ -487,24 +517,26 @@ func TestResourcePoolAccessRoutes(t *testing.T) {
 				"without a grant on %q", pool)
 		}
 		computeWarning := fmt.Sprintf("%q is the cluster's default compute pool: submissions %s",
-			compute, refused(compute))
+			publicDefault, refused(publicDefault))
 		auxWarning := fmt.Sprintf("%q is the cluster's default aux pool: submissions %s",
-			aux, refused(aux))
-
-		// The default compute pool is public again: it warns only once restricted.
-		require.Empty(t, warnings[compute])
-		require.Equal(t, []any{computeWarning}, ifRestricted[compute])
-		// The default aux pool is restricted: it warns now.
-		require.Equal(t, []any{auxWarning}, warnings[aux])
-		require.Equal(t, []any{auxWarning}, ifRestricted[aux])
-		require.Len(t, warnings[shared], 2)
-		require.Equal(t, warnings[shared], ifRestricted[shared])
-		require.Empty(t, warnings[dynamic])
-		require.Empty(t, ifRestricted[dynamic])
-		// A name with records but no pool warns in either mode.
+			restrictedDefault, refused(restrictedDefault))
 		missingWarning := fmt.Sprintf("no resource pool named %q exists; the setting applies to "+
-			"a pool created with this name", missing)
-		require.Equal(t, []any{missingWarning}, warnings[missing])
-		require.Equal(t, []any{missingWarning}, ifRestricted[missing])
+			"a pool created with this name", orphan)
+
+		// A public default pool warns only once restricted.
+		require.Empty(t, warnings[publicDefault])
+		require.Equal(t, []any{computeWarning}, ifRestricted[publicDefault])
+		// A restricted default pool warns now.
+		require.Equal(t, []any{auxWarning}, warnings[restrictedDefault])
+		require.Equal(t, []any{auxWarning}, ifRestricted[restrictedDefault])
+		// A name with records but no pool warns in either mode.
+		require.Equal(t, []any{missingWarning}, warnings[orphan])
+		require.Equal(t, []any{missingWarning}, ifRestricted[orphan])
+
+		// Each list item is the item that the write answered with.
+		items := defaults.list(admin)
+		for pool, item := range written {
+			require.Equal(t, items[pool], item, pool)
+		}
 	})
 }
