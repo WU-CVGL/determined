@@ -82,14 +82,45 @@ func NewMemo(user model.User) *Memo {
 // not, and Unavailable or Internal when access could not be decided. pool must be the final,
 // resolved name.
 func (c *Checker) CanUseResourcePool(ctx context.Context, user model.User, pool string) error {
-	return c.NewMemo(user).CanUseResourcePool(ctx, pool)
+	return c.decide(ctx, user, pool, c.isAdmin)
+}
+
+// decide applies the rule to one pool, checking the admin predicate with isAdmin.
+func (c *Checker) decide(
+	ctx context.Context, user model.User, pool string,
+	isAdmin func(context.Context, model.User) (bool, error),
+) error {
+	if pool == "" {
+		return status.Error(codes.Internal,
+			"resource pool access checked before the pool was resolved")
+	}
+	admin, err := isAdmin(ctx, user)
+	if err != nil {
+		return err
+	}
+	if admin {
+		return nil
+	}
+	restricted, err := c.read(ctx, user.ID, []string{pool})
+	if err != nil {
+		return status.Errorf(codes.Unavailable,
+			"could not check access to resource pool %q: %s; try again", pool, err)
+	}
+	if granted, ok := restricted[pool]; !ok || granted {
+		return nil
+	}
+	log.Infof("resource pool access: refused user %q in restricted pool %q", user.Username, pool)
+	return status.Errorf(codes.PermissionDenied,
+		"user %q may not use resource pool %q: the pool is restricted; choose another pool or ask "+
+			"an administrator for access (if resources.resource_pool was not set, %q is the "+
+			"default pool for this workspace or the cluster)", user.Username, pool, pool)
 }
 
 // Memo decides the access of one user within one request that admits work into many pools, such
 // as a bulk activation: it checks the admin predicate at most once and reads each pool's access at
 // most once, and answers a pool again with its first decision, an error included. It is safe for
-// concurrent use. A Memo must not outlive its request, so that a change of access applies from
-// the next request.
+// concurrent use. A Memo must not outlive its request: a pool that it has decided keeps that
+// decision, and a change of access applies to the pools that later requests decide.
 type Memo struct {
 	checker *Checker
 	user    model.User
@@ -108,45 +139,24 @@ func (c *Checker) NewMemo(user model.User) *Memo {
 
 // CanUseResourcePool decides like Checker.CanUseResourcePool, once per pool.
 func (m *Memo) CanUseResourcePool(ctx context.Context, pool string) error {
-	if pool == "" {
-		return status.Error(codes.Internal,
-			"resource pool access checked before the pool was resolved")
-	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err, ok := m.decided[pool]; ok {
 		return err
 	}
-	err := m.decide(ctx, pool)
+	err := m.checker.decide(ctx, m.user, pool, m.isAdmin)
 	m.decided[pool] = err
 	return err
 }
 
-func (m *Memo) decide(ctx context.Context, pool string) error {
+// isAdmin checks the admin predicate on its first call and answers later calls the same. m.mu
+// must be held.
+func (m *Memo) isAdmin(ctx context.Context, user model.User) (bool, error) {
 	if !m.adminChecked {
-		m.admin, m.adminErr = m.checker.isAdmin(ctx, m.user)
+		m.admin, m.adminErr = m.checker.isAdmin(ctx, user)
 		m.adminChecked = true
 	}
-	if m.adminErr != nil {
-		return m.adminErr
-	}
-	if m.admin {
-		return nil
-	}
-	restricted, err := m.checker.read(ctx, m.user.ID, []string{pool})
-	if err != nil {
-		return status.Errorf(codes.Unavailable,
-			"could not check access to resource pool %q: %s; try again", pool, err)
-	}
-	if granted, ok := restricted[pool]; !ok || granted {
-		return nil
-	}
-	log.Infof("resource pool access: refused user %q in restricted pool %q",
-		m.user.Username, pool)
-	return status.Errorf(codes.PermissionDenied,
-		"user %q may not use resource pool %q: the pool is restricted; choose another pool or ask "+
-			"an administrator for access (if resources.resource_pool was not set, %q is the "+
-			"default pool for this workspace or the cluster)", m.user.Username, pool, pool)
+	return m.admin, m.adminErr
 }
 
 // UsablePools returns, for each name, whether user may use it (admins: all true, no read).
