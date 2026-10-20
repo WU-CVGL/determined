@@ -236,8 +236,13 @@ func TestMemoConcurrentCallsDecideOnce(t *testing.T) {
 			require.Equal(t, 1, *adminChecks)
 			require.Equal(t, [][]string{{test.pool}}, restrictions.asked)
 			require.Equal(t, test.code, status.Code(errs[0]), "%v", errs[0])
+			// Every caller gets the same result.
 			for _, err := range errs {
-				require.True(t, err == errs[0], "every caller gets the same result: %v", err)
+				if test.code == codes.OK {
+					require.NoError(t, err)
+				} else {
+					require.Same(t, errs[0], err)
+				}
 			}
 		})
 	}
