@@ -95,12 +95,15 @@ restricted default aux pool, but cannot make it run code of their choice.
 
 ## Revocation
 
-Restricting a pool or revoking a grant applies from the next request; a request
-whose access was checked before the change was saved is not stopped. Nothing
-that runs is killed, paused, or moved, and workspace defaults that name the pool
-stay. A user without access can no longer submit, activate, unpause, continue,
-fork, or clone work into the pool, move a job into it, or make it a new
-workspace default or the pool of a config policy; work that one of their
+Restricting a pool or revoking a grant applies to the access checks made after
+the change is saved; a request whose access was checked before is not stopped. A
+request that admits work into several pools, such as a bulk activation, a run
+resume, or the unpause of a generic task tree, keeps the result of a pool that
+it has already checked for the rest of the request (see "Error messages").
+Nothing that runs is killed, paused, or moved, and workspace defaults that name
+the pool stay. A user without access can no longer submit, activate, unpause,
+continue, fork, or clone work into the pool, move a job into it, or make it a
+new workspace default or the pool of a config policy; work that one of their
 running tasks submits is refused too.
 The pool disappears from the user's pool list, while their own experiment and
 task pages keep working.
@@ -278,10 +281,14 @@ messages. The REST API returns the HTTP status in parentheses.
   `only admins may set other user's workspaces default resource pools`.
 
 Activating experiments in bulk and resuming runs report a refusal in the result
-of each refused experiment and activate the others. Such a request checks each
-pool once, so when the access records cannot be read, every experiment in that
-pool is refused with `Unavailable`. The admin API's errors are listed with its
-endpoints below.
+of each refused experiment and activate the others. Such a request decides a
+pool's access when it first checks that pool and reuses that result, also a
+failure to read the access records, for the pool's other experiments for the
+rest of the request: when the records of a pool cannot be read, every
+experiment in that pool is refused with `Unavailable`, and the other pools are
+decided as usual. The pools are not read as one snapshot, so a change saved
+during the request applies to the pools that the request checks after it. The
+admin API's errors are listed with its endpoints below.
 
 ## REST API
 
