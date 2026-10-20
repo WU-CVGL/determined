@@ -4,8 +4,10 @@
 package command
 
 import (
+	"context"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/determined-ai/determined/master/internal/user"
 
@@ -19,6 +21,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/job/jobservice"
 	"github.com/determined-ai/determined/master/internal/mocks"
 	"github.com/determined-ai/determined/master/internal/sproto"
+	"github.com/determined-ai/determined/master/internal/task"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/syncx/queue"
 	"github.com/determined-ai/determined/master/pkg/tasks"
@@ -261,6 +264,24 @@ func TestNTSCListsReportSlots(t *testing.T) {
 		require.Contains(t, listed, tensorboardID, "TensorBoard with %d slots", slots)
 		require.Equal(t, int32(slots), listed[tensorboardID], "TensorBoard with %d slots", slots)
 	}
+}
+
+func TestNTSCEndTime(t *testing.T) {
+	pgDB := setupTest(t)
+	v1cmd := launchCommand(t, pgDB)
+	require.Nil(t, v1cmd.EndTime)
+
+	cmd := DefaultCmdService.commands[model.TaskID(v1cmd.Id)]
+	cmd.OnExit(&task.AllocationExited{FinalState: task.AllocationState{
+		State: model.AllocationStateTerminated,
+	}})
+
+	endTime := cmd.ToV1Command().EndTime
+	require.NotNil(t, endTime)
+	completed, err := db.TaskByID(context.Background(), model.TaskID(v1cmd.Id))
+	require.NoError(t, err)
+	require.NotNil(t, completed.EndTime)
+	require.WithinDuration(t, *completed.EndTime, endTime.AsTime(), time.Microsecond)
 }
 
 func setupTest(t *testing.T) *db.PgDB {

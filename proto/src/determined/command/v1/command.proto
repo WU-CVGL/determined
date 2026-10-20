@@ -52,4 +52,6 @@ message Command {
   // The slot count the command requests (resources.slots), 0 when it
   // requests none.
   int32 slots = 100;
+  // The time the command ended; unset while it runs.
+  google.protobuf.Timestamp end_time = 101;
 }

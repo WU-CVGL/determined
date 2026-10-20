@@ -5,6 +5,7 @@ import * as ioTypes from 'ioTypes';
 import { DateString } from 'ioTypes';
 import {
   Devicev1Type,
+  Taskv1State,
   V1Agent,
   V1ExperimentActionResult,
   V1GenericTask,
@@ -127,6 +128,33 @@ describe('Decoder', () => {
           { error: 'エラー', id: 5 },
         ],
         successful: [],
+      });
+    });
+  });
+
+  describe('notebooks, shells, commands and TensorBoards', () => {
+    const wire = (endTime?: string) => ({
+      description: 'train',
+      endTime: endTime as DateString | undefined,
+      id: 'task-1',
+      jobId: 'job-1',
+      resourcePool: 'default',
+      startTime: '2026-01-01T00:00:00Z' as DateString,
+      state: endTime ? Taskv1State.TERMINATED : Taskv1State.RUNNING,
+      username: 'alice',
+      workspaceId: 1,
+    });
+    const mappers = [
+      decoder.mapV1Command,
+      decoder.mapV1Notebook,
+      decoder.mapV1Shell,
+      decoder.mapV1TensorBoard,
+    ];
+
+    it('should carry the end time once ended, none while running', () => {
+      mappers.forEach((map) => {
+        expect(map(wire()).endTime).toBeUndefined();
+        expect(map(wire('2026-01-01T01:00:00Z')).endTime).toBe('2026-01-01T01:00:00Z');
       });
     });
   });

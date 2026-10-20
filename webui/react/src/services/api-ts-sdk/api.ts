@@ -2142,6 +2142,12 @@ export interface V1Command {
      * @memberof V1Command
      */
     slots?: number;
+    /**
+     * The time the command ended; unset while it runs.
+     * @type {Date | DateString}
+     * @memberof V1Command
+     */
+    endTime?: Date | DateString;
 }
 /**
  * Container for a requested trial and its metrics.
@@ -7544,6 +7550,12 @@ export interface V1Notebook {
      * @memberof V1Notebook
      */
     slots?: number;
+    /**
+     * The time the notebook ended; unset while it runs.
+     * @type {Date | DateString}
+     * @memberof V1Notebook
+     */
+    endTime?: Date | DateString;
 }
 /**
  * Arguments to a notify container running.
@@ -11427,6 +11439,12 @@ export interface V1Shell {
      * @memberof V1Shell
      */
     slots?: number;
+    /**
+     * The time the shell ended; unset while it runs.
+     * @type {Date | DateString}
+     * @memberof V1Shell
+     */
+    endTime?: Date | DateString;
 }
 /**
  * Slot wraps a single device on the agent.
@@ -12063,6 +12081,12 @@ export interface V1Tensorboard {
      * @memberof V1Tensorboard
      */
     slots?: number;
+    /**
+     * The time the TensorBoard ended; unset while it runs.
+     * @type {Date | DateString}
+     * @memberof V1Tensorboard
+     */
+    endTime?: Date | DateString;
 }
 /**
  * Response to TestWebhookRequest.
