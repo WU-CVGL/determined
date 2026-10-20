@@ -10,6 +10,38 @@
  Version 0.42
 **************
 
+Version 0.42.1
+==============
+
+**Release Date:** October 20, 2026
+
+**Improvements**
+
+-  Resource pools: List the pools that a user may not use, striped and tagged **Restricted** in the
+   WebUI and not selectable in pool pickers, instead of hiding them; set
+   ``resource_pool_access.hide_unusable_pools: true`` to hide them as before.
+
+-  WebUI, API: Show when notebooks, shells, commands, and TensorBoards ended on the Jobs page, and
+   return their ``end_time``.
+
+-  API: Return each pool's restriction warnings from ``GET /api/v1/resource-pool-access``.
+
+-  Experiments: Check each resource pool's access once per request when activating experiments in
+   bulk or resuming runs.
+
+-  WebUI: Let **Escape** hide the GPU details that hover shows on the resource pool page.
+
+**Bug Fixes**
+
+-  WebUI: Show the not found page for a resource pool that is not in the user's pool list instead
+   of loading forever.
+
+-  WebUI: Leave the resource pool of a hyperparameter search empty until the user picks a pool that
+   they may use, instead of selecting the first pool.
+
+Reload open WebUI tabs after the upgrade. See :doc:`resource pool access
+</maintenance/resource-pool-access>`.
+
 Version 0.42.0
 ==============
 
