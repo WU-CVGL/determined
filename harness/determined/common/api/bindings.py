@@ -13607,6 +13607,7 @@ class v1ResourcePool(Printable):
     accelerator: "typing.Optional[str]" = None
     slotsPerAgent: "typing.Optional[int]" = None
     stats: "typing.Optional[v1QueueStats]" = None
+    usable: "typing.Optional[bool]" = None
 
     def __init__(
         self,
@@ -13647,6 +13648,7 @@ class v1ResourcePool(Printable):
         accelerator: "typing.Union[str, None, Unset]" = _unset,
         slotsPerAgent: "typing.Union[int, None, Unset]" = _unset,
         stats: "typing.Union[v1QueueStats, None, Unset]" = _unset,
+        usable: "typing.Union[bool, None, Unset]" = _unset,
     ):
         self.agentDockerImage = agentDockerImage
         self.agentDockerNetwork = agentDockerNetwork
@@ -13687,6 +13689,8 @@ class v1ResourcePool(Printable):
             self.slotsPerAgent = slotsPerAgent
         if not isinstance(stats, Unset):
             self.stats = stats
+        if not isinstance(usable, Unset):
+            self.usable = usable
 
     @classmethod
     def from_json(cls, obj: Json) -> "v1ResourcePool":
@@ -13731,6 +13735,8 @@ class v1ResourcePool(Printable):
             kwargs["slotsPerAgent"] = obj["slotsPerAgent"]
         if "stats" in obj:
             kwargs["stats"] = v1QueueStats.from_json(obj["stats"]) if obj["stats"] is not None else None
+        if "usable" in obj:
+            kwargs["usable"] = obj["usable"]
         return cls(**kwargs)
 
     def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
@@ -13775,6 +13781,8 @@ class v1ResourcePool(Printable):
             out["slotsPerAgent"] = self.slotsPerAgent
         if not omit_unset or "stats" in vars(self):
             out["stats"] = None if self.stats is None else self.stats.to_json(omit_unset)
+        if not omit_unset or "usable" in vars(self):
+            out["usable"] = self.usable
         return out
 
 class v1ResourcePoolAwsDetail(Printable):

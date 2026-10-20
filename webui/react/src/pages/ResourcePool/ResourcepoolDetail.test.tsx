@@ -63,7 +63,9 @@ vi.mock('services/api', () => ({
       ],
     }),
   ),
-  getResourcePools: vi.fn(() => Promise.resolve([POOL])),
+  getResourcePools: vi.fn(() =>
+    Promise.resolve([POOL, { ...POOL, name: 'locked', usable: false }]),
+  ),
   getTask: vi.fn(),
   getUsers: vi.fn(() => Promise.resolve({ pagination: {}, users: [] })),
   updateUserSetting: vi.fn(() => Promise.resolve()),
@@ -169,6 +171,19 @@ describe('ResourcepoolDetail', () => {
     await screen.findByText('node01: 0, 1');
     expect(screen.queryByRole('button', { name: 'node01: 0, 1' })).toBeNull();
     expect(screen.queryByRole('article', { name: 'GPU topology of agent node01' })).toBeNull();
+  });
+
+  it('shows a pool that the user may not use, tagged', async () => {
+    await setup(agentOf(undefined), 'locked');
+    expect(await screen.findByText('Restricted')).toBeInTheDocument();
+    expect(screen.getByText(/^locked \(/)).toBeInTheDocument();
+    expect(screen.queryByText("Page not found or you don't have access")).toBeNull();
+  });
+
+  it('shows no tag for a pool that the user may use', async () => {
+    await setup(agentOf(undefined));
+    await screen.findByText('node01: 0, 1');
+    expect(screen.queryByText('Restricted')).toBeNull();
   });
 
   it('shows the not found page for a pool that is not in the pool list', async () => {

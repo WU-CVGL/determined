@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
 	"github.com/sirupsen/logrus"
@@ -16,6 +17,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/determined-ai/determined/master/internal/command"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/mocks"
 	"github.com/determined-ai/determined/master/internal/poolaccess"
@@ -373,63 +375,180 @@ func TestDeleteBindingsSucceeds(t *testing.T) {
 	require.True(t, mockRM.AssertExpectations(t))
 }
 
-func TestGetResourcePoolsFiltersByAccess(t *testing.T) {
-	var pools []*resourcepoolv1.ResourcePool
+func TestGetResourcePoolsMarksUsable(t *testing.T) {
+	var names []string
 	mockRM := MockRM()
+	// Fresh pools for every request, as the resource managers build them.
 	mockRM.On("GetResourcePools").Return(func() *apiv1.GetResourcePoolsResponse {
-		return &apiv1.GetResourcePoolsResponse{ResourcePools: pools}
+		resp := &apiv1.GetResourcePoolsResponse{}
+		for _, name := range names {
+			resp.ResourcePools = append(resp.ResourcePools, &resourcepoolv1.ResourcePool{Name: name})
+		}
+		return resp
 	}, nil)
+	mockRM.On("GetDefaultComputeResourcePool").Return(rm.ResourcePoolName(mockRMDefaultPool), nil)
+	mockRM.On("GetDefaultAuxResourcePool").Return(rm.ResourcePoolName(mockRMDefaultPool), nil)
 	api, admin, adminCtx := setupAPITest(t, nil, mockRM)
+	cs, err := command.NewService(api.m.db, api.m.rm)
+	require.NoError(t, err)
+	command.SetDefaultService(cs)
 	u1 := db.RequireMockUser(t, api.m.db)
 	u2 := db.RequireMockUser(t, api.m.db)
 	public := accessTestPool(t, "a-public", admin, false)
 	granted := accessTestPool(t, "b-granted", admin, true, u1)
 	adminsOnly := accessTestPool(t, "c-admins-only", admin, true)
 	// The resource manager lists the pools out of order; the response is sorted by name.
-	for _, name := range []string{adminsOnly, public, granted} {
-		pools = append(pools, &resourcepoolv1.ResourcePool{Name: name})
+	names = []string{adminsOnly, public, granted}
+
+	// adminsOnly is bound to a workspace; public and granted are unbound.
+	ws, err := api.PostWorkspace(adminCtx, &apiv1.PostWorkspaceRequest{Name: uuid.NewString()})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := db.Bun().NewDelete().Table("workspaces").Where("id = ?", ws.Workspace.Id).
+			Exec(context.Background())
+		require.NoError(t, err)
+	})
+	_, err = api.BindRPToWorkspace(adminCtx, &apiv1.BindRPToWorkspaceRequest{
+		ResourcePoolName: adminsOnly, WorkspaceIds: []int32{ws.Workspace.Id},
+	})
+	require.NoError(t, err)
+
+	usable := func(resp *apiv1.GetResourcePoolsResponse) map[string]bool {
+		out := map[string]bool{}
+		for _, pool := range resp.ResourcePools {
+			require.NotNil(t, pool.Usable, pool.Name)
+			out[pool.Name] = *pool.Usable
+		}
+		return out
 	}
-	names := func(resp *apiv1.GetResourcePoolsResponse) []string {
+	listed := func(resp *apiv1.GetResourcePoolsResponse) []string {
 		out := []string{}
 		for _, pool := range resp.ResourcePools {
 			out = append(out, pool.Name)
 		}
 		return out
 	}
+	all := []string{public, granted, adminsOnly}
+	unbound := []string{public, granted}
 
 	u2Ctx := ntscUserCtx(t, u2)
 	ctxs := map[string]context.Context{
 		"granted user": ntscUserCtx(t, u1), "other user": u2Ctx, "admin": adminCtx,
 	}
-	for name, want := range map[string][]string{
-		"granted user": {public, granted},
-		"other user":   {public},
-		"admin":        {public, granted, adminsOnly},
+	wants := map[string]map[string]bool{
+		"granted user": {public: true, granted: true, adminsOnly: false},
+		"other user":   {public: true, granted: false, adminsOnly: false},
+		"admin":        {public: true, granted: true, adminsOnly: true},
+	}
+	for name, want := range wants {
+		// Every pool is listed, restricted or not, with whether the user may use it.
+		resp, err := api.GetResourcePools(ctxs[name], &apiv1.GetResourcePoolsRequest{})
+		require.NoError(t, err, name)
+		require.Equal(t, all, listed(resp), name)
+		require.Equal(t, want, usable(resp), name)
+		require.Equal(t, int32(len(all)), resp.Pagination.Total, name)
+
+		// So is every unbound pool.
+		resp, err = api.GetResourcePools(ctxs[name], &apiv1.GetResourcePoolsRequest{Unbound: true})
+		require.NoError(t, err, name)
+		require.Equal(t, unbound, listed(resp), name)
+		require.Equal(t, map[string]bool{public: want[public], granted: want[granted]},
+			usable(resp), name)
+		require.Equal(t, int32(len(unbound)), resp.Pagination.Total, name)
+	}
+
+	// Pagination counts the pools that are not usable too.
+	resp, err := api.GetResourcePools(u2Ctx, &apiv1.GetResourcePoolsRequest{Offset: 1, Limit: 1})
+	require.NoError(t, err)
+	require.Equal(t, []string{granted}, listed(resp))
+	require.Equal(t, map[string]bool{granted: false}, usable(resp))
+	require.Equal(t, int32(3), resp.Pagination.Total)
+
+	// With hide_unusable_pools, the list leaves out the pools that the user may not use.
+	api.m.config.ResourcePoolAccess.HideUnusablePools = true
+	t.Cleanup(func() { api.m.config.ResourcePoolAccess.HideUnusablePools = false })
+	for name, want := range map[string]struct{ all, unbound []string }{
+		"granted user": {[]string{public, granted}, unbound},
+		"other user":   {[]string{public}, []string{public}},
+		"admin":        {all, unbound},
 	} {
 		resp, err := api.GetResourcePools(ctxs[name], &apiv1.GetResourcePoolsRequest{})
 		require.NoError(t, err, name)
-		require.Equal(t, want, names(resp), name)
-		require.Equal(t, int32(len(want)), resp.Pagination.Total, name)
+		require.Equal(t, want.all, listed(resp), name)
+		for pool, u := range usable(resp) {
+			require.True(t, u, "%s: %s", name, pool)
+		}
+		require.Equal(t, int32(len(want.all)), resp.Pagination.Total, name)
 
-		// The unbound pools are a subset of the usable pools.
 		resp, err = api.GetResourcePools(ctxs[name], &apiv1.GetResourcePoolsRequest{Unbound: true})
 		require.NoError(t, err, name)
-		require.Subset(t, want, names(resp), name)
+		require.Equal(t, want.unbound, listed(resp), name)
+		for pool, u := range usable(resp) {
+			require.True(t, u, "%s: %s", name, pool)
+		}
+		require.Equal(t, int32(len(want.unbound)), resp.Pagination.Total, name)
 	}
-
-	// Pagination counts only the usable pools.
-	resp, err := api.GetResourcePools(u2Ctx, &apiv1.GetResourcePoolsRequest{Offset: 1, Limit: 1})
+	resp, err = api.GetResourcePools(u2Ctx, &apiv1.GetResourcePoolsRequest{Offset: 1, Limit: 1})
 	require.NoError(t, err)
 	require.Empty(t, resp.ResourcePools)
 	require.Equal(t, int32(1), resp.Pagination.Total)
+	api.m.config.ResourcePoolAccess.HideUnusablePools = false
 
-	// A failed read never returns the unfiltered list.
+	// A pool listed with usable false refuses the user's submission, and accepts it after a grant.
+	jobs := func() int {
+		n, err := db.Bun().NewSelect().Table("jobs").Where("owner_id = ?", u2.ID).
+			Count(context.Background())
+		require.NoError(t, err)
+		return n
+	}
+	commands := func() int {
+		resp, err := api.GetCommands(adminCtx, &apiv1.GetCommandsRequest{
+			UserIds: []int32{int32(u2.ID)},
+		})
+		require.NoError(t, err)
+		return len(resp.Commands)
+	}
+	launch := func() (*apiv1.LaunchCommandResponse, error) {
+		return api.LaunchCommand(u2Ctx, &apiv1.LaunchCommandRequest{
+			Config: ntscPoolConfig(t, granted),
+		})
+	}
+	resp, err = api.GetResourcePools(u2Ctx, &apiv1.GetResourcePoolsRequest{})
+	require.NoError(t, err)
+	require.False(t, usable(resp)[granted])
+	sessions, jobsBefore := countUserSessions(adminCtx, t, u2.ID), jobs()
+	require.Zero(t, commands())
+	_, err = launch()
+	requirePoolDenied(t, err, u2, granted)
+	require.Equal(t, sessions, countUserSessions(adminCtx, t, u2.ID),
+		"a refused launch must not start a task session")
+	require.Equal(t, jobsBefore, jobs(), "a refused launch must not create a job")
+	require.Zero(t, commands())
+
+	_, err = poolaccess.Grant(context.Background(), granted, []model.UserID{u2.ID}, admin.ID)
+	require.NoError(t, err)
+	resp, err = api.GetResourcePools(u2Ctx, &apiv1.GetResourcePoolsRequest{})
+	require.NoError(t, err)
+	require.True(t, usable(resp)[granted])
+	launched, err := launch()
+	require.NoError(t, err)
+	require.Equal(t, granted,
+		launched.Config.AsMap()["resources"].(map[string]any)["resource_pool"])
+	require.Equal(t, jobsBefore+1, jobs())
+	require.Equal(t, 1, commands())
+
+	// A failed read fails the request, whether unusable pools are hidden or not: no pool is
+	// reported usable.
 	poolaccess.SetReaderForTest(t, func(context.Context, model.UserID, []string) (map[string]bool, error) {
 		return nil, fmt.Errorf("the database went away")
 	})
-	_, err = api.GetResourcePools(u2Ctx, &apiv1.GetResourcePoolsRequest{})
-	require.Equal(t, codes.Unavailable, status.Code(err))
-	resp, err = api.GetResourcePools(adminCtx, &apiv1.GetResourcePoolsRequest{})
-	require.NoError(t, err)
-	require.Equal(t, []string{public, granted, adminsOnly}, names(resp))
+	for _, hide := range []bool{true, false} {
+		api.m.config.ResourcePoolAccess.HideUnusablePools = hide
+		_, err = api.GetResourcePools(u2Ctx, &apiv1.GetResourcePoolsRequest{})
+		require.Equal(t, codes.Unavailable, status.Code(err), hide)
+		resp, err = api.GetResourcePools(adminCtx, &apiv1.GetResourcePoolsRequest{})
+		require.NoError(t, err, hide)
+		require.Equal(t, all, listed(resp), hide)
+		require.Equal(t, wants["admin"], usable(resp), hide)
+	}
 }

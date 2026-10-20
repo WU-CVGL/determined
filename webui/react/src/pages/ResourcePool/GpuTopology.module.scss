@@ -2,6 +2,8 @@
 // palette, set inline as --gpu-tile-fill; Running and Pending also set --gpu-tile-edge), health = a
 // separate LED dot, stripes = no new work.
 
+@use '../../styles/stripes';
+
 .agent {
   display: grid;
   flex: 1 1 100%;
@@ -119,11 +121,7 @@
     0 0 0 4px var(--theme-surface-on);
 }
 .striped {
-  background-image: repeating-linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--theme-surface-on) 30%, transparent) 0 2px,
-    transparent 2px 7px
-  );
+  @include stripes.no-new-work;
 }
 .tileName {
   font-size: 15px;

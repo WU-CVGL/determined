@@ -12,12 +12,14 @@ import NtscLaunchModalComponent, { Props } from 'components/NtscLaunchModal';
 import { ThemeProvider } from 'components/ThemeProvider';
 import { SettingsProvider } from 'hooks/useSettingsProvider';
 import authStore from 'stores/auth';
+import clusterStore from 'stores/cluster';
 import userStore from 'stores/users';
 import userSettings from 'stores/userSettings';
 import { CommandState, CommandTask, CommandType, RawJson, WorkspaceState } from 'types';
 import { listLaunchHistory, recordLaunch } from 'utils/launchHistory';
 
 const mocks = vi.hoisted(() => ({
+  availablePools: [] as string[],
   canCreateTemplateWorkspace: true,
   createTaskTemplate: vi.fn(),
   getJupyterLabConfig: vi.fn(),
@@ -30,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   launchShell: vi.fn(),
   makeToast: vi.fn(),
   openCommandResponse: vi.fn(),
+  pools: [] as unknown[],
   previewJupyterLab: vi.fn(),
   taskTemplatesOn: true,
   updateTaskTemplate: vi.fn(),
@@ -37,11 +40,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('services/api', () => ({
   createTaskTemplate: mocks.createTaskTemplate,
-  getAvailableResourcePools: () => Promise.resolve([]),
+  getAvailableResourcePools: () => Promise.resolve(mocks.availablePools),
   getCurrentUser: () => Promise.resolve({ id: 1, isActive: true, isAdmin: false, username: 'me' }),
   getJupyterLabConfig: mocks.getJupyterLabConfig,
   getJupyterLabs: mocks.getJupyterLabs,
-  getResourcePools: () => Promise.resolve([]),
+  getResourcePools: () => Promise.resolve(mocks.pools),
   getShellConfig: mocks.getShellConfig,
   getShells: mocks.getShells,
   getTaskTemplates: mocks.getTaskTemplates,
@@ -532,6 +535,38 @@ describe('NtscLaunchModal', () => {
         },
         workspaceId: WORKSPACE.id,
       });
+    });
+
+    it('picks the first pool that the user may use and lists the others disabled', async () => {
+      const pool = { auxContainerCapacityPerAgent: 1, slotsAvailable: 0, slotsPerAgent: 0 };
+      mocks.pools = [
+        { ...pool, name: 'a-locked', usable: false },
+        { ...pool, name: 'b-open', usable: true },
+      ];
+      mocks.availablePools = ['a-locked', 'b-open'];
+      clusterStore.fetchResourcePools();
+      await waitFor(() =>
+        expect(Loadable.getOrElse([], clusterStore.resourcePools.get())).toHaveLength(2),
+      );
+      try {
+        const { user } = await setup();
+        const picker = screen.getByRole('combobox', { name: 'Resource Pool' });
+        await waitFor(() => expect(picker.closest('.ant-select')).toHaveTextContent('b-open'));
+
+        await user.click(picker);
+        const locked = (
+          await screen.findByText('a-locked', { selector: '.ant-select-item-option-content *' })
+        ).closest('.ant-select-item-option');
+        expect(locked).toHaveClass('ant-select-item-option-disabled');
+        expect(locked).toHaveTextContent('Restricted');
+      } finally {
+        mocks.pools = [];
+        mocks.availablePools = [];
+        clusterStore.fetchResourcePools();
+        await waitFor(() =>
+          expect(Loadable.getOrElse([], clusterStore.resourcePools.get())).toHaveLength(0),
+        );
+      }
     });
 
     it('starts from a template and copies its pool and slots into the form', async () => {

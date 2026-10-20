@@ -1,6 +1,7 @@
 package grpcutil
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +16,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/determined-ai/determined/master/internal/user"
+	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
+	"github.com/determined-ai/determined/proto/pkg/resourcepoolv1"
 )
 
 // testGateway serves fake login and logout calls through the real gateway mux and its response
@@ -216,5 +219,32 @@ func TestGatewayLegacySetUserPasswordBody(t *testing.T) {
 	} {
 		seen, _ := send(r.method, r.path, `"New-password-1"`, int64(len(`"New-password-1"`)))
 		require.Equal(t, `"New-password-1"`, seen, r)
+	}
+}
+
+// TestGatewayResourcePoolUsable checks that the gateway's JSON states usable, true or false, and
+// leaves it out when it is unset.
+func TestGatewayResourcePoolUsable(t *testing.T) {
+	mux := newGRPCGatewayMux()
+	_, marshaler := runtime.MarshalerForRequest(mux, httptest.NewRequest(http.MethodGet, "/", nil))
+	for name, usable := range map[string]*bool{
+		"true": ptrs.Ptr(true), "false": ptrs.Ptr(false), "unset": nil,
+	} {
+		out, err := marshaler.Marshal(&apiv1.GetResourcePoolsResponse{
+			ResourcePools: []*resourcepoolv1.ResourcePool{{Name: "pool", Usable: usable}},
+		})
+		require.NoError(t, err, name)
+		var resp struct {
+			ResourcePools []map[string]any `json:"resourcePools"`
+		}
+		require.NoError(t, json.Unmarshal(out, &resp), name)
+		require.Len(t, resp.ResourcePools, 1, name)
+		got, ok := resp.ResourcePools[0]["usable"]
+		if usable == nil {
+			require.False(t, ok, "%s: %s", name, out)
+			continue
+		}
+		require.True(t, ok, "%s: %s", name, out)
+		require.Equal(t, *usable, got, name)
 	}
 }

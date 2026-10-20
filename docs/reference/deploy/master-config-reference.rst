@@ -1857,6 +1857,23 @@ Deployment notes:
    users' shells. Open task services only from users you trust, and consider setting
    ``allow_admin`` to ``false``.
 
+.. _master-config-resource-pool-access:
+
+**************************
+ ``resource_pool_access``
+**************************
+
+Configures what users see of the resource pools that they may not use. See :doc:`resource pool
+access </maintenance/resource-pool-access>`.
+
+``hide_unusable_pools``
+=======================
+
+Whether the resource pool list, ``GET /api/v1/resource-pools``, leaves out the pools that the
+requesting user may not use, and with it the WebUI, the CLI, and the SDK. When ``false``, the list
+shows every pool with ``usable``, whether the user passes the pool's access control. Submissions to
+a pool that the user may not use are refused either way. Defaults to ``false``.
+
 *************
  ``logging``
 *************

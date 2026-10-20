@@ -1,13 +1,16 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event';
 import Button from 'hew/Button';
 import { useModal } from 'hew/Modal';
 import UIProvider, { DefaultTheme } from 'hew/Theme';
+import { Loadable, Loaded } from 'hew/utils/loadable';
 import React from 'react';
 
 import { ThemeProvider } from 'components/ThemeProvider';
 import { createExperiment as mockCreateExperiment } from 'services/api';
-import { FullExperimentItem } from 'types';
+import clusterStore from 'stores/cluster';
+import { FullExperimentItem, ResourcePool } from 'types';
+import { WritableObservable } from 'utils/observable';
 import { generateTestExperimentData } from 'utils/tests/generateTestData';
 
 import HyperparameterSearchModalComponent from './HyperparameterSearchModal';
@@ -20,42 +23,44 @@ vi.mock('stores/cluster', async (importOriginal) => {
   const loadable = await import('hew/utils/loadable');
   const observable = await import('utils/observable');
 
+  const pool = {
+    agentDockerImage: '',
+    agentDockerNetwork: '',
+    agentDockerRuntime: '',
+    auxContainerCapacity: 0,
+    auxContainerCapacityPerAgent: 0,
+    auxContainersRunning: 0,
+    containerStartupScript: '',
+    defaultAuxPool: false,
+    defaultComputePool: true,
+    description: '',
+    details: {},
+    imageId: '',
+    instanceType: '',
+    location: '',
+    masterCertName: '',
+    masterUrl: '',
+    maxAgents: 1,
+    maxAgentStartingPeriod: 1000,
+    maxIdleAgentPeriod: 1000,
+    minAgents: 0,
+    name: 'default',
+    numAgents: 1,
+    preemptible: false,
+    schedulerFittingPolicy: sdkTypes.V1FittingPolicy.UNSPECIFIED,
+    schedulerType: sdkTypes.V1SchedulerType.UNSPECIFIED,
+    slotsAvailable: 1,
+    slotsUsed: 0,
+    slotType: types.ResourceType.CUDA,
+    startupScript: '',
+    type: sdkTypes.V1ResourcePoolType.UNSPECIFIED,
+  };
   const store = {
     fetchResourcePools: vi.fn(),
     resourcePools: observable.observable(
       loadable.Loaded([
-        {
-          agentDockerImage: '',
-          agentDockerNetwork: '',
-          agentDockerRuntime: '',
-          auxContainerCapacity: 0,
-          auxContainerCapacityPerAgent: 0,
-          auxContainersRunning: 0,
-          containerStartupScript: '',
-          defaultAuxPool: false,
-          defaultComputePool: true,
-          description: '',
-          details: {},
-          imageId: '',
-          instanceType: '',
-          location: '',
-          masterCertName: '',
-          masterUrl: '',
-          maxAgents: 1,
-          maxAgentStartingPeriod: 1000,
-          maxIdleAgentPeriod: 1000,
-          minAgents: 0,
-          name: 'default',
-          numAgents: 1,
-          preemptible: false,
-          schedulerFittingPolicy: sdkTypes.V1FittingPolicy.UNSPECIFIED,
-          schedulerType: sdkTypes.V1SchedulerType.UNSPECIFIED,
-          slotsAvailable: 1,
-          slotsUsed: 0,
-          slotType: types.ResourceType.CUDA,
-          startupScript: '',
-          type: sdkTypes.V1ResourcePoolType.UNSPECIFIED,
-        },
+        pool,
+        { ...pool, defaultComputePool: false, name: 'locked', usable: false },
       ]),
     ),
   };
@@ -94,6 +99,10 @@ const ModalTrigger: React.FC<{ experiment: FullExperimentItem }> = ({ experiment
 
 const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
 
+const resourcePools = clusterStore.resourcePools as WritableObservable<Loadable<ResourcePool[]>>;
+const initialPools = resourcePools.get();
+const setPools = (pools: ResourcePool[]) => act(() => resourcePools.set(Loaded(pools)));
+
 const setup = async (exp: FullExperimentItem = experiment) => {
   const view = render(
     <UIProvider theme={DefaultTheme.Light}>
@@ -108,6 +117,10 @@ const setup = async (exp: FullExperimentItem = experiment) => {
 };
 
 describe('useModalHyperparameterSearch', () => {
+  afterEach(() => {
+    act(() => resourcePools.set(initialPools));
+  });
+
   it('should open modal', async () => {
     const { view } = await setup();
 
@@ -153,6 +166,79 @@ describe('useModalHyperparameterSearch', () => {
     );
     await waitFor(() => expect(next).toBeEnabled());
     expect(view.getByText('1 max slots')).toBeInTheDocument();
+  });
+
+  it('leaves the pool empty when the user may not use the experiment pool', async () => {
+    const { view } = await setup({ ...experiment, resourcePool: 'locked' });
+    const next = view.getByRole('button', { name: 'Select Hyperparameters' });
+
+    await waitFor(() => expect(next).toBeDisabled());
+    const picker = view.getByRole('combobox', { name: 'Resource pool' });
+    expect(picker.closest('.ant-select')?.querySelector('.ant-select-selection-item')).toBeNull();
+    expect(view.queryByText(/max slots/)).toBeNull();
+
+    await user.click(picker);
+    const locked = (
+      await view.findByText('locked', { selector: '.ant-select-item-option-content *' })
+    ).closest('.ant-select-item-option');
+    expect(locked).toHaveClass('ant-select-item-option-disabled');
+    expect(locked).toHaveClass('restricted');
+    expect(locked).toHaveTextContent('Restricted');
+    await user.click(locked as HTMLElement);
+    expect(next).toBeDisabled();
+
+    await user.click(
+      await view.findByText('default', { selector: '.ant-select-item-option-content' }),
+    );
+    await waitFor(() => expect(next).toBeEnabled());
+  });
+
+  it('blocks the submission while the picked pool is not usable in the latest pool list', async () => {
+    const { view } = await setup({ ...experiment, resourcePool: 'default' });
+    const next = view.getByRole('button', { name: 'Select Hyperparameters' });
+    const picker = view.getByRole('combobox', { name: 'Resource pool' });
+    const poolItem = picker.closest('.ant-form-item');
+    const selection = () =>
+      picker.closest('.ant-select')?.querySelector('.ant-select-selection-item')?.textContent;
+    await waitFor(() => expect(next).toBeEnabled());
+    expect(selection()).toBe('default');
+
+    const [pool] = Loadable.getOrElse([], initialPools);
+    const spare = { ...pool, defaultComputePool: false, name: 'spare' };
+    setPools([{ ...pool, usable: false }, spare]);
+    await waitFor(() => expect(next).toBeDisabled());
+    expect(poolItem).toHaveClass('ant-form-item-has-error');
+    expect(view.queryByText(/max slots/)).toBeNull();
+    // The pick stays; the dialog does not switch to another pool.
+    expect(selection()).toBe('defaultRestricted');
+
+    setPools([spare]);
+    await waitFor(() => expect(next).toBeDisabled());
+    expect(poolItem).toHaveClass('ant-form-item-has-error');
+    expect(selection()).toMatch(/^default/);
+
+    await user.click(picker);
+    await user.click(
+      await view.findByText('spare', { selector: '.ant-select-item-option-content' }),
+    );
+    await waitFor(() => expect(next).toBeEnabled());
+    expect(poolItem).not.toHaveClass('ant-form-item-has-error');
+
+    await user.click(next);
+    const run = view.getByRole('button', { name: /Run/ });
+    expect(run).toBeEnabled();
+    setPools([{ ...spare, usable: false }]);
+    await waitFor(() => expect(run).toBeDisabled());
+    setPools([spare]);
+    await waitFor(() => expect(run).toBeEnabled());
+    vi.mocked(mockCreateExperiment).mockClear();
+    await user.click(run);
+    expect(mockCreateExperiment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        experimentConfig: expect.stringContaining('resource_pool: spare'),
+      }),
+      expect.anything(),
+    );
   });
 
   it('should only allow current on constant hyperparameter', async () => {

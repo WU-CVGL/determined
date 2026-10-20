@@ -14,6 +14,7 @@ import yaml from 'js-yaml';
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import Link from 'components/Link';
+import { resourcePoolOption } from 'components/ResourcePoolOption';
 import useFeature from 'hooks/useFeature';
 import { paths } from 'routes/utils';
 import { createExperiment } from 'services/api';
@@ -25,11 +26,11 @@ import {
   Hyperparameter,
   HyperparameterType,
   Primitive,
-  ResourcePool,
   TrialDetails,
   TrialHyperparameters,
   TrialItem,
 } from 'types';
+import { isUsablePool } from 'utils/cluster';
 import { flattenObject, isBoolean, unflattenObject } from 'utils/data';
 import { DetError, ErrorLevel, ErrorType, handleWarning, isDetError } from 'utils/error';
 import { roundToPrecision } from 'utils/number';
@@ -102,10 +103,17 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
   );
   const canceler = useRef<AbortController>(new AbortController());
   const resourcePools = Loadable.getOrElse([], useObservable(clusterStore.resourcePools));
-  // Empty when the experiment's pool is not in the list, so the user picks one.
-  const [resourcePool, setResourcePool] = useState<ResourcePool | undefined>(
-    resourcePools.find((pool) => pool.name === experiment.resourcePool),
-  );
+  // The name of the picked pool. Starts as the experiment's pool if the user may use it, otherwise
+  // empty, so the user picks one.
+  const [poolName, setPoolName] = useState<string | undefined>(() => {
+    const pool = resourcePools.find((pool) => pool.name === experiment.resourcePool);
+    return pool && isUsablePool(pool) ? pool.name : undefined;
+  });
+  // From the latest pool list: a picked pool that left the list or that the user may no longer use
+  // blocks the submission until the user picks another.
+  const pickedPool = resourcePools.find((pool) => pool.name === poolName);
+  const resourcePool = pickedPool && isUsablePool(pickedPool) ? pickedPool : undefined;
+  const poolUnavailable = poolName !== undefined && !resourcePool;
   const [form] = Form.useForm();
   const [currentPage, setCurrentPage] = useState(0);
   const [validationError, setValidationError] = useState(false);
@@ -138,7 +146,7 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
   );
 
   const submitExperiment = useCallback(async () => {
-    if (isSubmitting) return;
+    if (isSubmitting || !resourcePool) return;
     const fields: Record<string, Primitive | HyperparameterRowValues> = form.getFieldsValue(true);
 
     // Deep cloning parent experiment's config
@@ -150,7 +158,7 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
     baseConfig.searcher.max_trials =
       fields.searcher === SEARCH_METHODS.Grid.id ? undefined : fields.max_trials;
     baseConfig.searcher.max_concurrent_trials = fields.max_concurrent_trials ?? 16;
-    baseConfig.resources.resource_pool = fields.pool;
+    baseConfig.resources.resource_pool = resourcePool.name;
     baseConfig.resources.slots_per_trial = fields.slots_per_trial;
 
     // Dealing with ASHA-specific settings
@@ -266,6 +274,7 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
     form,
     currentHPs,
     isSubmitting,
+    resourcePool,
   ]);
 
   const handleOk = useCallback(() => {
@@ -284,12 +293,9 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
     closeModal('Cancel');
   }, [closeModal]);
 
-  const handleSelectPool = useCallback(
-    (value: SelectValue) => {
-      setResourcePool(resourcePools.find((pool) => pool.name === value));
-    },
-    [resourcePools],
-  );
+  const handleSelectPool = useCallback((value: SelectValue) => {
+    setPoolName(typeof value === 'string' ? value : undefined);
+  }, []);
 
   const maxSlots = useMemo(
     /**
@@ -308,10 +314,12 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
   );
 
   useEffect(() => {
-    if (resourcePool) return;
+    if (poolName !== undefined) return;
     const pool = resourcePools.find((pool) => pool.name === experiment.resourcePool);
-    if (pool) setResourcePool(pool);
-  }, [experiment.resourcePool, resourcePool, resourcePools]);
+    if (!pool || !isUsablePool(pool)) return;
+    setPoolName(pool.name);
+    form.setFieldValue('pool', pool.name);
+  }, [experiment.resourcePool, form, poolName, resourcePools]);
 
   const validateForm = useCallback(() => {
     if (!formValues) return;
@@ -497,17 +505,12 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
         </Form.Item>
         <div className={css.poolContainer}>
           <Form.Item
-            initialValue={resourcePool?.name}
+            initialValue={poolName}
             label="Resource pool"
             name="pool"
-            rules={[{ required: true }]}>
-            <Select onChange={handleSelectPool}>
-              {resourcePools.map((pool) => (
-                <Option key={pool.name} value={pool.name}>
-                  {pool.name}
-                </Option>
-              ))}
-            </Select>
+            rules={[{ required: true }]}
+            validateStatus={poolUnavailable ? 'error' : undefined}>
+            <Select onChange={handleSelectPool}>{resourcePools.map(resourcePoolOption)}</Select>
           </Form.Item>
           {resourcePool && <p>{maxSlots} max slots</p>}
         </div>
@@ -598,6 +601,8 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
     handleSelectSearcher,
     maxSlots,
     modalError,
+    poolName,
+    poolUnavailable,
     resourcePool,
     resourcePools,
     searcher,
@@ -616,7 +621,7 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
         <Row>
           <Button onClick={handleCancel}>Cancel</Button>
           <Button
-            disabled={validationError || isSubmitting}
+            disabled={validationError || isSubmitting || !resourcePool}
             loading={isSubmitting}
             type="primary"
             onClick={handleOk}>
@@ -627,7 +632,16 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
         </Row>
       </>
     );
-  }, [currentPage, entityCopy, handleBack, handleCancel, handleOk, validationError, isSubmitting]);
+  }, [
+    currentPage,
+    entityCopy,
+    handleBack,
+    handleCancel,
+    handleOk,
+    validationError,
+    isSubmitting,
+    resourcePool,
+  ]);
 
   return (
     <Modal footer={footer} title="Hyperparameter Search">

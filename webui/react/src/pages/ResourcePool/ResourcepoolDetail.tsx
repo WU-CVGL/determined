@@ -16,6 +16,7 @@ import Page from 'components/Page';
 import PageNotFound from 'components/PageNotFound';
 import ResourcePoolBindings from 'components/ResourcePoolBindings';
 import { RenderAllocationBarResourcePool } from 'components/ResourcePoolCard';
+import { RestrictedTag } from 'components/ResourcePoolOption';
 import Section from 'components/Section';
 import { V1SchedulerTypeToLabel } from 'constants/states';
 import useFeature from 'hooks/useFeature';
@@ -34,7 +35,7 @@ import {
 } from 'services/api-ts-sdk';
 import clusterStore, { maxPoolSlotCapacity } from 'stores/cluster';
 import { Agent, JobState, JsonObject, ResourceState, ValueOf } from 'types';
-import { getSlotContainerStates } from 'utils/cluster';
+import { getSlotContainerStates, isUsablePool } from 'utils/cluster';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import { useObservable } from 'utils/observable';
 import { camelCaseToSentence, floatToPercent } from 'utils/string';
@@ -209,7 +210,8 @@ const ResourcepoolDetailInner: React.FC = () => {
 
   const renderPoolConfig = useCallback(() => {
     if (!pool) return;
-    const { details, stats, resourceManagerMetadata, ...mainSection } = structuredClone(pool);
+    const { details, stats, resourceManagerMetadata, usable, ...mainSection } =
+      structuredClone(pool);
     for (const key in details) {
       if (details[key as keyof V1ResourcePoolDetail] === null) {
         delete details[key as keyof V1ResourcePoolDetail];
@@ -347,6 +349,7 @@ const ResourcepoolDetailInner: React.FC = () => {
         },
       ]}
       menuItems={menu}
+      options={isUsablePool(pool) ? undefined : <RestrictedTag />}
       title={
         tabKey === TabType.Active || tabKey === TabType.Queued
           ? 'Job Queue by Resource Pool'

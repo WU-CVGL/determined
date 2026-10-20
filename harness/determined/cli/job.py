@@ -127,7 +127,7 @@ def check_is_priority(pools: bindings.v1GetResourcePoolsResponse, resource_pool:
         if (resource_pool is None and pool.defaultComputePool) or resource_pool == pool.name:
             return pool.schedulerType == bindings.v1SchedulerType.PRIORITY
     if resource_pool is None:
-        # The list holds only the pools this user may use, so a restricted default is hidden.
+        # A master with resource_pool_access.hide_unusable_pools leaves out a restricted default.
         raise errors.CliError(
             "the default compute pool is not available to you; name a pool with -r"
         )
