@@ -10203,7 +10203,7 @@ export interface V1ResourcePool {
      */
     clusterName: string;
     /**
-     * Whether the requesting user may start new work in the pool.
+     * Whether the requesting user passes the pool's access control; a submission still goes through the other checks. Unset from masters that do not report it.
      * @type {boolean}
      * @memberof V1ResourcePool
      */

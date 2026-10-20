@@ -194,8 +194,10 @@ message ResourcePool {
   map<string, string> resource_manager_metadata = 35;
   // Resource manager's associated cluster name.
   string cluster_name = 36;
-  // Whether the requesting user may start new work in the pool.
-  bool usable = 37;
+  // Whether the requesting user passes the pool's access control; a submission
+  // still goes through the other checks. Unset from masters that do not report
+  // it.
+  optional bool usable = 37;
 }
 
 // Detailed information about the resource pool

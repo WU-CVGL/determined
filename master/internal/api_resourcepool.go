@@ -14,6 +14,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/rm"
 	workspaceauth "github.com/determined-ai/determined/master/internal/workspace"
 	"github.com/determined-ai/determined/master/pkg/model"
+	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/master/pkg/set"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 	"github.com/determined-ai/determined/proto/pkg/resourcepoolv1"
@@ -60,8 +61,8 @@ func markUsablePools(
 	}
 	listed := make([]*resourcepoolv1.ResourcePool, 0, len(pools))
 	for _, pool := range pools {
-		pool.Usable = usable[pool.Name]
-		if hide && !pool.Usable {
+		pool.Usable = ptrs.Ptr(usable[pool.Name])
+		if hide && !pool.GetUsable() {
 			continue
 		}
 		listed = append(listed, pool)
