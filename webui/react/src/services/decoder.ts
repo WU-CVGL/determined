@@ -205,6 +205,7 @@ const mapCommonV1Task = (
 ): types.CommandTask => {
   return {
     displayName: task.displayName || '',
+    endTime: (task.endTime as string | undefined) || undefined,
     id: task.id,
     name: task.description,
     resourcePool: task.resourcePool,

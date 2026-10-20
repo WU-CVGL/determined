@@ -61,4 +61,6 @@ message Shell {
   // The slot count the shell requests (resources.slots), 0 when it
   // requests none.
   int32 slots = 100;
+  // The time the shell ended; unset while it runs.
+  google.protobuf.Timestamp end_time = 101;
 }

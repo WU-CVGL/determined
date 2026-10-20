@@ -222,8 +222,8 @@ view, which is then saved as yours; ``/jobs`` alone opens your saved view. In a 
 filter is no filter, a missing ``sortKey`` sorts by Started, and a missing ``sortDesc`` sorts
 descending.
 
-JupyterLabs, shells, commands, and TensorBoards have no end time. They are listed for 24 hours after
-they end, and not after the master restarts.
+JupyterLabs, shells, commands, and TensorBoards are listed for 24 hours after they end, and not
+after the master restarts.
 
 ************************************
  Viewing and Managing the Job Queue

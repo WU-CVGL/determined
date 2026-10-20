@@ -2406,6 +2406,7 @@ class v1Command(Printable):
     """Command is a single container running the configured command."""
     container: "typing.Optional[v1Container]" = None
     displayName: "typing.Optional[str]" = None
+    endTime: "typing.Optional[str]" = None
     exitStatus: "typing.Optional[str]" = None
     slots: "typing.Optional[int]" = None
     userId: "typing.Optional[int]" = None
@@ -2423,6 +2424,7 @@ class v1Command(Printable):
         workspaceId: int,
         container: "typing.Union[v1Container, None, Unset]" = _unset,
         displayName: "typing.Union[str, None, Unset]" = _unset,
+        endTime: "typing.Union[str, None, Unset]" = _unset,
         exitStatus: "typing.Union[str, None, Unset]" = _unset,
         slots: "typing.Union[int, None, Unset]" = _unset,
         userId: "typing.Union[int, None, Unset]" = _unset,
@@ -2439,6 +2441,8 @@ class v1Command(Printable):
             self.container = container
         if not isinstance(displayName, Unset):
             self.displayName = displayName
+        if not isinstance(endTime, Unset):
+            self.endTime = endTime
         if not isinstance(exitStatus, Unset):
             self.exitStatus = exitStatus
         if not isinstance(slots, Unset):
@@ -2462,6 +2466,8 @@ class v1Command(Printable):
             kwargs["container"] = v1Container.from_json(obj["container"]) if obj["container"] is not None else None
         if "displayName" in obj:
             kwargs["displayName"] = obj["displayName"]
+        if "endTime" in obj:
+            kwargs["endTime"] = obj["endTime"]
         if "exitStatus" in obj:
             kwargs["exitStatus"] = obj["exitStatus"]
         if "slots" in obj:
@@ -2485,6 +2491,8 @@ class v1Command(Printable):
             out["container"] = None if self.container is None else self.container.to_json(omit_unset)
         if not omit_unset or "displayName" in vars(self):
             out["displayName"] = self.displayName
+        if not omit_unset or "endTime" in vars(self):
+            out["endTime"] = self.endTime
         if not omit_unset or "exitStatus" in vars(self):
             out["exitStatus"] = self.exitStatus
         if not omit_unset or "slots" in vars(self):
@@ -9956,6 +9964,7 @@ class v1Notebook(Printable):
     """Notebook is a Jupyter notebook in a containerized environment."""
     container: "typing.Optional[v1Container]" = None
     displayName: "typing.Optional[str]" = None
+    endTime: "typing.Optional[str]" = None
     exitStatus: "typing.Optional[str]" = None
     serviceAddress: "typing.Optional[str]" = None
     slots: "typing.Optional[int]" = None
@@ -9974,6 +9983,7 @@ class v1Notebook(Printable):
         workspaceId: int,
         container: "typing.Union[v1Container, None, Unset]" = _unset,
         displayName: "typing.Union[str, None, Unset]" = _unset,
+        endTime: "typing.Union[str, None, Unset]" = _unset,
         exitStatus: "typing.Union[str, None, Unset]" = _unset,
         serviceAddress: "typing.Union[str, None, Unset]" = _unset,
         slots: "typing.Union[int, None, Unset]" = _unset,
@@ -9991,6 +10001,8 @@ class v1Notebook(Printable):
             self.container = container
         if not isinstance(displayName, Unset):
             self.displayName = displayName
+        if not isinstance(endTime, Unset):
+            self.endTime = endTime
         if not isinstance(exitStatus, Unset):
             self.exitStatus = exitStatus
         if not isinstance(serviceAddress, Unset):
@@ -10016,6 +10028,8 @@ class v1Notebook(Printable):
             kwargs["container"] = v1Container.from_json(obj["container"]) if obj["container"] is not None else None
         if "displayName" in obj:
             kwargs["displayName"] = obj["displayName"]
+        if "endTime" in obj:
+            kwargs["endTime"] = obj["endTime"]
         if "exitStatus" in obj:
             kwargs["exitStatus"] = obj["exitStatus"]
         if "serviceAddress" in obj:
@@ -10041,6 +10055,8 @@ class v1Notebook(Printable):
             out["container"] = None if self.container is None else self.container.to_json(omit_unset)
         if not omit_unset or "displayName" in vars(self):
             out["displayName"] = self.displayName
+        if not omit_unset or "endTime" in vars(self):
+            out["endTime"] = self.endTime
         if not omit_unset or "exitStatus" in vars(self):
             out["exitStatus"] = self.exitStatus
         if not omit_unset or "serviceAddress" in vars(self):
@@ -15451,6 +15467,7 @@ class v1Shell(Printable):
     agentUserGroup: "typing.Optional[typing.Dict[str, typing.Any]]" = None
     container: "typing.Optional[v1Container]" = None
     displayName: "typing.Optional[str]" = None
+    endTime: "typing.Optional[str]" = None
     exitStatus: "typing.Optional[str]" = None
     privateKey: "typing.Optional[str]" = None
     publicKey: "typing.Optional[str]" = None
@@ -15472,6 +15489,7 @@ class v1Shell(Printable):
         agentUserGroup: "typing.Union[typing.Dict[str, typing.Any], None, Unset]" = _unset,
         container: "typing.Union[v1Container, None, Unset]" = _unset,
         displayName: "typing.Union[str, None, Unset]" = _unset,
+        endTime: "typing.Union[str, None, Unset]" = _unset,
         exitStatus: "typing.Union[str, None, Unset]" = _unset,
         privateKey: "typing.Union[str, None, Unset]" = _unset,
         publicKey: "typing.Union[str, None, Unset]" = _unset,
@@ -15494,6 +15512,8 @@ class v1Shell(Printable):
             self.container = container
         if not isinstance(displayName, Unset):
             self.displayName = displayName
+        if not isinstance(endTime, Unset):
+            self.endTime = endTime
         if not isinstance(exitStatus, Unset):
             self.exitStatus = exitStatus
         if not isinstance(privateKey, Unset):
@@ -15525,6 +15545,8 @@ class v1Shell(Printable):
             kwargs["container"] = v1Container.from_json(obj["container"]) if obj["container"] is not None else None
         if "displayName" in obj:
             kwargs["displayName"] = obj["displayName"]
+        if "endTime" in obj:
+            kwargs["endTime"] = obj["endTime"]
         if "exitStatus" in obj:
             kwargs["exitStatus"] = obj["exitStatus"]
         if "privateKey" in obj:
@@ -15556,6 +15578,8 @@ class v1Shell(Printable):
             out["container"] = None if self.container is None else self.container.to_json(omit_unset)
         if not omit_unset or "displayName" in vars(self):
             out["displayName"] = self.displayName
+        if not omit_unset or "endTime" in vars(self):
+            out["endTime"] = self.endTime
         if not omit_unset or "exitStatus" in vars(self):
             out["exitStatus"] = self.exitStatus
         if not omit_unset or "privateKey" in vars(self):
@@ -16262,6 +16286,7 @@ class v1Tensorboard(Printable):
     """Tensorboard is a tensorboard instance in a containerized environment."""
     container: "typing.Optional[v1Container]" = None
     displayName: "typing.Optional[str]" = None
+    endTime: "typing.Optional[str]" = None
     exitStatus: "typing.Optional[str]" = None
     experimentIds: "typing.Optional[typing.Sequence[int]]" = None
     serviceAddress: "typing.Optional[str]" = None
@@ -16282,6 +16307,7 @@ class v1Tensorboard(Printable):
         workspaceId: int,
         container: "typing.Union[v1Container, None, Unset]" = _unset,
         displayName: "typing.Union[str, None, Unset]" = _unset,
+        endTime: "typing.Union[str, None, Unset]" = _unset,
         exitStatus: "typing.Union[str, None, Unset]" = _unset,
         experimentIds: "typing.Union[typing.Sequence[int], None, Unset]" = _unset,
         serviceAddress: "typing.Union[str, None, Unset]" = _unset,
@@ -16301,6 +16327,8 @@ class v1Tensorboard(Printable):
             self.container = container
         if not isinstance(displayName, Unset):
             self.displayName = displayName
+        if not isinstance(endTime, Unset):
+            self.endTime = endTime
         if not isinstance(exitStatus, Unset):
             self.exitStatus = exitStatus
         if not isinstance(experimentIds, Unset):
@@ -16330,6 +16358,8 @@ class v1Tensorboard(Printable):
             kwargs["container"] = v1Container.from_json(obj["container"]) if obj["container"] is not None else None
         if "displayName" in obj:
             kwargs["displayName"] = obj["displayName"]
+        if "endTime" in obj:
+            kwargs["endTime"] = obj["endTime"]
         if "exitStatus" in obj:
             kwargs["exitStatus"] = obj["exitStatus"]
         if "experimentIds" in obj:
@@ -16359,6 +16389,8 @@ class v1Tensorboard(Printable):
             out["container"] = None if self.container is None else self.container.to_json(omit_unset)
         if not omit_unset or "displayName" in vars(self):
             out["displayName"] = self.displayName
+        if not omit_unset or "endTime" in vars(self):
+            out["endTime"] = self.endTime
         if not omit_unset or "exitStatus" in vars(self):
             out["exitStatus"] = self.exitStatus
         if not omit_unset or "experimentIds" in vars(self):

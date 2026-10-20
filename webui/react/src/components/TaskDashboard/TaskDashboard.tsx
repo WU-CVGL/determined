@@ -921,7 +921,6 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         dataIndex: 'endTime',
         defaultWidth: DEFAULT_COLUMN_WIDTHS.endTime,
         key: 'endTime',
-        // Notebooks, shells, commands and TensorBoards have no end time in their API.
         render: (_: unknown, row: RunRow) => timeRenderer(row.endTime),
         responsive: ['md'],
         sortDirections: DESCEND_FIRST,
