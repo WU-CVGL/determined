@@ -324,6 +324,7 @@ const ownerName = (displayName?: string, username?: string): string | undefined 
   displayName || username || undefined;
 
 export const commandRow = (task: CommandTask): CommandRunRow => ({
+  endTime: task.endTime,
   id: task.id,
   key: runRowKey(task.type, task.id),
   kind: task.type,

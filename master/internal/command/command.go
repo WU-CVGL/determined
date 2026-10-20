@@ -11,6 +11,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/uptrace/bun"
 	"golang.org/x/exp/slices"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/determined-ai/determined/master/internal/configpolicy"
 	internaldb "github.com/determined-ai/determined/master/internal/db"
@@ -62,6 +63,7 @@ type Command struct {
 	allocationID     model.AllocationID
 	lastState        task.AllocationState
 	exitStatus       *task.AllocationExited
+	endTime          *time.Time
 	restored         bool
 	contextDirectory []byte // Don't rely on this being set outsides of PreStart non restore case.
 
@@ -241,9 +243,11 @@ func (c *Command) OnExit(ae *task.AllocationExited) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	endTime := time.Now().UTC()
 	c.exitStatus = ae
+	c.endTime = &endTime
 
-	if err := internaldb.CompleteTask(context.TODO(), c.taskID, time.Now().UTC()); err != nil {
+	if err := internaldb.CompleteTask(context.TODO(), c.taskID, endTime); err != nil {
 		c.syslog.WithError(err).Error("marking task complete")
 	}
 	if err := user.DeleteSessionByToken(context.TODO(), c.GenericCommandSpec.Base.UserSessionToken); err != nil {
@@ -343,6 +347,7 @@ func (c *Command) ToV1Command() *commandv1.Command {
 		DisplayName:  c.Base.Owner.DisplayName.ValueOrZero(),
 		ResourcePool: c.Config.Resources.ResourcePool,
 		ExitStatus:   c.exitStatus.String(),
+		EndTime:      c.endTimeProto(),
 		JobId:        c.jobID.String(),
 		WorkspaceId:  int32(c.GenericCommandSpec.Metadata.WorkspaceID),
 		Slots:        int32(c.Config.Resources.Slots),
@@ -367,6 +372,7 @@ func (c *Command) ToV1Notebook() *notebookv1.Notebook {
 		DisplayName:    c.Base.Owner.DisplayName.ValueOrZero(),
 		ResourcePool:   c.Config.Resources.ResourcePool,
 		ExitStatus:     c.exitStatus.String(),
+		EndTime:        c.endTimeProto(),
 		JobId:          c.jobID.String(),
 		WorkspaceId:    int32(c.GenericCommandSpec.Metadata.WorkspaceID),
 		Slots:          int32(c.Config.Resources.Slots),
@@ -407,6 +413,7 @@ func (c *Command) ToV1Shell() *shellv1.Shell {
 		DisplayName:    c.Base.Owner.DisplayName.ValueOrZero(),
 		ResourcePool:   c.Config.Resources.ResourcePool,
 		ExitStatus:     c.exitStatus.String(),
+		EndTime:        c.endTimeProto(),
 		Addresses:      toProto(allo.SingleContainerAddresses()),
 		AgentUserGroup: protoutils.ToStruct(c.Base.AgentUserGroup),
 		JobId:          c.jobID.String(),
@@ -448,6 +455,7 @@ func (c *Command) ToV1Tensorboard() *tensorboardv1.Tensorboard {
 		DisplayName:    c.Base.Owner.DisplayName.ValueOrZero(),
 		ResourcePool:   c.Config.Resources.ResourcePool,
 		ExitStatus:     c.exitStatus.String(),
+		EndTime:        c.endTimeProto(),
 		JobId:          c.jobID.String(),
 		WorkspaceId:    int32(c.GenericCommandSpec.Metadata.WorkspaceID),
 		Slots:          int32(c.Config.Resources.Slots),
@@ -455,7 +463,7 @@ func (c *Command) ToV1Tensorboard() *tensorboardv1.Tensorboard {
 }
 
 // ToV1Command(), ToV1Notebook(), ToV1Shell(), ToV1Tensorboard() helper functions:
-// refreshAllocationState, enrichState, toProto, serviceAddress, stringID
+// refreshAllocationState, enrichState, toProto, endTimeProto, serviceAddress, stringID
 
 // Refresh our view of the allocation state. If the allocation has sent us an exit status,
 // we don't ask for a refresh because it won't respond. Otherwise, ask with a timeout
@@ -488,6 +496,13 @@ func toProto(as []cproto.Address) []*structpb.Struct {
 		res = append(res, protoutils.ToStruct(a))
 	}
 	return res
+}
+
+func (c *Command) endTimeProto() *timestamppb.Timestamp {
+	if c.endTime == nil {
+		return nil
+	}
+	return protoutils.ToTimestamp(*c.endTime)
 }
 
 func (c *Command) serviceAddress() string {

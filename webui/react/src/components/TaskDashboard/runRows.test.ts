@@ -294,6 +294,36 @@ describe('runRows', () => {
       expect(keys(sorted)).toEqual(['command:new', 'jupyter-lab:z', 'command:a', 'command:b']);
     });
 
+    it('sorts by end time, running tasks last both ways', () => {
+      const rows = [
+        commandRow(command('running', '2026-01-03T00:00:00Z')),
+        commandRow(
+          command('early', '2026-01-01T00:00:00Z', {
+            endTime: '2026-01-01T01:00:00Z',
+            state: CommandState.Terminated,
+          }),
+        ),
+        commandRow(
+          command('late', '2026-01-02T00:00:00Z', {
+            endTime: '2026-01-02T01:00:00Z',
+            state: CommandState.Terminated,
+          }),
+        ),
+      ];
+      expect(rows[1].endTime).toBe('2026-01-01T01:00:00Z');
+      expect(rows[0].endTime).toBeUndefined();
+      expect(keys(sortCommandRows(rows, { desc: true, key: SortKey.EndTime }))).toEqual([
+        'command:late',
+        'command:early',
+        'command:running',
+      ]);
+      expect(keys(sortCommandRows(rows, { desc: false, key: SortKey.EndTime }))).toEqual([
+        'command:early',
+        'command:late',
+        'command:running',
+      ]);
+    });
+
     it('merges newest first, breaks ties by kind and keeps each source order', () => {
       const same = '2026-01-02T00:00:00.000Z';
       // The master sorts experiments by ID, newest first, on the same start time.

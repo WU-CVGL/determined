@@ -54,4 +54,6 @@ message Notebook {
   // The slot count the notebook requests (resources.slots), 0 when it
   // requests none.
   int32 slots = 100;
+  // The time the notebook ended; unset while it runs.
+  google.protobuf.Timestamp end_time = 101;
 }

@@ -155,16 +155,17 @@ const genericTasks: Source = source(rows, (row, i) => {
   return genericTaskRow(mapV1GenericTasksResponse({ pagination: {}, tasks: [wire] }).tasks[0]);
 });
 
-/* Commands have no end time and never pause, so they take the other keys. */
+/* Commands never pause, so they take the other keys. */
 const commands: Source = source(sharedRows, (row, i) => {
   const wire = {
     description: row.name,
+    endTime: row.end === null ? null : protoTime(row.end),
     id: taskId(i),
     jobId: `job-${i}`,
     resourcePool: row.pool ?? '',
     slots: row.slots,
     startTime: protoTime(row.start),
-    state: Sdk.Taskv1State.RUNNING,
+    state: row.end === null ? Sdk.Taskv1State.RUNNING : Sdk.Taskv1State.TERMINATED,
     workspaceId: 1,
     ...owner(row, i, false),
   } as unknown as Sdk.V1Command;
@@ -208,9 +209,7 @@ describe('the Jobs page order', () => {
   });
 
   describe.each(
-    Object.entries(fixtureKeys).filter(
-      ([fixtureKey]) => !['end', 'stateGroup'].includes(fixtureKey),
-    ),
+    Object.entries(fixtureKeys).filter(([fixtureKey]) => !['stateGroup'].includes(fixtureKey)),
   )('notebooks, shells, commands and TensorBoards by %s', (fixtureKey, key) => {
     it.each([
       ['ascend', false],

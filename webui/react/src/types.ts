@@ -1006,6 +1006,7 @@ export interface CommandResponse {
 
 export interface CommandTask extends Task {
   displayName?: string;
+  endTime?: string;
   misc?: CommandMisc;
   resourcePool: string;
   /** The slots the task asks for: 0 for a CPU-only task; unset if the master does not say. */
