@@ -1871,8 +1871,8 @@ access </maintenance/resource-pool-access>`.
 
 Whether the resource pool list, ``GET /api/v1/resource-pools``, leaves out the pools that the
 requesting user may not use, and with it the WebUI, the CLI, and the SDK. When ``false``, the list
-shows every pool with ``usable``, whether the user may start new work in it. Submissions to a pool
-that the user may not use are refused either way. Defaults to ``false``.
+shows every pool with ``usable``, whether the user passes the pool's access control. Submissions to
+a pool that the user may not use are refused either way. Defaults to ``false``.
 
 *************
  ``logging``

@@ -86,17 +86,23 @@ restricted default aux pool, but cannot make it run code of their choice.
 ## Pool lists
 
 `GET /api/v1/resource-pools` lists every pool, restricted or not, that the
-user may otherwise view, and gives each pool `usable`: whether the user may
-start new work in it. For administrators, `usable` is `true` for every pool.
-Listing a pool grants nothing: submissions to a pool with `usable` false are
-refused as described in "What is checked".
+user may otherwise view, and gives each pool `usable`: whether the user passes
+the pool's access control. It covers access control only; a submission to a
+pool with `usable` true still goes through the other checks, such as workspace
+pool bindings, config policies, and resource validation. For administrators,
+`usable` is `true` for every pool. Listing a pool grants nothing: submissions
+to a pool with `usable` false are refused as described in "What is checked". A
+master before 0.42.1 leaves `usable` out, and the WebUI takes a pool without it
+as usable.
 
 The WebUI stripes such a pool and tags it **Restricted** on its card and on
 its page. The pool pickers, of the notebook and shell launch form, of the
 hyperparameter search dialog, and of a job-queue move, list it but do not let
 it be picked, and the launch form picks the first pool that the user may use.
 The hyperparameter search dialog of an experiment whose pool the user may not
-use leaves the pool empty until the user picks one. A workspace's page does not
+use leaves the pool empty until the user picks one. When the picked pool leaves
+the list or the user may no longer use it, the dialog marks the pool field and
+does not submit until the user picks another pool. A workspace's page does not
 offer to make such a pool a workspace default, but still unsets one.
 
 To leave these pools out of the list, set `hide_unusable_pools` in
