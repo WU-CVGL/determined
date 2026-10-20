@@ -10,13 +10,9 @@ import { UNCONFIRMED_NOTE } from 'components/PoolAccessResults';
 import { ThemeProvider } from 'components/ThemeProvider';
 import { resourcePoolAccessResponse } from 'fixtures/resourcePoolAccess';
 import { SettingsProvider } from 'hooks/useSettingsProvider';
-import {
-  mapResourcePoolAccess,
-  mapResourcePoolAccessChange,
-  RawResourcePoolAccess,
-} from 'services/decoder';
+import { mapResourcePoolAccess, RawResourcePoolAccess } from 'services/decoder';
 import poolAccessChange from 'stores/poolAccessChange';
-import { DetailedUser, ResourcePoolAccessChange, ResourcePoolAccessMode } from 'types';
+import { DetailedUser, ResourcePoolAccess, ResourcePoolAccessMode } from 'types';
 import { DetError } from 'utils/error';
 import { chunkUsernames, PoolAccessResult } from 'utils/resourcePoolAccess';
 
@@ -57,8 +53,8 @@ vi.setConfig({ testTimeout: 30_000 });
 
 const pools = () => resourcePoolAccessResponse.resource_pools.map(mapResourcePoolAccess);
 
-const changeOf = (poolName: string, warnings: string[] = []): ResourcePoolAccessChange =>
-  mapResourcePoolAccessChange({
+const changeOf = (poolName: string, warnings: string[] = []): ResourcePoolAccess =>
+  mapResourcePoolAccess({
     ...resourcePoolAccessResponse.resource_pools.find((pool) => pool.pool_name === poolName),
     warnings,
   });
@@ -160,6 +156,32 @@ describe('PoolAccess', () => {
     const orphan = await rowOf('old-pool');
     expect(within(orphan).getByText('no pool')).toBeInTheDocument();
     expect(within(orphan).getByTestId('pool-access-warnings-old-pool')).toHaveTextContent('1');
+  });
+
+  it("shows the master's warnings", async () => {
+    mocks.getResourcePoolAccess.mockImplementation(() =>
+      Promise.resolve([
+        mapResourcePoolAccess({
+          exists: true,
+          mode: 'public',
+          pool_name: 'gpu-h100',
+          warnings: ['warning now'],
+          warnings_if_restricted: ['warning now', 'warning once restricted'],
+        }),
+      ]),
+    );
+    setup();
+    const row = await rowOf('gpu-h100');
+    expect(within(row).getByTestId('pool-access-warnings-gpu-h100')).toHaveTextContent('1');
+    await user.click(within(row).getByRole('button', { name: /expand row/i }));
+    const detail = await screen.findByTestId('pool-access-detail-gpu-h100');
+    expect(detail).toHaveTextContent('warning now');
+    expect(detail).not.toHaveTextContent('warning once restricted');
+
+    await selectPools('gpu-h100');
+    await user.click(screen.getByRole('button', { name: 'Restrict' }));
+    const confirm = await screen.findByTestId('pool-access-restrict-confirm');
+    expect(confirm).toHaveTextContent('warning once restricted');
   });
 
   it('filters by pool, granted user, and workspace', async () => {
@@ -288,7 +310,7 @@ describe('PoolAccess', () => {
   });
 
   it('shows the results on the tab when the dialog is closed during a change', async () => {
-    const cpu = deferred<ResourcePoolAccessChange>();
+    const cpu = deferred<ResourcePoolAccess>();
     mocks.setResourcePoolAccessMode.mockImplementation(({ poolName }) =>
       poolName === 'cpu'
         ? cpu.promise
@@ -330,7 +352,7 @@ describe('PoolAccess', () => {
   });
 
   it('names the failed pools in a notification when the tab is left during a change', async () => {
-    const cpu = deferred<ResourcePoolAccessChange>();
+    const cpu = deferred<ResourcePoolAccess>();
     mocks.setResourcePoolAccessMode.mockImplementation(({ poolName }) =>
       poolName === 'cpu'
         ? cpu.promise
@@ -360,7 +382,7 @@ describe('PoolAccess', () => {
   });
 
   it('runs one change at a time: a grant still being sent blocks a newer revoke', async () => {
-    const a100 = deferred<ResourcePoolAccessChange>();
+    const a100 = deferred<ResourcePoolAccess>();
     mocks.grantResourcePoolAccess.mockImplementation(({ poolName }) =>
       poolName === 'gpu-a100' ? a100.promise : Promise.resolve(changeOf(poolName)),
     );
@@ -399,7 +421,7 @@ describe('PoolAccess', () => {
   });
 
   it('keeps the actions waiting when the tab is left and opened again during a change', async () => {
-    const cpu = deferred<ResourcePoolAccessChange>();
+    const cpu = deferred<ResourcePoolAccess>();
     mocks.setResourcePoolAccessMode.mockImplementation(() => cpu.promise);
     const first = setup();
     await selectPools('cpu');
@@ -429,7 +451,7 @@ describe('PoolAccess', () => {
   });
 
   it('does not start a second change from a confirmation being applied', async () => {
-    const cpu = deferred<ResourcePoolAccessChange>();
+    const cpu = deferred<ResourcePoolAccess>();
     mocks.setResourcePoolAccessMode.mockImplementation(({ poolName }) =>
       poolName === 'cpu' ? cpu.promise : Promise.resolve(changeOf(poolName)),
     );
@@ -481,7 +503,7 @@ describe('PoolAccess', () => {
     change.reject(new Error('bug'));
     await expect(running).rejects.toThrow('bug');
     await waitFor(() => expect(mocks.getResourcePoolAccess).toHaveBeenCalledTimes(2));
-    expect(screen.queryByText(PENDING_DISMISSED_NOTE)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(PENDING_DISMISSED_NOTE)).not.toBeInTheDocument());
     await selectPools('cpu');
     for (const name of ACTIONS) expect(screen.getByRole('button', { name })).toBeEnabled();
   });

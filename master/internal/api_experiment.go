@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	structpb "github.com/golang/protobuf/ptypes/struct"
@@ -937,7 +938,7 @@ func (a *apiServer) ActivateExperiment(
 	if !ok {
 		return nil, api.NotFoundErrs("experiment", strconv.Itoa(int(req.Id)), true)
 	}
-	if err := admitExperimentPool(ctx, e); err != nil {
+	if err := admitExperimentPools()(ctx, e); err != nil {
 		return nil, err
 	}
 	if err := e.ActivateExperiment(); err != nil {
@@ -946,21 +947,36 @@ func (a *apiServer) ActivateExperiment(
 	return &apiv1.ActivateExperimentResponse{}, nil
 }
 
-// admitExperimentPool checks that the request user may use the pool that the experiment
-// allocates in when it is activated: its current pool, which a job-queue move may have changed.
-func admitExperimentPool(ctx context.Context, e experiment.Experiment) error {
-	curUser, _, err := grpcutil.GetUser(ctx)
-	if err != nil {
-		return err
+// admitExperimentPools returns the admission check of one request that activates experiments: the
+// request user must be able to use the pool that each experiment allocates in when it is
+// activated, its current pool, which a job-queue move may have changed. It decides each pool once
+// within the request (poolaccess.Memo).
+func admitExperimentPools() func(context.Context, experiment.Experiment) error {
+	var (
+		once    sync.Once
+		pools   *poolaccess.Memo
+		userErr error
+	)
+	return func(ctx context.Context, e experiment.Experiment) error {
+		once.Do(func() {
+			var curUser *model.User
+			curUser, _, userErr = grpcutil.GetUser(ctx)
+			if userErr == nil {
+				pools = poolaccess.NewMemo(*curUser)
+			}
+		})
+		if userErr != nil {
+			return userErr
+		}
+		return pools.CanUseResourcePool(ctx, e.ResourcePool())
 	}
-	return poolaccess.CanUseResourcePool(ctx, *curUser, e.ResourcePool())
 }
 
 func (a *apiServer) ActivateExperiments(
 	ctx context.Context, req *apiv1.ActivateExperimentsRequest,
 ) (*apiv1.ActivateExperimentsResponse, error) {
 	results, err := experiment.ActivateExperiments(ctx, req.ProjectId, req.ExperimentIds, req.Filters,
-		admitExperimentPool)
+		admitExperimentPools())
 	return &apiv1.ActivateExperimentsResponse{Results: experiment.ToAPIResults(results)}, err
 }
 

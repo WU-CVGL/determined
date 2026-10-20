@@ -10,13 +10,13 @@
 // with no grants at all is for admins only), access tables that cannot be read (Unavailable, never
 // treated as "no record"), and an empty pool name (Internal). The check never picks another pool.
 //
-// Invariant: CanUseResourcePool is called only from the admission check sites (command, shell,
-// notebook and TensorBoard launch; generic task create and unpause; experiment create, continue
-// and activate; job-queue pool moves) and when a workspace default pool or the pool of an
-// experiment config policy is set. UsablePools is called only by the resource pool list
-// (GetResourcePools). Nothing at or below task.DefaultService.StartAllocation or rm.Allocate
-// calls either. Continuations (experiment, trial, command and generic task restore; trial
-// allocations and restarts; generic task resume recovery and retried resume plans) are not
+// Invariant: CanUseResourcePool, directly or through a Memo, is called only from the admission
+// check sites (command, shell, notebook and TensorBoard launch; generic task create and unpause;
+// experiment create, continue and activate; job-queue pool moves) and when a workspace default pool
+// or the pool of an experiment config policy is set. UsablePools is called only by the resource
+// pool list (GetResourcePools). Nothing at or below task.DefaultService.StartAllocation or
+// rm.Allocate calls either. Continuations (experiment, trial, command and generic task restore;
+// trial allocations and restarts; generic task resume recovery and retried resume plans) are not
 // checked, because they continue work that a pool has accepted. Checkpoint GC is not checked
 // either: it always runs in the cluster's default aux pool, also when a user's request starts it,
 // as the experiment's owner in a fixed environment that takes only the experiment's checkpoint
@@ -27,6 +27,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -49,11 +50,13 @@ type RestrictionReader func(
 // Checker decides access from the restrictions that its reader returns.
 type Checker struct {
 	read RestrictionReader
+	// isAdmin is the admin predicate.
+	isAdmin func(ctx context.Context, user model.User) (bool, error)
 }
 
 // NewChecker returns a Checker that reads restrictions with read.
 func NewChecker(read RestrictionReader) *Checker {
-	return &Checker{read: read}
+	return &Checker{read: read, isAdmin: isAdmin}
 }
 
 // defaultChecker reads the access tables. CanUseResourcePool and UsablePools use it, so that the
@@ -70,10 +73,23 @@ func UsablePools(ctx context.Context, user model.User, pools []string) (map[stri
 	return defaultChecker.UsablePools(ctx, user, pools)
 }
 
+// NewMemo returns a Memo of user that reads the access tables; see Checker.NewMemo.
+func NewMemo(user model.User) *Memo {
+	return defaultChecker.NewMemo(user)
+}
+
 // CanUseResourcePool returns nil when user may start new work in pool, PermissionDenied when
 // not, and Unavailable or Internal when access could not be decided. pool must be the final,
 // resolved name.
 func (c *Checker) CanUseResourcePool(ctx context.Context, user model.User, pool string) error {
+	return c.decide(ctx, user, pool, c.isAdmin)
+}
+
+// decide applies the rule to one pool, checking the admin predicate with isAdmin.
+func (c *Checker) decide(
+	ctx context.Context, user model.User, pool string,
+	isAdmin func(context.Context, model.User) (bool, error),
+) error {
 	if pool == "" {
 		return status.Error(codes.Internal,
 			"resource pool access checked before the pool was resolved")
@@ -100,12 +116,55 @@ func (c *Checker) CanUseResourcePool(ctx context.Context, user model.User, pool 
 			"default pool for this workspace or the cluster)", user.Username, pool, pool)
 }
 
+// Memo decides the access of one user within one request that admits work into many pools, such
+// as a bulk activation: it checks the admin predicate at most once and reads each pool's access at
+// most once, and answers a pool again with its first decision, an error included. It is safe for
+// concurrent use. A Memo must not outlive its request: a pool that it has decided keeps that
+// decision, and a change of access applies to the pools that later requests decide.
+type Memo struct {
+	checker *Checker
+	user    model.User
+
+	mu           sync.Mutex
+	adminChecked bool
+	admin        bool
+	adminErr     error
+	decided      map[string]error
+}
+
+// NewMemo returns a Memo of user that decides with c.
+func (c *Checker) NewMemo(user model.User) *Memo {
+	return &Memo{checker: c, user: user, decided: map[string]error{}}
+}
+
+// CanUseResourcePool decides like Checker.CanUseResourcePool, once per pool.
+func (m *Memo) CanUseResourcePool(ctx context.Context, pool string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err, ok := m.decided[pool]; ok {
+		return err
+	}
+	err := m.checker.decide(ctx, m.user, pool, m.isAdmin)
+	m.decided[pool] = err
+	return err
+}
+
+// isAdmin checks the admin predicate on its first call and answers later calls the same. m.mu
+// must be held.
+func (m *Memo) isAdmin(ctx context.Context, user model.User) (bool, error) {
+	if !m.adminChecked {
+		m.admin, m.adminErr = m.checker.isAdmin(ctx, user)
+		m.adminChecked = true
+	}
+	return m.admin, m.adminErr
+}
+
 // UsablePools returns, for each name, whether user may use it (admins: all true, no read).
 // One read, no cache; an error is returned, never a partial answer.
 func (c *Checker) UsablePools(
 	ctx context.Context, user model.User, pools []string,
 ) (map[string]bool, error) {
-	admin, err := isAdmin(ctx, user)
+	admin, err := c.isAdmin(ctx, user)
 	if err != nil {
 		return nil, err
 	}

@@ -120,12 +120,15 @@ queue, jobs, and agents, show every pool.
 
 ## Revocation
 
-Restricting a pool or revoking a grant applies from the next request; a request
-whose access was checked before the change was saved is not stopped. Nothing
-that runs is killed, paused, or moved, and workspace defaults that name the pool
-stay. A user without access can no longer submit, activate, unpause, continue,
-fork, or clone work into the pool, move a job into it, or make it a new
-workspace default or the pool of a config policy; work that one of their
+Restricting a pool or revoking a grant applies to the access checks made after
+the change is saved; a request whose access was checked before is not stopped. A
+request that admits work into several pools, such as a bulk activation, a run
+resume, or the unpause of a generic task tree, keeps the result of a pool that
+it has already checked for the rest of the request (see "Error messages").
+Nothing that runs is killed, paused, or moved, and workspace defaults that name
+the pool stay. A user without access can no longer submit, activate, unpause,
+continue, fork, or clone work into the pool, move a job into it, or make it a
+new workspace default or the pool of a config policy; work that one of their
 running tasks submits is refused too.
 The user's pool list shows the pool with `usable` false, or leaves it out with
 `hide_unusable_pools`, while their own experiment and task pages keep working.
@@ -149,18 +152,18 @@ generic tasks.
 Administrators may restrict a default pool. Every submission that omits its
 pool and would run there is then refused for users without a grant, while
 checkpoint garbage collection still runs in the cluster's default aux pool (see
-"What is not checked"). The response to the restriction warns about each
-default the pool is, and `det resource-pool access list` shows them in its
-`Defaults` column, including when a `master.yaml` edit makes a restricted pool
-a default.
+"What is not checked"). The admin API's item of a restricted pool warns about
+each default the pool is, also when a `master.yaml` edit makes a restricted
+pool a default, and `det resource-pool access list` shows the defaults in its
+`Defaults` column.
 
 An experiment config policy whose invariant config sets
 `resources.resource_pool` decides the pool more strongly than a default: every
 experiment in its workspace, or in the cluster for a global policy, runs in
 that pool, also one that names another pool. When that pool is restricted, every
-experiment there is refused for users without a grant. The response to a
-restriction does not warn about such policies, and neither `det resource-pool
-access list` nor the WebUI's **Pool Access** tab shows them;
+experiment there is refused for users without a grant. The admin API's warnings
+do not name such policies, and neither `det resource-pool access list` nor the
+WebUI's **Pool Access** tab shows them;
 `det config-policies describe experiment` with `--workspace-name`, or without
 it for the cluster, does.
 
@@ -306,8 +309,14 @@ messages. The REST API returns the HTTP status in parentheses.
   `only admins may set other user's workspaces default resource pools`.
 
 Activating experiments in bulk and resuming runs report a refusal in the result
-of each refused experiment and activate the others. The admin API's errors are
-listed with its endpoints below.
+of each refused experiment and activate the others. Such a request decides a
+pool's access when it first checks that pool and reuses that result, also a
+failure to read the access records, for the pool's other experiments for the
+rest of the request: when the records of a pool cannot be read, every
+experiment in that pool is refused with `Unavailable`, and the other pools are
+decided as usual. The pools are not read as one snapshot, so a change saved
+during the request applies to the pools that the request checks after it. The
+admin API's errors are listed with its endpoints below.
 
 ## REST API
 
@@ -341,7 +350,13 @@ state, and every name that has a restriction or a grant:
     {"id": 7, "username": "alice", "active": true, "admin": false}
   ],
   "restricted_at": "<timestamp>",
-  "restricted_by": "admin"
+  "restricted_by": "admin",
+  "warnings": [
+    "\"gpu-a100\" is the default compute pool of workspace \"vision\": submissions there that omit resources.resource_pool are refused for users without a grant on \"gpu-a100\""
+  ],
+  "warnings_if_restricted": [
+    "\"gpu-a100\" is the default compute pool of workspace \"vision\": submissions there that omit resources.resource_pool are refused for users without a grant on \"gpu-a100\""
+  ]
 }
 ```
 
@@ -355,6 +370,16 @@ state, and every name that has a restriction or a grant:
 - `users` are the users granted access, also while the pool is public.
 - `restricted_at` and `restricted_by`, a username, are `null` for a public
   pool. `restricted_by` is also `null` once that user is deleted.
+- `warnings` names what the pool's access refuses that an administrator may
+  not expect, and `warnings_if_restricted` what it refuses once the pool is
+  restricted; for a restricted pool, both are the same. They are:
+  - `no resource pool named "<pool>" exists; the setting applies to a pool
+    created with this name`, when `exists` is false;
+  - in restricted mode, one for each default the pool is, for example
+    `"<pool>" is the cluster's default compute pool: submissions that omit
+    resources.resource_pool are refused for users without a grant on "<pool>"`,
+    and likewise for the cluster's default aux pool and for each workspace that
+    uses it as a default.
 
 ### Restrict or make public
 
@@ -385,15 +410,8 @@ are idempotent.
 
 ### Responses to changes
 
-Every change returns `200` with the item and `warnings`, a list of messages:
-
-- `no resource pool named "<pool>" exists; the setting applies to a pool
-  created with this name`, when `exists` is false;
-- while the pool is restricted, one for each default it is, for example
-  `"<pool>" is the cluster's default compute pool: submissions that omit
-  resources.resource_pool are refused for users without a grant on "<pool>"`,
-  and likewise for the cluster's default aux pool and for each workspace that
-  uses it as a default.
+Every change returns `200` with the pool's item, read after the change, as the
+list shows it, with its warnings.
 
 The master logs each change at `INFO` level with the administrator who made it.
 An invalid `mode`, an empty `usernames` list, an unknown field, or more than one
@@ -432,21 +450,22 @@ other users open the address directly.
 The tab lists the same names as `det rp access list`: each pool's mode, its
 number of granted users, marking the inactive ones, the workspaces that use it
 as a default, and a name with records but no pool as "no pool". The warnings
-column shows the warnings that the master gives when the pool is changed. A row
-expands to the pool's granted users, which can be revoked together, its
-workspace defaults, and its warnings.
+column shows the master's `warnings` of each pool. A row expands to the pool's
+granted users, which can be revoked together, its workspace defaults, and its
+warnings.
 
 **Grant…**, **Revoke…**, **Restrict**, and **Make public** change the selected
-pools, one pool after another, and show what the master answered for each
-pool, with its warnings. Restrict and Make public first say what the change
-means for each selected pool. Closing the dialog does not stop a change that is
-being sent: a note and then its results show on the tab, and when the tab is
-not open at its end, a notification names the pools that failed. One change
-runs at a time in each browser tab of the WebUI: until it ends, these actions
-and the revoke of an expanded row are unavailable, also after leaving the tab
-and coming back. Changes from other browser tabs, other administrators, or the
-CLI are not coordinated with it, and the last write wins. Signing out ends a
-change: its remaining requests are not sent, and the ones sent are not undone.
+pools, one pool after another, and show what the master answered for each pool,
+with its warnings. Restrict and Make public first say what the change means for
+each selected pool; Restrict lists the master's `warnings_if_restricted` of the
+selected pools. Closing the dialog does not stop a change that is being sent: a
+note and then its results show on the tab, and when the tab is not open at its
+end, a notification names the pools that failed. One change runs at a time in
+each browser tab of the WebUI: until it ends, these actions and the revoke of an
+expanded row are unavailable, also after leaving the tab and coming back.
+Changes from other browser tabs, other administrators, or the CLI are not
+coordinated with it, and the last write wins. Signing out ends a change: its
+remaining requests are not sent, and the ones sent are not undone.
 
 A request without an answer within 60 seconds fails. A failed request may still
 have been applied: the master answers a change with the pool's access, read

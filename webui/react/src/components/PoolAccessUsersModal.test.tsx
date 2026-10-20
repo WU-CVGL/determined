@@ -13,7 +13,7 @@ import {
 } from 'components/PoolAccessResults';
 import { ThemeProvider } from 'components/ThemeProvider';
 import { resourcePoolAccessResponse } from 'fixtures/resourcePoolAccess';
-import { mapResourcePoolAccess, mapResourcePoolAccessChange } from 'services/decoder';
+import { mapResourcePoolAccess } from 'services/decoder';
 import userStore from 'stores/users';
 import { DetailedUser, ResourcePoolAccess } from 'types';
 import { DetError } from 'utils/error';
@@ -78,7 +78,7 @@ const poolsNamed = (...names: string[]): ResourcePoolAccess[] =>
   allPools.filter((pool) => names.includes(pool.poolName));
 
 const accepted = ({ poolName }: { poolName: string }) =>
-  Promise.resolve(mapResourcePoolAccessChange({ exists: true, pool_name: poolName }));
+  Promise.resolve(mapResourcePoolAccess({ exists: true, pool_name: poolName }));
 
 interface ContainerProps {
   action: PoolAccessUsersAction;
@@ -296,7 +296,7 @@ describe('PoolAccessUsersModal', () => {
   });
 
   it('locks the picker while a change is applied', async () => {
-    const grant = deferred<ReturnType<typeof mapResourcePoolAccessChange>>();
+    const grant = deferred<ReturnType<typeof mapResourcePoolAccess>>();
     mocks.grantResourcePoolAccess.mockImplementation(() => grant.promise);
     await setup(poolsNamed('gpu-a100'));
 
@@ -309,7 +309,7 @@ describe('PoolAccessUsersModal', () => {
     expect(screen.getByLabelText('Groups')).toBeDisabled();
     expect(screen.getByLabelText('Paste usernames')).toBeDisabled();
 
-    grant.resolve(mapResourcePoolAccessChange({ exists: true, pool_name: 'gpu-a100' }));
+    grant.resolve(mapResourcePoolAccess({ exists: true, pool_name: 'gpu-a100' }));
     expect(await screen.findByTestId('pool-access-results')).toHaveTextContent('Done for 1 pool.');
   });
 

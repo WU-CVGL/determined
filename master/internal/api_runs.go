@@ -990,7 +990,7 @@ func pauseResumeAction(ctx context.Context, isPause bool, projectID int32,
 		errMsg = "Failed to pause associated experiment: %s"
 	} else {
 		expResults, err = experiment.ActivateExperiments(ctx, projectID, expIDs.ToSlice(), nil,
-			admitExperimentPool)
+			admitExperimentPools())
 		errMsg = "Failed to resume associated experiment: %s"
 	}
 	if err != nil {

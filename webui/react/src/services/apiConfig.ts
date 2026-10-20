@@ -163,10 +163,10 @@ export const getResourcePoolAccess: DetApi<
 export const setResourcePoolAccessMode: DetApi<
   Service.SetResourcePoolAccessModeParams,
   decoder.RawResourcePoolAccess,
-  Type.ResourcePoolAccessChange
+  Type.ResourcePoolAccess
 > = {
   name: 'setResourcePoolAccessMode',
-  postProcess: decoder.mapResourcePoolAccessChange,
+  postProcess: decoder.mapResourcePoolAccess,
   request: (params, options) =>
     resourcePoolAccessFetch(
       resourcePoolAccessPoolPath(params.poolName),
@@ -179,10 +179,10 @@ export const setResourcePoolAccessMode: DetApi<
 export const grantResourcePoolAccess: DetApi<
   Service.ChangeResourcePoolAccessUsersParams,
   decoder.RawResourcePoolAccess,
-  Type.ResourcePoolAccessChange
+  Type.ResourcePoolAccess
 > = {
   name: 'grantResourcePoolAccess',
-  postProcess: decoder.mapResourcePoolAccessChange,
+  postProcess: decoder.mapResourcePoolAccess,
   request: (params, options) =>
     resourcePoolAccessFetch(
       resourcePoolAccessPoolPath(params.poolName, '/grant'),
@@ -195,10 +195,10 @@ export const grantResourcePoolAccess: DetApi<
 export const revokeResourcePoolAccess: DetApi<
   Service.ChangeResourcePoolAccessUsersParams,
   decoder.RawResourcePoolAccess,
-  Type.ResourcePoolAccessChange
+  Type.ResourcePoolAccess
 > = {
   name: 'revokeResourcePoolAccess',
-  postProcess: decoder.mapResourcePoolAccessChange,
+  postProcess: decoder.mapResourcePoolAccess,
   request: (params, options) =>
     resourcePoolAccessFetch(
       resourcePoolAccessPoolPath(params.poolName, '/revoke'),

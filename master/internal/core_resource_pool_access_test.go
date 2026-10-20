@@ -110,3 +110,55 @@ func TestResourceManagerDefaultPools(t *testing.T) {
 		})
 	}
 }
+
+func TestResourcePoolAccessWarnings(t *testing.T) {
+	refused := `that omit resources.resource_pool are refused for users without a grant on "gpu"`
+	defaults := resourcePoolAccessItem{
+		PoolName: "gpu", Exists: true, DefaultCompute: true, DefaultAux: true,
+		WorkspaceDefaults: []resourcePoolAccessWorkspaceDefault{
+			{WorkspaceID: 4, Workspace: "vision", Kind: resourcePoolDefaultCompute},
+			{WorkspaceID: 4, Workspace: "vision", Kind: resourcePoolDefaultAux},
+		},
+	}
+	defaultWarnings := []string{
+		`"gpu" is the cluster's default compute pool: submissions ` + refused,
+		`"gpu" is the cluster's default aux pool: submissions ` + refused,
+		`"gpu" is the default compute pool of workspace "vision": submissions there ` + refused,
+		`"gpu" is the default aux pool of workspace "vision": submissions there ` + refused,
+	}
+	missing := `no resource pool named "gpu" exists; the setting applies to a pool created with ` +
+		`this name`
+	orphan := defaults
+	orphan.Exists = false
+
+	for _, test := range []struct {
+		name     string
+		item     resourcePoolAccessItem
+		mode     string
+		warnings []string
+	}{
+		{"a public pool", defaults, resourcePoolModePublic, []string{}},
+		{"a restricted pool, each default it is", defaults, resourcePoolModeRestricted, defaultWarnings},
+		{"no pool, public", orphan, resourcePoolModePublic, []string{missing}},
+		{
+			"no pool, restricted", orphan, resourcePoolModeRestricted,
+			append([]string{missing}, defaultWarnings...),
+		},
+		{
+			"a restricted pool that is no default",
+			resourcePoolAccessItem{PoolName: "gpu", Exists: true},
+			resourcePoolModeRestricted,
+			[]string{},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// The warnings follow the mode asked for, not the item's own.
+			for _, itemMode := range []string{resourcePoolModePublic, resourcePoolModeRestricted} {
+				item := test.item
+				item.Mode = itemMode
+				require.Equal(t, test.warnings, resourcePoolAccessWarnings(item, test.mode),
+					"item mode %s", itemMode)
+			}
+		})
+	}
+}

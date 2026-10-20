@@ -46,19 +46,19 @@ export const getResourcePoolAccess = generateDetApi<
 export const setResourcePoolAccessMode = generateDetApi<
   Service.SetResourcePoolAccessModeParams,
   RawResourcePoolAccess,
-  Type.ResourcePoolAccessChange
+  Type.ResourcePoolAccess
 >(Config.setResourcePoolAccessMode);
 
 export const grantResourcePoolAccess = generateDetApi<
   Service.ChangeResourcePoolAccessUsersParams,
   RawResourcePoolAccess,
-  Type.ResourcePoolAccessChange
+  Type.ResourcePoolAccess
 >(Config.grantResourcePoolAccess);
 
 export const revokeResourcePoolAccess = generateDetApi<
   Service.ChangeResourcePoolAccessUsersParams,
   RawResourcePoolAccess,
-  Type.ResourcePoolAccessChange
+  Type.ResourcePoolAccess
 >(Config.revokeResourcePoolAccess);
 
 export const getCurrentUser = generateDetApi<
