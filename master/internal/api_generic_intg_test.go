@@ -1089,6 +1089,42 @@ func TestUnpauseGenericTaskChecksPool(t *testing.T) {
 	require.Equal(t, []model.AllocationID{model.AllocationID(granted.String() + ".1")}, starts)
 }
 
+func TestUnpauseGenericTaskReadsEachPoolOnce(t *testing.T) {
+	api, admin, ctx := setupAPITest(t, nil)
+	service := &lifecycleAllocationService{running: map[model.AllocationID]bool{}}
+	oldService := task.DefaultService
+	task.DefaultService = service
+	t.Cleanup(func() { task.DefaultService = oldService })
+
+	owner := db.RequireMockUser(t, api.m.db)
+	ownerCtx := ntscUserCtx(t, owner)
+	granted := accessTestPool(t, "treegranted", admin, true, owner)
+	public := accessTestPool(t, "treepublic", admin, false)
+	root := pausedGenericTaskInPool(ctx, t, owner, nil, granted)
+	child := pausedGenericTaskInPool(ctx, t, owner, &root, granted)
+	sibling := pausedGenericTaskInPool(ctx, t, owner, &root, public)
+	grandchild := pausedGenericTaskInPool(ctx, t, owner, &child, granted)
+
+	var asked [][]string
+	var readRestrictions poolaccess.RestrictionReader
+	readRestrictions = poolaccess.SetReaderForTest(t, func(
+		ctx context.Context, userID model.UserID, pools []string,
+	) (map[string]bool, error) {
+		asked = append(asked, pools)
+		return readRestrictions(ctx, userID, pools)
+	})
+
+	_, err := api.UnpauseGenericTask(ownerCtx,
+		&apiv1.UnpauseGenericTaskRequest{TaskId: root.String()})
+	require.NoError(t, err)
+	require.ElementsMatch(t, [][]string{{granted}, {public}}, asked, "one read per pool")
+	var started []model.AllocationID
+	for _, id := range []model.TaskID{root, child, sibling, grandchild} {
+		started = append(started, model.AllocationID(id.String()+".1"))
+	}
+	require.ElementsMatch(t, started, service.starts)
+}
+
 // addGenericTaskInProjectForTest persists an active generic task in a project, with a name and a
 // slot count. A nil slot count leaves resources.slots out of the stored spec.
 func addGenericTaskInProjectForTest(

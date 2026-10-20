@@ -87,14 +87,14 @@ func (r poolAccessRoutes) sendAs(
 	return recorder.Code, recorder.Body.Bytes()
 }
 
-// write sends a write as user and returns the pool's access and the warnings.
+// write sends a write as user and returns the pool's access.
 func (r poolAccessRoutes) write(
 	user model.User, method, path, body string,
-) resourcePoolAccessWriteResponse {
+) resourcePoolAccessItem {
 	r.t.Helper()
 	code, response := r.sendAs(&user, method, path, echo.MIMEApplicationJSON, body)
 	require.Equal(r.t, http.StatusOK, code, string(response))
-	var written resourcePoolAccessWriteResponse
+	var written resourcePoolAccessItem
 	require.NoError(r.t, json.Unmarshal(response, &written), string(response))
 	return written
 }
@@ -246,8 +246,10 @@ func TestResourcePoolAccessRoutes(t *testing.T) {
 		items := routes.list(admin)
 		require.Equal(t, resourcePoolAccessItem{
 			PoolName: known, Mode: resourcePoolModePublic, Exists: true,
-			WorkspaceDefaults: []resourcePoolAccessWorkspaceDefault{},
-			Users:             []resourcePoolAccessUser{},
+			WorkspaceDefaults:    []resourcePoolAccessWorkspaceDefault{},
+			Users:                []resourcePoolAccessUser{},
+			Warnings:             []string{},
+			WarningsIfRestricted: []string{},
 		}, items[known])
 		require.True(t, items[compute].DefaultCompute)
 		require.False(t, items[compute].DefaultAux)
@@ -453,13 +455,88 @@ func TestResourcePoolAccessRoutes(t *testing.T) {
 	})
 
 	t.Run("a write answers with the pool's list item", func(t *testing.T) {
-		// A write reads only its pool; the list reads every pool. Both show the same item: a
-		// default pool, a workspace default, a dynamic pool, a name with a dormant grant only.
+		// A write reads only its pool; the list reads every pool. Both show the same item, with
+		// the same warnings: a default pool, a workspace default, a dynamic pool, a name with a
+		// dormant grant only.
 		for _, pool := range []string{compute, aux, known, shared, dynamic, missing, slashed} {
 			written := routes.write(admin, http.MethodPost, poolAccessPath(pool, "grant"),
 				fmt.Sprintf(`{"usernames":[%q]}`, bob.Username))
 			require.Contains(t, usernamesOf(written.Users), bob.Username, pool)
-			require.Equal(t, routes.list(admin)[pool], written.resourcePoolAccessItem, pool)
+			require.Equal(t, routes.list(admin)[pool], written, pool)
+		}
+	})
+
+	t.Run("the list carries each pool's warnings", func(t *testing.T) {
+		ownSuffix := uuid.NewString()
+		publicDefault := "acl-warn-compute-" + ownSuffix
+		restrictedDefault := "acl-warn-aux-" + ownSuffix
+		orphan := "acl-warn-missing-" + ownSuffix
+		t.Cleanup(func() {
+			for _, pool := range []string{publicDefault, restrictedDefault, orphan} {
+				_, err := db.Bun().NewRaw(
+					`DELETE FROM resource_pool_restrictions WHERE pool_name = ?`, pool).Exec(ctx)
+				require.NoError(t, err)
+			}
+		})
+		defaults := newPoolAccessRoutes(t, pgDB, &config.ResourceManagerWithPoolsConfig{
+			ResourceManager: &config.ResourceManagerConfig{AgentRM: &config.AgentResourceManagerConfig{
+				ClusterName:                "agent-cluster",
+				DefaultComputeResourcePool: publicDefault,
+				DefaultAuxResourcePool:     restrictedDefault,
+			}},
+			ResourcePools: []config.ResourcePoolConfig{
+				{PoolName: publicDefault}, {PoolName: restrictedDefault},
+			},
+		}, admin)
+		written := map[string]resourcePoolAccessItem{
+			publicDefault: defaults.write(admin, http.MethodPut, poolAccessPath(publicDefault),
+				`{"mode":"public"}`),
+			restrictedDefault: defaults.write(admin, http.MethodPut,
+				poolAccessPath(restrictedDefault), `{"mode":"restricted"}`),
+			orphan: defaults.write(admin, http.MethodPut, poolAccessPath(orphan),
+				`{"mode":"restricted"}`),
+		}
+
+		code, response := defaults.sendAs(&admin, http.MethodGet, resourcePoolAccessPath, "", "")
+		require.Equal(t, http.StatusOK, code, string(response))
+		var listed struct {
+			ResourcePools []map[string]any `json:"resource_pools"`
+		}
+		require.NoError(t, json.Unmarshal(response, &listed), string(response))
+		warnings := map[string][]any{}
+		ifRestricted := map[string][]any{}
+		for _, item := range listed.ResourcePools {
+			name, _ := item["pool_name"].(string)
+			require.IsType(t, []any{}, item["warnings"], name)
+			require.IsType(t, []any{}, item["warnings_if_restricted"], name)
+			warnings[name], _ = item["warnings"].([]any)
+			ifRestricted[name], _ = item["warnings_if_restricted"].([]any)
+		}
+		refused := func(pool string) string {
+			return fmt.Sprintf("that omit resources.resource_pool are refused for users "+
+				"without a grant on %q", pool)
+		}
+		computeWarning := fmt.Sprintf("%q is the cluster's default compute pool: submissions %s",
+			publicDefault, refused(publicDefault))
+		auxWarning := fmt.Sprintf("%q is the cluster's default aux pool: submissions %s",
+			restrictedDefault, refused(restrictedDefault))
+		missingWarning := fmt.Sprintf("no resource pool named %q exists; the setting applies to "+
+			"a pool created with this name", orphan)
+
+		// A public default pool warns only once restricted.
+		require.Empty(t, warnings[publicDefault])
+		require.Equal(t, []any{computeWarning}, ifRestricted[publicDefault])
+		// A restricted default pool warns now.
+		require.Equal(t, []any{auxWarning}, warnings[restrictedDefault])
+		require.Equal(t, []any{auxWarning}, ifRestricted[restrictedDefault])
+		// A name with records but no pool warns in either mode.
+		require.Equal(t, []any{missingWarning}, warnings[orphan])
+		require.Equal(t, []any{missingWarning}, ifRestricted[orphan])
+
+		// Each list item is the item that the write answered with.
+		items := defaults.list(admin)
+		for pool, item := range written {
+			require.Equal(t, items[pool], item, pool)
 		}
 	})
 }

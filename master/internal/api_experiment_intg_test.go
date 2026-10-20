@@ -3121,6 +3121,143 @@ func TestActivateOnCreateAndContinueReadsAccessOnce(t *testing.T) {
 	require.Equal(t, model.ActiveState, experimentStateForAccessTest(adminCtx, t, ended))
 }
 
+// bulkActivationBatch is a batch of paused experiments of one owner, two in each of three pools:
+// allowed, restricted with a grant for the owner; refused, restricted after the experiments were
+// created; and failing, whose access cannot be read. asked holds the pools of each access read.
+type bulkActivationBatch struct {
+	allowed, refused, failing string
+	pools                     map[int32]string
+	asked                     *[][]string
+}
+
+func newBulkActivationBatch(
+	ownerCtx context.Context, t *testing.T, api *apiServer, admin, owner model.User,
+) bulkActivationBatch {
+	t.Helper()
+	batch := bulkActivationBatch{
+		allowed: accessTestPool(t, "bulkallowed", admin, true, owner),
+		refused: accessTestPool(t, "bulkrefused", admin, false),
+		failing: accessTestPool(t, "bulkfailing", admin, false),
+		pools:   map[int32]string{},
+		asked:   &[][]string{},
+	}
+	for _, pool := range []string{batch.allowed, batch.refused, batch.failing} {
+		for i := 0; i < 2; i++ {
+			resp, err := createExperimentForAccessTest(ownerCtx, t, api,
+				&apiv1.CreateExperimentRequest{Config: accessTestExperimentConfig(pool)})
+			require.NoError(t, err)
+			batch.pools[resp.Experiment.Id] = pool
+		}
+	}
+	_, err := poolaccess.Restrict(context.Background(), batch.refused, admin.ID)
+	require.NoError(t, err)
+
+	var readRestrictions poolaccess.RestrictionReader
+	readRestrictions = poolaccess.SetReaderForTest(t, func(
+		ctx context.Context, userID model.UserID, pools []string,
+	) (map[string]bool, error) {
+		*batch.asked = append(*batch.asked, pools)
+		if len(pools) == 1 && pools[0] == batch.failing {
+			return nil, fmt.Errorf("connection refused")
+		}
+		return readRestrictions(ctx, userID, pools)
+	})
+	return batch
+}
+
+func (b bulkActivationBatch) ids() []int32 {
+	ids := make([]int32, 0, len(b.pools))
+	for id := range b.pools {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// requireResult checks the result error of experiment id: none in the allowed pool, and the
+// error of its own pool in the others.
+func (b bulkActivationBatch) requireResult(t *testing.T, id int32, err string) {
+	t.Helper()
+	switch b.pools[id] {
+	case b.allowed:
+		require.Empty(t, err, id)
+	case b.refused:
+		require.Contains(t, err, "code = PermissionDenied", id)
+		require.Contains(t, err, fmt.Sprintf("may not use resource pool %q", b.refused), id)
+	case b.failing:
+		require.Contains(t, err, "code = Unavailable", id)
+		require.Contains(t, err, fmt.Sprintf(
+			"could not check access to resource pool %q: connection refused", b.failing), id)
+	default:
+		require.Failf(t, "a result of another experiment", "%d: %s", id, err)
+	}
+}
+
+// requireActivated checks that the allowed pool's experiments, and only those, are active, and
+// that each pool was read once.
+func (b bulkActivationBatch) requireActivated(ctx context.Context, t *testing.T) {
+	t.Helper()
+	for id, pool := range b.pools {
+		state := model.PausedState
+		if pool == b.allowed {
+			state = model.ActiveState
+		}
+		require.Equal(t, state, experimentStateForAccessTest(ctx, t, id), id)
+	}
+	require.ElementsMatch(t, [][]string{{b.allowed}, {b.refused}, {b.failing}}, *b.asked,
+		"one read per pool")
+}
+
+func TestBulkActivateAndResumeReadEachPoolOnce(t *testing.T) {
+	mockRM := MockRM()
+	mockRM.On("SmallerValueIsHigherPriority", mock.Anything).Return(true, nil)
+	mockRM.On("Release", mock.Anything).Return()
+	api, admin, adminCtx := setupAPITest(t, nil, mockRM)
+	owner := db.RequireMockUser(t, api.m.db)
+	ownerCtx := ntscUserCtx(t, owner)
+
+	t.Run("ActivateExperiments", func(t *testing.T) {
+		batch := newBulkActivationBatch(ownerCtx, t, api, admin, owner)
+		resp, err := api.ActivateExperiments(ownerCtx,
+			&apiv1.ActivateExperimentsRequest{ProjectId: 1, ExperimentIds: batch.ids()})
+		require.NoError(t, err)
+		require.Len(t, resp.Results, len(batch.pools))
+		for _, result := range resp.Results {
+			batch.requireResult(t, result.Id, result.Error)
+		}
+		batch.requireActivated(adminCtx, t)
+	})
+
+	t.Run("ResumeRuns", func(t *testing.T) {
+		batch := newBulkActivationBatch(ownerCtx, t, api, admin, owner)
+		var runs []struct {
+			ID           int32 `bun:"id"`
+			ExperimentID int32 `bun:"experiment_id"`
+		}
+		require.NoError(t, db.Bun().NewRaw(
+			`SELECT id, experiment_id FROM runs WHERE experiment_id IN (?)`, bun.In(batch.ids()),
+		).Scan(adminCtx, &runs))
+		require.Len(t, runs, len(batch.pools))
+		experimentOf := map[int32]int32{}
+		var runIDs []int32
+		for _, run := range runs {
+			experimentOf[run.ID] = run.ExperimentID
+			runIDs = append(runIDs, run.ID)
+		}
+
+		resp, err := api.ResumeRuns(ownerCtx,
+			&apiv1.ResumeRunsRequest{ProjectId: 1, RunIds: runIDs})
+		require.NoError(t, err)
+		require.Len(t, resp.Results, len(runIDs))
+		for _, result := range resp.Results {
+			if result.Error != "" {
+				require.Contains(t, result.Error, "Failed to resume associated experiment: ")
+			}
+			batch.requireResult(t, experimentOf[result.Id], result.Error)
+		}
+		batch.requireActivated(adminCtx, t)
+	})
+}
+
 func TestGetExperimentsFiltersByWorkspaceAndSlots(t *testing.T) {
 	api, curUser, ctx := setupAPITest(t, nil)
 	workspaceID, projectID := createProjectAndWorkspace(ctx, t, api)
