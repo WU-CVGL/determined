@@ -44,10 +44,11 @@ func (a *apiServer) getUnboundResourcePools(ctx context.Context,
 	return unboundPools, nil
 }
 
-// usableResourcePools returns the pools that user may use. A failed read of the access tables
-// fails the request: the unfiltered list is never returned.
-func usableResourcePools(
-	ctx context.Context, user model.User, pools []*resourcepoolv1.ResourcePool,
+// markUsablePools sets whether user may use each pool and, with hide, leaves out the pools that user
+// may not use. A failed read of the access tables fails the request: no pool is reported usable
+// and no list is returned.
+func markUsablePools(
+	ctx context.Context, user model.User, pools []*resourcepoolv1.ResourcePool, hide bool,
 ) ([]*resourcepoolv1.ResourcePool, error) {
 	names := make([]string, 0, len(pools))
 	for _, pool := range pools {
@@ -57,13 +58,15 @@ func usableResourcePools(
 	if err != nil {
 		return nil, err
 	}
-	usablePools := make([]*resourcepoolv1.ResourcePool, 0, len(pools))
+	listed := make([]*resourcepoolv1.ResourcePool, 0, len(pools))
 	for _, pool := range pools {
-		if usable[pool.Name] {
-			usablePools = append(usablePools, pool)
+		pool.Usable = usable[pool.Name]
+		if hide && !pool.Usable {
+			continue
 		}
+		listed = append(listed, pool)
 	}
-	return usablePools, nil
+	return listed, nil
 }
 
 func (a *apiServer) GetResourcePools(
@@ -96,9 +99,9 @@ func (a *apiServer) GetResourcePools(
 	if err != nil {
 		return nil, err
 	}
-	// Hide the pools the user may not use, before the unbound subset and the pagination, so
-	// their totals count only usable pools.
-	filteredPools, err = usableResourcePools(ctx, *curUser, filteredPools)
+	// Before the unbound subset and the pagination, so that their totals count the listed pools.
+	filteredPools, err = markUsablePools(ctx, *curUser, filteredPools,
+		a.m.config.ResourcePoolAccess.HideUnusablePools)
 	if err != nil {
 		return nil, err
 	}

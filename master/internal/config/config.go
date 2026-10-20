@@ -199,6 +199,7 @@ type Config struct {
 	FeatureSwitches       []string                          `json:"feature_switches"`
 	ReservedPorts         []int                             `json:"reserved_ports"`
 	ShellTerminal         ShellTerminalConfig               `json:"shell_terminal"`
+	ResourcePoolAccess    ResourcePoolAccessConfig          `json:"resource_pool_access"`
 	ResourceConfig
 
 	// Internal contains "hidden" useful debugging configurations.

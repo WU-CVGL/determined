@@ -373,11 +373,16 @@ func TestDeleteBindingsSucceeds(t *testing.T) {
 	require.True(t, mockRM.AssertExpectations(t))
 }
 
-func TestGetResourcePoolsFiltersByAccess(t *testing.T) {
-	var pools []*resourcepoolv1.ResourcePool
+func TestGetResourcePoolsMarksUsable(t *testing.T) {
+	var names []string
 	mockRM := MockRM()
+	// Fresh pools for every request, as the resource managers build them.
 	mockRM.On("GetResourcePools").Return(func() *apiv1.GetResourcePoolsResponse {
-		return &apiv1.GetResourcePoolsResponse{ResourcePools: pools}
+		resp := &apiv1.GetResourcePoolsResponse{}
+		for _, name := range names {
+			resp.ResourcePools = append(resp.ResourcePools, &resourcepoolv1.ResourcePool{Name: name})
+		}
+		return resp
 	}, nil)
 	api, admin, adminCtx := setupAPITest(t, nil, mockRM)
 	u1 := db.RequireMockUser(t, api.m.db)
@@ -386,50 +391,92 @@ func TestGetResourcePoolsFiltersByAccess(t *testing.T) {
 	granted := accessTestPool(t, "b-granted", admin, true, u1)
 	adminsOnly := accessTestPool(t, "c-admins-only", admin, true)
 	// The resource manager lists the pools out of order; the response is sorted by name.
-	for _, name := range []string{adminsOnly, public, granted} {
-		pools = append(pools, &resourcepoolv1.ResourcePool{Name: name})
+	names = []string{adminsOnly, public, granted}
+	usable := func(resp *apiv1.GetResourcePoolsResponse) map[string]bool {
+		out := map[string]bool{}
+		for _, pool := range resp.ResourcePools {
+			out[pool.Name] = pool.Usable
+		}
+		return out
 	}
-	names := func(resp *apiv1.GetResourcePoolsResponse) []string {
+	listed := func(resp *apiv1.GetResourcePoolsResponse) []string {
 		out := []string{}
 		for _, pool := range resp.ResourcePools {
 			out = append(out, pool.Name)
 		}
 		return out
 	}
+	all := []string{public, granted, adminsOnly}
 
 	u2Ctx := ntscUserCtx(t, u2)
 	ctxs := map[string]context.Context{
 		"granted user": ntscUserCtx(t, u1), "other user": u2Ctx, "admin": adminCtx,
 	}
+	wants := map[string]map[string]bool{
+		"granted user": {public: true, granted: true, adminsOnly: false},
+		"other user":   {public: true, granted: false, adminsOnly: false},
+		"admin":        {public: true, granted: true, adminsOnly: true},
+	}
+	for name, want := range wants {
+		// Every pool is listed, restricted or not, with whether the user may use it.
+		resp, err := api.GetResourcePools(ctxs[name], &apiv1.GetResourcePoolsRequest{})
+		require.NoError(t, err, name)
+		require.Equal(t, all, listed(resp), name)
+		require.Equal(t, want, usable(resp), name)
+		require.Equal(t, int32(len(all)), resp.Pagination.Total, name)
+
+		resp, err = api.GetResourcePools(ctxs[name], &apiv1.GetResourcePoolsRequest{Unbound: true})
+		require.NoError(t, err, name)
+		require.Subset(t, all, listed(resp), name)
+		for pool, u := range usable(resp) {
+			require.Equal(t, want[pool], u, name)
+		}
+	}
+
+	// Pagination counts the pools that are not usable too.
+	resp, err := api.GetResourcePools(u2Ctx, &apiv1.GetResourcePoolsRequest{Offset: 1, Limit: 1})
+	require.NoError(t, err)
+	require.Equal(t, []string{granted}, listed(resp))
+	require.False(t, resp.ResourcePools[0].Usable)
+	require.Equal(t, int32(3), resp.Pagination.Total)
+
+	// Submitting to a listed pool that the user may not use is still refused.
+	require.Equal(t, codes.PermissionDenied,
+		status.Code(poolaccess.CanUseResourcePool(u2Ctx, u2, granted)))
+
+	// With hide_unusable_pools, the list leaves out the pools that the user may not use.
+	api.m.config.ResourcePoolAccess.HideUnusablePools = true
+	t.Cleanup(func() { api.m.config.ResourcePoolAccess.HideUnusablePools = false })
 	for name, want := range map[string][]string{
 		"granted user": {public, granted},
 		"other user":   {public},
-		"admin":        {public, granted, adminsOnly},
+		"admin":        all,
 	} {
 		resp, err := api.GetResourcePools(ctxs[name], &apiv1.GetResourcePoolsRequest{})
 		require.NoError(t, err, name)
-		require.Equal(t, want, names(resp), name)
+		require.Equal(t, want, listed(resp), name)
+		for _, pool := range resp.ResourcePools {
+			require.True(t, pool.Usable, name)
+		}
 		require.Equal(t, int32(len(want)), resp.Pagination.Total, name)
-
-		// The unbound pools are a subset of the usable pools.
-		resp, err = api.GetResourcePools(ctxs[name], &apiv1.GetResourcePoolsRequest{Unbound: true})
-		require.NoError(t, err, name)
-		require.Subset(t, want, names(resp), name)
 	}
-
-	// Pagination counts only the usable pools.
-	resp, err := api.GetResourcePools(u2Ctx, &apiv1.GetResourcePoolsRequest{Offset: 1, Limit: 1})
+	resp, err = api.GetResourcePools(u2Ctx, &apiv1.GetResourcePoolsRequest{Offset: 1, Limit: 1})
 	require.NoError(t, err)
 	require.Empty(t, resp.ResourcePools)
 	require.Equal(t, int32(1), resp.Pagination.Total)
 
-	// A failed read never returns the unfiltered list.
+	// A failed read fails the request, whether unusable pools are hidden or not: no pool is
+	// reported usable.
 	poolaccess.SetReaderForTest(t, func(context.Context, model.UserID, []string) (map[string]bool, error) {
 		return nil, fmt.Errorf("the database went away")
 	})
-	_, err = api.GetResourcePools(u2Ctx, &apiv1.GetResourcePoolsRequest{})
-	require.Equal(t, codes.Unavailable, status.Code(err))
-	resp, err = api.GetResourcePools(adminCtx, &apiv1.GetResourcePoolsRequest{})
-	require.NoError(t, err)
-	require.Equal(t, []string{public, granted, adminsOnly}, names(resp))
+	for _, hide := range []bool{true, false} {
+		api.m.config.ResourcePoolAccess.HideUnusablePools = hide
+		_, err = api.GetResourcePools(u2Ctx, &apiv1.GetResourcePoolsRequest{})
+		require.Equal(t, codes.Unavailable, status.Code(err), hide)
+		resp, err = api.GetResourcePools(adminCtx, &apiv1.GetResourcePoolsRequest{})
+		require.NoError(t, err, hide)
+		require.Equal(t, all, listed(resp), hide)
+		require.Equal(t, wants["admin"], usable(resp), hide)
+	}
 }
