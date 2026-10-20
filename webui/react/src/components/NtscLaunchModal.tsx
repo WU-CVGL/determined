@@ -15,6 +15,7 @@ import { isPlainObject } from 'lodash';
 import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
 
 import Link from 'components/Link';
+import { resourcePoolOption } from 'components/ResourcePoolOption';
 import StartFromSelect, { StartFrom, templateNameFromStartFrom } from 'components/StartFromSelect';
 import useFeature from 'hooks/useFeature';
 import usePermissions from 'hooks/usePermissions';
@@ -24,6 +25,7 @@ import { paths } from 'routes/utils';
 import clusterStore from 'stores/cluster';
 import workspaceStore from 'stores/workspaces';
 import { CommandResponse, CommandTask, CommandType, RawJson, ResourcePool, Workspace } from 'types';
+import { isUsablePool } from 'utils/cluster';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import { launchJupyterLab, previewJupyterLab } from 'utils/jupyter';
 import {
@@ -685,10 +687,8 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
 
   useEffect(() => {
     const fields = form.getFieldsValue(true);
-    if (!fields?.pool && boundResourcePools[0]?.name) {
-      const firstPoolInList = boundResourcePools[0]?.name;
-      form.setFieldValue('pool', firstPoolInList);
-    }
+    const firstUsablePool = boundResourcePools.find(isUsablePool)?.name;
+    if (!fields?.pool && firstUsablePool) form.setFieldValue('pool', firstUsablePool);
   }, [boundResourcePools, form]);
 
   useEffect(() => {
@@ -743,11 +743,7 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
       </Form.Item>
       <Form.Item label="Resource Pool" name="pool">
         <Select allowClear disabled={!selectedWorkspaceId} placeholder="Pick the best option">
-          {boundResourcePools.map((pool) => (
-            <Option key={pool.name} value={pool.name}>
-              {pool.name}
-            </Option>
-          ))}
+          {boundResourcePools.map(resourcePoolOption)}
         </Select>
       </Form.Item>
       <Form.Item

@@ -11,6 +11,7 @@ import { patchWorkspace } from 'services/api';
 import clusterStore from 'stores/cluster';
 import workspaceStore from 'stores/workspaces';
 import { ResourcePool, Workspace } from 'types';
+import { isUsablePool } from 'utils/cluster';
 
 interface Props {
   workspace: Workspace;
@@ -38,6 +39,7 @@ const ResourcePoolsBound: React.FC<Props> = ({ workspace }) => {
     );
   }, [resourcePools, boundResourcePoolNames, unboundResourcePools]);
 
+  // A pool that the user may not use cannot become a default; a default can always be unset.
   const actionMenu = useCallback(
     (pool: ResourcePool) =>
       canManageResourcePoolBindings
@@ -70,7 +72,13 @@ const ResourcePoolsBound: React.FC<Props> = ({ workspace }) => {
                 workspaceStore.fetch(undefined, true);
               },
             },
-          ]
+          ].filter(
+            ({ key }) =>
+              isUsablePool(pool) ||
+              (key === 'set-default-aux'
+                ? workspace.defaultAuxPool === pool.name
+                : workspace.defaultComputePool === pool.name),
+          )
         : [],
     [
       canManageResourcePoolBindings,

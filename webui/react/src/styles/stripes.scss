@@ -1,0 +1,9 @@
+// Diagonal stripes for what takes no new work: GPU slots that are disabled, draining or excluded,
+// and resource pools that the user may not use.
+@mixin no-new-work {
+  background-image: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--theme-surface-on) 30%, transparent) 0 2px,
+    transparent 2px 7px
+  );
+}

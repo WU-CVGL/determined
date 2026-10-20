@@ -1,3 +1,5 @@
+@use '../styles/stripes';
+
 .base {
   font-size: 12px;
   line-height: 22px;
@@ -35,4 +37,10 @@
       gap: 4px;
     }
   }
+}
+
+// A pool that the user may not use: the whole card is striped. The card's surface is the element
+// around its content section, so the stripes cover its padding too.
+div:has(> section > .striped) {
+  @include stripes.no-new-work;
 }

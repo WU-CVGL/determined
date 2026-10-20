@@ -1,0 +1,10 @@
+@use '../styles/stripes';
+
+.restricted {
+  @include stripes.no-new-work;
+}
+.label {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}

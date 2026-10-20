@@ -14,6 +14,7 @@ import yaml from 'js-yaml';
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import Link from 'components/Link';
+import { resourcePoolOption } from 'components/ResourcePoolOption';
 import useFeature from 'hooks/useFeature';
 import { paths } from 'routes/utils';
 import { createExperiment } from 'services/api';
@@ -30,6 +31,7 @@ import {
   TrialHyperparameters,
   TrialItem,
 } from 'types';
+import { isUsablePool } from 'utils/cluster';
 import { flattenObject, isBoolean, unflattenObject } from 'utils/data';
 import { DetError, ErrorLevel, ErrorType, handleWarning, isDetError } from 'utils/error';
 import { roundToPrecision } from 'utils/number';
@@ -102,9 +104,10 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
   );
   const canceler = useRef<AbortController>(new AbortController());
   const resourcePools = Loadable.getOrElse([], useObservable(clusterStore.resourcePools));
-  // Empty when the experiment's pool is not in the list, so the user picks one.
+  // Empty when the experiment's pool is not in the list or the user may not use it, so the user
+  // picks one.
   const [resourcePool, setResourcePool] = useState<ResourcePool | undefined>(
-    resourcePools.find((pool) => pool.name === experiment.resourcePool),
+    resourcePools.find((pool) => pool.name === experiment.resourcePool && isUsablePool(pool)),
   );
   const [form] = Form.useForm();
   const [currentPage, setCurrentPage] = useState(0);
@@ -309,7 +312,9 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
 
   useEffect(() => {
     if (resourcePool) return;
-    const pool = resourcePools.find((pool) => pool.name === experiment.resourcePool);
+    const pool = resourcePools.find(
+      (pool) => pool.name === experiment.resourcePool && isUsablePool(pool),
+    );
     if (pool) setResourcePool(pool);
   }, [experiment.resourcePool, resourcePool, resourcePools]);
 
@@ -501,13 +506,7 @@ const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JS
             label="Resource pool"
             name="pool"
             rules={[{ required: true }]}>
-            <Select onChange={handleSelectPool}>
-              {resourcePools.map((pool) => (
-                <Option key={pool.name} value={pool.name}>
-                  {pool.name}
-                </Option>
-              ))}
-            </Select>
+            <Select onChange={handleSelectPool}>{resourcePools.map(resourcePoolOption)}</Select>
           </Form.Item>
           {resourcePool && <p>{maxSlots} max slots</p>}
         </div>

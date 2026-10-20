@@ -16,6 +16,7 @@ import staticLogo from 'assets/images/on-prem-logo.svg?url';
 import { ConditionalWrapper } from 'components/ConditionalWrapper';
 import JsonGlossary from 'components/JsonGlossary';
 import ResourcePoolBindingModalComponent from 'components/ResourcePoolBindingModal';
+import { RestrictedTag } from 'components/ResourcePoolOption';
 import SlotAllocationBar from 'components/SlotAllocationBar';
 import useUI from 'components/ThemeProvider';
 import { V1ResourcePoolTypeToLabel, V1SchedulerTypeToLabel } from 'constants/states';
@@ -26,7 +27,7 @@ import { V1ResourcePoolType, V1RPQueueStat } from 'services/api-ts-sdk';
 import clusterStore, { maxPoolSlotCapacity } from 'stores/cluster';
 import workspaceStore from 'stores/workspaces';
 import { isDeviceType, JsonObject, ResourcePool } from 'types';
-import { getSlotContainerStates } from 'utils/cluster';
+import { getSlotContainerStates, isUsablePool } from 'utils/cluster';
 import { useObservable } from 'utils/observable';
 import { AnyMouseEvent } from 'utils/routes';
 import { pluralizer } from 'utils/string';
@@ -174,7 +175,7 @@ const ResourcePoolCard: React.FC<Props> = ({
       size="medium"
       onClick={(e: AnyMouseEvent) => handlePath(e, { path: paths.resourcePool(pool.name) })}
       onDropdown={onDropdown}>
-      <div className={css.base}>
+      <div className={isUsablePool(pool) ? css.base : `${css.base} ${css.striped}`}>
         <div className={css.header}>
           <div className={css.name}>{pool.name}</div>
           <div className={css.details}>
@@ -187,6 +188,7 @@ const ResourcePoolCard: React.FC<Props> = ({
               )}>
               <span>{defaultLabel}</span>
             </ConditionalWrapper>
+            {!isUsablePool(pool) && <RestrictedTag />}
             {pool.description && <Icon name="info" showTooltip title={pool.description} />}
           </div>
         </div>

@@ -20,42 +20,44 @@ vi.mock('stores/cluster', async (importOriginal) => {
   const loadable = await import('hew/utils/loadable');
   const observable = await import('utils/observable');
 
+  const pool = {
+    agentDockerImage: '',
+    agentDockerNetwork: '',
+    agentDockerRuntime: '',
+    auxContainerCapacity: 0,
+    auxContainerCapacityPerAgent: 0,
+    auxContainersRunning: 0,
+    containerStartupScript: '',
+    defaultAuxPool: false,
+    defaultComputePool: true,
+    description: '',
+    details: {},
+    imageId: '',
+    instanceType: '',
+    location: '',
+    masterCertName: '',
+    masterUrl: '',
+    maxAgents: 1,
+    maxAgentStartingPeriod: 1000,
+    maxIdleAgentPeriod: 1000,
+    minAgents: 0,
+    name: 'default',
+    numAgents: 1,
+    preemptible: false,
+    schedulerFittingPolicy: sdkTypes.V1FittingPolicy.UNSPECIFIED,
+    schedulerType: sdkTypes.V1SchedulerType.UNSPECIFIED,
+    slotsAvailable: 1,
+    slotsUsed: 0,
+    slotType: types.ResourceType.CUDA,
+    startupScript: '',
+    type: sdkTypes.V1ResourcePoolType.UNSPECIFIED,
+  };
   const store = {
     fetchResourcePools: vi.fn(),
     resourcePools: observable.observable(
       loadable.Loaded([
-        {
-          agentDockerImage: '',
-          agentDockerNetwork: '',
-          agentDockerRuntime: '',
-          auxContainerCapacity: 0,
-          auxContainerCapacityPerAgent: 0,
-          auxContainersRunning: 0,
-          containerStartupScript: '',
-          defaultAuxPool: false,
-          defaultComputePool: true,
-          description: '',
-          details: {},
-          imageId: '',
-          instanceType: '',
-          location: '',
-          masterCertName: '',
-          masterUrl: '',
-          maxAgents: 1,
-          maxAgentStartingPeriod: 1000,
-          maxIdleAgentPeriod: 1000,
-          minAgents: 0,
-          name: 'default',
-          numAgents: 1,
-          preemptible: false,
-          schedulerFittingPolicy: sdkTypes.V1FittingPolicy.UNSPECIFIED,
-          schedulerType: sdkTypes.V1SchedulerType.UNSPECIFIED,
-          slotsAvailable: 1,
-          slotsUsed: 0,
-          slotType: types.ResourceType.CUDA,
-          startupScript: '',
-          type: sdkTypes.V1ResourcePoolType.UNSPECIFIED,
-        },
+        pool,
+        { ...pool, defaultComputePool: false, name: 'locked', usable: false },
       ]),
     ),
   };
@@ -153,6 +155,31 @@ describe('useModalHyperparameterSearch', () => {
     );
     await waitFor(() => expect(next).toBeEnabled());
     expect(view.getByText('1 max slots')).toBeInTheDocument();
+  });
+
+  it('leaves the pool empty when the user may not use the experiment pool', async () => {
+    const { view } = await setup({ ...experiment, resourcePool: 'locked' });
+    const next = view.getByRole('button', { name: 'Select Hyperparameters' });
+
+    await waitFor(() => expect(next).toBeDisabled());
+    const picker = view.getByRole('combobox', { name: 'Resource pool' });
+    expect(picker.closest('.ant-select')?.querySelector('.ant-select-selection-item')).toBeNull();
+    expect(view.queryByText(/max slots/)).toBeNull();
+
+    await user.click(picker);
+    const locked = (
+      await view.findByText('locked', { selector: '.ant-select-item-option-content *' })
+    ).closest('.ant-select-item-option');
+    expect(locked).toHaveClass('ant-select-item-option-disabled');
+    expect(locked).toHaveClass('restricted');
+    expect(locked).toHaveTextContent('Restricted');
+    await user.click(locked as HTMLElement);
+    expect(next).toBeDisabled();
+
+    await user.click(
+      await view.findByText('default', { selector: '.ant-select-item-option-content' }),
+    );
+    await waitFor(() => expect(next).toBeEnabled());
   });
 
   it('should only allow current on constant hyperparameter', async () => {

@@ -10202,6 +10202,12 @@ export interface V1ResourcePool {
      * @memberof V1ResourcePool
      */
     clusterName: string;
+    /**
+     * Whether the requesting user may start new work in the pool.
+     * @type {boolean}
+     * @memberof V1ResourcePool
+     */
+    usable?: boolean;
 }
 /**
  * 

@@ -2,11 +2,12 @@ import Form from 'hew/Form';
 import Glossary from 'hew/Glossary';
 import Input from 'hew/Input';
 import { Modal } from 'hew/Modal';
-import Select, { Option } from 'hew/Select';
+import Select from 'hew/Select';
 import { Loadable } from 'hew/utils/loadable';
 import React, { ReactElement, ReactNode, useCallback, useMemo, useState } from 'react';
 
 import Badge, { BadgeType } from 'components/Badge';
+import { resourcePoolOption } from 'components/ResourcePoolOption';
 import useFeature from 'hooks/useFeature';
 import { columns } from 'pages/JobQueue/JobQueue.table';
 import { updateJobQueue } from 'services/api';
@@ -217,11 +218,7 @@ const ManageJobModalComponent: React.FC<Props> = ({
           label="Resource Pool"
           name="resourcePool">
           <Select disabled={job.type !== JobType.EXPERIMENT}>
-            {resourcePools.map((rp) => (
-              <Option key={rp.name} value={rp.name}>
-                {rp.name}
-              </Option>
-            ))}
+            {resourcePools.map(resourcePoolOption)}
           </Select>
         </Form.Item>
       </Form>
