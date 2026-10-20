@@ -59,16 +59,6 @@ Requests that code in a task makes, such as a submission from inside a running
 experiment, are checked as the user the task runs as: the user who launched it,
 or, for a continued experiment, the experiment's owner.
 
-`GET /api/v1/resource-pools` lists only the pools that the user may use, so the
-WebUI's pool pickers and cluster pages, the CLI, and the SDK show only those.
-Administrators see every pool. The WebUI page of a pool outside that list
-shows the not found page, and the hyperparameter search dialog of an experiment
-whose pool is outside it leaves the pool empty until the user picks one. Other
-lists that name pools, such as workspace bindings, the job queue, jobs, and
-agents, are not filtered. `det job list` without `-r` fails with "the default
-compute pool is not available to you; name a pool with -r" when the user may
-not use the default compute pool.
-
 ## What is not checked
 
 Work that a pool has accepted keeps its access:
@@ -93,6 +83,41 @@ mounts, or pod spec. It runs a fixed entrypoint with the task container defaults
 of that pool. A user without a grant can therefore start garbage collection in a
 restricted default aux pool, but cannot make it run code of their choice.
 
+## Pool lists
+
+`GET /api/v1/resource-pools` lists every pool, restricted or not, that the
+user may otherwise view, and gives each pool `usable`: whether the user may
+start new work in it. For administrators, `usable` is `true` for every pool.
+Listing a pool grants nothing: submissions to a pool with `usable` false are
+refused as described in "What is checked".
+
+The WebUI stripes such a pool and tags it **Restricted** on its card and on
+its page. The pool pickers, of the notebook and shell launch form, of the
+hyperparameter search dialog, and of a job-queue move, list it but do not let
+it be picked, and the launch form picks the first pool that the user may use.
+The hyperparameter search dialog of an experiment whose pool the user may not
+use leaves the pool empty until the user picks one. A workspace's page does not
+offer to make such a pool a workspace default, but still unsets one.
+
+To leave these pools out of the list, set `hide_unusable_pools` in
+`master.yaml`:
+
+```yaml
+resource_pool_access:
+  hide_unusable_pools: true
+```
+
+The list then holds only the pools that the user may use, and its pagination
+counts only those, so the WebUI's pool pickers and cluster pages, the CLI, and
+the SDK show only those. The WebUI page of a pool outside the list shows the
+not found page, and the hyperparameter search dialog of an experiment whose
+pool is outside it leaves the pool empty. `det job list` without `-r` fails
+with "the default compute pool is not available to you; name a pool with -r"
+when the user may not use the default compute pool.
+
+Either way, other lists that name pools, such as workspace bindings, the job
+queue, jobs, and agents, show every pool.
+
 ## Revocation
 
 Restricting a pool or revoking a grant applies from the next request; a request
@@ -102,8 +127,8 @@ stay. A user without access can no longer submit, activate, unpause, continue,
 fork, or clone work into the pool, move a job into it, or make it a new
 workspace default or the pool of a config policy; work that one of their
 running tasks submits is refused too.
-The pool disappears from the user's pool list, while their own experiment and
-task pages keep working.
+The user's pool list shows the pool with `usable` false, or leaves it out with
+`hide_unusable_pools`, while their own experiment and task pages keep working.
 
 To stop work that already runs in the pool, an administrator pauses it, kills
 it, or moves it to another pool in the job queue. Activating a paused
@@ -256,6 +281,9 @@ Rolling forward to a master with pool access restores the restrictions as they
 were in the database. Save the output of
 `det resource-pool access list --json` with each database dump, and restrict
 and grant again from it after such a restore.
+
+A master before 0.42.1 refuses to start with `resource_pool_access` in
+`master.yaml`; remove the key before rolling back to one.
 
 ## Error messages
 
