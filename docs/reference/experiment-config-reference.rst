@@ -1464,11 +1464,11 @@ Only the agent resource manager runs ``gpu_groups``:
    pool could hold the groups with every slot free, disabled and draining slots included, on one
    NUMA node with ``"strong"``: ``no agent in pool gpus has GPUs for gpu_groups simulation: 1 ×
    NVIDIA GeForce RTX 4090; learner: 1 × NVIDIA H100 80GB HBM3``. A pool without agents refuses it
-   at creation, except a pool with a provider, which accepts it; moving the experiment to such a
-   pool is refused the same way. With ``"strong"``, an agent whose GPUs hold the groups but whose
-   topology the master does not have yet, for example right after a master restart, counts as one
-   that could. The master never refuses a trial it restores; retries, continued experiments and
-   trials restored after a master restart keep the groups.
+   at creation, except a pool with a provider, which accepts it. Moving the experiment to a pool
+   without agents is refused the same way. With ``"strong"``, an agent whose GPUs hold the groups
+   but whose topology the master does not have yet, for example right after a master restart, counts
+   as one that could. The master never refuses a trial it restores; retries, continued experiments
+   and trials restored after a master restart keep the groups.
 
 -  The Kubernetes, Slurm and PBS resource managers refuse it.
 
