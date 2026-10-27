@@ -45,6 +45,8 @@ func overwriteSpec(
 	}
 
 	if len(cont.DeviceUUIDsByType(device.CUDA)) > 0 {
+		// The NVIDIA OCI runtime adds graphics ICD and render-device mounts.
+		spec.RunSpec.HostConfig.Runtime = "nvidia"
 		spec.RunSpec.HostConfig.DeviceRequests = append(
 			spec.RunSpec.HostConfig.DeviceRequests, cudaDeviceRequests(cont)...)
 	}
@@ -90,7 +92,7 @@ func cudaDeviceRequests(cont cproto.Container) []dcontainer.DeviceRequest {
 	return []dcontainer.DeviceRequest{
 		{
 			Driver:       "nvidia",
-			Capabilities: [][]string{{"gpu", "compute", "utility"}},
+			Capabilities: [][]string{{"gpu"}},
 			DeviceIDs:    cudaUUIDs,
 		},
 	}

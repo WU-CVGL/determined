@@ -200,6 +200,10 @@ starting its agents.
 `det agent list` shows each agent's version. Running work stays where it is;
 check its allocations as after the master swap.
 
+For agents with headless Vulkan and OpenGL support, register the NVIDIA runtime
+before replacing the agent; see [graphics containers](graphics-containers.md).
+Existing containers keep their original driver mounts after reattachment.
+
 ## Roll back
 
 A rollback starts the previous master again against the migrated database. For
