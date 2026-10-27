@@ -14,10 +14,15 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/exp/slices"
 
 	"github.com/determined-ai/determined/master/internal/config"
+	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/rm/tasklist"
+	"github.com/determined-ai/determined/master/internal/sproto"
+	"github.com/determined-ai/determined/master/internal/task"
 	"github.com/determined-ai/determined/master/pkg/aproto"
+	"github.com/determined-ai/determined/master/pkg/cproto"
 	"github.com/determined-ai/determined/master/pkg/device"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ws"
@@ -215,4 +220,142 @@ func TestRefusedAgentThatStaysConnectedIsStopped(t *testing.T) {
 	h.waitFor(second, func() bool { return second.stopped }, "the second agent to stop")
 	_, ok := h.service.agents.Load(second.id)
 	require.False(t, ok, "the refused agent is still registered")
+}
+
+// restoredGPUTest is a master that ran a one-GPU task on agent A, which has two GPUs, and was
+// restarted: the new master has restored A from the database and the task's allocation.
+type restoredGPUTest struct {
+	master    *restoreTestMaster
+	restored  *agent
+	running   sproto.AllocateRequest
+	container cproto.Container
+	owner     model.User
+	gpus      []string
+}
+
+func (r *restoredGPUTest) agentStarted(reattached ...aproto.ContainerReattachAck) *aproto.AgentStarted {
+	started := &aproto.AgentStarted{
+		Version:              "test",
+		ResourcePoolName:     r.master.pool.PoolName,
+		ContainersReattached: reattached,
+	}
+	for i, u := range r.gpus {
+		started.Devices = append(started.Devices,
+			device.Device{ID: device.ID(i), Brand: "nvda", UUID: u, Type: device.CUDA})
+	}
+	return started
+}
+
+// reattached is the running task's container as the agent reports it on reconnect.
+func (r *restoredGPUTest) reattached() aproto.ContainerReattachAck {
+	return aproto.ContainerReattachAck{Container: cproto.Container{
+		ID: r.container.ID, State: cproto.Running, Devices: r.container.Devices,
+	}}
+}
+
+func newRestoredGPUTest(t *testing.T, poolName string, agentID aproto.ID) *restoredGPUTest {
+	database, dropDB := db.MustResolveNewPostgresDatabase(t)
+	t.Cleanup(dropDB)
+	db.MustMigrateTestPostgres(t, database, "file://../../../static/migrations", "up")
+	r := &restoredGPUTest{
+		owner: db.RequireMockUser(t, database),
+		gpus:  []string{"GPU-0-" + poolName, "GPU-1-" + poolName},
+	}
+
+	first := newRestoreTestMaster(t, poolName, false)
+	r.master = first
+	firstAgent := connectRestoreTestAgent(t, first.addAgent(t, agentID, nil), r.agentStarted())
+	r.running = newRestoreTestRequest(t, poolName)
+	restoreTestAllocation(t, first, r.running, &r.owner)
+	r.container = firstAgent.awaitStart(r.running.AllocationID)
+	firstAgent.report(r.container, cproto.Running)
+	requireAllocationState(t, r.running.AllocationID, model.AllocationStateRunning)
+
+	detach(t, r.running.AllocationID)
+	r.master = newRestoreTestMaster(t, poolName, true)
+	restored, ok := r.master.agents.get(agentID)
+	require.True(t, ok, "agent not restored")
+	r.restored = restored
+	r.running.Restore = true
+	restoreTestAllocation(t, r.master, r.running, &r.owner)
+	t.Cleanup(func() {
+		if slices.Contains(task.DefaultService.GetAllAllocationIDs(), r.running.AllocationID) {
+			detach(t, r.running.AllocationID)
+		}
+	})
+	return r
+}
+
+// After a master restart, an agent with another ID that reports the GPU of a restored agent is
+// refused while the restored agent awaits its reconnect. The restored agent then reconnects with
+// its task.
+func TestRestoredAgentKeepsItsGPUs(t *testing.T) {
+	poolName := "gpu-restore-" + uuid.NewString()[:8]
+	agentID, otherID := aproto.ID(poolName+"-a"), aproto.ID(poolName+"-b")
+	r := newRestoredGPUTest(t, poolName, agentID)
+
+	other := connectRestoreTestAgent(t, r.master.registerAgent(t, otherID), r.agentStarted())
+	require.Equal(t,
+		fmt.Sprintf("agent %s refused: GPU %s is already reported by agent %s",
+			otherID, strings.Join(r.gpus, ","), agentID),
+		other.awaitShutdown())
+	require.NoError(t, other.socket.Close())
+	require.Eventually(t, func() bool {
+		_, ok := r.master.agents.get(otherID)
+		return !ok
+	}, 10*time.Second, 10*time.Millisecond, "the refused agent is still registered")
+	other.agent.mu.Lock()
+	require.False(t, other.agent.started)
+	other.agent.mu.Unlock()
+
+	connectRestoreTestAgent(t, r.restored, r.agentStarted(r.reattached()))
+	require.Eventually(t, func() bool {
+		r.restored.mu.Lock()
+		defer r.restored.mu.Unlock()
+		return !r.restored.awaitingReconnect
+	}, 10*time.Second, 10*time.Millisecond, "the restored agent never recovered")
+	time.Sleep(4 * actionCoolDown)
+	r.restored.mu.Lock()
+	require.False(t, r.restored.stopped)
+	require.True(t, r.restored.agentState.enabled)
+	require.Equal(t, r.running.AllocationID, r.restored.agentState.containerAllocation[r.container.ID])
+	r.restored.mu.Unlock()
+	requireAllocationState(t, r.running.AllocationID, model.AllocationStateRunning)
+	_, ok := r.master.agents.get(agentID)
+	require.True(t, ok)
+}
+
+// A restored agent whose websocket connects stays disabled, and gets no container, until its
+// AgentStarted passes the checks.
+func TestRestoredAgentWaitsForAgentStarted(t *testing.T) {
+	poolName := "gpu-restore-" + uuid.NewString()[:8]
+	r := newRestoredGPUTest(t, poolName, aproto.ID(poolName+"-a"))
+
+	// A task that waits for the free GPU, and a start that was buffered while the agent was away.
+	queued := newRestoreTestRequest(t, poolName)
+	restoreTestAllocation(t, r.master, queued, &r.owner)
+	buffered := cproto.ID("buffered-" + uuid.NewString()[:8])
+	r.restored.StartTaskContainer(sproto.StartTaskContainer{
+		AllocationID:   model.AllocationID("buffered-" + uuid.NewString()[:8]),
+		StartContainer: aproto.StartContainer{Container: cproto.Container{ID: buffered}},
+	})
+
+	ta := dialRestoreTestAgent(t, r.restored)
+	ta.requireNoStart(4 * actionCoolDown)
+	requireAllocationState(t, queued.AllocationID, model.AllocationStatePending)
+	r.restored.mu.Lock()
+	require.True(t, r.restored.awaitingReconnect)
+	require.False(t, r.restored.agentState.enabled)
+	require.Len(t, r.restored.reconnectBacklog, 1)
+	r.restored.mu.Unlock()
+
+	ta.socket.Outbox <- &aproto.MasterMessage{AgentStarted: r.agentStarted(r.reattached())}
+	queuedContainer := ta.awaitStart(queued.AllocationID)
+	require.NotEqual(t, r.container.Devices, queuedContainer.Devices)
+	requireAllocationState(t, r.running.AllocationID, model.AllocationStateRunning)
+	r.restored.mu.Lock()
+	require.False(t, r.restored.awaitingReconnect)
+	require.True(t, r.restored.agentState.enabled)
+	require.Empty(t, r.restored.reconnectBacklog)
+	r.restored.mu.Unlock()
 }

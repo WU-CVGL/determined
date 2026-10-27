@@ -35,7 +35,8 @@ import (
 )
 
 // restoreTestMaster is the part of a master that schedules allocations: an agent resource manager
-// with one pool.
+// with one pool. With restoreAgents, its agent service restores the agents in the database, as a
+// master does at startup.
 type restoreTestMaster struct {
 	rm           *ResourceManager
 	agents       *agents
@@ -43,7 +44,7 @@ type restoreTestMaster struct {
 	pool         config.ResourcePoolConfig
 }
 
-func newRestoreTestMaster(t *testing.T, poolName string) *restoreTestMaster {
+func newRestoreTestMaster(t *testing.T, poolName string, restoreAgents bool) *restoreTestMaster {
 	t.Helper()
 	pool := config.ResourcePoolConfig{
 		PoolName:                 poolName,
@@ -65,7 +66,7 @@ func newRestoreTestMaster(t *testing.T, poolName string) *restoreTestMaster {
 	}
 	registry, err := newPoolRegistry(rmConfig.ResourcePools)
 	require.NoError(t, err)
-	agentService, agentUpdates := newAgentService(registry, restoreTestAgentOptions(), false)
+	agentService, agentUpdates := newAgentService(registry, restoreTestAgentOptions(), restoreAgents)
 	rm, err := newAgentResourceManager(nil, rmConfig, nil, agentService, agentUpdates, registry)
 	require.NoError(t, err)
 	t.Cleanup(rm.stop)
@@ -89,6 +90,19 @@ func (m *restoreTestMaster) addAgent(t *testing.T, id aproto.ID, restored *agent
 	return a
 }
 
+// registerAgent registers a new agent as the agent service does for an agent that connects for
+// the first time.
+func (m *restoreTestMaster) registerAgent(t *testing.T, id aproto.ID) *agent {
+	t.Helper()
+	var a *agent
+	a, err := m.agents.createAgent(id, m.pool.PoolName, m.agents.opts, nil, func() {
+		tasklist.DeleteIf(m.agents.agents, id, a)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.agents.agents.Add(id, a))
+	return a
+}
+
 // restoreTestAgent plays an agent process that is connected to the master over a websocket.
 type restoreTestAgent struct {
 	t      *testing.T
@@ -97,6 +111,14 @@ type restoreTestAgent struct {
 }
 
 func connectRestoreTestAgent(t *testing.T, a *agent, started *aproto.AgentStarted) *restoreTestAgent {
+	t.Helper()
+	ta := dialRestoreTestAgent(t, a)
+	ta.socket.Outbox <- &aproto.MasterMessage{AgentStarted: started}
+	return ta
+}
+
+// dialRestoreTestAgent opens the agent's websocket without sending AgentStarted.
+func dialRestoreTestAgent(t *testing.T, a *agent) *restoreTestAgent {
 	t.Helper()
 	e := echo.New()
 	e.GET("/", func(c echo.Context) error {
@@ -112,7 +134,6 @@ func connectRestoreTestAgent(t *testing.T, a *agent, started *aproto.AgentStarte
 	socket, err := ws.Wrap[aproto.AgentMessage, *aproto.MasterMessage]("test-agent", conn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = socket.Close() })
-	socket.Outbox <- &aproto.MasterMessage{AgentStarted: started}
 	return &restoreTestAgent{t: t, agent: a, socket: socket}
 }
 
@@ -135,6 +156,38 @@ func (ta *restoreTestAgent) awaitStart(id model.AllocationID) cproto.Container {
 			}
 		case <-timeout:
 			require.FailNow(ta.t, "no container started", "allocation %s", id)
+		}
+	}
+}
+
+// awaitShutdown returns the ErrMsg of the AgentShutdown the master sends.
+func (ta *restoreTestAgent) awaitShutdown() string {
+	ta.t.Helper()
+	timeout := time.After(10 * time.Second)
+	for {
+		select {
+		case msg, ok := <-ta.socket.Inbox:
+			require.True(ta.t, ok, "socket closed")
+			if msg.AgentShutdown != nil {
+				return msg.AgentShutdown.ErrMsg
+			}
+		case <-timeout:
+			require.FailNow(ta.t, "no AgentShutdown")
+		}
+	}
+}
+
+// requireNoStart fails if the master starts a container on the agent within d.
+func (ta *restoreTestAgent) requireNoStart(d time.Duration) {
+	ta.t.Helper()
+	timeout := time.After(d)
+	for {
+		select {
+		case msg, ok := <-ta.socket.Inbox:
+			require.True(ta.t, ok, "socket closed")
+			require.Nil(ta.t, msg.StartContainer, "container started")
+		case <-timeout:
+			return
 		}
 	}
 }
@@ -258,7 +311,7 @@ func TestQueuedAllocationStaysQueuedAcrossMasterRestart(t *testing.T) {
 	}
 
 	// The first master: a task runs on the agent's only slot and a second one waits for it.
-	first := newRestoreTestMaster(t, poolName)
+	first := newRestoreTestMaster(t, poolName, false)
 	firstAgent := connectRestoreTestAgent(t, first.addAgent(t, agentID, nil), agentStarted())
 	running := newRestoreTestRequest(t, poolName)
 	queued := newRestoreTestRequest(t, poolName)
@@ -277,7 +330,7 @@ func TestQueuedAllocationStaysQueuedAcrossMasterRestart(t *testing.T) {
 	require.NoError(t, err)
 	state, ok := states[agentID]
 	require.True(t, ok)
-	second := newRestoreTestMaster(t, poolName)
+	second := newRestoreTestMaster(t, poolName, false)
 	restoredAgent := second.addAgent(t, agentID, &state)
 	running.Restore = true
 	queued.Restore = true

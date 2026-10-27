@@ -92,6 +92,7 @@ func newAgentService(
 			badAgentIds = append(badAgentIds, agentID)
 			continue
 		}
+		agentRef.restoreGPUs()
 
 		a.syslog.Debugf("restored agent state: %s", agentID)
 	}
