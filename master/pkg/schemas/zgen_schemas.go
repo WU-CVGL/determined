@@ -1119,6 +1119,67 @@ var (
     }
 }
 `)
+	textGPUGroupV0 = []byte(`{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "http://determined.ai/schemas/expconf/v0/gpu-group.json",
+    "title": "GPUGroup",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+        "name",
+        "count",
+        "models"
+    ],
+    "properties": {
+        "name": {
+            "type": "string",
+            "checks": {
+                "name must match ^[a-z][a-z0-9_-]{0,31}$": {
+                    "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                }
+            }
+        },
+        "count": {
+            "type": "integer",
+            "minimum": 1
+        },
+        "models": {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "checks": {
+                    "a model must not be empty": {
+                        "minLength": 1
+                    }
+                }
+            },
+            "checks": {
+                "models must not be empty": {
+                    "minItems": 1
+                },
+                "models must be unique": {
+                    "uniqueItems": true
+                }
+            }
+        }
+    }
+}
+`)
+	textGPUGroupsConfigV0 = []byte(`{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "http://determined.ai/schemas/expconf/v0/gpu-groups.json",
+    "title": "GPUGroupsConfig",
+    "type": "array",
+    "items": {
+        "$ref": "http://determined.ai/schemas/expconf/v0/gpu-group.json"
+    },
+    "checks": {
+        "gpu_groups must not be empty": {
+            "minItems": 1
+        }
+    }
+}
+`)
 	textPbsConfigV0 = []byte(`{
     "$schema": "http://json-schema.org/draft-07/schema#",
     "$id": "http://determined.ai/schemas/expconf/v0/hpc-cluster-pbs.json",
@@ -2032,6 +2093,14 @@ var (
             ],
             "default": [],
             "optionalRef": "http://determined.ai/schemas/expconf/v0/devices.json"
+        },
+        "gpu_groups": {
+            "type": [
+                "array",
+                "null"
+            ],
+            "default": null,
+            "optionalRef": "http://determined.ai/schemas/expconf/v0/gpu-groups.json"
         },
         "is_single_node": {
             "type": [
@@ -3509,6 +3578,10 @@ var (
 
 	schemaGCSConfigV0 interface{}
 
+	schemaGPUGroupV0 interface{}
+
+	schemaGPUGroupsConfigV0 interface{}
+
 	schemaPbsConfigV0 interface{}
 
 	schemaSlurmConfigV0 interface{}
@@ -3934,6 +4007,46 @@ func ParsedGCSConfigV0() interface{} {
 		panic("invalid embedded json for GCSConfigV0")
 	}
 	return schemaGCSConfigV0
+}
+
+func ParsedGPUGroupV0() interface{} {
+	cacheLock.RLock()
+	if schemaGPUGroupV0 != nil {
+		cacheLock.RUnlock()
+		return schemaGPUGroupV0
+	}
+	cacheLock.RUnlock()
+
+	cacheLock.Lock()
+	defer cacheLock.Unlock()
+	if schemaGPUGroupV0 != nil {
+		return schemaGPUGroupV0
+	}
+	err := json.Unmarshal(textGPUGroupV0, &schemaGPUGroupV0)
+	if err != nil {
+		panic("invalid embedded json for GPUGroupV0")
+	}
+	return schemaGPUGroupV0
+}
+
+func ParsedGPUGroupsConfigV0() interface{} {
+	cacheLock.RLock()
+	if schemaGPUGroupsConfigV0 != nil {
+		cacheLock.RUnlock()
+		return schemaGPUGroupsConfigV0
+	}
+	cacheLock.RUnlock()
+
+	cacheLock.Lock()
+	defer cacheLock.Unlock()
+	if schemaGPUGroupsConfigV0 != nil {
+		return schemaGPUGroupsConfigV0
+	}
+	err := json.Unmarshal(textGPUGroupsConfigV0, &schemaGPUGroupsConfigV0)
+	if err != nil {
+		panic("invalid embedded json for GPUGroupsConfigV0")
+	}
+	return schemaGPUGroupsConfigV0
 }
 
 func ParsedPbsConfigV0() interface{} {
@@ -4983,6 +5096,10 @@ func schemaBytesMap() map[string][]byte {
 	cachedSchemaBytesMap[url] = textExperimentConfigV0
 	url = "http://determined.ai/schemas/expconf/v0/gcs.json"
 	cachedSchemaBytesMap[url] = textGCSConfigV0
+	url = "http://determined.ai/schemas/expconf/v0/gpu-group.json"
+	cachedSchemaBytesMap[url] = textGPUGroupV0
+	url = "http://determined.ai/schemas/expconf/v0/gpu-groups.json"
+	cachedSchemaBytesMap[url] = textGPUGroupsConfigV0
 	url = "http://determined.ai/schemas/expconf/v0/hpc-cluster-pbs.json"
 	cachedSchemaBytesMap[url] = textPbsConfigV0
 	url = "http://determined.ai/schemas/expconf/v0/hpc-cluster-slurm.json"

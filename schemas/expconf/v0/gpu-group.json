@@ -1,0 +1,45 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "http://determined.ai/schemas/expconf/v0/gpu-group.json",
+    "title": "GPUGroup",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+        "name",
+        "count",
+        "models"
+    ],
+    "properties": {
+        "name": {
+            "type": "string",
+            "checks": {
+                "name must match ^[a-z][a-z0-9_-]{0,31}$": {
+                    "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+                }
+            }
+        },
+        "count": {
+            "type": "integer",
+            "minimum": 1
+        },
+        "models": {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "checks": {
+                    "a model must not be empty": {
+                        "minLength": 1
+                    }
+                }
+            },
+            "checks": {
+                "models must not be empty": {
+                    "minItems": 1
+                },
+                "models must be unique": {
+                    "uniqueItems": true
+                }
+            }
+        }
+    }
+}

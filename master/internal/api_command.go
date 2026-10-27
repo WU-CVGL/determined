@@ -150,7 +150,8 @@ func (a *apiServer) getCommandLaunchParams(ctx context.Context, req *protoComman
 	if err := poolaccess.CanUseResourcePool(ctx, *userModel, poolName.String()); err != nil {
 		return nil, launchWarnings, err
 	}
-	if err := validateGPUTopology(a.m.rm, poolName, resources.Slots, config.Resources.GPUTopology()); err != nil {
+	if err := validateGPUTopology(a.m.rm, poolName, resources.Slots, slotsField,
+		config.Resources.GPUTopology(), config.Resources.GPUGroupRequests()); err != nil {
 		return nil, launchWarnings, err
 	}
 

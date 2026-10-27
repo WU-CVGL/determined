@@ -97,6 +97,8 @@ type ResourcesConfig struct {
 	// PreferGPUTopology is resources.prefer_gpu_topology, left out when unset. The merged command
 	// config is decoded with DisallowUnknownFields, so it needs the field.
 	PreferGPUTopology *expconf.GPUTopologyPreference `json:"prefer_gpu_topology,omitempty"`
+	// GPUGroups is resources.gpu_groups, left out when unset.
+	GPUGroups expconf.GPUGroupsConfigV0 `json:"gpu_groups,omitempty"`
 
 	Devices DevicesConfig `json:"devices"`
 }
@@ -132,11 +134,12 @@ func (d *StorageSize) UnmarshalJSON(data []byte) error {
 // fails that can just get caught later.
 func ParseJustResources(configBytes []byte) ResourcesConfig {
 	// Make this function usable on experiment or command configs.
-	// prefer_gpu_topology is read as raw JSON: an invalid value, such as true, would stop the
-	// decode before resource_pool and slots, which sort after it.
+	// prefer_gpu_topology and gpu_groups are read as raw JSON: an invalid value, such as true or a
+	// bad group, would stop the decode before resource_pool and slots, which sort after them.
 	type DummyResources struct {
 		ResourcesConfig
 		PreferGPUTopology json.RawMessage `json:"prefer_gpu_topology"`
+		GPUGroups         json.RawMessage `json:"gpu_groups"`
 	}
 	type DummyConfig struct {
 		Resources DummyResources `json:"resources"`
@@ -177,6 +180,11 @@ func (r ResourcesConfig) GPUTopology() expconf.GPUTopologyPreference {
 		return expconf.GPUTopologyOff
 	}
 	return *r.PreferGPUTopology
+}
+
+// GPUGroupRequests returns resources.gpu_groups, nil when it is not set.
+func (r ResourcesConfig) GPUGroupRequests() expconf.GPUGroupRequests {
+	return r.GPUGroups.Requests()
 }
 
 // Validate implements the check.Validatable interface.

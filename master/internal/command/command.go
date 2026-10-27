@@ -160,7 +160,10 @@ func (c *Command) Start(ctx context.Context) error {
 		}
 	}
 
-	fitting := sproto.FittingRequirements{SingleAgent: true, GPUTopology: c.Config.Resources.GPUTopology()}
+	fitting := sproto.FittingRequirements{
+		SingleAgent: true, GPUTopology: c.Config.Resources.GPUTopology(),
+		GPUGroups: c.Config.Resources.GPUGroupRequests(),
+	}
 	err := task.DefaultService.StartAllocation(c.logCtx,
 		sproto.AllocateRequest{
 			AllocationID:        c.allocationID,

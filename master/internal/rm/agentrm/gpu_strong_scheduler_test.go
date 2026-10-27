@@ -141,7 +141,7 @@ func (s *strongPool) pass(t *testing.T) (map[string][]int, []model.AllocationID,
 		s.allocated(req, fits[0].Agent, cid, res.devices)
 		allocated[string(req.AllocationID)] = deviceIDs(res.devices)
 	}
-	return allocated, toRelease, s.rp.checkStrongRequests(reserved)
+	return allocated, toRelease, s.rp.checkWaitingRequests(reserved)
 }
 
 // addStrong adds a pending task with prefer_gpu_topology "strong" at the default priority and
@@ -403,15 +403,15 @@ func TestStrongCheckAfterThePass(t *testing.T) {
 	allocated, _, again = s.pass(t)
 	require.Equal(t, map[string][]int{"four": {4, 5, 6, 7}}, allocated)
 	require.False(t, again)
-	require.Equal(t, map[model.AllocationID]strongNotice{"four": strongWaiting}, s.rp.strongNotices)
+	require.Equal(t, map[model.AllocationID]waitNotice{"four": noticeWaiting}, s.rp.waitNotices)
 
 	// A strong task that fits after a pass that reserved asks for another; one after a pass that
 	// reserved nothing does not.
 	s.addStrong(t, "two", 2)
 	s.rp.mu.Lock()
 	s.rp.agentStatesCache = s.live
-	require.True(t, s.rp.checkStrongRequests(true))
-	require.False(t, s.rp.checkStrongRequests(false))
+	require.True(t, s.rp.checkWaitingRequests(true))
+	require.False(t, s.rp.checkWaitingRequests(false))
 	s.rp.mu.Unlock()
 }
 
