@@ -176,6 +176,8 @@ func gpuTopologyPreferenceLine(reservations []gpuReservation) string {
 	case r.resp.choice.worstPair != "":
 		return fmt.Sprintf("GPU topology preference: agent %s, slots %s; %s",
 			r.fit.Agent.id, idList(r.resp.devices), r.resp.choice.worstPair)
+	case r.resp.choice.gpuGroups != nil:
+		return fmt.Sprintf("GPU topology preference: agent %s not ranked (%s)", r.fit.Agent.id, r.resp.choice.unranked)
 	default:
 		return fmt.Sprintf("GPU topology preference: agent %s not ranked (%s); "+
 			"slots chosen as for tasks without it", r.fit.Agent.id, r.resp.choice.unranked)
@@ -198,8 +200,8 @@ const (
 //     pass's plan and its reservations can differ (deepCopy), and an agent can change under a
 //     failed reservation. A pass that does neither, also one whose only failures are persistence
 //     failures, does not ask again, so passes converge;
-//   - if no agent of the pool can ever hold it (strongCannotFit, gpuGroupsCannotFit), the request
-//     fails, once, with an InvalidResourcesRequestError whose cause is that type too, so a trial
+//   - if no agent of the pool can ever hold it (strongCannotFit, gpuGroupsCannotFit), or its
+//     gpu_groups do not add up to its slots, the request fails, once, with an InvalidResourcesRequestError whose cause is that type too, so a trial
 //     ends without restarts;
 //   - otherwise, if it does not fit, the task log says once that it waits.
 //
@@ -236,6 +238,9 @@ func (rp *resourcePool) checkWaitingRequests(reserved bool) bool {
 		if groups != nil {
 			prefix = "gpu_groups: "
 			cause = gpuGroupsCannotFit(rp.config.PoolName, rp.agentStatesCache, groups, strongTopology(req))
+			if groups.Slots() != req.SlotsNeeded {
+				cause = errGPUGroupsSlots(groups, req.SlotsNeeded)
+			}
 			msg = fmt.Sprintf("gpu_groups: waiting until one agent in pool %s has free GPUs for %s",
 				rp.config.PoolName, groups)
 		}

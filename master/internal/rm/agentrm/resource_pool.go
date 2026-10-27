@@ -220,10 +220,6 @@ func (rp *resourcePool) restoreResources(
 			started:     cs.ResourcesWithState.Started,
 			exited:      cs.ResourcesWithState.Exited,
 		}
-		if groups := gpuGroupsOf(req); groups != nil {
-			// The reservation's assignment is the one assignment of its devices.
-			cr.gpuGroups = gpuGroupUUIDs(groups, cs.Devices)
-		}
 		resources[cr.Summary().ResourcesID] = &cr
 	}
 

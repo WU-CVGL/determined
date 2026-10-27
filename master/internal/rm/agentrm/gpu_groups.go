@@ -128,25 +128,59 @@ func matchGPUGroups(groups expconf.GPUGroupRequests, devices []device.Device, fo
 }
 
 // gpuGroupAssignment returns the devices of each group for exactly the devices of a valid set,
-// each group's devices sorted by ID, or nil when the set is not valid. It is the one assignment of
-// a set: the reservation records it, and a restore computes it again from the devices.
+// each group's devices sorted by ID, or nil when the set is not valid. The groups take the set's
+// lowest IDs in config order: each GPU of a group, one after another, is the lowest-ID device of
+// the set that leaves an assignment of the rest (exactGPUGroupSet).
 func gpuGroupAssignment(groups expconf.GPUGroupRequests, devices []device.Device) map[string][]device.Device {
 	sorted := slices.Clone(devices)
 	slices.SortFunc(sorted, func(a, b device.Device) int { return cmpInt(int(a.ID), int(b.ID)) })
-	slotDev := matchGPUGroups(groups, sorted, len(sorted))
-	if slotDev == nil {
+	if !exactGPUGroupSet(groups, sorted) {
 		return nil
 	}
+	used := make([]bool, len(sorted))
 	out := map[string][]device.Device{}
-	slot := 0
-	for _, group := range groups {
+	for gi, group := range groups {
 		for c := 0; c < group.Count; c++ {
-			out[group.Name] = append(out[group.Name], sorted[slotDev[slot]])
-			slot++
+			// The groups' GPUs after this one.
+			rest := expconf.GPUGroupRequests{}
+			if left := group.Count - c - 1; left > 0 {
+				rest = append(rest, expconf.GPUGroupRequest{Name: group.Name, Count: left, Models: group.Models})
+			}
+			rest = append(rest, groups[gi+1:]...)
+			taken := false
+			for i, d := range sorted {
+				if used[i] || !servesGPUGroup(group, d) {
+					continue
+				}
+				used[i] = true
+				var others []device.Device
+				for j, o := range sorted {
+					if !used[j] {
+						others = append(others, o)
+					}
+				}
+				if exactGPUGroupSet(rest, others) {
+					out[group.Name] = append(out[group.Name], d)
+					taken = true
+					break
+				}
+				used[i] = false
+			}
+			if !taken {
+				return nil
+			}
 		}
-		slices.SortFunc(out[group.Name], func(a, b device.Device) int { return cmpInt(int(a.ID), int(b.ID)) })
 	}
 	return out
+}
+
+// exactGPUGroupSet reports whether exactly the devices are a valid set of the groups; no groups
+// take exactly no devices.
+func exactGPUGroupSet(groups expconf.GPUGroupRequests, devices []device.Device) bool {
+	if groups.Slots() == 0 {
+		return len(devices) == 0
+	}
+	return len(devices) == groups.Slots() && matchGPUGroups(groups, devices, len(devices)) != nil
 }
 
 // gpuGroupUUIDs returns the UUIDs of each group's devices for the container (DET_GPU_GROUPS), or
@@ -192,12 +226,15 @@ func holdsGPUGroupsOnOneNUMANode(groups expconf.GPUGroupRequests, in gpuSelectio
 }
 
 // gpuGroupsSatisfied admits an agent for a request with gpu_groups when its free devices hold a
-// valid set, on one known NUMA node under prefer_gpu_topology "strong". It admits every agent for
-// other requests. The free devices are exactly the allocatable free slots (gpuSelectionInput).
+// valid set, on one known NUMA node under prefer_gpu_topology "strong", and none when the groups'
+// counts do not add up to the request's slots. It admits every agent for other requests. The free devices are exactly the allocatable free slots (gpuSelectionInput).
 func gpuGroupsSatisfied(req *sproto.AllocateRequest, agent *agentState) bool {
 	groups := gpuGroupsOf(req)
 	if groups == nil {
 		return true
+	}
+	if groups.Slots() != req.SlotsNeeded {
+		return false
 	}
 	in := agent.gpuSelectionInput()
 	if strongTopology(req) {
@@ -416,7 +453,7 @@ func bestValidGPUGroupSet(
 func selectGPUGroups(in gpuSelectionInput, n int, sel deviceSelection) gpuChoice {
 	groups := sel.groups
 	if groups.Slots() != n {
-		return gpuChoice{noSelectionReason: fmt.Sprintf("gpu_groups have %d GPUs for %d slots", groups.Slots(), n)}
+		return gpuChoice{noSelectionReason: errGPUGroupsSlots(groups, n).Error()}
 	}
 	if sel.strong && n >= 2 {
 		return selectGPUGroupsOnOneNUMANode(in, n, sel)
@@ -542,6 +579,11 @@ func (a *agentState) allDevices() []device.Device {
 	}
 	slices.SortFunc(out, func(a, b device.Device) int { return cmpInt(int(a.ID), int(b.ID)) })
 	return out
+}
+
+// errGPUGroupsSlots is why a task whose gpu_groups do not add up to its slots fails.
+func errGPUGroupsSlots(groups expconf.GPUGroupRequests, slots int) error {
+	return fmt.Errorf("gpu_groups have %d GPUs for %d slots", groups.Slots(), slots)
 }
 
 // errGPUGroupsNoAgent is why a task with gpu_groups is refused or fails.

@@ -102,9 +102,22 @@ func TestGPUGroupAssignment(t *testing.T) {
 		assignmentIDs(gpuGroupAssignment(overlap, modelDevices(rtx4090, ada6000))))
 	require.Equal(t, map[string][]int{"any": {1}, "ada": {0}},
 		assignmentIDs(gpuGroupAssignment(overlap, modelDevices(ada6000, rtx4090))))
-	require.Equal(t, map[string][]int{"any": {1}, "ada": {0}},
+	require.Equal(t, map[string][]int{"any": {0}, "ada": {1}},
 		assignmentIDs(gpuGroupAssignment(overlap, modelDevices(ada6000, ada6000))))
 	require.Nil(t, gpuGroupAssignment(overlap, modelDevices(rtx4090, rtx4090)))
+
+	// Groups listed first take the lowest IDs that leave GPUs for the rest.
+	same := expconf.GPUGroupRequests{group("a", 2, rtx4090), group("b", 2, rtx4090)}
+	require.Equal(t, map[string][]int{"a": {0, 1}, "b": {2, 3}},
+		assignmentIDs(gpuGroupAssignment(same, modelDevices(rtx4090, rtx4090, rtx4090, rtx4090))))
+	three := expconf.GPUGroupRequests{group("a", 1, rtx4090), group("b", 1, rtx4090), group("c", 1, rtx4090)}
+	require.Equal(t, map[string][]int{"a": {0}, "b": {1}, "c": {2}},
+		assignmentIDs(gpuGroupAssignment(three, modelDevices(rtx4090, rtx4090, rtx4090))))
+	wide := expconf.GPUGroupRequests{group("sim", 2, rtx4090, ada6000), group("learn", 2, rtx4090)}
+	require.Equal(t, map[string][]int{"sim": {0, 1}, "learn": {2, 3}},
+		assignmentIDs(gpuGroupAssignment(wide, modelDevices(rtx4090, rtx4090, rtx4090, rtx4090))))
+	require.Equal(t, map[string][]int{"sim": {1, 3}, "learn": {0, 2}},
+		assignmentIDs(gpuGroupAssignment(wide, modelDevices(rtx4090, ada6000, rtx4090, ada6000))))
 
 	// A GPU serves at most one group.
 	twice := expconf.GPUGroupRequests{group("a", 1, rtx4090), group("b", 1, rtx4090)}
@@ -134,6 +147,72 @@ func TestGPUGroupAssignment(t *testing.T) {
 		simAndLearner.String())
 	require.Equal(t, "any: 1 × NVIDIA GeForce RTX 4090 or NVIDIA RTX 6000 Ada Generation; "+
 		"ada: 1 × NVIDIA RTX 6000 Ada Generation", overlap.String())
+}
+
+// TestGPUGroupAssignmentLowestFirst checks the assignment against every assignment of small sets:
+// it is valid and, read GPU by GPU in config order, has the smallest IDs.
+func TestGPUGroupAssignmentLowestFirst(t *testing.T) {
+	brands := []string{rtx4090, ada6000, "NVIDIA A100"}
+	rng := rand.New(rand.NewSource(7))
+	for iter := 0; iter < 3000; iter++ {
+		var groups expconf.GPUGroupRequests
+		n := 0
+		for g := 0; g < 1+rng.Intn(3); g++ {
+			var models []string
+			for _, b := range brands {
+				if rng.Intn(2) == 0 {
+					models = append(models, b)
+				}
+			}
+			if len(models) == 0 {
+				models = []string{brands[rng.Intn(len(brands))]}
+			}
+			count := 1 + rng.Intn(2)
+			n += count
+			groups = append(groups, group(fmt.Sprintf("g%d", g), count, models...))
+		}
+		devices := make([]device.Device, n)
+		for i := range devices {
+			devices[i] = modelDevice(i, brands[rng.Intn(len(brands))])
+		}
+		// Slots in config order; the smallest list of IDs, slot by slot, of every assignment.
+		var slotGroup []int
+		for i, g := range groups {
+			for c := 0; c < g.Count; c++ {
+				slotGroup = append(slotGroup, i)
+			}
+		}
+		var best []int
+		perm := make([]int, n)
+		used := make([]bool, n)
+		var walk func(slot int)
+		walk = func(slot int) {
+			if slot == n {
+				if best == nil || slices.Compare(perm, best) < 0 {
+					best = slices.Clone(perm)
+				}
+				return
+			}
+			for d := 0; d < n; d++ {
+				if !used[d] && servesGPUGroup(groups[slotGroup[slot]], devices[d]) {
+					used[d], perm[slot] = true, d
+					walk(slot + 1)
+					used[d] = false
+				}
+			}
+		}
+		walk(0)
+		got := assignmentIDs(gpuGroupAssignment(groups, devices))
+		if best == nil {
+			require.Nil(t, got, "%v %v", groups, devices)
+			continue
+		}
+		want := map[string][]int{}
+		for slot, d := range best {
+			want[groups[slotGroup[slot]].Name] = append(want[groups[slotGroup[slot]].Name], d)
+		}
+		require.Equal(t, want, got, "%v %v", groups, devices)
+	}
 }
 
 // gpuGroupsOracle says whether exactly the devices are a valid set, by Hall's condition on their
@@ -591,6 +670,44 @@ func TestGPUGroupsImpossibleFailsOnce(t *testing.T) {
 	require.Error(t, gpuGroupsCannotFit("gpus", agents, impossible, false))
 	require.Error(t, gpuGroupsCannotFit("gpus", agents, impossible, true))
 	require.NoError(t, gpuGroupsCannotFit("gpus", map[aproto.ID]*agentState{}, impossible, false))
+}
+
+func TestGPUGroupsPreferenceLine(t *testing.T) {
+	// Unranked, a task with gpu_groups gets its set by the rule its debug line names.
+	fit := &fittingState{Agent: &agentState{id: "node02"}}
+	require.Equal(t, "GPU topology preference: agent node02 not ranked (more than 20000 sets of free GPUs)",
+		gpuTopologyPreferenceLine([]gpuReservation{{fit: fit, resp: allocateFreeDevicesResponse{
+			devices: gpuDeviceList(0, 1),
+			choice: gpuChoice{
+				unranked:  "more than 20000 sets of free GPUs",
+				gpuGroups: map[string][]string{"simulation": {"GPU-0"}, "learner": {"GPU-1"}},
+			},
+		}}}))
+}
+
+func TestGPUGroupsCountMismatchFailsOnce(t *testing.T) {
+	// A request whose groups do not add up to its slots never fits; it fails once with the count.
+	state := modelAgentState(t, modelDevices(rtx4090, ada6000, rtx4090), nil)
+	s := groupsPool(t, gpuPolicy{packNUMA: true}, map[aproto.ID]*agentState{"a": state})
+	sub := s.addGroups(t, "mismatch", simAndLearner, expconf.GPUTopologyOff)
+	s.rp.mu.Lock()
+	req, ok := s.rp.taskList.TaskByID("mismatch")
+	require.True(t, ok)
+	req.SlotsNeeded = 3
+	require.Empty(t, findFits(req, s.live, BestFit, false, true))
+	s.rp.mu.Unlock()
+	before := snapshotOf(state)
+	for pass := 0; pass < 3; pass++ {
+		allocated, _, again := s.pass(t)
+		require.Empty(t, allocated)
+		require.False(t, again)
+	}
+	require.Equal(t, before, snapshotOf(state))
+	event := awaitEvent(t, sub, time.Second)
+	require.IsType(t, &sproto.InvalidResourcesRequestError{}, event)
+	require.EqualError(t, event.(*sproto.InvalidResourcesRequestError).Cause,
+		"invalid resources request: gpu_groups have 2 GPUs for 3 slots")
+	require.Nil(t, awaitEvent(t, sub, 100*time.Millisecond), "fails once")
 }
 
 func TestGPUGroupsPlanMatchesTheReservations(t *testing.T) {
