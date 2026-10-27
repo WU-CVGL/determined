@@ -127,9 +127,16 @@ func describeGPUConflicts(conflicts map[aproto.ID][]string, verb string) string 
 func gpuUUIDs(devices []device.Device) []string {
 	var uuids []string
 	for _, d := range devices {
-		if (d.Type == device.CUDA || d.Type == device.ROCM) && d.UUID != "" {
+		if (d.Type == device.CUDA || d.Type == device.ROCM) && !placeholderGPUUUID(d.UUID) {
 			uuids = append(uuids, d.UUID)
 		}
 	}
 	return uuids
+}
+
+// placeholderGPUUUID reports a UUID that names no GPU: empty, or the "N/A" that rocm-smi prints
+// when it cannot read a card's unique ID.
+func placeholderGPUUUID(uuid string) bool {
+	uuid = strings.TrimSpace(uuid)
+	return uuid == "" || strings.EqualFold(uuid, "N/A")
 }

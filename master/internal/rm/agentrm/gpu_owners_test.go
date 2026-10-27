@@ -1,6 +1,7 @@
 package agentrm
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -66,6 +67,30 @@ func TestGPUOwnersIgnoresDevicesWithoutGPUUUID(t *testing.T) {
 	rocm := []device.Device{{ID: 0, Brand: "amd", UUID: "0x1234", Type: device.ROCM}}
 	require.NoError(t, g.claim(&agent{id: "a"}, rocm))
 	require.ErrorContains(t, g.claim(&agent{id: "b"}, rocm), "already reported by agent a")
+}
+
+// rocm-smi prints "N/A" for a card whose unique ID it cannot read; such cards on different agents
+// are not the same GPU.
+func TestGPUOwnersIgnoresPlaceholderUUIDs(t *testing.T) {
+	g := newGPUOwners()
+	for i, uuid := range []string{"N/A", "n/a", " N/A ", "N/A\n"} {
+		devices := []device.Device{
+			{ID: 0, Brand: "amd", UUID: uuid, Type: device.ROCM},
+			{ID: 1, Brand: "test", UUID: uuid, Type: device.CUDA},
+		}
+		require.NoError(t, g.claim(&agent{id: aproto.ID(fmt.Sprintf("a%d", i))}, devices), uuid)
+		require.NoError(t, g.claim(&agent{id: aproto.ID(fmt.Sprintf("b%d", i))}, devices), uuid)
+	}
+	require.Empty(t, g.owners)
+
+	// A real ROCm unique ID next to a placeholder is still compared.
+	devices := []device.Device{
+		{ID: 0, Brand: "amd", UUID: "N/A", Type: device.ROCM},
+		{ID: 1, Brand: "amd", UUID: "0x7ef570db1b346018", Type: device.ROCM},
+	}
+	require.NoError(t, g.claim(&agent{id: "c"}, devices))
+	require.EqualError(t, g.claim(&agent{id: "d"}, devices),
+		"agent d refused: GPU 0x7ef570db1b346018 is already reported by agent c")
 }
 
 // Agents restored from snapshots that share a GPU all hold it. A new agent ID is refused while any
