@@ -120,13 +120,15 @@ func (m *Manager) ReattachContainers(
 				ack = aproto.ContainerReattachAck{
 					Container: *cpc,
 				}
+				delete(runningContainers, cID)
 			}
 		}
 
 		result = append(result, ack)
-		delete(runningContainers, cID)
 	}
 
+	// This includes the expected survivors that failed to reattach: the master treats them as
+	// terminated and frees their slots.
 	m.log.Trace("sending SIGKILL to running containers that were not reattached")
 	for cid, containerInfo := range runningContainers {
 		m.log.Infof("will kill container %s", cid)
