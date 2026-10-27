@@ -35,6 +35,8 @@ import (
 )
 
 const (
+	validateResourcesMethod = "ValidateResources"
+
 	h100     = "NVIDIA H100 80GB HBM3"
 	rtx4090  = "NVIDIA GeForce RTX 4090"
 	ada6000  = "NVIDIA RTX 6000 Ada Generation"
@@ -53,14 +55,14 @@ func groupsValidatingRM() (*mocks.ResourceManager, func() []sproto.ValidateResou
 	mockRM := MockRM()
 	var kept []*mock.Call
 	for _, c := range mockRM.ExpectedCalls {
-		if c.Method != "ValidateResources" {
+		if c.Method != validateResourcesMethod {
 			kept = append(kept, c)
 		}
 	}
 	mockRM.ExpectedCalls = kept
 	var mu sync.Mutex
 	var seen []sproto.ValidateResourcesRequest
-	mockRM.On("ValidateResources", mock.Anything).Return(
+	mockRM.On(validateResourcesMethod, mock.Anything).Return(
 		func(req sproto.ValidateResourcesRequest) []pkgCommand.LaunchWarning {
 			mu.Lock()
 			defer mu.Unlock()

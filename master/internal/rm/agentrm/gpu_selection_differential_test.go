@@ -27,7 +27,7 @@ const gpuSelectionGolden = "testdata/gpu_selection_without_groups.golden"
 // devices with the rule, or the reservation's error. A reservation in map order is random, so only
 // its count and reason are described.
 func selectionOutcomes(t *testing.T) []string {
-	rng := rand.New(rand.NewSource(42))
+	rng := rand.New(rand.NewSource(42)) //nolint:gosec
 	fixtures := []topologyFixture{node02, node01, node07, node05, node01Widths, g292(p2pOK), g292(p2pNotOK)}
 	var out []string
 	for trial := 0; trial < 600; trial++ {
@@ -100,7 +100,7 @@ func selectionOutcomes(t *testing.T) []string {
 func TestGPUSelectionWithoutGroupsUnchanged(t *testing.T) {
 	got := selectionOutcomes(t)
 	if os.Getenv("DET_UPDATE_GOLDEN") != "" {
-		require.NoError(t, os.MkdirAll("testdata", 0o755))
+		require.NoError(t, os.MkdirAll("testdata", 0o750))
 		require.NoError(t, os.WriteFile(gpuSelectionGolden, []byte(strings.Join(got, "\n")+"\n"), 0o600))
 	}
 	want, err := os.ReadFile(gpuSelectionGolden)

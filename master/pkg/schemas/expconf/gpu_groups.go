@@ -18,17 +18,18 @@ type GPUGroupsConfigV0 []GPUGroupV0
 // entry over the entry at the same index, so an entry that leaves out a key would keep a
 // template's value for it in a command's config.
 func (g *GPUGroupsConfigV0) UnmarshalJSON(data []byte) error {
-	if string(bytes.TrimSpace(data)) == "null" {
-		*g = nil
-		return nil
-	}
-	var out []GPUGroupV0
+	// null leaves the pointer nil.
+	var out *[]GPUGroupV0
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&out); err != nil {
 		return fmt.Errorf("gpu_groups: %w", err)
 	}
-	*g = out
+	if out == nil {
+		*g = nil
+		return nil
+	}
+	*g = *out
 	return nil
 }
 

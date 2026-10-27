@@ -49,6 +49,8 @@ const (
 	noKnownNUMANode = "no free healthy GPU with a known NUMA node"
 	// fewerThanTwoSlots is why prefer_gpu_topology does not rank a reservation of 1 slot.
 	fewerThanTwoSlots = "fewer than 2 slots"
+	// everyPairUnknown is why prefer_gpu_topology does not rank a report without a rankable link.
+	everyPairUnknown = "every pair of free GPUs unknown"
 	// maxTopologySets bounds the sets of free GPUs that prefer_gpu_topology compares in one
 	// ranking (C(16,8) = 12870 fits): of the agent's free GPUs for "soft", of each NUMA node's free
 	// GPUs for "strong". Above it, "soft" gets the pool's default choice; "strong" takes that NUMA
@@ -629,7 +631,7 @@ func selectByTopology(
 		}
 	}
 	if !rankable {
-		return nil, "", "every pair of free GPUs unknown"
+		return nil, "", everyPairUnknown
 	}
 
 	type setKey struct {

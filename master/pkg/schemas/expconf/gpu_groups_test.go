@@ -25,23 +25,37 @@ func TestGPUGroupsCheck(t *testing.T) {
 		field  string
 		want   string
 	}{
-		{gpuGroupRequests(sim, learner), 2, "resources.slots_per_trial",
-			"resources.gpu_groups counts must add up to resources.slots_per_trial (2)"},
+		{
+			gpuGroupRequests(sim, learner), 2, "resources.slots_per_trial",
+			"resources.gpu_groups counts must add up to resources.slots_per_trial (2)",
+		},
 		{gpuGroupRequests(sim), 0, "resources.slots", "resources.gpu_groups counts must add up to resources.slots (0)"},
 		{GPUGroupRequests{}, 0, "resources.slots", "resources.gpu_groups must not be empty"},
-		{gpuGroupRequests(GPUGroupRequest{Name: "Sim", Count: 1, Models: []string{"x"}}), 1, "resources.slots",
-			`resources.gpu_groups name "Sim" must match ^[a-z][a-z0-9_-]{0,31}$`},
-		{gpuGroupRequests(GPUGroupRequest{Count: 1, Models: []string{"x"}}), 1, "resources.slots",
-			`resources.gpu_groups name "" must match ^[a-z][a-z0-9_-]{0,31}$`},
+		{
+			gpuGroupRequests(GPUGroupRequest{Name: "Sim", Count: 1, Models: []string{"x"}}), 1, "resources.slots",
+			`resources.gpu_groups name "Sim" must match ^[a-z][a-z0-9_-]{0,31}$`,
+		},
+		{
+			gpuGroupRequests(GPUGroupRequest{Count: 1, Models: []string{"x"}}), 1, "resources.slots",
+			`resources.gpu_groups name "" must match ^[a-z][a-z0-9_-]{0,31}$`,
+		},
 		{gpuGroupRequests(sim, sim), 2, "resources.slots", `resources.gpu_groups name "simulation" is not unique`},
-		{gpuGroupRequests(GPUGroupRequest{Name: "a", Models: []string{"x"}}), 0, "resources.slots",
-			"resources.gpu_groups a: count must be at least 1"},
-		{gpuGroupRequests(GPUGroupRequest{Name: "a", Count: 1}), 1, "resources.slots",
-			"resources.gpu_groups a: models must not be empty"},
-		{gpuGroupRequests(GPUGroupRequest{Name: "a", Count: 1, Models: []string{"x", "x"}}), 1, "resources.slots",
-			"resources.gpu_groups a: models must be unique"},
-		{gpuGroupRequests(GPUGroupRequest{Name: "a", Count: 1, Models: []string{""}}), 1, "resources.slots",
-			"resources.gpu_groups a: a model must not be empty"},
+		{
+			gpuGroupRequests(GPUGroupRequest{Name: "a", Models: []string{"x"}}), 0, "resources.slots",
+			"resources.gpu_groups a: count must be at least 1",
+		},
+		{
+			gpuGroupRequests(GPUGroupRequest{Name: "a", Count: 1}), 1, "resources.slots",
+			"resources.gpu_groups a: models must not be empty",
+		},
+		{
+			gpuGroupRequests(GPUGroupRequest{Name: "a", Count: 1, Models: []string{"x", "x"}}), 1, "resources.slots",
+			"resources.gpu_groups a: models must be unique",
+		},
+		{
+			gpuGroupRequests(GPUGroupRequest{Name: "a", Count: 1, Models: []string{""}}), 1, "resources.slots",
+			"resources.gpu_groups a: a model must not be empty",
+		},
 	} {
 		require.EqualError(t, c.groups.Check(c.slots, c.field), c.want)
 	}

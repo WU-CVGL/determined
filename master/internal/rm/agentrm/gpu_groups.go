@@ -323,7 +323,7 @@ func gpuGroupsUnranked(candidates []rankedGPU, g *gpuTopology, n int) string {
 			}
 		}
 	}
-	return "every pair of free GPUs unknown"
+	return everyPairUnknown
 }
 
 // bestValidGPUGroupSet returns the valid set of n candidates that ranks first, or nil when there

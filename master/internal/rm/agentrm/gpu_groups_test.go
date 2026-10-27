@@ -261,7 +261,7 @@ func TestGPUGroupsEqualsOracle(t *testing.T) {
 	// free GPUs (on one known NUMA node under "strong"), the reservation takes a valid set with the
 	// assignment it records, the lowest-ID valid set without a rule, and a failed reservation
 	// changes nothing.
-	rng := rand.New(rand.NewSource(7))
+	rng := rand.New(rand.NewSource(7)) //nolint:gosec
 	allModels := []string{rtx4090, ada6000, "NVIDIA A100-SXM4-80GB"}
 	fitted := map[string]int{}
 	for trial := 0; trial < 3000; trial++ {
