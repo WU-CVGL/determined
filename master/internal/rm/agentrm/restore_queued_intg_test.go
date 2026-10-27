@@ -185,7 +185,9 @@ func (ta *restoreTestAgent) requireNoStart(d time.Duration) {
 		select {
 		case msg, ok := <-ta.socket.Inbox:
 			require.True(ta.t, ok, "socket closed")
-			require.Nil(ta.t, msg.StartContainer, "container started")
+			if msg.StartContainer != nil {
+				require.FailNow(ta.t, "container started", "%s", msg.StartContainer.Container.ID)
+			}
 		case <-timeout:
 			return
 		}
