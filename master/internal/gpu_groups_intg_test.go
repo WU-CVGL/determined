@@ -6,9 +6,11 @@ package internal
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ghodss/yaml"
 	"github.com/google/uuid"
@@ -292,24 +294,41 @@ func TestContinueAndMoveCheckGPUGroups(t *testing.T) {
 	}, checks[len(checks)-1])
 }
 
-// A trial passes its gpu_groups to the resource manager.
+// A trial passes its gpu_groups to the resource manager, for a new allocation and for one restored
+// after a master restart from the stored experiment config.
 func TestTrialCarriesGPUGroups(t *testing.T) {
 	var groups expconf.GPUGroupsConfig
 	require.NoError(t, yaml.Unmarshal([]byte(gpuGroupsConfig(ada6000)), &groups))
-	_, tr, alloc, _ := setupWithResources(t, &expconf.ResourcesConfig{
-		RawSlotsPerTrial: ptrs.Ptr(2), RawGPUGroups: groups,
-	})
-	alloc.ExpectedCalls = nil
-	var req sproto.AllocateRequest
-	alloc.On(
-		"StartAllocation", mock.Anything, mock.Anything, mock.Anything,
-		mock.Anything, mock.Anything, mock.Anything, mock.Anything,
-	).Run(func(args mock.Arguments) {
-		req = args.Get(1).(sproto.AllocateRequest)
-	}).Return(nil)
+	for _, restored := range []bool{false, true} {
+		_, tr, alloc, _ := setupWithResources(t, &expconf.ResourcesConfig{
+			RawSlotsPerTrial: ptrs.Ptr(2), RawGPUGroups: groups,
+		})
+		if restored {
+			tr.rm.(*mocks.ResourceManager).On("IsReattachableOnlyAfterStarted").Return(false)
+			require.NoError(t, db.AddAllocation(context.TODO(), &model.Allocation{
+				AllocationID: model.AllocationID(fmt.Sprintf("%s.1", tr.taskID)),
+				TaskID:       tr.taskID,
+				Slots:        2,
+				ResourcePool: "default",
+				StartTime:    ptrs.Ptr(time.Now().UTC()),
+				State:        ptrs.Ptr(model.AllocationStateRunning),
+				Ports:        map[string]int{},
+			}))
+			tr.restored = true
+		}
+		alloc.ExpectedCalls = nil
+		var req sproto.AllocateRequest
+		alloc.On(
+			"StartAllocation", mock.Anything, mock.Anything, mock.Anything,
+			mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+		).Run(func(args mock.Arguments) {
+			req = args.Get(1).(sproto.AllocateRequest)
+		}).Return(nil)
 
-	require.NoError(t, tr.PatchState(model.StateWithReason{State: model.ActiveState}))
-	require.NoError(t, tr.PatchSearcherState(experiment.TrialSearcherState{Create: searcher.Create{}}))
-	require.Equal(t, 2, req.SlotsNeeded)
-	require.Equal(t, wantGroups, req.FittingRequirements.GPUGroups)
+		require.NoError(t, tr.PatchState(model.StateWithReason{State: model.ActiveState}))
+		require.NoError(t, tr.PatchSearcherState(experiment.TrialSearcherState{Create: searcher.Create{}}))
+		require.Equal(t, restored, req.Restore)
+		require.Equal(t, 2, req.SlotsNeeded)
+		require.Equal(t, wantGroups, req.FittingRequirements.GPUGroups)
+	}
 }

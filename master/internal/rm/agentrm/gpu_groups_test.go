@@ -445,8 +445,20 @@ func TestGPUGroupsNeverTakeMapOrder(t *testing.T) {
 	require.Equal(t, []int{0, 1}, deviceIDs(res.devices))
 	require.Equal(t, map[string][]string{"simulation": {"GPU-0"}, "learner": {"GPU-1"}}, res.choice.gpuGroups)
 
+	// Under "strong", a valid set on two NUMA nodes fails too.
+	brands := []string{rtx4090, rtx4090, rtx4090, rtx4090, ada6000, ada6000, ada6000, ada6000}
+	split := modelAgentState(t, modelDevices(brands...), &node02)
+	before := snapshotOf(split)
+	res, err = split.chooseFreeDevices(2, deviceSelection{groups: simAndLearner, strong: true},
+		func(gpuSelectionInput, int, deviceSelection) gpuChoice {
+			return gpuChoice{devices: []device.Device{modelDevice(1, rtx4090), modelDevice(4, ada6000)}}
+		})
+	require.ErrorContains(t, err, "gpu_groups")
+	require.Nil(t, res.devices)
+	require.Equal(t, before, snapshotOf(split))
+
 	// The simulation counts a failed reservation as a miss; it does not panic.
-	full := modelAgentState(t, modelDevices(rtx4090, rtx4090), nil)
+	full :=modelAgentState(t, modelDevices(rtx4090, rtx4090), nil)
 	req := groupsRequest(simAndLearner, expconf.GPUTopologyOff)
 	require.False(t, priorityScheduler{}.addTaskToAgents(req, []*fittingState{{Agent: full, Slots: 2}}))
 }

@@ -225,6 +225,8 @@ func setupWithResources(t *testing.T, resources *expconf.ResourcesConfig) (
 
 	// mock allocation service
 	var as allocationmocks.AllocationService
+	oldService := task.DefaultService
+	t.Cleanup(func() { task.DefaultService = oldService })
 	task.DefaultService = &as
 	as.On(
 		"StartAllocation", mock.Anything, mock.Anything, mock.Anything,
