@@ -200,8 +200,9 @@ starting its agents.
 `det agent list` shows each agent's version. Running work stays where it is;
 check its allocations as after the master swap.
 
-For agents with headless Vulkan and OpenGL support, register the NVIDIA runtime
-before replacing the agent; see [graphics containers](graphics-containers.md).
+An agent starts every CUDA task with the `nvidia` runtime. Before replacing a
+GPU agent, check that Docker on its node has the `nvidia` runtime registered;
+see [graphics containers](graphics-containers.md).
 Existing containers keep their original driver mounts after reattachment.
 
 ## Roll back
