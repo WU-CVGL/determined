@@ -1437,8 +1437,8 @@ Each group has:
 
 The counts must add up to ``slots_per_trial``; otherwise the experiment is refused with
 ``resources.gpu_groups counts must add up to resources.slots_per_trial (2)``. Unset, or ``null``, is
-no groups. Templates and config policies set the list as a whole: two lists are never merged entry
-by entry.
+no groups; in an experiment, a template's list still applies. Templates and config policies set the
+list as a whole: two lists are never merged entry by entry.
 
 Only the agent resource manager runs ``gpu_groups``:
 
@@ -1464,19 +1464,20 @@ Only the agent resource manager runs ``gpu_groups``:
    pool could hold the groups with every slot free, disabled and draining slots included, on one
    NUMA node with ``"strong"``: ``no agent in pool gpus has GPUs for gpu_groups simulation: 1 ×
    NVIDIA GeForce RTX 4090; learner: 1 × NVIDIA H100 80GB HBM3``. A pool without agents refuses it
-   at creation, and moving the experiment to such a pool is refused the same way. With ``"strong"``,
-   an agent whose GPUs hold the groups but whose topology the master does not have yet, for example
-   right after a master restart, counts as one that could. The master never refuses a trial it
-   restores; retries, continued experiments and trials restored after a master restart keep the
-   groups.
+   at creation, except a pool with a provider, which accepts it; moving the experiment to such a
+   pool is refused the same way. With ``"strong"``, an agent whose GPUs hold the groups but whose
+   topology the master does not have yet, for example right after a master restart, counts as one
+   that could. The master never refuses a trial it restores; retries, continued experiments and
+   trials restored after a master restart keep the groups.
 
 -  The Kubernetes, Slurm and PBS resource managers refuse it.
 
 The container gets every GPU of the groups, as for any task, and ``DET_GPU_GROUPS``: compact JSON
 with each group's GPU UUIDs, groups sorted by name and each group's GPUs by slot ID, for example
-``{"learner":["GPU-5b2e…"],"simulation":["GPU-0c1d…"]}``. Inside the container, CUDA's device
-indexes need not follow the groups or the slot IDs; bind a process to its group by UUID instead.
-CUDA accepts UUIDs in ``CUDA_VISIBLE_DEVICES``, so a process started with
+``{"learner":["GPU-5b2e…"],"simulation":["GPU-0c1d…"]}``. The groups take the trial's GPUs in list
+order: each group gets the lowest slot IDs that leave GPUs for the groups after it. Inside the
+container, CUDA's device indexes need not follow the groups or the slot IDs; bind a process to its
+group by UUID instead. CUDA accepts UUIDs in ``CUDA_VISIBLE_DEVICES``, so a process started with
 ``CUDA_VISIBLE_DEVICES=<the group's UUIDs, comma-separated>`` sees only its group's GPUs, as device
 0 onward:
 
