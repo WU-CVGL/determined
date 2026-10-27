@@ -406,3 +406,136 @@
     priority: null
     is_single_node: null
     devices: []
+
+- name: gpu_groups (valid)
+  sane_as:
+    - http://determined.ai/schemas/expconf/v0/resources.json
+  case:
+    slots_per_trial: 2
+    gpu_groups:
+      - name: simulation
+        count: 1
+        models: ["NVIDIA GeForce RTX 4090"]
+      - name: learner-2
+        count: 1
+        models: ["NVIDIA RTX 6000 Ada Generation", "NVIDIA GeForce RTX 4090"]
+
+- name: gpu_groups null (valid)
+  sane_as:
+    - http://determined.ai/schemas/expconf/v0/resources.json
+  case:
+    gpu_groups: null
+
+- name: gpu_groups empty list (invalid)
+  sanity_errors:
+    http://determined.ai/schemas/expconf/v0/resources.json:
+      - "<config>.gpu_groups: gpu_groups must not be empty"
+  case:
+    gpu_groups: []
+
+- name: gpu_groups bad name (invalid)
+  sanity_errors:
+    http://determined.ai/schemas/expconf/v0/resources.json:
+      - "<config>.gpu_groups\\[0\\].name: name must match"
+      - "<config>.gpu_groups\\[1\\].name: name must match"
+      - "<config>.gpu_groups\\[2\\].name: name must match"
+  case:
+    gpu_groups:
+      - name: Simulation
+        count: 1
+        models: ["NVIDIA GeForce RTX 4090"]
+      - name: 1sim
+        count: 1
+        models: ["NVIDIA GeForce RTX 4090"]
+      - name: a234567890123456789012345678901234
+        count: 1
+        models: ["NVIDIA GeForce RTX 4090"]
+
+- name: gpu_groups count and models (invalid)
+  sanity_errors:
+    http://determined.ai/schemas/expconf/v0/resources.json:
+      - "<config>.gpu_groups\\[0\\].count: must be >= 1"
+      - "<config>.gpu_groups\\[1\\].models: models must not be empty"
+      - "<config>.gpu_groups\\[2\\].models: models must be unique"
+      - "<config>.gpu_groups\\[3\\].models\\[0\\]: a model must not be empty"
+  case:
+    gpu_groups:
+      - name: zero
+        count: 0
+        models: ["NVIDIA GeForce RTX 4090"]
+      - name: none
+        count: 1
+        models: []
+      - name: twice
+        count: 1
+        models: ["NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 4090"]
+      - name: blank
+        count: 1
+        models: [""]
+
+- name: gpu_groups unknown and missing keys (invalid)
+  sanity_errors:
+    http://determined.ai/schemas/expconf/v0/resources.json:
+      - "<config>.gpu_groups\\[0\\]: additionalProperties \"memory\" not allowed"
+      - "<config>.gpu_groups\\[1\\]: missing properties: \"models\""
+  case:
+    gpu_groups:
+      - name: sim
+        count: 1
+        models: ["NVIDIA GeForce RTX 4090"]
+        memory: 24
+      - name: learner
+        count: 1
+
+- name: gpu_groups replace a template's list
+  merge_as: http://determined.ai/schemas/expconf/v0/resources.json
+  case:
+    gpu_groups:
+      - name: sim
+        count: 2
+        models: ["NVIDIA GeForce RTX 4090"]
+  merge_src:
+    slots_per_trial: 2
+    gpu_groups:
+      - name: sim
+        count: 1
+        models: ["NVIDIA RTX 6000 Ada Generation"]
+      - name: learner
+        count: 1
+        models: ["NVIDIA RTX 6000 Ada Generation"]
+  merged:
+    slots_per_trial: 2
+    gpu_groups:
+      - name: sim
+        count: 2
+        models: ["NVIDIA GeForce RTX 4090"]
+    max_slots: null
+    weight: null
+    shm_size: null
+    resource_pool: null
+    priority: null
+    is_single_node: null
+    devices: []
+
+- name: gpu_groups from a template
+  merge_as: http://determined.ai/schemas/expconf/v0/resources.json
+  case:
+    slots_per_trial: 1
+  merge_src:
+    gpu_groups:
+      - name: sim
+        count: 1
+        models: ["NVIDIA RTX 6000 Ada Generation"]
+  merged:
+    slots_per_trial: 1
+    gpu_groups:
+      - name: sim
+        count: 1
+        models: ["NVIDIA RTX 6000 Ada Generation"]
+    max_slots: null
+    weight: null
+    shm_size: null
+    resource_pool: null
+    priority: null
+    is_single_node: null
+    devices: []

@@ -495,10 +495,10 @@ func gpuGroupsChoice(
 }
 
 // gpuGroupsCannotFit says why no agent of the pool can ever hold the groups, or returns nil while
-// one might: the pool has no agent, an agent's devices hold a valid set with every slot free,
-// disabled and draining ones included, or, under prefer_gpu_topology "strong", those of one known
-// NUMA node do, or an agent has not reported its topology since the master started. Restored
-// agents keep their devices' models, so without "strong" it never waits for an agent to report.
+// one might: the pool has no agent, or an agent's devices hold a valid set with every slot free,
+// disabled and draining ones included, and, under prefer_gpu_topology "strong", those of one known
+// NUMA node do or the agent has not reported its topology since the master started. Restored
+// agents keep their devices' models, so the models decide before an agent reports.
 func gpuGroupsCannotFit(
 	pool string, agents map[aproto.ID]*agentState, groups expconf.GPUGroupRequests, strong bool,
 ) error {
@@ -506,15 +506,12 @@ func gpuGroupsCannotFit(
 		return nil
 	}
 	for _, a := range agents {
-		if strong && a.gpuTopology == nil {
-			return nil
-		}
 		devices := a.allDevices()
-		if !strong {
-			if holdsGPUGroups(groups, devices) {
-				return nil
-			}
+		if !holdsGPUGroups(groups, devices) {
 			continue
+		}
+		if !strong || a.gpuTopology == nil {
+			return nil
 		}
 		byNode := map[int][]device.Device{}
 		for _, d := range devices {

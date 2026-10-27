@@ -1,0 +1,600 @@
+0 slots=5 single=false pref="soft" pack=false: fit agent-2/5 one-node=false devices [1 2 3 4 7] (GPU topology preference; worst pair SYS, P2P usable, narrow) worst "worst pair SYS, P2P usable, narrow" unranked ""
+1 slots=16 single=true pref="" pack=false:
+2 slots=14 single=false pref="strong" pack=false:
+3 slots=6 single=false pref="soft" pack=true: fit agent-0/6 one-node=false devices [0 1 2 3 5 6] (GPU topology preference; worst pair SYS, P2P not usable) worst "worst pair SYS, P2P not usable" unranked ""
+4 slots=8 single=true pref="strong" pack=true:
+5 slots=15 single=false pref="soft" pack=true:
+6 slots=1 single=false pref="off" pack=false: fit agent-2/1 one-node=false map order 1 () failure ""
+7 slots=8 single=true pref="" pack=false: fit agent-0/8 one-node=false map order 8 () failure ""
+8 slots=6 single=true pref="soft" pack=true:
+9 slots=3 single=true pref="soft" pack=false: fit agent-0/3 one-node=false devices [1 2 5] (GPU topology preference; worst pair SYS, P2P not usable) worst "worst pair SYS, P2P not usable" unranked ""
+10 slots=15 single=false pref="" pack=true:
+11 slots=8 single=true pref="" pack=true:
+12 slots=6 single=false pref="strong" pack=true:
+13 slots=15 single=true pref="strong" pack=false:
+14 slots=7 single=true pref="" pack=false: fit agent-0/7 one-node=false map order 7 () failure ""
+15 slots=2 single=true pref="soft" pack=false: fit agent-0/2 one-node=false devices [1 2] (GPU topology preference; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+16 slots=2 single=true pref="soft" pack=false: fit agent-0/2 one-node=false devices [5 6] (GPU topology preference; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+17 slots=14 single=true pref="strong" pack=true:
+18 slots=16 single=true pref="soft" pack=false:
+19 slots=1 single=true pref="" pack=false: fit agent-0/1 one-node=false map order 1 () failure ""
+20 slots=16 single=true pref="soft" pack=true:
+21 slots=2 single=true pref="" pack=true: fit agent-1/2 one-node=false devices [0 2] (NUMA packing; free per NUMA node 0:4; in error: 5) worst "" unranked ""
+22 slots=14 single=false pref="soft" pack=false:
+23 slots=15 single=true pref="" pack=true:
+24 slots=3 single=true pref="soft" pack=true: fit agent-0/3 one-node=false devices [0 1 4] (lowest free IDs: not reported since the master started) worst "" unranked "topology unknown: not reported since the master started"
+25 slots=6 single=true pref="strong" pack=false: fit agent-0/6 one-node=false devices [1 2 3 4 6 7] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+26 slots=2 single=true pref="" pack=true: fit agent-1/2 one-node=false devices [0 1] (NUMA packing; free per NUMA node 0:8) worst "" unranked ""
+27 slots=16 single=false pref="strong" pack=false:
+28 slots=16 single=true pref="" pack=false:
+29 slots=7 single=false pref="strong" pack=true: fit agent-0/7 one-node=false devices [0 1 2 3 4 5 6] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+30 slots=1 single=true pref="soft" pack=true: fit agent-0/1 one-node=false devices [0] (NUMA packing; free per NUMA node 0:4; in error: 3) worst "" unranked ""
+31 slots=3 single=true pref="off" pack=true: fit agent-0/3 one-node=false devices [4 6 7] (NUMA packing; free per NUMA node 0:4 1:3; in error: 5) worst "" unranked ""
+32 slots=3 single=false pref="soft" pack=true: fit agent-1/3 one-node=true devices [0 1 3] (GPU topology preference; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+33 slots=2 single=true pref="soft" pack=true: fit agent-0/2 one-node=true devices [2 3] (GPU topology preference; worst pair NODE, P2P usable, narrow) worst "worst pair NODE, P2P usable, narrow" unranked ""
+34 slots=14 single=true pref="strong" pack=true:
+35 slots=6 single=false pref="soft" pack=true: fit agent-1/6 one-node=true devices [0 2 3 4 5 6] (GPU topology preference; worst pair PIX, P2P not usable) worst "worst pair PIX, P2P not usable" unranked ""
+36 slots=8 single=false pref="" pack=true:
+37 slots=14 single=true pref="soft" pack=true:
+38 slots=5 single=false pref="strong" pack=true:
+39 slots=8 single=true pref="off" pack=true:
+40 slots=1 single=true pref="off" pack=true: fit agent-0/1 one-node=false devices [0] (NUMA packing; free per NUMA node 0:4 1:4) worst "" unranked ""
+41 slots=5 single=false pref="strong" pack=true:
+42 slots=16 single=false pref="off" pack=true:
+43 slots=0 single=true pref="" pack=false: fit agent-0/0 one-node=false
+44 slots=8 single=true pref="soft" pack=true:
+45 slots=15 single=true pref="off" pack=true:
+46 slots=1 single=true pref="strong" pack=true: fit agent-0/1 one-node=false devices [0] (lowest free IDs: not reported since the master started; in error last: 6) worst "" unranked ""
+47 slots=16 single=true pref="strong" pack=true:
+48 slots=15 single=false pref="off" pack=false: fit agent-0/8 one-node=false fit agent-2/7 one-node=false
+49 slots=16 single=false pref="soft" pack=true:
+50 slots=15 single=false pref="soft" pack=true:
+51 slots=16 single=false pref="strong" pack=true:
+52 slots=0 single=false pref="off" pack=true: fit agent-1/0 one-node=false
+53 slots=3 single=false pref="" pack=false: fit agent-0/3 one-node=false map order 3 () failure ""
+54 slots=16 single=false pref="soft" pack=true:
+55 slots=1 single=true pref="strong" pack=true: fit agent-0/1 one-node=false devices [1] (NUMA packing; free per NUMA node 0:3 1:4) worst "" unranked ""
+56 slots=0 single=true pref="soft" pack=true: fit agent-0/0 one-node=false
+57 slots=1 single=true pref="strong" pack=true: fit agent-0/1 one-node=false devices [5] (NUMA packing; free per NUMA node 0:4 1:2; in error: 6) worst "" unranked ""
+58 slots=15 single=false pref="strong" pack=true:
+59 slots=16 single=true pref="soft" pack=true:
+60 slots=6 single=true pref="off" pack=true: fit agent-0/6 one-node=false devices [0 1 2 3 5 7] (NUMA packing; free per NUMA node 0:4 1:2; in error: 6) worst "" unranked ""
+61 slots=16 single=false pref="soft" pack=false:
+62 slots=3 single=true pref="" pack=true: fit agent-0/3 one-node=false devices [1 2 3] (NUMA packing; free per NUMA node 0:6; in error: 0) worst "" unranked ""
+63 slots=4 single=false pref="off" pack=true: fit agent-0/4 one-node=false devices [0 1 2 3] (NUMA packing; free per NUMA node 0:4 1:4) worst "" unranked ""
+64 slots=4 single=false pref="" pack=false: fit agent-0/4 one-node=false map order 4 () failure ""
+65 slots=6 single=false pref="off" pack=true:
+66 slots=14 single=false pref="off" pack=false:
+67 slots=16 single=true pref="strong" pack=true:
+68 slots=1 single=false pref="" pack=false: fit agent-0/1 one-node=false map order 1 () failure ""
+69 slots=14 single=false pref="strong" pack=true:
+70 slots=16 single=false pref="" pack=true:
+71 slots=15 single=false pref="strong" pack=true:
+72 slots=1 single=true pref="strong" pack=true: fit agent-0/1 one-node=false devices [0] (NUMA packing; free per NUMA node 0:4 1:4) worst "" unranked ""
+73 slots=7 single=true pref="off" pack=true:
+74 slots=2 single=true pref="soft" pack=true: fit agent-2/2 one-node=true devices [5 6] (GPU topology preference; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+75 slots=1 single=false pref="off" pack=true: fit agent-1/1 one-node=false devices [6] (NUMA packing; free per NUMA node 1:2) worst "" unranked ""
+76 slots=8 single=true pref="off" pack=true: fit agent-0/8 one-node=false devices [0 1 2 3 4 5 6 7] (NUMA packing; free per NUMA node 0:8) worst "" unranked ""
+77 slots=1 single=true pref="soft" pack=true: fit agent-0/1 one-node=false devices [2] (NUMA packing; free per NUMA node 0:1 1:2) worst "" unranked ""
+78 slots=4 single=true pref="soft" pack=true: fit agent-0/4 one-node=true devices [0 2 4 6] (GPU topology preference; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+79 slots=6 single=true pref="off" pack=true: fit agent-0/6 one-node=false devices [0 1 2 3 5 6] (NUMA packing; free per NUMA node 0:4 1:3) worst "" unranked ""
+80 slots=15 single=true pref="" pack=false:
+81 slots=14 single=false pref="strong" pack=true:
+82 slots=3 single=true pref="strong" pack=true: fit agent-2/3 one-node=false devices [1 2 3] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P usable, narrow) worst "worst pair NODE, P2P usable, narrow" unranked ""
+83 slots=6 single=true pref="strong" pack=true:
+84 slots=14 single=false pref="soft" pack=true:
+85 slots=7 single=false pref="soft" pack=false: fit agent-0/7 one-node=false map order 7 (topology unknown: not reported since the master started) failure ""
+86 slots=2 single=false pref="off" pack=true: fit agent-0/2 one-node=false devices [0 1] (lowest free IDs: not reported since the master started; in error last: 3) worst "" unranked ""
+87 slots=1 single=false pref="" pack=true: fit agent-0/1 one-node=false devices [0] (lowest free IDs: not reported since the master started) worst "" unranked ""
+88 slots=6 single=false pref="off" pack=true: fit agent-1/6 one-node=false devices [0 1 2 3 5 6] (NUMA packing; free per NUMA node 0:4 1:3) worst "" unranked ""
+89 slots=1 single=true pref="" pack=false: fit agent-0/1 one-node=false map order 1 () failure ""
+90 slots=2 single=false pref="soft" pack=false: fit agent-1/2 one-node=false devices [0 1] (GPU topology preference; worst pair PIX, P2P usable) worst "worst pair PIX, P2P usable" unranked ""
+91 slots=5 single=true pref="soft" pack=false: fit agent-1/5 one-node=false devices [1 3 5 6 7] (GPU topology preference; worst pair SYS, P2P usable, narrow) worst "worst pair SYS, P2P usable, narrow" unranked ""
+92 slots=2 single=false pref="" pack=false: fit agent-1/2 one-node=false map order 2 () failure ""
+93 slots=6 single=false pref="soft" pack=true: fit agent-1/6 one-node=false devices [0 2 3 4 5 6] (lowest free IDs: not reported since the master started) worst "" unranked "topology unknown: not reported since the master started"
+94 slots=2 single=true pref="off" pack=true: fit agent-1/2 one-node=false devices [0 3] (NUMA packing; free per NUMA node 0:2 1:3) worst "" unranked ""
+95 slots=15 single=false pref="strong" pack=true:
+96 slots=7 single=true pref="strong" pack=false:
+97 slots=15 single=false pref="soft" pack=true:
+98 slots=0 single=true pref="strong" pack=false: fit agent-0/0 one-node=false
+99 slots=4 single=false pref="" pack=true:
+100 slots=6 single=false pref="soft" pack=true: fit agent-1/6 one-node=true devices [0 1 2 3 4 6] (GPU topology preference; worst pair PIX, P2P not usable) worst "worst pair PIX, P2P not usable" unranked ""
+101 slots=2 single=false pref="strong" pack=false: fit agent-1/2 one-node=false devices [5 6] (GPU topology preference strong; NUMA node 1; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+102 slots=3 single=false pref="off" pack=false: fit agent-0/3 one-node=false map order 3 () failure ""
+103 slots=3 single=true pref="strong" pack=true: fit agent-0/3 one-node=false devices [0 3 5] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+104 slots=1 single=false pref="soft" pack=true: fit agent-1/1 one-node=false devices [0] (NUMA packing; free per NUMA node 0:2 1:2) worst "" unranked ""
+105 slots=5 single=false pref="strong" pack=true: fit agent-1/5 one-node=false devices [0 2 3 5 6] (GPU topology preference strong; NUMA node 0; worst pair PIX, P2P not usable) worst "worst pair PIX, P2P not usable" unranked ""
+106 slots=3 single=true pref="strong" pack=false: fit agent-1/3 one-node=false devices [0 2 3] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+107 slots=8 single=false pref="off" pack=true:
+108 slots=3 single=true pref="soft" pack=false: fit agent-0/3 one-node=false devices [1 2 3] (GPU topology preference; worst pair NODE, P2P usable, narrow) worst "worst pair NODE, P2P usable, narrow" unranked ""
+109 slots=2 single=true pref="off" pack=false: fit agent-1/2 one-node=false map order 2 () failure ""
+110 slots=14 single=true pref="strong" pack=true:
+111 slots=6 single=true pref="off" pack=true: fit agent-0/6 one-node=false devices [0 1 2 3 4 5] (NUMA packing; free per NUMA node 0:8) worst "" unranked ""
+112 slots=2 single=false pref="" pack=true: fit agent-0/2 one-node=false devices [1 3] (NUMA packing; free per NUMA node 0:2 1:3) worst "" unranked ""
+113 slots=14 single=false pref="off" pack=true:
+114 slots=3 single=false pref="soft" pack=true: fit agent-0/3 one-node=false devices [1 2 4] (GPU topology preference; worst pair SYS, P2P not usable) worst "worst pair SYS, P2P not usable" unranked ""
+115 slots=6 single=false pref="off" pack=true:
+116 slots=8 single=false pref="strong" pack=false:
+117 slots=14 single=true pref="strong" pack=true:
+118 slots=16 single=false pref="off" pack=true:
+119 slots=15 single=false pref="soft" pack=false:
+120 slots=4 single=false pref="soft" pack=true: fit agent-2/4 one-node=true devices [0 1 2 3] (GPU topology preference; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+121 slots=3 single=true pref="" pack=false: fit agent-0/3 one-node=false map order 3 () failure ""
+122 slots=1 single=false pref="off" pack=true: fit agent-0/1 one-node=false devices [0] (lowest free IDs: not reported since the master started) worst "" unranked ""
+123 slots=3 single=true pref="strong" pack=false:
+124 slots=2 single=true pref="strong" pack=true: fit agent-0/2 one-node=false devices [0 1] (GPU topology preference strong; NUMA node 0; worst pair PIX, P2P usable) worst "worst pair PIX, P2P usable" unranked ""
+125 slots=16 single=true pref="" pack=true:
+126 slots=5 single=false pref="" pack=true:
+127 slots=3 single=true pref="" pack=true: fit agent-2/3 one-node=false devices [5 6 7] (NUMA packing; free per NUMA node 0:4 1:3; in error: 4) worst "" unranked ""
+128 slots=2 single=true pref="" pack=true: fit agent-1/2 one-node=false devices [0 1] (NUMA packing; free per NUMA node 0:4 1:4) worst "" unranked ""
+129 slots=7 single=false pref="strong" pack=false:
+130 slots=3 single=true pref="off" pack=false: fit agent-1/3 one-node=false map order 3 () failure ""
+131 slots=2 single=true pref="off" pack=false: fit agent-1/2 one-node=false map order 2 () failure ""
+132 slots=14 single=false pref="off" pack=true:
+133 slots=16 single=true pref="" pack=true:
+134 slots=6 single=true pref="off" pack=true:
+135 slots=6 single=true pref="soft" pack=true: fit agent-1/6 one-node=true devices [0 1 2 3 4 6] (GPU topology preference; worst pair PIX, P2P not usable) worst "worst pair PIX, P2P not usable" unranked ""
+136 slots=8 single=true pref="off" pack=true:
+137 slots=16 single=true pref="soft" pack=false:
+138 slots=0 single=true pref="" pack=true: fit agent-1/0 one-node=false
+139 slots=5 single=false pref="soft" pack=true: fit agent-0/5 one-node=false devices [0 1 2 3 4] (lowest free IDs: not reported since the master started; in error last: 7) worst "" unranked "topology unknown: not reported since the master started"
+140 slots=0 single=false pref="off" pack=true: fit agent-1/0 one-node=false
+141 slots=1 single=false pref="off" pack=false: fit agent-0/1 one-node=false map order 1 () failure ""
+142 slots=7 single=false pref="off" pack=true: fit agent-1/7 one-node=false devices [0 1 2 3 4 5 6] (lowest free IDs: not reported since the master started) worst "" unranked ""
+143 slots=4 single=true pref="" pack=false: fit agent-0/4 one-node=false map order 4 () failure ""
+144 slots=16 single=true pref="off" pack=true:
+145 slots=0 single=false pref="strong" pack=false: fit agent-1/0 one-node=false
+146 slots=4 single=false pref="soft" pack=true: fit agent-1/4 one-node=true devices [4 5 6 7] (GPU topology preference; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+147 slots=8 single=true pref="strong" pack=true:
+148 slots=5 single=false pref="" pack=true: fit agent-0/5 one-node=false devices [1 3 4 5 7] (NUMA packing; free per NUMA node 0:5) worst "" unranked ""
+149 slots=16 single=false pref="strong" pack=false:
+150 slots=1 single=false pref="soft" pack=true: fit agent-0/1 one-node=false devices [1] (NUMA packing; free per NUMA node 0:2 1:4) worst "" unranked ""
+151 slots=15 single=false pref="strong" pack=true:
+152 slots=1 single=false pref="" pack=false: fit agent-1/1 one-node=false map order 1 () failure ""
+153 slots=14 single=false pref="" pack=false:
+154 slots=2 single=false pref="strong" pack=true: fit agent-1/2 one-node=false devices [0 1] (GPU topology preference strong; NUMA node 0; worst pair PIX, P2P usable) worst "worst pair PIX, P2P usable" unranked ""
+155 slots=1 single=false pref="strong" pack=true: fit agent-0/1 one-node=false devices [7] (NUMA packing; free per NUMA node 0:2 1:1) worst "" unranked ""
+156 slots=15 single=false pref="" pack=true:
+157 slots=14 single=true pref="strong" pack=true:
+158 slots=4 single=false pref="off" pack=true: fit agent-1/4 one-node=false devices [0 1 2 3] (NUMA packing; free per NUMA node 0:4 1:3) worst "" unranked ""
+159 slots=2 single=true pref="soft" pack=true: fit agent-0/2 one-node=true devices [6 7] (GPU topology preference; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+160 slots=16 single=false pref="off" pack=true:
+161 slots=6 single=true pref="off" pack=true:
+162 slots=3 single=true pref="soft" pack=true: fit agent-1/3 one-node=true devices [0 1 3] (GPU topology preference; worst pair NODE, P2P usable, narrow) worst "worst pair NODE, P2P usable, narrow" unranked ""
+163 slots=3 single=false pref="" pack=true: fit agent-0/3 one-node=false devices [0 1 2] (NUMA packing; free per NUMA node 0:4 1:4) worst "" unranked ""
+164 slots=7 single=false pref="off" pack=false: fit agent-1/7 one-node=false map order 7 () failure ""
+165 slots=2 single=false pref="strong" pack=true: fit agent-1/2 one-node=false devices [4 5] (GPU topology preference strong; NUMA node 1; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+166 slots=6 single=true pref="soft" pack=false: fit agent-1/6 one-node=false devices [1 2 3 4 5 6] (GPU topology preference; worst pair SYS, P2P usable, narrow) worst "worst pair SYS, P2P usable, narrow" unranked ""
+167 slots=4 single=false pref="soft" pack=false: fit agent-1/4 one-node=false devices [0 2 4 6] (GPU topology preference; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+168 slots=4 single=false pref="soft" pack=true: fit agent-0/4 one-node=false devices [2 3 6 7] (GPU topology preference; worst pair SYS, P2P usable) worst "worst pair SYS, P2P usable" unranked ""
+169 slots=6 single=true pref="soft" pack=true: fit agent-0/6 one-node=false devices [0 1 2 3 6 7] (GPU topology preference; worst pair SYS, P2P usable, narrow) worst "worst pair SYS, P2P usable, narrow" unranked ""
+170 slots=5 single=true pref="soft" pack=true: fit agent-1/5 one-node=true devices [1 2 3 4 5] (GPU topology preference; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+171 slots=5 single=true pref="strong" pack=true: fit agent-0/5 one-node=false devices [0 1 2 4 6] (GPU topology preference strong; NUMA node 0; worst pair PIX, P2P not usable) worst "worst pair PIX, P2P not usable" unranked ""
+172 slots=16 single=false pref="soft" pack=true:
+173 slots=7 single=false pref="soft" pack=true: fit agent-0/7 one-node=true devices [0 1 2 3 4 5 6] (GPU topology preference; worst pair PIX, P2P not usable) worst "worst pair PIX, P2P not usable" unranked ""
+174 slots=4 single=true pref="strong" pack=true: fit agent-1/4 one-node=false devices [4 5 6 7] (GPU topology preference strong; NUMA node 1; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+175 slots=1 single=true pref="off" pack=true: fit agent-1/1 one-node=false devices [0] (NUMA packing; free per NUMA node 0:4 1:4) worst "" unranked ""
+176 slots=5 single=false pref="soft" pack=true: fit agent-1/5 one-node=true devices [0 1 3 4 6] (GPU topology preference; worst pair PIX, P2P not usable) worst "worst pair PIX, P2P not usable" unranked ""
+177 slots=2 single=false pref="soft" pack=false: fit agent-0/2 one-node=false devices [0 2] (GPU topology preference; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+178 slots=2 single=false pref="soft" pack=true: fit agent-0/2 one-node=true devices [0 1] (GPU topology preference; worst pair PIX, P2P usable) worst "worst pair PIX, P2P usable" unranked ""
+179 slots=15 single=false pref="" pack=false:
+180 slots=14 single=true pref="soft" pack=false:
+181 slots=16 single=true pref="" pack=true:
+182 slots=4 single=false pref="off" pack=true: fit agent-0/4 one-node=false devices [1 2 3 5] (NUMA packing; free per NUMA node 0:3 1:3) worst "" unranked ""
+183 slots=15 single=true pref="soft" pack=false:
+184 slots=5 single=true pref="soft" pack=true: fit agent-1/5 one-node=false devices [1 3 4 5 6] (lowest free IDs: not reported since the master started) worst "" unranked "topology unknown: not reported since the master started"
+185 slots=0 single=false pref="" pack=false: fit agent-0/0 one-node=false
+186 slots=0 single=true pref="off" pack=true: fit agent-0/0 one-node=false
+187 slots=6 single=true pref="strong" pack=true:
+188 slots=3 single=true pref="off" pack=true: fit agent-0/3 one-node=false devices [0 1 2] (lowest free IDs: not reported since the master started) worst "" unranked ""
+189 slots=3 single=true pref="strong" pack=false: fit agent-1/3 one-node=false devices [2 4 6] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+190 slots=1 single=false pref="soft" pack=false: fit agent-0/1 one-node=false map order 1 (fewer than 2 slots) failure ""
+191 slots=6 single=true pref="" pack=false:
+192 slots=4 single=false pref="off" pack=true: fit agent-1/4 one-node=false devices [1 4 6 7] (NUMA packing; free per NUMA node 0:4) worst "" unranked ""
+193 slots=14 single=false pref="strong" pack=true:
+194 slots=8 single=true pref="strong" pack=false: fit agent-2/8 one-node=false devices [0 1 2 3 4 5 6 7] (GPU topology preference strong; NUMA node 0; worst pair PIX, P2P not usable) worst "worst pair PIX, P2P not usable" unranked ""
+195 slots=5 single=false pref="off" pack=true: fit agent-0/5 one-node=false devices [0 2 3 5 6] (lowest free IDs: not reported since the master started; in error last: 1) worst "" unranked ""
+196 slots=15 single=true pref="strong" pack=true:
+197 slots=0 single=false pref="strong" pack=true: fit agent-0/0 one-node=false
+198 slots=15 single=true pref="strong" pack=true:
+199 slots=2 single=true pref="off" pack=true: fit agent-1/2 one-node=false devices [1 2] (NUMA packing; free per NUMA node 0:4) worst "" unranked ""
+200 slots=2 single=false pref="off" pack=true: fit agent-0/2 one-node=false devices [0 1] (NUMA packing; free per NUMA node 0:4 1:4) worst "" unranked ""
+201 slots=16 single=false pref="" pack=false:
+202 slots=5 single=false pref="off" pack=true: fit agent-1/5 one-node=false devices [0 1 2 3 4] (lowest free IDs: not reported since the master started) worst "" unranked ""
+203 slots=4 single=false pref="strong" pack=false: fit agent-1/4 one-node=false devices [0 1 2 3] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P usable, narrow) worst "worst pair NODE, P2P usable, narrow" unranked ""
+204 slots=16 single=true pref="" pack=true:
+205 slots=2 single=true pref="off" pack=true: fit agent-0/2 one-node=false devices [0 1] (NUMA packing; free per NUMA node 0:4 1:4) worst "" unranked ""
+206 slots=4 single=true pref="" pack=true: fit agent-1/4 one-node=false devices [0 1 3 5] (NUMA packing; free per NUMA node 0:3 1:3) worst "" unranked ""
+207 slots=16 single=false pref="strong" pack=true:
+208 slots=3 single=false pref="strong" pack=false: fit agent-1/3 one-node=false devices [0 2 4] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+209 slots=3 single=true pref="" pack=true: fit agent-1/3 one-node=false devices [4 5 7] (NUMA packing; free per NUMA node 0:2 1:3) worst "" unranked ""
+210 slots=14 single=false pref="" pack=true:
+211 slots=4 single=true pref="" pack=true: fit agent-1/4 one-node=false devices [4 5 6 7] (NUMA packing; free per NUMA node 0:3 1:4) worst "" unranked ""
+212 slots=14 single=false pref="soft" pack=true:
+213 slots=7 single=true pref="off" pack=true: fit agent-0/7 one-node=false devices [0 1 2 3 4 5 6] (lowest free IDs: not reported since the master started) worst "" unranked ""
+214 slots=14 single=false pref="off" pack=true:
+215 slots=16 single=true pref="strong" pack=true:
+216 slots=3 single=true pref="" pack=true: fit agent-1/3 one-node=false devices [5 6 7] (NUMA packing; free per NUMA node 0:2 1:3) worst "" unranked ""
+217 slots=15 single=false pref="soft" pack=true:
+218 slots=14 single=false pref="" pack=true:
+219 slots=5 single=false pref="off" pack=false:
+220 slots=1 single=false pref="off" pack=false: fit agent-0/1 one-node=false map order 1 () failure ""
+221 slots=14 single=true pref="off" pack=true:
+222 slots=16 single=true pref="soft" pack=true:
+223 slots=3 single=true pref="" pack=true: fit agent-0/3 one-node=false devices [0 1 2] (NUMA packing; free per NUMA node 0:4 1:4) worst "" unranked ""
+224 slots=14 single=true pref="strong" pack=false:
+225 slots=6 single=true pref="off" pack=true: fit agent-1/6 one-node=false devices [0 1 2 3 4 5] (NUMA packing; free per NUMA node 0:8) worst "" unranked ""
+226 slots=5 single=false pref="" pack=false: fit agent-1/5 one-node=false map order 5 () failure ""
+227 slots=14 single=true pref="" pack=true:
+228 slots=1 single=false pref="off" pack=false: fit agent-0/1 one-node=false map order 1 () failure ""
+229 slots=14 single=true pref="strong" pack=true:
+230 slots=16 single=true pref="strong" pack=true:
+231 slots=8 single=true pref="" pack=true:
+232 slots=2 single=true pref="strong" pack=true: fit agent-0/2 one-node=false devices [0 3] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+233 slots=16 single=true pref="soft" pack=true:
+234 slots=16 single=true pref="off" pack=true:
+235 slots=3 single=false pref="soft" pack=true: fit agent-0/3 one-node=true devices [4 5 7] (GPU topology preference; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+236 slots=6 single=false pref="strong" pack=true:
+237 slots=1 single=true pref="soft" pack=true: fit agent-0/1 one-node=false devices [0] (NUMA packing; free per NUMA node 0:3 1:3) worst "" unranked ""
+238 slots=0 single=true pref="soft" pack=true: fit agent-0/0 one-node=false
+239 slots=6 single=true pref="soft" pack=true: fit agent-2/6 one-node=true devices [0 2 3 4 5 6] (GPU topology preference; worst pair PIX, P2P not usable) worst "worst pair PIX, P2P not usable" unranked ""
+240 slots=14 single=true pref="off" pack=false:
+241 slots=15 single=false pref="soft" pack=false:
+242 slots=15 single=true pref="soft" pack=false:
+243 slots=15 single=false pref="" pack=true:
+244 slots=16 single=false pref="off" pack=true:
+245 slots=6 single=true pref="strong" pack=true:
+246 slots=14 single=true pref="soft" pack=true:
+247 slots=5 single=true pref="strong" pack=false:
+248 slots=5 single=true pref="soft" pack=true: fit agent-0/5 one-node=true devices [0 1 2 3 4] (GPU topology preference; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+249 slots=4 single=true pref="soft" pack=true: fit agent-0/4 one-node=true devices [0 2 4 7] (GPU topology preference; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+250 slots=14 single=true pref="off" pack=true:
+251 slots=2 single=false pref="soft" pack=true: fit agent-1/2 one-node=true devices [0 2] (GPU topology preference; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+252 slots=3 single=true pref="" pack=false: fit agent-2/3 one-node=false map order 3 () failure ""
+253 slots=6 single=false pref="" pack=false: fit agent-1/6 one-node=false map order 6 () failure ""
+254 slots=16 single=false pref="off" pack=true:
+255 slots=6 single=true pref="off" pack=false: fit agent-0/6 one-node=false map order 6 () failure ""
+256 slots=16 single=false pref="off" pack=false:
+257 slots=2 single=false pref="" pack=true: fit agent-0/2 one-node=false devices [0 1] (NUMA packing; free per NUMA node 0:3 1:1) worst "" unranked ""
+258 slots=5 single=false pref="soft" pack=false:
+259 slots=15 single=false pref="" pack=true:
+260 slots=16 single=false pref="soft" pack=false:
+261 slots=2 single=false pref="" pack=false: fit agent-0/2 one-node=false map order 2 () failure ""
+262 slots=8 single=false pref="strong" pack=true:
+263 slots=0 single=true pref="strong" pack=true: fit agent-1/0 one-node=false
+264 slots=16 single=false pref="" pack=false:
+265 slots=2 single=false pref="off" pack=true: fit agent-0/2 one-node=false devices [1 2] (NUMA packing; free per NUMA node 0:3 1:3; in error: 6) worst "" unranked ""
+266 slots=6 single=true pref="strong" pack=true:
+267 slots=6 single=false pref="strong" pack=false: fit agent-1/6 one-node=false devices [1 3 4 5 6 7] (GPU topology preference strong; NUMA node 0; worst pair PIX, P2P not usable) worst "worst pair PIX, P2P not usable" unranked ""
+268 slots=8 single=false pref="strong" pack=true:
+269 slots=5 single=true pref="" pack=false: fit agent-1/5 one-node=false map order 5 () failure ""
+270 slots=0 single=true pref="strong" pack=false: fit agent-1/0 one-node=false
+271 slots=1 single=false pref="strong" pack=true: fit agent-0/1 one-node=false devices [5] (NUMA packing; free per NUMA node 0:3 1:2; in error: 4) worst "" unranked ""
+272 slots=5 single=true pref="off" pack=true: fit agent-1/5 one-node=false devices [1 2 3 6 7] (NUMA packing; free per NUMA node 0:3 1:1; in error: 6) worst "" unranked ""
+273 slots=3 single=true pref="soft" pack=false: fit agent-1/3 one-node=false devices [4 6 7] (GPU topology preference; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+274 slots=14 single=false pref="soft" pack=true:
+275 slots=4 single=true pref="soft" pack=true: fit agent-0/4 one-node=true devices [0 1 2 3] (GPU topology preference; worst pair NODE, P2P usable, narrow) worst "worst pair NODE, P2P usable, narrow" unranked ""
+276 slots=3 single=false pref="" pack=true: fit agent-0/3 one-node=false devices [0 1 2] (NUMA packing; free per NUMA node 0:8) worst "" unranked ""
+277 slots=8 single=false pref="soft" pack=true: fit agent-2/8 one-node=false devices [0 1 2 3 4 5 6 7] (GPU topology preference; worst pair SYS, P2P usable, narrow) worst "worst pair SYS, P2P usable, narrow" unranked ""
+278 slots=4 single=false pref="" pack=true: fit agent-0/4 one-node=false devices [0 2 3 4] (NUMA packing; free per NUMA node 0:3 1:2) worst "" unranked ""
+279 slots=4 single=true pref="" pack=false: fit agent-0/4 one-node=false map order 4 () failure ""
+280 slots=4 single=true pref="strong" pack=true: fit agent-1/4 one-node=false devices [0 1 3 5] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+281 slots=16 single=true pref="soft" pack=true:
+282 slots=16 single=false pref="" pack=false:
+283 slots=7 single=false pref="strong" pack=true: fit agent-1/7 one-node=false devices [0 1 2 3 4 5 6] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+284 slots=8 single=true pref="off" pack=false: fit agent-0/8 one-node=false map order 8 () failure ""
+285 slots=14 single=false pref="off" pack=false:
+286 slots=4 single=false pref="off" pack=false: fit agent-0/4 one-node=false map order 4 () failure ""
+287 slots=14 single=false pref="strong" pack=true:
+288 slots=3 single=true pref="off" pack=true:
+289 slots=16 single=true pref="" pack=false:
+290 slots=5 single=true pref="strong" pack=false:
+291 slots=0 single=false pref="off" pack=true: fit agent-0/0 one-node=false
+292 slots=16 single=false pref="strong" pack=true:
+293 slots=6 single=false pref="" pack=true:
+294 slots=14 single=false pref="off" pack=false:
+295 slots=15 single=false pref="strong" pack=true:
+296 slots=16 single=true pref="off" pack=true:
+297 slots=3 single=false pref="strong" pack=true: fit agent-0/3 one-node=false devices [5 6 7] (GPU topology preference strong; NUMA node 1; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+298 slots=16 single=true pref="off" pack=true:
+299 slots=16 single=true pref="" pack=true:
+300 slots=5 single=true pref="strong" pack=true: fit agent-0/5 one-node=false devices [1 2 3 4 5] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+301 slots=14 single=false pref="" pack=true:
+302 slots=0 single=false pref="off" pack=true: fit agent-1/0 one-node=false
+303 slots=15 single=true pref="strong" pack=true:
+304 slots=0 single=false pref="" pack=true: fit agent-0/0 one-node=false
+305 slots=16 single=true pref="strong" pack=false:
+306 slots=8 single=true pref="soft" pack=true: fit agent-2/8 one-node=true devices [0 1 2 3 4 5 6 7] (GPU topology preference; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+307 slots=16 single=false pref="soft" pack=false:
+308 slots=5 single=true pref="soft" pack=false: fit agent-0/5 one-node=false map order 5 (topology unknown: not reported since the master started) failure ""
+309 slots=15 single=true pref="" pack=false:
+310 slots=4 single=false pref="soft" pack=false: fit agent-1/4 one-node=false devices [0 1 2 3] (GPU topology preference; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+311 slots=0 single=true pref="off" pack=false: fit agent-1/0 one-node=false
+312 slots=8 single=true pref="soft" pack=true: fit agent-1/8 one-node=true devices [0 1 2 3 4 5 6 7] (GPU topology preference; worst pair PIX, P2P not usable) worst "worst pair PIX, P2P not usable" unranked ""
+313 slots=14 single=true pref="soft" pack=true:
+314 slots=15 single=true pref="soft" pack=false:
+315 slots=15 single=false pref="strong" pack=false:
+316 slots=15 single=true pref="off" pack=true:
+317 slots=2 single=false pref="" pack=true: fit agent-1/2 one-node=false devices [0 1] (NUMA packing; free per NUMA node 0:7; in error: 4) worst "" unranked ""
+318 slots=5 single=true pref="off" pack=true: fit agent-1/5 one-node=false devices [0 1 2 3 5] (NUMA packing; free per NUMA node 0:4 1:2) worst "" unranked ""
+319 slots=2 single=false pref="strong" pack=false: fit agent-0/2 one-node=false devices [0 2] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+320 slots=16 single=false pref="soft" pack=false: fit agent-0/8 one-node=false fit agent-2/8 one-node=false
+321 slots=1 single=false pref="off" pack=true: fit agent-1/1 one-node=false devices [5] (NUMA packing; free per NUMA node 0:4 1:3) worst "" unranked ""
+322 slots=15 single=true pref="soft" pack=true:
+323 slots=15 single=true pref="off" pack=false:
+324 slots=14 single=true pref="soft" pack=false:
+325 slots=6 single=true pref="soft" pack=false: fit agent-1/6 one-node=false devices [0 2 3 5 6 7] (GPU topology preference; worst pair SYS, P2P usable) worst "worst pair SYS, P2P usable" unranked ""
+326 slots=14 single=false pref="" pack=true:
+327 slots=16 single=false pref="soft" pack=true:
+328 slots=7 single=false pref="" pack=true:
+329 slots=16 single=true pref="strong" pack=true:
+330 slots=16 single=false pref="" pack=true:
+331 slots=6 single=true pref="strong" pack=false:
+332 slots=7 single=true pref="soft" pack=true:
+333 slots=14 single=true pref="" pack=false:
+334 slots=14 single=true pref="" pack=true:
+335 slots=1 single=true pref="off" pack=false: fit agent-1/1 one-node=false map order 1 () failure ""
+336 slots=15 single=false pref="" pack=false: fit agent-0/8 one-node=false fit agent-2/7 one-node=false
+337 slots=14 single=true pref="strong" pack=true:
+338 slots=8 single=false pref="strong" pack=false:
+339 slots=7 single=true pref="off" pack=true: fit agent-0/7 one-node=false devices [0 1 2 4 5 6 7] (lowest free IDs: not reported since the master started; in error last: 3) worst "" unranked ""
+340 slots=6 single=false pref="" pack=false: fit agent-0/6 one-node=false map order 6 () failure ""
+341 slots=3 single=true pref="soft" pack=true: fit agent-1/3 one-node=true devices [0 6 7] (GPU topology preference; worst pair SYS, P2P not usable) worst "worst pair SYS, P2P not usable" unranked ""
+342 slots=2 single=false pref="" pack=true: fit agent-0/2 one-node=false devices [1 2] (NUMA packing; free per NUMA node 0:3) worst "" unranked ""
+343 slots=4 single=false pref="soft" pack=false: fit agent-0/4 one-node=false devices [0 2 3 4] (GPU topology preference; worst pair SYS, P2P usable) worst "worst pair SYS, P2P usable" unranked ""
+344 slots=15 single=false pref="off" pack=true:
+345 slots=4 single=false pref="" pack=true: fit agent-0/4 one-node=false devices [1 2 3 4] (NUMA packing; free per NUMA node 0:3 1:2; in error: 6) worst "" unranked ""
+346 slots=16 single=false pref="" pack=false: fit agent-1/8 one-node=false fit agent-0/8 one-node=false
+347 slots=14 single=false pref="soft" pack=false:
+348 slots=4 single=true pref="" pack=false: fit agent-2/4 one-node=false map order 4 () failure ""
+349 slots=15 single=true pref="soft" pack=true:
+350 slots=6 single=true pref="strong" pack=false:
+351 slots=1 single=false pref="off" pack=true: fit agent-0/1 one-node=false devices [0] (NUMA packing; free per NUMA node 0:6) worst "" unranked ""
+352 slots=16 single=false pref="strong" pack=true:
+353 slots=4 single=false pref="off" pack=false:
+354 slots=1 single=true pref="" pack=false: fit agent-0/1 one-node=false map order 1 () failure ""
+355 slots=15 single=false pref="" pack=true:
+356 slots=3 single=true pref="soft" pack=false: fit agent-0/3 one-node=false devices [0 1 2] (GPU topology preference; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+357 slots=4 single=true pref="" pack=true: fit agent-0/4 one-node=false devices [0 1 2 3] (NUMA packing; free per NUMA node 0:4 1:4) worst "" unranked ""
+358 slots=0 single=false pref="off" pack=true: fit agent-1/0 one-node=false
+359 slots=3 single=false pref="off" pack=false: fit agent-0/3 one-node=false map order 3 () failure ""
+360 slots=4 single=true pref="off" pack=true: fit agent-0/4 one-node=false devices [0 1 2 3] (NUMA packing; free per NUMA node 0:4 1:4) worst "" unranked ""
+361 slots=4 single=false pref="strong" pack=true: fit agent-1/4 one-node=false devices [0 1 2 3] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P usable, narrow) worst "worst pair NODE, P2P usable, narrow" unranked ""
+362 slots=14 single=true pref="off" pack=false:
+363 slots=1 single=false pref="strong" pack=false: fit agent-1/1 one-node=false map order 1 () failure ""
+364 slots=0 single=true pref="" pack=false: fit agent-0/0 one-node=false
+365 slots=2 single=false pref="soft" pack=true: fit agent-0/2 one-node=true devices [5 6] (GPU topology preference; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+366 slots=16 single=false pref="" pack=true:
+367 slots=16 single=false pref="" pack=true:
+368 slots=15 single=false pref="soft" pack=true:
+369 slots=4 single=false pref="soft" pack=false: fit agent-0/4 one-node=false map order 4 (topology unknown: not reported since the master started) failure ""
+370 slots=3 single=true pref="strong" pack=true: fit agent-1/3 one-node=false devices [1 2 3] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P usable, narrow) worst "worst pair NODE, P2P usable, narrow" unranked ""
+371 slots=15 single=false pref="soft" pack=true:
+372 slots=8 single=true pref="strong" pack=true:
+373 slots=2 single=false pref="strong" pack=true: fit agent-0/2 one-node=false devices [0 2] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+374 slots=15 single=true pref="strong" pack=true:
+375 slots=2 single=true pref="soft" pack=true: fit agent-0/2 one-node=true devices [4 7] (GPU topology preference; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+376 slots=15 single=false pref="off" pack=true:
+377 slots=5 single=true pref="strong" pack=true:
+378 slots=7 single=false pref="off" pack=false: fit agent-0/7 one-node=false map order 7 () failure ""
+379 slots=8 single=false pref="strong" pack=true:
+380 slots=16 single=true pref="" pack=true:
+381 slots=6 single=false pref="soft" pack=true: fit agent-0/6 one-node=false devices [0 1 3 4 5 7] (GPU topology preference; worst pair SYS, P2P usable, narrow) worst "worst pair SYS, P2P usable, narrow" unranked ""
+382 slots=15 single=false pref="soft" pack=true:
+383 slots=6 single=true pref="off" pack=false:
+384 slots=14 single=true pref="" pack=true:
+385 slots=0 single=false pref="" pack=false: fit agent-0/0 one-node=false
+386 slots=5 single=false pref="strong" pack=false: fit agent-1/5 one-node=false devices [0 1 2 3 4] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+387 slots=4 single=true pref="" pack=true: fit agent-0/4 one-node=false devices [1 3 4 7] (NUMA packing; free per NUMA node 0:2 1:2) worst "" unranked ""
+388 slots=1 single=true pref="soft" pack=true: fit agent-1/1 one-node=false devices [0] (NUMA packing; free per NUMA node 0:4 1:4) worst "" unranked ""
+389 slots=14 single=true pref="strong" pack=true:
+390 slots=14 single=false pref="strong" pack=false:
+391 slots=3 single=true pref="off" pack=true: fit agent-1/3 one-node=false devices [0 3 4] (NUMA packing; free per NUMA node 0:2 1:2) worst "" unranked ""
+392 slots=2 single=false pref="soft" pack=false: fit agent-0/2 one-node=false devices [2 3] (GPU topology preference; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+393 slots=15 single=false pref="strong" pack=false:
+394 slots=3 single=true pref="soft" pack=true: fit agent-0/3 one-node=true devices [0 1 2] (GPU topology preference; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+395 slots=0 single=false pref="" pack=true: fit agent-1/0 one-node=false
+396 slots=5 single=true pref="soft" pack=true: fit agent-1/5 one-node=true devices [0 1 2 3 4] (GPU topology preference; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+397 slots=6 single=false pref="" pack=false: fit agent-0/6 one-node=false map order 6 () failure ""
+398 slots=15 single=false pref="" pack=true:
+399 slots=2 single=false pref="" pack=false: fit agent-1/2 one-node=false map order 2 () failure ""
+400 slots=16 single=true pref="" pack=false:
+401 slots=3 single=true pref="strong" pack=false: fit agent-0/3 one-node=false devices [0 1 2] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+402 slots=8 single=true pref="off" pack=true:
+403 slots=16 single=false pref="off" pack=true:
+404 slots=14 single=true pref="" pack=true:
+405 slots=3 single=false pref="" pack=false: fit agent-1/3 one-node=false map order 3 () failure ""
+406 slots=0 single=true pref="off" pack=true: fit agent-0/0 one-node=false
+407 slots=16 single=false pref="soft" pack=false:
+408 slots=3 single=true pref="off" pack=true: fit agent-0/3 one-node=false devices [0 1 2] (NUMA packing; free per NUMA node 0:7; in error: 6) worst "" unranked ""
+409 slots=5 single=true pref="soft" pack=true: fit agent-1/5 one-node=false devices [0 1 2 6 7] (GPU topology preference; worst pair SYS, P2P usable) worst "worst pair SYS, P2P usable" unranked ""
+410 slots=8 single=false pref="soft" pack=true: fit agent-1/8 one-node=false devices [0 1 2 3 4 5 6 7] (GPU topology preference; worst pair SYS, P2P usable, narrow) worst "worst pair SYS, P2P usable, narrow" unranked ""
+411 slots=15 single=false pref="strong" pack=true:
+412 slots=0 single=true pref="strong" pack=false: fit agent-1/0 one-node=false
+413 slots=14 single=false pref="" pack=true:
+414 slots=16 single=false pref="off" pack=true:
+415 slots=2 single=true pref="strong" pack=false: fit agent-0/2 one-node=false devices [0 1] (GPU topology preference strong; NUMA node 0; worst pair PIX, P2P usable) worst "worst pair PIX, P2P usable" unranked ""
+416 slots=5 single=false pref="soft" pack=true: fit agent-0/5 one-node=true devices [2 3 5 6 7] (GPU topology preference; worst pair PIX, P2P not usable) worst "worst pair PIX, P2P not usable" unranked ""
+417 slots=5 single=true pref="soft" pack=true: fit agent-0/5 one-node=false devices [0 4 5 6 7] (GPU topology preference; worst pair SYS, P2P usable) worst "worst pair SYS, P2P usable" unranked ""
+418 slots=4 single=true pref="off" pack=false: fit agent-1/4 one-node=false map order 4 () failure ""
+419 slots=0 single=true pref="off" pack=false: fit agent-2/0 one-node=false
+420 slots=14 single=true pref="" pack=true:
+421 slots=4 single=false pref="strong" pack=true:
+422 slots=16 single=true pref="" pack=true:
+423 slots=7 single=false pref="soft" pack=true: fit agent-0/7 one-node=true devices [0 1 2 3 4 5 6] (GPU topology preference; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+424 slots=0 single=true pref="soft" pack=false: fit agent-1/0 one-node=false
+425 slots=3 single=true pref="" pack=true: fit agent-0/3 one-node=false devices [1 2 3] (lowest free IDs: not reported since the master started; in error last: 0) worst "" unranked ""
+426 slots=8 single=false pref="soft" pack=true:
+427 slots=16 single=false pref="soft" pack=true:
+428 slots=0 single=false pref="soft" pack=false: fit agent-0/0 one-node=false
+429 slots=7 single=false pref="off" pack=true: fit agent-0/7 one-node=false devices [0 1 2 3 4 5 7] (NUMA packing; free per NUMA node 0:7; in error: 6) worst "" unranked ""
+430 slots=3 single=false pref="off" pack=false: fit agent-0/3 one-node=false map order 3 () failure ""
+431 slots=4 single=false pref="strong" pack=true: fit agent-0/4 one-node=false devices [0 1 2 3] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P usable, narrow; in error: 1) worst "worst pair NODE, P2P usable, narrow" unranked ""
+432 slots=4 single=false pref="" pack=true: fit agent-0/4 one-node=false devices [0 1 2 3] (NUMA packing; free per NUMA node 0:4 1:4) worst "" unranked ""
+433 slots=5 single=true pref="off" pack=true: fit agent-0/5 one-node=false devices [0 4 5 6 7] (NUMA packing; free per NUMA node 0:3 1:4; in error: 3) worst "" unranked ""
+434 slots=0 single=false pref="" pack=true: fit agent-0/0 one-node=false
+435 slots=5 single=false pref="" pack=true: fit agent-0/5 one-node=false devices [0 1 2 3 5] (NUMA packing; free per NUMA node 0:4 1:3) worst "" unranked ""
+436 slots=15 single=true pref="off" pack=false:
+437 slots=0 single=true pref="soft" pack=true: fit agent-0/0 one-node=false
+438 slots=8 single=false pref="off" pack=false:
+439 slots=8 single=false pref="" pack=true:
+440 slots=7 single=true pref="off" pack=true: fit agent-1/7 one-node=false devices [0 1 2 3 4 5 6] (NUMA packing; free per NUMA node 0:4 1:3; in error: 7) worst "" unranked ""
+441 slots=0 single=false pref="" pack=true: fit agent-0/0 one-node=false
+442 slots=14 single=false pref="" pack=true:
+443 slots=0 single=true pref="soft" pack=false: fit agent-0/0 one-node=false
+444 slots=6 single=false pref="strong" pack=false:
+445 slots=14 single=false pref="strong" pack=true:
+446 slots=16 single=true pref="off" pack=false:
+447 slots=14 single=true pref="off" pack=false:
+448 slots=5 single=true pref="strong" pack=true:
+449 slots=15 single=false pref="off" pack=true:
+450 slots=14 single=true pref="strong" pack=false:
+451 slots=2 single=true pref="strong" pack=true: fit agent-2/2 one-node=false devices [0 2] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+452 slots=16 single=true pref="strong" pack=true:
+453 slots=4 single=false pref="soft" pack=true: fit agent-0/4 one-node=false devices [0 2 4 5] (GPU topology preference; worst pair SYS, P2P usable) worst "worst pair SYS, P2P usable" unranked ""
+454 slots=8 single=true pref="soft" pack=true: fit agent-1/8 one-node=true devices [0 1 2 3 4 5 6 7] (GPU topology preference; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+455 slots=14 single=false pref="soft" pack=false:
+456 slots=14 single=false pref="off" pack=true:
+457 slots=0 single=true pref="soft" pack=false: fit agent-1/0 one-node=false
+458 slots=14 single=true pref="off" pack=false:
+459 slots=4 single=false pref="strong" pack=true:
+460 slots=4 single=false pref="" pack=false: fit agent-0/4 one-node=false map order 4 () failure ""
+461 slots=15 single=false pref="" pack=true:
+462 slots=8 single=true pref="strong" pack=true: fit agent-0/8 one-node=false devices [0 1 2 3 4 5 6 7] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P usable; in error: 4) worst "worst pair NODE, P2P usable" unranked ""
+463 slots=1 single=true pref="strong" pack=true: fit agent-0/1 one-node=false devices [0] (NUMA packing; free per NUMA node 0:4 1:4) worst "" unranked ""
+464 slots=15 single=true pref="soft" pack=true:
+465 slots=15 single=false pref="" pack=true:
+466 slots=8 single=true pref="" pack=true:
+467 slots=5 single=false pref="soft" pack=false: fit agent-0/5 one-node=false devices [0 1 2 4 6] (GPU topology preference; worst pair PIX, P2P not usable) worst "worst pair PIX, P2P not usable" unranked ""
+468 slots=7 single=false pref="strong" pack=false:
+469 slots=4 single=true pref="soft" pack=false: fit agent-1/4 one-node=false devices [0 1 2 3] (GPU topology preference; worst pair NODE, P2P usable, narrow) worst "worst pair NODE, P2P usable, narrow" unranked ""
+470 slots=6 single=false pref="strong" pack=false:
+471 slots=15 single=true pref="strong" pack=true:
+472 slots=1 single=true pref="" pack=true: fit agent-0/1 one-node=false devices [4] (NUMA packing; free per NUMA node 0:4 1:3) worst "" unranked ""
+473 slots=8 single=true pref="soft" pack=false:
+474 slots=5 single=false pref="off" pack=false: fit agent-1/5 one-node=false map order 5 () failure ""
+475 slots=15 single=false pref="strong" pack=true:
+476 slots=7 single=false pref="off" pack=true:
+477 slots=8 single=false pref="strong" pack=true:
+478 slots=1 single=false pref="soft" pack=true: fit agent-0/1 one-node=false devices [0] (NUMA packing; free per NUMA node 0:4 1:4) worst "" unranked ""
+479 slots=5 single=false pref="strong" pack=true: fit agent-1/5 one-node=false devices [0 1 2 3 4] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+480 slots=3 single=true pref="soft" pack=true: fit agent-0/3 one-node=true devices [4 5 6] (GPU topology preference; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+481 slots=15 single=false pref="" pack=false:
+482 slots=16 single=false pref="soft" pack=false:
+483 slots=2 single=true pref="strong" pack=false: fit agent-0/2 one-node=false devices [0 3] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+484 slots=14 single=true pref="strong" pack=true:
+485 slots=0 single=false pref="strong" pack=true: fit agent-1/0 one-node=false
+486 slots=15 single=true pref="off" pack=true:
+487 slots=6 single=true pref="off" pack=false: fit agent-1/6 one-node=false map order 6 () failure ""
+488 slots=4 single=true pref="strong" pack=true: fit agent-0/4 one-node=false devices [4 5 6 7] (GPU topology preference strong; NUMA node 1; worst pair NODE, P2P usable; in error: 5) worst "worst pair NODE, P2P usable" unranked ""
+489 slots=14 single=true pref="soft" pack=true:
+490 slots=5 single=true pref="soft" pack=true: fit agent-1/5 one-node=false devices [1 2 3 6 7] (lowest free IDs: not reported since the master started) worst "" unranked "topology unknown: not reported since the master started"
+491 slots=1 single=true pref="off" pack=true: fit agent-1/1 one-node=false devices [1] (lowest free IDs: not reported since the master started) worst "" unranked ""
+492 slots=16 single=false pref="soft" pack=false:
+493 slots=3 single=true pref="strong" pack=true: fit agent-0/3 one-node=false devices [0 2 3] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P not usable; in error: 2) worst "worst pair NODE, P2P not usable" unranked ""
+494 slots=7 single=false pref="soft" pack=false: fit agent-0/7 one-node=false devices [0 2 3 4 5 6 7] (GPU topology preference; worst pair PIX, P2P not usable) worst "worst pair PIX, P2P not usable" unranked ""
+495 slots=7 single=false pref="soft" pack=true: fit agent-1/7 one-node=false devices [0 1 2 3 4 5 6] (lowest free IDs: not reported since the master started) worst "" unranked "topology unknown: not reported since the master started"
+496 slots=14 single=true pref="strong" pack=true:
+497 slots=4 single=true pref="strong" pack=true: fit agent-0/4 one-node=false devices [0 1 2 3] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P usable, narrow) worst "worst pair NODE, P2P usable, narrow" unranked ""
+498 slots=16 single=false pref="off" pack=true:
+499 slots=16 single=false pref="soft" pack=true:
+500 slots=14 single=true pref="soft" pack=true:
+501 slots=8 single=true pref="strong" pack=true:
+502 slots=15 single=false pref="" pack=false:
+503 slots=5 single=true pref="strong" pack=true: fit agent-0/5 one-node=false devices [0 1 2 4 6] (GPU topology preference strong; NUMA node 0; worst pair PIX, P2P not usable) worst "worst pair PIX, P2P not usable" unranked ""
+504 slots=16 single=true pref="" pack=true:
+505 slots=3 single=true pref="off" pack=true: fit agent-0/3 one-node=false devices [0 2 3] (NUMA packing; free per NUMA node 0:3 1:2) worst "" unranked ""
+506 slots=3 single=true pref="off" pack=true: fit agent-0/3 one-node=false devices [0 1 2] (NUMA packing; free per NUMA node 0:4 1:4) worst "" unranked ""
+507 slots=4 single=false pref="" pack=true: fit agent-2/4 one-node=false devices [0 1 5 7] (NUMA packing; free per NUMA node 0:2 1:2) worst "" unranked ""
+508 slots=7 single=false pref="off" pack=true: fit agent-0/7 one-node=false devices [0 1 2 3 4 5 6] (NUMA packing; free per NUMA node 0:7) worst "" unranked ""
+509 slots=6 single=true pref="strong" pack=true:
+510 slots=8 single=true pref="strong" pack=true:
+511 slots=4 single=true pref="" pack=true: fit agent-0/4 one-node=false devices [1 2 3 7] (NUMA packing; free per NUMA node 0:3 1:1) worst "" unranked ""
+512 slots=8 single=true pref="off" pack=true:
+513 slots=0 single=true pref="soft" pack=true: fit agent-0/0 one-node=false
+514 slots=14 single=true pref="" pack=false:
+515 slots=0 single=false pref="" pack=false: fit agent-1/0 one-node=false
+516 slots=4 single=false pref="strong" pack=true: fit agent-0/4 one-node=false devices [0 1 2 3] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P usable, narrow) worst "worst pair NODE, P2P usable, narrow" unranked ""
+517 slots=6 single=false pref="strong" pack=true: fit agent-1/6 one-node=false devices [0 1 4 5 6 7] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+518 slots=16 single=true pref="off" pack=true:
+519 slots=2 single=true pref="soft" pack=true: fit agent-1/2 one-node=true devices [0 1] (GPU topology preference; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+520 slots=14 single=true pref="off" pack=false:
+521 slots=15 single=true pref="" pack=true:
+522 slots=14 single=false pref="soft" pack=false:
+523 slots=5 single=true pref="soft" pack=false: fit agent-1/5 one-node=false devices [0 2 5 6 7] (GPU topology preference; worst pair PIX, P2P not usable) worst "worst pair PIX, P2P not usable" unranked ""
+524 slots=3 single=true pref="strong" pack=true: fit agent-0/3 one-node=false devices [0 2 4] (GPU topology preference strong; NUMA node 0; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+525 slots=5 single=false pref="" pack=false: fit agent-1/5 one-node=false map order 5 () failure ""
+526 slots=3 single=false pref="" pack=true: fit agent-0/3 one-node=false devices [0 1 2] (NUMA packing; free per NUMA node 0:3 1:4; in error: 3) worst "" unranked ""
+527 slots=3 single=true pref="off" pack=false: fit agent-0/3 one-node=false map order 3 () failure ""
+528 slots=8 single=true pref="" pack=true:
+529 slots=14 single=true pref="soft" pack=true:
+530 slots=15 single=true pref="off" pack=false:
+531 slots=14 single=true pref="soft" pack=true:
+532 slots=8 single=false pref="" pack=false: fit agent-2/8 one-node=false map order 8 () failure ""
+533 slots=5 single=true pref="" pack=false:
+534 slots=4 single=false pref="" pack=true: fit agent-1/4 one-node=false devices [0 1 2 5] (NUMA packing; free per NUMA node 0:3 1:3; in error: 3) worst "" unranked ""
+535 slots=15 single=true pref="strong" pack=true:
+536 slots=8 single=true pref="off" pack=true:
+537 slots=2 single=true pref="off" pack=false: fit agent-1/2 one-node=false map order 2 () failure ""
+538 slots=1 single=true pref="" pack=true: fit agent-0/1 one-node=false devices [0] (lowest free IDs: not reported since the master started) worst "" unranked ""
+539 slots=6 single=false pref="off" pack=true: fit agent-0/6 one-node=false devices [0 1 2 3 5 6] (lowest free IDs: not reported since the master started; in error last: 7) worst "" unranked ""
+540 slots=15 single=false pref="off" pack=true:
+541 slots=4 single=false pref="" pack=true: fit agent-1/4 one-node=false devices [0 1 2 3] (NUMA packing; free per NUMA node 0:7; in error: 4) worst "" unranked ""
+542 slots=14 single=true pref="" pack=false:
+543 slots=0 single=false pref="" pack=false: fit agent-0/0 one-node=false
+544 slots=1 single=true pref="soft" pack=true: fit agent-2/1 one-node=false devices [1] (lowest free IDs: not reported since the master started) worst "" unranked ""
+545 slots=16 single=true pref="" pack=false:
+546 slots=15 single=true pref="strong" pack=false:
+547 slots=6 single=false pref="off" pack=false: fit agent-0/6 one-node=false map order 6 () failure ""
+548 slots=16 single=false pref="" pack=true:
+549 slots=14 single=true pref="strong" pack=true:
+550 slots=16 single=false pref="strong" pack=false:
+551 slots=6 single=true pref="strong" pack=true:
+552 slots=6 single=false pref="off" pack=true: fit agent-1/6 one-node=false devices [0 1 2 3 4 5] (NUMA packing; free per NUMA node 0:7) worst "" unranked ""
+553 slots=0 single=false pref="" pack=true: fit agent-0/0 one-node=false
+554 slots=15 single=false pref="strong" pack=true:
+555 slots=6 single=true pref="strong" pack=true:
+556 slots=2 single=false pref="off" pack=true: fit agent-0/2 one-node=false devices [0 2] (NUMA packing; free per NUMA node 0:2 1:1) worst "" unranked ""
+557 slots=14 single=false pref="" pack=true: fit agent-0/8 one-node=false fit agent-2/6 one-node=false
+558 slots=8 single=false pref="soft" pack=true:
+559 slots=14 single=false pref="soft" pack=true:
+560 slots=2 single=true pref="soft" pack=false: fit agent-0/2 one-node=false devices [0 5] (GPU topology preference; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+561 slots=1 single=false pref="strong" pack=false: fit agent-1/1 one-node=false map order 1 () failure ""
+562 slots=3 single=false pref="off" pack=true: fit agent-1/3 one-node=false devices [5 6 7] (NUMA packing; free per NUMA node 0:4 1:3) worst "" unranked ""
+563 slots=4 single=true pref="" pack=true:
+564 slots=1 single=true pref="soft" pack=true: fit agent-0/1 one-node=false devices [4] (NUMA packing; free per NUMA node 0:3 1:3) worst "" unranked ""
+565 slots=3 single=false pref="off" pack=true: fit agent-0/3 one-node=false devices [0 2 3] (NUMA packing; free per NUMA node 0:3 1:2) worst "" unranked ""
+566 slots=7 single=true pref="" pack=true: fit agent-0/7 one-node=false devices [1 2 3 4 5 6 7] (NUMA packing; free per NUMA node 0:7; in error: 0) worst "" unranked ""
+567 slots=8 single=false pref="off" pack=true: fit agent-0/8 one-node=false devices [0 1 2 3 4 5 6 7] (NUMA packing; free per NUMA node 0:3 1:4; in error: 1) worst "" unranked ""
+568 slots=6 single=false pref="soft" pack=true: fit agent-0/6 one-node=false devices [0 1 2 3 5 7] (GPU topology preference; worst pair SYS, P2P usable, narrow) worst "worst pair SYS, P2P usable, narrow" unranked ""
+569 slots=8 single=false pref="" pack=false: fit agent-0/8 one-node=false map order 8 () failure ""
+570 slots=16 single=true pref="off" pack=true:
+571 slots=14 single=true pref="off" pack=false:
+572 slots=1 single=false pref="strong" pack=true: fit agent-1/1 one-node=false devices [1] (NUMA packing; free per NUMA node 0:3; in error: 0) worst "" unranked ""
+573 slots=3 single=true pref="strong" pack=false: fit agent-0/3 one-node=false devices [5 6 7] (GPU topology preference strong; NUMA node 1; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+574 slots=6 single=true pref="" pack=true: fit agent-0/6 one-node=false devices [0 1 2 3 5 6] (NUMA packing; free per NUMA node 0:4 1:3) worst "" unranked ""
+575 slots=2 single=false pref="off" pack=false: fit agent-0/2 one-node=false map order 2 () failure ""
+576 slots=16 single=false pref="strong" pack=true:
+577 slots=2 single=true pref="" pack=true: fit agent-0/2 one-node=false devices [0 1] (NUMA packing; free per NUMA node 0:8) worst "" unranked ""
+578 slots=15 single=false pref="" pack=true:
+579 slots=7 single=false pref="strong" pack=true:
+580 slots=6 single=false pref="strong" pack=true:
+581 slots=14 single=false pref="" pack=true:
+582 slots=16 single=false pref="strong" pack=false:
+583 slots=1 single=false pref="strong" pack=true: fit agent-0/1 one-node=false devices [2] (lowest free IDs: not reported since the master started; in error last: 5) worst "" unranked ""
+584 slots=1 single=true pref="off" pack=true: fit agent-1/1 one-node=false devices [0] (NUMA packing; free per NUMA node 0:4) worst "" unranked ""
+585 slots=4 single=true pref="soft" pack=false: fit agent-1/4 one-node=false devices [0 2 4 6] (GPU topology preference; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+586 slots=7 single=true pref="strong" pack=true:
+587 slots=5 single=false pref="soft" pack=false: fit agent-0/5 one-node=false devices [0 1 2 3 6] (GPU topology preference; worst pair SYS, P2P usable, narrow) worst "worst pair SYS, P2P usable, narrow" unranked ""
+588 slots=16 single=true pref="strong" pack=true:
+589 slots=2 single=true pref="strong" pack=true: fit agent-1/2 one-node=false devices [0 1] (GPU topology preference strong; NUMA node 0; worst pair PIX, P2P usable) worst "worst pair PIX, P2P usable" unranked ""
+590 slots=2 single=false pref="" pack=true: fit agent-0/2 one-node=false devices [0 1] (lowest free IDs: not reported since the master started) worst "" unranked ""
+591 slots=1 single=false pref="strong" pack=true: fit agent-0/1 one-node=false devices [0] (NUMA packing; free per NUMA node 0:2 1:2; in error: 2) worst "" unranked ""
+592 slots=4 single=false pref="" pack=false: fit agent-0/4 one-node=false map order 4 () failure ""
+593 slots=8 single=false pref="" pack=true: fit agent-0/8 one-node=false devices [0 1 2 3 4 5 6 7] (lowest free IDs: not reported since the master started) worst "" unranked ""
+594 slots=2 single=false pref="strong" pack=true: fit agent-0/2 one-node=false devices [5 7] (GPU topology preference strong; NUMA node 1; worst pair NODE, P2P usable) worst "worst pair NODE, P2P usable" unranked ""
+595 slots=14 single=true pref="" pack=false:
+596 slots=8 single=true pref="strong" pack=true: fit agent-1/8 one-node=false devices [0 1 2 3 4 5 6 7] (GPU topology preference strong; NUMA node 0; worst pair PIX, P2P not usable) worst "worst pair PIX, P2P not usable" unranked ""
+597 slots=2 single=true pref="strong" pack=false: fit agent-0/2 one-node=false devices [4 6] (GPU topology preference strong; NUMA node 1; worst pair NODE, P2P not usable) worst "worst pair NODE, P2P not usable" unranked ""
+598 slots=7 single=true pref="strong" pack=true:
+599 slots=5 single=true pref="strong" pack=false:
