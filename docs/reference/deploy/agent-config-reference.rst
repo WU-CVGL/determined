@@ -63,8 +63,9 @@ specified by a 0-based index, UUID, PCI bus ID, or board serial number. The 0-ba
 GPUs or AMD GPUs can be obtained via the ``nvidia-smi`` or ``rocm-smi`` commands.
 
 After a restart, the agent reattaches a running task container only if each of its slot IDs is still
-a slot of the agent with the GPU UUID the container was started with, and kills it otherwise. The
-master refuses an agent that reports a GPU UUID that an agent with another agent ID already reports.
+a slot of the agent and, if the container recorded GPU UUIDs, still has the same GPU UUID; it kills
+the other containers. The master refuses an agent that reports a GPU UUID that an agent with another
+agent ID already reports.
 
 .. _agent-exclude-gpus:
 
