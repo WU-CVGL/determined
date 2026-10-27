@@ -126,6 +126,14 @@ The following configuration settings are supported:
       waits until one NUMA node of an agent has as many free GPUs as the task has slots and gets
       GPUs of that node. See :ref:`prefer_gpu_topology <exp-config-resources-prefer-gpu-topology>`.
 
+   -  ``gpu_groups``: named groups of GPUs of exact models on one agent, each with ``name``,
+      ``count`` and ``models``, for example ``[{name: simulation, count: 1, models: ["NVIDIA GeForce
+      RTX 4090"]}, {name: learner, count: 1, models: ["NVIDIA RTX 6000 Ada Generation"]}]``. The
+      counts must add up to ``slots``; TensorBoards, which have no slots, cannot set it. The task
+      starts only when one agent has free GPUs for every group, and its container gets
+      ``DET_GPU_GROUPS`` with each group's GPU UUIDs. See :ref:`gpu_groups
+      <exp-config-resources-gpu-groups>`.
+
 -  ``bind_mounts``: Specifies a collection of directories that are bind-mounted into the Docker
    containers for execution. This can be used to allow commands to access additional data that is
    not contained in the command context. This field should consist of an array of entries. Note that
