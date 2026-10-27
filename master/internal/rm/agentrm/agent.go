@@ -31,6 +31,9 @@ import (
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 )
 
+// refusedAgentStopWait is how long an agent that was refused before it started may stay connected.
+var refusedAgentStopWait = 10 * time.Second
+
 var (
 	errRecovering                = errors.New("agent disconnected, wait for recovery")
 	errWebsocketAlreadyConnected = errors.New("websocket already connected")
@@ -88,6 +91,9 @@ type (
 
 		// opts are additional agent options the master sends to the agent.
 		opts *aproto.MasterSetAgentOptions
+		// gpus records the GPUs of all registered agents; nil skips the check for GPUs that
+		// another agent reports.
+		gpus *gpuOwners
 
 		agentState *agentState
 	}
@@ -265,6 +271,7 @@ func (a *agent) stop(cause error) {
 	}
 	a.stopped = true
 	a.cancelReconnectTimers()
+	a.gpus.release(a)
 	defer a.unregister()
 
 	if cause != nil {
@@ -650,7 +657,14 @@ func (a *agent) HandleIncomingWebsocketMessage(msg *aproto.MasterMessage) {
 				a.stop(resourcePoolErr)
 				return
 			}
+			// An agent restored from the snapshot claims its GPUs on its first reconnect.
+			if !a.claimGPUs(msg.AgentStarted) {
+				return
+			}
 		} else {
+			if !a.claimGPUs(msg.AgentStarted) {
+				return
+			}
 			a.agentStarted(msg.AgentStarted)
 		}
 
@@ -713,6 +727,35 @@ func (a *agent) HandleIncomingWebsocketMessage(msg *aproto.MasterMessage) {
 
 func (a *agent) taskNeedsRecording(record *aproto.ContainerStatsRecord) bool {
 	return record.TaskType == model.TaskTypeTrial
+}
+
+// claimGPUs records the agent's GPUs. If another agent already reports one of them, it tells the
+// agent to shut down and returns false. A started agent is stopped at once. An agent that has not
+// started is stopped when it disconnects, so that it receives the message first, or after
+// refusedAgentStopWait. A stopped agent claims nothing: its GPUs were released in stop.
+func (a *agent) claimGPUs(agentStarted *aproto.AgentStarted) bool {
+	if a.stopped {
+		return false
+	}
+	err := a.gpus.claim(a, agentStarted.Devices)
+	if err == nil {
+		return true
+	}
+	a.syslog.Error(err.Error())
+	a.socket.Outbox <- aproto.AgentMessage{
+		AgentShutdown: &aproto.AgentShutdown{ErrMsg: err.Error()},
+	}
+	if a.started {
+		a.stop(nil)
+		return false
+	}
+	// stop cancels the timer.
+	a.reconnectTimers = append(a.reconnectTimers, time.AfterFunc(refusedAgentStopWait, func() {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		a.stop(nil)
+	}))
+	return false
 }
 
 func (a *agent) agentStarted(agentStarted *aproto.AgentStarted) {
