@@ -201,8 +201,8 @@ const (
 //     failed reservation. A pass that does neither, also one whose only failures are persistence
 //     failures, does not ask again, so passes converge;
 //   - if no agent of the pool can ever hold it (strongCannotFit, gpuGroupsCannotFit), or its
-//     gpu_groups do not add up to its slots, the request fails, once, with an InvalidResourcesRequestError whose cause is that type too, so a trial
-//     ends without restarts;
+//     gpu_groups do not add up to its slots, the request fails, once, with an
+//     InvalidResourcesRequestError whose cause is that type too, so a trial ends without restarts;
 //   - otherwise, if it does not fit, the task log says once that it waits.
 //
 // It returns whether to run another pass. It keeps one notice per task and drops the tasks that

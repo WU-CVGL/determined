@@ -227,7 +227,8 @@ func holdsGPUGroupsOnOneNUMANode(groups expconf.GPUGroupRequests, in gpuSelectio
 
 // gpuGroupsSatisfied admits an agent for a request with gpu_groups when its free devices hold a
 // valid set, on one known NUMA node under prefer_gpu_topology "strong", and none when the groups'
-// counts do not add up to the request's slots. It admits every agent for other requests. The free devices are exactly the allocatable free slots (gpuSelectionInput).
+// counts do not add up to the request's slots. It admits every agent for other requests. The free
+// devices are exactly the allocatable free slots (gpuSelectionInput).
 func gpuGroupsSatisfied(req *sproto.AllocateRequest, agent *agentState) bool {
 	groups := gpuGroupsOf(req)
 	if groups == nil {

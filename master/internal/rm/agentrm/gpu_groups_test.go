@@ -153,7 +153,7 @@ func TestGPUGroupAssignment(t *testing.T) {
 // it is valid and, read GPU by GPU in config order, has the smallest IDs.
 func TestGPUGroupAssignmentLowestFirst(t *testing.T) {
 	brands := []string{rtx4090, ada6000, "NVIDIA A100"}
-	rng := rand.New(rand.NewSource(7))
+	rng := rand.New(rand.NewSource(7)) //nolint:gosec
 	for iter := 0; iter < 3000; iter++ {
 		var groups expconf.GPUGroupRequests
 		n := 0
@@ -537,7 +537,7 @@ func TestGPUGroupsNeverTakeMapOrder(t *testing.T) {
 	require.Equal(t, before, snapshotOf(split))
 
 	// The simulation counts a failed reservation as a miss; it does not panic.
-	full :=modelAgentState(t, modelDevices(rtx4090, rtx4090), nil)
+	full := modelAgentState(t, modelDevices(rtx4090, rtx4090), nil)
 	req := groupsRequest(simAndLearner, expconf.GPUTopologyOff)
 	require.False(t, priorityScheduler{}.addTaskToAgents(req, []*fittingState{{Agent: full, Slots: 2}}))
 }
