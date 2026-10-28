@@ -19,6 +19,7 @@ import {
   ResourcePool,
   ResourceType,
 } from 'types';
+import { usablePoolsFirst } from 'utils/cluster';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import { percent } from 'utils/number';
 import { deepObservable, immutableObservable, Observable } from 'utils/observable';
@@ -119,9 +120,10 @@ class ClusterStore extends PollingStore {
     pools.map((p) => new Set(p.map((pp) => pp.clusterName)).size > 1),
   );
 
+  /** By name, the pools the user may use first: restricted pools come last. */
   public readonly resourcePools = this.#resourcePools.select((loadable) => {
     return Loadable.map(loadable, (pools) => {
-      return pools.sort((a, b) => a.name.localeCompare(b.name));
+      return usablePoolsFirst([...pools].sort((a, b) => a.name.localeCompare(b.name)));
     });
   });
 
