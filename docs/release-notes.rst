@@ -10,6 +10,19 @@
  Version 0.42
 **************
 
+Version 0.42.3
+==============
+
+**Release Date:** October 28, 2026
+
+**Improvements**
+
+-  WebUI: List the resource pools that the user may not use after the others.
+
+-  WebUI: Show the model of each GPU in its details on the resource pool page.
+
+Reload open WebUI tabs after the upgrade.
+
 Version 0.42.2
 ==============
 
