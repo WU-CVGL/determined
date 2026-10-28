@@ -46,11 +46,11 @@ automatically.
    problems occur after upgrading Determined.
 
 All users should also upgrade this fork's CLI and SDK from the same source revision as the deployed
-master and agent. For the 0.42.3 release, run:
+master and agent. For the 0.42.4 release, run:
 
 .. code::
 
-   VERSION=0.42.3 python -m pip install --upgrade 'git+https://github.com/WU-CVGL/determined.git@0.42.3#subdirectory=harness'
+   VERSION=0.42.4 python -m pip install --upgrade 'git+https://github.com/WU-CVGL/determined.git@0.42.4#subdirectory=harness'
 
 This Python package command does not upgrade the master or agent images. Follow the fork
 distribution guide for those artifacts and keep a compatible database backup for rollback.

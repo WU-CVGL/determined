@@ -10,6 +10,18 @@
  Version 0.42
 **************
 
+Version 0.42.4
+==============
+
+**Release Date:** October 28, 2026
+
+**Bug Fixes**
+
+-  WebUI: List the resource pools that the user may not use after the others, which 0.42.3 still
+   listed by name.
+
+Reload open WebUI tabs after the upgrade.
+
 Version 0.42.3
 ==============
 
