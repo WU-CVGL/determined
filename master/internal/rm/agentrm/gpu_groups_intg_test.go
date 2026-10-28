@@ -76,7 +76,7 @@ func TestGPUGroupsQueuedAcrossMasterRestart(t *testing.T) {
 		}
 	}
 
-	first := newRestoreTestMaster(t, poolName)
+	first := newRestoreTestMaster(t, poolName, false)
 	firstAgent := connectRestoreTestAgent(t, first.addAgent(t, agentID, nil), agentStarted())
 	running := newRestoreTestRequest(t, poolName)
 	queued := newRestoreTestRequest(t, poolName)
@@ -96,7 +96,7 @@ func TestGPUGroupsQueuedAcrossMasterRestart(t *testing.T) {
 	require.NoError(t, err)
 	state, ok := states[agentID]
 	require.True(t, ok)
-	second := newRestoreTestMaster(t, poolName)
+	second := newRestoreTestMaster(t, poolName, false)
 	restoredAgent := second.addAgent(t, agentID, &state)
 	running.Restore = true
 	queued.Restore = true
