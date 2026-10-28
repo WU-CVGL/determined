@@ -142,6 +142,17 @@ func TestGPUOwnersRestoredAgentReleased(t *testing.T) {
 	require.NoError(t, g.claim(&agent{id: "fresh"}, []device.Device{gpu(0, "GPU-a")}))
 }
 
+// A restored agent whose reconnect wait ended before its GPUs were restored holds none.
+func TestStoppedRestoredAgentHoldsNoGPUs(t *testing.T) {
+	g := newGPUOwners()
+	state := newAgentState("stopped", 0)
+	state.slotStates[0] = &slot{device: gpu(0, "GPU-a")}
+	a := &agent{id: "stopped", gpus: g, agentState: state, stopped: true}
+	a.restoreGPUs()
+	require.Empty(t, g.owners)
+	require.NoError(t, g.claim(&agent{id: "fresh"}, []device.Device{gpu(0, "GPU-a")}))
+}
+
 func TestGPUOwnersNil(t *testing.T) {
 	var g *gpuOwners
 	require.NoError(t, g.claim(&agent{id: aproto.ID("a")}, []device.Device{gpu(0, "GPU-a")}))

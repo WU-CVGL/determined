@@ -774,10 +774,14 @@ func (a *agent) claimGPUs(agentStarted *aproto.AgentStarted) bool {
 
 // restoreGPUs records the GPUs of an agent restored from the snapshot as held by it, so that an
 // agent with another ID that reports them is refused while this one awaits its reconnect. It logs
-// the other restored agents that hold them too.
+// the other restored agents that hold them too. An agent stopped meanwhile, when its reconnect wait
+// ended first, records nothing: its GPUs were released in stop.
 func (a *agent) restoreGPUs() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.stopped {
+		return
+	}
 
 	devices := make([]device.Device, 0, len(a.agentState.slotStates))
 	for _, s := range a.agentState.slotStates {
