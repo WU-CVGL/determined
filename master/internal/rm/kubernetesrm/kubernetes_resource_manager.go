@@ -362,6 +362,9 @@ func (k *ResourceManager) ValidateResources(
 	if msg.GPUTopology == expconf.GPUTopologyStrong && msg.Slots >= 2 {
 		return nil, errors.New(`prefer_gpu_topology "strong" is not available on Kubernetes`)
 	}
+	if msg.GPUGroups != nil {
+		return nil, errors.New("resources.gpu_groups is not available on Kubernetes")
+	}
 
 	rp, err := k.poolByName(msg.ResourcePool)
 	if err != nil {

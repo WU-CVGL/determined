@@ -851,6 +851,10 @@ func TestValidateResourcesRefusesStrongGPUTopology(t *testing.T) {
 		Slots: 2, GPUTopology: expconf.GPUTopologyStrong,
 	})
 	require.EqualError(t, err, `prefer_gpu_topology "strong" is not available on Slurm or PBS`)
+	_, err = m.ValidateResources(sproto.ValidateResourcesRequest{
+		Slots: 1, GPUGroups: expconf.GPUGroupRequests{{Name: "sim", Count: 1, Models: []string{"m"}}},
+	})
+	require.EqualError(t, err, "resources.gpu_groups is not available with this resource manager")
 	for _, req := range []sproto.ValidateResourcesRequest{
 		{Slots: 1, GPUTopology: expconf.GPUTopologyStrong},
 		{Slots: 2, GPUTopology: expconf.GPUTopologySoft},

@@ -995,7 +995,8 @@ func (e *internalExperiment) setRP(resourcePool string) error {
 	case oldRP == rp.String():
 		return fmt.Errorf("resource pool is unchanged (%s == %s)", oldRP, rp)
 	}
-	if err := validateGPUTopology(e.rm, rp, resources.SlotsPerTrial(), resources.GPUTopology()); err != nil {
+	if err := validateGPUTopology(e.rm, rp, resources.SlotsPerTrial(), slotsPerTrialField,
+		resources.GPUTopology(), resources.GPUGroupRequests()); err != nil {
 		return err
 	}
 

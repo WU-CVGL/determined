@@ -60,8 +60,9 @@ func (s stoppingMasterAllocations) StartAllocation(
 
 // restartWithQueuedShell launches a shell that waits for resources, stops the master, and
 // restores the shell in a new master as the master start does, up to closing the open
-// allocations with the last cluster heartbeat at heartbeat.
-func restartWithQueuedShell(t *testing.T, heartbeat time.Time) (
+// allocations with the last cluster heartbeat at heartbeat. configure changes the shell's request
+// before the launch.
+func restartWithQueuedShell(t *testing.T, heartbeat time.Time, configure ...func(*CreateGeneric)) (
 	*Command, *mocks.ResourceManager, *queue.Queue[sproto.ResourcesEvent],
 ) {
 	// The restore picks up every command in the database that has not ended.
@@ -82,6 +83,9 @@ func restartWithQueuedShell(t *testing.T, heartbeat time.Time) (
 
 	req := CreateMockGenericReq(t, pgDB)
 	req.Spec.Config.Resources.Priority = ptrs.Ptr(7)
+	for _, c := range configure {
+		c(req)
+	}
 	shell, err := cs.LaunchGenericCommand(model.TaskTypeShell, model.JobTypeShell, req)
 	require.NoError(t, err)
 	state, err := task.DefaultService.State(shell.allocationID)

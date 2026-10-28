@@ -569,6 +569,9 @@ func (*DispatcherResourceManager) ValidateResources(
 	if req.GPUTopology == expconf.GPUTopologyStrong && req.Slots >= 2 {
 		return nil, errors.New(`prefer_gpu_topology "strong" is not available on Slurm or PBS`)
 	}
+	if req.GPUGroups != nil {
+		return nil, errors.New("resources.gpu_groups is not available with this resource manager")
+	}
 	// TODO(HAL-2862): Use inferred value here if possible.
 	// fulfillable := m.config.MaxSlotsPerContainer >= msg.Slots
 	return nil, nil

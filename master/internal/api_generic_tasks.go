@@ -144,7 +144,8 @@ func (a *apiServer) getGenericTaskLaunchParameters(
 	if err := poolaccess.CanUseResourcePool(ctx, *userModel, poolName.String()); err != nil {
 		return nil, nil, nil, err
 	}
-	if err := validateGPUTopology(a.m.rm, poolName, resources.Slots, taskConfig.Resources.GPUTopology()); err != nil {
+	if err := validateGPUTopology(a.m.rm, poolName, resources.Slots, slotsField,
+		taskConfig.Resources.GPUTopology(), taskConfig.Resources.GPUGroupRequests()); err != nil {
 		return nil, nil, nil, err
 	}
 
@@ -408,6 +409,7 @@ func (a *apiServer) CreateGenericTask(
 		FittingRequirements: sproto.FittingRequirements{
 			SingleAgent: isSingleNode,
 			GPUTopology: genericTaskSpec.GenericTaskConfig.Resources.GPUTopology(),
+			GPUGroups:   genericTaskSpec.GenericTaskConfig.Resources.GPUGroupRequests(),
 		},
 
 		ProxyPorts: sproto.NewProxyPortConfig(genericTaskSpec.ProxyPorts(), taskID),

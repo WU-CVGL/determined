@@ -112,6 +112,8 @@ type (
 		// GPUTopology is the task's resources.prefer_gpu_topology. Only paths that create a task
 		// set it, so a restore never fails on the topology.
 		GPUTopology expconf.GPUTopologyPreference
+		// GPUGroups is the task's resources.gpu_groups, set as GPUTopology is.
+		GPUGroups expconf.GPUGroupRequests
 	}
 
 	// ValidateResourcesResponse is the response to ValidateResourcesRequest.

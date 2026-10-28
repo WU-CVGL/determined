@@ -9,13 +9,15 @@ import (
 
 	"github.com/determined-ai/determined/master/pkg/aproto"
 	"github.com/determined-ai/determined/master/pkg/device"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 )
 
 // GPU selection chooses which free devices of the agent the scheduler picked a reservation gets.
 // It never changes how many devices a task gets or on which agent: the fit and the agent choice
 // are made before it, from counts only, except for prefer_gpu_topology "strong", whose fit also
-// counts the free GPUs of each NUMA node (holdsOnOneNUMANode), and for "soft" under NUMA packing,
-// whose agent choice counts them the same way (preferOneNUMANode).
+// counts the free GPUs of each NUMA node (holdsOnOneNUMANode), for "soft" under NUMA packing,
+// whose agent choice counts them the same way (preferOneNUMANode), and for resources.gpu_groups,
+// whose fit reads the models of the free GPUs (gpuGroupsSatisfied).
 //
 // Three rules rank the free devices; without any, a reservation takes them in map order, as before
 // GPU selection existed:
@@ -27,6 +29,9 @@ import (
 //     equal pair (pairRank); NUMA packing never reads the width;
 //   - prefer_gpu_topology "strong" (selectOnOneNUMANode), for a task with 2 or more slots: the set
 //     of one NUMA node, under every fitting policy and packing switch. It never takes map order.
+//
+// A task with resources.gpu_groups (selectGPUGroups) takes these rules over the sets that hold its
+// groups, and the lowest IDs without a rule; it never takes map order either.
 //
 // NUMA packing, and "soft" when it ranks, prefer fewer GPUs in error: an NVML health call of the
 // GPU failed at agent start, or the GPU has a recent critical XID (gpuhealth.IsCriticalXID: 13, 31,
@@ -44,6 +49,8 @@ const (
 	noKnownNUMANode = "no free healthy GPU with a known NUMA node"
 	// fewerThanTwoSlots is why prefer_gpu_topology does not rank a reservation of 1 slot.
 	fewerThanTwoSlots = "fewer than 2 slots"
+	// everyPairUnknown is why prefer_gpu_topology does not rank a report without a rankable link.
+	everyPairUnknown = "every pair of free GPUs unknown"
 	// maxTopologySets bounds the sets of free GPUs that prefer_gpu_topology compares in one
 	// ranking (C(16,8) = 12870 fits): of the agent's free GPUs for "soft", of each NUMA node's free
 	// GPUs for "strong". Above it, "soft" gets the pool's default choice; "strong" takes that NUMA
@@ -65,12 +72,15 @@ type deviceSelection struct {
 	// strong takes the GPUs of one NUMA node: the task asks for prefer_gpu_topology "strong" with
 	// 2 or more slots, and its fit is on one agent where one NUMA node holds them.
 	strong bool
+	// groups are the task's resources.gpu_groups: the selection takes a valid set of them
+	// (selectGPUGroups) and never map order.
+	groups expconf.GPUGroupRequests
 	// xids holds the UUIDs of GPUs with a recent critical XID, read once per scheduling pass.
 	xids map[string]bool
 }
 
 func (s deviceSelection) ranks() bool {
-	return s.packNUMA || s.preferTopology || s.strong
+	return s.packNUMA || s.preferTopology || s.strong || s.groups != nil
 }
 
 // gpuSelectionInput is what a selection reads of an agent.
@@ -99,6 +109,9 @@ type gpuChoice struct {
 	worstPair string
 	// unranked is why prefer_gpu_topology did not choose the set, for the task log.
 	unranked string
+	// gpuGroups holds the UUIDs of each group's devices for a task with gpu_groups, set by the
+	// reservation from the devices it reserved (gpuGroupUUIDs).
+	gpuGroups map[string][]string
 }
 
 // rankedGPU is a free device with what the keys read of it.
@@ -154,6 +167,8 @@ func selectFreeDevices(in gpuSelectionInput, n int, sel deviceSelection) gpuChoi
 	switch {
 	case n <= 0 || len(in.free) < n:
 		return gpuChoice{noSelectionReason: fmt.Sprintf("%d free devices for %d slots", len(in.free), n)}
+	case sel.groups != nil:
+		return selectGPUGroups(in, n, sel)
 	case !sel.ranks():
 		return gpuChoice{noSelectionReason: "no rule ranks the devices"}
 	case sel.strong && n >= 2:
@@ -616,7 +631,7 @@ func selectByTopology(
 		}
 	}
 	if !rankable {
-		return nil, "", "every pair of free GPUs unknown"
+		return nil, "", everyPairUnknown
 	}
 
 	type setKey struct {

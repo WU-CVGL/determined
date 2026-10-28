@@ -44,6 +44,7 @@ func (r ResourcesConfig) ToExpconf() expconf.ResourcesConfig {
 		RawIsSingleNode:   r.IsSingleNode,
 
 		RawPreferGPUTopology: r.PreferGPUTopology,
+		RawGPUGroups:         schemas.Copy(r.GPUGroups),
 	})
 }
 

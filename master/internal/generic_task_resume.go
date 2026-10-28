@@ -370,6 +370,7 @@ func (a *apiServer) startGenericTaskResumeAllocation(
 	singleNode := spec.GenericTaskConfig.Resources.IsSingleNode() != nil && *spec.GenericTaskConfig.Resources.IsSingleNode()
 	fitting := sproto.FittingRequirements{
 		SingleAgent: singleNode, GPUTopology: spec.GenericTaskConfig.Resources.GPUTopology(),
+		GPUGroups: spec.GenericTaskConfig.Resources.GPUGroupRequests(),
 	}
 	now := time.Now().UTC()
 	return task.DefaultService.StartAllocation(logCtx, sproto.AllocateRequest{

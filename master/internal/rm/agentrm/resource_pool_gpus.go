@@ -80,14 +80,19 @@ func (rp *resourcePool) newGPUPolicy() gpuPolicy {
 
 // selection returns how a request's reservation on one of its fits chooses its devices.
 // prefer_gpu_topology "soft" ranks GPU sets only on one agent: a multi-agent fit takes whole idle
-// agents, so there is no choice. "strong" with 2 or more slots fits only on one agent.
+// agents, so there is no choice. "strong" with 2 or more slots and gpu_groups fit only on one
+// agent.
 func (p gpuPolicy) selection(req *sproto.AllocateRequest, fits []*fittingState) deviceSelection {
-	return deviceSelection{
+	sel := deviceSelection{
 		packNUMA:       p.packNUMA,
 		preferTopology: req.FittingRequirements.GPUTopology == expconf.GPUTopologySoft && len(fits) == 1,
 		strong:         strongTopology(req) && len(fits) == 1,
 		xids:           p.xids,
 	}
+	if len(fits) == 1 {
+		sel.groups = gpuGroupsOf(req)
+	}
+	return sel
 }
 
 // strongTopology reports whether a request takes the GPUs of one NUMA node: prefer_gpu_topology
@@ -105,6 +110,16 @@ func strongTopology(req *sproto.AllocateRequest) bool {
 // (deepCopy).
 func preferOneNUMANode(req *sproto.AllocateRequest, packNUMA bool) bool {
 	return packNUMA && req.FittingRequirements.GPUTopology == expconf.GPUTopologySoft && req.SlotsNeeded >= 2
+}
+
+// oneNUMANodeHolds is the first key of the agent choice of preferOneNUMANode: one NUMA node has the
+// request's slots free (holdsOnOneNUMANode), or, for a request with gpu_groups, a valid set
+// (holdsGPUGroupsOnOneNUMANode).
+func oneNUMANodeHolds(req *sproto.AllocateRequest, in gpuSelectionInput) bool {
+	if groups := gpuGroupsOf(req); groups != nil {
+		return holdsGPUGroupsOnOneNUMANode(groups, in)
+	}
+	return holdsOnOneNUMANode(in, req.SlotsNeeded)
 }
 
 // gpuReservation is one reservation of an allocation, for its logs.
@@ -161,46 +176,51 @@ func gpuTopologyPreferenceLine(reservations []gpuReservation) string {
 	case r.resp.choice.worstPair != "":
 		return fmt.Sprintf("GPU topology preference: agent %s, slots %s; %s",
 			r.fit.Agent.id, idList(r.resp.devices), r.resp.choice.worstPair)
+	case r.resp.choice.gpuGroups != nil:
+		return fmt.Sprintf("GPU topology preference: agent %s not ranked (%s)", r.fit.Agent.id, r.resp.choice.unranked)
 	default:
 		return fmt.Sprintf("GPU topology preference: agent %s not ranked (%s); "+
 			"slots chosen as for tasks without it", r.fit.Agent.id, r.resp.choice.unranked)
 	}
 }
 
-// strongNotice is what the pool told a pending task with prefer_gpu_topology "strong".
-type strongNotice int
+// waitNotice is what the pool told a pending task with prefer_gpu_topology "strong" or
+// gpu_groups.
+type waitNotice int
 
 const (
-	strongWaiting strongNotice = iota + 1
-	strongFailed
+	noticeWaiting waitNotice = iota + 1
+	noticeFailed
 )
 
-// checkStrongRequests runs after the reservations of a scheduling pass, on the agent states as the
+// checkWaitingRequests runs after the reservations of a scheduling pass, on the agent states as the
 // pass left them (rp.agentStatesCache, refreshed for every agent the pass reserved on or failed
-// on). For each pending request with prefer_gpu_topology "strong":
+// on). For each pending request with prefer_gpu_topology "strong" or with gpu_groups:
 //   - if it fits and the pass allocated or failed a reservation, it asks for one more pass: the
 //     pass's plan and its reservations can differ (deepCopy), and an agent can change under a
 //     failed reservation. A pass that does neither, also one whose only failures are persistence
 //     failures, does not ask again, so passes converge;
-//   - if no agent of the pool can ever hold it (strongCannotFit), the request fails, once, with an
+//   - if no agent of the pool can ever hold it (strongCannotFit, gpuGroupsCannotFit), or its
+//     gpu_groups do not add up to its slots, the request fails, once, with an
 //     InvalidResourcesRequestError whose cause is that type too, so a trial ends without restarts;
 //   - otherwise, if it does not fit, the task log says once that it waits.
 //
 // It returns whether to run another pass. It keeps one notice per task and drops the tasks that
 // left the task list.
-func (rp *resourcePool) checkStrongRequests(reserved bool) bool {
-	if rp.strongNotices == nil {
-		rp.strongNotices = map[model.AllocationID]strongNotice{}
+func (rp *resourcePool) checkWaitingRequests(reserved bool) bool {
+	if rp.waitNotices == nil {
+		rp.waitNotices = map[model.AllocationID]waitNotice{}
 	}
-	for id := range rp.strongNotices {
+	for id := range rp.waitNotices {
 		if _, ok := rp.taskList.TaskByID(id); !ok {
-			delete(rp.strongNotices, id)
+			delete(rp.waitNotices, id)
 		}
 	}
 	again := false
 	for it := rp.taskList.Iterator(); it.Next(); {
 		req := it.Value()
-		if !strongTopology(req) || rp.taskList.IsScheduled(req.AllocationID) {
+		groups := gpuGroupsOf(req)
+		if (!strongTopology(req) && groups == nil) || rp.taskList.IsScheduled(req.AllocationID) {
 			continue
 		}
 		fits := findFits(req, rp.agentStatesCache, rp.fittingMethod, rp.config.Scheduler.AllowHeterogeneousFits,
@@ -210,11 +230,24 @@ func (rp *resourcePool) checkStrongRequests(reserved bool) bool {
 			continue
 		}
 		log := rp.syslog.WithField("allocation-id", req.AllocationID)
-		notice := rp.strongNotices[req.AllocationID]
-		if cause := strongCannotFit(rp.config.PoolName, rp.agentStatesCache, req.SlotsNeeded); cause != nil {
-			if notice != strongFailed {
-				rp.strongNotices[req.AllocationID] = strongFailed
-				log.Warnf("GPU topology preference strong: %s", cause)
+		notice := rp.waitNotices[req.AllocationID]
+		prefix := "GPU topology preference strong: "
+		cause := strongCannotFit(rp.config.PoolName, rp.agentStatesCache, req.SlotsNeeded)
+		msg := fmt.Sprintf("GPU topology preference strong: waiting until one NUMA node of an agent "+
+			"in pool %s has %d free GPUs", rp.config.PoolName, req.SlotsNeeded)
+		if groups != nil {
+			prefix = "gpu_groups: "
+			cause = gpuGroupsCannotFit(rp.config.PoolName, rp.agentStatesCache, groups, strongTopology(req))
+			if groups.Slots() != req.SlotsNeeded {
+				cause = errGPUGroupsSlots(groups, req.SlotsNeeded)
+			}
+			msg = fmt.Sprintf("gpu_groups: waiting until one agent in pool %s has free GPUs for %s",
+				rp.config.PoolName, groups)
+		}
+		if cause != nil {
+			if notice != noticeFailed {
+				rp.waitNotices[req.AllocationID] = noticeFailed
+				log.Warnf("%s%s", prefix, cause)
 				rmevents.Publish(req.AllocationID, &sproto.InvalidResourcesRequestError{
 					Cause: sproto.InvalidResourcesRequestError{Cause: cause},
 				})
@@ -222,9 +255,7 @@ func (rp *resourcePool) checkStrongRequests(reserved bool) bool {
 			continue
 		}
 		if notice == 0 {
-			rp.strongNotices[req.AllocationID] = strongWaiting
-			msg := fmt.Sprintf("GPU topology preference strong: waiting until one NUMA node of an agent "+
-				"in pool %s has %d free GPUs", rp.config.PoolName, req.SlotsNeeded)
+			rp.waitNotices[req.AllocationID] = noticeWaiting
 			log.Info(msg)
 			rmevents.Publish(req.AllocationID, &sproto.ContainerLog{
 				Timestamp:  time.Now().UTC(),

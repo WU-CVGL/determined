@@ -24,6 +24,7 @@ func DefaultConfigGenericTaskConfig(
 			RawDevices:        expconf.DevicesConfigV0{},
 
 			RawPreferGPUTopology: nil,
+			RawGPUGroups:         nil,
 		},
 		Environment: DefaultEnvConfig(taskContainerDefaults),
 	}

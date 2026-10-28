@@ -1404,6 +1404,100 @@ shell and TensorBoard templates, in invariant config policies, and in the comman
 that the master restores or resumes. Before rolling back, end the experiments that set it and remove
 it from templates and config policies.
 
+.. _exp-config-resources-gpu-groups:
+
+``gpu_groups``
+==============
+
+Optional. Named groups of GPUs that a trial gets on one agent, each of an exact GPU model, for
+example one RTX 4090 for simulation and one RTX 6000 Ada for learning:
+
+.. code:: yaml
+
+   resources:
+     slots_per_trial: 2
+     gpu_groups:
+       - name: simulation
+         count: 1
+         models: ["NVIDIA GeForce RTX 4090"]
+       - name: learner
+         count: 1
+         models: ["NVIDIA RTX 6000 Ada Generation"]
+
+Each group has:
+
+-  ``name``: required, unique in the list, a lowercase letter followed by up to 31 lowercase
+   letters, digits, ``_`` or ``-``.
+
+-  ``count``: required, the group's number of GPUs, at least 1.
+
+-  ``models``: required, a non-empty list of distinct GPU model names. A GPU belongs to the group
+   only if its model name is one of them, exactly and case-sensitively, as the **Device** column of
+   ``det slot list`` shows it (the name ``nvidia-smi`` prints).
+
+The counts must add up to ``slots_per_trial``; otherwise the experiment is refused with
+``resources.gpu_groups counts must add up to resources.slots_per_trial (2)``. Unset, or ``null``, is
+no groups; in an experiment, a template's list still applies. Templates and config policies set the
+list as a whole: two lists are never merged entry by entry.
+
+Only the agent resource manager runs ``gpu_groups``:
+
+-  A trial uses one agent, whatever ``is_single_node`` says, and starts only when that agent has
+   free GPUs for every group at once; it never gets some of its GPUs first. Disabled and draining
+   slots do not count as free. A GPU belongs to at most one group. Model lists of two groups may
+   overlap: the scheduler finds an assignment of GPUs to groups when one exists.
+
+-  Among the sets of free GPUs that hold the groups, the trial gets the one that the rules of tasks
+   without groups rank first: :ref:`prefer_gpu_topology <exp-config-resources-prefer-gpu-topology>`
+   ``"soft"`` ranks them, then :ref:`NUMA packing <master-config-numa-packing>` in pools that pack;
+   without either, the lowest IDs. ``"strong"`` takes a set on one NUMA node and waits until one
+   NUMA node of an agent has free GPUs for every group. With more than 20000 sets to compare, the
+   trial gets the set with the lowest IDs.
+
+-  A waiting trial shows ``QUEUED``, and its task log gets one line, for example ``gpu_groups:
+   waiting until one agent in pool gpus has free GPUs for simulation: 1 × NVIDIA GeForce RTX 4090;
+   learner: 1 × NVIDIA RTX 6000 Ada Generation``. The scheduler treats it as any waiting task: with
+   preemption off, no task of a lower priority that needs slots starts while it waits; with
+   preemption on, it can preempt tasks whose GPUs it does not use.
+
+-  An experiment is refused at creation, and a trial fails without restarts, when no agent of the
+   pool could hold the groups with every slot free, disabled and draining slots included, on one
+   NUMA node with ``"strong"``: ``no agent in pool gpus has GPUs for gpu_groups simulation: 1 ×
+   NVIDIA GeForce RTX 4090; learner: 1 × NVIDIA H100 80GB HBM3``. A pool without agents refuses it
+   at creation, except a pool with a provider, which accepts it. Moving the experiment to a pool
+   without agents is refused the same way. With ``"strong"``, an agent whose GPUs hold the groups
+   but whose topology the master does not have yet, for example right after a master restart, counts
+   as one that could. The master never refuses a trial it restores; retries, continued experiments
+   and trials restored after a master restart keep the groups.
+
+-  The Kubernetes, Slurm and PBS resource managers refuse it.
+
+The container gets every GPU of the groups, as for any task, and ``DET_GPU_GROUPS``: compact JSON
+with each group's GPU UUIDs, groups sorted by name and each group's GPUs by slot ID, for example
+``{"learner":["GPU-5b2e…"],"simulation":["GPU-0c1d…"]}``; it replaces a ``DET_GPU_GROUPS`` set
+in ``environment_variables``. The groups take the trial's GPUs in list
+order: each group gets the lowest slot IDs that leave GPUs for the groups after it. Inside the
+container, CUDA's device indexes need not follow the groups or the slot IDs; bind a process to its
+group by UUID instead. CUDA accepts UUIDs in ``CUDA_VISIBLE_DEVICES``, so a process started with
+``CUDA_VISIBLE_DEVICES=<the group's UUIDs, comma-separated>`` sees only its group's GPUs, as device
+0 onward:
+
+.. code:: python
+
+   import json, os, subprocess
+
+   groups = json.loads(os.environ["DET_GPU_GROUPS"])
+   env = dict(os.environ, CUDA_VISIBLE_DEVICES=",".join(groups["simulation"]))
+   subprocess.Popen(["python3", "simulate.py"], env=env)
+
+Whether GPUs of two groups can use P2P with each other is a property of the hardware: check the pair
+with ``nvidia-smi topo -m`` or ``cudaDeviceCanAccessPeer``.
+
+A master without this option, after a rollback, treats a config that sets it as it treats one that
+sets ``prefer_gpu_topology`` above; the commands and generic tasks that it restores or resumes run
+without the groups. Before rolling back, end the experiments that set it and remove it from
+templates and config policies.
+
 .. _exp-resources-devices:
 
 ``devices``

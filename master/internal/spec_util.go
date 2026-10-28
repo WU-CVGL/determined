@@ -54,25 +54,43 @@ func (m *Master) ResolveResources(
 	return poolName, launchWarnings, nil
 }
 
-// validateGPUTopology refuses a task with prefer_gpu_topology "strong" that no agent of the pool
-// can ever hold: every agent has reported its topology, and no NUMA node has the slots. The
-// paths that create a task call it once the task's config is final, and so does moving an
-// experiment to another pool; a restore does not, so it never fails on the topology.
+// validateGPUTopology refuses a task with prefer_gpu_topology "strong" or resources.gpu_groups
+// that no agent of the pool can ever hold: for "strong", every agent has reported its topology,
+// and no NUMA node has the slots; for gpu_groups, no agent has GPUs for every group. It first
+// refuses groups that are invalid or whose counts do not add up to the task's slots, given with
+// the name of their field (slotsField). The paths that create a task call it once the task's
+// config is final, and so does moving an experiment to another pool; a restore does not, so it
+// never fails on the topology or the groups.
 func validateGPUTopology(
-	rm rm.ResourceManager, pool rm.ResourcePoolName, slots int, pref expconf.GPUTopologyPreference,
+	rm rm.ResourceManager, pool rm.ResourcePoolName, slots int, slotsField string,
+	pref expconf.GPUTopologyPreference, groups expconf.GPUGroupRequests,
 ) error {
-	if pref != expconf.GPUTopologyStrong || slots < 2 {
+	if err := groups.Check(slots, slotsField); err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
+	strong := pref == expconf.GPUTopologyStrong && slots >= 2
+	if !strong && groups == nil {
 		return nil
 	}
-	if _, err := rm.ValidateResources(sproto.ValidateResourcesRequest{
+	req := sproto.ValidateResourcesRequest{
 		ResourcePool: pool.String(),
 		Slots:        slots,
-		GPUTopology:  pref,
-	}); err != nil {
+		GPUGroups:    groups,
+	}
+	if strong {
+		req.GPUTopology = pref
+	}
+	if _, err := rm.ValidateResources(req); err != nil {
 		return status.Errorf(codes.InvalidArgument, "validating resources: %s", err)
 	}
 	return nil
 }
+
+// Slot fields that resources.gpu_groups must add up to.
+const (
+	slotsPerTrialField = "resources.slots_per_trial"
+	slotsField         = "resources.slots"
+)
 
 // Fill and return TaskSpec.
 func (m *Master) fillTaskSpec(

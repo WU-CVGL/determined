@@ -21,6 +21,8 @@ type (
 	EnvironmentVariablesMap   = EnvironmentVariablesMapV0
 	ExperimentConfig          = ExperimentConfigV0
 	GCSConfig                 = GCSConfigV0
+	GPUGroup                  = GPUGroupV0
+	GPUGroupsConfig           = GPUGroupsConfigV0
 	GridConfig                = GridConfigV0
 	Hyperparameter            = HyperparameterV0
 	Hyperparameters           = HyperparametersV0

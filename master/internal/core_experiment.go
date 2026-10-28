@@ -402,7 +402,8 @@ func (m *Master) parseCreateExperiment(ctx context.Context, req *apiv1.CreateExp
 		return nil, nil, config, nil, nil, invalidExperimentConfig(err)
 	}
 	if slots := config.Resources().SlotsPerTrial(); !req.GetUnmanaged() &&
-		config.Resources().GPUTopology() == expconf.GPUTopologyStrong && slots >= 2 {
+		(config.Resources().GPUTopology() == expconf.GPUTopologyStrong && slots >= 2 ||
+			config.Resources().GPUGroupRequests() != nil) {
 		// The pool the experiment runs in, which newExperiment resolves from the final config: an
 		// invariant config policy can set it.
 		var runPool rm.ResourcePoolName
@@ -410,7 +411,8 @@ func (m *Master) parseCreateExperiment(ctx context.Context, req *apiv1.CreateExp
 			rm.ResourcePoolName(config.Resources().ResourcePool()), workspaceID, slots); err != nil {
 			return nil, nil, config, nil, nil, status.Error(codes.InvalidArgument, err.Error())
 		}
-		if err = validateGPUTopology(m.rm, runPool, slots, config.Resources().GPUTopology()); err != nil {
+		if err = validateGPUTopology(m.rm, runPool, slots, slotsPerTrialField,
+			config.Resources().GPUTopology(), config.Resources().GPUGroupRequests()); err != nil {
 			return nil, nil, config, nil, nil, err
 		}
 	}

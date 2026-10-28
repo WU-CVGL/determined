@@ -2,7 +2,11 @@ package agentrm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
+	"strings"
 
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/sproto"
@@ -13,11 +17,17 @@ import (
 	"github.com/determined-ai/determined/master/pkg/tasks"
 )
 
+// gpuGroupsEnvVar maps each group of a task with gpu_groups to the UUIDs of its GPUs.
+const gpuGroupsEnvVar = "DET_GPU_GROUPS"
+
 // containerResources contains information for tasks have been allocated but not yet started.
 type containerResources struct {
-	req         *sproto.AllocateRequest
-	agent       *agentState
-	devices     []device.Device
+	req     *sproto.AllocateRequest
+	agent   *agentState
+	devices []device.Device
+	// gpuGroups holds the UUIDs of each group's devices for a task with gpu_groups, as the
+	// reservation assigned them (gpuChoice.gpuGroups).
+	gpuGroups   map[string][]string
 	containerID cproto.ID
 	started     *sproto.ResourcesStarted
 	exited      *sproto.ResourcesStopped
@@ -54,8 +64,23 @@ func (c containerResources) Start(
 	spec.LoggingFields["allocation_id"] = spec.AllocationID
 	spec.LoggingFields["task_id"] = spec.TaskID
 	spec.ExtraEnvVars[sproto.ResourcesTypeEnvVar] = string(sproto.ResourcesTypeDockerContainer)
+	if len(c.gpuGroups) > 0 {
+		// Compact JSON with the group names sorted (encoding/json sorts map keys).
+		groups, err := json.Marshal(c.gpuGroups)
+		if err != nil {
+			return fmt.Errorf("encoding %s: %w", gpuGroupsEnvVar, err)
+		}
+		// The spec's map can be shared with the caller's spec.
+		spec.ExtraEnvVars = maps.Clone(spec.ExtraEnvVars)
+		spec.ExtraEnvVars[gpuGroupsEnvVar] = string(groups)
+	}
 	spec.UseHostMode = rri.IsMultiAgent
 	spec.Devices = c.devices
+	dockerSpec := spec.ToDockerSpec()
+	if len(c.gpuGroups) > 0 {
+		dockerSpec.RunSpec.ContainerConfig.Env = masterGPUGroupsEnv(
+			dockerSpec.RunSpec.ContainerConfig.Env, spec.ExtraEnvVars[gpuGroupsEnvVar])
+	}
 
 	c.agent.handler.StartTaskContainer(sproto.StartTaskContainer{
 		AllocationID: c.req.AllocationID,
@@ -66,11 +91,21 @@ func (c containerResources) Start(
 				Devices:     c.devices,
 				Description: spec.Description,
 			},
-			Spec: spec.ToDockerSpec(),
+			Spec: dockerSpec,
 		},
 		LogContext: logCtx,
 	})
 	return nil
+}
+
+// masterGPUGroupsEnv drops the DET_GPU_GROUPS entries of the container's env, which a task's
+// environment_variables could set after the master's, and appends the master's value.
+func masterGPUGroupsEnv(env []string, groups string) []string {
+	env = slices.DeleteFunc(slices.Clone(env), func(kv string) bool {
+		k, _, _ := strings.Cut(kv, "=")
+		return k == gpuGroupsEnvVar
+	})
+	return append(env, gpuGroupsEnvVar+"="+groups)
 }
 
 // Kill notifies the agent to kill the container.

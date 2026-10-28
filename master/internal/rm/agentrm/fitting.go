@@ -90,8 +90,9 @@ func findFits(
 	if fit := findSharedAgentFit(req, agents, fittingMethod, packNUMA); fit != nil {
 		return []*fittingState{fit}
 	}
-	// prefer_gpu_topology "strong" uses one agent.
-	if req.FittingRequirements.SingleAgent || req.SlotsNeeded <= 1 || strongTopology(req) {
+	// prefer_gpu_topology "strong" and gpu_groups use one agent.
+	if req.FittingRequirements.SingleAgent || req.SlotsNeeded <= 1 || strongTopology(req) ||
+		gpuGroupsOf(req) != nil {
 		return nil
 	}
 	if fits := findDedicatedAgentFits(
@@ -233,7 +234,8 @@ func findDedicatedAgentFits(
 
 // findSharedAgentFit returns the agent that takes the whole request, or nil. Every agent that can
 // take it counts, whatever its NUMA nodes, except for prefer_gpu_topology "strong"
-// (gpuTopologySatisfied); under preferOneNUMANode, the agents where one NUMA node holds the request
+// (gpuTopologySatisfied), and only agents whose free GPUs hold the request's gpu_groups
+// (gpuGroupsSatisfied); under preferOneNUMANode, the agents where one NUMA node holds the request
 // come first.
 func findSharedAgentFit(
 	req *sproto.AllocateRequest, agents map[aproto.ID]*agentState, fittingMethod SoftConstraint,
@@ -243,7 +245,7 @@ func findSharedAgentFit(
 	var candidates candidateList
 	for _, agent := range agents {
 		if !isViable(req, agent, slotsSatisfied, maxZeroSlotContainersSatisfied, agentPermittedSatisfied,
-			gpuTopologySatisfied) {
+			gpuTopologySatisfied, gpuGroupsSatisfied) {
 			continue
 		}
 
@@ -251,7 +253,7 @@ func findSharedAgentFit(
 			Agent:        agent,
 			Score:        fittingMethod(req, agent),
 			HashDistance: hashDistance(req, agent),
-			OneNUMANode:  oneNode && holdsOnOneNUMANode(agent.gpuSelectionInput(), req.SlotsNeeded),
+			OneNUMANode:  oneNode && oneNUMANodeHolds(req, agent.gpuSelectionInput()),
 		})
 	}
 

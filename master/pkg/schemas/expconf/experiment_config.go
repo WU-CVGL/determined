@@ -215,6 +215,8 @@ type ResourcesConfigV0 struct {
 
 	// RawPreferGPUTopology is left out when unset, so stored configs gain no key.
 	RawPreferGPUTopology *GPUTopologyPreference `json:"prefer_gpu_topology,omitempty"`
+	// RawGPUGroups is left out when unset, so stored configs gain no key.
+	RawGPUGroups GPUGroupsConfigV0 `json:"gpu_groups,omitempty"`
 
 	RawDevices DevicesConfigV0 `json:"devices"`
 }

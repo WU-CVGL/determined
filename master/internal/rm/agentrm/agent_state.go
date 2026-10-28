@@ -179,10 +179,10 @@ type deviceReservation struct {
 
 // allocateFreeDevices reserves slots devices for the container cid. Its one change of state comes
 // last: chooseFreeDevices picks a full set and validates it whole without changing anything, then
-// every device of the set is reserved at once. With fewer than slots free devices, or for
-// prefer_gpu_topology "strong" without a set on one NUMA node, it returns an error and changes
-// nothing. A zero-slot container takes no devices, and the topology is never
-// read. The scheduler's copies run this too, so it must not log: a copy has no syslog.
+// every device of the set is reserved at once. With fewer than slots free devices, for
+// prefer_gpu_topology "strong" without a set on one NUMA node, or for gpu_groups without a valid
+// set, it returns an error and changes nothing. A zero-slot container takes no devices, and the
+// topology is never read. The scheduler's copies run this too, so it must not log: a copy has no syslog.
 func (a *agentState) allocateFreeDevices(
 	slots int, cid cproto.ID, sel deviceSelection,
 ) (deviceReservation, error) {
@@ -214,12 +214,15 @@ func (a *agentState) allocateFreeDevices(
 //     would.
 //
 // Only the selection runs under recover: it has no side effects. prefer_gpu_topology "strong"
-// never takes map order (chooseOnOneNUMANode).
+// (chooseOnOneNUMANode) and gpu_groups (chooseGPUGroups) never take map order.
 func (a *agentState) chooseFreeDevices(
 	slots int, sel deviceSelection, selector func(gpuSelectionInput, int, deviceSelection) gpuChoice,
 ) (deviceReservation, error) {
 	if a.numFreeDevices() < slots {
 		return deviceReservation{}, errors.New("not enough devices")
+	}
+	if sel.groups != nil {
+		return a.chooseGPUGroups(slots, sel, selector)
 	}
 	if sel.strong {
 		return a.chooseOnOneNUMANode(slots, sel, selector)
@@ -246,8 +249,8 @@ func (a *agentState) chooseFreeDevices(
 	}
 
 	// The one fallback to map order, for the zero selection and for a plain or "soft" selection
-	// that chooses no set or fails; prefer_gpu_topology "strong" never gets here
-	// (chooseOnOneNUMANode). Every path selects a full set and validates it whole;
+	// that chooses no set or fails; prefer_gpu_topology "strong" (chooseOnOneNUMANode) and
+	// gpu_groups (chooseGPUGroups) never get here. Every path selects a full set and validates it whole;
 	// allocateFreeDevices changes state once, after the validation.
 	devices := a.mapOrderDevices(slots)
 	if err := a.checkFreeDevices(devices, slots); err != nil {
@@ -280,6 +283,41 @@ func (a *agentState) chooseOnOneNUMANode(
 	}
 	if err := a.checkOneNUMANode(choice.devices); err != nil {
 		return deviceReservation{}, fmt.Errorf("GPU topology preference strong: %w", err)
+	}
+	return deviceReservation{devices: choice.devices, choice: choice}, nil
+}
+
+// chooseGPUGroups is chooseFreeDevices for a request with gpu_groups: the selection's (selector's)
+// set, validated whole, as a valid set of the groups (gpuGroupAssignment) and, under
+// prefer_gpu_topology "strong", on one known NUMA node, or an error that changes nothing. It never
+// takes map order. The groups' UUIDs come from the reserved devices, so the container gets exactly
+// this assignment. Its fit admits only agents where the selection chooses a set
+// (gpuGroupsSatisfied), so an error means the agent changed after the fit; the scheduler's
+// simulation counts it as a miss (addTaskToAgents).
+func (a *agentState) chooseGPUGroups(
+	slots int, sel deviceSelection, selector func(gpuSelectionInput, int, deviceSelection) gpuChoice,
+) (deviceReservation, error) {
+	choice, failure := a.selectRankedDevices(slots, sel, selector)
+	switch {
+	case failure != "":
+		return deviceReservation{}, fmt.Errorf("gpu_groups: selection failed: %s", failure)
+	case choice.devices == nil && choice.noSelectionReason == "":
+		return deviceReservation{}, errors.New("gpu_groups: no devices and no reason")
+	case choice.devices == nil:
+		return deviceReservation{}, fmt.Errorf("gpu_groups: %s", choice.noSelectionReason)
+	}
+	if err := a.checkFreeDevices(choice.devices, slots); err != nil {
+		return deviceReservation{}, fmt.Errorf("gpu_groups: %w", err)
+	}
+	choice.gpuGroups = gpuGroupUUIDs(sel.groups, choice.devices)
+	if choice.gpuGroups == nil {
+		return deviceReservation{}, fmt.Errorf("gpu_groups: selected devices %s hold no assignment",
+			idList(choice.devices))
+	}
+	if sel.strong {
+		if err := a.checkOneNUMANode(choice.devices); err != nil {
+			return deviceReservation{}, fmt.Errorf("gpu_groups: %w", err)
+		}
 	}
 	return deviceReservation{devices: choice.devices, choice: choice}, nil
 }
@@ -429,8 +467,8 @@ func (a *agentState) freeDevice(d device.Device) {
 // whether a plain or "soft" request fits does not depend on the NUMA distribution of its free
 // GPUs; that is no guarantee for the whole pass, since the agent choice of "soft" under NUMA
 // packing (preferOneNUMANode) reads that distribution and changes the free counts that later
-// requests see. The fit of prefer_gpu_topology "strong" reads it too; the check after the pass
-// then asks for one more pass (checkStrongRequests).
+// requests see. The fits of prefer_gpu_topology "strong" and of gpu_groups read which GPUs are
+// free too; the check after the pass then asks for one more pass (checkWaitingRequests).
 func (a *agentState) deepCopy() *agentState {
 	copiedAgent := &agentState{
 		id:                    a.id,

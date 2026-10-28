@@ -48,9 +48,9 @@ type resourcePool struct {
 	gpuPolicy gpuPolicy
 	// gpuXIDs is where the pool reads the GPUs' recent critical XIDs; nil reads none.
 	gpuXIDs *gpuXIDReader
-	// strongNotices holds what the pool told the pending tasks with prefer_gpu_topology "strong"
-	// (checkStrongRequests).
-	strongNotices  map[model.AllocationID]strongNotice
+	// waitNotices holds what the pool told the pending tasks with prefer_gpu_topology "strong" or
+	// gpu_groups (checkWaitingRequests).
+	waitNotices    map[model.AllocationID]waitNotice
 	taskList       *tasklist.TaskList
 	groups         map[model.JobID]*tasklist.Group
 	queuePositions tasklist.JobSortState // secondary sort key based on job submission time
@@ -396,7 +396,7 @@ func (rp *resourcePool) schedulerTick() {
 		for _, aID := range toRelease {
 			rp.releaseResource(aID)
 		}
-		again = rp.checkStrongRequests(reserved)
+		again = rp.checkWaitingRequests(reserved)
 		rp.sendScalingInfo()
 	}
 	// The check after the pass can ask for one more.
@@ -468,7 +468,7 @@ func (rp *resourcePool) allocateResources(req *sproto.AllocateRequest) reservati
 			rp.syslog.WithError(err).Warnf("failed to allocate request %s", req.AllocationID)
 			rollback = true
 			// The agent can differ from the cache, which the check after the pass reads
-			// (checkStrongRequests); the failed reservation changed nothing on it.
+			// (checkWaitingRequests); the failed reservation changed nothing on it.
 			rp.refreshAgentStateCacheFor([]*agent{fit.Agent.handler})
 			return reservationFailed
 		}
@@ -478,6 +478,7 @@ func (rp *resourcePool) allocateResources(req *sproto.AllocateRequest) reservati
 			agent:       fit.Agent,
 			containerID: containerID,
 			devices:     resp.devices,
+			gpuGroups:   resp.choice.gpuGroups,
 		})
 		reservations = append(reservations, gpuReservation{fit: fit, containerID: containerID, resp: resp})
 	}
@@ -632,16 +633,22 @@ func (rp *resourcePool) ValidateResources(
 
 		fulfillable = maxSlots >= msg.Slots
 	}
-	if msg.GPUTopology != expconf.GPUTopologyStrong || msg.Slots < 2 {
+	strong := msg.GPUTopology == expconf.GPUTopologyStrong && msg.Slots >= 2
+	if !strong && msg.GPUGroups == nil {
 		return sproto.ValidateResourcesResponse{Fulfillable: fulfillable}
 	}
 
-	// prefer_gpu_topology "strong": refused when the single-node check fails (the pool has no agent,
-	// or none with the slots), or when every agent has reported its topology and none has a NUMA
-	// node with the slots. Each refusal gives one of strong's causes.
+	// prefer_gpu_topology "strong" and gpu_groups: refused when the single-node check fails (the
+	// pool has no agent, or none with the slots), or when no agent can hold the task: for
+	// "strong", every agent has reported its topology and none has a NUMA node with the slots; for
+	// gpu_groups, no agent has GPUs for every group, on one NUMA node with "strong". Each refusal
+	// gives one of the causes the task would fail with in the pool.
 	if !fulfillable {
 		cause := errStrongNoNUMANodeHolds(rp.config.PoolName, msg.Slots)
-		if rp.slotsPerInstance <= 0 && len(rp.agentStatesCache) == 0 {
+		switch {
+		case msg.GPUGroups != nil:
+			cause = errGPUGroupsNoAgent(rp.config.PoolName, msg.GPUGroups)
+		case rp.slotsPerInstance <= 0 && len(rp.agentStatesCache) == 0:
 			cause = errStrongNoNUMANodes(rp.config.PoolName)
 		}
 		return sproto.ValidateResourcesResponse{Fulfillable: false, Reason: cause.Error()}
@@ -650,7 +657,13 @@ func (rp *resourcePool) ValidateResources(
 	if agents == nil {
 		agents = rp.agentService.list(rp.config.PoolName)
 	}
-	if err := strongCannotFit(rp.config.PoolName, agents, msg.Slots); err != nil {
+	cannotFit := strongCannotFit
+	if msg.GPUGroups != nil {
+		cannotFit = func(pool string, agents map[aproto.ID]*agentState, _ int) error {
+			return gpuGroupsCannotFit(pool, agents, msg.GPUGroups, strong)
+		}
+	}
+	if err := cannotFit(rp.config.PoolName, agents, msg.Slots); err != nil {
 		return sproto.ValidateResourcesResponse{Fulfillable: false, Reason: err.Error()}
 	}
 	return sproto.ValidateResourcesResponse{Fulfillable: true}

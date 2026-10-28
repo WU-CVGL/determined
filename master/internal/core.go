@@ -968,6 +968,7 @@ func (m *Master) restoreGenericTasks(ctx context.Context) error {
 				FittingRequirements: sproto.FittingRequirements{
 					SingleAgent: isSingleNode,
 					GPUTopology: snapshots[i].GenericTaskSpec.GenericTaskConfig.Resources.GPUTopology(),
+					GPUGroups:   snapshots[i].GenericTaskSpec.GenericTaskConfig.Resources.GPUGroupRequests(),
 				},
 
 				Restore: true,
