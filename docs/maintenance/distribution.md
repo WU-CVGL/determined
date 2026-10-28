@@ -1,19 +1,22 @@
-# Install and deploy version 0.42.1
+# Install and deploy version 0.42.2
 
-Use the [0.42.1 GitHub release](https://github.com/WU-CVGL/determined/releases/tag/0.42.1)
+Use the [0.42.2 GitHub release](https://github.com/WU-CVGL/determined/releases/tag/0.42.2)
 and its tag as the version reference. The matching master and agent images are
-published to GHCR under `ghcr.io/wu-cvgl/determined-master:0.42.1` and
-`ghcr.io/wu-cvgl/determined-agent:0.42.1`. Pin the images to the release's
+published to GHCR under `ghcr.io/wu-cvgl/determined-master:0.42.2` and
+`ghcr.io/wu-cvgl/determined-agent:0.42.2`. Pin the images to the release's
 published digests when preparing a deployment. Master and agent do not check
-each other's version. The agent's own code and its messages to and from the master
-are the same in 0.41.0, 0.41.1, 0.42.0 and 0.42.1, so agents can stay on 0.41.0
-under a 0.42.1 master. 0.41.0 changed the agent: it reads the GPU topology through NVML
-and sends it when it connects, which a 0.40.1 master ignores. 0.40.1 agents ran
-under a 0.41.0 master during a rolling agent upgrade. 0.42.0 adds one database
-migration, for resource pool access, and a 0.41.1 master starts on the migrated
-database. 0.42.1 adds no migration, so a rollback to 0.42.0 is a binary swap;
-remove `resource_pool_access` from `master.yaml` first, if it is set, since
-0.42.0 does not know the key.
+each other's version, and their messages are the same from 0.41.0 to 0.42.2, so
+0.41.0 to 0.42.1 agents run under a 0.42.2 master; `gpu_groups` works with them,
+since the master sets `DET_GPU_GROUPS`. 0.41.0 changed the agent: it reads the GPU
+topology through NVML and sends it when it connects, which a 0.40.1 master
+ignores. 0.42.2 changes the agent again: it starts CUDA tasks with the `nvidia`
+runtime, which Docker on each GPU host must have registered before the 0.42.2
+agent starts (see [upgrade with running tasks](hot-upgrade.md)), and it
+reattaches containers by GPU UUID. 0.42.0 adds one database migration, for
+resource pool access, and a 0.41.1 master starts on the migrated database.
+0.42.1 and 0.42.2 add no migration, so a rollback to 0.42.1 is a binary swap;
+end the experiments that set `gpu_groups` and remove it from templates and config
+policies first, since 0.42.1 refuses configs that set it.
 
 ## Install the CLI from the repository
 
@@ -24,8 +27,8 @@ checkout can otherwise report the repository's development version.
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
-VERSION=0.42.1 python -m pip install --upgrade \
-  'git+https://github.com/WU-CVGL/determined.git@0.42.1#subdirectory=harness'
+VERSION=0.42.2 python -m pip install --upgrade \
+  'git+https://github.com/WU-CVGL/determined.git@0.42.2#subdirectory=harness'
 det --version
 ```
 
@@ -37,15 +40,15 @@ does not replace the SDK inside running tasks.
 ## Pull and deploy the images
 
 ```sh
-docker pull ghcr.io/wu-cvgl/determined-master:0.42.1
-docker pull ghcr.io/wu-cvgl/determined-agent:0.42.1
+docker pull ghcr.io/wu-cvgl/determined-master:0.42.2
+docker pull ghcr.io/wu-cvgl/determined-agent:0.42.2
 ```
 
-`det deploy local master-up` and `agent-up` from the 0.42.1 CLI use these
+`det deploy local master-up` and `agent-up` from the 0.42.2 CLI use these
 images by default: the image repository defaults to `ghcr.io/wu-cvgl` and
 `--det-version` to the CLI's version. A 0.40.1 or older CLI defaults to the
 upstream `determinedai` images, which do not exist for this fork's versions;
-pass it `--image-repo-prefix ghcr.io/wu-cvgl --det-version 0.42.1`. Images
+pass it `--image-repo-prefix ghcr.io/wu-cvgl --det-version 0.42.2`. Images
 built from source are tagged `determinedai/...` and need
 `--image-repo-prefix determinedai`.
 
@@ -84,11 +87,11 @@ restore and task/checkpoint visibility in a disposable environment first.
 The release tag identifies the source used for the images. The
 [`Fork release` workflow](https://github.com/WU-CVGL/determined/blob/main/.github/workflows/fork-release.yml)
 defines the Linux amd64 build on a GitHub-hosted runner. It publishes
-PR candidates under separate `0.42.1-rc.<run-id>` tags and publishes the final
+PR candidates under separate `0.42.2-rc.<run-id>` tags and publishes the final
 version from the corresponding Git tag. Confirm the GHCR packages are public
 before using the unauthenticated pull commands above. For a manual
 source build, check out the release tag and set both `VERSION` and
-`FORK_VERSION` to `0.42.1` so binaries, wheel, and WebUI agree; a local build
+`FORK_VERSION` to `0.42.2` so binaries, wheel, and WebUI agree; a local build
 is not published automatically. Run the
 [`tools/fork/smoke.sh`](https://github.com/WU-CVGL/determined/blob/main/tools/fork/smoke.sh) CPU packaging check for a
 new build before deploying it; it does not validate GPU workloads.

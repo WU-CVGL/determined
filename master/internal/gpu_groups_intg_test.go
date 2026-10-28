@@ -39,7 +39,7 @@ import (
 const (
 	validateResourcesMethod = "ValidateResources"
 
-	h100     = "NVIDIA H100 80GB HBM3"
+	h100     = "NVIDIA H100 PCIe"
 	rtx4090  = "NVIDIA GeForce RTX 4090"
 	ada6000  = "NVIDIA RTX 6000 Ada Generation"
 	simGroup = `{"name": "sim", "count": 1, "models": ["` + rtx4090 + `"]}`

@@ -90,7 +90,7 @@ func (g GPUGroupRequests) Slots() int {
 }
 
 // String describes the groups, for example "simulation: 1 × NVIDIA GeForce RTX 4090; learner: 1 ×
-// NVIDIA RTX 6000 Ada Generation".
+// NVIDIA H100 PCIe".
 func (g GPUGroupRequests) String() string {
 	parts := make([]string, 0, len(g))
 	for _, group := range g {

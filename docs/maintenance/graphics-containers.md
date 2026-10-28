@@ -70,7 +70,7 @@ docker run --rm --runtime=nvidia --gpus device=GPU-allocated \
 
 ## Running tasks during deployment
 
-Use the [rolling agent replacement procedure](hot-upgrade.md#replace-the-agents).
+Replace the agents one at a time as in [upgrade with running tasks](hot-upgrade.md).
 Keep each agent's ID, pool, mounts, environment, and GPU UUID allowlist unchanged.
 Stage the new image before stopping the old agent, then verify that running
 task containers retain their IDs, process IDs, and start times after reattachment.
