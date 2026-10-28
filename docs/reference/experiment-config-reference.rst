@@ -1422,7 +1422,7 @@ example one RTX 4090 for simulation and one H100, which has no graphics, for lea
          models: ["NVIDIA GeForce RTX 4090"]
        - name: learner
          count: 1
-         models: ["NVIDIA H100 80GB HBM3"]
+         models: ["NVIDIA H100 PCIe"]
 
 Each group has:
 
@@ -1456,14 +1456,14 @@ Only the agent resource manager runs ``gpu_groups``:
 
 -  A waiting trial shows ``QUEUED``, and its task log gets one line, for example ``gpu_groups:
    waiting until one agent in pool gpus has free GPUs for simulation: 1 × NVIDIA GeForce RTX 4090;
-   learner: 1 × NVIDIA H100 80GB HBM3``. The scheduler treats it as any waiting task: with
+   learner: 1 × NVIDIA H100 PCIe``. The scheduler treats it as any waiting task: with
    preemption off, no task of a lower priority that needs slots starts while it waits; with
    preemption on, it can preempt tasks whose GPUs it does not use.
 
 -  An experiment is refused at creation, and a trial fails without restarts, when no agent of the
    pool could hold the groups with every slot free, disabled and draining slots included, on one
    NUMA node with ``"strong"``: ``no agent in pool gpus has GPUs for gpu_groups simulation: 1 ×
-   NVIDIA GeForce RTX 4090; learner: 1 × NVIDIA H100 80GB HBM3``. A pool without agents refuses it
+   NVIDIA GeForce RTX 4090; learner: 1 × NVIDIA H100 PCIe``. A pool without agents refuses it
    at creation, except a pool with a provider, which accepts it. Moving the experiment to a pool
    without agents is refused the same way. With ``"strong"``, an agent whose GPUs hold the groups
    but whose topology the master does not have yet, for example right after a master restart, counts

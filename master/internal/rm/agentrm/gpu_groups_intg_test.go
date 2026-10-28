@@ -154,7 +154,7 @@ func TestValidateGPUGroupsAtSubmit(t *testing.T) {
 	four := expconf.GPUGroupRequests{group("sim", 4, rtx4090)}
 	require.NoError(t, validate(h, four, expconf.GPUTopologyStrong))
 	require.EqualError(t, validate(h, simAndLearner, expconf.GPUTopologyStrong), cause(simAndLearner))
-	h100 := expconf.GPUGroupRequests{group("sim", 1, "NVIDIA H100 80GB HBM3")}
+	h100 := expconf.GPUGroupRequests{group("sim", 1, "NVIDIA H100 PCIe")}
 	require.EqualError(t, validate(h, h100, ""), cause(h100))
 	five := expconf.GPUGroupRequests{group("sim", 5, rtx4090)}
 	require.EqualError(t, validate(h, five, ""), cause(five))
