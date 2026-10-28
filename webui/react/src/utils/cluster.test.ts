@@ -136,3 +136,16 @@ describe('Cluster Utilities', () => {
     });
   });
 });
+
+describe('usablePoolsFirst', () => {
+  it('moves restricted pools to the end and keeps the order otherwise', () => {
+    const pools = [
+      { name: 'a', usable: false },
+      { name: 'b', usable: true },
+      { name: 'c' },
+      { name: 'd', usable: false },
+      { name: 'e', usable: true },
+    ];
+    expect(utils.usablePoolsFirst(pools).map((pool) => pool.name)).toEqual(['b', 'c', 'e', 'a', 'd']);
+  });
+});
