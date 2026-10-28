@@ -159,11 +159,13 @@ func makeContainerDockerLabels(cont cproto.Container) map[string]string {
 	labels[docker.ContainerVersionLabel] = docker.ContainerVersionValue
 	labels[docker.ContainerIDLabel] = cont.ID.String()
 	labels[docker.ContainerDescriptionLabel] = cont.Description
-	var slotIds []string
+	var slotIds, uuids []string
 	for _, d := range cont.Devices {
 		slotIds = append(slotIds, strconv.Itoa(int(d.ID)))
+		uuids = append(uuids, d.UUID)
 	}
 	labels[docker.ContainerDevicesLabel] = strings.Join(slotIds, ",")
+	labels[docker.ContainerDeviceUUIDsLabel] = strings.Join(uuids, ",")
 	return labels
 }
 
@@ -176,19 +178,9 @@ func (m *Manager) unmakeContainerDockerLabels(cont types.Container) (
 			"can't parse container labels version %s", cont.Labels[docker.ContainerVersionLabel])
 	}
 
-	devicesLabel := cont.Labels[docker.ContainerDevicesLabel]
-	devices := []device.Device{}
-
-	// devicesLabel is empty for zero-slot tasks.
-	if len(devicesLabel) > 0 {
-		slotIDs := strings.Split(devicesLabel, ",")
-		for _, slotID := range slotIDs {
-			number, err := strconv.ParseInt(slotID, 10, 64)
-			if err != nil {
-				return nil, err
-			}
-			devices = append(devices, m.devices[number])
-		}
+	devices, err := m.containerDevices(cont.Labels)
+	if err != nil {
+		return nil, err
 	}
 
 	state, err := cproto.ParseStateFromDocker(cont)
@@ -202,6 +194,51 @@ func (m *Manager) unmakeContainerDockerLabels(cont types.Container) (
 		State:       state,
 		Description: cont.Labels[docker.ContainerDescriptionLabel],
 	}, nil
+}
+
+// containerDevices returns the agent's devices that the container labels name. The IDs label is
+// looked up by device ID. When the UUIDs label is present, each device must also have the UUID at
+// the same position; containers created by agents that did not write it are matched by ID only.
+func (m *Manager) containerDevices(labels map[string]string) ([]device.Device, error) {
+	devices := []device.Device{}
+	devicesLabel := labels[docker.ContainerDevicesLabel]
+	// devicesLabel is empty for zero-slot tasks.
+	if len(devicesLabel) == 0 {
+		return devices, nil
+	}
+	slotIDs := strings.Split(devicesLabel, ",")
+
+	uuidsLabel, hasUUIDs := labels[docker.ContainerDeviceUUIDsLabel]
+	var uuids []string
+	if hasUUIDs {
+		uuids = strings.Split(uuidsLabel, ",")
+		if len(uuids) != len(slotIDs) {
+			return nil, fmt.Errorf(
+				"container has %d device IDs and %d device UUIDs", len(slotIDs), len(uuids))
+		}
+	}
+
+	byID := make(map[device.ID]device.Device, len(m.devices))
+	for _, d := range m.devices {
+		byID[d.ID] = d
+	}
+	for i, slotID := range slotIDs {
+		number, err := strconv.Atoi(slotID)
+		if err != nil {
+			return nil, err
+		}
+		d, ok := byID[device.ID(number)]
+		if !ok {
+			return nil, fmt.Errorf("container device %d is not a device of this agent", number)
+		}
+		if hasUUIDs && d.UUID != uuids[i] {
+			return nil, fmt.Errorf(
+				"container device %d has UUID %s, the agent's device %d has UUID %s",
+				number, uuids[i], number, d.UUID)
+		}
+		devices = append(devices, d)
+	}
+	return devices, nil
 }
 
 func makeGlobalEnvVars(opts options.Options, mopts aproto.MasterSetAgentOptions) []string {

@@ -42,6 +42,7 @@ type agents struct {
 	agentUpdates *queue.Queue[agentUpdatedEvent]
 	registry     *poolRegistry
 	opts         *aproto.MasterSetAgentOptions
+	gpus         *gpuOwners
 }
 
 func newAgentService(
@@ -56,6 +57,7 @@ func newAgentService(
 		agentUpdates: agentUpdates,
 		registry:     registry,
 		opts:         opts,
+		gpus:         newGPUOwners(),
 	}
 
 	if !restorePersistedAgents {
@@ -90,6 +92,7 @@ func newAgentService(
 			badAgentIds = append(badAgentIds, agentID)
 			continue
 		}
+		agentRef.restoreGPUs()
 
 		a.syslog.Debugf("restored agent state: %s", agentID)
 	}
@@ -221,7 +224,7 @@ func (a *agents) createAgent(
 		return nil, fmt.Errorf("cannot find specified resource pool %s for agent %s", resourcePool, id)
 	}
 
-	return newAgent(
+	ref := newAgent(
 		id,
 		a.agentUpdates,
 		resourcePool,
@@ -229,7 +232,11 @@ func (a *agents) createAgent(
 		opts,
 		restoredAgentState,
 		unregister,
-	), nil
+	)
+	ref.mu.Lock()
+	ref.gpus = a.gpus
+	ref.mu.Unlock()
+	return ref, nil
 }
 
 func (a *agents) summarize() model.AgentsSummary {
