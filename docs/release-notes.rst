@@ -10,6 +10,39 @@
  Version 0.42
 **************
 
+Version 0.42.2
+==============
+
+**Release Date:** October 28, 2026
+
+**New Features**
+
+-  Experiments, tasks: Place named groups of GPUs of exact models on one agent with
+   ``resources.gpu_groups``, for example one RTX 4090 for simulation and one RTX 6000 Ada for
+   learning; the container finds each group's GPU UUIDs in ``DET_GPU_GROUPS``.
+
+**Improvements**
+
+-  Master: Refuse an agent that reports a GPU that an agent with another agent ID already reports.
+
+**Bug Fixes**
+
+-  Agent: Start CUDA tasks with the NVIDIA runtime and pass the image's or task's
+   ``NVIDIA_DRIVER_CAPABILITIES`` through, so that Vulkan and other graphics libraries work in GPU
+   tasks.
+
+-  Agent: Reattach task containers to the GPUs they were started on after an agent restart when
+   ``visible_gpus`` or ``exclude_gpus`` leaves gaps in the slot IDs, instead of another GPU or a
+   crash.
+
+-  Agent: Kill a task container that cannot be reattached after an agent restart, for example
+   because its slot ID now belongs to a GPU with another UUID, instead of leaving it running.
+
+Register Docker's ``nvidia`` runtime on GPU hosts before upgrading their agents. Before rolling back
+to 0.42.1, end the experiments that set ``gpu_groups`` and remove it from templates and config
+policies. See :ref:`gpu_groups <exp-config-resources-gpu-groups>` and :doc:`upgrade with running
+tasks </maintenance/hot-upgrade>`.
+
 Version 0.42.1
 ==============
 
