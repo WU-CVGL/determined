@@ -158,6 +158,14 @@ describe('GpuTopology', () => {
     ).toBeInTheDocument();
   });
 
+  it('shows the model from the GPU slot, and unknown for an excluded GPU', async () => {
+    const agent = agentOf('node01', gpuTopologyCase('node01 with the exclude list'));
+    setup(<GpuTopology agent={agent} />);
+    await userEvent.hover(within(tile('Excluded GPU 81:00.0')).getByRole('button'));
+    const tooltip = await screen.findByRole('tooltip');
+    expect(tooltip).toHaveTextContent(/ModelunknownSlotnone/);
+  });
+
   it('shows the details on hover and pins the same popup in place on click', async () => {
     const agent = agentOf('node01', gpuTopologyCase('node01 with the exclude list'));
     setup(<GpuTopology agent={agent} />);
@@ -167,6 +175,7 @@ describe('GpuTopology', () => {
     const tooltip = await screen.findByRole('tooltip');
     expect(button).toHaveAttribute('aria-describedby', tooltip.id);
     expect(tooltip).toHaveTextContent('Slot 3 on node01: link below max');
+    expect(tooltip).toHaveTextContent(/ModelNVIDIA GeForce RTX 3090Slot3/);
     expect(tooltip).toHaveTextContent('UUID');
     expect(tooltip).toHaveTextContent('0000:61:00.0');
     expect(tooltip).toHaveTextContent(/PCIe linkx8 of x16, Gen4NVML errors/);

@@ -141,6 +141,8 @@ export const GpuDetails: React.FC<GpuProps & { pinned: boolean }> = ({
         {gpuName(gpu)} on {agentId}: {GPU_HEALTH_LABELS[word]}
       </p>
       <dl>
+        <dt>Model</dt>
+        <dd>{resource?.name || 'unknown'}</dd>
         <dt>Slot</dt>
         <dd>{gpu.excluded ? 'none' : gpu.deviceId}</dd>
         <dt>State</dt>
