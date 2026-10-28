@@ -1410,7 +1410,7 @@ it from templates and config policies.
 ==============
 
 Optional. Named groups of GPUs that a trial gets on one agent, each of an exact GPU model, for
-example one RTX 4090 for simulation and one H100, which has no graphics, for learning:
+example one RTX 4090 for simulation and one H100 PCIe, which has no graphics, for learning:
 
 .. code:: yaml
 
