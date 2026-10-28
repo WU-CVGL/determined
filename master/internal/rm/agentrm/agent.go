@@ -31,6 +31,9 @@ import (
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 )
 
+// refusedAgentStopWait is how long an agent that was refused before it started may stay connected.
+var refusedAgentStopWait = 10 * time.Second
+
 var (
 	errRecovering                = errors.New("agent disconnected, wait for recovery")
 	errWebsocketAlreadyConnected = errors.New("websocket already connected")
@@ -71,9 +74,12 @@ type (
 		// Because of all this, for future developers: messages must be replay-able and writes must
 		// get buffered while down.
 		awaitingReconnect bool
-		// awaitingRestore tracks the restoration of agentState.containerAllocation, which must be
-		// restored after allocation refs start and register in allocationmap. It happens in during
-		// websocket connection if the websocket does reconnect and in poststop if it does not.
+		// awaitingRestore is set for an agent restored from the snapshot until its first
+		// AgentStarted passes the device, resource pool and GPU checks. Until then it stays
+		// awaitingReconnect after its websocket connects: its slots stay disabled and messages for
+		// it stay buffered. agentState.containerAllocation, which must be restored after allocation
+		// refs start and register in allocationmap, is restored on websocket connection if the
+		// websocket does reconnect and in stop if it does not.
 		awaitingRestore  bool
 		reconnectBacklog []interface{}
 		reconnectTimers  []*time.Timer
@@ -88,6 +94,9 @@ type (
 
 		// opts are additional agent options the master sends to the agent.
 		opts *aproto.MasterSetAgentOptions
+		// gpus records the GPUs of all registered agents; nil skips the check for GPUs that
+		// another agent reports.
+		gpus *gpuOwners
 
 		agentState *agentState
 	}
@@ -265,6 +274,7 @@ func (a *agent) stop(cause error) {
 	}
 	a.stopped = true
 	a.cancelReconnectTimers()
+	a.gpus.release(a)
 	defer a.unregister()
 
 	if cause != nil {
@@ -397,49 +407,53 @@ func (a *agent) handleWebsocketConnection(msg webSocketRequest) error {
 		masterSetAgentOptions = aproto.AgentMessage{MasterSetAgentOptions: a.opts}
 	}
 
-	if a.awaitingRestore {
-		a.awaitingRestore = false
-	}
-
 	a.socket.Outbox <- masterSetAgentOptions
 
 	if a.awaitingReconnect {
 		a.syslog.Info("agent reconnected")
-		a.awaitingReconnect = false
-
 		a.cancelReconnectTimers()
-
-		// Re-propagate our old state back on successful recovery.
-		if a.preDisconnectEnabled {
-			a.agentState.enable()
-		} else {
-			a.agentState.disable(a.preDisconnectDraining)
+		// An agent restored from the snapshot recovers once its AgentStarted passes the checks.
+		if !a.awaitingRestore {
+			a.recover()
 		}
-		a.agentState.patchAllSlotsState(patchAllSlotsState{
-			enabled: &a.agentState.enabled,
-			drain:   &a.agentState.draining,
-		})
-
-		if len(a.reconnectBacklog) > 0 {
-			for i, msg := range a.reconnectBacklog {
-				a.syslog.Debugf("will replay reconnectBacklog %d %s", i, reflect.TypeOf(msg))
-			}
-		}
-
-		for _, msg := range a.reconnectBacklog {
-			switch msg := msg.(type) {
-			case sproto.KillTaskContainer:
-				a.killTaskContainer(msg)
-			case sproto.StartTaskContainer:
-				a.startTaskContainer(msg)
-			default:
-				panic(fmt.Sprintf("incorrect type for message buffered for recovery: %T", msg))
-			}
-		}
-		a.reconnectBacklog = nil
-		a.notifyListeners()
 	}
 	return nil
+}
+
+// recover ends the wait for a reconnect: it restores the agent's state from before the disconnect,
+// replays the buffered messages and tells the pool.
+func (a *agent) recover() {
+	a.awaitingReconnect = false
+
+	// Re-propagate our old state back on successful recovery.
+	if a.preDisconnectEnabled {
+		a.agentState.enable()
+	} else {
+		a.agentState.disable(a.preDisconnectDraining)
+	}
+	a.agentState.patchAllSlotsState(patchAllSlotsState{
+		enabled: &a.agentState.enabled,
+		drain:   &a.agentState.draining,
+	})
+
+	if len(a.reconnectBacklog) > 0 {
+		for i, msg := range a.reconnectBacklog {
+			a.syslog.Debugf("will replay reconnectBacklog %d %s", i, reflect.TypeOf(msg))
+		}
+	}
+
+	for _, msg := range a.reconnectBacklog {
+		switch msg := msg.(type) {
+		case sproto.KillTaskContainer:
+			a.killTaskContainer(msg)
+		case sproto.StartTaskContainer:
+			a.startTaskContainer(msg)
+		default:
+			panic(fmt.Sprintf("incorrect type for message buffered for recovery: %T", msg))
+		}
+	}
+	a.reconnectBacklog = nil
+	a.notifyListeners()
 }
 
 func (a *agent) HandleWebsocketDisconnect() {
@@ -650,7 +664,21 @@ func (a *agent) HandleIncomingWebsocketMessage(msg *aproto.MasterMessage) {
 				a.stop(resourcePoolErr)
 				return
 			}
+			// An agent restored from the snapshot holds its GPUs since the restore; a reconnect
+			// that passes the checks leaves it their only holder.
+			if !a.claimGPUs(msg.AgentStarted) {
+				return
+			}
+			// A restored agent recovers here, as an agent reconnecting within the wait does on
+			// connection: before handleContainersReattached.
+			if a.awaitingRestore {
+				a.awaitingRestore = false
+				a.recover()
+			}
 		} else {
+			if !a.claimGPUs(msg.AgentStarted) {
+				return
+			}
 			a.agentStarted(msg.AgentStarted)
 		}
 
@@ -713,6 +741,55 @@ func (a *agent) HandleIncomingWebsocketMessage(msg *aproto.MasterMessage) {
 
 func (a *agent) taskNeedsRecording(record *aproto.ContainerStatsRecord) bool {
 	return record.TaskType == model.TaskTypeTrial
+}
+
+// claimGPUs records the agent's GPUs. If another agent already reports one of them, it tells the
+// agent to shut down and returns false. A started agent is stopped at once. An agent that has not
+// started is stopped when it disconnects, so that it receives the message first, or after
+// refusedAgentStopWait. A stopped agent claims nothing: its GPUs were released in stop.
+func (a *agent) claimGPUs(agentStarted *aproto.AgentStarted) bool {
+	if a.stopped {
+		return false
+	}
+	err := a.gpus.claim(a, agentStarted.Devices)
+	if err == nil {
+		return true
+	}
+	a.syslog.Error(err.Error())
+	a.socket.Outbox <- aproto.AgentMessage{
+		AgentShutdown: &aproto.AgentShutdown{ErrMsg: err.Error()},
+	}
+	if a.started {
+		a.stop(nil)
+		return false
+	}
+	// stop cancels the timer.
+	a.reconnectTimers = append(a.reconnectTimers, time.AfterFunc(refusedAgentStopWait, func() {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		a.stop(nil)
+	}))
+	return false
+}
+
+// restoreGPUs records the GPUs of an agent restored from the snapshot as held by it, so that an
+// agent with another ID that reports them is refused while this one awaits its reconnect. It logs
+// the other restored agents that hold them too. An agent stopped meanwhile, when its reconnect wait
+// ended first, records nothing: its GPUs were released in stop.
+func (a *agent) restoreGPUs() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.stopped {
+		return
+	}
+
+	devices := make([]device.Device, 0, len(a.agentState.slotStates))
+	for _, s := range a.agentState.slotStates {
+		devices = append(devices, s.device)
+	}
+	if err := a.gpus.restore(a, devices); err != nil {
+		a.syslog.Warn(err.Error())
+	}
 }
 
 func (a *agent) agentStarted(agentStarted *aproto.AgentStarted) {
@@ -934,12 +1011,16 @@ func (a *agent) socketDisconnected() {
 		// stop closed the socket; nothing to wait for.
 		return
 	}
+	// A restored agent that disconnects before its AgentStarted passed is still awaiting a
+	// reconnect: its state from before the master restart is already stashed.
+	stash := !a.awaitingReconnect
 	a.awaitingReconnect = true
 
 	timer := time.AfterFunc(a.agentReconnectWait, a.HandleReconnectTimeout)
 	a.reconnectTimers = append(a.reconnectTimers, timer)
 
-	if a.agentState != nil { // This is nil for a bit after `a.socket` is connected but before `a.started` is true.
+	// agentState is nil for a bit after `a.socket` is connected but before `a.started` is true.
+	if stash && a.agentState != nil {
 		a.preDisconnectEnabled = a.agentState.enabled
 		a.preDisconnectDraining = a.agentState.draining
 		// Mark ourselves as draining to avoid action on ourselves while we recover. While the
