@@ -7,6 +7,7 @@ import * as Service from 'services/types';
 import { DeterminedInfo, Telemetry } from 'stores/determinedInfo';
 import { DetApi, EmptyParams, FetchOptions, RawJson, SingleEntityParams } from 'types';
 import * as Type from 'types';
+import { usablePoolsFirst } from 'utils/cluster';
 import { ensureArray } from 'utils/data';
 import { identity, noOp } from 'utils/service';
 
@@ -641,7 +642,7 @@ export const getResourcePools: DetApi<
 > = {
   name: 'getResourcePools',
   postProcess: (response) => {
-    return response.resourcePools?.map(decoder.mapV1ResourcePool) || [];
+    return usablePoolsFirst(response.resourcePools?.map(decoder.mapV1ResourcePool) || []);
   },
   request: (params: Service.GetResourcePoolsParams, options) =>
     detApi.Internal.getResourcePools(params?.offset, params?.limit, params?.unbound, options),
