@@ -57,6 +57,14 @@ func gpuGroupCandidates(groups expconf.GPUGroupRequests, devices []device.Device
 // assignment does (Mendelsohn–Dulmage). Slots and devices are tried in order, so the result is
 // deterministic.
 func matchGPUGroups(groups expconf.GPUGroupRequests, devices []device.Device, forced int) []int {
+	// More GPUs than devices match nothing; checked before the slots are listed.
+	total := 0
+	for _, group := range groups {
+		if group.Count > len(devices)-total {
+			return nil
+		}
+		total += max(group.Count, 0)
+	}
 	var slotGroup []int
 	for i, group := range groups {
 		for c := 0; c < group.Count; c++ {

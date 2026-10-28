@@ -95,6 +95,27 @@ func assignmentIDs(a map[string][]device.Device) map[string][]int {
 	return out
 }
 
+// More GPUs than devices match nothing at once, however large the counts.
+func TestGPUGroupsMoreGPUsThanDevices(t *testing.T) {
+	devices := modelDevices(rtx4090, ada6000)
+	require.Nil(t, matchGPUGroups(expconf.GPUGroupRequests{group("sim", 1<<62, rtx4090)}, devices, 0))
+	require.Nil(t, matchGPUGroups(expconf.GPUGroupRequests{group("sim", 1<<62, "none")}, nil, 0))
+	require.False(t, holdsGPUGroups(expconf.GPUGroupRequests{
+		group("a", 1<<62, rtx4090), group("b", 1<<62, rtx4090), group("c", 1<<62, rtx4090),
+		group("d", 1<<62, rtx4090), group("e", 2, rtx4090),
+	}, devices))
+	require.NotNil(t, matchGPUGroups(simAndLearner, devices, 0))
+}
+
+func TestMasterGPUGroupsEnv(t *testing.T) {
+	require.Equal(t,
+		[]string{"A=1", "DET_GPU_GROUPSX=2", `DET_GPU_GROUPS={"sim":["GPU-0"]}`},
+		masterGPUGroupsEnv(
+			[]string{"A=1", `DET_GPU_GROUPS={"sim":["GPU-0"]}`, "DET_GPU_GROUPSX=2", "DET_GPU_GROUPS=user"},
+			`{"sim":["GPU-0"]}`,
+		))
+}
+
 func TestGPUGroupAssignment(t *testing.T) {
 	// Overlapping model lists: the matching moves a GPU to the group that needs it.
 	overlap := expconf.GPUGroupRequests{group("any", 1, rtx4090, ada6000), group("ada", 1, ada6000)}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 )
@@ -75,10 +76,14 @@ func (r ResourcesConfigV0) GPUGroupRequests() GPUGroupRequests {
 	return r.RawGPUGroups.Requests()
 }
 
-// Slots returns the number of GPUs of all groups.
+// Slots returns the number of GPUs of all groups, or -1, which no task's slots equal, when a count
+// is negative or the sum does not fit in an int.
 func (g GPUGroupRequests) Slots() int {
 	n := 0
 	for _, group := range g {
+		if group.Count < 0 || group.Count > math.MaxInt-n {
+			return -1
+		}
 		n += group.Count
 	}
 	return n

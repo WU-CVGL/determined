@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"slices"
+	"strings"
 
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/sproto"
@@ -74,6 +76,11 @@ func (c containerResources) Start(
 	}
 	spec.UseHostMode = rri.IsMultiAgent
 	spec.Devices = c.devices
+	dockerSpec := spec.ToDockerSpec()
+	if len(c.gpuGroups) > 0 {
+		dockerSpec.RunSpec.ContainerConfig.Env = masterGPUGroupsEnv(
+			dockerSpec.RunSpec.ContainerConfig.Env, spec.ExtraEnvVars[gpuGroupsEnvVar])
+	}
 
 	c.agent.handler.StartTaskContainer(sproto.StartTaskContainer{
 		AllocationID: c.req.AllocationID,
@@ -84,11 +91,21 @@ func (c containerResources) Start(
 				Devices:     c.devices,
 				Description: spec.Description,
 			},
-			Spec: spec.ToDockerSpec(),
+			Spec: dockerSpec,
 		},
 		LogContext: logCtx,
 	})
 	return nil
+}
+
+// masterGPUGroupsEnv drops the DET_GPU_GROUPS entries of the container's env, which a task's
+// environment_variables could set after the master's, and appends the master's value.
+func masterGPUGroupsEnv(env []string, groups string) []string {
+	env = slices.DeleteFunc(slices.Clone(env), func(kv string) bool {
+		k, _, _ := strings.Cut(kv, "=")
+		return k == gpuGroupsEnvVar
+	})
+	return append(env, gpuGroupsEnvVar+"="+groups)
 }
 
 // Kill notifies the agent to kill the container.

@@ -1474,7 +1474,8 @@ Only the agent resource manager runs ``gpu_groups``:
 
 The container gets every GPU of the groups, as for any task, and ``DET_GPU_GROUPS``: compact JSON
 with each group's GPU UUIDs, groups sorted by name and each group's GPUs by slot ID, for example
-``{"learner":["GPU-5b2e…"],"simulation":["GPU-0c1d…"]}``. The groups take the trial's GPUs in list
+``{"learner":["GPU-5b2e…"],"simulation":["GPU-0c1d…"]}``; it replaces a ``DET_GPU_GROUPS`` set
+in ``environment_variables``. The groups take the trial's GPUs in list
 order: each group gets the lowest slot IDs that leave GPUs for the groups after it. Inside the
 container, CUDA's device indexes need not follow the groups or the slot IDs; bind a process to its
 group by UUID instead. CUDA accepts UUIDs in ``CUDA_VISIBLE_DEVICES``, so a process started with

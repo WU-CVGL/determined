@@ -56,6 +56,17 @@ func TestGPUGroupsCheck(t *testing.T) {
 			gpuGroupRequests(GPUGroupRequest{Name: "a", Count: 1, Models: []string{""}}), 1, "resources.slots",
 			"resources.gpu_groups a: a model must not be empty",
 		},
+		{
+			// The counts' sum wraps around to 2 in an int.
+			gpuGroupRequests(
+				GPUGroupRequest{Name: "a", Count: 1 << 62, Models: []string{"x"}},
+				GPUGroupRequest{Name: "b", Count: 1 << 62, Models: []string{"x"}},
+				GPUGroupRequest{Name: "c", Count: 1 << 62, Models: []string{"x"}},
+				GPUGroupRequest{Name: "d", Count: 1 << 62, Models: []string{"x"}},
+				GPUGroupRequest{Name: "e", Count: 2, Models: []string{"x"}},
+			), 2, "resources.slots",
+			"resources.gpu_groups counts must add up to resources.slots (2)",
+		},
 	} {
 		require.EqualError(t, c.groups.Check(c.slots, c.field), c.want)
 	}
