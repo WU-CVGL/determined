@@ -1410,7 +1410,7 @@ it from templates and config policies.
 ==============
 
 Optional. Named groups of GPUs that a trial gets on one agent, each of an exact GPU model, for
-example one RTX 4090 for simulation and one RTX 6000 Ada for learning:
+example one RTX 4090 for simulation and one H100, which has no graphics, for learning:
 
 .. code:: yaml
 
@@ -1422,7 +1422,7 @@ example one RTX 4090 for simulation and one RTX 6000 Ada for learning:
          models: ["NVIDIA GeForce RTX 4090"]
        - name: learner
          count: 1
-         models: ["NVIDIA RTX 6000 Ada Generation"]
+         models: ["NVIDIA H100 80GB HBM3"]
 
 Each group has:
 
@@ -1456,7 +1456,7 @@ Only the agent resource manager runs ``gpu_groups``:
 
 -  A waiting trial shows ``QUEUED``, and its task log gets one line, for example ``gpu_groups:
    waiting until one agent in pool gpus has free GPUs for simulation: 1 × NVIDIA GeForce RTX 4090;
-   learner: 1 × NVIDIA RTX 6000 Ada Generation``. The scheduler treats it as any waiting task: with
+   learner: 1 × NVIDIA H100 80GB HBM3``. The scheduler treats it as any waiting task: with
    preemption off, no task of a lower priority that needs slots starts while it waits; with
    preemption on, it can preempt tasks whose GPUs it does not use.
 
