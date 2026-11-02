@@ -407,6 +407,8 @@ func TestSupervisorPrimaryExitStopsOthers(t *testing.T) {
 	lines := s.logLines()
 	require.Equal(t, []string{"[p] start", "[q] start", "[stubborn] start", "[p] exited 7"}, lines[:4])
 	require.ElementsMatch(t, []string{"[q] exited 143", "[stubborn] exited 137"}, lines[4:])
+	// Without bash's report of the killed subshell.
+	require.NotContains(t, s.stderr.String(), "Killed")
 }
 
 // A service that is not the primary one only logs its exit: the task keeps running, and the

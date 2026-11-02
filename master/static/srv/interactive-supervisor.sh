@@ -229,8 +229,13 @@ stop_services() {
     if [[ -n $interruptible && -n $stop_signal ]]; then
         return 0
     fi
+    # Wait for each killed subshell at once, before bash reports it as a killed job.
     for name in "${supervisor_stopping[@]}"; do
         kill -s KILL -- "-${service_pids[$name]}" 2>/dev/null
+        if [[ -z ${service_status[$name]-} ]]; then
+            wait "${service_pids[$name]}" 2>/dev/null
+            service_status[$name]=$?
+        fi
     done
     await_services 1 ""
     # Only a process that cannot be killed is left; the service has exited all the same.
