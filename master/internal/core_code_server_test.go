@@ -373,3 +373,92 @@ func TestCodeServerUpstreamErrorsRedactURL(t *testing.T) {
 		require.NotContains(t, err.Error(), secret)
 	})
 }
+
+// placeCodeServerFile writes content to the file at path in place, as an administrator would, with
+// a modification time that differs for each n so that a rewrite of the same size is a change.
+func placeCodeServerFile(t *testing.T, path string, content []byte, n int) {
+	require.NoError(t, os.WriteFile(path, content, 0o600))
+	mtime := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(n) * time.Hour)
+	require.NoError(t, os.Chtimes(path, mtime, mtime))
+}
+
+func TestCodeServerReplacedTarball(t *testing.T) {
+	amd64Line := testCodeServerSum("amd64") + "  " + testCodeServerAMD64 + "\n"
+	arm64Line := testCodeServerSum("arm64") + "  " + testCodeServerAMD64 + "\n"
+
+	// Without a configured checksum, a replaced tarball is hashed again and its checksum file
+	// rewritten, although that still matches the file name.
+	cst := newCodeServerTest(t, nil, nil)
+	path := filepath.Join(cst.dir, testCodeServerAMD64)
+	placeCodeServerFile(t, path, testCodeServerContent("amd64"), 1)
+	require.Equal(t, amd64Line, cst.get("/det/code-server/4.144.0/"+testCodeServerAMD64+".sha256").Body.String())
+	placeCodeServerFile(t, path, testCodeServerContent("arm64"), 2)
+	rec := cst.get("/det/code-server/4.144.0/" + testCodeServerAMD64 + ".sha256")
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, arm64Line, rec.Body.String())
+	sumLine, err := os.ReadFile(filepath.Join(cst.dir, testCodeServerAMD64+".sha256"))
+	require.NoError(t, err)
+	require.Equal(t, arm64Line, string(sumLine))
+	require.Equal(t, int32(2), cst.artifacts.hashed.Load())
+
+	// With one, the replaced tarball is refused and kept.
+	cst = newCodeServerTest(t, nil, func(c *config.CodeServerConfig) {
+		c.SHA256 = map[string]string{"amd64": testCodeServerSum("amd64")}
+	})
+	path = filepath.Join(cst.dir, testCodeServerAMD64)
+	placeCodeServerFile(t, path, testCodeServerContent("amd64"), 1)
+	require.Equal(t, http.StatusOK, cst.get("/det/code-server/4.144.0/"+testCodeServerAMD64).Code)
+	placeCodeServerFile(t, path, testCodeServerContent("arm64"), 2)
+	require.Equal(t, http.StatusBadGateway, cst.get("/det/code-server/4.144.0/"+testCodeServerAMD64).Code)
+	require.Equal(t, http.StatusBadGateway,
+		cst.get("/det/code-server/4.144.0/"+testCodeServerAMD64+".sha256").Code)
+	content, err := os.ReadFile(filepath.Join(cst.dir, testCodeServerAMD64))
+	require.NoError(t, err)
+	require.Equal(t, testCodeServerContent("arm64"), content)
+	require.Equal(t, int32(0), cst.calls.Load())
+}
+
+func TestCodeServerRepairedTarball(t *testing.T) {
+	cst := newCodeServerTest(t, nil, func(c *config.CodeServerConfig) {
+		c.SHA256 = map[string]string{"amd64": testCodeServerSum("amd64")}
+	})
+	path := filepath.Join(cst.dir, testCodeServerAMD64)
+	placeCodeServerFile(t, path, testCodeServerContent("arm64"), 1)
+	require.NoError(t, os.WriteFile(path+".sha256",
+		[]byte(testCodeServerSum("arm64")+"  "+testCodeServerAMD64+"\n"), 0o600))
+	require.Equal(t, http.StatusBadGateway, cst.get("/det/code-server/4.144.0/"+testCodeServerAMD64).Code)
+
+	// The repaired tarball is served although its checksum file is stale, which is rewritten.
+	placeCodeServerFile(t, path, testCodeServerContent("amd64"), 2)
+	rec := cst.get("/det/code-server/4.144.0/" + testCodeServerAMD64)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, testCodeServerContent("amd64"), rec.Body.Bytes())
+	sumLine, err := os.ReadFile(filepath.Join(cst.dir, testCodeServerAMD64+".sha256"))
+	require.NoError(t, err)
+	require.Equal(t, testCodeServerSum("amd64")+"  "+testCodeServerAMD64+"\n", string(sumLine))
+	require.Equal(t, int32(0), cst.calls.Load())
+}
+
+func TestCodeServerHashesOnce(t *testing.T) {
+	cst := newCodeServerTest(t, nil, nil)
+	path := filepath.Join(cst.dir, testCodeServerAMD64)
+	placeCodeServerFile(t, path, testCodeServerContent("amd64"), 1)
+	for _, p := range []string{testCodeServerAMD64, testCodeServerAMD64 + ".sha256", testCodeServerAMD64} {
+		require.Equal(t, http.StatusOK, cst.get("/det/code-server/4.144.0/"+p).Code, p)
+	}
+	require.Equal(t, int32(1), cst.artifacts.hashed.Load())
+
+	// A deleted checksum file is written again without hashing.
+	require.NoError(t, os.Remove(path+".sha256"))
+	rec := cst.get("/det/code-server/4.144.0/" + testCodeServerAMD64 + ".sha256")
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, testCodeServerSum("amd64")+"  "+testCodeServerAMD64+"\n", rec.Body.String())
+	require.Equal(t, int32(1), cst.artifacts.hashed.Load())
+
+	// A downloaded tarball is hashed while it is downloaded only.
+	for _, p := range []string{testCodeServerARM64, testCodeServerARM64 + ".sha256", testCodeServerARM64} {
+		require.Equal(t, http.StatusOK, cst.get("/det/code-server/4.144.0/"+p).Code, p)
+	}
+	require.Equal(t, int32(1), cst.artifacts.hashed.Load())
+	require.Equal(t, int32(1), cst.calls.Load())
+}

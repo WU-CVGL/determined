@@ -1943,9 +1943,8 @@ Deployment notes:
 
 -  An administrator may place the tarball in ``dir`` instead, for example on a master without
    internet access, under its release name ``code-server-<version>-linux-<arch>.tar.gz``. The master
-   serves it without downloading and writes its ``.sha256`` file on the first request. It never
-   deletes a tarball that it did not download. After replacing a tarball, delete its ``.sha256``
-   file as well.
+   serves it without downloading and writes its ``.sha256`` file on the first request, and again
+   after the tarball changes. It never deletes a tarball that it did not download.
 
 *************
  ``logging``

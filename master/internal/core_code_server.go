@@ -15,6 +15,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/hashicorp/go-cleanhttp"
@@ -54,6 +57,36 @@ type codeServerArtifacts struct {
 	client *http.Client //nolint:forbidigo // Built by cleanhttp.
 	// fetches lets concurrent requests for the files of one architecture share one download.
 	fetches singleflight.Group
+
+	// mu guards sums.
+	mu sync.Mutex
+	// sums has the SHA-256 of each tarball in conf.Dir by its path, with the identity of the file
+	// that was hashed.
+	sums map[string]codeServerSum
+	// hashed counts the tarballs read to compute their SHA-256.
+	hashed atomic.Int32
+}
+
+// codeServerSum is the SHA-256 of a file with the identity of that file.
+type codeServerSum struct {
+	id  codeServerFileID
+	sum string
+}
+
+// codeServerFileID identifies a file and its content: replacing a file changes its inode, and
+// writing to it changes its modification time or its size.
+type codeServerFileID struct {
+	size  int64
+	mtime int64
+	inode uint64
+}
+
+func codeServerFileIDOf(info fs.FileInfo) codeServerFileID {
+	id := codeServerFileID{size: info.Size(), mtime: info.ModTime().UnixNano()}
+	if st, ok := info.Sys().(*syscall.Stat_t); ok {
+		id.inode = st.Ino
+	}
+	return id
 }
 
 func newCodeServerArtifacts(conf config.CodeServerConfig) (*codeServerArtifacts, error) {
@@ -63,7 +96,9 @@ func newCodeServerArtifacts(conf config.CodeServerConfig) (*codeServerArtifacts,
 	// cleanhttp's transport takes HTTPS_PROXY and NO_PROXY from the master's environment.
 	client := cleanhttp.DefaultClient()
 	client.Timeout = codeServerFetchTimeout
-	return &codeServerArtifacts{conf: conf, client: client}, nil
+	return &codeServerArtifacts{
+		conf: conf, client: client, sums: map[string]codeServerSum{},
+	}, nil
 }
 
 // registerCodeServerRoutes registers the code-server route. Without the interactive.code_server
@@ -203,8 +238,9 @@ func (a *codeServerArtifacts) serve(c echo.Context) error {
 }
 
 // prepare makes sure that the tarball for arch and its checksum file are in conf.Dir and that the
-// tarball matches conf.SHA256, downloading the tarball if it is missing. It never removes a
-// tarball that it did not download.
+// tarball matches conf.SHA256, downloading the tarball if it is missing. It hashes a tarball that
+// it has not hashed before or that has changed since, and rewrites a checksum file that does not
+// match. It never removes a tarball that it did not download.
 func (a *codeServerArtifacts) prepare(arch string) error {
 	path := filepath.Join(a.conf.Dir, codeServerTarball(a.conf.Version, arch))
 	info, err := os.Stat(path)
@@ -217,17 +253,53 @@ func (a *codeServerArtifacts) prepare(arch string) error {
 		return fmt.Errorf("%s is not a regular file", path)
 	}
 
-	sum, err := readChecksumFile(path)
+	sum, err := a.sum(path, info)
 	if err != nil {
-		if sum, err = hashFile(path); err != nil {
-			return err
-		}
-		if err := a.verify(arch, sum); err != nil {
-			return err
-		}
-		return writeChecksumFile(path, sum)
+		return err
 	}
-	return a.verify(arch, sum)
+	if err := a.verify(arch, sum); err != nil {
+		return err
+	}
+	if b, err := os.ReadFile(path + ".sha256"); err == nil && //nolint:gosec // Built from config.
+		bytes.Equal(b, checksumLine(path, sum)) {
+		return nil
+	}
+	return writeChecksumFile(path, sum)
+}
+
+// sum returns the SHA-256 of the tarball at path, whose information is info, hashing it unless it
+// has hashed the same file before.
+func (a *codeServerArtifacts) sum(path string, info fs.FileInfo) (string, error) {
+	a.mu.Lock()
+	cached, ok := a.sums[path]
+	a.mu.Unlock()
+	if ok && cached.id == codeServerFileIDOf(info) {
+		return cached.sum, nil
+	}
+
+	f, err := os.Open(path) //nolint:gosec // path is built from config.
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	// The identity of the opened file, which is the one hashed even if path is replaced meanwhile.
+	if info, err = f.Stat(); err != nil {
+		return "", err
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	a.hashed.Add(1)
+	sum := hex.EncodeToString(h.Sum(nil))
+	a.remember(path, info, sum)
+	return sum, nil
+}
+
+func (a *codeServerArtifacts) remember(path string, info fs.FileInfo, sum string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.sums[path] = codeServerSum{id: codeServerFileIDOf(info), sum: sum}
 }
 
 func (a *codeServerArtifacts) verify(arch, sum string) error {
@@ -284,6 +356,9 @@ func (a *codeServerArtifacts) download(arch, path string) (err error) {
 		return err
 	}
 	log.Infof("downloaded %s, SHA-256 %s", filepath.Base(path), sum)
+	if info, err := os.Stat(path); err == nil {
+		a.remember(path, info, sum)
+	}
 	return writeChecksumFile(path, sum)
 }
 
@@ -307,39 +382,9 @@ func redactURL(raw string) string {
 	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path, RawPath: u.RawPath}).String()
 }
 
-func hashFile(path string) (string, error) {
-	f, err := os.Open(path) //nolint:gosec // path is built from config.
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = f.Close() }()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
 // checksumLine is a line of sha256sum's output for the file at path.
 func checksumLine(path, sum string) []byte {
 	return []byte(sum + "  " + filepath.Base(path) + "\n")
-}
-
-// readChecksumFile returns the checksum in <path>.sha256, or an error if the file is missing or
-// is not sha256sum's line for path.
-func readChecksumFile(path string) (string, error) {
-	b, err := os.ReadFile(path + ".sha256") //nolint:gosec // path is built from config.
-	if err != nil {
-		return "", err
-	}
-	sum, _, _ := bytes.Cut(b, []byte("  "))
-	if len(sum) != sha256.Size*2 || !bytes.Equal(b, checksumLine(path, string(sum))) {
-		return "", fmt.Errorf("%s.sha256 is not a checksum line for %s", path, filepath.Base(path))
-	}
-	if _, err := hex.DecodeString(string(sum)); err != nil {
-		return "", fmt.Errorf("%s.sha256: %w", path, err)
-	}
-	return string(sum), nil
 }
 
 // writeChecksumFile writes <path>.sha256 in sha256sum's format, through a temporary file so that
