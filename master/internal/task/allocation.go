@@ -1241,10 +1241,16 @@ func (a *allocation) registerProxies(addresses []cproto.Address) {
 		if pcfg.TLS {
 			urlScheme = "https"
 		}
-		proxy.DefaultProxy.Register(pcfg.ServiceID, &url.URL{
-			Scheme: urlScheme,
-			Host:   fmt.Sprintf("%s:%d", address.HostIP, address.HostPort),
-		}, pcfg.ProxyTCP, pcfg.Unauthenticated)
+		proxy.DefaultProxy.RegisterService(pcfg.ServiceID, proxy.Service{
+			URL: &url.URL{
+				Scheme: urlScheme,
+				Host:   fmt.Sprintf("%s:%d", address.HostIP, address.HostPort),
+			},
+			ProxyTCP:             pcfg.ProxyTCP,
+			AllowUnauthenticated: pcfg.Unauthenticated,
+			Exec:                 pcfg.Exec,
+			StripPrefix:          pcfg.StripPrefix,
+		})
 		a.syslog.Debugf("registered proxy id: %s, cfg: %v\n", pcfg.ServiceID, pcfg)
 		a.proxies = append(a.proxies, pcfg.ServiceID)
 	}

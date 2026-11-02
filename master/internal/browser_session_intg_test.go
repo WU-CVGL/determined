@@ -449,7 +449,7 @@ func TestProxyAuthenticationChecksOrigin(t *testing.T) {
 		c := echo.New().NewContext(req, httptest.NewRecorder())
 		c.SetParamNames("service")
 		c.SetParamValues("abc")
-		_, err := processProxyAuthentication(&detContext.DetContext{Context: c})
+		_, err := processProxyAuthentication(&detContext.DetContext{Context: c}, nil)
 		return err
 	}
 	crossSite := map[string]string{"Sec-Fetch-Site": "cross-site", "Origin": "https://evil.test"}

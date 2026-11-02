@@ -79,7 +79,7 @@ var visitorCookies = []string{
 
 func newTestProxy(t *testing.T, sawAuthCookie *string) (*Proxy, string) {
 	p := &Proxy{
-		HTTPAuth: func(c echo.Context) (bool, error) {
+		HTTPAuth: func(c echo.Context, _ *Service) (bool, error) {
 			// Authentication runs on the request as the visitor sent it.
 			if cookie, err := c.Request().Cookie("auth"); err == nil {
 				*sawAuthCookie = cookie.Value
