@@ -285,6 +285,7 @@ export const experimentSlots = (item: BulkExperimentItem): number | undefined =>
 /* Rows */
 
 interface RunRowBase {
+  allocationStartTime?: string;
   endTime?: string;
   /** The ID as text: a task ID, or an experiment's number. */
   id: string;
@@ -324,6 +325,7 @@ const ownerName = (displayName?: string, username?: string): string | undefined 
   displayName || username || undefined;
 
 export const commandRow = (task: CommandTask): CommandRunRow => ({
+  allocationStartTime: task.allocationStartTime,
   endTime: task.endTime,
   id: task.id,
   key: runRowKey(task.type, task.id),
@@ -340,6 +342,7 @@ export const commandRow = (task: CommandTask): CommandRunRow => ({
 });
 
 export const genericTaskRow = (task: GenericTask): GenericTaskRunRow => ({
+  allocationStartTime: task.allocationStartTime,
   endTime: task.endTime,
   id: task.taskId,
   key: runRowKey(RunKind.GenericTask, task.taskId),
@@ -366,6 +369,7 @@ export const experimentRow = (item: BulkExperimentItem): ExperimentRunRow => {
     workspaceName: item.workspaceName ?? '',
   };
   return {
+    allocationStartTime: item.allocationStartTime,
     endTime: item.endTime,
     experiment,
     id: String(item.id),

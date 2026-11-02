@@ -86,7 +86,17 @@ func (a *apiServer) GetNotebooks(
 	})
 
 	api.Sort(resp.Notebooks, req.OrderBy, req.SortBy, apiv1.GetNotebooksRequest_SORT_BY_ID)
-	return resp, api.Paginate(&resp.Pagination, &resp.Notebooks, req.Offset, req.Limit)
+	if err = api.Paginate(&resp.Pagination, &resp.Notebooks, req.Offset, req.Limit); err != nil {
+		return nil, err
+	}
+	starts := make([]allocationStartTarget, 0, len(resp.Notebooks))
+	for _, item := range resp.Notebooks {
+		starts = append(starts, allocationStartTarget{item.Id, &item.AllocationStartTime})
+	}
+	if err = enrichAllocationStartTimes(ctx, starts, false); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (a *apiServer) GetNotebook(

@@ -163,6 +163,9 @@ message Experiment {
   optional int32 model_definition_size = 45;
   // The experiment pachyderm integration config.
   optional google.protobuf.Struct pachyderm_integration = 47;
+  // First resource assignment time among the experiment's trials, supplied by
+  // GetExperiments; unset if no trial has received resources.
+  google.protobuf.Timestamp allocation_start_time = 48;
 }
 
 // PatchExperiment is a partial update to an experiment with only id required.

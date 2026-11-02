@@ -629,6 +629,9 @@ type GenericTask struct {
 	AllocationId *string `protobuf:"bytes,17,opt,name=allocation_id,json=allocationId,proto3,oneof" json:"allocation_id,omitempty"`
 	// Display name of the user who owns the task; empty without one.
 	DisplayName string `protobuf:"bytes,18,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	// First resource assignment time, across this task's allocations.
+	// Unset if no allocation has received resources.
+	AllocationStartTime *timestamp.Timestamp `protobuf:"bytes,19,opt,name=allocation_start_time,json=allocationStartTime,proto3" json:"allocation_start_time,omitempty"`
 }
 
 func (x *GenericTask) Reset() {
@@ -787,6 +790,13 @@ func (x *GenericTask) GetDisplayName() string {
 		return x.DisplayName
 	}
 	return ""
+}
+
+func (x *GenericTask) GetAllocationStartTime() *timestamp.Timestamp {
+	if x != nil {
+		return x.AllocationStartTime
+	}
+	return nil
 }
 
 // Address represents an exposed port on a container.
@@ -1633,7 +1643,7 @@ var file_determined_task_v1_task_proto_rawDesc = []byte{
 	0x5f, 0x69, 0x64, 0x42, 0x0d, 0x0a, 0x0b, 0x5f, 0x74, 0x61, 0x73, 0x6b, 0x5f, 0x73, 0x74, 0x61,
 	0x74, 0x65, 0x42, 0x0e, 0x0a, 0x0c, 0x5f, 0x66, 0x6f, 0x72, 0x6b, 0x65, 0x64, 0x5f, 0x66, 0x72,
 	0x6f, 0x6d, 0x42, 0x0b, 0x0a, 0x09, 0x5f, 0x6e, 0x6f, 0x5f, 0x70, 0x61, 0x75, 0x73, 0x65, 0x22,
-	0xe0, 0x06, 0x0a, 0x0b, 0x47, 0x65, 0x6e, 0x65, 0x72, 0x69, 0x63, 0x54, 0x61, 0x73, 0x6b, 0x12,
+	0xb0, 0x07, 0x0a, 0x0b, 0x47, 0x65, 0x6e, 0x65, 0x72, 0x69, 0x63, 0x54, 0x61, 0x73, 0x6b, 0x12,
 	0x17, 0x0a, 0x07, 0x74, 0x61, 0x73, 0x6b, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09,
 	0x52, 0x06, 0x74, 0x61, 0x73, 0x6b, 0x49, 0x64, 0x12, 0x15, 0x0a, 0x06, 0x6a, 0x6f, 0x62, 0x5f,
 	0x69, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x6a, 0x6f, 0x62, 0x49, 0x64, 0x12,
@@ -1673,7 +1683,12 @@ var file_determined_task_v1_task_proto_rawDesc = []byte{
 	0x20, 0x01, 0x28, 0x09, 0x48, 0x03, 0x52, 0x0c, 0x61, 0x6c, 0x6c, 0x6f, 0x63, 0x61, 0x74, 0x69,
 	0x6f, 0x6e, 0x49, 0x64, 0x88, 0x01, 0x01, 0x12, 0x21, 0x0a, 0x0c, 0x64, 0x69, 0x73, 0x70, 0x6c,
 	0x61, 0x79, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x12, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0b, 0x64,
-	0x69, 0x73, 0x70, 0x6c, 0x61, 0x79, 0x4e, 0x61, 0x6d, 0x65, 0x3a, 0x98, 0x01, 0x92, 0x41, 0x94,
+	0x69, 0x73, 0x70, 0x6c, 0x61, 0x79, 0x4e, 0x61, 0x6d, 0x65, 0x12, 0x4e, 0x0a, 0x15, 0x61, 0x6c,
+	0x6c, 0x6f, 0x63, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x5f, 0x73, 0x74, 0x61, 0x72, 0x74, 0x5f, 0x74,
+	0x69, 0x6d, 0x65, 0x18, 0x13, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1a, 0x2e, 0x67, 0x6f, 0x6f, 0x67,
+	0x6c, 0x65, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2e, 0x54, 0x69, 0x6d, 0x65,
+	0x73, 0x74, 0x61, 0x6d, 0x70, 0x52, 0x13, 0x61, 0x6c, 0x6c, 0x6f, 0x63, 0x61, 0x74, 0x69, 0x6f,
+	0x6e, 0x53, 0x74, 0x61, 0x72, 0x74, 0x54, 0x69, 0x6d, 0x65, 0x3a, 0x98, 0x01, 0x92, 0x41, 0x94,
 	0x01, 0x0a, 0x91, 0x01, 0xd2, 0x01, 0x07, 0x74, 0x61, 0x73, 0x6b, 0x5f, 0x69, 0x64, 0xd2, 0x01,
 	0x06, 0x6a, 0x6f, 0x62, 0x5f, 0x69, 0x64, 0xd2, 0x01, 0x05, 0x73, 0x74, 0x61, 0x74, 0x65, 0xd2,
 	0x01, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0xd2, 0x01, 0x0b, 0x64, 0x65, 0x73, 0x63, 0x72, 0x69, 0x70,
@@ -1951,24 +1966,25 @@ var file_determined_task_v1_task_proto_depIdxs = []int32{
 	2,  // 6: determined.task.v1.GenericTask.state:type_name -> determined.task.v1.GenericTaskState
 	17, // 7: determined.task.v1.GenericTask.start_time:type_name -> google.protobuf.Timestamp
 	17, // 8: determined.task.v1.GenericTask.end_time:type_name -> google.protobuf.Timestamp
-	7,  // 9: determined.task.v1.ResourcesStarted.addresses:type_name -> determined.task.v1.Address
-	3,  // 10: determined.task.v1.ResourcesFailure.failure_type:type_name -> determined.task.v1.FailureType
-	9,  // 11: determined.task.v1.ResourcesStopped.failure:type_name -> determined.task.v1.ResourcesFailure
-	16, // 12: determined.task.v1.ResourcesSummary.agent_devices:type_name -> determined.task.v1.ResourcesSummary.AgentDevicesEntry
-	8,  // 13: determined.task.v1.ResourcesSummary.started:type_name -> determined.task.v1.ResourcesStarted
-	10, // 14: determined.task.v1.ResourcesSummary.exited:type_name -> determined.task.v1.ResourcesStopped
-	17, // 15: determined.task.v1.AllocationSummary.registered_time:type_name -> google.protobuf.Timestamp
-	11, // 16: determined.task.v1.AllocationSummary.resources:type_name -> determined.task.v1.ResourcesSummary
-	12, // 17: determined.task.v1.AllocationSummary.proxy_ports:type_name -> determined.task.v1.ProxyPortConfig
-	17, // 18: determined.task.v1.TaskLog.timestamp:type_name -> google.protobuf.Timestamp
-	18, // 19: determined.task.v1.TaskLog.level:type_name -> determined.log.v1.LogLevel
-	19, // 20: determined.task.v1.ResourcesSummary.Devices.devices:type_name -> determined.device.v1.Device
-	15, // 21: determined.task.v1.ResourcesSummary.AgentDevicesEntry.value:type_name -> determined.task.v1.ResourcesSummary.Devices
-	22, // [22:22] is the sub-list for method output_type
-	22, // [22:22] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	17, // 9: determined.task.v1.GenericTask.allocation_start_time:type_name -> google.protobuf.Timestamp
+	7,  // 10: determined.task.v1.ResourcesStarted.addresses:type_name -> determined.task.v1.Address
+	3,  // 11: determined.task.v1.ResourcesFailure.failure_type:type_name -> determined.task.v1.FailureType
+	9,  // 12: determined.task.v1.ResourcesStopped.failure:type_name -> determined.task.v1.ResourcesFailure
+	16, // 13: determined.task.v1.ResourcesSummary.agent_devices:type_name -> determined.task.v1.ResourcesSummary.AgentDevicesEntry
+	8,  // 14: determined.task.v1.ResourcesSummary.started:type_name -> determined.task.v1.ResourcesStarted
+	10, // 15: determined.task.v1.ResourcesSummary.exited:type_name -> determined.task.v1.ResourcesStopped
+	17, // 16: determined.task.v1.AllocationSummary.registered_time:type_name -> google.protobuf.Timestamp
+	11, // 17: determined.task.v1.AllocationSummary.resources:type_name -> determined.task.v1.ResourcesSummary
+	12, // 18: determined.task.v1.AllocationSummary.proxy_ports:type_name -> determined.task.v1.ProxyPortConfig
+	17, // 19: determined.task.v1.TaskLog.timestamp:type_name -> google.protobuf.Timestamp
+	18, // 20: determined.task.v1.TaskLog.level:type_name -> determined.log.v1.LogLevel
+	19, // 21: determined.task.v1.ResourcesSummary.Devices.devices:type_name -> determined.device.v1.Device
+	15, // 22: determined.task.v1.ResourcesSummary.AgentDevicesEntry.value:type_name -> determined.task.v1.ResourcesSummary.Devices
+	23, // [23:23] is the sub-list for method output_type
+	23, // [23:23] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_determined_task_v1_task_proto_init() }

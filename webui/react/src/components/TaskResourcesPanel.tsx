@@ -273,6 +273,10 @@ const TaskResourcesPanel: React.FC<Props> = ({
         </p>
       )}
       <p className={css.explanation}>
+        Shell and notebook resource samples may be delayed after resources are assigned (5 minutes
+        by default).
+      </p>
+      <p className={css.explanation}>
         Each allocation is shown separately. Gaps mean no confirmed samples, not zero use. GPU
         readings describe the entire assigned device and may include other processes. Child tasks
         are not included.

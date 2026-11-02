@@ -11,7 +11,9 @@ import settingsConfig, {
 } from './TaskDashboard.settings';
 
 /* The default columns before the Slots column, and widths that a user gave them. */
-const OLD_COLUMNS = DEFAULT_COLUMNS.filter((col) => col !== 'slots');
+const OLD_COLUMNS = DEFAULT_COLUMNS.filter(
+  (col) => col !== 'slots' && col !== 'allocationStartTime',
+);
 const OLD_WIDTHS = [301, 302, 303, 304, 305, 306, 307, 308, 309];
 const OWN_WIDTHS = {
   endTime: 309,
@@ -48,17 +50,38 @@ describe('normalizedLayout', () => {
     ).toBeUndefined();
   });
 
+  it('inserts Started after Submitted without moving saved widths from before Started', () => {
+    const columns = DEFAULT_COLUMNS.filter((col) => col !== 'allocationStartTime');
+    const widths = columns.map((_, index) => 200 + index);
+    for (const saved of [columns, DEFAULT_COLUMNS]) {
+      const layout = normalized({ columns: saved, columnWidths: widths });
+      expect(layout.columns).toEqual(DEFAULT_COLUMNS);
+      expect(widthOf(layout)).toEqual({
+        ...Object.fromEntries(columns.map((col, index) => [col, widths[index]])),
+        allocationStartTime: DEFAULT_COLUMN_WIDTHS.allocationStartTime,
+      });
+    }
+  });
+
   it('puts Slots after Resource Pool in columns stored before it, each column with its width', () => {
     const layout = normalized({ columns: OLD_COLUMNS, columnWidths: OLD_WIDTHS });
     expect(layout.columns).toEqual(DEFAULT_COLUMNS);
-    expect(widthOf(layout)).toEqual({ ...OWN_WIDTHS, slots: DEFAULT_COLUMN_WIDTHS.slots });
+    expect(widthOf(layout)).toEqual({
+      ...OWN_WIDTHS,
+      allocationStartTime: 117,
+      slots: DEFAULT_COLUMN_WIDTHS.slots,
+    });
   });
 
   it('gives Slots its width at its place when only the widths before it were stored', () => {
     // The settings give the default columns of now for columns never stored, Slots included.
     const layout = normalized({ columns: DEFAULT_COLUMNS, columnWidths: OLD_WIDTHS });
     expect(layout.columns).toEqual(DEFAULT_COLUMNS);
-    expect(widthOf(layout)).toEqual({ ...OWN_WIDTHS, slots: DEFAULT_COLUMN_WIDTHS.slots });
+    expect(widthOf(layout)).toEqual({
+      ...OWN_WIDTHS,
+      allocationStartTime: 117,
+      slots: DEFAULT_COLUMN_WIDTHS.slots,
+    });
   });
 
   it('gives columns stored without widths their own default widths', () => {
@@ -146,7 +169,7 @@ describe('normalizedLayout', () => {
   it('reads no columns as the default ones', () => {
     expect(normalized({ columns: [], columnWidths: OLD_WIDTHS })).toEqual({
       columns: DEFAULT_COLUMNS,
-      columnWidths: [301, 302, 303, 304, 305, 306, 307, DEFAULT_COLUMN_WIDTHS.slots, 308, 309],
+      columnWidths: [301, 302, 303, 304, 305, 306, 307, DEFAULT_COLUMN_WIDTHS.slots, 308, 117, 309],
     });
   });
 });

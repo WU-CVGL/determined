@@ -725,6 +725,16 @@ func (a *apiServer) GetExperiments(
 		return nil, err
 	}
 
+	starts := make([]allocationStartTarget, 0, len(resp.Experiments))
+	for _, item := range resp.Experiments {
+		starts = append(starts, allocationStartTarget{
+			strconv.Itoa(int(item.Id)), &item.AllocationStartTime,
+		})
+	}
+	if err = enrichAllocationStartTimes(ctx, starts, true); err != nil {
+		return nil, err
+	}
+
 	if err = a.enrichExperimentState(resp.Experiments...); err != nil {
 		return nil, err
 	}

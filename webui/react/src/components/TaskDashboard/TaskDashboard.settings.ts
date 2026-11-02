@@ -19,6 +19,7 @@ import {
 
 export type TaskDashboardColumnName =
   | 'action'
+  | 'allocationStartTime'
   | 'endTime'
   | 'id'
   | 'kind'
@@ -40,11 +41,13 @@ export const DEFAULT_COLUMNS: TaskDashboardColumnName[] = [
   'resourcePool',
   'slots',
   'startTime',
+  'allocationStartTime',
   'endTime',
 ];
 
 export const DEFAULT_COLUMN_WIDTHS: Record<TaskDashboardColumnName, number> = {
   action: 46,
+  allocationStartTime: 117,
   endTime: 117,
   id: 100,
   kind: 84,
@@ -94,6 +97,7 @@ export type ColumnLayout = Layout<TaskDashboardColumnName>;
  * - Widths stored without columns, as a resize stores them, are those of the default columns before
  *   Slots; the settings give the default columns of now, Slots included, so Slots gets its default
  *   width at its place.
+ * - Started is inserted after Submitted, retaining the older columns and their widths.
  * - The default widths are those of the default columns: columns in another order get their own.
  * - A missing width is its column's default; widths past the last column are dropped.
  */
@@ -101,16 +105,28 @@ export const normalizedLayout = ({
   columns,
   columnWidths,
 }: ColumnLayout): ColumnLayout | undefined => {
-  const cols = columns.length > 0 ? columns : DEFAULT_COLUMNS;
+  let cols = columns.length > 0 ? columns : DEFAULT_COLUMNS;
+  // Widths saved alone belong to one of the two older default layouts. Recover its columns
+  // before inserting either new column, so a width stays with the column the user resized.
+  if (_.isEqual(cols, DEFAULT_COLUMNS)) {
+    if (columnWidths.length === DEFAULT_COLUMNS.length - 2) {
+      cols = cols.filter((col) => col !== 'slots' && col !== 'allocationStartTime');
+    } else if (columnWidths.length === DEFAULT_COLUMNS.length - 1) {
+      cols = cols.filter((col) => col !== 'allocationStartTime');
+    }
+  }
   const widths = _.isEqual(columnWidths, defaultWidths())
     ? cols.map((col) => DEFAULT_COLUMN_WIDTHS[col])
     : columnWidths;
-  const layout = withColumn(
+  const withSlots = withColumn(
     { columns: cols, columnWidths: widths },
     'slots',
     'resourcePool',
     DEFAULT_COLUMN_WIDTHS,
   );
+  const layout = withSlots.columns.includes('startTime')
+    ? withColumn(withSlots, 'allocationStartTime', 'startTime', DEFAULT_COLUMN_WIDTHS)
+    : withSlots;
   if (_.isEqual(layout.columns, columns) && _.isEqual(layout.columnWidths, columnWidths)) {
     return undefined;
   }
@@ -287,6 +303,7 @@ const settingsConfig = (scope: DashboardScope, experiments: boolean): SettingsCo
       type: array(
         union([
           literal('action'),
+          literal('allocationStartTime'),
           literal('endTime'),
           literal('id'),
           literal('kind'),

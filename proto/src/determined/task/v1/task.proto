@@ -185,6 +185,9 @@ message GenericTask {
   optional string allocation_id = 17;
   // Display name of the user who owns the task; empty without one.
   string display_name = 18;
+  // First resource assignment time, across this task's allocations.
+  // Unset if no allocation has received resources.
+  google.protobuf.Timestamp allocation_start_time = 19;
 }
 
 // Address represents an exposed port on a container.

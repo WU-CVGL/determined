@@ -2083,7 +2083,7 @@ export interface V1Command {
      */
     state: Taskv1State;
     /**
-     * The time the command was started.
+     * The time the command was submitted (registered with the master).
      * @type {Date | DateString}
      * @memberof V1Command
      */
@@ -2148,6 +2148,12 @@ export interface V1Command {
      * @memberof V1Command
      */
     endTime?: Date | DateString;
+    /**
+     * First resource assignment time, provided by the list API; unset if never assigned.
+     * @type {Date | DateString}
+     * @memberof V1Command
+     */
+    allocationStartTime?: Date | DateString;
 }
 /**
  * Container for a requested trial and its metrics.
@@ -3232,6 +3238,12 @@ export interface V1Experiment {
      * @memberof V1Experiment
      */
     pachydermIntegration?: any;
+    /**
+     * First resource assignment time among the experiment's trials, supplied by GetExperiments; unset if no trial has received resources.
+     * @type {Date | DateString}
+     * @memberof V1Experiment
+     */
+    allocationStartTime?: Date | DateString;
 }
 /**
  * Message for results of individual experiments in a multi-experiment action.
@@ -3751,6 +3763,12 @@ export interface V1GenericTask {
      * @memberof V1GenericTask
      */
     displayName?: string;
+    /**
+     * First resource assignment time, across this task's allocations. Unset if no allocation has received resources.
+     * @type {Date | DateString}
+     * @memberof V1GenericTask
+     */
+    allocationStartTime?: Date | DateString;
 }
 /**
  * State of a Generic task - GENERIC_TASK_STATE_UNSPECIFIED: The task state unknown  - GENERIC_TASK_STATE_ACTIVE: The task state unknown  - GENERIC_TASK_STATE_CANCELED: The task state unknown  - GENERIC_TASK_STATE_COMPLETED: The task state unknown  - GENERIC_TASK_STATE_ERROR: The task state unknown  - GENERIC_TASK_STATE_PAUSED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_PAUSED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_CANCELED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_COMPLETED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_ERROR: The task state unknown
@@ -7485,7 +7503,7 @@ export interface V1Notebook {
      */
     state: Taskv1State;
     /**
-     * The time the notebook was started.
+     * The time the notebook was submitted (registered with the master).
      * @type {Date | DateString}
      * @memberof V1Notebook
      */
@@ -7556,6 +7574,12 @@ export interface V1Notebook {
      * @memberof V1Notebook
      */
     endTime?: Date | DateString;
+    /**
+     * First resource assignment time, provided by the list API; unset if never assigned.
+     * @type {Date | DateString}
+     * @memberof V1Notebook
+     */
+    allocationStartTime?: Date | DateString;
 }
 /**
  * Arguments to a notify container running.
@@ -11362,7 +11386,7 @@ export interface V1Shell {
      */
     state: Taskv1State;
     /**
-     * The time the shell was started.
+     * The time the shell was submitted (registered with the master).
      * @type {Date | DateString}
      * @memberof V1Shell
      */
@@ -11451,6 +11475,12 @@ export interface V1Shell {
      * @memberof V1Shell
      */
     endTime?: Date | DateString;
+    /**
+     * First resource assignment time, provided by the list API; unset if never assigned.
+     * @type {Date | DateString}
+     * @memberof V1Shell
+     */
+    allocationStartTime?: Date | DateString;
 }
 /**
  * Slot wraps a single device on the agent.
@@ -12010,7 +12040,7 @@ export interface V1Tensorboard {
      */
     state: Taskv1State;
     /**
-     * The time the tensorboard was started.
+     * The time the tensorboard was submitted (registered with the master).
      * @type {Date | DateString}
      * @memberof V1Tensorboard
      */
@@ -12093,6 +12123,12 @@ export interface V1Tensorboard {
      * @memberof V1Tensorboard
      */
     endTime?: Date | DateString;
+    /**
+     * First resource assignment time, provided by the list API; unset if never assigned.
+     * @type {Date | DateString}
+     * @memberof V1Tensorboard
+     */
+    allocationStartTime?: Date | DateString;
 }
 /**
  * Response to TestWebhookRequest.

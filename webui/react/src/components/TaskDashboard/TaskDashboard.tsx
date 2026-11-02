@@ -915,6 +915,17 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         render: (_: unknown, row: RunRow) => timeRenderer(row.startTime),
         sortDirections: DESCEND_FIRST,
         sorter: true,
+        title: 'Submitted',
+      },
+      {
+        dataIndex: 'allocationStartTime',
+        defaultWidth: DEFAULT_COLUMN_WIDTHS.allocationStartTime,
+        key: 'allocationStartTime',
+        render: (_: unknown, row: RunRow) => (
+          <span title="First resource assignment; image pulling and setup may follow. — means no recorded assignment.">
+            {timeRenderer(row.allocationStartTime)}
+          </span>
+        ),
         title: 'Started',
       },
       {

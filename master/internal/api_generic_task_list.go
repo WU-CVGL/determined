@@ -154,7 +154,17 @@ func (a *apiServer) GetGenericTasks(
 		resp.Tasks = append(resp.Tasks, task)
 	}
 	sort.SliceStable(resp.Tasks, func(i, j int) bool { return less(resp.Tasks[i], resp.Tasks[j]) })
-	return resp, api.Paginate(&resp.Pagination, &resp.Tasks, req.Offset, req.Limit)
+	if err = api.Paginate(&resp.Pagination, &resp.Tasks, req.Offset, req.Limit); err != nil {
+		return nil, err
+	}
+	starts := make([]allocationStartTarget, 0, len(resp.Tasks))
+	for _, item := range resp.Tasks {
+		starts = append(starts, allocationStartTarget{item.TaskId, &item.AllocationStartTime})
+	}
+	if err = enrichAllocationStartTimes(ctx, starts, false); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (row genericTaskListRow) toProto() *taskv1.GenericTask {
