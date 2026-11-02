@@ -102,7 +102,7 @@ service_exited() {
         kill "$pid" 2>/dev/null
         wait "$pid" 2>/dev/null
     done
-    if [[ $! != "$service_inherited_pid" ]]; then
+    if [[ ${!-} != "$service_inherited_pid" ]]; then
         pid=$!
         if ! wait_for_child "$pid" "$supervisor_log_drain_seconds"; then
             kill -TERM -- "-$BASHPID" 2>/dev/null
@@ -126,7 +126,7 @@ start_service() {
     (
         # Outlive the service when a stop signals the process group, and end with its status.
         trap : INT TERM HUP
-        service_inherited_pid=$!
+        service_inherited_pid=${!-}
         exec {service_stdout}>&1 {service_stderr}>&2
         trap service_exited EXIT
         service_ready_args=(--service "$name")

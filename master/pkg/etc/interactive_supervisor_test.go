@@ -139,10 +139,7 @@ func newSupervisorRun(t *testing.T, services string) *supervisorRun {
 		[]byte(staticScript(t, InteractiveInitScriptResource)), 0o600))
 	writeScript(t, filepath.Join(s.run, TaskSetupScriptResource), `echo setup >>"$ORDER_FILE"`+"\n")
 	writeScript(t, filepath.Join(dir, "python"), pythonStandIn)
-	// Exported and shell-only variables of the hook both reach the services; common names do not
-	// change the supervisor's own.
-	writeScript(t, filepath.Join(s.work, "startup-hook.sh"),
-		"echo hook >>\"$ORDER_FILE\"\nexport HOOK_VAR=hook\nHOOK_LOCAL=local\nservices=x primary=x name=x\n")
+	s.hook(defaultHook)
 
 	s.env = append(os.Environ(),
 		"DET_SERVICES="+services,
@@ -157,6 +154,21 @@ func newSupervisorRun(t *testing.T, services string) *supervisorRun {
 		"HOOK_LOCAL=",
 	)
 	return s
+}
+
+// defaultHook is the startup hook of every run. Exported and shell-only variables of the hook both
+// reach the services; common names do not change the supervisor's own.
+const defaultHook = "echo hook >>\"$ORDER_FILE\"\nexport HOOK_VAR=hook\nHOOK_LOCAL=local\n" +
+	"services=x primary=x name=x\n"
+
+// strictHook is defaultHook with the shell options that many scripts start with, which stay set
+// after the init.
+const strictHook = "set -euo pipefail\n" + defaultHook
+
+// hook replaces the startup hook in the work dir.
+func (s *supervisorRun) hook(body string) {
+	s.t.Helper()
+	writeScript(s.t, filepath.Join(s.work, "startup-hook.sh"), body)
 }
 
 // unit installs a service unit, with /run/determined in the test's directory.
@@ -516,6 +528,35 @@ while :; do sleep 0.05; done
 	}
 }
 
+// A startup hook may leave "set -euo pipefail" on. The units run with those options, as the old
+// entrypoints did, and the supervisor still starts, stops and reaps the services.
+func TestSupervisorStrictHook(t *testing.T) {
+	strict := `if [[ -o nounset && -o pipefail ]]; then echo "%s strict" >>"$ORDER_FILE"; fi` + "\n"
+	t.Run("primary exit", func(t *testing.T) {
+		s := newSupervisorRun(t, "p,q")
+		s.hook(strictHook)
+		s.unit("p", fmt.Sprintf(strict, "p")+waitUntilOrder("q up")+"exit 3\n")
+		s.unit("q", fmt.Sprintf(strict, "q")+"echo 'q up' >>\"$ORDER_FILE\"\nsleep 300\n")
+		s.start()
+		require.Equal(t, 3, s.wait())
+		require.Subset(t, s.orderLines(), []string{"p strict", "q strict"})
+		require.Equal(t, []string{"[p] start", "[q] start", "[p] exited 3", "[q] exited 143"}, s.logLines())
+	})
+	t.Run("stop", func(t *testing.T) {
+		s := newSupervisorRun(t, "p,q")
+		s.hook(strictHook)
+		s.unit("p", readyLog+`{ bash -c 'echo up >&2; exec sleep 300'; } 2> >(log)`+"\n")
+		s.unit("q", "echo 'q up' >>\"$ORDER_FILE\"\nsleep 300\n")
+		s.start()
+		s.waitForLog("[p] ready")
+		s.waitForOrder("q up")
+		s.signal(syscall.SIGTERM)
+		require.Equal(t, 128+int(syscall.SIGTERM), s.wait())
+		require.ElementsMatch(t,
+			[]string{"[p] start", "[q] start", "[p] ready", "[p] exited 143", "[q] exited 143"}, s.logLines())
+	})
+}
+
 // A failed init ends the task with its status before any service starts.
 func TestSupervisorStopsOnInitFailure(t *testing.T) {
 	s := newSupervisorRun(t, "p")
@@ -543,9 +584,16 @@ func TestSupervisorRejectsInvalidServices(t *testing.T) {
 
 // The ssh unit under the supervisor: the sessions' environment is the one after the init, sshd gets
 // the supervisor's arguments, its log loses the login records message, and its readiness is
-// reported and logged.
+// reported and logged, also with a strict startup hook.
 func TestSupervisorSSHUnit(t *testing.T) {
+	for name, hook := range map[string]string{"default": defaultHook, "strict": strictHook} {
+		t.Run(name, func(t *testing.T) { testSupervisorSSHUnit(t, hook) })
+	}
+}
+
+func testSupervisorSSHUnit(t *testing.T, hook string) {
 	s := newSupervisorRun(t, "ssh")
+	s.hook(hook)
 	sshd := filepath.Join(s.dir, "sshd")
 	writeScript(t, sshd, `
 printf '%s\0' "$@" >"$ORDER_FILE.sshd-args"
@@ -583,9 +631,17 @@ exit 0
 }
 
 // The jupyter unit under the supervisor: the idle check runs in the background while JupyterLab
-// runs in the foreground with today's flags, and the idle check ends with it.
+// runs in the foreground with today's flags, and the idle check ends with it, also with a strict
+// startup hook.
 func TestSupervisorJupyterUnit(t *testing.T) {
+	for name, hook := range map[string]string{"default": defaultHook, "strict": strictHook} {
+		t.Run(name, func(t *testing.T) { testSupervisorJupyterUnit(t, hook) })
+	}
+}
+
+func testSupervisorJupyterUnit(t *testing.T, hook string) {
 	s := newSupervisorRun(t, "jupyter")
+	s.hook(hook)
 	bin := filepath.Join(s.dir, "bin")
 	require.NoError(t, os.Mkdir(bin, 0o700))
 	writeScript(t, filepath.Join(bin, "jupyter"), `
