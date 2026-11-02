@@ -30,6 +30,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
 	"github.com/determined-ai/determined/master/internal/user"
+	"github.com/determined-ai/determined/master/pkg/model"
 )
 
 const (
@@ -129,16 +130,18 @@ func codeServerAuthentication(next echo.HandlerFunc) echo.HandlerFunc {
 		if userErr == nil {
 			return next(c)
 		}
-		token := codeServerAllocationToken(c.Request())
-		if token == "" {
-			return userErr
+		var session *model.AllocationSession
+		for _, token := range codeServerAllocationTokens(c.Request()) {
+			var err error
+			if session, err = grpcutil.AllocationSessionByToken(token); err == nil {
+				break
+			} else if !errors.Is(err, db.ErrNotFound) {
+				return err
+			}
 		}
-		session, err := grpcutil.AllocationSessionByToken(token)
 		switch {
-		case errors.Is(err, db.ErrNotFound):
+		case session == nil:
 			return userErr
-		case err != nil:
-			return err
 		case session.OwnerID == nil:
 			return echo.NewHTTPError(http.StatusUnauthorized)
 		}
@@ -156,19 +159,20 @@ func codeServerAuthentication(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
-// codeServerAllocationToken returns the bearer token of the request's Authorization header, or of
-// its x-allocation-token header, which the Determined Python client sends as gRPC metadata.
-func codeServerAllocationToken(r *http.Request) string {
+// codeServerAllocationTokens returns the bearer tokens of the request's Authorization header and
+// of its x-allocation-token header, which the Determined Python client sends as gRPC metadata.
+func codeServerAllocationTokens(r *http.Request) []string {
+	var tokens []string
 	for _, header := range []string{
 		echo.HeaderAuthorization,
 		grpcutil.AllocationTokenHeader,
 		grpcutil.GrpcMetadataPrefix + grpcutil.AllocationTokenHeader,
 	} {
 		if token, ok := strings.CutPrefix(r.Header.Get(header), "Bearer "); ok && token != "" {
-			return token
+			tokens = append(tokens, token)
 		}
 	}
-	return ""
+	return tokens
 }
 
 func codeServerTarball(version, arch string) string {

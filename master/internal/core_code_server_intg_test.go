@@ -110,6 +110,8 @@ func TestCodeServerRouteAuthentication(t *testing.T) {
 	require.Equal(t, http.StatusOK, get(srv, path, "X-Allocation-Token", "Bearer "+allocationToken))
 	require.Equal(t, http.StatusUnauthorized,
 		get(srv, path, "Authorization", "Bearer "+userToken, "X-Allocation-Token", allocationToken))
+	require.Equal(t, http.StatusOK, get(srv, path,
+		"Authorization", "Bearer "+userToken, "X-Allocation-Token", "Bearer "+allocationToken))
 	require.Equal(t, int32(1), upstreamCalls.Load())
 
 	// The allocation session ends with the allocation.
