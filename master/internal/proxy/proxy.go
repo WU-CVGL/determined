@@ -30,6 +30,12 @@ type Service struct {
 	LastRequested        time.Time
 	ProxyTCP             bool
 	AllowUnauthenticated bool
+	// Exec marks a service that runs code as its task's owner. HTTPAuth decides who may reach it,
+	// even when AllowUnauthenticated is set.
+	Exec bool
+	// StripPrefix removes /proxy/<service ID> from the path of HTTP and WebSocket requests before
+	// they reach the service.
+	StripPrefix bool
 }
 
 // Clone returns a deep copy of the Service.
@@ -40,12 +46,14 @@ func (s Service) Clone() Service {
 		LastRequested:        s.LastRequested,
 		ProxyTCP:             s.ProxyTCP,
 		AllowUnauthenticated: s.AllowUnauthenticated,
+		Exec:                 s.Exec,
+		StripPrefix:          s.StripPrefix,
 	}
 }
 
-// ProxyHTTPAuth processes a proxy request, returning true if the request should terminate
-// immediately and an error if one was encountered during authentication.
-type ProxyHTTPAuth func(echo.Context) (done bool, err error)
+// ProxyHTTPAuth processes a proxy request to service, returning true if the request should
+// terminate immediately and an error if one was encountered during authentication.
+type ProxyHTTPAuth func(c echo.Context, service *Service) (done bool, err error)
 
 // IsMasterToken reports whether a token was issued by the master, whether or not its session is
 // still valid. It only identifies the master's credentials to keep them from proxied services; it
@@ -90,19 +98,25 @@ func InitProxy(httpAuth ProxyHTTPAuth, isMasterToken IsMasterToken) {
 // Register registers the service name with the associated target URL. All requests with the
 // format ".../:service-name/*" are forwarded to the service via the target URL.
 func (p *Proxy) Register(serviceID string, url *url.URL, proxyTCP bool, unauth bool) {
+	p.RegisterService(serviceID, Service{
+		URL:                  url,
+		ProxyTCP:             proxyTCP,
+		AllowUnauthenticated: unauth,
+	})
+}
+
+// RegisterService registers the service under serviceID, as Register does, with every field of
+// service but LastRequested, which starts now.
+func (p *Proxy) RegisterService(serviceID string, service Service) {
 	if serviceID == "" {
 		return
 	}
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	p.syslog.Infof("registering service: %s (%v)", serviceID, url)
-	p.services[serviceID] = &Service{
-		URL:                  url,
-		LastRequested:        time.Now(),
-		ProxyTCP:             proxyTCP,
-		AllowUnauthenticated: unauth,
-	}
+	p.syslog.Infof("registering service: %s (%v)", serviceID, service.URL)
+	service.LastRequested = time.Now()
+	p.services[serviceID] = &service
 }
 
 // Unregister removes the service from the proxy. All future requests until the service name is
@@ -149,8 +163,9 @@ func (p *Proxy) NewProxyHandler(serviceID string) echo.HandlerFunc {
 				fmt.Sprintf("service not found: %s", serviceName))
 		}
 
-		if !service.AllowUnauthenticated {
-			switch done, err := p.HTTPAuth(c); {
+		authenticate := service.Exec || !service.AllowUnauthenticated
+		if authenticate {
+			switch done, err := p.HTTPAuth(c, service); {
 			case err != nil:
 				return err
 			case done:
@@ -161,7 +176,7 @@ func (p *Proxy) NewProxyHandler(serviceID string) echo.HandlerFunc {
 		// The proxied service runs whatever its task's owner chose, so it must never see the
 		// visitor's master credentials, whether or not the master authenticated the request.
 		req := c.Request()
-		stripMasterCredentials(req.Header, !service.AllowUnauthenticated, p.IsMasterToken)
+		stripMasterCredentials(req.Header, authenticate, p.IsMasterToken)
 
 		// Set proxy headers.
 		if req.Header.Get(echo.HeaderXRealIP) == "" {
@@ -172,6 +187,10 @@ func (p *Proxy) NewProxyHandler(serviceID string) echo.HandlerFunc {
 		}
 		if c.IsWebSocket() && req.Header.Get(echo.HeaderXForwardedFor) == "" {
 			req.Header.Set(echo.HeaderXForwardedFor, c.RealIP())
+		}
+
+		if service.StripPrefix && !service.ProxyTCP {
+			req = withoutServicePrefix(req, c.Param("*"))
 		}
 
 		// Proxy the request to the target host.
@@ -193,6 +212,25 @@ func (p *Proxy) NewProxyHandler(serviceID string) echo.HandlerFunc {
 
 		return nil
 	}
+}
+
+// withoutServicePrefix returns a copy of req whose path is rest, the part of the path after
+// /proxy/<service ID>/, as the router matched it, with a leading slash: /proxy/<service ID>/ becomes
+// /. The query and every header, Host included, stay as they are.
+func withoutServicePrefix(req *http.Request, rest string) *http.Request {
+	out := req.WithContext(req.Context())
+	u := *req.URL
+	u.Path, u.RawPath = "/"+rest, ""
+	// The router matches the escaped path when it differs from the default encoding of the
+	// decoded one, so rest is escaped then.
+	if req.URL.RawPath != "" {
+		if path, err := url.PathUnescape(rest); err == nil {
+			u.Path, u.RawPath = "/"+path, "/"+rest
+		}
+	}
+	out.URL = &u
+	out.RequestURI = u.RequestURI()
+	return out
 }
 
 // masterAuthCookies are the cookies that carry a master session: "auth" is set at login and by
