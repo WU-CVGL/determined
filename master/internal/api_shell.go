@@ -281,12 +281,6 @@ func (a *apiServer) LaunchShell(
 			0o700,
 			tar.TypeReg,
 		),
-		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(
-			interactiveInitScript,
-			etc.MustStaticFile(etc.InteractiveInitScriptResource),
-			0o700,
-			tar.TypeReg,
-		),
 	}
 	launchReq.Spec.AdditionalFiles = append(launchReq.Spec.AdditionalFiles,
 		interactiveSupervisorFiles(launchReq.Spec.Base.AgentUserGroup)...)
