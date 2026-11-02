@@ -19,7 +19,7 @@ import (
 
 var (
 	tickInterval = 100 * time.Millisecond
-	proxyAuth    = func(c echo.Context) (done bool, err error) {
+	proxyAuth    = func(c echo.Context, _ *Service) (done bool, err error) {
 		return true, nil
 	}
 	serviceIDs = []string{"a", "b", "c"}

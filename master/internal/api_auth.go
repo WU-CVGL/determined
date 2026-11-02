@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/labstack/echo/v4"
 	"github.com/pkg/errors"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/db"
 	expauth "github.com/determined-ai/determined/master/internal/experiment"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
+	"github.com/determined-ai/determined/master/internal/proxy"
 	"github.com/determined-ai/determined/master/internal/user"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
@@ -110,13 +112,16 @@ func redirectToLogin(c echo.Context) error {
 }
 
 // processProxyAuthentication is a middleware processing function that attempts
-// to authenticate incoming HTTP requests coming through proxies.
-func processProxyAuthentication(c echo.Context) (done bool, err error) {
+// to authenticate incoming HTTP requests coming through proxies to service. A nil service is
+// treated as one without a policy of its own.
+func processProxyAuthentication(c echo.Context, service *proxy.Service) (done bool, err error) {
 	taskID := model.TaskID(strings.SplitN(c.Param("service"), ":", 2)[0])
+	exec := service != nil && service.Exec
 
 	// Notebooks require special auth token passed as a URL parameter.
 	token := extractNotebookTokenFromRequest(c.Request())
 	var usr *model.User
+	var session *model.UserSession
 	var notebookSession *model.NotebookSession
 
 	if token != "" {
@@ -137,7 +142,7 @@ func processProxyAuthentication(c echo.Context) (done bool, err error) {
 				return true, err
 			}
 		}
-		usr, _, err = user.GetService().UserAndSessionFromRequest(c.Request())
+		usr, session, err = user.GetService().UserAndSessionFromRequest(c.Request())
 	}
 
 	if errors.Is(err, db.ErrNotFound) || errors.Is(err, user.ErrAccessTokenRevoked) ||
@@ -173,6 +178,10 @@ func processProxyAuthentication(c echo.Context) (done bool, err error) {
 		}
 
 		err = expauth.AuthZProvider.Get().CanGetExperiment(ctx, *usr, e)
+		if err == nil && exec {
+			// Only NTSC tasks have exec ports.
+			return true, serviceNotFoundErr
+		}
 		return err != nil, authz.SubIfUnauthorized(err, serviceNotFoundErr)
 	}
 
@@ -188,7 +197,60 @@ func processProxyAuthentication(c echo.Context) (done bool, err error) {
 		err = command.AuthZProvider.Get().CanGetNSC(
 			ctx, *usr, spec.WorkspaceID)
 	}
+	if err == nil && exec {
+		err = authorizeExecPort(ctx, *usr, session, notebookSession != nil, taskID)
+	}
 	return err != nil, authz.SubIfUnauthorized(err, serviceNotFoundErr)
+}
+
+// execPortAuditKey names an admin's session on another user's task.
+type execPortAuditKey struct {
+	userID    model.UserID
+	sessionID model.SessionID
+	taskID    model.TaskID
+}
+
+// execPortAudits holds the admin sessions whose first request to an exec port of another user's
+// task was logged. It forgets the oldest ones, which are then logged again.
+var execPortAudits = func() *lru.Cache[execPortAuditKey, struct{}] {
+	cache, err := lru.New[execPortAuditKey, struct{}](4096)
+	if err != nil {
+		panic(err)
+	}
+	return cache
+}()
+
+// authorizeExecPort lets only the task's owner and admins reach a port whose service runs code as
+// the owner, the rule for the task's credentials (canReadTaskCredential). A notebook token of the
+// task acts as its owner. The first request in each session of an admin to another user's task is
+// logged. Others are refused with an authz error.
+func authorizeExecPort(
+	ctx context.Context, usr model.User, session *model.UserSession, notebookToken bool,
+	taskID model.TaskID,
+) error {
+	if notebookToken {
+		return nil
+	}
+	ownerID, err := command.TaskOwnerID(ctx, taskID)
+	switch {
+	case errors.Is(err, db.ErrNotFound):
+		return authz.PermissionDeniedError{}
+	case err != nil:
+		return fmt.Errorf("error looking up task owner: %w", err)
+	case !canReadTaskCredential(usr, int32(ownerID)):
+		return authz.PermissionDeniedError{}
+	case usr.ID == ownerID:
+		return nil
+	}
+
+	key := execPortAuditKey{userID: usr.ID, taskID: taskID}
+	if session != nil {
+		key.sessionID = session.ID
+	}
+	if seen, _ := execPortAudits.ContainsOrAdd(key, struct{}{}); !seen {
+		logCredentialRead(usr, "exec port", string(taskID), int32(ownerID))
+	}
+	return nil
 }
 
 // extractNotebookTokenFromRequest looks for auth token for Jupyter notebooks
