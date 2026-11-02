@@ -30,7 +30,8 @@ type Service struct {
 	LastRequested        time.Time
 	ProxyTCP             bool
 	AllowUnauthenticated bool
-	// Exec marks a service that runs code as its task's owner. HTTPAuth decides who may reach it.
+	// Exec marks a service that runs code as its task's owner. HTTPAuth decides who may reach it,
+	// even when AllowUnauthenticated is set.
 	Exec bool
 	// StripPrefix removes /proxy/<service ID> from the path of HTTP and WebSocket requests before
 	// they reach the service.
@@ -162,7 +163,8 @@ func (p *Proxy) NewProxyHandler(serviceID string) echo.HandlerFunc {
 				fmt.Sprintf("service not found: %s", serviceName))
 		}
 
-		if !service.AllowUnauthenticated {
+		authenticate := service.Exec || !service.AllowUnauthenticated
+		if authenticate {
 			switch done, err := p.HTTPAuth(c, service); {
 			case err != nil:
 				return err
@@ -174,7 +176,7 @@ func (p *Proxy) NewProxyHandler(serviceID string) echo.HandlerFunc {
 		// The proxied service runs whatever its task's owner chose, so it must never see the
 		// visitor's master credentials, whether or not the master authenticated the request.
 		req := c.Request()
-		stripMasterCredentials(req.Header, !service.AllowUnauthenticated, p.IsMasterToken)
+		stripMasterCredentials(req.Header, authenticate, p.IsMasterToken)
 
 		// Set proxy headers.
 		if req.Header.Get(echo.HeaderXRealIP) == "" {

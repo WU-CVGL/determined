@@ -252,3 +252,90 @@ func TestStripCookies(t *testing.T) {
 		})
 	}
 }
+
+// TestProxyAuthenticatesExecServices checks that an exec service goes through HTTPAuth even when
+// it also allows unauthenticated requests, and that its bearer tokens are then all stripped as on
+// any authenticated service.
+func TestProxyAuthenticatesExecServices(t *testing.T) {
+	cases := []struct {
+		name              string
+		service           Service
+		refuse            bool
+		wantAuthCalls     int
+		wantStatus        int
+		wantReached       bool
+		wantAuthorization []string
+	}{
+		{
+			name:          "exec, unauthenticated, allowed",
+			service:       Service{Exec: true, AllowUnauthenticated: true},
+			wantAuthCalls: 1,
+			wantStatus:    http.StatusOK,
+			wantReached:   true,
+		},
+		{
+			name:          "exec, unauthenticated, refused",
+			service:       Service{Exec: true, AllowUnauthenticated: true},
+			refuse:        true,
+			wantAuthCalls: 1,
+			wantStatus:    http.StatusNotFound,
+		},
+		{
+			name:          "exec, strip prefix, unauthenticated, refused",
+			service:       Service{Exec: true, AllowUnauthenticated: true, StripPrefix: true},
+			refuse:        true,
+			wantAuthCalls: 1,
+			wantStatus:    http.StatusNotFound,
+		},
+		{
+			name:              "unauthenticated",
+			service:           Service{AllowUnauthenticated: true},
+			wantStatus:        http.StatusOK,
+			wantReached:       true,
+			wantAuthorization: []string{"Bearer svc-key"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var sawAuthCookie string
+			p, base := newTestProxy(t, &sawAuthCookie)
+			authCalls := 0
+			p.HTTPAuth = func(c echo.Context, _ *Service) (bool, error) {
+				authCalls++
+				if tc.refuse {
+					return true, c.NoContent(http.StatusNotFound)
+				}
+				return false, nil
+			}
+
+			upstreamHeaders := make(chan http.Header, 1)
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				upstreamHeaders <- r.Header.Clone()
+			}))
+			defer upstream.Close()
+			upstreamURL, err := url.Parse(upstream.URL)
+			require.NoError(t, err)
+			service := tc.service
+			service.URL = upstreamURL
+			p.RegisterService("svc:1", service)
+
+			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+				base+"/proxy/svc:1/lab", nil)
+			require.NoError(t, err)
+			req.Header.Set("Authorization", "Bearer svc-key")
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			require.NoError(t, resp.Body.Close())
+			require.Equal(t, tc.wantStatus, resp.StatusCode)
+			require.Equal(t, tc.wantAuthCalls, authCalls)
+
+			select {
+			case got := <-upstreamHeaders:
+				require.True(t, tc.wantReached, "a refused request reached the service")
+				require.Equal(t, tc.wantAuthorization, got.Values("Authorization"))
+			default:
+				require.False(t, tc.wantReached, "the request never reached the service")
+			}
+		})
+	}
+}
