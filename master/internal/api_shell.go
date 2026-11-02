@@ -172,7 +172,9 @@ func (a *apiServer) KillShell(
 	}
 
 	cmd, err := command.DefaultCmdService.KillNTSC(req.ShellId, model.TaskTypeShell)
-
+	if err != nil {
+		return nil, err
+	}
 	return &apiv1.KillShellResponse{Shell: cmd.ToV1Shell()}, nil
 }
 
@@ -250,6 +252,7 @@ func (a *apiServer) LaunchShell(
 		RawUnauthenticated:  ptrs.Ptr(true),
 		RawDefaultServiceID: ptrs.Ptr(true),
 	})
+	launchReq.Spec.SSHDPort = port
 
 	launchReq.Spec.Config.Entrypoint = []string{
 		shellEntrypointScript, "-f", shellSSHDConfigFile, "-p", strconv.Itoa(port), "-D", "-e",

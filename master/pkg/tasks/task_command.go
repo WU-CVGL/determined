@@ -57,6 +57,11 @@ type GenericCommandSpec struct {
 
 	Keys *ssh.PrivateAndPublicKeys
 
+	// SSHDPort is the container port of the task's sshd, which logs in with Keys. Zero means
+	// unknown: commands saved before the master recorded it, and tasks without an sshd. A shell
+	// saved without it finds its sshd as its default TCP proxy port in Base.ExtraProxyPorts.
+	SSHDPort int
+
 	WatchProxyIdleTimeout  bool
 	WatchRunnerIdleTimeout bool
 

@@ -23,6 +23,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/internal/task"
 	"github.com/determined-ai/determined/master/pkg/model"
+	"github.com/determined-ai/determined/master/pkg/ssh"
 	"github.com/determined-ai/determined/master/pkg/syncx/queue"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
@@ -145,6 +146,25 @@ func TestShellManagerLifecycle(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 	_, err = DefaultCmdService.GetShellPrivateKey(uuid.NewString())
 	require.Equal(t, codes.NotFound, status.Code(err))
+
+	// The SSH key of any task with an sshd: every shell, and another task launched with keys and
+	// an sshd port, but not a task with keys alone.
+	key, err = DefaultCmdService.GetSSHPrivateKey(cmd1.Id)
+	require.NoError(t, err)
+	require.Equal(t, "pass", key)
+	_, err = DefaultCmdService.GetSSHPrivateKey(launchCommand(t, db).Id)
+	require.Equal(t, codes.NotFound, status.Code(err))
+	_, err = DefaultCmdService.GetSSHPrivateKey(uuid.NewString())
+	require.Equal(t, codes.NotFound, status.Code(err))
+	req := CreateMockGenericReq(t, db)
+	req.Spec.Keys = &ssh.PrivateAndPublicKeys{}
+	req.Spec.SSHDPort = 2222
+	withSSHD, err := DefaultCmdService.LaunchGenericCommand(
+		model.TaskTypeCommand, model.JobTypeCommand, req)
+	require.NoError(t, err)
+	key, err = DefaultCmdService.GetSSHPrivateKey(withSSHD.ToV1Command().Id)
+	require.NoError(t, err)
+	require.Equal(t, "pass", key)
 
 	// Launch another Shell.
 	cmd2 := launchShell(t, db)

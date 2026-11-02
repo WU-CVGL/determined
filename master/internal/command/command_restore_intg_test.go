@@ -15,6 +15,7 @@ import (
 
 	internaldb "github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/mocks"
+	"github.com/determined-ai/determined/master/internal/proxy"
 	"github.com/determined-ai/determined/master/internal/rm"
 	"github.com/determined-ai/determined/master/internal/rm/tasklist"
 	"github.com/determined-ai/determined/master/internal/sproto"
@@ -25,6 +26,8 @@ import (
 	"github.com/determined-ai/determined/master/pkg/logger"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
+	"github.com/determined-ai/determined/master/pkg/ssh"
 	"github.com/determined-ai/determined/master/pkg/syncx/queue"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/taskv1"
@@ -199,4 +202,83 @@ func TestRestoreQueuedShellKilled(t *testing.T) {
 	require.NotNil(t, row.EndTime)
 	require.True(t, heartbeat.Equal(*row.StartTime), "start %s", row.StartTime)
 	require.True(t, heartbeat.Equal(*row.EndTime), "end %s", row.EndTime)
+}
+
+// A shell finds its sshd after a master restart: a shell saved without its sshd port, as the
+// master saved every shell before it recorded the port, as its default TCP proxy port, and a
+// shell saved with it at the recorded port.
+func TestRestoreQueuedShellFindsSSHD(t *testing.T) {
+	if proxy.DefaultProxy == nil {
+		proxy.InitProxy(nil, nil)
+	}
+	for _, tc := range []struct {
+		name     string
+		sshdPort int
+		want     string
+	}{
+		{name: "saved without the sshd port", want: "10.0.0.7:40002"},
+		{name: "saved with the sshd port", sshdPort: 2222, want: "10.0.0.7:40003"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			shell, _, q := restartWithQueuedShell(t, time.Now().UTC().Add(-time.Hour),
+				func(req *CreateGeneric) {
+					req.Spec.Keys = &ssh.PrivateAndPublicKeys{
+						PrivateKey: []byte(*req.Spec.Metadata.PrivateKey),
+						PublicKey:  []byte(*req.Spec.Metadata.PublicKey),
+					}
+					// The ports LaunchShell registers, and another TCP port.
+					req.Spec.Base.ExtraProxyPorts = expconf.ProxyPortsConfig{
+						{
+							RawProxyPort:        3210,
+							RawProxyTCP:         ptrs.Ptr(true),
+							RawUnauthenticated:  ptrs.Ptr(true),
+							RawDefaultServiceID: ptrs.Ptr(true),
+						},
+						{RawProxyPort: 2222, RawProxyTCP: ptrs.Ptr(true)},
+					}
+					req.Spec.SSHDPort = tc.sshdPort
+				})
+			require.Equal(t, tc.sshdPort, shell.SSHDPort)
+
+			rID := sproto.ResourcesID(cproto.NewID())
+			var resources mocks.Resources
+			resources.On("Summary").Return(sproto.ResourcesSummary{
+				AllocationID:  shell.allocationID,
+				ResourcesID:   rID,
+				ResourcesType: sproto.ResourcesTypeDockerContainer,
+				AgentDevices:  map[aproto.ID][]device.Device{"agent": nil},
+			})
+			var started atomic.Bool
+			resources.On("Start", mock.Anything, mock.Anything, mock.Anything).Return(nil).
+				Run(func(mock.Arguments) { started.Store(true) })
+			resources.On("Kill", mock.Anything).Return()
+			q.Put(&sproto.ResourcesAllocated{
+				ID:                shell.allocationID,
+				ResourcePool:      shell.Config.Resources.ResourcePool,
+				Resources:         map[sproto.ResourcesID]sproto.Resources{rID: &resources},
+				JobSubmissionTime: shell.registeredTime,
+			})
+			require.Eventually(t, started.Load, 5*time.Second, 10*time.Millisecond)
+			q.Put(&sproto.ResourcesStateChanged{
+				ResourcesID:    rID,
+				ResourcesState: sproto.Running,
+				ResourcesStarted: &sproto.ResourcesStarted{Addresses: []cproto.Address{
+					{ContainerIP: "172.17.0.2", ContainerPort: 3210, HostIP: "10.0.0.7", HostPort: 40002},
+					{ContainerIP: "172.17.0.2", ContainerPort: 2222, HostIP: "10.0.0.7", HostPort: 40003},
+				}},
+			})
+
+			var target *ShellTerminalTarget
+			require.Eventually(t, func() bool {
+				var err error
+				target, err = DefaultCmdService.ShellTerminalTarget(shell.taskID)
+				require.NoError(t, err)
+				return target.SSHAddr != ""
+			}, 5*time.Second, 10*time.Millisecond)
+			require.Equal(t, tc.want, target.SSHAddr)
+			key, err := DefaultCmdService.GetSSHPrivateKey(shell.taskID.String())
+			require.NoError(t, err)
+			require.Equal(t, *shell.Metadata.PrivateKey, key)
+		})
+	}
 }
