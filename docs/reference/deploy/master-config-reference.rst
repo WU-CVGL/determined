@@ -1874,6 +1874,78 @@ requesting user may not use, and with it the WebUI, the CLI, and the SDK. When `
 shows every pool with ``usable``, whether the user passes the pool's access control. Submissions to
 a pool that the user may not use are refused either way. Defaults to ``false``.
 
+.. _master-config-interactive:
+
+*****************
+ ``interactive``
+*****************
+
+Configures what the master provides to interactive tasks.
+
+``code_server``
+===============
+
+The code-server release that the master serves to tasks on ``/det/code-server/<version>/<file>``.
+``<file>`` is ``code-server-<version>-linux-<arch>.tar.gz`` or that name followed by ``.sha256``,
+for the architectures ``amd64`` and ``arm64``. Requests need the session of any user, sent as a
+bearer token or in the session cookie; a task sends its ``DET_USER_TOKEN``. Without this section,
+the master serves no code-server files.
+
+On the first request for a tarball that is not in ``dir``, the master downloads it from
+``url_template``, checks it against ``sha256``, and stores it in ``dir`` together with a ``.sha256``
+file in the format of ``sha256sum``. Requests that arrive during the download wait for it. A failed
+download, or one whose checksum differs from ``sha256``, is answered with ``502`` and leaves nothing
+in ``dir``, and the next request downloads again.
+
+.. code:: yaml
+
+   interactive:
+     code_server:
+       version: 4.144.0
+       dir: /var/cache/determined/code-server
+
+``version``
+-----------
+
+The code-server release that the master serves, as ``<major>.<minor>.<patch>``. Required. Requests
+for other releases are answered with ``404``.
+
+``dir``
+-------
+
+The absolute path of the directory that holds the tarballs and their ``.sha256`` files. Required.
+The master creates it when it starts, and does not start if it cannot. It must be able to write
+files there.
+
+``url_template``
+----------------
+
+The URL to download a tarball from, with the placeholders ``{version}`` and ``{arch}``. An ``http``
+or ``https`` URL, such as that of a mirror. Defaults to the release on GitHub,
+``https://github.com/coder/code-server/releases/download/v{version}/code-server-{version}-linux-{arch}.tar.gz``.
+
+``sha256``
+----------
+
+The SHA-256 of the tarball for each architecture, as a map from ``amd64`` and ``arm64`` to 64
+hexadecimal characters. Optional. The master serves no tarball of an architecture listed here whose
+checksum differs, whether it downloaded the tarball or an administrator placed it in ``dir``.
+
+Deployment notes:
+
+-  The master downloads through the proxy set in its own environment, ``HTTPS_PROXY``,
+   ``HTTP_PROXY`` and ``NO_PROXY``; for a master in a container, the container's environment. Tasks
+   download from the master and need no internet access.
+
+-  For a master in a container, mount a volume at ``dir``, so that the tarballs outlive the
+   container.
+
+-  An administrator may place the tarball in ``dir`` instead, for example on a master without
+   internet access, under its release name ``code-server-<version>-linux-<arch>.tar.gz``. The master
+   serves it without downloading and writes its ``.sha256`` file on the first request. It never
+   deletes a tarball that it did not download. After replacing a tarball, delete its ``.sha256``
+   file as well.
+
 *************
  ``logging``
 *************

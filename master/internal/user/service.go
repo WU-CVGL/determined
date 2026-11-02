@@ -205,11 +205,20 @@ func (s *Service) getAuthLevel(c echo.Context) int {
 // ProcessAuthentication is a middleware processing function that attempts
 // to authenticate incoming HTTP requests.
 func (s *Service) ProcessAuthentication(next echo.HandlerFunc) echo.HandlerFunc {
+	authenticated := s.RequireAuthentication(next)
 	return func(c echo.Context) error {
 		if s.getAuthLevel(c) == authNone {
 			return next(c)
 		}
+		return authenticated(c)
+	}
+}
 
+// RequireAuthentication authenticates every request the way ProcessAuthentication authenticates
+// the routes that need it. It is the route middleware of the routes under paths that
+// ProcessAuthentication exempts, such as /det/.
+func (s *Service) RequireAuthentication(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
 		user, session, err := s.UserAndSessionFromRequest(c.Request())
 		switch err {
 		case nil:
