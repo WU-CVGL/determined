@@ -237,10 +237,11 @@ func (a *apiServer) LaunchShell(
 	}
 
 	launchReq, launchWarnings, err := a.getCommandLaunchParams(ctx, &protoCommandParams{
-		TemplateName: req.TemplateName,
-		WorkspaceID:  req.WorkspaceId,
-		Config:       req.Config,
-		Files:        req.Files,
+		TemplateName:  req.TemplateName,
+		WorkspaceID:   req.WorkspaceId,
+		Config:        req.Config,
+		Files:         req.Files,
+		AllowServices: true,
 	}, user)
 	if err != nil {
 		return nil, api.WrapWithFallbackCode(err, codes.InvalidArgument,

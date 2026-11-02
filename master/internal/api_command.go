@@ -57,6 +57,8 @@ type protoCommandParams struct {
 	Config       *pstruct.Struct
 	Files        []*utilv1.File
 	MustZeroSlot bool
+	// AllowServices accepts the config's services, which only shells run.
+	AllowServices bool
 }
 
 func (a *apiServer) getCommandLaunchParams(ctx context.Context, req *protoCommandParams,
@@ -140,6 +142,10 @@ func (a *apiServer) getCommandLaunchParams(ctx context.Context, req *protoComman
 				errors.Wrapf(err,
 					"unable to decode the merged config: %s", string(configBytes)).Error())
 		}
+	}
+	if len(config.Services) > 0 && !req.AllowServices {
+		return nil, launchWarnings, status.Error(codes.InvalidArgument,
+			"services: only shells run services")
 	}
 	// Copy discovered (default) resource pool name and slot count.
 	fillTaskConfig(resources.Slots, taskSpec, &config.Environment)
