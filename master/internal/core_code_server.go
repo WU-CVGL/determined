@@ -48,14 +48,18 @@ var codeServerFilePattern = regexp.MustCompile(
 var (
 	errCodeServerUpstream = errors.New("code-server download failed")
 	errCodeServerChecksum = errors.New("code-server checksum mismatch")
+	// errCodeServerMissing is the error for a tarball of a version other than conf.Version that is
+	// not in conf.Dir.
+	errCodeServerMissing = errors.New("code-server tarball not found")
 )
 
-// codeServerArtifacts serves the tarballs of the configured code-server version from conf.Dir,
-// downloading each one on the first request for it.
+// codeServerArtifacts serves the code-server tarballs in conf.Dir, downloading each one of the
+// configured version on the first request for it.
 type codeServerArtifacts struct {
 	conf   config.CodeServerConfig
 	client *http.Client //nolint:forbidigo // Built by cleanhttp.
-	// fetches lets concurrent requests for the files of one architecture share one download.
+	// fetches lets concurrent requests for the files of one version and architecture share one
+	// download or hash.
 	fetches singleflight.Group
 
 	// mu guards sums.
@@ -171,24 +175,24 @@ func codeServerTarball(version, arch string) string {
 	return "code-server-" + version + "-linux-" + arch + ".tar.gz"
 }
 
-// match returns the architecture that a request path below codeServerRoute names, one of
-// config.CodeServerArches, and whether it asks for the checksum file. ok is false for every
-// path other than <version>/<tarball> and <version>/<tarball>.sha256 of the configured version.
-func (a *codeServerArtifacts) match(path string) (arch string, checksum bool, ok bool) {
+// match returns the version and the architecture, one of config.CodeServerArches, that a request
+// path below codeServerRoute names, and whether it asks for the checksum file. ok is false for
+// every path other than <version>/<tarball> and <version>/<tarball>.sha256 of the same version.
+func (a *codeServerArtifacts) match(path string) (version, arch string, checksum, ok bool) {
 	version, file, found := strings.Cut(path, "/")
-	if !found || version != a.conf.Version {
-		return "", false, false
+	if !found {
+		return "", "", false, false
 	}
 	m := codeServerFilePattern.FindStringSubmatch(file)
-	if m == nil || m[1] != a.conf.Version {
-		return "", false, false
+	if m == nil || m[1] != version {
+		return "", "", false, false
 	}
 	for _, known := range config.CodeServerArches {
 		if m[2] == known {
-			return known, m[3] != "", true
+			return m[1], known, m[3] != "", true
 		}
 	}
-	return "", false, false
+	return "", "", false, false
 }
 
 func (a *codeServerArtifacts) serve(c echo.Context) error {
@@ -199,32 +203,39 @@ func (a *codeServerArtifacts) serve(c echo.Context) error {
 	if c.Request().URL.RawPath != "" {
 		return echo.NewHTTPError(http.StatusNotFound)
 	}
-	arch, checksum, ok := a.match(c.Param("*"))
+	version, arch, checksum, ok := a.match(c.Param("*"))
 	if !ok {
 		return echo.NewHTTPError(http.StatusNotFound)
 	}
 	// The download does not depend on the requests that wait for it, so a client that goes away
 	// does not cancel it for the others.
-	_, err, _ := a.fetches.Do(arch, func() (interface{}, error) { return nil, a.prepare(arch) })
+	_, err, _ := a.fetches.Do(version+"/"+arch, func() (interface{}, error) {
+		return nil, a.prepare(version, arch)
+	})
 	// The response names the failure only; the log has the URL and the checksums.
 	switch {
+	case errors.Is(err, errCodeServerMissing):
+		return echo.NewHTTPError(http.StatusNotFound)
 	case errors.Is(err, errCodeServerUpstream):
-		log.WithError(err).Warnf("serving code-server %s for %s", a.conf.Version, arch)
+		log.WithError(err).Warnf("serving code-server %s for %s", version, arch)
 		return echo.NewHTTPError(http.StatusBadGateway, errCodeServerUpstream.Error())
 	case errors.Is(err, errCodeServerChecksum):
-		log.WithError(err).Warnf("serving code-server %s for %s", a.conf.Version, arch)
+		log.WithError(err).Warnf("serving code-server %s for %s", version, arch)
 		return echo.NewHTTPError(http.StatusBadGateway, errCodeServerChecksum.Error())
 	case err != nil:
-		log.WithError(err).Errorf("serving code-server %s for %s", a.conf.Version, arch)
+		log.WithError(err).Errorf("serving code-server %s for %s", version, arch)
 		return echo.NewHTTPError(http.StatusInternalServerError)
 	}
 
-	name, contentType := codeServerTarball(a.conf.Version, arch), "application/gzip"
+	name, contentType := codeServerTarball(version, arch), "application/gzip"
 	if checksum {
 		name, contentType = name+".sha256", "text/plain; charset=utf-8"
 	}
-	f, err := os.Open(filepath.Join(a.conf.Dir, name)) //nolint:gosec // name is built from config.
-	if err != nil {
+	f, err := os.Open(filepath.Join(a.conf.Dir, name)) //nolint:gosec // name is built by match.
+	if errors.Is(err, fs.ErrNotExist) {
+		// Removed since prepare.
+		return echo.NewHTTPError(http.StatusNotFound)
+	} else if err != nil {
 		return fmt.Errorf("opening %s: %w", name, err)
 	}
 	defer func() { _ = f.Close() }()
@@ -237,14 +248,17 @@ func (a *codeServerArtifacts) serve(c echo.Context) error {
 	return nil
 }
 
-// prepare makes sure that the tarball for arch and its checksum file are in conf.Dir and that the
-// tarball matches conf.SHA256, downloading the tarball if it is missing. It hashes a tarball that
+// prepare makes sure that the tarball of version for arch and its checksum file are in conf.Dir,
+// and that a tarball of conf.Version matches conf.SHA256. It downloads a missing tarball of
+// conf.Version only; for other versions it returns errCodeServerMissing. It hashes a tarball that
 // it has not hashed before or that has changed since, and rewrites a checksum file that does not
 // match. It never removes a tarball that it did not download.
-func (a *codeServerArtifacts) prepare(arch string) error {
-	path := filepath.Join(a.conf.Dir, codeServerTarball(a.conf.Version, arch))
+func (a *codeServerArtifacts) prepare(version, arch string) error {
+	path := filepath.Join(a.conf.Dir, codeServerTarball(version, arch))
 	info, err := os.Stat(path)
 	switch {
+	case errors.Is(err, fs.ErrNotExist) && version != a.conf.Version:
+		return errCodeServerMissing
 	case errors.Is(err, fs.ErrNotExist):
 		return a.download(arch, path)
 	case err != nil:
@@ -257,10 +271,12 @@ func (a *codeServerArtifacts) prepare(arch string) error {
 	if err != nil {
 		return err
 	}
-	if err := a.verify(arch, sum); err != nil {
-		return err
+	if version == a.conf.Version {
+		if err := a.verify(arch, sum); err != nil {
+			return err
+		}
 	}
-	if b, err := os.ReadFile(path + ".sha256"); err == nil && //nolint:gosec // Built from config.
+	if b, err := os.ReadFile(path + ".sha256"); err == nil && //nolint:gosec // Built by match.
 		bytes.Equal(b, checksumLine(path, sum)) {
 		return nil
 	}
@@ -277,7 +293,7 @@ func (a *codeServerArtifacts) sum(path string, info fs.FileInfo) (string, error)
 		return cached.sum, nil
 	}
 
-	f, err := os.Open(path) //nolint:gosec // path is built from config.
+	f, err := os.Open(path) //nolint:gosec // path is built by match.
 	if err != nil {
 		return "", err
 	}

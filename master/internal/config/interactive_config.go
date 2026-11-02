@@ -27,16 +27,17 @@ type InteractiveConfig struct {
 }
 
 // CodeServerConfig configures the code-server release tarballs that the master serves to tasks.
-// The master downloads a tarball into Dir on the first request for it, unless an administrator
-// has placed it there. An unset section turns the feature off.
+// The master downloads a tarball of Version into Dir on the first request for it, unless an
+// administrator has placed it there, and serves the tarballs of other versions that are in Dir.
+// An unset section turns the feature off.
 type CodeServerConfig struct {
-	// Version is the one code-server release that the master serves.
+	// Version is the code-server release that the master downloads.
 	Version string `json:"version"`
 	// Dir is the absolute path of the directory that holds the tarballs and their checksums.
 	Dir string `json:"dir"`
 	// URLTemplate is the download URL, with the placeholders {version} and {arch}.
 	URLTemplate string `json:"url_template"`
-	// SHA256 maps an architecture to the expected SHA-256 of its tarball, in hex.
+	// SHA256 maps an architecture to the expected SHA-256 of its tarball of Version, in hex.
 	SHA256 map[string]string `json:"sha256"`
 }
 

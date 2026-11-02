@@ -345,7 +345,7 @@ func TestCodeServerUpstreamErrorsRedactURL(t *testing.T) {
 		cst := newCodeServerTest(t, func(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "unavailable", http.StatusInternalServerError)
 		}, func(c *config.CodeServerConfig) { c.URLTemplate += "?token=" + secret })
-		err := cst.artifacts.prepare("amd64")
+		err := cst.artifacts.prepare(testCodeServerVersion, "amd64")
 		require.ErrorIs(t, err, errCodeServerUpstream)
 		require.Contains(t, err.Error(), "/code-server-4.144.0-linux-amd64.tar.gz answered 500")
 		require.NotContains(t, err.Error(), secret)
@@ -357,7 +357,7 @@ func TestCodeServerUpstreamErrorsRedactURL(t *testing.T) {
 			closed.Close()
 			c.URLTemplate = closed.URL + "/{version}/{arch}?token=" + secret
 		})
-		err := cst.artifacts.prepare("amd64")
+		err := cst.artifacts.prepare(testCodeServerVersion, "amd64")
 		require.ErrorIs(t, err, errCodeServerUpstream)
 		require.Contains(t, err.Error(), "/4.144.0/amd64: ")
 		require.NotContains(t, err.Error(), secret)
@@ -367,7 +367,7 @@ func TestCodeServerUpstreamErrorsRedactURL(t *testing.T) {
 		cst := newCodeServerTest(t, func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, r.URL.String(), http.StatusFound)
 		}, func(c *config.CodeServerConfig) { c.URLTemplate += "?token=" + secret })
-		err := cst.artifacts.prepare("amd64")
+		err := cst.artifacts.prepare(testCodeServerVersion, "amd64")
 		require.ErrorIs(t, err, errCodeServerUpstream)
 		require.Contains(t, err.Error(), "redirects")
 		require.NotContains(t, err.Error(), secret)
@@ -461,4 +461,32 @@ func TestCodeServerHashesOnce(t *testing.T) {
 	}
 	require.Equal(t, int32(1), cst.artifacts.hashed.Load())
 	require.Equal(t, int32(1), cst.calls.Load())
+}
+
+func TestCodeServerOtherVersions(t *testing.T) {
+	const older = "code-server-4.143.0-linux-amd64.tar.gz"
+	// The configured checksum applies to the configured version only.
+	cst := newCodeServerTest(t, nil, func(c *config.CodeServerConfig) {
+		c.SHA256 = map[string]string{"amd64": testCodeServerSum("arm64")}
+	})
+	placeCodeServerFile(t, filepath.Join(cst.dir, older), testCodeServerContent("amd64"), 1)
+
+	rec := cst.get("/det/code-server/4.143.0/" + older)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, testCodeServerContent("amd64"), rec.Body.Bytes())
+	rec = cst.get("/det/code-server/4.143.0/" + older + ".sha256")
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, testCodeServerSum("amd64")+"  "+older+"\n", rec.Body.String())
+	require.Equal(t, []string{older, older + ".sha256"}, cst.files(t))
+
+	// A version other than the configured one is never downloaded.
+	for _, p := range []string{
+		"4.143.0/code-server-4.143.0-linux-arm64.tar.gz",
+		"4.143.0/code-server-4.143.0-linux-arm64.tar.gz.sha256",
+		"4.145.0/code-server-4.145.0-linux-amd64.tar.gz",
+	} {
+		require.Equal(t, http.StatusNotFound, cst.get("/det/code-server/"+p).Code, p)
+	}
+	require.Equal(t, int32(0), cst.calls.Load())
+	require.Equal(t, []string{older, older + ".sha256"}, cst.files(t))
 }
