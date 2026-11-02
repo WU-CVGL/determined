@@ -171,8 +171,18 @@ func (s *supervisorRun) hook(body string) {
 	writeScript(s.t, filepath.Join(s.work, "startup-hook.sh"), body)
 }
 
-// unit installs a service unit, with /run/determined in the test's directory.
+// preInitGuard starts a unit that sets nothing before the init.
+const preInitGuard = "[[ ${supervisor_phase-} != pre-init ]] || return 0\n"
+
+// unit installs a stand-in service unit that sets nothing before the init, with /run/determined in
+// the test's directory.
 func (s *supervisorRun) unit(name, body string) {
+	s.t.Helper()
+	s.staticUnit(name, preInitGuard+body)
+}
+
+// staticUnit installs a service unit as it is, with /run/determined in the test's directory.
+func (s *supervisorRun) staticUnit(name, body string) {
 	s.t.Helper()
 	body = strings.ReplaceAll(body, "/run/determined/", s.run+"/")
 	require.NoError(s.t, os.WriteFile(filepath.Join(s.run, "services", name+".sh"),
@@ -607,7 +617,7 @@ exit 0
 `)
 	unit := staticScript(t, SSHServiceResource)
 	require.Contains(t, unit, sshdPath)
-	s.unit("ssh", strings.Replace(unit, sshdPath, sshd, 1))
+	s.staticUnit("ssh", strings.Replace(unit, sshdPath, sshd, 1))
 	require.NoError(t, os.WriteFile(filepath.Join(s.run, "ssh", "authorized_keys_unmodified"),
 		[]byte("ssh-ed25519 AAAAkey det\n"), 0o600))
 	sshdArgs := []string{"-f", "/run/determined/ssh/sshd_config", "-p", "2222", "-D", "-e"}
@@ -632,14 +642,38 @@ exit 0
 
 // The jupyter unit under the supervisor: the idle check runs in the background while JupyterLab
 // runs in the foreground with today's flags, and the idle check ends with it, also with a strict
-// startup hook.
+// startup hook. SHELL is the user's login shell before the init, so that the startup hook sees it
+// and may set another one for JupyterLab.
 func TestSupervisorJupyterUnit(t *testing.T) {
-	for name, hook := range map[string]string{"default": defaultHook, "strict": strictHook} {
-		t.Run(name, func(t *testing.T) { testSupervisorJupyterUnit(t, hook) })
+	out, err := exec.Command("bash", "-c", `getent passwd "$(whoami)" | cut -d: -f7`).Output()
+	require.NoError(t, err)
+	loginShell := strings.TrimSpace(string(out))
+	if loginShell == "" {
+		loginShell = "/bin/bash"
+	}
+	hookShell := `echo "$SHELL" >"$ORDER_FILE.hook-shell"` + "\n"
+	for _, tc := range []struct {
+		name, hook, shell string
+	}{
+		{name: "default", hook: defaultHook + hookShell, shell: loginShell},
+		{name: "strict", hook: strictHook + hookShell, shell: loginShell},
+		{
+			name:  "hook shell",
+			hook:  defaultHook + hookShell + "export SHELL=/opt/hook-chosen/bash\n",
+			shell: "/opt/hook-chosen/bash",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testSupervisorJupyterUnit(t, tc.hook)
+			seen, err := os.ReadFile(s.order + ".hook-shell")
+			require.NoError(t, err)
+			require.Equal(t, loginShell+"\n", string(seen), "the hook's SHELL")
+			require.Contains(t, s.orderLines(), "SHELL="+tc.shell)
+		})
 	}
 }
 
-func testSupervisorJupyterUnit(t *testing.T, hook string) {
+func testSupervisorJupyterUnit(t *testing.T, hook string) *supervisorRun {
 	s := newSupervisorRun(t, "jupyter")
 	s.hook(hook)
 	bin := filepath.Join(s.dir, "bin")
@@ -662,12 +696,13 @@ for _ in $(seq 400); do
 done
 exit 0
 `)
-	s.unit("jupyter", staticScript(t, JupyterServiceResource))
+	s.staticUnit("jupyter", staticScript(t, JupyterServiceResource))
 	s.env = append(s.env,
 		"PATH="+bin+":"+os.Getenv("PATH"),
 		"NOTEBOOK_PORT=2900",
 		"DET_TASK_ID=task-1",
 		"DET_NOTEBOOK_TOKEN=secret",
+		"SHELL=/opt/image/sh",
 	)
 	s.start()
 	require.Equal(t, 0, s.wait())
@@ -707,6 +742,29 @@ exit 0
 	require.Equal(t, strings.Join(want, "\x00")+"\x00", string(args))
 	require.Equal(t, []string{"[jupyter] start", "[jupyter] ready", "[jupyter] exited 0"}, s.logLines())
 	require.Contains(t, s.stderr.String(), "Jupyter Server 2.14.0 is running at:\n")
+	return s
+}
+
+// Before the init, the units only set their defaults and return: the ssh unit none, the jupyter
+// unit SHELL.
+func TestSupervisorUnitsPreInit(t *testing.T) {
+	for unit, want := range map[string]string{
+		SSHServiceResource:     "returned \n",
+		JupyterServiceResource: "returned /",
+	} {
+		t.Run(unit, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "unit.sh")
+			require.NoError(t, os.WriteFile(path, []byte(staticScript(t, unit)), 0o600))
+			cmd := exec.Command("bash", "-c", //nolint:gosec
+				`set -e; SHELL=; supervisor_phase=pre-init; source "$1"; echo "returned $SHELL"`,
+				"bash", path)
+			cmd.Env = append(os.Environ(), "DET_PYTHON_EXECUTABLE=false")
+			out, err := cmd.CombinedOutput()
+			require.NoError(t, err, string(out))
+			require.True(t, strings.HasPrefix(string(out), want), string(out))
+			require.Equal(t, 1, strings.Count(string(out), "\n"), string(out))
+		})
+	}
 }
 
 func findPrefix(lines []string, prefix string) string {

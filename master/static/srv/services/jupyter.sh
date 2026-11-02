@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 
 # The jupyter service: JupyterLab, with the idle check in the background. The supervisor sources
-# this file after the init.
+# this file before the init, to set SHELL, and after it.
 
-# Use user's preferred SHELL in JupyterLab terminals.
-SHELL="$(
-    set -o pipefail
-    getent passwd "$(whoami)" | cut -d: -f7
-)" || SHELL="/bin/bash"
-export SHELL
+if [[ ${supervisor_phase-} == pre-init ]]; then
+    # Use user's preferred SHELL in JupyterLab terminals, unless a startup hook sets another one.
+    SHELL="$(
+        set -o pipefail
+        getent passwd "$(whoami)" | cut -d: -f7
+    )" || SHELL="/bin/bash"
+    export SHELL
+    return 0
+fi
 
 "$DET_PYTHON_EXECUTABLE" /run/determined/jupyter/check_idle.py &
 

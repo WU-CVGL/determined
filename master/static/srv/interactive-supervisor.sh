@@ -7,6 +7,10 @@
 # - A unit is sourced, with "set -e", in the service's own subshell, so that the service inherits
 #   everything the init and the startup hooks set. It runs its service in the foreground, last. The
 #   primary unit gets the supervisor's arguments; the others get none.
+# - Before the init, each unit is also sourced in the supervisor's shell with
+#   supervisor_phase=pre-init. A unit then only sets the defaults that the startup hooks may
+#   change, such as SHELL, and returns; one without any starts with
+#   "[[ ${supervisor_phase-} != pre-init ]] || return 0".
 # - A unit passes "${service_ready_args[@]}" to check_ready_logs.py: only the primary service's
 #   readiness marks the task ready, and each service's is logged.
 # - The task ends with the primary service's exit status when it exits; the others are stopped.
@@ -40,6 +44,12 @@ for supervisor_name in "${supervisor_services[@]}"; do
     supervisor_seen[$supervisor_name]=1
 done
 supervisor_primary=${supervisor_services[0]}
+
+supervisor_phase=pre-init
+for supervisor_name in "${supervisor_services[@]}"; do
+    source "$supervisor_units/$supervisor_name.sh"
+done
+unset supervisor_phase
 
 source /run/determined/interactive-init.sh
 

@@ -3,6 +3,8 @@
 # The ssh service: sshd with the task's environment in its sessions. The supervisor sources this
 # file after the init, with sshd's arguments.
 
+[[ ${supervisor_phase-} != pre-init ]] || return 0
+
 # Prepend each key in authorized_keys with a set of environment="KEY=VALUE"
 # options to inject the entire docker environment into the eventual ssh
 # session via an options in the authorized keys file.  See syntax described in
