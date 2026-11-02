@@ -20,6 +20,7 @@ import (
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
+	"github.com/determined-ai/determined/proto/pkg/commonv1"
 	"github.com/determined-ai/determined/proto/pkg/jobv1"
 )
 
@@ -69,8 +70,13 @@ func TestEnrichAllocationStartTimes(t *testing.T) {
 	require.Equal(t, timestamppb.New(*at(10)), start)
 	require.Nil(t, pending)
 	// Exercise the authorized experiment list, not just the helper.
-	listed, err := api.GetExperiments(ctx, &apiv1.GetExperimentsRequest{Limit: 0})
+	listed, err := api.GetExperiments(ctx, &apiv1.GetExperimentsRequest{
+		ExperimentIdFilter: &commonv1.Int32FieldFilter{
+			Incl: []int32{int32(trial.ExperimentID), int32(queuedTrial.ExperimentID)},
+		},
+	})
 	require.NoError(t, err)
+	require.Len(t, listed.Experiments, 2)
 	found := false
 	for _, exp := range listed.Experiments {
 		if int(exp.Id) == trial.ExperimentID {
@@ -159,7 +165,9 @@ func TestAssignmentStartsExcludeExperimentGC(t *testing.T) {
 	manager.On("GetExternalJobs", mock.Anything).Return([]*jobv1.Job{{JobId: string(exp.JobID)}}, nil)
 	jobservice.SetDefaultService(manager)
 	check := func(want *timestamppb.Timestamp) {
-		listed, err := api.GetExperiments(ctx, &apiv1.GetExperimentsRequest{Limit: 0})
+		listed, err := api.GetExperiments(ctx, &apiv1.GetExperimentsRequest{
+			ExperimentIdFilter: &commonv1.Int32FieldFilter{Incl: []int32{int32(trial.ExperimentID)}},
+		})
 		require.NoError(t, err)
 		found := false
 		for _, item := range listed.Experiments {
