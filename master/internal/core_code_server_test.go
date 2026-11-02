@@ -377,7 +377,7 @@ func TestCodeServerUpstreamErrorsRedactURL(t *testing.T) {
 }
 
 // placeCodeServerFile writes content to the file at path in place, as an administrator would, with
-// a modification time that differs for each n so that a rewrite of the same size is a change.
+// a modification time that is the same for the same n.
 func placeCodeServerFile(t *testing.T, path string, content []byte, n int) {
 	require.NoError(t, os.WriteFile(path, content, 0o600))
 	mtime := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(n) * time.Hour)
@@ -438,6 +438,48 @@ func TestCodeServerRepairedTarball(t *testing.T) {
 	sumLine, err := os.ReadFile(filepath.Join(cst.dir, testCodeServerAMD64+".sha256"))
 	require.NoError(t, err)
 	require.Equal(t, testCodeServerSum("amd64")+"  "+testCodeServerAMD64+"\n", string(sumLine))
+	require.Equal(t, int32(0), cst.calls.Load())
+}
+
+// rewriteCodeServerFile writes content of the same size to the file at path in place and restores
+// its modification time, as cp -p over it does, so that only its status change time differs.
+func rewriteCodeServerFile(t *testing.T, path string, content []byte) {
+	before, err := os.Stat(path)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, content, 0o600))
+	// The status change time has the filesystem's granularity: touch the file until it moves on.
+	for i := 0; ; i++ {
+		require.NoError(t, os.Chtimes(path, before.ModTime(), before.ModTime()))
+		after, err := os.Stat(path)
+		require.NoError(t, err)
+		require.Equal(t, before.Size(), after.Size())
+		require.Equal(t, before.ModTime(), after.ModTime())
+		if codeServerFileIDOf(after) != codeServerFileIDOf(before) {
+			return
+		}
+		require.Less(t, i, 100, "status change time of %s did not change", path)
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestCodeServerSameSizeRewrite(t *testing.T) {
+	// A rewrite that keeps the size, the modification time and the inode is hashed again.
+	cst := newCodeServerTest(t, nil, func(c *config.CodeServerConfig) {
+		c.SHA256 = map[string]string{"amd64": testCodeServerSum("amd64")}
+	})
+	path := filepath.Join(cst.dir, testCodeServerAMD64)
+	placeCodeServerFile(t, path, testCodeServerContent("arm64"), 1)
+	require.Equal(t, http.StatusBadGateway, cst.get("/det/code-server/4.144.0/"+testCodeServerAMD64).Code)
+
+	rewriteCodeServerFile(t, path, testCodeServerContent("amd64"))
+	rec := cst.get("/det/code-server/4.144.0/" + testCodeServerAMD64 + ".sha256")
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, testCodeServerSum("amd64")+"  "+testCodeServerAMD64+"\n", rec.Body.String())
+	require.Equal(t, http.StatusOK, cst.get("/det/code-server/4.144.0/"+testCodeServerAMD64).Code)
+
+	rewriteCodeServerFile(t, path, testCodeServerContent("arm64"))
+	require.Equal(t, http.StatusBadGateway, cst.get("/det/code-server/4.144.0/"+testCodeServerAMD64).Code)
+	require.Equal(t, int32(3), cst.artifacts.hashed.Load())
 	require.Equal(t, int32(0), cst.calls.Load())
 }
 

@@ -78,18 +78,21 @@ type codeServerSum struct {
 	sum string
 }
 
-// codeServerFileID identifies a file and its content: replacing a file changes its inode, and
-// writing to it changes its modification time or its size.
+// codeServerFileID identifies a file and its content: replacing a file changes its device or
+// inode, and writing to it or setting its times changes its status change time, which no one can
+// set.
 type codeServerFileID struct {
 	size  int64
 	mtime int64
+	dev   uint64
 	inode uint64
+	ctime int64
 }
 
 func codeServerFileIDOf(info fs.FileInfo) codeServerFileID {
 	id := codeServerFileID{size: info.Size(), mtime: info.ModTime().UnixNano()}
 	if st, ok := info.Sys().(*syscall.Stat_t); ok {
-		id.inode = st.Ino
+		id.dev, id.inode, id.ctime = codeServerStatID(st)
 	}
 	return id
 }
@@ -313,6 +316,14 @@ func (a *codeServerArtifacts) sum(path string, info fs.FileInfo) (string, error)
 		return "", err
 	}
 	a.hashed.Add(1)
+	// The sum of a file written to while it was read matches no content of it.
+	after, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	if codeServerFileIDOf(after) != codeServerFileIDOf(info) {
+		return "", fmt.Errorf("%s changed while it was hashed", path)
+	}
 	sum := hex.EncodeToString(h.Sum(nil))
 	a.remember(path, info, sum)
 	return sum, nil
