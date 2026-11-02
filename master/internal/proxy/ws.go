@@ -55,6 +55,7 @@ func newSingleHostReverseWebSocketProxy(c echo.Context, t *url.URL) http.Handler
 			if err != nil {
 				c.Error(echo.NewHTTPError(http.StatusBadGateway,
 					errors.Errorf("error getting tls key or cert: %v", err)))
+				return
 			}
 			cert, err := tls.X509KeyPair(certBytes, keyBytes)
 			if err != nil {
@@ -83,6 +84,7 @@ func newSingleHostReverseWebSocketProxy(c echo.Context, t *url.URL) http.Handler
 			if err != nil {
 				c.Error(echo.NewHTTPError(http.StatusBadGateway,
 					errors.Errorf("tls handshake error %v", err)))
+				return
 			}
 		}
 

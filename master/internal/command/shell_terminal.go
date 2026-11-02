@@ -13,7 +13,8 @@ import (
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 )
 
-// ErrShellTerminalNotFound is returned for a task that is not a shell in the registry.
+// ErrShellTerminalNotFound is returned for a task that is not in the registry or runs no sshd
+// that the master can log in to.
 var ErrShellTerminalNotFound = errors.New("shell not found")
 
 // ShellTerminalTarget is what the browser terminal needs to know about a shell. It holds the
@@ -37,18 +38,41 @@ type ShellTerminalTarget struct {
 	SSHAddr string
 }
 
-// ShellTerminalTarget returns a snapshot of a shell for the browser terminal. The sshd address
-// comes from the allocation's own container addresses (as reported by the agent, or the posted
-// proxy address on Kubernetes and Slurm), the same addresses the master registers for its proxy.
+// ShellTerminalTarget returns a snapshot of a task with an sshd for the browser terminal. The sshd
+// address comes from the allocation's own container addresses (as reported by the agent, or the
+// posted proxy address on Kubernetes and Slurm), the same addresses the master registers for its
+// proxy.
 func (cs *CommandService) ShellTerminalTarget(id model.TaskID) (*ShellTerminalTarget, error) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 
-	c, err := cs.getNTSC(id, model.TaskTypeShell)
+	c, err := cs.getSSHTask(id)
 	if err != nil {
 		return nil, ErrShellTerminalNotFound
 	}
 	return c.shellTerminalTarget()
+}
+
+// getSSHTask returns an NTSC that runs an sshd that the master can log in to with the task's key
+// pair: every shell, and any other NTSC that was launched with keys and an sshd port.
+func (cs *CommandService) getSSHTask(id model.TaskID) (*Command, error) {
+	c, ok := cs.commands[id]
+	if !ok || !c.hasSSHD() {
+		return nil, fmt.Errorf("get NTSC %s with an sshd: not found", id)
+	}
+	return c, nil
+}
+
+// hasSSHD reports whether the master holds the task's key pair and knows its sshd port. Shells
+// saved before the master recorded the port know it as their default TCP proxy port.
+func (c *Command) hasSSHD() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.Metadata.PrivateKey == nil || c.Metadata.PublicKey == nil {
+		return false
+	}
+	return c.taskType == model.TaskTypeShell || c.Keys != nil && c.SSHDPort != 0
 }
 
 func (c *Command) shellTerminalTarget() (*ShellTerminalTarget, error) {
@@ -56,7 +80,7 @@ func (c *Command) shellTerminalTarget() (*ShellTerminalTarget, error) {
 	defer c.mu.Unlock()
 
 	if c.Base.Owner == nil || c.Metadata.PrivateKey == nil || c.Metadata.PublicKey == nil {
-		return nil, fmt.Errorf("shell %s has no owner or keys", c.taskID)
+		return nil, fmt.Errorf("task %s has no owner or keys", c.taskID)
 	}
 
 	t := &ShellTerminalTarget{
@@ -82,21 +106,19 @@ func (c *Command) shellTerminalTarget() (*ShellTerminalTarget, error) {
 		return t, nil
 	}
 
-	t.SSHAddr = shellSSHDAddr(c.Base.ExtraProxyPorts, allo.Addresses)
+	t.SSHAddr = shellSSHDAddr(c.SSHDPort, c.Base.ExtraProxyPorts, allo.Addresses)
 	return t, nil
 }
 
-// shellSSHDAddr returns the host:port at which the master reaches a shell's sshd: the address of
-// the container port that LaunchShell registered as the shell's default TCP proxy port.
+// shellSSHDAddr returns the host:port at which the master reaches a task's sshd: the address of
+// the container port sshdPort, or, when that is unknown, of the port that LaunchShell registered
+// as the shell's default TCP proxy port.
 func shellSSHDAddr(
-	ports expconf.ProxyPortsConfig, addresses map[sproto.ResourcesID][]cproto.Address,
+	sshdPort int, ports expconf.ProxyPortsConfig, addresses map[sproto.ResourcesID][]cproto.Address,
 ) string {
-	port := 0
-	for _, pp := range schemas.WithDefaults(ports) {
-		if pp.DefaultServiceID() && pp.ProxyTCP() {
-			port = pp.ProxyPort()
-			break
-		}
+	port := sshdPort
+	if port == 0 {
+		port = shellDefaultTCPPort(ports)
 	}
 	if port == 0 {
 		return ""
@@ -109,4 +131,14 @@ func shellSSHDAddr(
 		}
 	}
 	return ""
+}
+
+// shellDefaultTCPPort returns the default TCP proxy port of a shell, which is its sshd's port.
+func shellDefaultTCPPort(ports expconf.ProxyPortsConfig) int {
+	for _, pp := range schemas.WithDefaults(ports) {
+		if pp.DefaultServiceID() && pp.ProxyTCP() {
+			return pp.ProxyPort()
+		}
+	}
+	return 0
 }
