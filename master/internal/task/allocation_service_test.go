@@ -195,6 +195,67 @@ func TestSetProxyAddress(t *testing.T) {
 	}
 }
 
+// TestRegisterProxiesPerPortScheme checks that each proxied port of one allocation gets the
+// upstream scheme of its own config.
+func TestRegisterProxiesPerPortScheme(t *testing.T) {
+	prefix := uuid.NewString()
+	ports := []*sproto.ProxyPortConfig{
+		{ServiceID: prefix, Port: 2900, TLS: true},
+		{ServiceID: prefix + ":8080", Port: 8080},
+		{ServiceID: prefix + ":22", Port: 22, ProxyTCP: true, Unauthenticated: true},
+		{ServiceID: prefix + ":2222", Port: 2222, ProxyTCP: true, TLS: true},
+	}
+	closeDB, _, id, q, exitFuture := requireStarted(t, func(ar *sproto.AllocateRequest) {
+		ar.ProxyPorts = ports
+	})
+	defer closeDB()
+	if proxy.DefaultProxy == nil {
+		proxy.InitProxy(nil, nil) // Needs the database.
+	}
+
+	rID, _ := requireAssigned(t, id, q)
+	var addresses []cproto.Address
+	for _, p := range ports {
+		addresses = append(addresses, cproto.Address{
+			ContainerIP:   "localhost",
+			ContainerPort: p.Port,
+			HostIP:        "remotehost",
+			HostPort:      p.Port + 10000,
+		})
+	}
+	q.Put(&sproto.ResourcesStateChanged{
+		ResourcesID:      rID,
+		ResourcesState:   sproto.Running,
+		ResourcesStarted: &sproto.ResourcesStarted{Addresses: addresses},
+	})
+	requireState(t, id, model.AllocationStateRunning)
+
+	for _, tc := range []struct {
+		serviceID string
+		scheme    string
+		host      string
+		tcp       bool
+		unauth    bool
+	}{
+		{prefix, "https", "remotehost:12900", false, false},
+		{prefix + ":8080", "http", "remotehost:18080", false, false},
+		{prefix + ":22", "http", "remotehost:10022", true, true},
+		{prefix + ":2222", "https", "remotehost:12222", true, false},
+	} {
+		svc := proxy.DefaultProxy.GetService(tc.serviceID)
+		require.NotNil(t, svc, tc.serviceID)
+		require.Equal(t, tc.scheme, svc.URL.Scheme, tc.serviceID)
+		require.Equal(t, tc.host, svc.URL.Host, tc.serviceID)
+		require.Equal(t, tc.tcp, svc.ProxyTCP, tc.serviceID)
+		require.Equal(t, tc.unauth, svc.AllowUnauthenticated, tc.serviceID)
+	}
+
+	requireKilled(t, id, exitFuture)
+	for _, p := range ports {
+		require.Nil(t, proxy.DefaultProxy.GetService(p.ServiceID), p.ServiceID)
+	}
+}
+
 func TestServiceRendezvous(t *testing.T) {
 	closeDB, _, id, q, exitFuture := requireStarted(t)
 	defer closeDB()

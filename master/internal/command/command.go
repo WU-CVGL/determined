@@ -175,10 +175,11 @@ func (c *Command) Start(ctx context.Context) error {
 			SlotsNeeded:         c.Config.Resources.Slots,
 			ResourcePool:        c.Config.Resources.ResourcePool,
 			FittingRequirements: fitting,
-			ProxyPorts:          sproto.NewProxyPortConfig(c.GenericCommandSpec.ProxyPorts(), c.taskID),
-			IdleTimeout:         idleWatcherConfig,
-			Restore:             c.restored,
-			ProxyTLS:            c.TaskType == model.TaskTypeNotebook,
+			// Every port of a notebook is reached over HTTPS; Jupyter serves a master-signed cert.
+			ProxyPorts: sproto.NewProxyPortConfig(
+				c.GenericCommandSpec.ProxyPorts(), c.taskID, c.TaskType == model.TaskTypeNotebook),
+			IdleTimeout: idleWatcherConfig,
+			Restore:     c.restored,
 		}, c.db, c.rm, c.GenericCommandSpec, c.OnExit)
 	if err != nil {
 		return err

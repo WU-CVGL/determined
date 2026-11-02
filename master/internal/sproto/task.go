@@ -45,7 +45,6 @@ type (
 		IdleTimeout *IdleTimeoutConfig
 		ProxyPorts  []*ProxyPortConfig
 		Restore     bool
-		ProxyTLS    bool
 
 		// Logging context of the allocation actor.
 		LogContext logger.Context
@@ -79,6 +78,9 @@ type (
 		Port            int    `json:"port"`
 		ProxyTCP        bool   `json:"proxy_tcp"`
 		Unauthenticated bool   `json:"unauthenticated"`
+		// TLS makes the master reach the port's upstream over HTTPS. The upstream must present a
+		// certificate signed by the master CA. TCP proxies ignore it.
+		TLS bool `json:"tls"`
 	}
 
 	// ResourcesReleased notifies resource providers to return resources from a task.
@@ -398,8 +400,11 @@ type Resources interface {
 // ResourceList is a wrapper for a list of resources.
 type ResourceList map[ResourcesID]Resources
 
-// NewProxyPortConfig converts expconf proxy configs into internal representation.
-func NewProxyPortConfig(input expconf.ProxyPortsConfig, taskID model.TaskID) []*ProxyPortConfig {
+// NewProxyPortConfig converts expconf proxy configs into internal representation. tls sets the
+// upstream scheme of every port it returns.
+func NewProxyPortConfig(
+	input expconf.ProxyPortsConfig, taskID model.TaskID, tls bool,
+) []*ProxyPortConfig {
 	out := []*ProxyPortConfig{}
 	for _, epp := range input {
 		serviceID := string(taskID)
@@ -411,6 +416,7 @@ func NewProxyPortConfig(input expconf.ProxyPortsConfig, taskID model.TaskID) []*
 			ProxyTCP:        epp.ProxyTCP(),
 			Unauthenticated: epp.Unauthenticated(),
 			ServiceID:       serviceID,
+			TLS:             tls,
 		})
 	}
 
