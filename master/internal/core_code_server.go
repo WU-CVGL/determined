@@ -211,12 +211,12 @@ func (a *codeServerArtifacts) download(arch, path string) (err error) {
 		}
 	}()
 	h := sha256.New()
-	_, copyErr := io.Copy(io.MultiWriter(f, h), resp.Body)
-	if closeErr := f.Close(); copyErr == nil && closeErr != nil {
-		return closeErr
+	if _, err := io.Copy(io.MultiWriter(f, h), resp.Body); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("%w: %w", errCodeServerUpstream, err)
 	}
-	if copyErr != nil {
-		return fmt.Errorf("%w: %w", errCodeServerUpstream, copyErr)
+	if err := syncAndClose(f); err != nil {
+		return err
 	}
 	sum := hex.EncodeToString(h.Sum(nil))
 	if err := a.verify(arch, sum); err != nil {
@@ -265,10 +265,20 @@ func readChecksumFile(path string) (string, error) {
 }
 
 // writeChecksumFile writes <path>.sha256 in sha256sum's format, through a temporary file so that
-// a reader never sees a partial line.
+// a reader never sees a partial line. It then syncs the directory, which makes the renames of the
+// tarball and of its checksum file durable.
 func writeChecksumFile(path, sum string) error {
 	tmp := path + ".sha256.tmp"
-	if err := os.WriteFile(tmp, checksumLine(path, sum), 0o644); err != nil { //nolint:gosec
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644) //nolint:gosec
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(checksumLine(path, sum)); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := syncAndClose(f); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
@@ -276,5 +286,23 @@ func writeChecksumFile(path, sum string) error {
 		_ = os.Remove(tmp)
 		return err
 	}
-	return nil
+	return syncDir(filepath.Dir(path))
+}
+
+// syncAndClose flushes f to disk and closes it. A file is synced before it is renamed into place,
+// so that after a crash the new name never refers to a truncated file.
+func syncAndClose(f *os.File) error {
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+func syncDir(dir string) error {
+	d, err := os.Open(dir) //nolint:gosec // dir is from config.
+	if err != nil {
+		return err
+	}
+	return syncAndClose(d)
 }
