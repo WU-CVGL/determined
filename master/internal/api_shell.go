@@ -293,8 +293,8 @@ func (a *apiServer) LaunchShell(
 			tar.TypeReg,
 		),
 	}
-	// The declared services after ssh, the primary one, in sorted order. The command service
-	// tells the supervisor about them.
+	// The declared services after ssh, the primary one, in sorted order, which Command.Start
+	// passes on to the supervisor from their records.
 	for _, name := range model.DeclaredServices(launchReq.Spec.Config.Services) {
 		switch name {
 		case interactiveServiceSSH:
@@ -359,7 +359,7 @@ func jupyterService(port int) tasks.InteractiveService {
 
 // addShellJupyter adds the jupyter service to a shell spec: JupyterLab's port, from the notebooks'
 // range, which does not overlap sshd's, its environment and its files, which it returns. The
-// command service adds its token and the supervisor its base URL.
+// command service adds its token, and Command.Start its base URL.
 func addShellJupyter(spec *tasks.GenericCommandSpec) (archive.Archive, error) {
 	key, cert, err := proxy.GenSignedCert()
 	if err != nil {
