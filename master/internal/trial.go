@@ -430,7 +430,7 @@ func (t *trial) maybeAllocateTask() error {
 			},
 			Restore: true,
 			ProxyPorts: sproto.NewProxyPortConfig(
-				tasks.TrialSpecProxyPorts(t.taskSpec, t.config), t.taskID),
+				tasks.TrialSpecProxyPorts(t.taskSpec, t.config), t.taskID, false),
 
 			BlockedNodes: blockedNodes,
 		}
@@ -483,7 +483,8 @@ func (t *trial) maybeAllocateTask() error {
 			Preemptible:     true,
 			TimeoutDuration: time.Duration(preemptionTimeout) * time.Second,
 		},
-		ProxyPorts: sproto.NewProxyPortConfig(tasks.TrialSpecProxyPorts(t.taskSpec, t.config), t.taskID),
+		ProxyPorts: sproto.NewProxyPortConfig(
+			tasks.TrialSpecProxyPorts(t.taskSpec, t.config), t.taskID, false),
 
 		BlockedNodes: blockedNodes,
 	}
