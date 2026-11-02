@@ -377,7 +377,7 @@ func (a *apiServer) startGenericTaskResumeAllocation(
 		AllocationID: member.NewAllocationID, TaskID: member.TaskID, JobID: *t.JobID,
 		JobSubmissionTime: now, RequestTime: now, IsUserVisible: true,
 		Name:                spec.DisplayName(),
-		ProxyPorts:          sproto.NewProxyPortConfig(spec.ProxyPorts(), member.TaskID),
+		ProxyPorts:          sproto.NewProxyPortConfig(spec.ProxyPorts(), member.TaskID, false),
 		SlotsNeeded:         *spec.GenericTaskConfig.Resources.Slots(),
 		ResourcePool:        spec.GenericTaskConfig.Resources.ResourcePool(),
 		FittingRequirements: fitting,

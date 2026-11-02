@@ -1238,7 +1238,7 @@ func (a *allocation) registerProxies(addresses []cproto.Address) {
 		// proxy multi-container tasks or when containers are created prior to being
 		// assigned to an agent.
 		urlScheme := "http"
-		if a.req.ProxyTLS {
+		if pcfg.TLS {
 			urlScheme = "https"
 		}
 		proxy.DefaultProxy.Register(pcfg.ServiceID, &url.URL{

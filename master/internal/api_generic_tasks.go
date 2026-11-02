@@ -412,7 +412,7 @@ func (a *apiServer) CreateGenericTask(
 			GPUGroups:   genericTaskSpec.GenericTaskConfig.Resources.GPUGroupRequests(),
 		},
 
-		ProxyPorts: sproto.NewProxyPortConfig(genericTaskSpec.ProxyPorts(), taskID),
+		ProxyPorts: sproto.NewProxyPortConfig(genericTaskSpec.ProxyPorts(), taskID, false),
 		Preemption: sproto.PreemptionConfig{
 			GracefulStop:    true,
 			TimeoutDuration: time.Duration(genericTaskSpec.GenericTaskConfig.PreemptionTimeout) * time.Second,

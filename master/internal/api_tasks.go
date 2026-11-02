@@ -41,6 +41,8 @@ const (
 
 var (
 	taskReadyCheckLogs = "/run/determined/check_ready_logs.py"
+	// interactiveInitScript is where the notebook and shell entrypoints source their shared init.
+	interactiveInitScript = "/run/determined/interactive-init.sh"
 
 	taskLogsBatchMissWaitTime   = time.Second
 	taskLogsFieldsBatchWaitTime = 5 * time.Second

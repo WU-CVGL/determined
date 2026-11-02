@@ -958,7 +958,7 @@ func (m *Master) restoreGenericTasks(ctx context.Context) error {
 				Name:              snapshots[i].GenericTaskSpec.DisplayName(),
 				SlotsNeeded:       *slots,
 				ProxyPorts: sproto.NewProxyPortConfig(
-					snapshots[i].GenericTaskSpec.ProxyPorts(), taskID),
+					snapshots[i].GenericTaskSpec.ProxyPorts(), taskID, false),
 				Preemption: sproto.PreemptionConfig{
 					GracefulStop: true,
 					TimeoutDuration: time.Duration(
