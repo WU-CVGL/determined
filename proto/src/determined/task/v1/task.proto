@@ -187,6 +187,7 @@ message GenericTask {
   string display_name = 18;
   // First resource assignment time, across this task's allocations.
   // Unset if no allocation has received resources.
+  // Available only in Agent-only clusters; omitted on other or mixed backends.
   google.protobuf.Timestamp allocation_start_time = 19;
 }
 

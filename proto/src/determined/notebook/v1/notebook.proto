@@ -58,5 +58,6 @@ message Notebook {
   google.protobuf.Timestamp end_time = 101;
   // First resource assignment time, provided by the list API; unset if never
   // assigned.
+  // Available only in Agent-only clusters; omitted on other or mixed backends.
   google.protobuf.Timestamp allocation_start_time = 102;
 }

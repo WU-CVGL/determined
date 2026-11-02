@@ -83,9 +83,15 @@ export const withStartedColumn = (layout: ColumnLayout): ColumnLayout => {
     _.isEqual(columns, DEFAULT_COLUMNS) && columnWidths.length === columns.length - 1
       ? columns.filter((col) => col !== 'allocationStartTime')
       : columns;
+  // Columns saved without widths read the new default widths. Bind those by column name,
+  // rather than shifting Started's width onto Slots and every following column.
+  const defaultWidths = DEFAULT_COLUMNS.map((col) => DEFAULT_COLUMN_WIDTHS[col]);
+  const widths = _.isEqual(columnWidths, defaultWidths)
+    ? cols.map((col) => DEFAULT_COLUMN_WIDTHS[col as keyof typeof DEFAULT_COLUMN_WIDTHS])
+    : columnWidths;
   return cols.includes('submissionTime')
     ? withColumn(
-        { columns: cols, columnWidths },
+        { columns: cols, columnWidths: widths },
         'allocationStartTime',
         'submissionTime',
         DEFAULT_COLUMN_WIDTHS,
@@ -208,7 +214,7 @@ export const columns: (f_flat_runs: boolean) => ColumnDef<Job>[] = (f_flat_runs)
     render: createOmitableRenderer<Job, FullJob>(
       'entityId',
       (_, record): ReactNode => (
-        <span title="First resource assignment; image pulling and setup may follow. — means no recorded assignment.">
+        <span title="First resource assignment in Agent-only clusters; image pulling and setup may follow. — means unavailable or no recorded assignment.">
           {record.allocationStartTime
             ? relativeTimeRenderer(
                 typeof record.allocationStartTime === 'string'

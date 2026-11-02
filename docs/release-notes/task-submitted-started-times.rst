@@ -4,6 +4,7 @@
 
 -  WebUI: Jobs, Tasks and resource pool queues distinguish **Submitted** from **Started**.
    Submitted is when the master registered the job; Started is its first resource assignment (for
-   experiments, the first trial
-   assignment). Jobs without a recorded assignment show a dash. Image pulling and setup can follow
-   assignment. Resource pages also explain the default monitoring delay for shells and notebooks.
+   experiments, the first trial assignment, excluding checkpoint cleanup). Image pulling and setup
+   can follow assignment. Started is supported only in clusters managed entirely by Agent resource
+   managers. Other or mixed backends and jobs without a confirmed assignment show a dash. Resource
+   pages also explain the default monitoring delay for shells and notebooks.

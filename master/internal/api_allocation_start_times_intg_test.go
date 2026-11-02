@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/job/jobservice"
 	"github.com/determined-ai/determined/master/internal/sproto"
@@ -24,6 +25,7 @@ import (
 
 func TestEnrichAllocationStartTimes(t *testing.T) {
 	api, user, ctx := setupAPITest(t, nil)
+	api.m.config.RootManagerInternal.AgentRM = &config.AgentResourceManagerConfig{}
 	trial, started := createTestTrial(t, api, user)
 	queuedTrial, queued := createTestTrial(t, api, user)
 	_, unrelated := createTestTrial(t, api, user)
@@ -85,6 +87,7 @@ func TestEnrichAllocationStartTimes(t *testing.T) {
 func TestJobQueueAllocationStartTimes(t *testing.T) {
 	manager := MockRM()
 	api, user, ctx := setupAPITest(t, nil, manager)
+	api.m.config.RootManagerInternal.AgentRM = &config.AgentResourceManagerConfig{}
 	jobID := db.RequireMockJob(t, db.SingleDB(), &user.ID)
 	queuedJobID := db.RequireMockJob(t, db.SingleDB(), &user.ID)
 	base := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
@@ -123,4 +126,94 @@ func TestJobQueueAllocationStartTimes(t *testing.T) {
 	require.Len(t, listedV2.Jobs, 2)
 	require.Equal(t, listed.Jobs[0].AllocationStartTime, listedV2.Jobs[0].GetFull().AllocationStartTime)
 	require.Nil(t, listedV2.Jobs[1].GetFull().AllocationStartTime)
+}
+
+func TestAssignmentStartsExcludeExperimentGC(t *testing.T) {
+	manager := MockRM()
+	api, user, ctx := setupAPITest(t, nil, manager)
+	api.m.config.RootManagerInternal.AgentRM = &config.AgentResourceManagerConfig{}
+	trial, task := createTestTrial(t, api, user)
+	exp, err := db.ExperimentByID(ctx, trial.ExperimentID)
+	require.NoError(t, err)
+	_, err = db.Bun().NewUpdate().Model((*model.Task)(nil)).
+		Set("job_id = ?", exp.JobID).Where("task_id = ?", task.TaskID).Exec(ctx)
+	require.NoError(t, err)
+	base := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	gc := model.NewTaskID()
+	require.NoError(t, db.AddTask(ctx, &model.Task{
+		TaskID: gc, TaskType: model.TaskTypeCheckpointGC, StartTime: base, JobID: &exp.JobID,
+	}))
+	addAssigned := func(taskID model.TaskID, minutes int) {
+		id := model.AllocationID(string(taskID) + ".1")
+		require.NoError(t, db.AddAllocation(ctx, &model.Allocation{
+			AllocationID: id, TaskID: taskID, Slots: 1, ResourcePool: "default",
+			State: ptrs.Ptr(model.AllocationStateRunning), Ports: map[string]int{},
+		}))
+		require.NoError(t, db.RecordTaskStats(ctx, &model.TaskStats{
+			AllocationID: id, EventType: "QUEUED", StartTime: &base,
+			EndTime: ptrs.Ptr(base.Add(time.Duration(minutes) * time.Minute)),
+		}))
+	}
+	addAssigned(gc, 1)
+	manager.On("GetJobQ", mock.Anything).Return(map[model.JobID]*sproto.RMJobInfo{}, nil)
+	manager.On("GetExternalJobs", mock.Anything).Return([]*jobv1.Job{{JobId: string(exp.JobID)}}, nil)
+	jobservice.SetDefaultService(manager)
+	check := func(want *timestamppb.Timestamp) {
+		listed, err := api.GetExperiments(ctx, &apiv1.GetExperimentsRequest{Limit: 0})
+		require.NoError(t, err)
+		found := false
+		for _, item := range listed.Experiments {
+			if int(item.Id) == trial.ExperimentID {
+				found = true
+				require.Equal(t, want, item.AllocationStartTime)
+			}
+		}
+		require.True(t, found)
+		queue, err := api.GetJobs(ctx, &apiv1.GetJobsRequest{ResourcePool: "default"})
+		require.NoError(t, err)
+		require.Equal(t, want, queue.Jobs[0].AllocationStartTime)
+		queueV2, err := api.GetJobsV2(ctx, &apiv1.GetJobsV2Request{ResourcePool: "default"})
+		require.NoError(t, err)
+		require.Equal(t, want, queueV2.Jobs[0].GetFull().AllocationStartTime)
+	}
+	check(nil) // GC ran, but the trial has never held resources.
+	addAssigned(task.TaskID, 30)
+	check(timestamppb.New(base.Add(30 * time.Minute)))
+}
+
+func TestUnsupportedAssignmentStartsRemainUnknown(t *testing.T) {
+	api, user, ctx := setupAPITest(t, nil)
+	_, task := createTestTrial(t, api, user)
+	api.m.config.RootManagerInternal = &config.ResourceManagerConfig{
+		KubernetesRM: &config.KubernetesResourceManagerConfig{},
+	}
+	id := model.AllocationID(string(task.TaskID) + ".1")
+	state := model.AllocationStatePending
+	require.NoError(t, db.AddAllocation(ctx, &model.Allocation{
+		AllocationID: id, TaskID: task.TaskID, State: &state, Ports: map[string]int{},
+	}))
+	base := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	// K8s admission can complete QUEUED stats even though no Pod has scheduled yet.
+	require.NoError(t, db.RecordTaskStats(ctx, &model.TaskStats{
+		AllocationID: id, EventType: "QUEUED", StartTime: &base, EndTime: &base,
+	}))
+	for _, phase := range []model.AllocationState{
+		model.AllocationStatePending, model.AllocationStateRunning, model.AllocationStatePending,
+	} {
+		_, err := db.Bun().NewUpdate().Model((*model.Allocation)(nil)).
+			Set("state = ?", phase).Where("allocation_id = ?", id).Exec(ctx)
+		require.NoError(t, err)
+		value := timestamppb.New(base) // A stale value must also be cleared on an unsupported backend.
+		require.NoError(t, api.enrichAllocationStartTimes(ctx, []allocationStartTarget{
+			{string(task.TaskID), &value},
+		}, allocationStartTask))
+		require.Nil(t, value, "Kubernetes is unsupported in every phase, not just while queued")
+	}
+	// The same recorded Agent history remains visible after requeue: no current-state filtering.
+	api.m.config.RootManagerInternal = &config.ResourceManagerConfig{AgentRM: &config.AgentResourceManagerConfig{}}
+	var value *timestamppb.Timestamp
+	require.NoError(t, api.enrichAllocationStartTimes(ctx, []allocationStartTarget{
+		{string(task.TaskID), &value},
+	}, allocationStartTask))
+	require.Equal(t, timestamppb.New(base), value)
 }

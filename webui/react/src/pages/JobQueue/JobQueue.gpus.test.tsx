@@ -298,6 +298,27 @@ describe('JobQueue GPUs', () => {
     expect(headers()).not.toContain('GPUs');
   });
 
+  it('binds default widths by name when only older columns were saved', async () => {
+    storeSettings(JobState.SCHEDULED, {
+      columns: [
+        'preemptible',
+        'type',
+        'name',
+        'priority',
+        'submissionTime',
+        'slots',
+        'status',
+        'user',
+      ],
+    });
+    setup(pool(Api.V1SchedulerType.PRIORITY, ResourceType.CPU));
+    await waitFor(() =>
+      expect(saved(JobState.SCHEDULED, 'columnWidths')).toEqual([
+        106, 75, 150, 107, 117, 117, 74, 160, 85,
+      ]),
+    );
+  });
+
   it('has no column for a Kubernetes pool, a CPU pool, or a pool without an agent', async () => {
     for (const rp of [
       pool(Api.V1SchedulerType.KUBERNETES),

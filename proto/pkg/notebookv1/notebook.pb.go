@@ -61,6 +61,7 @@ type Notebook struct {
 	EndTime *timestamp.Timestamp `protobuf:"bytes,101,opt,name=end_time,json=endTime,proto3" json:"end_time,omitempty"`
 	// First resource assignment time, provided by the list API; unset if never
 	// assigned.
+	// Available only in Agent-only clusters; omitted on other or mixed backends.
 	AllocationStartTime *timestamp.Timestamp `protobuf:"bytes,102,opt,name=allocation_start_time,json=allocationStartTime,proto3" json:"allocation_start_time,omitempty"`
 }
 

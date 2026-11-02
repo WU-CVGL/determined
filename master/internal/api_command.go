@@ -240,7 +240,7 @@ func (a *apiServer) GetCommands(
 	for _, item := range resp.Commands {
 		starts = append(starts, allocationStartTarget{item.Id, &item.AllocationStartTime})
 	}
-	if err = enrichAllocationStartTimes(ctx, starts, allocationStartTask); err != nil {
+	if err = a.enrichAllocationStartTimes(ctx, starts, allocationStartTask); err != nil {
 		return nil, err
 	}
 	return resp, nil

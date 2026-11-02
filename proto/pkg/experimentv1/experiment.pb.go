@@ -280,6 +280,7 @@ type Experiment struct {
 	PachydermIntegration *_struct.Struct `protobuf:"bytes,47,opt,name=pachyderm_integration,json=pachydermIntegration,proto3,oneof" json:"pachyderm_integration,omitempty"`
 	// First resource assignment time among the experiment's trials, supplied by
 	// GetExperiments; unset if no trial has received resources.
+	// Available only in Agent-only clusters; omitted on other or mixed backends.
 	AllocationStartTime *timestamp.Timestamp `protobuf:"bytes,48,opt,name=allocation_start_time,json=allocationStartTime,proto3" json:"allocation_start_time,omitempty"`
 }
 

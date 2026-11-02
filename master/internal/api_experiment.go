@@ -731,7 +731,7 @@ func (a *apiServer) GetExperiments(
 			strconv.Itoa(int(item.Id)), &item.AllocationStartTime,
 		})
 	}
-	if err = enrichAllocationStartTimes(ctx, starts, allocationStartExperiment); err != nil {
+	if err = a.enrichAllocationStartTimes(ctx, starts, allocationStartExperiment); err != nil {
 		return nil, err
 	}
 

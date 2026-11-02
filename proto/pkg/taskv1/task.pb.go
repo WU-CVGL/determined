@@ -631,6 +631,7 @@ type GenericTask struct {
 	DisplayName string `protobuf:"bytes,18,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	// First resource assignment time, across this task's allocations.
 	// Unset if no allocation has received resources.
+	// Available only in Agent-only clusters; omitted on other or mixed backends.
 	AllocationStartTime *timestamp.Timestamp `protobuf:"bytes,19,opt,name=allocation_start_time,json=allocationStartTime,proto3" json:"allocation_start_time,omitempty"`
 }
 

@@ -454,6 +454,7 @@ type Job struct {
 	Placement []*JobPlacement `protobuf:"bytes,17,rep,name=placement,proto3" json:"placement,omitempty"`
 	// First resource assignment across the job's allocations, supplied by the job
 	// queue list APIs. Unset if no allocation has received resources.
+	// Available only in Agent-only clusters; omitted on other or mixed backends.
 	AllocationStartTime *timestamp.Timestamp `protobuf:"bytes,18,opt,name=allocation_start_time,json=allocationStartTime,proto3" json:"allocation_start_time,omitempty"`
 }
 

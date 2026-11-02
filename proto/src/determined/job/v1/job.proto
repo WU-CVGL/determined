@@ -159,6 +159,7 @@ message Job {
   repeated JobPlacement placement = 17;
   // First resource assignment across the job's allocations, supplied by the job
   // queue list APIs. Unset if no allocation has received resources.
+  // Available only in Agent-only clusters; omitted on other or mixed backends.
   google.protobuf.Timestamp allocation_start_time = 18;
 }
 

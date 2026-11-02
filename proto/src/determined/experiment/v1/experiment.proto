@@ -165,6 +165,7 @@ message Experiment {
   optional google.protobuf.Struct pachyderm_integration = 47;
   // First resource assignment time among the experiment's trials, supplied by
   // GetExperiments; unset if no trial has received resources.
+  // Available only in Agent-only clusters; omitted on other or mixed backends.
   google.protobuf.Timestamp allocation_start_time = 48;
 }
 

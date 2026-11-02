@@ -2149,7 +2149,7 @@ export interface V1Command {
      */
     endTime?: Date | DateString;
     /**
-     * First resource assignment time, provided by the list API; unset if never assigned.
+     * First resource assignment time, provided by the list API; unset if never assigned. Available only in Agent-only clusters; omitted on other or mixed backends.
      * @type {Date | DateString}
      * @memberof V1Command
      */
@@ -3239,7 +3239,7 @@ export interface V1Experiment {
      */
     pachydermIntegration?: any;
     /**
-     * First resource assignment time among the experiment's trials, supplied by GetExperiments; unset if no trial has received resources.
+     * First resource assignment time among the experiment's trials, supplied by GetExperiments; unset if no trial has received resources. Available only in Agent-only clusters; omitted on other or mixed backends.
      * @type {Date | DateString}
      * @memberof V1Experiment
      */
@@ -3764,7 +3764,7 @@ export interface V1GenericTask {
      */
     displayName?: string;
     /**
-     * First resource assignment time, across this task's allocations. Unset if no allocation has received resources.
+     * First resource assignment time, across this task's allocations. Unset if no allocation has received resources. Available only in Agent-only clusters; omitted on other or mixed backends.
      * @type {Date | DateString}
      * @memberof V1GenericTask
      */
@@ -6114,7 +6114,7 @@ export interface V1Job {
      */
     placement?: Array<V1JobPlacement>;
     /**
-     * First resource assignment across the job's allocations, supplied by the job queue list APIs. Unset if no allocation has received resources.
+     * First resource assignment across the job's allocations, supplied by the job queue list APIs. Unset if no allocation has received resources. Available only in Agent-only clusters; omitted on other or mixed backends.
      * @type {Date | DateString}
      * @memberof V1Job
      */
@@ -7581,7 +7581,7 @@ export interface V1Notebook {
      */
     endTime?: Date | DateString;
     /**
-     * First resource assignment time, provided by the list API; unset if never assigned.
+     * First resource assignment time, provided by the list API; unset if never assigned. Available only in Agent-only clusters; omitted on other or mixed backends.
      * @type {Date | DateString}
      * @memberof V1Notebook
      */
@@ -11482,7 +11482,7 @@ export interface V1Shell {
      */
     endTime?: Date | DateString;
     /**
-     * First resource assignment time, provided by the list API; unset if never assigned.
+     * First resource assignment time, provided by the list API; unset if never assigned. Available only in Agent-only clusters; omitted on other or mixed backends.
      * @type {Date | DateString}
      * @memberof V1Shell
      */
@@ -12130,7 +12130,7 @@ export interface V1Tensorboard {
      */
     endTime?: Date | DateString;
     /**
-     * First resource assignment time, provided by the list API; unset if never assigned.
+     * First resource assignment time, provided by the list API; unset if never assigned. Available only in Agent-only clusters; omitted on other or mixed backends.
      * @type {Date | DateString}
      * @memberof V1Tensorboard
      */

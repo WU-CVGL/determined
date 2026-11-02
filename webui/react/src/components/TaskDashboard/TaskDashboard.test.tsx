@@ -1023,7 +1023,7 @@ describe('TaskDashboard', () => {
     expect(header('Submitted')).toBeInTheDocument();
     expect(header('Started')).not.toHaveAttribute('aria-sort');
     const caption =
-      'First resource assignment; image pulling and setup may follow. — means no recorded assignment.';
+      'First resource assignment in Agent-only clusters; image pulling and setup may follow. — means unavailable or no recorded assignment.';
     expect(within(running).getByTitle(caption)).not.toHaveTextContent(/^—$/);
     expect(within(queued).getByTitle(caption)).toHaveTextContent(/^—$/);
     // No per-row request is needed: the existing list carries both timestamps.

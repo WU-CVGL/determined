@@ -922,7 +922,7 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         defaultWidth: DEFAULT_COLUMN_WIDTHS.allocationStartTime,
         key: 'allocationStartTime',
         render: (_: unknown, row: RunRow) => (
-          <span title="First resource assignment; image pulling and setup may follow. — means no recorded assignment.">
+          <span title="First resource assignment in Agent-only clusters; image pulling and setup may follow. — means unavailable or no recorded assignment.">
             {timeRenderer(row.allocationStartTime)}
           </span>
         ),

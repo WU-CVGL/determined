@@ -52,7 +52,7 @@ func (a *apiServer) GetJobs(
 	if err = api.Paginate(&resp.Pagination, &resp.Jobs, req.Offset, req.Limit); err != nil {
 		return nil, err
 	}
-	if err = enrichJobAllocationStartTimes(ctx, resp.Jobs); err != nil {
+	if err = a.enrichJobAllocationStartTimes(ctx, resp.Jobs); err != nil {
 		return nil, err
 	}
 	return resp, nil
@@ -114,18 +114,18 @@ func (a *apiServer) GetJobsV2(
 			fullJobs = append(fullJobs, full)
 		}
 	}
-	if err = enrichJobAllocationStartTimes(ctx, fullJobs); err != nil {
+	if err = a.enrichJobAllocationStartTimes(ctx, fullJobs); err != nil {
 		return nil, err
 	}
 	return resp, nil
 }
 
-func enrichJobAllocationStartTimes(ctx context.Context, jobs []*jobv1.Job) error {
+func (a *apiServer) enrichJobAllocationStartTimes(ctx context.Context, jobs []*jobv1.Job) error {
 	starts := make([]allocationStartTarget, 0, len(jobs))
 	for _, item := range jobs {
 		starts = append(starts, allocationStartTarget{item.JobId, &item.AllocationStartTime})
 	}
-	return enrichAllocationStartTimes(ctx, starts, allocationStartJob)
+	return a.enrichAllocationStartTimes(ctx, starts, allocationStartJob)
 }
 
 // GetJobQueueStats retrieves job queue stats for a set of resource pools.
