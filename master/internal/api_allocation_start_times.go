@@ -83,16 +83,27 @@ func enrichAllocationStartTimes(ctx context.Context, targets []allocationStartTa
 	return nil
 }
 
-func allocationStartTimesQuery(ids []string, scope allocationStartScope) *bun.SelectQuery {
-	query := db.Bun().NewSelect().TableExpr("allocations AS a").
+func completedQueuedAllocationStatsQuery() *bun.SelectQuery {
+	return db.Bun().NewSelect().TableExpr("allocations AS a").
 		Join("JOIN task_stats AS ts ON ts.allocation_id = a.allocation_id").
 		Where("ts.event_type = 'QUEUED'").
 		Where("ts.end_time IS NOT NULL").
 		ColumnExpr("min(ts.end_time) AS start")
+}
+
+// experimentAllocationStartsQuery is shared by page enrichment and Started sorting. It returns
+// a raw timestamp; callers choose the experiment scope and convert only the output to protobuf.
+func experimentAllocationStartsQuery() *bun.SelectQuery {
+	return completedQueuedAllocationStatsQuery().
+		Join("JOIN run_id_task_id AS rt ON rt.task_id = a.task_id").
+		Join("JOIN trials AS t ON t.id = rt.run_id")
+}
+
+func allocationStartTimesQuery(ids []string, scope allocationStartScope) *bun.SelectQuery {
+	query := completedQueuedAllocationStatsQuery()
 	switch scope {
 	case allocationStartExperiment:
-		query = query.Join("JOIN run_id_task_id AS rt ON rt.task_id = a.task_id").
-			Join("JOIN trials AS t ON t.id = rt.run_id").
+		query = experimentAllocationStartsQuery().
 			ColumnExpr("t.experiment_id::text AS id").
 			Where("t.experiment_id IN (?)", bun.In(ids)).GroupExpr("t.experiment_id")
 	case allocationStartJob:

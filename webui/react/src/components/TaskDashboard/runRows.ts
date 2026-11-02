@@ -15,8 +15,6 @@ import {
 import { timeKey } from 'utils/taskTime';
 import { compareCodePoints, compareText } from 'utils/textOrder';
 
-export { timeKey } from 'utils/taskTime';
-
 /*
  * The rows of the Jobs dashboard and how they are filtered, merged and paged. Kept free of React so
  * that the order and the paging can be tested on their own.

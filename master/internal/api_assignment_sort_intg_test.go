@@ -4,18 +4,104 @@
 package internal
 
 import (
+	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/uptrace/bun"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
+	"github.com/determined-ai/determined/proto/pkg/experimentv1"
 )
+
+type experimentPageReadKey struct{}
+
+type experimentPageRead struct {
+	once sync.Once
+	run  func()
+}
+
+// The callback is scoped to one request context. Bun's hook runs after the SELECT rows have
+// been scanned, so an assignment here commits exactly in the former read/enrichment window.
+type experimentPageReadHook struct{}
+
+func (experimentPageReadHook) BeforeQuery(ctx context.Context, _ *bun.QueryEvent) context.Context {
+	return ctx
+}
+
+func (experimentPageReadHook) AfterQuery(ctx context.Context, event *bun.QueryEvent) {
+	read, ok := ctx.Value(experimentPageReadKey{}).(*experimentPageRead)
+	if !ok || event.Err != nil || event.Model == nil {
+		return
+	}
+	if _, ok := event.IQuery.(*bun.SelectQuery); !ok { // Excludes the pagination count.
+		return
+	}
+	if _, ok := event.Model.Value().(*[]*experimentv1.Experiment); ok {
+		read.once.Do(read.run)
+	}
+}
+
+var addExperimentPageReadHook sync.Once
+
+func TestAssignmentSortUsesPageSnapshot(t *testing.T) {
+	api, user, ctx := setupAPITest(t, nil)
+	api.m.config.RootManagerInternal.AgentRM = &config.AgentResourceManagerConfig{}
+	addExperimentPageReadHook.Do(func() { db.Bun().AddQueryHook(experimentPageReadHook{}) })
+	for _, direction := range []apiv1.OrderBy{apiv1.OrderBy_ORDER_BY_ASC, apiv1.OrderBy_ORDER_BY_DESC} {
+		t.Run(direction.String(), func(t *testing.T) {
+			_, projectID := createProjectAndWorkspace(ctx, t, api)
+			older, task := createTestTrial(t, api, user)
+			newer, _ := createTestTrial(t, api, user)
+			base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			for i, id := range []int{older.ExperimentID, newer.ExperimentID} {
+				_, err := db.Bun().NewRaw("UPDATE experiments SET project_id = ?, start_time = ? WHERE id = ?",
+					projectID, base.Add(time.Duration(i)*time.Minute), id).Exec(ctx)
+				require.NoError(t, err)
+			}
+			allocation := model.AllocationID(string(task.TaskID) + ".1")
+			require.NoError(t, db.AddAllocation(ctx, &model.Allocation{
+				AllocationID: allocation, TaskID: task.TaskID, Slots: 1, ResourcePool: "default",
+				Ports: map[string]int{},
+			}))
+			assigned := base.Add(time.Hour + time.Microsecond)
+			fired := false
+			read := &experimentPageRead{run: func() {
+				fired = true
+				require.NoError(t, db.RecordTaskStats(ctx, &model.TaskStats{
+					AllocationID: allocation, EventType: "QUEUED", StartTime: &base, EndTime: &assigned,
+				}))
+			}}
+			req := &apiv1.GetExperimentsRequest{
+				ProjectId: int32(projectID), Limit: 2, OrderBy: direction,
+				SortBy: apiv1.GetExperimentsRequest_SORT_BY_ALLOCATION_START_TIME,
+			}
+			page, err := api.GetExperiments(context.WithValue(ctx, experimentPageReadKey{}, read), req)
+			require.NoError(t, err)
+			require.True(t, fired, "assignment must commit after the page SELECT")
+			require.Len(t, page.Experiments, 2)
+			require.Equal(t, int32(newer.ExperimentID), page.Experiments[0].Id)
+			require.Equal(t, int32(older.ExperimentID), page.Experiments[1].Id)
+			for _, exp := range page.Experiments {
+				require.Nil(t, exp.AllocationStartTime, "returned value must use the sorting snapshot")
+			}
+			// The next request sees the newly committed assignment and puts it before missing values.
+			page, err = api.GetExperiments(ctx, req)
+			require.NoError(t, err)
+			require.Equal(t, int32(older.ExperimentID), page.Experiments[0].Id)
+			require.Equal(t, timestamppb.New(assigned), page.Experiments[0].AllocationStartTime)
+			require.Nil(t, page.Experiments[1].AllocationStartTime)
+		})
+	}
+}
 
 // Submission order deliberately differs from assignment order, including a tie and an unassigned
 // task submitted most recently. Every one-row page must agree with the whole-list order.

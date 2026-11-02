@@ -61,6 +61,7 @@ import { getActionsForExperiment } from 'utils/experiment';
 import { alphaNumericSorter, numericSorter } from 'utils/sort';
 import { pluralizer } from 'utils/string';
 import { canKillGenericTask, isTaskKillable } from 'utils/task';
+import { ALLOCATION_START_TOOLTIP } from 'utils/taskTime';
 import { compareText } from 'utils/textOrder';
 import { getDisplayName } from 'utils/user';
 
@@ -922,9 +923,7 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         defaultWidth: DEFAULT_COLUMN_WIDTHS.allocationStartTime,
         key: 'allocationStartTime',
         render: (_: unknown, row: RunRow) => (
-          <span title="First resource assignment in Agent-only clusters; image pulling and setup may follow. — means unavailable or no recorded assignment.">
-            {timeRenderer(row.allocationStartTime)}
-          </span>
+          <span title={ALLOCATION_START_TOOLTIP}>{timeRenderer(row.allocationStartTime)}</span>
         ),
         sortDirections: DESCEND_FIRST,
         sorter: true,

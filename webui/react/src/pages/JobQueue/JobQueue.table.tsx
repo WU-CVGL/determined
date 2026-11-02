@@ -19,6 +19,7 @@ import {
   taskJobLabel,
 } from 'utils/job';
 import { floatToPercent } from 'utils/string';
+import { ALLOCATION_START_TOOLTIP } from 'utils/taskTime';
 import { openCommand } from 'utils/wait';
 
 import css from './JobQueue.module.scss';
@@ -214,7 +215,7 @@ export const columns: (f_flat_runs: boolean) => ColumnDef<Job>[] = (f_flat_runs)
     render: createOmitableRenderer<Job, FullJob>(
       'entityId',
       (_, record): ReactNode => (
-        <span title="First resource assignment in Agent-only clusters; image pulling and setup may follow. — means unavailable or no recorded assignment.">
+        <span title={ALLOCATION_START_TOOLTIP}>
           {record.allocationStartTime
             ? relativeTimeRenderer(
                 typeof record.allocationStartTime === 'string'

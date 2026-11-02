@@ -27,16 +27,14 @@ export const ACTIVE_SORTS: Record<string, ColumnSort> = {
     directions: MOST_FIRST,
     value: (job) => {
       if (!('allocationStartTime' in job) || !job.allocationStartTime) return undefined;
-      const time = job.allocationStartTime;
-      return timeKey(typeof time === 'string' ? time : time.toISOString());
+      return timeKey(job.allocationStartTime);
     },
   },
   submitted: {
     directions: MOST_FIRST,
     value: (job) => {
       if (!('submissionTime' in job) || !job.submissionTime) return undefined;
-      const time = new Date(job.submissionTime).getTime();
-      return Number.isNaN(time) ? undefined : [time];
+      return timeKey(job.submissionTime);
     },
   },
   user: { directions: A_TO_Z_FIRST, value: (job, ownerName) => ownerName(job) },

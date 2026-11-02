@@ -779,8 +779,8 @@ export type JobSummary = t.TypeOf<typeof JobSummary>;
 // Bulk endpoints like experimentSearch dont return config due to perf issue
 // since https://github.com/determined-ai/determined/pull/8732
 export const BulkExperimentItem = t.intersection([
-  t.partial({ allocationStartTime: t.string }),
   t.partial({
+    allocationStartTime: t.string,
     checkpoints: t.number,
     checkpointSize: t.number,
     config: ExperimentConfig,

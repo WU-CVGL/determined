@@ -530,17 +530,9 @@ type jobsSortKey struct {
 // experimentJobsSortKeys are the experiment sorts of the Jobs page. The expressions are written
 // out in full: a column alias does not bind inside lower().
 var experimentJobsSortKeys = map[apiv1.GetExperimentsRequest_SortBy]jobsSortKey{
-	apiv1.GetExperimentsRequest_SORT_BY_ALLOCATION_START_TIME: {expr: `(
-		SELECT min(ts.end_time)
-		FROM trials AS assigned_trial
-		JOIN run_id_task_id AS assigned_task ON assigned_task.run_id = assigned_trial.id
-		JOIN allocations AS assigned_allocation ON assigned_allocation.task_id = assigned_task.task_id
-		JOIN task_stats AS ts ON ts.allocation_id = assigned_allocation.allocation_id
-		WHERE assigned_trial.experiment_id = e.id
-		  AND ts.event_type = 'QUEUED' AND ts.end_time IS NOT NULL
-	)`},
-	apiv1.GetExperimentsRequest_SORT_BY_START_TIME: {expr: "e.start_time"},
-	apiv1.GetExperimentsRequest_SORT_BY_END_TIME:   {expr: "e.end_time"},
+	apiv1.GetExperimentsRequest_SORT_BY_ALLOCATION_START_TIME: {expr: "assignment.start"},
+	apiv1.GetExperimentsRequest_SORT_BY_START_TIME:            {expr: "e.start_time"},
+	apiv1.GetExperimentsRequest_SORT_BY_END_TIME:              {expr: "e.end_time"},
 	apiv1.GetExperimentsRequest_SORT_BY_NAME: {
 		expr: "COALESCE(e.config->>'name', '')", text: true,
 	},
@@ -627,9 +619,17 @@ func (a *apiServer) GetExperiments(
 	}
 	orderExpr := ""
 	jobsKey, isJobsKey := experimentJobsSortKeys[req.SortBy]
-	if req.SortBy == apiv1.GetExperimentsRequest_SORT_BY_ALLOCATION_START_TIME &&
-		!agentOnlyAllocationStarts(a.m.config.ResourceConfig) {
-		jobsKey.expr = "NULL::timestamptz"
+	sortByAssignment := req.SortBy == apiv1.GetExperimentsRequest_SORT_BY_ALLOCATION_START_TIME
+	if sortByAssignment {
+		if agentOnlyAllocationStarts(a.m.config.ResourceConfig) {
+			query = query.Join("LEFT JOIN LATERAL (?) AS assignment ON true",
+				experimentAllocationStartsQuery().Where("t.experiment_id = e.id"))
+		} else {
+			jobsKey.expr = "NULL::timestamptz"
+		}
+		// Keep the response and ordering key in the same statement snapshot. Sort by the
+		// raw timestamp, converting only the selected output to the protobuf representation.
+		query = query.ColumnExpr("proto_time(" + jobsKey.expr + ") AS allocation_start_time")
 	}
 	switch _, ok := orderColMap[req.SortBy]; {
 	case isJobsKey:
@@ -738,14 +738,16 @@ func (a *apiServer) GetExperiments(
 		return nil, err
 	}
 
-	starts := make([]allocationStartTarget, 0, len(resp.Experiments))
-	for _, item := range resp.Experiments {
-		starts = append(starts, allocationStartTarget{
-			strconv.Itoa(int(item.Id)), &item.AllocationStartTime,
-		})
-	}
-	if err = a.enrichAllocationStartTimes(ctx, starts, allocationStartExperiment); err != nil {
-		return nil, err
+	if !sortByAssignment {
+		starts := make([]allocationStartTarget, 0, len(resp.Experiments))
+		for _, item := range resp.Experiments {
+			starts = append(starts, allocationStartTarget{
+				strconv.Itoa(int(item.Id)), &item.AllocationStartTime,
+			})
+		}
+		if err = a.enrichAllocationStartTimes(ctx, starts, allocationStartExperiment); err != nil {
+			return nil, err
+		}
 	}
 
 	if err = a.enrichExperimentState(resp.Experiments...); err != nil {
