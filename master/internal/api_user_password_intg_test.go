@@ -369,7 +369,7 @@ func requireProxySignIn(t *testing.T, token string) {
 	c := echo.New().NewContext(req, rec)
 	c.SetParamNames("service")
 	c.SetParamValues("abc")
-	done, err := processProxyAuthentication(&detContext.DetContext{Context: c})
+	done, err := processProxyAuthentication(&detContext.DetContext{Context: c}, nil)
 	require.True(t, done)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusSeeOther, rec.Code)

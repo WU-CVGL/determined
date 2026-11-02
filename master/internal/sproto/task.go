@@ -81,6 +81,12 @@ type (
 		// TLS makes the master reach the port's upstream over HTTPS. The upstream must present a
 		// certificate signed by the master CA. TCP proxies ignore it.
 		TLS bool `json:"tls"`
+		// Exec marks a port whose service runs code as the task's owner, such as a browser
+		// editor: only the owner and admins may reach it through the proxy.
+		Exec bool `json:"exec"`
+		// StripPrefix makes the proxy remove /proxy/<service ID> from the request path before it
+		// reaches the upstream, on HTTP and WebSocket requests. TCP proxies ignore it.
+		StripPrefix bool `json:"strip_prefix"`
 	}
 
 	// ResourcesReleased notifies resource providers to return resources from a task.
@@ -401,7 +407,8 @@ type Resources interface {
 type ResourceList map[ResourcesID]Resources
 
 // NewProxyPortConfig converts expconf proxy configs into internal representation. tls sets the
-// upstream scheme of every port it returns.
+// upstream scheme of every port it returns. Exec and StripPrefix stay off: proxy port configs
+// cannot set them.
 func NewProxyPortConfig(
 	input expconf.ProxyPortsConfig, taskID model.TaskID, tls bool,
 ) []*ProxyPortConfig {

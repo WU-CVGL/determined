@@ -204,6 +204,33 @@ func (cs *CommandService) getNTSC(cmdID model.TaskID, cmdType model.TaskType) (*
 	return c, nil
 }
 
+// TaskOwnerID returns the ID of the user who owns the NTSC task taskID: from the command service
+// while it runs the task, else from the task's persisted state. It is 0 for a task without an
+// owner. Returns db.ErrNotFound if no NTSC task has that ID.
+func TaskOwnerID(ctx context.Context, taskID model.TaskID) (model.UserID, error) {
+	if cs := DefaultCmdService; cs != nil {
+		if id, ok := cs.ownerID(taskID); ok {
+			return id, nil
+		}
+	}
+	return GetCommandOwnerID(ctx, taskID)
+}
+
+// ownerID returns the ID of the owner of the command taskID, if the service runs it.
+func (cs *CommandService) ownerID(taskID model.TaskID) (model.UserID, bool) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	c, ok := cs.commands[taskID]
+	if !ok {
+		return 0, false
+	}
+	if c.Base.Owner == nil {
+		return 0, true
+	}
+	return c.Base.Owner.ID, true
+}
+
 // listByType returns a list of NTSCs of one type.
 func (cs *CommandService) listByType(
 	reqUsers []string,
