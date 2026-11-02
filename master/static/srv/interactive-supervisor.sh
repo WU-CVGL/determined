@@ -56,10 +56,32 @@ wait_for_child() {
     ! kill -0 "$1" 2>/dev/null
 }
 
+# Kill the descendants of the process $1, the deepest first, so that each parent reaps its children
+# before it is killed itself.
+kill_descendants() {
+    local tasks child i
+    local -a ids children=()
+    for tasks in /proc/"$1"/task/*/children; do
+        [[ -r $tasks ]] || continue
+        ids=()
+        read -r -a ids 2>/dev/null <"$tasks"
+        children+=("${ids[@]}")
+    done
+    for child in "${children[@]}"; do
+        kill_descendants "$child"
+        kill -KILL "$child" 2>/dev/null
+        for ((i = 0; i < 10; i++)); do
+            [[ -e /proc/$child ]] || break
+            sleep 0.1
+        done
+    done
+}
+
 # The EXIT trap of a service's subshell: once the service has exited, stop the unit's background
 # helpers and give its log helper a moment to pass on the last lines. A log helper that still
 # waits for input is held up by what is left of the service's process group, which is stopped
-# then, so that nothing outlives the subshell (ship_logs.py reaps nothing).
+# then, or by a process outside it, and is then killed, so that nothing outlives the subshell
+# (ship_logs.py reaps nothing).
 service_exited() {
     local status=$?
     set +e
@@ -78,14 +100,16 @@ service_exited() {
     helpers=$(jobs -pr)
     for pid in $helpers; do
         kill "$pid" 2>/dev/null
-        wait "$pid"
+        wait "$pid" 2>/dev/null
     done
     if [[ $! != "$service_inherited_pid" ]]; then
         pid=$!
         if ! wait_for_child "$pid" "$supervisor_log_drain_seconds"; then
             kill -TERM -- "-$BASHPID" 2>/dev/null
             if ! wait_for_child "$pid" "$supervisor_log_drain_seconds"; then
-                kill -KILL -- "-$BASHPID"
+                # Held up from outside the group, as by an sshd session: kill the log helper.
+                kill_descendants "$pid"
+                kill -KILL "$pid" 2>/dev/null
             fi
         fi
         wait "$pid" 2>/dev/null
@@ -115,7 +139,8 @@ start_service() {
     service_pids[$name]=$!
 }
 
-# Reap the services that have exited and log each. The primary one ends the task.
+# Reap the services that have exited and log each. The primary one ends the task. The supervisor's
+# waits drop bash's reports of killed jobs, which are not part of the task log.
 reap_services() {
     local name pid status
     for name in "${!service_pids[@]}"; do
@@ -123,7 +148,7 @@ reap_services() {
         if kill -0 "$pid" 2>/dev/null; then
             continue
         fi
-        wait "$pid"
+        wait "$pid" 2>/dev/null
         status=$?
         unset "service_pids[$name]"
         printf '[%s] exited %d\n' "$name" "$status" >&2
@@ -143,7 +168,7 @@ stop_services() {
         sleep 0.1
         for name in "${!service_pids[@]}"; do
             if ! kill -0 "${service_pids[$name]}" 2>/dev/null; then
-                wait "${service_pids[$name]}"
+                wait "${service_pids[$name]}" 2>/dev/null
                 printf '[%s] exited %d\n' "$name" "$?" >&2
                 unset "service_pids[$name]"
             fi
@@ -151,7 +176,6 @@ stop_services() {
     done
     for name in "${!service_pids[@]}"; do
         kill -s KILL -- "-${service_pids[$name]}" 2>/dev/null
-        # Without bash's report of the killed job.
         wait "${service_pids[$name]}" 2>/dev/null
         printf '[%s] exited %d\n' "$name" "$?" >&2
         unset "service_pids[$name]"
@@ -173,7 +197,7 @@ done
 
 while [[ -z $stop_signal ]]; do
     # Returns when a service exits or a trapped signal arrives.
-    wait -n
+    wait -n 2>/dev/null
     reap_services
 done
 

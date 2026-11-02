@@ -167,6 +167,18 @@ func (s *supervisorRun) unit(name, body string) {
 		[]byte("#!/usr/bin/env bash\n"+body), 0o600))
 }
 
+// setting changes one of the supervisor's settings, "supervisor_<name>=<value>".
+func (s *supervisorRun) setting(name string, value int) {
+	s.t.Helper()
+	path := filepath.Join(s.run, InteractiveSupervisorResource)
+	b, err := os.ReadFile(path) //nolint:gosec
+	require.NoError(s.t, err)
+	line := regexp.MustCompile(`(?m)^supervisor_` + name + `=[0-9]+$`)
+	require.Len(s.t, line.FindAll(b, -1), 1, name)
+	b = line.ReplaceAll(b, []byte(fmt.Sprintf("supervisor_%s=%d", name, value)))
+	require.NoError(s.t, os.WriteFile(path, b, 0o700)) //nolint:gosec
+}
+
 func (s *supervisorRun) start(args ...string) {
 	s.t.Helper()
 	s.cmd = exec.Command( //nolint:gosec
@@ -325,6 +337,20 @@ func reapOrphans() {
 	}
 }
 
+// readyLog defines log helpers like the units' own: "2> >(log)" copies a service's log to the task
+// log and to a readiness check for the line "up".
+const readyLog = `
+log() {
+    trap '' INT TERM HUP
+    tee -p >(ready_check) >&2
+    wait "$!"
+}
+ready_check() {
+    trap - INT TERM HUP
+    exec "$DET_PYTHON_EXECUTABLE" /run/determined/check_ready_logs.py --ready-regex up "${service_ready_args[@]}"
+}
+`
+
 // waitUntilOrder is a unit line that waits for a line in the order file.
 func waitUntilOrder(line string) string {
 	return `for _ in $(seq 400); do grep -qx '` + line + `' "$ORDER_FILE" && break; sleep 0.05; done` + "\n"
@@ -365,18 +391,6 @@ func TestSupervisorPrimaryExitStopsOthers(t *testing.T) {
 // service's helpers are gone with it. Its readiness is logged but not reported.
 func TestSupervisorKeepsRunningWhenOtherServiceExits(t *testing.T) {
 	s := newSupervisorRun(t, "p,q")
-	// Log helpers like the units' own.
-	readyLog := `
-log() {
-    trap '' INT TERM HUP
-    tee -p >(ready_check) >&2
-    wait "$!"
-}
-ready_check() {
-    trap - INT TERM HUP
-    exec "$DET_PYTHON_EXECUTABLE" /run/determined/check_ready_logs.py --ready-regex up "${service_ready_args[@]}"
-}
-`
 	s.unit("p", readyLog+`{ bash -c 'echo up >&2; exec sleep 300'; } 2> >(log)`+"\n")
 	s.unit("q", readyLog+`sleep 300 &
 echo "$!" >"$ORDER_FILE.q-helper"
@@ -433,6 +447,71 @@ while :; do sleep 0.05; done
 			require.Subset(t, s.orderLines(), []string{"p " + name, "q " + name})
 			require.ElementsMatch(t,
 				[]string{"[p] start", "[q] start", "[p] exited 0", "[q] exited 0"}, s.logLines())
+		})
+	}
+}
+
+// A process that a service starts in a session of its own, like an sshd session, may keep the
+// service's log open after the service has exited. The log helper is stopped then, the service
+// keeps its exit status, and the task log gets no other lines.
+func TestSupervisorLogHeldOutsideService(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		stop   bool
+		status int
+		exited string
+	}{
+		{name: "exit", status: 255, exited: "[p] exited 255"},
+		{name: "stop", stop: true, status: 128 + int(syscall.SIGTERM), exited: "[p] exited 0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newSupervisorRun(t, "p")
+			// Longer than the log helper's two waits.
+			s.setting("stop_grace_seconds", 10)
+			service := filepath.Join(s.dir, "service")
+			// Like sshd, the service keeps only its standard descriptors.
+			writeScript(t, service, `
+for fd in /proc/$$/fd/*; do
+    fd=${fd##*/}
+    if ((fd > 2 && fd < 255)) && [[ -e /proc/$$/fd/$fd ]]; then
+        exec {fd}>&-
+    fi
+done
+setsid sleep 300 >/dev/null &
+echo "$!" >"$1"
+echo up >&2
+if [[ -z $2 ]]; then
+    exit 255
+fi
+trap 'exit 0' TERM
+# Without this shell's report of the stopped sleep.
+exec 2>/dev/null
+while :; do sleep 0.05; done
+`)
+			holder := filepath.Join(s.dir, "holder")
+			s.unit("p", readyLog+fmt.Sprintf("{ %q %q %q; } 2> >(log)\n", service, holder,
+				map[bool]string{true: "run"}[tc.stop]))
+			s.start()
+			s.waitForLog("[p] ready")
+			if tc.stop {
+				s.signal(syscall.SIGTERM)
+			}
+			waitFor(t, "the supervisor's exit", func() bool { return !s.running() })
+
+			b, err := os.ReadFile(holder) //nolint:gosec
+			require.NoError(t, err)
+			pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+			require.NoError(t, err)
+			require.NoError(t, unix.Kill(pid, unix.SIGKILL))
+			var ws unix.WaitStatus
+			_, err = unix.Wait4(pid, &ws, 0, nil)
+			require.NoError(t, err, "the holder is left to the container")
+
+			require.Equal(t, tc.status, s.wait())
+			_, log, found := strings.Cut(s.stderr.String(), "[p] start\n")
+			require.True(t, found)
+			require.ElementsMatch(t, []string{"up", "[p] ready", tc.exited},
+				strings.Split(strings.TrimSuffix(log, "\n"), "\n"))
 		})
 	}
 }
