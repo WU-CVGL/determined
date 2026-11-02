@@ -132,6 +132,8 @@ func TestCodeServerNotFound(t *testing.T) {
 		"/det/code-server/4.144.0/code-server-4.144.0-linux-amd64%2Etar%2Egz",
 		"/det/code-server/%2E%2E/code-server-4.144.0-linux-amd64.tar.gz",
 		"/det/code-server/4.144.0/..",
+		"/det/code-server/" + strings.Repeat("4", 300) + ".0.0/code-server-" + strings.Repeat("4", 300) +
+			".0.0-linux-amd64.tar.gz",
 	} {
 		require.Equal(t, http.StatusNotFound, cst.get(path).Code, path)
 	}

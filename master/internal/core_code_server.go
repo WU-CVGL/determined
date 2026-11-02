@@ -257,7 +257,9 @@ func (a *codeServerArtifacts) prepare(version, arch string) error {
 	path := filepath.Join(a.conf.Dir, codeServerTarball(version, arch))
 	info, err := os.Stat(path)
 	switch {
-	case errors.Is(err, fs.ErrNotExist) && version != a.conf.Version:
+	case err != nil && version != a.conf.Version:
+		// A tarball that cannot be found, such as one whose name is too long for the filesystem,
+		// is not in conf.Dir.
 		return errCodeServerMissing
 	case errors.Is(err, fs.ErrNotExist):
 		return a.download(arch, path)
