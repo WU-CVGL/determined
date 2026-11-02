@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"time"
 
-	"golang.org/x/exp/maps"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -323,18 +322,19 @@ func (a *apiServer) LaunchNotebook(
 		return nil, status.Errorf(codes.Internal, "cannot marshal notebook config: %s", err.Error())
 	}
 
-	launchReq.Spec.Base.ExtraEnvVars = map[string]string{
+	addExtraEnvVars(launchReq.Spec, map[string]string{
 		"NOTEBOOK_PORT":      strconv.Itoa(port),
 		"NOTEBOOK_CONFIG":    string(configBytes),
 		"NOTEBOOK_IDLE_TYPE": launchReq.Spec.Config.NotebookIdleType,
 		"DET_TASK_TYPE":      string(model.TaskTypeNotebook),
-	}
+	})
+	setInteractiveServices(launchReq.Spec, interactiveServiceJupyter)
 
 	oidcPachydermEnvVars, err := a.getOIDCPachydermEnvVars(session)
 	if err != nil {
 		return nil, err
 	}
-	maps.Copy(launchReq.Spec.Base.ExtraEnvVars, oidcPachydermEnvVars)
+	addExtraEnvVars(launchReq.Spec, oidcPachydermEnvVars)
 
 	launchReq.Spec.Base.ExtraProxyPorts = append(launchReq.Spec.Base.ExtraProxyPorts,
 		expconf.ProxyPort{
@@ -342,7 +342,7 @@ func (a *apiServer) LaunchNotebook(
 			RawDefaultServiceID: ptrs.Ptr(true),
 		})
 
-	launchReq.Spec.Config.Entrypoint = []string{jupyterEntrypoint}
+	launchReq.Spec.Config.Entrypoint = interactiveSupervisorEntrypoint()
 
 	if err = check.Validate(launchReq.Spec.Config); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid notebook config: %s", err.Error())
@@ -353,6 +353,7 @@ func (a *apiServer) LaunchNotebook(
 		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(jupyterConfigDir, nil, 0o700, tar.TypeDir),
 		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(jupyterDataDir, nil, 0o700, tar.TypeDir),
 		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(jupyterRuntimeDir, nil, 0o700, tar.TypeDir),
+		// A wrapper that runs the supervisor with this task's service, for whatever names it.
 		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(
 			jupyterEntrypoint,
 			etc.MustStaticFile(etc.NotebookEntrypointResource),
@@ -368,12 +369,6 @@ func (a *apiServer) LaunchNotebook(
 		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(
 			taskReadyCheckLogs,
 			etc.MustStaticFile(etc.TaskCheckReadyLogsResource),
-			0o700,
-			tar.TypeReg,
-		),
-		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(
-			interactiveInitScript,
-			etc.MustStaticFile(etc.InteractiveInitScriptResource),
 			0o700,
 			tar.TypeReg,
 		),
@@ -396,6 +391,8 @@ func (a *apiServer) LaunchNotebook(
 			tar.TypeReg,
 		),
 	}
+	launchReq.Spec.AdditionalFiles = append(launchReq.Spec.AdditionalFiles,
+		interactiveSupervisorFiles(launchReq.Spec.Base.AgentUserGroup)...)
 
 	// Launch a Notebook.
 	genericCmd, err := command.DefaultCmdService.LaunchNotebookCommand(

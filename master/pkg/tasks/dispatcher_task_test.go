@@ -435,6 +435,18 @@ func Test_makeLocalVolumn(t *testing.T) {
 			want: true,
 		},
 		{
+			// Likewise the supervisor and its service units.
+			name: "Test InteractiveSupervisorResource",
+			arg: cproto.RunArchive{
+				Archive: archive.Archive{
+					archive.Item{Path: "/run/determined/interactive-supervisor.sh"},
+					archive.Item{Path: "/run/determined/services"},
+					archive.Item{Path: "/run/determined/services/ssh.sh"},
+				},
+			},
+			want: true,
+		},
+		{
 			name: "Test item path runDir",
 			arg: cproto.RunArchive{
 				Archive: archive.Archive{

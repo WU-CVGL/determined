@@ -35,7 +35,7 @@ func startOpenSSH(t *testing.T, hostKeyPEM, authorizedKey []byte) (addr string) 
 	dir := t.TempDir()
 	hostKey := filepath.Join(dir, "id_shell")
 	require.NoError(t, os.WriteFile(hostKey, hostKeyPEM, 0o600))
-	// Like shell-entrypoint.sh, inject environment variables through authorized_keys options.
+	// Like the ssh service unit, inject environment variables through authorized_keys options.
 	// HOME and ZDOTDIR keep the user's own shell startup files out of the test.
 	opts := fmt.Sprintf(`environment="DET_MARKER=det-web-terminal",environment="HOME=%[1]s",`+
 		`environment="ZDOTDIR=%[1]s"`, dir)
