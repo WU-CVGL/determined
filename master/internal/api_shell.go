@@ -272,6 +272,12 @@ func (a *apiServer) LaunchShell(
 			0o700,
 			tar.TypeReg,
 		),
+		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(
+			interactiveInitScript,
+			etc.MustStaticFile(etc.InteractiveInitScriptResource),
+			0o700,
+			tar.TypeReg,
+		),
 	}
 
 	launchReq.Spec.Base.ExtraEnvVars = map[string]string{"DET_TASK_TYPE": string(model.TaskTypeShell)}
