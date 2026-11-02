@@ -28,6 +28,9 @@ const (
 	NotebookEntrypointResource = "notebook-entrypoint.sh"
 	// NotebookIdleCheckResource is the script to check if a notebook is idle.
 	NotebookIdleCheckResource = "check_idle.py"
+	// InteractiveInitScriptResource is the container init that the notebook and shell entrypoints
+	// source.
+	InteractiveInitScriptResource = "interactive-init.sh"
 	// TaskCheckReadyLogsResource is the script to parse logs to check if a task is ready.
 	TaskCheckReadyLogsResource = "check_ready_logs.py"
 	// TaskShipLogsShellResource is the shell script to call the python script to ship logs.

@@ -11,13 +11,7 @@ SHELL="$(
 )" || SHELL="/bin/bash"
 export SHELL
 
-"$DET_PYTHON_EXECUTABLE" -m determined.exec.prep_container --resources --proxy --download_context_directory
-
-STARTUP_HOOK="startup-hook.sh"
-set -x
-test -f "${TCD_STARTUP_HOOK}" && source "${TCD_STARTUP_HOOK}"
-test -f "${STARTUP_HOOK}" && source "${STARTUP_HOOK}"
-set +x
+source /run/determined/interactive-init.sh
 
 "$DET_PYTHON_EXECUTABLE" /run/determined/jupyter/check_idle.py &
 

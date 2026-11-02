@@ -372,6 +372,12 @@ func (a *apiServer) LaunchNotebook(
 			tar.TypeReg,
 		),
 		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(
+			interactiveInitScript,
+			etc.MustStaticFile(etc.InteractiveInitScriptResource),
+			0o700,
+			tar.TypeReg,
+		),
+		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(
 			notebookDefaultPage,
 			etc.MustStaticFile(etc.NotebookTemplateResource),
 			0o644,

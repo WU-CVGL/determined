@@ -4,13 +4,7 @@ source /run/determined/task-setup.sh
 
 set -e
 
-"$DET_PYTHON_EXECUTABLE" -m determined.exec.prep_container --resources --proxy --download_context_directory
-
-STARTUP_HOOK="startup-hook.sh"
-set -x
-test -f "${TCD_STARTUP_HOOK}" && source "${TCD_STARTUP_HOOK}"
-test -f "${STARTUP_HOOK}" && source "${STARTUP_HOOK}"
-set +x
+source /run/determined/interactive-init.sh
 
 # Prepend each key in authorized_keys with a set of environment="KEY=VALUE"
 # options to inject the entire docker environment into the eventual ssh
