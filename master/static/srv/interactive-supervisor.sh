@@ -14,7 +14,7 @@
 # - A unit passes "${service_ready_args[@]}" to check_ready_logs.py: only the primary service's
 #   readiness marks the task ready, and each service's is logged.
 # - The task ends with the primary service's exit status when it exits; the others are stopped.
-#   A service that is not the primary one only logs its exit.
+#   A service that is not the primary one does not end the task.
 # - SIGINT, SIGTERM and SIGHUP stop all services, and the supervisor exits as if killed by the
 #   signal.
 # - Each service runs in its own process group, which a stop signals: SIGTERM (or the signal that
