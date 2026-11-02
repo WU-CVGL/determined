@@ -184,6 +184,22 @@ The following configuration settings are supported:
       terminal that is running a command but not being viewed or running a command with no output is
       treated as idle, since JupyterLab does not provide activity information for those case.)
 
+-  ``services``: Shells only. The services that the shell runs in its container besides its SSH
+   server, as a map from the name of each service to an object, which is empty. The services are:
+
+   -  ``jupyter``: JupyterLab.
+
+   -  ``ssh``: The SSH server, which every shell runs.
+
+   For example, a shell that also runs JupyterLab:
+
+   .. code:: yaml
+
+      services:
+        jupyter: {}
+
+   See :ref:`shell-services`.
+
 -  ``slurm``: Slurm cluster details may optionally be specified in the same fashion as for
    :ref:`experiments <slurm-config>`.
 
