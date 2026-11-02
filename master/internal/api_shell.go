@@ -29,6 +29,7 @@ import (
 	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/master/pkg/ssh"
+	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 )
 
@@ -211,6 +212,22 @@ func (a *apiServer) SetShellPriority(
 	return &apiv1.SetShellPriorityResponse{Shell: cmd.ToV1Shell()}, nil
 }
 
+// setShellSSHD makes a shell spec run its sshd on the given container port: the entrypoint starts
+// sshd there, the port is the shell's default TCP proxy port, and SSHDPort records it.
+func setShellSSHD(spec *tasks.GenericCommandSpec, port int) {
+	// Shell authentication happens through SSH keys, instead.
+	spec.Base.ExtraProxyPorts = append(spec.Base.ExtraProxyPorts, expconf.ProxyPort{
+		RawProxyPort:        port,
+		RawProxyTCP:         ptrs.Ptr(true),
+		RawUnauthenticated:  ptrs.Ptr(true),
+		RawDefaultServiceID: ptrs.Ptr(true),
+	})
+	spec.SSHDPort = port
+	spec.Config.Entrypoint = []string{
+		shellEntrypointScript, "-f", shellSSHDConfigFile, "-p", strconv.Itoa(port), "-D", "-e",
+	}
+}
+
 func (a *apiServer) LaunchShell(
 	ctx context.Context, req *apiv1.LaunchShellRequest,
 ) (*apiv1.LaunchShellResponse, error) {
@@ -244,19 +261,7 @@ func (a *apiServer) LaunchShell(
 
 	// Selecting a random port mitigates the risk of multiple processes binding
 	// the same port on an agent in host mode.
-	port := getRandomPort(minSshdPort, maxSshdPort)
-	// Shell authentication happens through SSH keys, instead.
-	launchReq.Spec.Base.ExtraProxyPorts = append(launchReq.Spec.Base.ExtraProxyPorts, expconf.ProxyPort{
-		RawProxyPort:        port,
-		RawProxyTCP:         ptrs.Ptr(true),
-		RawUnauthenticated:  ptrs.Ptr(true),
-		RawDefaultServiceID: ptrs.Ptr(true),
-	})
-	launchReq.Spec.SSHDPort = port
-
-	launchReq.Spec.Config.Entrypoint = []string{
-		shellEntrypointScript, "-f", shellSSHDConfigFile, "-p", strconv.Itoa(port), "-D", "-e",
-	}
+	setShellSSHD(launchReq.Spec, getRandomPort(minSshdPort, maxSshdPort))
 
 	if err = check.Validate(launchReq.Spec.Config); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
