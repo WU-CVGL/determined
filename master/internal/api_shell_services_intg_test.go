@@ -264,32 +264,45 @@ func TestLaunchRejectsServices(t *testing.T) {
 	command.SetDefaultService(cs)
 	jupyter := map[string]any{"jupyter": map[string]any{}}
 
-	requireInvalid := func(err error, what string) {
+	// The message ties each rejection to the services check: a launch can be refused with
+	// InvalidArgument for other reasons, such as TensorBoard's experiment 1 not existing.
+	requireInvalid := func(err error, what, msg string) {
 		t.Helper()
 		require.Error(t, err, what)
 		require.Equal(t, codes.InvalidArgument, status.Code(err), "%s: %v", what, err)
+		require.ErrorContains(t, err, msg, what)
 	}
+	const onlyShells = "services: only shells run services"
 	_, err = api.LaunchNotebook(ctx, &apiv1.LaunchNotebookRequest{Config: servicesConfig(t, jupyter)})
-	requireInvalid(err, "notebook")
+	requireInvalid(err, "notebook", onlyShells)
 	_, err = api.LaunchNotebook(ctx, &apiv1.LaunchNotebookRequest{
 		Config: servicesConfig(t, jupyter), Preview: true,
 	})
-	requireInvalid(err, "notebook preview")
+	requireInvalid(err, "notebook preview", onlyShells)
 	_, err = api.LaunchCommand(ctx, &apiv1.LaunchCommandRequest{Config: servicesConfig(t, jupyter)})
-	requireInvalid(err, "command")
+	requireInvalid(err, "command", onlyShells)
 	_, err = api.LaunchTensorboard(ctx, &apiv1.LaunchTensorboardRequest{
 		ExperimentIds: []int32{1}, Config: servicesConfig(t, jupyter),
 	})
-	requireInvalid(err, "tensorboard")
+	requireInvalid(err, "tensorboard", onlyShells)
 
-	for name, services := range map[string]any{
-		"unknown":       map[string]any{"vscode": map[string]any{}},
-		"not an object": map[string]any{"jupyter": 1.0},
-		"an option":     map[string]any{"jupyter": map[string]any{"port": 8888.0}},
-		"a list":        []any{"jupyter"},
+	for name, tc := range map[string]struct {
+		services any
+		msg      string
+	}{
+		"unknown": {
+			map[string]any{"vscode": map[string]any{}}, `services: unknown service "vscode"`,
+		},
+		"not an object": {map[string]any{"jupyter": 1.0}, "model.ServiceConfig"},
+		"an option": {
+			map[string]any{"jupyter": map[string]any{"port": 8888.0}}, `unknown field "port"`,
+		},
+		"a list": {[]any{"jupyter"}, "services"},
 	} {
-		_, err = api.LaunchShell(ctx, &apiv1.LaunchShellRequest{Config: servicesConfig(t, services)})
-		requireInvalid(err, "shell: "+name)
+		_, err = api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
+			Config: servicesConfig(t, tc.services),
+		})
+		requireInvalid(err, "shell: "+name, tc.msg)
 	}
 
 	// An empty map is no services, on every launch.
