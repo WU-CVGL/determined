@@ -17,11 +17,19 @@ type allocationStartTarget struct {
 	dest **timestamppb.Timestamp
 }
 
+type allocationStartScope int
+
+const (
+	allocationStartTask allocationStartScope = iota
+	allocationStartExperiment
+	allocationStartJob
+)
+
 // enrichAllocationStartTimes reads the first resource assignment of all entries in one query.
 // A QUEUED task_stats row is written only when resources are assigned. Unlike an allocation's
 // accounting start_time, it cannot be synthesized for a never-started allocation at master restart.
 // For a generic task this includes all its runs, but no descendants; for an experiment all trials.
-func enrichAllocationStartTimes(ctx context.Context, targets []allocationStartTarget, experiments bool) error {
+func enrichAllocationStartTimes(ctx context.Context, targets []allocationStartTarget, scope allocationStartScope) error {
 	if len(targets) == 0 {
 		return nil
 	}
@@ -38,12 +46,17 @@ func enrichAllocationStartTimes(ctx context.Context, targets []allocationStartTa
 		Where("ts.event_type = 'QUEUED'").
 		Where("ts.end_time IS NOT NULL").
 		ColumnExpr("min(ts.end_time) AS start")
-	if experiments {
+	switch scope {
+	case allocationStartExperiment:
 		query = query.Join("JOIN run_id_task_id AS rt ON rt.task_id = a.task_id").
 			Join("JOIN trials AS t ON t.id = rt.run_id").
 			ColumnExpr("t.experiment_id::text AS id").
 			Where("t.experiment_id IN (?)", bun.In(ids)).GroupExpr("t.experiment_id")
-	} else {
+	case allocationStartJob:
+		query = query.Join("JOIN tasks AS t ON t.task_id = a.task_id").
+			ColumnExpr("t.job_id AS id").
+			Where("t.job_id IN (?)", bun.In(ids)).GroupExpr("t.job_id")
+	default:
 		query = query.ColumnExpr("a.task_id AS id").
 			Where("a.task_id IN (?)", bun.In(ids)).GroupExpr("a.task_id")
 	}

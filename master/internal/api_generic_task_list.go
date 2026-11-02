@@ -161,7 +161,7 @@ func (a *apiServer) GetGenericTasks(
 	for _, item := range resp.Tasks {
 		starts = append(starts, allocationStartTarget{item.TaskId, &item.AllocationStartTime})
 	}
-	if err = enrichAllocationStartTimes(ctx, starts, false); err != nil {
+	if err = enrichAllocationStartTimes(ctx, starts, allocationStartTask); err != nil {
 		return nil, err
 	}
 	return resp, nil

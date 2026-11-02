@@ -157,6 +157,9 @@ message Job {
   // The slots the job holds, one entry per agent where it holds any, by agent
   // ID. Agent resource manager only.
   repeated JobPlacement placement = 17;
+  // First resource assignment across the job's allocations, supplied by the job
+  // queue list APIs. Unset if no allocation has received resources.
+  google.protobuf.Timestamp allocation_start_time = 18;
 }
 
 // RBACJob is a job that can have either a limited or a full

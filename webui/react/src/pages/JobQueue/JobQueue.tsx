@@ -35,6 +35,7 @@ import {
   JobGpus,
   SCHEDULING_VAL_KEY,
   withGpusColumn,
+  withStartedColumn,
 } from 'pages/JobQueue/JobQueue.table';
 import { paths } from 'routes/utils';
 import {
@@ -427,15 +428,16 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState, onHighlight 
   }, [settings.columns, settingsColumns]);
 
   /*
-   * The Active tab of an agent pool with GPU slots lists the GPUs each job holds, after Slots.
-   * Layouts are stored per tab: once the stored settings have loaded, the tab's layout gains the
-   * column, and a pool without it skips the stored column.
+   * Both tabs list Started after Submitted. The Active tab of an agent pool with GPU slots also
+   * lists the GPUs each job holds, after Slots. Once stored settings load, insert these columns
+   * with their widths; a pool without GPU placement skips that stored column.
    */
   const showGpus = jobState === JobState.SCHEDULED && poolListsJobGpus(selectedRp);
   const layoutUpdate = useMemo(() => {
-    if (!showGpus || isLoading) return undefined;
+    if (isLoading) return undefined;
     const layout = { columns: settings.columns, columnWidths: settings.columnWidths };
-    const update = withGpusColumn(layout);
+    const withStarted = withStartedColumn(layout);
+    const update = showGpus ? withGpusColumn(withStarted) : withStarted;
     return _.isEqual(update, layout) ? undefined : update;
   }, [isLoading, settings.columnWidths, settings.columns, showGpus]);
   useEffect(() => {

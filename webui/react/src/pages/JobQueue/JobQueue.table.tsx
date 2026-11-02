@@ -1,5 +1,6 @@
 import Icon from 'hew/Icon';
 import Tooltip from 'hew/Tooltip';
+import _ from 'lodash';
 import React, { ReactNode } from 'react';
 
 import Badge, { BadgeType } from 'components/Badge';
@@ -21,7 +22,7 @@ import { floatToPercent } from 'utils/string';
 import { openCommand } from 'utils/wait';
 
 import css from './JobQueue.module.scss';
-import { DEFAULT_COLUMN_WIDTHS } from './JobQueue.settings';
+import { DEFAULT_COLUMN_WIDTHS, DEFAULT_COLUMNS } from './JobQueue.settings';
 
 type Renderer<T> = (_: unknown, record: T) => ReactNode;
 export type JobTypeRenderer = Renderer<Job>;
@@ -74,6 +75,23 @@ const linkToEntityPage = (job: Job, label: ReactNode): ReactNode => {
 /** The stored layout with the GPUs column, after Slots at its default width. */
 export const withGpusColumn = (layout: ColumnLayout): ColumnLayout =>
   withColumn(layout, 'gpus', 'slots', DEFAULT_COLUMN_WIDTHS);
+
+/** Insert Started after Submitted, preserving the widths of older saved layouts. */
+export const withStartedColumn = (layout: ColumnLayout): ColumnLayout => {
+  const { columns, columnWidths } = layout;
+  const cols =
+    _.isEqual(columns, DEFAULT_COLUMNS) && columnWidths.length === columns.length - 1
+      ? columns.filter((col) => col !== 'allocationStartTime')
+      : columns;
+  return cols.includes('submissionTime')
+    ? withColumn(
+        { columns: cols, columnWidths },
+        'allocationStartTime',
+        'submissionTime',
+        DEFAULT_COLUMN_WIDTHS,
+      )
+    : layout;
+};
 
 /**
  * The GPUs a job holds, one line per agent. With `onToggle`, the lines are a toggle button that
@@ -181,6 +199,27 @@ export const columns: (f_flat_runs: boolean) => ColumnDef<Job>[] = (f_flat_runs)
         ),
     ),
     title: 'Submitted',
+  },
+  {
+    align: 'right',
+    dataIndex: 'allocationStartTime',
+    defaultWidth: DEFAULT_COLUMN_WIDTHS.allocationStartTime,
+    key: 'started',
+    render: createOmitableRenderer<Job, FullJob>(
+      'entityId',
+      (_, record): ReactNode => (
+        <span title="First resource assignment; image pulling and setup may follow. — means no recorded assignment.">
+          {record.allocationStartTime
+            ? relativeTimeRenderer(
+                typeof record.allocationStartTime === 'string'
+                  ? new Date(record.allocationStartTime)
+                  : record.allocationStartTime,
+              )
+            : '—'}
+        </span>
+      ),
+    ),
+    title: 'Started',
   },
   {
     align: 'right',

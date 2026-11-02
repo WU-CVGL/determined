@@ -10,7 +10,7 @@ import { BrowserRouter } from 'react-router-dom';
 
 import { ThemeProvider } from 'components/ThemeProvider';
 import { SettingsProvider } from 'hooks/useSettingsProvider';
-import { updateUserSetting } from 'services/api';
+import { getJobQ, getTask, updateUserSetting } from 'services/api';
 import * as Api from 'services/api-ts-sdk';
 import userStore from 'stores/users';
 import userSettings from 'stores/userSettings';
@@ -200,6 +200,7 @@ describe('JobQueue GPUs', () => {
       'Job Name',
       'Priority',
       'Submitted',
+      'Started',
       'Slots',
       'GPUs',
       'State',
@@ -234,14 +235,41 @@ describe('JobQueue GPUs', () => {
         'name',
         'priority',
         'submissionTime',
+        'allocationStartTime',
         'slots',
         'gpus',
         'status',
       ]),
     );
     expect(saved(JobState.SCHEDULED, 'columnWidths')).toEqual([
-      106, 75, 300, 107, 117, 90, 170, 160,
+      106, 75, 300, 107, 117, 117, 90, 170, 160,
     ]);
+  });
+
+  it('shows first assignment separately from submission, preserves omitted jobs and needs no task lookups', async () => {
+    storeSettings(JobState.SCHEDULED);
+    mocks.jobs = [
+      { ...sweep, allocationStartTime: new Date('2026-01-01T00:30:00Z') },
+      cpuOnly,
+      hidden,
+    ];
+    setup();
+    await waitForRow('job-1');
+    expect(headers()).toContain('Submitted');
+    expect(headers()).toContain('Started');
+    const ths = Array.from(document.querySelectorAll('thead th'));
+    const index = ths.findIndex((th) => th.querySelector('[data-testid="Started"]'));
+    const cell = (id: string) => {
+      const row = document.querySelector(`tbody tr[data-row-key="${id}"]`);
+      const value = row?.querySelectorAll<HTMLElement>('td')[index];
+      if (!value) throw new Error(`no Started cell for ${id}`);
+      return value;
+    };
+    expect(cell('job-1')).not.toHaveTextContent(/^—$/);
+    expect(cell('job-3')).toHaveTextContent(/^—$/);
+    expect(cell('job-4')).toHaveTextContent(/^\*\*\*$/);
+    expect(getJobQ).toHaveBeenCalledTimes(1);
+    expect(getTask).not.toHaveBeenCalled();
   });
 
   it('has no column on the Queued tab and leaves its stored layout alone', async () => {
@@ -250,8 +278,24 @@ describe('JobQueue GPUs', () => {
     setup(pool(), JobState.QUEUED);
     await waitForRow('job-1');
     expect(headers()).not.toContain('GPUs');
+    expect(headers()).toContain('Started');
     expect(saved(JobState.QUEUED, 'columns')).toBeUndefined();
     expect(saved(JobState.QUEUED, 'columnWidths')).toBeUndefined();
+  });
+
+  it('retains widths saved alone before Started was available, including on CPU pools', async () => {
+    storeSettings(JobState.SCHEDULED, {
+      columnWidths: [106, 75, 300, 107, 119, 90, 160, 85],
+    });
+    setup(pool(Api.V1SchedulerType.PRIORITY, ResourceType.CPU));
+    await waitFor(() =>
+      expect(saved(JobState.SCHEDULED, 'columnWidths')).toEqual([
+        106, 75, 300, 107, 119, 117, 90, 160, 85,
+      ]),
+    );
+    expect(headers()).toContain('Submitted');
+    expect(headers()).toContain('Started');
+    expect(headers()).not.toContain('GPUs');
   });
 
   it('has no column for a Kubernetes pool, a CPU pool, or a pool without an agent', async () => {

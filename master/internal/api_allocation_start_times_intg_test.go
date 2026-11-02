@@ -9,13 +9,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/determined-ai/determined/master/internal/db"
+	"github.com/determined-ai/determined/master/internal/job/jobservice"
+	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
+	"github.com/determined-ai/determined/proto/pkg/jobv1"
 )
 
 func TestEnrichAllocationStartTimes(t *testing.T) {
@@ -50,7 +54,7 @@ func TestEnrichAllocationStartTimes(t *testing.T) {
 	var start, pending, missing *timestamppb.Timestamp
 	require.NoError(t, enrichAllocationStartTimes(ctx, []allocationStartTarget{
 		{string(started.TaskID), &start}, {string(queued.TaskID), &pending}, {"unknown", &missing},
-	}, false))
+	}, allocationStartTask))
 	require.Equal(t, timestamppb.New(*at(10)), start)
 	require.Nil(t, pending)
 	require.Nil(t, missing)
@@ -59,7 +63,7 @@ func TestEnrichAllocationStartTimes(t *testing.T) {
 	require.NoError(t, enrichAllocationStartTimes(ctx, []allocationStartTarget{
 		{strconv.Itoa(trial.ExperimentID), &start},
 		{strconv.Itoa(queuedTrial.ExperimentID), &pending},
-	}, true))
+	}, allocationStartExperiment))
 	require.Equal(t, timestamppb.New(*at(10)), start)
 	require.Nil(t, pending)
 	// Exercise the authorized experiment list, not just the helper.
@@ -76,4 +80,47 @@ func TestEnrichAllocationStartTimes(t *testing.T) {
 		}
 	}
 	require.True(t, found)
+}
+
+func TestJobQueueAllocationStartTimes(t *testing.T) {
+	manager := MockRM()
+	api, user, ctx := setupAPITest(t, nil, manager)
+	jobID := db.RequireMockJob(t, db.SingleDB(), &user.ID)
+	queuedJobID := db.RequireMockJob(t, db.SingleDB(), &user.ID)
+	base := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	for _, minutes := range []int{30, 10} {
+		_, task := createTestTrial(t, api, user)
+		_, err := db.Bun().NewUpdate().Model((*model.Task)(nil)).
+			Set("job_id = ?", jobID).Where("task_id = ?", task.TaskID).Exec(ctx)
+		require.NoError(t, err)
+		id := model.AllocationID(fmt.Sprintf("%s.1", task.TaskID))
+		require.NoError(t, db.AddAllocation(ctx, &model.Allocation{
+			AllocationID: id, TaskID: task.TaskID, Slots: 1, ResourcePool: "default",
+			State: ptrs.Ptr(model.AllocationStateRunning), Ports: map[string]int{},
+		}))
+		require.NoError(t, db.RecordTaskStats(ctx, &model.TaskStats{
+			AllocationID: id, EventType: "QUEUED", StartTime: &base,
+			EndTime: ptrs.Ptr(base.Add(time.Duration(minutes) * time.Minute)),
+		}))
+	}
+	jobs := []*jobv1.Job{
+		{JobId: string(jobID), SubmissionTime: timestamppb.New(base)},
+		{JobId: string(queuedJobID), SubmissionTime: timestamppb.New(base)},
+	}
+	manager.On("GetJobQ", mock.Anything).Return(map[model.JobID]*sproto.RMJobInfo{}, nil)
+	manager.On("GetExternalJobs", mock.Anything).Return(jobs, nil)
+	jobservice.SetDefaultService(manager)
+
+	// Both queue API versions expose the first assignment across all of the job's tasks.
+	listed, err := api.GetJobs(ctx, &apiv1.GetJobsRequest{ResourcePool: "default"})
+	require.NoError(t, err)
+	require.Len(t, listed.Jobs, 2)
+	require.Equal(t, timestamppb.New(base.Add(10*time.Minute)), listed.Jobs[0].AllocationStartTime)
+	require.Equal(t, timestamppb.New(base), listed.Jobs[0].SubmissionTime)
+	require.Nil(t, listed.Jobs[1].AllocationStartTime)
+	listedV2, err := api.GetJobsV2(ctx, &apiv1.GetJobsV2Request{ResourcePool: "default"})
+	require.NoError(t, err)
+	require.Len(t, listedV2.Jobs, 2)
+	require.Equal(t, listed.Jobs[0].AllocationStartTime, listedV2.Jobs[0].GetFull().AllocationStartTime)
+	require.Nil(t, listedV2.Jobs[1].GetFull().AllocationStartTime)
 }

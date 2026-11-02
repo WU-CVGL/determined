@@ -49,7 +49,13 @@ func (a *apiServer) GetJobs(
 		req.Limit = 100
 	}
 
-	return resp, api.Paginate(&resp.Pagination, &resp.Jobs, req.Offset, req.Limit)
+	if err = api.Paginate(&resp.Pagination, &resp.Jobs, req.Offset, req.Limit); err != nil {
+		return nil, err
+	}
+	if err = enrichJobAllocationStartTimes(ctx, resp.Jobs); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 // GetJobsV2 retrieves a list of jobs for a resource pool.
@@ -98,7 +104,28 @@ func (a *apiServer) GetJobsV2(
 		req.Limit = 100
 	}
 
-	return resp, api.Paginate(&resp.Pagination, &resp.Jobs, req.Offset, req.Limit)
+	if err = api.Paginate(&resp.Pagination, &resp.Jobs, req.Offset, req.Limit); err != nil {
+		return nil, err
+	}
+	// Limited jobs retain their omitted metadata, including the assignment timestamp.
+	fullJobs := make([]*jobv1.Job, 0, len(resp.Jobs))
+	for _, item := range resp.Jobs {
+		if full := item.GetFull(); full != nil {
+			fullJobs = append(fullJobs, full)
+		}
+	}
+	if err = enrichJobAllocationStartTimes(ctx, fullJobs); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func enrichJobAllocationStartTimes(ctx context.Context, jobs []*jobv1.Job) error {
+	starts := make([]allocationStartTarget, 0, len(jobs))
+	for _, item := range jobs {
+		starts = append(starts, allocationStartTarget{item.JobId, &item.AllocationStartTime})
+	}
+	return enrichAllocationStartTimes(ctx, starts, allocationStartJob)
 }
 
 // GetJobQueueStats retrieves job queue stats for a set of resource pools.

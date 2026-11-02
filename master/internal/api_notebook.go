@@ -93,7 +93,7 @@ func (a *apiServer) GetNotebooks(
 	for _, item := range resp.Notebooks {
 		starts = append(starts, allocationStartTarget{item.Id, &item.AllocationStartTime})
 	}
-	if err = enrichAllocationStartTimes(ctx, starts, false); err != nil {
+	if err = enrichAllocationStartTimes(ctx, starts, allocationStartTask); err != nil {
 		return nil, err
 	}
 	return resp, nil

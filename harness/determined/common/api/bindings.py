@@ -8026,6 +8026,7 @@ class v1Job(Printable):
     """Job represents a user submitted work that is not in a terminal
     state.
     """
+    allocationStartTime: "typing.Optional[str]" = None
     placement: "typing.Optional[typing.Sequence[v1JobPlacement]]" = None
     priority: "typing.Optional[int]" = None
     progress: "typing.Optional[float]" = None
@@ -8047,6 +8048,7 @@ class v1Job(Printable):
         type: "jobv1Type",
         username: str,
         workspaceId: int,
+        allocationStartTime: "typing.Union[str, None, Unset]" = _unset,
         placement: "typing.Union[typing.Sequence[v1JobPlacement], None, Unset]" = _unset,
         priority: "typing.Union[int, None, Unset]" = _unset,
         progress: "typing.Union[float, None, Unset]" = _unset,
@@ -8065,6 +8067,8 @@ class v1Job(Printable):
         self.type = type
         self.username = username
         self.workspaceId = workspaceId
+        if not isinstance(allocationStartTime, Unset):
+            self.allocationStartTime = allocationStartTime
         if not isinstance(placement, Unset):
             self.placement = placement
         if not isinstance(priority, Unset):
@@ -8093,6 +8097,8 @@ class v1Job(Printable):
             "username": obj["username"],
             "workspaceId": obj["workspaceId"],
         }
+        if "allocationStartTime" in obj:
+            kwargs["allocationStartTime"] = obj["allocationStartTime"]
         if "placement" in obj:
             kwargs["placement"] = [v1JobPlacement.from_json(x) for x in obj["placement"]] if obj["placement"] is not None else None
         if "priority" in obj:
@@ -8121,6 +8127,8 @@ class v1Job(Printable):
             "username": self.username,
             "workspaceId": self.workspaceId,
         }
+        if not omit_unset or "allocationStartTime" in vars(self):
+            out["allocationStartTime"] = self.allocationStartTime
         if not omit_unset or "placement" in vars(self):
             out["placement"] = None if self.placement is None else [x.to_json(omit_unset) for x in self.placement]
         if not omit_unset or "priority" in vars(self):

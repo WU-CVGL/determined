@@ -6113,6 +6113,12 @@ export interface V1Job {
      * @memberof V1Job
      */
     placement?: Array<V1JobPlacement>;
+    /**
+     * First resource assignment across the job's allocations, supplied by the job queue list APIs. Unset if no allocation has received resources.
+     * @type {Date | DateString}
+     * @memberof V1Job
+     */
+    allocationStartTime?: Date | DateString;
 }
 /**
  * The slots a job holds on one agent.
