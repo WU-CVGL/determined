@@ -149,22 +149,22 @@ func TestShellManagerLifecycle(t *testing.T) {
 
 	// The SSH key of any task with an sshd: every shell, and another task launched with keys and
 	// an sshd port, but not a task with keys alone.
-	key, err = DefaultCmdService.GetSSHPrivateKey(cmd1.Id)
+	target, err := DefaultCmdService.ShellTerminalTarget(model.TaskID(cmd1.Id))
 	require.NoError(t, err)
-	require.Equal(t, "pass", key)
-	_, err = DefaultCmdService.GetSSHPrivateKey(launchCommand(t, db).Id)
-	require.Equal(t, codes.NotFound, status.Code(err))
-	_, err = DefaultCmdService.GetSSHPrivateKey(uuid.NewString())
-	require.Equal(t, codes.NotFound, status.Code(err))
+	require.Equal(t, "pass", string(target.PrivateKey))
+	_, err = DefaultCmdService.ShellTerminalTarget(model.TaskID(launchCommand(t, db).Id))
+	require.ErrorIs(t, err, ErrShellTerminalNotFound)
+	_, err = DefaultCmdService.ShellTerminalTarget(model.TaskID(uuid.NewString()))
+	require.ErrorIs(t, err, ErrShellTerminalNotFound)
 	req := CreateMockGenericReq(t, db)
 	req.Spec.Keys = &ssh.PrivateAndPublicKeys{}
 	req.Spec.SSHDPort = 2222
 	withSSHD, err := DefaultCmdService.LaunchGenericCommand(
 		model.TaskTypeCommand, model.JobTypeCommand, req)
 	require.NoError(t, err)
-	key, err = DefaultCmdService.GetSSHPrivateKey(withSSHD.ToV1Command().Id)
+	target, err = DefaultCmdService.ShellTerminalTarget(model.TaskID(withSSHD.ToV1Command().Id))
 	require.NoError(t, err)
-	require.Equal(t, "pass", key)
+	require.Equal(t, "pass", string(target.PrivateKey))
 
 	// Launch another Shell.
 	cmd2 := launchShell(t, db)

@@ -406,20 +406,6 @@ func (cs *CommandService) GetShellPrivateKey(shellID string) (string, error) {
 	return c.ShellPrivateKey(), nil
 }
 
-// GetSSHPrivateKey returns the SSH private key of any NTSC with an sshd that the master can log in
-// to, such as a shell. Callers must make sure that the requesting user owns the task or is an
-// admin.
-func (cs *CommandService) GetSSHPrivateKey(taskID string) (string, error) {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
-	c, err := cs.getSSHTask(model.TaskID(taskID))
-	if err != nil {
-		return "", api.NotFoundErrs("task", taskID, true)
-	}
-	return c.ShellPrivateKey(), nil
-}
-
 // GetTensorboards returns all tbs in the command service registry matching the workspace ID.
 func (cs *CommandService) GetTensorboards(req *apiv1.GetTensorboardsRequest) (*apiv1.GetTensorboardsResponse, error) {
 	cs.mu.Lock()

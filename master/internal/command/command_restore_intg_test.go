@@ -276,9 +276,7 @@ func TestRestoreQueuedShellFindsSSHD(t *testing.T) {
 				return target.SSHAddr != ""
 			}, 5*time.Second, 10*time.Millisecond)
 			require.Equal(t, tc.want, target.SSHAddr)
-			key, err := DefaultCmdService.GetSSHPrivateKey(shell.taskID.String())
-			require.NoError(t, err)
-			require.Equal(t, *shell.Metadata.PrivateKey, key)
+			require.Equal(t, *shell.Metadata.PrivateKey, string(target.PrivateKey))
 		})
 	}
 }
