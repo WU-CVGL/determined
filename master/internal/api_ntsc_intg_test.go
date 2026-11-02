@@ -249,6 +249,32 @@ func TestAuthZCanTerminateNSC(t *testing.T) {
 	require.NotEqual(t, codes.PermissionDenied, status.Code(err))
 }
 
+// signalFailingAllocations is an allocation service that cannot signal allocations.
+type signalFailingAllocations struct{ task.AllocationService }
+
+func (signalFailingAllocations) Signal(model.AllocationID, task.AllocationSignal, string) error {
+	return fmt.Errorf("signal failed")
+}
+
+// A shell kill that fails returns the error.
+func TestKillShellError(t *testing.T) {
+	api, authz, curUser, ctx := setupNTSCAuthzTest(t)
+	authz.On("CanGetNSC", mock.Anything, curUser, mock.Anything).Return(nil)
+	authz.On("CanTerminateNSC", mock.Anything, curUser, mock.Anything).Return(nil)
+	authz.On("CanControlGenericTask", mock.Anything, curUser, mock.Anything,
+		mock.Anything).Return(nil)
+	shell, err := command.DefaultCmdService.LaunchGenericCommand(
+		model.TaskTypeShell, model.JobTypeShell, mockGenericReq(t, api.m.db))
+	require.NoError(t, err)
+
+	allocations := task.DefaultService
+	task.DefaultService = signalFailingAllocations{allocations}
+	t.Cleanup(func() { task.DefaultService = allocations })
+	resp, err := api.KillShell(ctx, &apiv1.KillShellRequest{ShellId: shell.ToV1Shell().Id})
+	require.Equal(t, codes.Internal, status.Code(err))
+	require.Nil(t, resp)
+}
+
 func TestNSCControlChecksOwnerBeforeMutation(t *testing.T) {
 	api, authz, curUser, ctx := setupNTSCAuthzTest(t)
 	authz.On("CanGetNSC", mock.Anything, curUser, mock.Anything).Return(nil)
