@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -276,9 +275,8 @@ func (c Config) Printable() ([]byte, error) {
 		c.Scim.Auth.BasicAuthConfig = &auth
 	}
 
-	// Validate refuses credentials in url_template, but the configuration is printed before it is
-	// validated.
-	if strings.Contains(configCopy.Interactive.CodeServer.URLTemplate, "@") {
+	// A mirror's URL may carry credentials, in its query for one.
+	if configCopy.Interactive.CodeServer.URLTemplate != DefaultCodeServerURLTemplate {
 		configCopy.Interactive.CodeServer.URLTemplate = hiddenValue
 	}
 

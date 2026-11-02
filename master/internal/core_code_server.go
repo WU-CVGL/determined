@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -242,17 +243,18 @@ func (a *codeServerArtifacts) verify(arch, sum string) error {
 func (a *codeServerArtifacts) download(arch, path string) (err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), codeServerFetchTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.conf.URL(arch), nil)
+	rawURL := a.conf.URL(arch)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return fmt.Errorf("%w: %w", errCodeServerUpstream, err)
+		return fmt.Errorf("%w: invalid URL %s", errCodeServerUpstream, redactURL(rawURL))
 	}
 	resp, err := a.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %w", errCodeServerUpstream, err)
+		return codeServerUpstreamError(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%w: %s answered %s", errCodeServerUpstream, a.conf.URL(arch), resp.Status)
+		return fmt.Errorf("%w: %s answered %s", errCodeServerUpstream, redactURL(rawURL), resp.Status)
 	}
 
 	// A .tmp file left by a master that stopped during a download is overwritten.
@@ -269,7 +271,7 @@ func (a *codeServerArtifacts) download(arch, path string) (err error) {
 	h := sha256.New()
 	if _, err := io.Copy(io.MultiWriter(f, h), resp.Body); err != nil {
 		_ = f.Close()
-		return fmt.Errorf("%w: %w", errCodeServerUpstream, err)
+		return codeServerUpstreamError(err)
 	}
 	if err := syncAndClose(f); err != nil {
 		return err
@@ -283,6 +285,26 @@ func (a *codeServerArtifacts) download(arch, path string) (err error) {
 	}
 	log.Infof("downloaded %s, SHA-256 %s", filepath.Base(path), sum)
 	return writeChecksumFile(path, sum)
+}
+
+// codeServerUpstreamError wraps an error of the HTTP client, naming the URL in its redacted form.
+func codeServerUpstreamError(err error) error {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return fmt.Errorf("%w: %s %s: %w", errCodeServerUpstream, urlErr.Op, redactURL(urlErr.URL),
+			urlErr.Err)
+	}
+	return fmt.Errorf("%w: %w", errCodeServerUpstream, err)
+}
+
+// redactURL returns the scheme, host and path of raw, without credentials in its userinfo or its
+// query, for logs and errors.
+func redactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "(invalid URL)"
+	}
+	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path, RawPath: u.RawPath}).String()
 }
 
 func hashFile(path string) (string, error) {

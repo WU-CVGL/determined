@@ -326,3 +326,50 @@ func TestCodeServerRange(t *testing.T) {
 	rec = cst.get("/det/code-server/4.144.0/" + testCodeServerAMD64)
 	require.Equal(t, strconv.Itoa(len(content)), rec.Header().Get("Content-Length"))
 }
+
+func TestRedactURL(t *testing.T) {
+	for _, tc := range [][2]string{
+		{"https://mirror.example/releases/4.144.0/amd64.tar.gz", "https://mirror.example/releases/4.144.0/amd64.tar.gz"},
+		{"https://user:secret@mirror.example:8443/a/b.tar.gz?token=secret#f", "https://mirror.example:8443/a/b.tar.gz"},
+		{"http://mirror.example/a%2Fb.tar.gz?X-Signature=secret", "http://mirror.example/a%2Fb.tar.gz"},
+		{"https://mirror.example?token=secret", "https://mirror.example"},
+		{"https://user:secret@mirror.example/%zz?token=secret", "(invalid URL)"},
+	} {
+		require.Equal(t, tc[1], redactURL(tc[0]), tc[0])
+	}
+}
+
+func TestCodeServerUpstreamErrorsRedactURL(t *testing.T) {
+	const secret = "query-secret"
+	t.Run("status", func(t *testing.T) {
+		cst := newCodeServerTest(t, func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "unavailable", http.StatusInternalServerError)
+		}, func(c *config.CodeServerConfig) { c.URLTemplate += "?token=" + secret })
+		err := cst.artifacts.prepare("amd64")
+		require.ErrorIs(t, err, errCodeServerUpstream)
+		require.Contains(t, err.Error(), "/code-server-4.144.0-linux-amd64.tar.gz answered 500")
+		require.NotContains(t, err.Error(), secret)
+	})
+
+	t.Run("network", func(t *testing.T) {
+		cst := newCodeServerTest(t, nil, func(c *config.CodeServerConfig) {
+			closed := httptest.NewServer(http.NotFoundHandler())
+			closed.Close()
+			c.URLTemplate = closed.URL + "/{version}/{arch}?token=" + secret
+		})
+		err := cst.artifacts.prepare("amd64")
+		require.ErrorIs(t, err, errCodeServerUpstream)
+		require.Contains(t, err.Error(), "/4.144.0/amd64: ")
+		require.NotContains(t, err.Error(), secret)
+	})
+
+	t.Run("redirect", func(t *testing.T) {
+		cst := newCodeServerTest(t, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, r.URL.String(), http.StatusFound)
+		}, func(c *config.CodeServerConfig) { c.URLTemplate += "?token=" + secret })
+		err := cst.artifacts.prepare("amd64")
+		require.ErrorIs(t, err, errCodeServerUpstream)
+		require.Contains(t, err.Error(), "redirects")
+		require.NotContains(t, err.Error(), secret)
+	})
+}
