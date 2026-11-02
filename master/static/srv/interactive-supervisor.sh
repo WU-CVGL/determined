@@ -19,6 +19,11 @@
 #   signal.
 # - Each service runs in its own process group, which a stop signals: SIGTERM (or the signal that
 #   the supervisor got), then SIGKILL after supervisor_stop_grace_seconds.
+# - A service has stopped once its process group is empty. When its unit's subshell exits, with
+#   the service's exit status, the supervisor stops what is left of the group as a stop does and
+#   logs the exit once the group is empty. The subshell only stops its own helpers, since it
+#   cannot kill its own group.
+# - Processes that leave the group on purpose (setsid) belong to the container's lifetime.
 
 source /run/determined/task-setup.sh
 
@@ -149,46 +154,118 @@ start_service() {
     service_pids[$name]=$!
 }
 
-# Reap the services that have exited and log each. The primary one ends the task. The supervisor's
-# waits drop bash's reports of killed jobs, which are not part of the task log.
-reap_services() {
-    local name pid status
-    for name in "${!service_pids[@]}"; do
-        pid=${service_pids[$name]}
-        if kill -0 "$pid" 2>/dev/null; then
-            continue
-        fi
-        wait "$pid" 2>/dev/null
-        status=$?
-        unset "service_pids[$name]"
-        printf '[%s] exited %d\n' "$name" "$status" >&2
-        if [[ $name == "$supervisor_primary" ]]; then
-            stop_services TERM
-            exit "$status"
+# Print the processes of the process group $1, without zombies, which have exited and only wait
+# for their parent.
+group_members() {
+    local stat line state
+    # Fails for a group without processes, also without zombies.
+    kill -0 -- "-$1" 2>/dev/null || return 0
+    for stat in /proc/[0-9]*/stat; do
+        line=
+        read -r line 2>/dev/null <"$stat"
+        # pid (comm) state ppid pgrp ...; comm may contain ") ".
+        line=${line##*) }
+        state=${line%% *}
+        line=${line#* }
+        line=${line#* }
+        if [[ ${line%% *} == "$1" && $state != [ZX] ]]; then
+            stat=${stat%/stat}
+            printf '%s\n' "${stat#/proc/}"
         fi
     done
 }
 
-stop_services() {
-    local signal=$1 name i
-    for name in "${!service_pids[@]}"; do
-        kill -s "$signal" -- "-${service_pids[$name]}" 2>/dev/null
-    done
-    for ((i = 0; i < supervisor_stop_grace_seconds * 10 && ${#service_pids[@]} > 0; i++)); do
-        sleep 0.1
-        for name in "${!service_pids[@]}"; do
-            if ! kill -0 "${service_pids[$name]}" 2>/dev/null; then
-                wait "${service_pids[$name]}" 2>/dev/null
-                printf '[%s] exited %d\n' "$name" "$?" >&2
-                unset "service_pids[$name]"
+declare -A service_status=()
+
+# Whether the service $1 has stopped: its subshell has exited, which saves its status in
+# service_status, and its process group is empty.
+service_stopped() {
+    local pid=${service_pids[$1]}
+    if [[ -z ${service_status[$1]-} ]]; then
+        kill -0 "$pid" 2>/dev/null && return 1
+        wait "$pid" 2>/dev/null
+        service_status[$1]=$?
+    fi
+    [[ -z $(group_members "$pid") ]]
+}
+
+# Wait up to $1 seconds for the services in supervisor_stopping to stop, or until a stop signal
+# when $2 is set. Log each that stops and keep the others in supervisor_stopping.
+await_services() {
+    local name i
+    local -a left
+    for ((i = 0; ; i++)); do
+        left=()
+        for name in "${supervisor_stopping[@]}"; do
+            if service_stopped "$name"; then
+                printf '[%s] exited %d\n' "$name" "${service_status[$name]}" >&2
+                unset "service_pids[$name]" "service_status[$name]"
+            else
+                left+=("$name")
             fi
         done
+        supervisor_stopping=("${left[@]}")
+        if ((${#left[@]} == 0 || i >= $1 * 10)) || [[ -n $2 && -n $stop_signal ]]; then
+            return 0
+        fi
+        sleep 0.1
     done
-    for name in "${!service_pids[@]}"; do
+}
+
+# Stop the services $3... that run or have a process group left: the signal $1 to each group,
+# SIGKILL after the grace. With $2 set, a stop signal ends the grace, and the services stay
+# tracked for the stop that follows.
+stop_services() {
+    local signal=$1 interruptible=$2 name
+    shift 2
+    supervisor_stopping=()
+    for name; do
+        if [[ -n ${service_pids[$name]-} ]]; then
+            supervisor_stopping+=("$name")
+            kill -s "$signal" -- "-${service_pids[$name]}" 2>/dev/null
+        fi
+    done
+    await_services "$supervisor_stop_grace_seconds" "$interruptible"
+    if [[ -n $interruptible && -n $stop_signal ]]; then
+        return 0
+    fi
+    for name in "${supervisor_stopping[@]}"; do
         kill -s KILL -- "-${service_pids[$name]}" 2>/dev/null
-        wait "${service_pids[$name]}" 2>/dev/null
-        printf '[%s] exited %d\n' "$name" "$?" >&2
-        unset "service_pids[$name]"
+    done
+    await_services 1 ""
+    # Only a process that cannot be killed is left; the service has exited all the same.
+    for name in "${supervisor_stopping[@]}"; do
+        if [[ -z ${service_status[$name]-} ]]; then
+            wait "${service_pids[$name]}" 2>/dev/null
+            service_status[$name]=$?
+        fi
+        printf '[%s] exited %d\n' "$name" "${service_status[$name]}" >&2
+        unset "service_pids[$name]" "service_status[$name]"
+    done
+}
+
+# Stop the services whose subshells have exited, and log each. The primary one ends the task and
+# stops the others. The supervisor's waits drop bash's reports of killed jobs, which are not part
+# of the task log. A scan starts over after a stop, which takes time.
+reap_services() {
+    local name status again=1
+    while [[ -n $again ]]; do
+        again=
+        for name in "${supervisor_services[@]}"; do
+            if [[ -z ${service_pids[$name]-} ]] || kill -0 "${service_pids[$name]}" 2>/dev/null; then
+                continue
+            fi
+            if [[ $name == "$supervisor_primary" ]]; then
+                service_stopped "$name"
+                status=${service_status[$name]}
+                stop_services TERM "" "${supervisor_services[@]}"
+                exit "$status"
+            fi
+            stop_services TERM 1 "$name"
+            [[ -z $stop_signal ]] || return 0
+            again=1
+            break
+        done
     done
 }
 
@@ -211,5 +288,5 @@ while [[ -z $stop_signal ]]; do
     reap_services
 done
 
-stop_services "$stop_signal"
+stop_services "$stop_signal" "" "${supervisor_services[@]}"
 exit $((128 + $(kill -l "$stop_signal")))

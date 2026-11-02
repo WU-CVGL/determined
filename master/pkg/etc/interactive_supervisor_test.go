@@ -443,6 +443,91 @@ echo "$!" >"$ORDER_FILE.q-helper"
 	require.Equal(t, "[p] exited 143", lines[len(lines)-1])
 }
 
+// leaveChild is a service that starts a process in its process group, with its own standard
+// descriptors, writes its pid to $1 and exits with $2.
+const leaveChild = `bash -c 'sleep 300 </dev/null >/dev/null 2>&1 & echo "$!" >"$1"; exit "$2"' bash `
+
+// reapLeftChild checks that the process whose pid is in pidFile has exited, as a zombie of this
+// process, the child subreaper, reaps it and returns the signal that killed it.
+func reapLeftChild(t *testing.T, pidFile string) syscall.Signal {
+	t.Helper()
+	b, err := os.ReadFile(pidFile) //nolint:gosec
+	require.NoError(t, err)
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	require.NoError(t, err)
+	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	require.NoError(t, err)
+	end := bytes.LastIndexByte(stat, ')')
+	require.Equal(t, "Z", strings.Fields(string(stat[end+1:]))[0], "the left process has exited")
+	var ws unix.WaitStatus
+	_, err = unix.Wait4(pid, &ws, 0, nil)
+	require.NoError(t, err)
+	require.True(t, ws.Signaled())
+	return ws.Signal()
+}
+
+// What a service that is not the primary one leaves in its process group is stopped before its exit
+// is logged, and the task keeps running.
+func TestSupervisorStopsWhatOtherServiceLeaves(t *testing.T) {
+	s := newSupervisorRun(t, "p,q")
+	s.unit("p", readyLog+`{ bash -c 'echo up >&2; exec sleep 300'; } 2> >(log)`+"\n")
+	child := filepath.Join(s.dir, "child")
+	s.unit("q", leaveChild+fmt.Sprintf("%q 5\n", child))
+	s.start()
+	s.waitForLog("[q] exited 5")
+	require.Equal(t, unix.SIGTERM, reapLeftChild(t, child))
+	s.waitForLog("[p] ready")
+	require.True(t, s.running())
+	require.Empty(t, orphans(t, s.cmd.Process.Pid))
+
+	s.signal(syscall.SIGTERM)
+	require.Equal(t, 128+int(syscall.SIGTERM), s.wait())
+	require.ElementsMatch(t,
+		[]string{"[p] start", "[q] start", "[p] ready", "[q] exited 5", "[p] exited 143"}, s.logLines())
+}
+
+// What the primary service leaves in its process group is stopped, and the task ends with the
+// service's exit status.
+func TestSupervisorStopsWhatPrimaryServiceLeaves(t *testing.T) {
+	s := newSupervisorRun(t, "p,q")
+	child := filepath.Join(s.dir, "child")
+	s.unit("p", waitUntilOrder("q up")+leaveChild+fmt.Sprintf("%q 3\n", child))
+	s.unit("q", "echo 'q up' >>\"$ORDER_FILE\"\nsleep 300\n")
+	s.start()
+	waitFor(t, "the supervisor's exit", func() bool { return !s.running() })
+	require.Equal(t, unix.SIGTERM, reapLeftChild(t, child))
+	require.Equal(t, 3, s.wait())
+	require.Equal(t, []string{"[p] start", "[q] start", "[p] exited 3", "[q] exited 143"}, s.logLines())
+}
+
+// On a stop, a process that a service leaves in its process group and that ignores the signal is
+// killed after the grace period, and the service keeps its exit status.
+func TestSupervisorStopKillsWhatServiceLeaves(t *testing.T) {
+	s := newSupervisorRun(t, "p,q")
+	service := filepath.Join(s.dir, "service")
+	writeScript(t, service, `
+bash -c 'trap "" TERM; echo "$$" >"$1.tmp"; mv "$1.tmp" "$1"; exec sleep 300' bash "$1" \
+    </dev/null >/dev/null 2>&1 &
+for _ in $(seq 400); do [[ -e $1 ]] && break; sleep 0.05; done
+trap 'exit 0' TERM
+echo 'q up' >>"$ORDER_FILE"
+# Without this shell's report of the stopped sleep.
+exec 2>/dev/null
+while :; do sleep 0.05; done
+`)
+	child := filepath.Join(s.dir, "child")
+	s.unit("p", "sleep 300\n")
+	s.unit("q", fmt.Sprintf("%q %q\n", service, child))
+	s.start()
+	s.waitForOrder("q up")
+	s.signal(syscall.SIGTERM)
+	waitFor(t, "the supervisor's exit", func() bool { return !s.running() })
+	require.Equal(t, unix.SIGKILL, reapLeftChild(t, child))
+	require.Equal(t, 128+int(syscall.SIGTERM), s.wait())
+	require.ElementsMatch(t,
+		[]string{"[p] start", "[q] start", "[p] exited 143", "[q] exited 0"}, s.logLines())
+}
+
 // SIGINT, SIGTERM and SIGHUP reach every service, and the supervisor then exits as if killed by the
 // signal.
 func TestSupervisorForwardsStopSignals(t *testing.T) {
