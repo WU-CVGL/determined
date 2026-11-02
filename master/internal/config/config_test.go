@@ -583,6 +583,7 @@ func TestPrintableConfig(t *testing.T) {
 	registryAuthSecret := "i_love_cellos"
 	startupScriptSecret := "my_startup_script_secret"
 	containerStartupScriptSecret := "my_container_startup_secret"
+	codeServerMirrorSecret := "my_code_server_mirror_secret"
 
 	raw := fmt.Sprintf(`
 db:
@@ -623,8 +624,13 @@ additional_resource_managers:
           type: gcp
           startup_script: %v
           container_startup_script: %v
+
+interactive:
+  code_server:
+    url_template: https://mirror:%v@mirror.example/{version}/{arch}.tar.gz
 `, s3Key, s3Secret, masterSecret, webuiSecret, registryAuthSecret, startupScriptSecret,
-		containerStartupScriptSecret, startupScriptSecret, containerStartupScriptSecret)
+		containerStartupScriptSecret, startupScriptSecret, containerStartupScriptSecret,
+		codeServerMirrorSecret)
 
 	provConfig := provconfig.DefaultConfig()
 	provConfig.StartupScript = startupScriptSecret
@@ -659,6 +665,10 @@ additional_resource_managers:
 			NetworkMode:       "bridge",
 			PreemptionTimeout: model.DefaultPreemptionTimeout,
 		},
+		Interactive: InteractiveConfig{CodeServer: CodeServerConfig{
+			URLTemplate: "https://mirror:" + codeServerMirrorSecret +
+				"@mirror.example/{version}/{arch}.tar.gz",
+		}},
 		ResourceConfig: ResourceConfig{
 			AdditionalResourceManagersInternal: []*ResourceManagerWithPoolsConfig{
 				{
@@ -705,6 +715,7 @@ additional_resource_managers:
 	assert.Assert(t, !bytes.Contains(printable, []byte(registryAuthSecret)))
 	assert.Assert(t, !bytes.Contains(printable, []byte(startupScriptSecret)))
 	assert.Assert(t, !bytes.Contains(printable, []byte(containerStartupScriptSecret)))
+	assert.Assert(t, !bytes.Contains(printable, []byte(codeServerMirrorSecret)))
 
 	// Ensure that the original was unmodified.
 	assert.DeepEqual(t, unmarshaled, expected)

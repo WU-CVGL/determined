@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -273,6 +274,12 @@ func (c Config) Printable() ([]byte, error) {
 		auth.Username = hiddenValue
 		auth.Password = hiddenValue
 		c.Scim.Auth.BasicAuthConfig = &auth
+	}
+
+	// Validate refuses credentials in url_template, but the configuration is printed before it is
+	// validated.
+	if strings.Contains(configCopy.Interactive.CodeServer.URLTemplate, "@") {
+		configCopy.Interactive.CodeServer.URLTemplate = hiddenValue
 	}
 
 	configCopy.CheckpointStorage = configCopy.CheckpointStorage.Printable()
