@@ -68,6 +68,16 @@ func (s stoppingMasterAllocations) StartAllocation(
 func restartWithQueuedShell(t *testing.T, heartbeat time.Time, configure ...func(*CreateGeneric)) (
 	*Command, *mocks.ResourceManager, *queue.Queue[sproto.ResourcesEvent],
 ) {
+	return restartWithQueuedTask(t, heartbeat, model.TaskTypeShell, model.JobTypeShell, configure...)
+}
+
+// restartWithQueuedTask is restartWithQueuedShell for a task of any type.
+func restartWithQueuedTask(
+	t *testing.T, heartbeat time.Time, taskType model.TaskType, jobType model.JobType,
+	configure ...func(*CreateGeneric),
+) (
+	*Command, *mocks.ResourceManager, *queue.Queue[sproto.ResourcesEvent],
+) {
 	// The restore picks up every command in the database that has not ended.
 	newDB, dropDB := internaldb.MustResolveNewPostgresDatabase(t)
 	t.Cleanup(func() {
@@ -89,7 +99,7 @@ func restartWithQueuedShell(t *testing.T, heartbeat time.Time, configure ...func
 	for _, c := range configure {
 		c(req)
 	}
-	shell, err := cs.LaunchGenericCommand(model.TaskTypeShell, model.JobTypeShell, req)
+	shell, err := cs.LaunchGenericCommand(taskType, jobType, req)
 	require.NoError(t, err)
 	state, err := task.DefaultService.State(shell.allocationID)
 	require.NoError(t, err)
@@ -277,6 +287,105 @@ func TestRestoreQueuedShellFindsSSHD(t *testing.T) {
 			}, 5*time.Second, 10*time.Millisecond)
 			require.Equal(t, tc.want, target.SSHAddr)
 			require.Equal(t, *shell.Metadata.PrivateKey, string(target.PrivateKey))
+		})
+	}
+}
+
+// A restored task gets the proxies it had: a task saved without service records, as every task was
+// before the master recorded them, by its type, and a shell with records by them, with the
+// services' environment.
+func TestRestoreQueuedTaskKeepsProxyPorts(t *testing.T) {
+	sshd := expconf.ProxyPort{
+		RawProxyPort:        3210,
+		RawProxyTCP:         ptrs.Ptr(true),
+		RawUnauthenticated:  ptrs.Ptr(true),
+		RawDefaultServiceID: ptrs.Ptr(true),
+	}
+	userPort := model.ProxyPortsConfig{{ProxyPort: 8080}}
+	for _, tc := range []struct {
+		name      string
+		taskType  model.TaskType
+		jobType   model.JobType
+		configure func(*CreateGeneric)
+		want      func(taskID string) []*sproto.ProxyPortConfig
+		wantEnv   func(taskID string) map[string]string
+	}{
+		{
+			name:     "shell without records",
+			taskType: model.TaskTypeShell,
+			jobType:  model.JobTypeShell,
+			configure: func(req *CreateGeneric) {
+				req.Spec.Base.ExtraProxyPorts = expconf.ProxyPortsConfig{sshd}
+				req.Spec.Config.Environment.ProxyPorts = userPort
+			},
+			want: func(taskID string) []*sproto.ProxyPortConfig {
+				return []*sproto.ProxyPortConfig{
+					{ServiceID: taskID, Port: 3210, ProxyTCP: true, Unauthenticated: true},
+					{ServiceID: taskID + ":8080", Port: 8080},
+				}
+			},
+			wantEnv: func(string) map[string]string { return map[string]string{} },
+		},
+		{
+			name:     "notebook without records",
+			taskType: model.TaskTypeNotebook,
+			jobType:  model.JobTypeNotebook,
+			configure: func(req *CreateGeneric) {
+				req.Spec.Base.ExtraProxyPorts = expconf.ProxyPortsConfig{
+					{RawProxyPort: 2950, RawDefaultServiceID: ptrs.Ptr(true)},
+				}
+				req.Spec.Config.Environment.ProxyPorts = userPort
+			},
+			want: func(taskID string) []*sproto.ProxyPortConfig {
+				return []*sproto.ProxyPortConfig{
+					{ServiceID: taskID, Port: 2950, TLS: true},
+					{ServiceID: taskID + ":8080", Port: 8080, TLS: true},
+				}
+			},
+			wantEnv: func(string) map[string]string { return map[string]string{} },
+		},
+		{
+			name:     "shell with records",
+			taskType: model.TaskTypeShell,
+			jobType:  model.JobTypeShell,
+			configure: func(req *CreateGeneric) {
+				req.Spec.AddService(tasks.InteractiveService{
+					Name: model.ServiceSSH, Port: 3210, DefaultServiceID: true, ProxyTCP: true,
+					Unauthenticated: true,
+				})
+				req.Spec.AddService(tasks.InteractiveService{
+					Name: model.ServiceJupyter, Port: 2950, TLS: true, Exec: true,
+				})
+				req.Spec.Config.Environment.ProxyPorts = userPort
+			},
+			want: func(taskID string) []*sproto.ProxyPortConfig {
+				return []*sproto.ProxyPortConfig{
+					{ServiceID: taskID, Port: 3210, ProxyTCP: true, Unauthenticated: true},
+					{ServiceID: taskID + ":2950", Port: 2950, TLS: true, Exec: true},
+					{ServiceID: taskID + ":8080", Port: 8080},
+				}
+			},
+			wantEnv: func(taskID string) map[string]string {
+				return map[string]string{
+					tasks.ServicesEnvVar:        "ssh,jupyter",
+					tasks.NotebookBaseURLEnvVar: "/proxy/" + taskID + ":2950/",
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			restored, restartedRM, _ := restartWithQueuedTask(t, time.Now().UTC().Add(-time.Hour),
+				tc.taskType, tc.jobType, tc.configure)
+			taskID := string(restored.taskID)
+			restartedRM.AssertCalled(t, "Allocate", mock.MatchedBy(func(req sproto.AllocateRequest) bool {
+				return req.AllocationID == restored.allocationID
+			}))
+			for _, call := range restartedRM.Calls {
+				if call.Method == "Allocate" {
+					require.Equal(t, tc.want(taskID), call.Arguments.Get(0).(sproto.AllocateRequest).ProxyPorts)
+				}
+			}
+			require.Equal(t, tc.wantEnv(taskID), restored.Base.ExtraEnvVars)
 		})
 	}
 }

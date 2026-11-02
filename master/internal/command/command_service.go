@@ -15,6 +15,7 @@ import (
 	"github.com/determined-ai/determined/master/pkg/logger"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/protoutils"
+	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 )
 
@@ -92,6 +93,38 @@ func (cs *CommandService) LaunchGenericCommand(
 	jobType model.JobType,
 	req *CreateGeneric,
 ) (*Command, error) {
+	return cs.launch(taskType, jobType, req, nil)
+}
+
+// LaunchNotebookCommand creates notebook commands and persists them to the database.
+func (cs *CommandService) LaunchNotebookCommand(
+	req *CreateGeneric,
+	user *model.User,
+) (*Command, error) {
+	return cs.launch(model.TaskTypeNotebook, model.JobTypeNotebook, req, user)
+}
+
+// LaunchShellCommand creates shell commands and persists them to the database. A shell with the
+// jupyter service gets a notebook session for user, as a notebook does.
+func (cs *CommandService) LaunchShellCommand(
+	req *CreateGeneric,
+	user *model.User,
+) (*Command, error) {
+	var jupyterUser *model.User
+	if _, ok := req.Spec.Service(model.ServiceJupyter); ok {
+		jupyterUser = user
+	}
+	return cs.launch(model.TaskTypeShell, model.JobTypeShell, req, jupyterUser)
+}
+
+// launch creates a command and persists it to the database. With jupyterUser, the command runs
+// JupyterLab, whose token is a notebook session of that user.
+func (cs *CommandService) launch(
+	taskType model.TaskType,
+	jobType model.JobType,
+	req *CreateGeneric,
+	jupyterUser *model.User,
+) (*Command, error) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	taskID := model.NewTaskID()
@@ -103,6 +136,22 @@ func (cs *CommandService) LaunchGenericCommand(
 		"job-id":    jobID,
 		"task-id":   taskID,
 		"task-type": taskType,
+	}
+
+	if jupyterUser != nil {
+		token, err := db.GenerateNotebookSessionToken(jupyterUser.ID, taskID)
+		if err != nil {
+			return nil, err
+		}
+		if req.Spec.Base.ExtraEnvVars == nil {
+			req.Spec.Base.ExtraEnvVars = map[string]string{}
+		}
+		req.Spec.Base.ExtraEnvVars[model.NotebookSessionEnvVar] = token
+		if taskType == model.TaskTypeNotebook {
+			// A notebook's JupyterLab is its default service; a shell's gets its base URL from
+			// its record.
+			req.Spec.Base.ExtraEnvVars[tasks.NotebookBaseURLEnvVar] = "/proxy/" + string(taskID) + "/"
+		}
 	}
 
 	cmd := &Command{
@@ -124,57 +173,10 @@ func (cs *CommandService) LaunchGenericCommand(
 		return nil, err
 	}
 
-	// Add it to the registry.
-	cs.commands[cmd.taskID] = cmd
-
-	return cmd, nil
-}
-
-// LaunchNotebookCommand creates notebook commands and persists them to the database.
-func (cs *CommandService) LaunchNotebookCommand(
-	req *CreateGeneric,
-	user *model.User,
-) (*Command, error) {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
-	taskID := model.NewTaskID()
-	jobID := model.NewJobID()
-	req.Spec.CommandID = string(taskID)
-	req.Spec.TaskType = model.TaskTypeNotebook
-
-	logCtx := logger.Context{
-		"job-id":    jobID,
-		"task-id":   taskID,
-		"task-type": model.TaskTypeNotebook,
-	}
-
-	token, err := db.GenerateNotebookSessionToken(user.ID, taskID)
-	if err != nil {
-		return nil, err
-	}
-	req.Spec.Base.ExtraEnvVars[model.NotebookSessionEnvVar] = token
-	cmd := &Command{
-		db: cs.db,
-		rm: cs.rm,
-
-		GenericCommandSpec: *req.Spec,
-
-		taskID:           taskID,
-		taskType:         model.TaskTypeNotebook,
-		jobType:          model.JobTypeNotebook,
-		jobID:            jobID,
-		contextDirectory: req.ContextDirectory,
-		logCtx:           logCtx,
-		syslog:           logrus.WithFields(logrus.Fields{"component": "command"}).WithFields(logCtx.Fields()),
-	}
-
-	if err := cmd.Start(context.TODO()); err != nil {
-		return nil, err
-	}
-
-	if err := db.StartNotebookSession(context.TODO(), user.ID, taskID); err != nil {
-		return nil, err
+	if jupyterUser != nil {
+		if err := db.StartNotebookSession(context.TODO(), jupyterUser.ID, taskID); err != nil {
+			return nil, err
+		}
 	}
 
 	// Add it to the registry.

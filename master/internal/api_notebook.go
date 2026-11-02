@@ -348,21 +348,12 @@ func (a *apiServer) LaunchNotebook(
 		return nil, status.Errorf(codes.InvalidArgument, "invalid notebook config: %s", err.Error())
 	}
 
-	launchReq.Spec.AdditionalFiles = archive.Archive{
-		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(jupyterDir, nil, 0o700, tar.TypeDir),
-		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(jupyterConfigDir, nil, 0o700, tar.TypeDir),
-		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(jupyterDataDir, nil, 0o700, tar.TypeDir),
-		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(jupyterRuntimeDir, nil, 0o700, tar.TypeDir),
+	launchReq.Spec.AdditionalFiles = append(
+		jupyterFiles(launchReq.Spec.Base.AgentUserGroup, notebookKey, notebookCert),
 		// A wrapper that runs the supervisor with this task's service, for whatever names it.
 		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(
 			jupyterEntrypoint,
 			etc.MustStaticFile(etc.NotebookEntrypointResource),
-			0o700,
-			tar.TypeReg,
-		),
-		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(
-			jupyterIdleCheck,
-			etc.MustStaticFile(etc.NotebookIdleCheckResource),
 			0o700,
 			tar.TypeReg,
 		),
@@ -372,25 +363,7 @@ func (a *apiServer) LaunchNotebook(
 			0o700,
 			tar.TypeReg,
 		),
-		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(
-			notebookDefaultPage,
-			etc.MustStaticFile(etc.NotebookTemplateResource),
-			0o644,
-			tar.TypeReg,
-		),
-		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(
-			jupyterKeyPath,
-			notebookKey,
-			0o600,
-			tar.TypeReg,
-		),
-		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(
-			jupyterCertPath,
-			notebookCert,
-			0o600,
-			tar.TypeReg,
-		),
-	}
+	)
 	launchReq.Spec.AdditionalFiles = append(launchReq.Spec.AdditionalFiles,
 		interactiveSupervisorFiles(launchReq.Spec.Base.AgentUserGroup)...)
 
@@ -412,4 +385,29 @@ func (a *apiServer) LaunchNotebook(
 		Config:   protoutils.ToStruct(launchReq.Spec.Config),
 		Warnings: pkgCommand.LaunchWarningToProto(launchWarnings),
 	}, nil
+}
+
+// jupyterFiles returns the run-dir files of the jupyter service: its directories, the idle check,
+// the default page, and the master-signed key and cert that JupyterLab serves HTTPS with.
+func jupyterFiles(aug *model.AgentUserGroup, key, cert []byte) archive.Archive {
+	return archive.Archive{
+		aug.OwnedArchiveItem(jupyterDir, nil, 0o700, tar.TypeDir),
+		aug.OwnedArchiveItem(jupyterConfigDir, nil, 0o700, tar.TypeDir),
+		aug.OwnedArchiveItem(jupyterDataDir, nil, 0o700, tar.TypeDir),
+		aug.OwnedArchiveItem(jupyterRuntimeDir, nil, 0o700, tar.TypeDir),
+		aug.OwnedArchiveItem(
+			jupyterIdleCheck,
+			etc.MustStaticFile(etc.NotebookIdleCheckResource),
+			0o700,
+			tar.TypeReg,
+		),
+		aug.OwnedArchiveItem(
+			notebookDefaultPage,
+			etc.MustStaticFile(etc.NotebookTemplateResource),
+			0o644,
+			tar.TypeReg,
+		),
+		aug.OwnedArchiveItem(jupyterKeyPath, key, 0o600, tar.TypeReg),
+		aug.OwnedArchiveItem(jupyterCertPath, cert, 0o600, tar.TypeReg),
+	}
 }

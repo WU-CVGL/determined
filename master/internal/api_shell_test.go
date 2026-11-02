@@ -42,4 +42,9 @@ func TestSetShellSSHD(t *testing.T) {
 	}
 	require.Equal(t, []int{port}, defaultTCP)
 	require.True(t, ports[1].Unauthenticated())
+
+	// The port is the shell's ssh service, its primary one.
+	require.Equal(t, []tasks.InteractiveService{{
+		Name: "ssh", Port: port, DefaultServiceID: true, ProxyTCP: true, Unauthenticated: true,
+	}}, spec.Services)
 }

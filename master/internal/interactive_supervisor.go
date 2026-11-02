@@ -17,7 +17,7 @@ import (
 const (
 	// interactiveServicesEnvVar names the services that the supervisor starts, comma-separated,
 	// the primary service first.
-	interactiveServicesEnvVar = "DET_SERVICES"
+	interactiveServicesEnvVar = tasks.ServicesEnvVar
 	// interactiveServiceSSH runs sshd. As the primary service it gets the supervisor's arguments.
 	interactiveServiceSSH = model.ServiceSSH
 	// interactiveServiceJupyter runs JupyterLab.

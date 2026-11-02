@@ -160,6 +160,10 @@ func (c *Command) Start(ctx context.Context) error {
 		}
 	}
 
+	// The services' environment comes from the persisted spec, as the proxies below do, so that a
+	// restore gets the same.
+	c.GenericCommandSpec.SetServicesEnv(c.taskID)
+
 	fitting := sproto.FittingRequirements{
 		SingleAgent: true, GPUTopology: c.Config.Resources.GPUTopology(),
 		GPUGroups: c.Config.Resources.GPUGroupRequests(),
@@ -175,11 +179,9 @@ func (c *Command) Start(ctx context.Context) error {
 			SlotsNeeded:         c.Config.Resources.Slots,
 			ResourcePool:        c.Config.Resources.ResourcePool,
 			FittingRequirements: fitting,
-			// Every port of a notebook is reached over HTTPS; Jupyter serves a master-signed cert.
-			ProxyPorts: sproto.NewProxyPortConfig(
-				c.GenericCommandSpec.ProxyPorts(), c.taskID, c.TaskType == model.TaskTypeNotebook),
-			IdleTimeout: idleWatcherConfig,
-			Restore:     c.restored,
+			ProxyPorts:          proxyPortConfigs(c.GenericCommandSpec, c.taskID),
+			IdleTimeout:         idleWatcherConfig,
+			Restore:             c.restored,
 		}, c.db, c.rm, c.GenericCommandSpec, c.OnExit)
 	if err != nil {
 		return err
@@ -258,7 +260,8 @@ func (c *Command) OnExit(ae *task.AllocationExited) {
 		c.syslog.WithError(err).Errorf(
 			"failure to delete user session for task: %v", c.taskID)
 	}
-	if c.TaskType == model.TaskTypeNotebook {
+	// Notebooks and shells that run JupyterLab have a notebook session for its token.
+	if c.Base.ExtraEnvVars[model.NotebookSessionEnvVar] != "" {
 		if err := internaldb.DeleteNotebookSessionByTask(context.TODO(), c.taskID); err != nil {
 			c.syslog.WithError(err).Errorf(
 				"failure to delete notebook session for task: %v", c.taskID)
@@ -515,4 +518,31 @@ func (c *Command) serviceAddress() string {
 
 func (c *Command) stringID() string {
 	return c.taskID.String()
+}
+
+// proxyPortConfigs returns the proxies of a command's ports, built from its persisted spec on
+// every start and restore. A service's port follows its record in spec.Services, and the other
+// ports, such as those of the config's environment, are plain. A spec without records reaches
+// every port over HTTPS if it is a notebook, since JupyterLab serves a master-signed cert.
+func proxyPortConfigs(spec tasks.GenericCommandSpec, taskID model.TaskID) []*sproto.ProxyPortConfig {
+	ports := sproto.NewProxyPortConfig(
+		spec.ProxyPorts(), taskID, len(spec.Services) == 0 && spec.TaskType == model.TaskTypeNotebook)
+	// A service's own extra proxy port comes before any other on its port.
+	recorded := map[int]bool{}
+	for _, service := range spec.Services {
+		for _, port := range ports {
+			if port.Port != service.Port || recorded[port.Port] {
+				continue
+			}
+			recorded[port.Port] = true
+			port.ServiceID = service.ServiceID(taskID)
+			port.ProxyTCP = service.ProxyTCP
+			port.Unauthenticated = service.Unauthenticated
+			port.TLS = service.TLS
+			port.Exec = service.Exec
+			port.StripPrefix = service.StripPrefix
+			break
+		}
+	}
+	return ports
 }
