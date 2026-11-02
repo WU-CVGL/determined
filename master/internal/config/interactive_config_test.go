@@ -76,6 +76,9 @@ func TestCodeServerConfigValidate(t *testing.T) {
 			c.URLTemplate = "file:///srv/code-server-{version}-linux-{arch}.tar.gz"
 		}, "url_template"},
 		{"no host", func(c *CodeServerConfig) { c.URLTemplate = "https:///{version}/{arch}.tar.gz" }, "url_template"},
+		{"credentials in url_template", func(c *CodeServerConfig) {
+			c.URLTemplate = "https://user:secret@mirror.example/{version}/{arch}.tar.gz"
+		}, "credentials"},
 		{"unknown arch", func(c *CodeServerConfig) {
 			c.SHA256 = map[string]string{"armhf": testCodeServerSHA256}
 		}, "unknown architecture"},

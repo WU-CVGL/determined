@@ -1921,7 +1921,7 @@ files there.
 ----------------
 
 The URL to download a tarball from, with the placeholders ``{version}`` and ``{arch}``. An ``http``
-or ``https`` URL, such as that of a mirror. Defaults to the release on GitHub,
+or ``https`` URL without credentials, such as that of a mirror. Defaults to the release on GitHub,
 ``https://github.com/coder/code-server/releases/download/v{version}/code-server-{version}-linux-{arch}.tar.gz``.
 
 ``sha256``

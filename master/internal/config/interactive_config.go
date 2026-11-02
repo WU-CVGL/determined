@@ -78,6 +78,10 @@ func (c CodeServerConfig) Validate() []error {
 	} else if u, err := url.Parse(c.URL(CodeServerArches[0])); err != nil ||
 		(u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		errs = append(errs, fmt.Errorf("interactive.code_server.url_template must be an http(s) URL"))
+	} else if u.User != nil {
+		// The master prints its configuration and the download URL to its log.
+		errs = append(errs, fmt.Errorf(
+			"interactive.code_server.url_template must not contain credentials"))
 	}
 	arches := make([]string, 0, len(c.SHA256))
 	for arch := range c.SHA256 {
