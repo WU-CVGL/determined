@@ -142,7 +142,9 @@ func TestProxyExecPortOwnerOrAdmin(t *testing.T) {
 	require.Len(t, audits(), 2)
 
 	// When the command service does not run the task, the owner comes from its persisted state.
+	runningService := command.DefaultCmdService
 	command.SetDefaultService(&command.CommandService{})
+	t.Cleanup(func() { command.SetDefaultService(runningService) })
 	requireReached("owner, persisted", exec, "", bearer(ownerToken))
 	requireNotFound("other user, persisted", exec, "", bearer(otherToken))
 	requireReached("admin, persisted", exec, "", bearer(adminToken))
