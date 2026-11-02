@@ -153,16 +153,28 @@ func (a *apiServer) GetGenericTasks(
 		}
 		resp.Tasks = append(resp.Tasks, task)
 	}
+	enrichStarts := func() error {
+		starts := make([]allocationStartTarget, 0, len(resp.Tasks))
+		for _, item := range resp.Tasks {
+			starts = append(starts, allocationStartTarget{item.TaskId, &item.AllocationStartTime})
+		}
+		return a.enrichAllocationStartTimes(ctx, starts, allocationStartTask)
+	}
+	// Sorting needs the assignment key before pagination. Other sorts only enrich the page.
+	sortByAssignment := req.SortBy == apiv1.GetGenericTasksRequest_SORT_BY_ALLOCATION_START_TIME
+	if sortByAssignment {
+		if err = enrichStarts(); err != nil {
+			return nil, err
+		}
+	}
 	sort.SliceStable(resp.Tasks, func(i, j int) bool { return less(resp.Tasks[i], resp.Tasks[j]) })
 	if err = api.Paginate(&resp.Pagination, &resp.Tasks, req.Offset, req.Limit); err != nil {
 		return nil, err
 	}
-	starts := make([]allocationStartTarget, 0, len(resp.Tasks))
-	for _, item := range resp.Tasks {
-		starts = append(starts, allocationStartTarget{item.TaskId, &item.AllocationStartTime})
-	}
-	if err = a.enrichAllocationStartTimes(ctx, starts, allocationStartTask); err != nil {
-		return nil, err
+	if !sortByAssignment {
+		if err = enrichStarts(); err != nil {
+			return nil, err
+		}
 	}
 	return resp, nil
 }
@@ -244,6 +256,11 @@ func genericTaskLess(
 	case apiv1.GetGenericTasksRequest_SORT_BY_END_TIME:
 		compareKey = func(a, b *taskv1.GenericTask) (int, bool, bool) {
 			return compareTimestamps(a.EndTime, b.EndTime), a.EndTime != nil, b.EndTime != nil
+		}
+	case apiv1.GetGenericTasksRequest_SORT_BY_ALLOCATION_START_TIME:
+		compareKey = func(a, b *taskv1.GenericTask) (int, bool, bool) {
+			return compareTimestamps(a.AllocationStartTime, b.AllocationStartTime),
+				a.AllocationStartTime != nil, b.AllocationStartTime != nil
 		}
 	case apiv1.GetGenericTasksRequest_SORT_BY_NAME:
 		compareKey = func(a, b *taskv1.GenericTask) (int, bool, bool) {

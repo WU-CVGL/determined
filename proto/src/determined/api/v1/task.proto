@@ -391,6 +391,9 @@ message GetGenericTasksRequest {
     SORT_BY_RESOURCE_POOL = 6;
     // Sort by the slot count the task requests.
     SORT_BY_SLOTS = 7;
+    // Sort by first confirmed resource assignment, missing last in either
+    // direction. Available only in Agent-only clusters.
+    SORT_BY_ALLOCATION_START_TIME = 8;
   }
   // Skip this many tasks before returning results.
   int32 offset = 1;

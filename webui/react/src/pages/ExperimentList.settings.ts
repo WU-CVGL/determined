@@ -150,6 +150,7 @@ export const settingsConfigForProject = (id: number): SettingsConfig<ExperimentL
       defaultValue: V1GetExperimentsRequestSortBy.STARTTIME,
       storageKey: 'sortKey',
       type: union([
+        literal(V1GetExperimentsRequestSortBy.ALLOCATIONSTARTTIME),
         literal(V1GetExperimentsRequestSortBy.DESCRIPTION),
         literal(V1GetExperimentsRequestSortBy.ENDTIME),
         literal(V1GetExperimentsRequestSortBy.FORKEDFROM),

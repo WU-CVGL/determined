@@ -530,6 +530,15 @@ type jobsSortKey struct {
 // experimentJobsSortKeys are the experiment sorts of the Jobs page. The expressions are written
 // out in full: a column alias does not bind inside lower().
 var experimentJobsSortKeys = map[apiv1.GetExperimentsRequest_SortBy]jobsSortKey{
+	apiv1.GetExperimentsRequest_SORT_BY_ALLOCATION_START_TIME: {expr: `(
+		SELECT min(ts.end_time)
+		FROM trials AS assigned_trial
+		JOIN run_id_task_id AS assigned_task ON assigned_task.run_id = assigned_trial.id
+		JOIN allocations AS assigned_allocation ON assigned_allocation.task_id = assigned_task.task_id
+		JOIN task_stats AS ts ON ts.allocation_id = assigned_allocation.allocation_id
+		WHERE assigned_trial.experiment_id = e.id
+		  AND ts.event_type = 'QUEUED' AND ts.end_time IS NOT NULL
+	)`},
 	apiv1.GetExperimentsRequest_SORT_BY_START_TIME: {expr: "e.start_time"},
 	apiv1.GetExperimentsRequest_SORT_BY_END_TIME:   {expr: "e.end_time"},
 	apiv1.GetExperimentsRequest_SORT_BY_NAME: {
@@ -618,6 +627,10 @@ func (a *apiServer) GetExperiments(
 	}
 	orderExpr := ""
 	jobsKey, isJobsKey := experimentJobsSortKeys[req.SortBy]
+	if req.SortBy == apiv1.GetExperimentsRequest_SORT_BY_ALLOCATION_START_TIME &&
+		!agentOnlyAllocationStarts(a.m.config.ResourceConfig) {
+		jobsKey.expr = "NULL::timestamptz"
+	}
 	switch _, ok := orderColMap[req.SortBy]; {
 	case isJobsKey:
 		orderExpr = jobsKey.orderExpr(req.OrderBy == apiv1.OrderBy_ORDER_BY_DESC) +

@@ -926,6 +926,8 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
             {timeRenderer(row.allocationStartTime)}
           </span>
         ),
+        sortDirections: DESCEND_FIRST,
+        sorter: true,
         title: 'Started',
       },
       {

@@ -480,6 +480,25 @@ describe('TaskDashboard', () => {
     });
     expect(header('Submitted')).toHaveAttribute('aria-sort', 'descending');
 
+    for (const [orderBy, direction] of [
+      ['ORDER_BY_DESC', 'descending'],
+      ['ORDER_BY_ASC', 'ascending'],
+    ] as const) {
+      await user.click(within(header('Started')).getByText('Started'));
+      await waitFor(() =>
+        expect(lastListCall(getExperiments)).toMatchObject({
+          orderBy,
+          sortBy: 'SORT_BY_ALLOCATION_START_TIME',
+        }),
+      );
+      expect(lastListCall(getGenericTasks)).toMatchObject({
+        orderBy,
+        sortBy: 'SORT_BY_ALLOCATION_START_TIME',
+      });
+      expect(header('Started')).toHaveAttribute('aria-sort', direction);
+      expect(urlParams().get('sortKey')).toBe('allocationStartTime');
+    }
+
     for (const [desc, orderBy] of [
       [false, 'ORDER_BY_ASC'],
       [true, 'ORDER_BY_DESC'],

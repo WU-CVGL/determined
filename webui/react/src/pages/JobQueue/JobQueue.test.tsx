@@ -10,6 +10,7 @@ import { BrowserRouter } from 'react-router-dom';
 
 import { ThemeProvider } from 'components/ThemeProvider';
 import { SettingsProvider } from 'hooks/useSettingsProvider';
+import { DateString } from 'ioTypes';
 import {
   getJobQ,
   getJupyterLab,
@@ -253,6 +254,7 @@ const limitedJob = (index: number, slots: number): LimitedJob => ({
 const activeJobs: Job[] = [
   queued(0, {
     allocatedSlots: 2,
+    allocationStartTime: '2026-02-01T00:00:00.000002Z' as DateString,
     name: 'beta',
     requestedSlots: 2,
     submissionTime: jan(3),
@@ -260,6 +262,7 @@ const activeJobs: Job[] = [
   }),
   queued(1, {
     allocatedSlots: 8,
+    allocationStartTime: '2026-02-01T00:00:00.000001Z' as DateString,
     name: 'Alpha',
     requestedSlots: 8,
     submissionTime: jan(1),
@@ -268,6 +271,7 @@ const activeJobs: Job[] = [
   limitedJob(2, 4),
   queued(3, {
     allocatedSlots: 1,
+    allocationStartTime: '2026-02-01T00:00:00.000003Z' as DateString,
     name: 'alpha_2',
     requestedSlots: 1,
     submissionTime: jan(2),
@@ -275,6 +279,7 @@ const activeJobs: Job[] = [
   }),
   queued(4, {
     allocatedSlots: 2,
+    allocationStartTime: '2026-02-01T00:00:00.000002Z' as DateString,
     name: 'beta',
     requestedSlots: 2,
     submissionTime: jan(3),
@@ -617,6 +622,12 @@ describe('JobQueue', () => {
         descending: ['q5', 'q0', 'q4', 'q3', 'q1', 'q2'],
         firstClick: 'descending',
         title: 'Submitted',
+      },
+      {
+        ascending: ['q1', 'q0', 'q4', 'q3', 'q2', 'q5'],
+        descending: ['q3', 'q0', 'q4', 'q1', 'q2', 'q5'],
+        firstClick: 'descending',
+        title: 'Started',
       },
     ])(
       'sorts by $title both ways, with missing values last and ties in queue order, then goes back to the queue order',

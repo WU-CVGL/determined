@@ -348,6 +348,7 @@ const settingsConfig = (scope: DashboardScope, experiments: boolean): SettingsCo
       defaultValue: SortKey.StartTime,
       storageKey: 'sortKey',
       type: union([
+        literal(SortKey.AllocationStartTime),
         literal(SortKey.EndTime),
         literal(SortKey.Kind),
         literal(SortKey.Name),

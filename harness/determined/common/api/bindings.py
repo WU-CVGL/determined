@@ -5171,6 +5171,8 @@ class v1GetExperimentsRequestSortBy(DetEnum):
     - SORT_BY_STATE_GROUP: Return experiments sorted by state group: active, then paused
     (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED).
     Every other state is active.
+    - SORT_BY_ALLOCATION_START_TIME: Sort by first confirmed resource assignment, missing last in either
+    direction. Available only in Agent-only clusters.
     """
     UNSPECIFIED = "SORT_BY_UNSPECIFIED"
     ID = "SORT_BY_ID"
@@ -5190,6 +5192,7 @@ class v1GetExperimentsRequestSortBy(DetEnum):
     SEARCHER_METRIC_VAL = "SORT_BY_SEARCHER_METRIC_VAL"
     SLOTS = "SORT_BY_SLOTS"
     STATE_GROUP = "SORT_BY_STATE_GROUP"
+    ALLOCATION_START_TIME = "SORT_BY_ALLOCATION_START_TIME"
 
 class v1GetExperimentsResponse(Printable):
     """Response to GetExperimentsRequest."""
@@ -5253,6 +5256,8 @@ class v1GetGenericTasksRequestSortBy(DetEnum):
     Tasks without an owner come last, in either order.
     - SORT_BY_RESOURCE_POOL: Sort by resource pool. Tasks without one come last, in either order.
     - SORT_BY_SLOTS: Sort by the slot count the task requests.
+    - SORT_BY_ALLOCATION_START_TIME: Sort by first confirmed resource assignment, missing last in either
+    direction. Available only in Agent-only clusters.
     """
     UNSPECIFIED = "SORT_BY_UNSPECIFIED"
     START_TIME = "SORT_BY_START_TIME"
@@ -5262,6 +5267,7 @@ class v1GetGenericTasksRequestSortBy(DetEnum):
     USER = "SORT_BY_USER"
     RESOURCE_POOL = "SORT_BY_RESOURCE_POOL"
     SLOTS = "SORT_BY_SLOTS"
+    ALLOCATION_START_TIME = "SORT_BY_ALLOCATION_START_TIME"
 
 class v1GetGenericTasksResponse(Printable):
     """Response to GetGenericTasksRequest."""
@@ -20123,6 +20129,8 @@ returned last, in either order.
  - SORT_BY_STATE_GROUP: Return experiments sorted by state group: active, then paused
 (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED).
 Every other state is active.
+ - SORT_BY_ALLOCATION_START_TIME: Sort by first confirmed resource assignment, missing last in either
+direction. Available only in Agent-only clusters.
     - states: Limit experiments to those that match the provided state.
 
  - STATE_UNSPECIFIED: The state of the experiment is unknown.
@@ -20275,6 +20283,8 @@ a state come last, in either order.
 Tasks without an owner come last, in either order.
  - SORT_BY_RESOURCE_POOL: Sort by resource pool. Tasks without one come last, in either order.
  - SORT_BY_SLOTS: Sort by the slot count the task requests.
+ - SORT_BY_ALLOCATION_START_TIME: Sort by first confirmed resource assignment, missing last in either
+direction. Available only in Agent-only clusters.
     - states: Limit tasks to these states.
 
  - GENERIC_TASK_STATE_UNSPECIFIED: The task state unknown
