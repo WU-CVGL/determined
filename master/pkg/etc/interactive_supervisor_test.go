@@ -488,6 +488,26 @@ func TestSupervisorStopsWhatOtherServiceLeaves(t *testing.T) {
 		[]string{"[p] start", "[q] start", "[p] ready", "[q] exited 5", "[p] exited 143"}, s.logLines())
 }
 
+// A process left in the group is found whatever its name, also with a newline in it: one that
+// ignores SIGTERM is killed after the grace period.
+func TestSupervisorStopsLeftProcessWithNewlineInName(t *testing.T) {
+	sleep, err := exec.LookPath("sleep")
+	require.NoError(t, err)
+	s := newSupervisorRun(t, "p,q")
+	s.unit("p", readyLog+`{ bash -c 'echo up >&2; exec sleep 300'; } 2> >(log)`+"\n")
+	child := filepath.Join(s.dir, "child")
+	require.NoError(t, os.Symlink(sleep, filepath.Join(s.dir, "a\nb")))
+	s.unit("q", fmt.Sprintf(`bash -c 'trap "" TERM; "$1" 300 </dev/null >/dev/null 2>&1 & echo "$!" >"$2"; exit 5' `+
+		`bash %q/a$'\n'b %q`+"\n", s.dir, child))
+	s.start()
+	s.waitForLog("[q] exited 5")
+	require.Equal(t, unix.SIGKILL, reapLeftChild(t, child))
+	require.True(t, s.running())
+
+	s.signal(syscall.SIGTERM)
+	require.Equal(t, 128+int(syscall.SIGTERM), s.wait())
+}
+
 // What the primary service leaves in its process group is stopped, and the task ends with the
 // service's exit status.
 func TestSupervisorStopsWhatPrimaryServiceLeaves(t *testing.T) {

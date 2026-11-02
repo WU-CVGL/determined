@@ -162,7 +162,8 @@ group_members() {
     kill -0 -- "-$1" 2>/dev/null || return 0
     for stat in /proc/[0-9]*/stat; do
         line=
-        read -r line 2>/dev/null <"$stat"
+        # The whole file, since comm may contain a newline; read fails at its end.
+        read -r -d '' line 2>/dev/null <"$stat"
         # pid (comm) state ppid pgrp ...; comm may contain ") ".
         line=${line##*) }
         state=${line%% *}
