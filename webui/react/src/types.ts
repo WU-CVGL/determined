@@ -780,6 +780,7 @@ export type JobSummary = t.TypeOf<typeof JobSummary>;
 // since https://github.com/determined-ai/determined/pull/8732
 export const BulkExperimentItem = t.intersection([
   t.partial({
+    allocationStartTime: t.string,
     checkpoints: t.number,
     checkpointSize: t.number,
     config: ExperimentConfig,
@@ -901,6 +902,7 @@ export const GenericTaskState = {
 export type GenericTaskState = ValueOf<typeof GenericTaskState>;
 
 export interface GenericTask {
+  allocationStartTime?: string;
   allocationId?: string;
   description: string;
   /** The owner's display name; unset without one. */
@@ -1005,6 +1007,7 @@ export interface CommandResponse {
 }
 
 export interface CommandTask extends Task {
+  allocationStartTime?: string;
   displayName?: string;
   endTime?: string;
   misc?: CommandMisc;

@@ -61,6 +61,7 @@ import { getActionsForExperiment } from 'utils/experiment';
 import { alphaNumericSorter, numericSorter } from 'utils/sort';
 import { pluralizer } from 'utils/string';
 import { canKillGenericTask, isTaskKillable } from 'utils/task';
+import { ALLOCATION_START_TOOLTIP } from 'utils/taskTime';
 import { compareText } from 'utils/textOrder';
 import { getDisplayName } from 'utils/user';
 
@@ -913,6 +914,17 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         defaultWidth: DEFAULT_COLUMN_WIDTHS.startTime,
         key: 'startTime',
         render: (_: unknown, row: RunRow) => timeRenderer(row.startTime),
+        sortDirections: DESCEND_FIRST,
+        sorter: true,
+        title: 'Submitted',
+      },
+      {
+        dataIndex: 'allocationStartTime',
+        defaultWidth: DEFAULT_COLUMN_WIDTHS.allocationStartTime,
+        key: 'allocationStartTime',
+        render: (_: unknown, row: RunRow) => (
+          <span title={ALLOCATION_START_TOOLTIP}>{timeRenderer(row.allocationStartTime)}</span>
+        ),
         sortDirections: DESCEND_FIRST,
         sorter: true,
         title: 'Started',

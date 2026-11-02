@@ -91,7 +91,17 @@ func (a *apiServer) GetShells(
 	}
 
 	api.Sort(resp.Shells, req.OrderBy, req.SortBy, apiv1.GetShellsRequest_SORT_BY_ID)
-	return resp, api.Paginate(&resp.Pagination, &resp.Shells, req.Offset, req.Limit)
+	if err = api.Paginate(&resp.Pagination, &resp.Shells, req.Offset, req.Limit); err != nil {
+		return nil, err
+	}
+	starts := make([]allocationStartTarget, 0, len(resp.Shells))
+	for _, item := range resp.Shells {
+		starts = append(starts, allocationStartTarget{item.Id, &item.AllocationStartTime})
+	}
+	if err = a.enrichAllocationStartTimes(ctx, starts, allocationStartTask); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (a *apiServer) GetShell(

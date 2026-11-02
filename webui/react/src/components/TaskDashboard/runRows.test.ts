@@ -97,6 +97,51 @@ const experiment = (id: number, startTime: string): BulkExperimentItem => ({
 const keys = (rows: RunRow[]) => rows.map((row) => row.key);
 
 describe('runRows', () => {
+  it('merges and pages by first assignment, keeping missing values last in both directions', () => {
+    const rows = [
+      commandRow(
+        command('c', '2026-01-03T00:00:00Z', {
+          allocationStartTime: '2026-02-01T00:00:00.000001Z',
+        }),
+      ),
+      genericTaskRow({
+        ...generic('g', '2026-01-01T00:00:00Z'),
+        allocationStartTime: '2026-02-01T00:00:00.000002Z',
+      }),
+      experimentRow({
+        ...experiment(1, '2026-01-02T00:00:00Z'),
+        allocationStartTime: '2026-02-01T00:00:00.000002Z',
+      }),
+      commandRow(command('pending', '2026-01-04T00:00:00Z')),
+    ];
+    for (const desc of [false, true]) {
+      const sort = { desc, key: SortKey.AllocationStartTime };
+      const lists = rows.map((r) => [r]);
+      const merged = mergeRuns(lists, sort);
+      expect(merged.map((r) => r.allocationStartTime)).toEqual(
+        desc
+          ? [
+              rows[2].allocationStartTime,
+              rows[1].allocationStartTime,
+              rows[0].allocationStartTime,
+              undefined,
+            ]
+          : [
+              rows[0].allocationStartTime,
+              rows[2].allocationStartTime,
+              rows[1].allocationStartTime,
+              undefined,
+            ],
+      );
+      expect(keys(merged)).toEqual(
+        desc
+          ? keys([rows[2], rows[1], rows[0], rows[3]])
+          : keys([rows[0], rows[2], rows[1], rows[3]]),
+      );
+      expect(keys(pageOfRuns(lists, 1, 2, sort))).toEqual(keys(merged.slice(1, 3)));
+    }
+  });
+
   describe('state groups', () => {
     it('maps notebooks, shells, commands and TensorBoards: terminated is ended, never paused', () => {
       expect(commandStateGroup(CommandState.Terminated)).toBe(StateGroup.Ended);

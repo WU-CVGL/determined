@@ -31,7 +31,7 @@ message Tensorboard {
   string description = 2;
   // The state of the tensorboard.
   determined.task.v1.State state = 3;
-  // The time the tensorboard was started.
+  // The time the tensorboard was submitted (registered with the master).
   google.protobuf.Timestamp start_time = 4;
   // The container running the tensorboard.
   determined.container.v1.Container container = 6;
@@ -60,4 +60,8 @@ message Tensorboard {
   int32 slots = 100;
   // The time the TensorBoard ended; unset while it runs.
   google.protobuf.Timestamp end_time = 101;
+  // First resource assignment time, provided by the list API; unset if never
+  // assigned.
+  // Available only in Agent-only clusters; omitted on other or mixed backends.
+  google.protobuf.Timestamp allocation_start_time = 102;
 }

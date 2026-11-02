@@ -285,8 +285,14 @@ const OLD_COLUMNS = [
 const OLD_WIDTHS = [301, 302, 303, 304, 305, 306, 307, 308, 309];
 
 /* The same with the Slots column, as this version stores them. */
-const NEW_COLUMNS = [...OLD_COLUMNS.slice(0, 7), 'slots', ...OLD_COLUMNS.slice(7)];
-const NEW_WIDTHS = [...OLD_WIDTHS.slice(0, 7), 92, ...OLD_WIDTHS.slice(7)];
+const NEW_COLUMNS = [
+  ...OLD_COLUMNS.slice(0, 7),
+  'slots',
+  'startTime',
+  'allocationStartTime',
+  'endTime',
+];
+const NEW_WIDTHS = [...OLD_WIDTHS.slice(0, 7), 92, 308, 117, 309];
 
 /* The width of each stored column: the table binds the stored widths to the columns by place. */
 const storedWidths = () => {
@@ -472,7 +478,26 @@ describe('TaskDashboard', () => {
       orderBy: 'ORDER_BY_DESC',
       sortBy: 'SORT_BY_START_TIME',
     });
-    expect(header('Started')).toHaveAttribute('aria-sort', 'descending');
+    expect(header('Submitted')).toHaveAttribute('aria-sort', 'descending');
+
+    for (const [orderBy, direction] of [
+      ['ORDER_BY_DESC', 'descending'],
+      ['ORDER_BY_ASC', 'ascending'],
+    ] as const) {
+      await user.click(within(header('Started')).getByText('Started'));
+      await waitFor(() =>
+        expect(lastListCall(getExperiments)).toMatchObject({
+          orderBy,
+          sortBy: 'SORT_BY_ALLOCATION_START_TIME',
+        }),
+      );
+      expect(lastListCall(getGenericTasks)).toMatchObject({
+        orderBy,
+        sortBy: 'SORT_BY_ALLOCATION_START_TIME',
+      });
+      expect(header('Started')).toHaveAttribute('aria-sort', direction);
+      expect(urlParams().get('sortKey')).toBe('allocationStartTime');
+    }
 
     for (const [desc, orderBy] of [
       [false, 'ORDER_BY_ASC'],
@@ -489,12 +514,12 @@ describe('TaskDashboard', () => {
       expect(urlParams().get('sortDesc')).toBe(desc ? null : 'false');
     }
     expect(header('Name')).toHaveAttribute('aria-sort', 'ascending');
-    expect(header('Started')).not.toHaveAttribute('aria-sort');
+    expect(header('Submitted')).not.toHaveAttribute('aria-sort');
 
     // Back to the default sort, which the URL still holds.
-    await user.click(within(header('Started')).getByText('Started'));
+    await user.click(within(header('Submitted')).getByText('Submitted'));
     await waitFor(() => expect(window.location.search).toBe('?sortKey=startTime'));
-    expect(header('Started')).toHaveAttribute('aria-sort', 'descending');
+    expect(header('Submitted')).toHaveAttribute('aria-sort', 'descending');
 
     // Slots sorts most first; the state sort is by state group.
     await user.click(within(header('Slots')).getByText('Slots'));
@@ -1006,7 +1031,25 @@ describe('TaskDashboard', () => {
     );
   }, 30_000);
 
-  it('shows the slots each run asks for between Resource Pool and Started', async () => {
+  it('distinguishes submission from assignment and leaves never-assigned tasks without Started', async () => {
+    vi.mocked(getShells).mockResolvedValue([
+      { ...SHELL, allocationStartTime: '2026-01-04T01:00:00Z' },
+      { ...SHELL, id: 'queued', name: 'queued-shell', state: CommandState.Queued },
+    ]);
+    setup();
+    const running = await row('gpu-shell');
+    const queued = await row('queued-shell');
+    expect(header('Submitted')).toBeInTheDocument();
+    expect(header('Started')).not.toHaveAttribute('aria-sort');
+    const caption =
+      'First resource assignment in Agent-only clusters; image pulling and setup may follow. — means unavailable or no recorded assignment.';
+    expect(within(running).getByTitle(caption)).not.toHaveTextContent(/^—$/);
+    expect(within(queued).getByTitle(caption)).toHaveTextContent(/^—$/);
+    // No per-row request is needed: the existing list carries both timestamps.
+    expect(getShells).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the slots each run asks for between Resource Pool and Submitted', async () => {
     const configOf = (config: unknown) => config as BulkExperimentItem['config'];
     vi.mocked(getShells).mockResolvedValue([
       SHELL,
@@ -1026,7 +1069,7 @@ describe('TaskDashboard', () => {
 
     // Resource Pool is hidden below the md breakpoint, as in tests; Slots shows at every width.
     const headers = screen.getAllByRole('columnheader').map((h) => h.textContent?.trim());
-    expect(headers.indexOf('Slots')).toBe(headers.indexOf('Started') - 1);
+    expect(headers.indexOf('Slots')).toBe(headers.indexOf('Submitted') - 1);
 
     const slots = async (name: string) => within(await row(name)).getByTestId('slots-cell');
     expect(await slots('bert-finetune')).toHaveTextContent(/^4$/);
@@ -1049,8 +1092,9 @@ describe('TaskDashboard', () => {
         setup();
         expect(await screen.findByText('bert-finetune', {}, AFTER_LOAD)).toBeInTheDocument();
 
-        await waitFor(() => expect(stored().columnWidths).toHaveLength(10), AFTER_LOAD);
+        await waitFor(() => expect(stored().columnWidths).toHaveLength(11), AFTER_LOAD);
         expect(storedWidths()).toEqual({
+          allocationStartTime: 117,
           endTime: 309,
           id: 302,
           kind: 301,
@@ -1068,8 +1112,8 @@ describe('TaskDashboard', () => {
         expect(shownWidths()).toMatchObject({
           Kind: '301px',
           Name: '303px',
-          Started: '308px',
           State: '304px',
+          Submitted: '308px',
         });
       },
       30_000,
@@ -1109,8 +1153,8 @@ describe('TaskDashboard', () => {
         expect(shownWidths()).toMatchObject({
           Name: '303px',
           Slots: '92px',
-          Started: '308px',
           State: '304px',
+          Submitted: '308px',
         });
       },
       30_000,
@@ -1126,7 +1170,9 @@ describe('TaskDashboard', () => {
       // The resize changes the table's own widths in place, not the stored ones it started from,
       // so the settings see a change and store it.
       await waitFor(() =>
-        expect(saved('columnWidths')).toEqual([301, 302, 450, 304, 305, 306, 307, 92, 308, 309]),
+        expect(saved('columnWidths')).toEqual([
+          301, 302, 450, 304, 305, 306, 307, 92, 308, 117, 309,
+        ]),
       );
       expect(shownWidths()).toMatchObject({ Kind: '301px', Name: '450px' });
     }, 30_000);
@@ -1141,13 +1187,15 @@ describe('TaskDashboard', () => {
       await waitFor(() =>
         expect(saved('columns')).toEqual(['kind', 'id', 'state', 'name', ...NEW_COLUMNS.slice(4)]),
       );
-      expect(saved('columnWidths')).toEqual([301, 302, 304, 303, 305, 306, 307, 92, 308, 309]);
+      expect(saved('columnWidths')).toEqual([301, 302, 304, 303, 305, 306, 307, 92, 308, 117, 309]);
 
       // The move gives the table and the settings one array of widths; the resize changes the
       // table's own.
       await resize('Kind', 500);
       await waitFor(() =>
-        expect(saved('columnWidths')).toEqual([500, 302, 304, 303, 305, 306, 307, 92, 308, 309]),
+        expect(saved('columnWidths')).toEqual([
+          500, 302, 304, 303, 305, 306, 307, 92, 308, 117, 309,
+        ]),
       );
       expect(shownWidths()).toMatchObject({ Kind: '500px', Name: '303px', State: '304px' });
     }, 30_000);
@@ -1188,7 +1236,7 @@ describe('TaskDashboard', () => {
     await resize('Name', 450);
     // Widths stored alone would be bound by place to the default columns of a later version.
     await waitFor(() =>
-      expect(saved('columnWidths')).toEqual([84, 100, 450, 120, 115, 230, 130, 90, 117, 117]),
+      expect(saved('columnWidths')).toEqual([84, 100, 450, 120, 115, 230, 130, 90, 117, 117, 117]),
     );
     expect(saved('columns')).toEqual(NEW_COLUMNS);
     expect(storedWidths()).toMatchObject({ kind: 84, name: 450, slots: 90 });

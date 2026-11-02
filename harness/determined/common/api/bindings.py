@@ -2404,6 +2404,7 @@ class v1ColumnType(DetEnum):
 
 class v1Command(Printable):
     """Command is a single container running the configured command."""
+    allocationStartTime: "typing.Optional[str]" = None
     container: "typing.Optional[v1Container]" = None
     displayName: "typing.Optional[str]" = None
     endTime: "typing.Optional[str]" = None
@@ -2422,6 +2423,7 @@ class v1Command(Printable):
         state: "taskv1State",
         username: str,
         workspaceId: int,
+        allocationStartTime: "typing.Union[str, None, Unset]" = _unset,
         container: "typing.Union[v1Container, None, Unset]" = _unset,
         displayName: "typing.Union[str, None, Unset]" = _unset,
         endTime: "typing.Union[str, None, Unset]" = _unset,
@@ -2437,6 +2439,8 @@ class v1Command(Printable):
         self.state = state
         self.username = username
         self.workspaceId = workspaceId
+        if not isinstance(allocationStartTime, Unset):
+            self.allocationStartTime = allocationStartTime
         if not isinstance(container, Unset):
             self.container = container
         if not isinstance(displayName, Unset):
@@ -2462,6 +2466,8 @@ class v1Command(Printable):
             "username": obj["username"],
             "workspaceId": obj["workspaceId"],
         }
+        if "allocationStartTime" in obj:
+            kwargs["allocationStartTime"] = obj["allocationStartTime"]
         if "container" in obj:
             kwargs["container"] = v1Container.from_json(obj["container"]) if obj["container"] is not None else None
         if "displayName" in obj:
@@ -2487,6 +2493,8 @@ class v1Command(Printable):
             "username": self.username,
             "workspaceId": self.workspaceId,
         }
+        if not omit_unset or "allocationStartTime" in vars(self):
+            out["allocationStartTime"] = self.allocationStartTime
         if not omit_unset or "container" in vars(self):
             out["container"] = None if self.container is None else self.container.to_json(omit_unset)
         if not omit_unset or "displayName" in vars(self):
@@ -3774,6 +3782,7 @@ class v1Experiment(Printable):
     """Experiment is a collection of one or more trials that are exploring a
     user-defined hyperparameter space.
     """
+    allocationStartTime: "typing.Optional[str]" = None
     bestTrialId: "typing.Optional[int]" = None
     bestTrialSearcherMetric: "typing.Optional[float]" = None
     checkpointCount: "typing.Optional[int]" = None
@@ -3817,6 +3826,7 @@ class v1Experiment(Printable):
         startTime: str,
         state: "experimentv1State",
         username: str,
+        allocationStartTime: "typing.Union[str, None, Unset]" = _unset,
         bestTrialId: "typing.Union[int, None, Unset]" = _unset,
         bestTrialSearcherMetric: "typing.Union[float, None, Unset]" = _unset,
         checkpointCount: "typing.Union[int, None, Unset]" = _unset,
@@ -3857,6 +3867,8 @@ class v1Experiment(Printable):
         self.startTime = startTime
         self.state = state
         self.username = username
+        if not isinstance(allocationStartTime, Unset):
+            self.allocationStartTime = allocationStartTime
         if not isinstance(bestTrialId, Unset):
             self.bestTrialId = bestTrialId
         if not isinstance(bestTrialSearcherMetric, Unset):
@@ -3927,6 +3939,8 @@ class v1Experiment(Printable):
             "state": experimentv1State(obj["state"]),
             "username": obj["username"],
         }
+        if "allocationStartTime" in obj:
+            kwargs["allocationStartTime"] = obj["allocationStartTime"]
         if "bestTrialId" in obj:
             kwargs["bestTrialId"] = obj["bestTrialId"]
         if "bestTrialSearcherMetric" in obj:
@@ -3997,6 +4011,8 @@ class v1Experiment(Printable):
             "state": self.state.value,
             "username": self.username,
         }
+        if not omit_unset or "allocationStartTime" in vars(self):
+            out["allocationStartTime"] = self.allocationStartTime
         if not omit_unset or "bestTrialId" in vars(self):
             out["bestTrialId"] = self.bestTrialId
         if not omit_unset or "bestTrialSearcherMetric" in vars(self):
@@ -4490,6 +4506,7 @@ class v1GenericTask(Printable):
     GetGenericTasks.
     """
     allocationId: "typing.Optional[str]" = None
+    allocationStartTime: "typing.Optional[str]" = None
     displayName: "typing.Optional[str]" = None
     endTime: "typing.Optional[str]" = None
     forkedFrom: "typing.Optional[str]" = None
@@ -4512,6 +4529,7 @@ class v1GenericTask(Printable):
         username: str,
         workspaceId: int,
         allocationId: "typing.Union[str, None, Unset]" = _unset,
+        allocationStartTime: "typing.Union[str, None, Unset]" = _unset,
         displayName: "typing.Union[str, None, Unset]" = _unset,
         endTime: "typing.Union[str, None, Unset]" = _unset,
         forkedFrom: "typing.Union[str, None, Unset]" = _unset,
@@ -4532,6 +4550,8 @@ class v1GenericTask(Printable):
         self.workspaceId = workspaceId
         if not isinstance(allocationId, Unset):
             self.allocationId = allocationId
+        if not isinstance(allocationStartTime, Unset):
+            self.allocationStartTime = allocationStartTime
         if not isinstance(displayName, Unset):
             self.displayName = displayName
         if not isinstance(endTime, Unset):
@@ -4560,6 +4580,8 @@ class v1GenericTask(Printable):
         }
         if "allocationId" in obj:
             kwargs["allocationId"] = obj["allocationId"]
+        if "allocationStartTime" in obj:
+            kwargs["allocationStartTime"] = obj["allocationStartTime"]
         if "displayName" in obj:
             kwargs["displayName"] = obj["displayName"]
         if "endTime" in obj:
@@ -4588,6 +4610,8 @@ class v1GenericTask(Printable):
         }
         if not omit_unset or "allocationId" in vars(self):
             out["allocationId"] = self.allocationId
+        if not omit_unset or "allocationStartTime" in vars(self):
+            out["allocationStartTime"] = self.allocationStartTime
         if not omit_unset or "displayName" in vars(self):
             out["displayName"] = self.displayName
         if not omit_unset or "endTime" in vars(self):
@@ -5147,6 +5171,8 @@ class v1GetExperimentsRequestSortBy(DetEnum):
     - SORT_BY_STATE_GROUP: Return experiments sorted by state group: active, then paused
     (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED).
     Every other state is active.
+    - SORT_BY_ALLOCATION_START_TIME: Sort by first confirmed resource assignment, missing last in either
+    direction. Available only in Agent-only clusters.
     """
     UNSPECIFIED = "SORT_BY_UNSPECIFIED"
     ID = "SORT_BY_ID"
@@ -5166,6 +5192,7 @@ class v1GetExperimentsRequestSortBy(DetEnum):
     SEARCHER_METRIC_VAL = "SORT_BY_SEARCHER_METRIC_VAL"
     SLOTS = "SORT_BY_SLOTS"
     STATE_GROUP = "SORT_BY_STATE_GROUP"
+    ALLOCATION_START_TIME = "SORT_BY_ALLOCATION_START_TIME"
 
 class v1GetExperimentsResponse(Printable):
     """Response to GetExperimentsRequest."""
@@ -5229,6 +5256,8 @@ class v1GetGenericTasksRequestSortBy(DetEnum):
     Tasks without an owner come last, in either order.
     - SORT_BY_RESOURCE_POOL: Sort by resource pool. Tasks without one come last, in either order.
     - SORT_BY_SLOTS: Sort by the slot count the task requests.
+    - SORT_BY_ALLOCATION_START_TIME: Sort by first confirmed resource assignment, missing last in either
+    direction. Available only in Agent-only clusters.
     """
     UNSPECIFIED = "SORT_BY_UNSPECIFIED"
     START_TIME = "SORT_BY_START_TIME"
@@ -5238,6 +5267,7 @@ class v1GetGenericTasksRequestSortBy(DetEnum):
     USER = "SORT_BY_USER"
     RESOURCE_POOL = "SORT_BY_RESOURCE_POOL"
     SLOTS = "SORT_BY_SLOTS"
+    ALLOCATION_START_TIME = "SORT_BY_ALLOCATION_START_TIME"
 
 class v1GetGenericTasksResponse(Printable):
     """Response to GetGenericTasksRequest."""
@@ -8002,6 +8032,7 @@ class v1Job(Printable):
     """Job represents a user submitted work that is not in a terminal
     state.
     """
+    allocationStartTime: "typing.Optional[str]" = None
     placement: "typing.Optional[typing.Sequence[v1JobPlacement]]" = None
     priority: "typing.Optional[int]" = None
     progress: "typing.Optional[float]" = None
@@ -8023,6 +8054,7 @@ class v1Job(Printable):
         type: "jobv1Type",
         username: str,
         workspaceId: int,
+        allocationStartTime: "typing.Union[str, None, Unset]" = _unset,
         placement: "typing.Union[typing.Sequence[v1JobPlacement], None, Unset]" = _unset,
         priority: "typing.Union[int, None, Unset]" = _unset,
         progress: "typing.Union[float, None, Unset]" = _unset,
@@ -8041,6 +8073,8 @@ class v1Job(Printable):
         self.type = type
         self.username = username
         self.workspaceId = workspaceId
+        if not isinstance(allocationStartTime, Unset):
+            self.allocationStartTime = allocationStartTime
         if not isinstance(placement, Unset):
             self.placement = placement
         if not isinstance(priority, Unset):
@@ -8069,6 +8103,8 @@ class v1Job(Printable):
             "username": obj["username"],
             "workspaceId": obj["workspaceId"],
         }
+        if "allocationStartTime" in obj:
+            kwargs["allocationStartTime"] = obj["allocationStartTime"]
         if "placement" in obj:
             kwargs["placement"] = [v1JobPlacement.from_json(x) for x in obj["placement"]] if obj["placement"] is not None else None
         if "priority" in obj:
@@ -8097,6 +8133,8 @@ class v1Job(Printable):
             "username": self.username,
             "workspaceId": self.workspaceId,
         }
+        if not omit_unset or "allocationStartTime" in vars(self):
+            out["allocationStartTime"] = self.allocationStartTime
         if not omit_unset or "placement" in vars(self):
             out["placement"] = None if self.placement is None else [x.to_json(omit_unset) for x in self.placement]
         if not omit_unset or "priority" in vars(self):
@@ -9962,6 +10000,7 @@ class v1Note(Printable):
 
 class v1Notebook(Printable):
     """Notebook is a Jupyter notebook in a containerized environment."""
+    allocationStartTime: "typing.Optional[str]" = None
     container: "typing.Optional[v1Container]" = None
     displayName: "typing.Optional[str]" = None
     endTime: "typing.Optional[str]" = None
@@ -9981,6 +10020,7 @@ class v1Notebook(Printable):
         state: "taskv1State",
         username: str,
         workspaceId: int,
+        allocationStartTime: "typing.Union[str, None, Unset]" = _unset,
         container: "typing.Union[v1Container, None, Unset]" = _unset,
         displayName: "typing.Union[str, None, Unset]" = _unset,
         endTime: "typing.Union[str, None, Unset]" = _unset,
@@ -9997,6 +10037,8 @@ class v1Notebook(Printable):
         self.state = state
         self.username = username
         self.workspaceId = workspaceId
+        if not isinstance(allocationStartTime, Unset):
+            self.allocationStartTime = allocationStartTime
         if not isinstance(container, Unset):
             self.container = container
         if not isinstance(displayName, Unset):
@@ -10024,6 +10066,8 @@ class v1Notebook(Printable):
             "username": obj["username"],
             "workspaceId": obj["workspaceId"],
         }
+        if "allocationStartTime" in obj:
+            kwargs["allocationStartTime"] = obj["allocationStartTime"]
         if "container" in obj:
             kwargs["container"] = v1Container.from_json(obj["container"]) if obj["container"] is not None else None
         if "displayName" in obj:
@@ -10051,6 +10095,8 @@ class v1Notebook(Printable):
             "username": self.username,
             "workspaceId": self.workspaceId,
         }
+        if not omit_unset or "allocationStartTime" in vars(self):
+            out["allocationStartTime"] = self.allocationStartTime
         if not omit_unset or "container" in vars(self):
             out["container"] = None if self.container is None else self.container.to_json(omit_unset)
         if not omit_unset or "displayName" in vars(self):
@@ -15473,6 +15519,7 @@ class v1Shell(Printable):
     """Shell is an ssh server in a containerized environment."""
     addresses: "typing.Optional[typing.Sequence[typing.Dict[str, typing.Any]]]" = None
     agentUserGroup: "typing.Optional[typing.Dict[str, typing.Any]]" = None
+    allocationStartTime: "typing.Optional[str]" = None
     container: "typing.Optional[v1Container]" = None
     displayName: "typing.Optional[str]" = None
     endTime: "typing.Optional[str]" = None
@@ -15495,6 +15542,7 @@ class v1Shell(Printable):
         workspaceId: int,
         addresses: "typing.Union[typing.Sequence[typing.Dict[str, typing.Any]], None, Unset]" = _unset,
         agentUserGroup: "typing.Union[typing.Dict[str, typing.Any], None, Unset]" = _unset,
+        allocationStartTime: "typing.Union[str, None, Unset]" = _unset,
         container: "typing.Union[v1Container, None, Unset]" = _unset,
         displayName: "typing.Union[str, None, Unset]" = _unset,
         endTime: "typing.Union[str, None, Unset]" = _unset,
@@ -15516,6 +15564,8 @@ class v1Shell(Printable):
             self.addresses = addresses
         if not isinstance(agentUserGroup, Unset):
             self.agentUserGroup = agentUserGroup
+        if not isinstance(allocationStartTime, Unset):
+            self.allocationStartTime = allocationStartTime
         if not isinstance(container, Unset):
             self.container = container
         if not isinstance(displayName, Unset):
@@ -15549,6 +15599,8 @@ class v1Shell(Printable):
             kwargs["addresses"] = obj["addresses"]
         if "agentUserGroup" in obj:
             kwargs["agentUserGroup"] = obj["agentUserGroup"]
+        if "allocationStartTime" in obj:
+            kwargs["allocationStartTime"] = obj["allocationStartTime"]
         if "container" in obj:
             kwargs["container"] = v1Container.from_json(obj["container"]) if obj["container"] is not None else None
         if "displayName" in obj:
@@ -15582,6 +15634,8 @@ class v1Shell(Printable):
             out["addresses"] = self.addresses
         if not omit_unset or "agentUserGroup" in vars(self):
             out["agentUserGroup"] = self.agentUserGroup
+        if not omit_unset or "allocationStartTime" in vars(self):
+            out["allocationStartTime"] = self.allocationStartTime
         if not omit_unset or "container" in vars(self):
             out["container"] = None if self.container is None else self.container.to_json(omit_unset)
         if not omit_unset or "displayName" in vars(self):
@@ -16292,6 +16346,7 @@ class v1Template(Printable):
 
 class v1Tensorboard(Printable):
     """Tensorboard is a tensorboard instance in a containerized environment."""
+    allocationStartTime: "typing.Optional[str]" = None
     container: "typing.Optional[v1Container]" = None
     displayName: "typing.Optional[str]" = None
     endTime: "typing.Optional[str]" = None
@@ -16313,6 +16368,7 @@ class v1Tensorboard(Printable):
         state: "taskv1State",
         username: str,
         workspaceId: int,
+        allocationStartTime: "typing.Union[str, None, Unset]" = _unset,
         container: "typing.Union[v1Container, None, Unset]" = _unset,
         displayName: "typing.Union[str, None, Unset]" = _unset,
         endTime: "typing.Union[str, None, Unset]" = _unset,
@@ -16331,6 +16387,8 @@ class v1Tensorboard(Printable):
         self.state = state
         self.username = username
         self.workspaceId = workspaceId
+        if not isinstance(allocationStartTime, Unset):
+            self.allocationStartTime = allocationStartTime
         if not isinstance(container, Unset):
             self.container = container
         if not isinstance(displayName, Unset):
@@ -16362,6 +16420,8 @@ class v1Tensorboard(Printable):
             "username": obj["username"],
             "workspaceId": obj["workspaceId"],
         }
+        if "allocationStartTime" in obj:
+            kwargs["allocationStartTime"] = obj["allocationStartTime"]
         if "container" in obj:
             kwargs["container"] = v1Container.from_json(obj["container"]) if obj["container"] is not None else None
         if "displayName" in obj:
@@ -16393,6 +16453,8 @@ class v1Tensorboard(Printable):
             "username": self.username,
             "workspaceId": self.workspaceId,
         }
+        if not omit_unset or "allocationStartTime" in vars(self):
+            out["allocationStartTime"] = self.allocationStartTime
         if not omit_unset or "container" in vars(self):
             out["container"] = None if self.container is None else self.container.to_json(omit_unset)
         if not omit_unset or "displayName" in vars(self):
@@ -20067,6 +20129,8 @@ returned last, in either order.
  - SORT_BY_STATE_GROUP: Return experiments sorted by state group: active, then paused
 (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED).
 Every other state is active.
+ - SORT_BY_ALLOCATION_START_TIME: Sort by first confirmed resource assignment, missing last in either
+direction. Available only in Agent-only clusters.
     - states: Limit experiments to those that match the provided state.
 
  - STATE_UNSPECIFIED: The state of the experiment is unknown.
@@ -20219,6 +20283,8 @@ a state come last, in either order.
 Tasks without an owner come last, in either order.
  - SORT_BY_RESOURCE_POOL: Sort by resource pool. Tasks without one come last, in either order.
  - SORT_BY_SLOTS: Sort by the slot count the task requests.
+ - SORT_BY_ALLOCATION_START_TIME: Sort by first confirmed resource assignment, missing last in either
+direction. Available only in Agent-only clusters.
     - states: Limit tasks to these states.
 
  - GENERIC_TASK_STATE_UNSPECIFIED: The task state unknown

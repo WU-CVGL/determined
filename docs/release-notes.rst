@@ -10,6 +10,29 @@
  Version 0.42
 **************
 
+Version 0.42.5
+==============
+
+**Release Date:** November 2, 2026
+
+**Bug Fixes**
+
+-  WebUI: Jobs, Tasks and resource pool queues distinguish **Submitted** from **Started**.
+   Submitted is when the master registered the job; Started is its first resource assignment (for
+   experiments, the first trial assignment, excluding checkpoint cleanup). Image pulling and setup
+   can follow assignment. Started is supported only in clusters managed entirely by Agent resource
+   managers. Other or mixed backends and jobs without a confirmed assignment show a dash. Resource
+   pages also explain the default monitoring delay for shells and notebooks. Jobs, Tasks and the
+   resource pool Active tab support sorting Started in either direction, with missing values last.
+
+**Upgrade Notes**
+
+-  Master: Adds an index on completed queue events for Started timestamps and sorting. The
+   0.42.4 master can start on the indexed database, so rollback to 0.42.4 is a master binary swap.
+   Agents can remain on 0.42.2; this release does not change their control protocol.
+
+Reload open WebUI tabs after the upgrade.
+
 Version 0.42.4
 ==============
 

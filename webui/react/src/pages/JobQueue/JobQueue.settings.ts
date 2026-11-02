@@ -7,6 +7,7 @@ import { Jobv1State } from 'services/api-ts-sdk';
 
 export type JobColumnName =
   | 'action'
+  | 'allocationStartTime'
   | 'preemptible'
   | 'type'
   | 'submissionTime'
@@ -25,6 +26,7 @@ export const DEFAULT_COLUMNS: JobColumnName[] = [
   'name',
   'priority',
   'submissionTime',
+  'allocationStartTime',
   'slots',
   'status',
   'user',
@@ -32,6 +34,7 @@ export const DEFAULT_COLUMNS: JobColumnName[] = [
 
 export const DEFAULT_COLUMN_WIDTHS: Record<JobColumnName, number> = {
   action: 46,
+  allocationStartTime: 117,
   gpus: 170,
   name: 150,
   preemptible: 106,

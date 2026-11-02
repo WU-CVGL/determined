@@ -233,7 +233,17 @@ func (a *apiServer) GetCommands(
 	})
 
 	api.Sort(resp.Commands, req.OrderBy, req.SortBy, apiv1.GetCommandsRequest_SORT_BY_ID)
-	return resp, api.Paginate(&resp.Pagination, &resp.Commands, req.Offset, req.Limit)
+	if err = api.Paginate(&resp.Pagination, &resp.Commands, req.Offset, req.Limit); err != nil {
+		return nil, err
+	}
+	starts := make([]allocationStartTarget, 0, len(resp.Commands))
+	for _, item := range resp.Commands {
+		starts = append(starts, allocationStartTarget{item.Id, &item.AllocationStartTime})
+	}
+	if err = a.enrichAllocationStartTimes(ctx, starts, allocationStartTask); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (a *apiServer) GetCommand(

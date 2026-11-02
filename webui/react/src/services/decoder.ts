@@ -204,6 +204,7 @@ const mapCommonV1Task = (
   type: types.CommandType,
 ): types.CommandTask => {
   return {
+    allocationStartTime: (task.allocationStartTime as string | undefined) || undefined,
     displayName: task.displayName || '',
     endTime: (task.endTime as string | undefined) || undefined,
     id: task.id,
@@ -304,6 +305,7 @@ export const mapV1Task = (task: Sdk.V1Task): types.TaskItem => {
 export const mapV1GenericTask = (task: Sdk.V1GenericTask): types.GenericTask => {
   return {
     allocationId: task.allocationId || undefined,
+    allocationStartTime: (task.allocationStartTime as string | undefined) || undefined,
     description: task.description ?? '',
     displayName: task.displayName || undefined,
     endTime: (task.endTime as string | undefined) || undefined,
@@ -579,6 +581,7 @@ export function mapV1Experiment(
   };
 
   const bulkExpItem: types.BulkExperimentItem = {
+    allocationStartTime: (data.allocationStartTime as string | undefined) || undefined,
     archived: data.archived,
     checkpoints: data.checkpointCount,
     checkpointSize: parseInt(data?.checkpointSize || '0'),

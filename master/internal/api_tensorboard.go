@@ -106,7 +106,17 @@ func (a *apiServer) GetTensorboards(
 	resp.Tensorboards = filteredTensorboards
 
 	api.Sort(resp.Tensorboards, req.OrderBy, req.SortBy, apiv1.GetTensorboardsRequest_SORT_BY_ID)
-	return resp, api.Paginate(&resp.Pagination, &resp.Tensorboards, req.Offset, req.Limit)
+	if err = api.Paginate(&resp.Pagination, &resp.Tensorboards, req.Offset, req.Limit); err != nil {
+		return nil, err
+	}
+	starts := make([]allocationStartTarget, 0, len(resp.Tensorboards))
+	for _, item := range resp.Tensorboards {
+		starts = append(starts, allocationStartTarget{item.Id, &item.AllocationStartTime})
+	}
+	if err = a.enrichAllocationStartTimes(ctx, starts, allocationStartTask); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (a *apiServer) GetTensorboard(

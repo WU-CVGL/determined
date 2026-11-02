@@ -1,4 +1,5 @@
 import fixture from 'fixtures/jobsSortOrder.json';
+import { DateString } from 'ioTypes';
 import { FullJob, Job, JobState, JobType } from 'types';
 
 import { sortJobs } from './JobQueue.sort';
@@ -44,6 +45,41 @@ const COLUMNS = [
   { column: 'name', fixtureKey: 'name', text: (job: Job) => rowOf(job).name },
   { column: 'user', fixtureKey: 'owner', text: ownerName },
 ];
+
+describe.each(['started', 'submitted'])('%s time ordering', (column) => {
+  it('keeps microsecond precision, equal values in queue order and missing/invalid values last', () => {
+    const values = [
+      '2026-01-01T00:00:00.000002Z',
+      '2026-01-01T00:00:00.000001Z',
+      '2026-01-01T00:00:00.000002Z',
+      undefined,
+      new Date(NaN),
+    ];
+    const rows = values.map(
+      (value, index): FullJob => ({
+        ...jobs[index],
+        allocationStartTime:
+          column === 'started' ? (value as DateString | Date | undefined) : undefined,
+        jobId: String(index),
+        submissionTime: column === 'submitted' ? (value as DateString | Date) : new Date(0),
+      }),
+    );
+    expect(sortJobs(rows, column, false, () => undefined).map((row) => row.jobId)).toEqual([
+      '1',
+      '0',
+      '2',
+      '3',
+      '4',
+    ]);
+    expect(sortJobs(rows, column, true, () => undefined).map((row) => row.jobId)).toEqual([
+      '0',
+      '2',
+      '1',
+      '3',
+      '4',
+    ]);
+  });
+});
 
 describe('sortJobs on the text cases of the shared fixture', () => {
   describe.each(COLUMNS)('by $column', ({ column, fixtureKey, text }) => {

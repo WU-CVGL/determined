@@ -2083,7 +2083,7 @@ export interface V1Command {
      */
     state: Taskv1State;
     /**
-     * The time the command was started.
+     * The time the command was submitted (registered with the master).
      * @type {Date | DateString}
      * @memberof V1Command
      */
@@ -2148,6 +2148,12 @@ export interface V1Command {
      * @memberof V1Command
      */
     endTime?: Date | DateString;
+    /**
+     * First resource assignment time, provided by the list API; unset if never assigned. Available only in Agent-only clusters; omitted on other or mixed backends.
+     * @type {Date | DateString}
+     * @memberof V1Command
+     */
+    allocationStartTime?: Date | DateString;
 }
 /**
  * Container for a requested trial and its metrics.
@@ -3232,6 +3238,12 @@ export interface V1Experiment {
      * @memberof V1Experiment
      */
     pachydermIntegration?: any;
+    /**
+     * First resource assignment time among the experiment's trials, supplied by GetExperiments; unset if no trial has received resources. Available only in Agent-only clusters; omitted on other or mixed backends.
+     * @type {Date | DateString}
+     * @memberof V1Experiment
+     */
+    allocationStartTime?: Date | DateString;
 }
 /**
  * Message for results of individual experiments in a multi-experiment action.
@@ -3751,6 +3763,12 @@ export interface V1GenericTask {
      * @memberof V1GenericTask
      */
     displayName?: string;
+    /**
+     * First resource assignment time, across this task's allocations. Unset if no allocation has received resources. Available only in Agent-only clusters; omitted on other or mixed backends.
+     * @type {Date | DateString}
+     * @memberof V1GenericTask
+     */
+    allocationStartTime?: Date | DateString;
 }
 /**
  * State of a Generic task - GENERIC_TASK_STATE_UNSPECIFIED: The task state unknown  - GENERIC_TASK_STATE_ACTIVE: The task state unknown  - GENERIC_TASK_STATE_CANCELED: The task state unknown  - GENERIC_TASK_STATE_COMPLETED: The task state unknown  - GENERIC_TASK_STATE_ERROR: The task state unknown  - GENERIC_TASK_STATE_PAUSED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_PAUSED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_CANCELED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_COMPLETED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_ERROR: The task state unknown
@@ -4039,7 +4057,7 @@ export interface V1GetExperimentResponse {
     config?: any;
 }
 /**
- * Sorts experiments by the given field.   - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.  - SORT_BY_ID: Returns experiments sorted by id.  - SORT_BY_DESCRIPTION: Returns experiments sorted by description.  - SORT_BY_START_TIME: Return experiments sorted by start time.  - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are returned after the ones with end_time, in either order.  - SORT_BY_STATE: Return experiments sorted by state.  - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.  - SORT_BY_PROGRESS: Return experiments sorted by progress.  - SORT_BY_USER: Return experiments sorted by user: the owner's display name, or the username without one.  - SORT_BY_NAME: Returns experiments sorted by name.  - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.  - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool. Experiments without one are returned last, in either order.  - SORT_BY_PROJECT_ID: Returns experiments sorted by project.  - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.  - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.  - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..  - SORT_BY_SLOTS: Return experiments sorted by the slot count each trial requests (resources.slots_per_trial, 1 when unset).  - SORT_BY_STATE_GROUP: Return experiments sorted by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED). Every other state is active.
+ * Sorts experiments by the given field.   - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.  - SORT_BY_ID: Returns experiments sorted by id.  - SORT_BY_DESCRIPTION: Returns experiments sorted by description.  - SORT_BY_START_TIME: Return experiments sorted by start time.  - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are returned after the ones with end_time, in either order.  - SORT_BY_STATE: Return experiments sorted by state.  - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.  - SORT_BY_PROGRESS: Return experiments sorted by progress.  - SORT_BY_USER: Return experiments sorted by user: the owner's display name, or the username without one.  - SORT_BY_NAME: Returns experiments sorted by name.  - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.  - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool. Experiments without one are returned last, in either order.  - SORT_BY_PROJECT_ID: Returns experiments sorted by project.  - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.  - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.  - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..  - SORT_BY_SLOTS: Return experiments sorted by the slot count each trial requests (resources.slots_per_trial, 1 when unset).  - SORT_BY_STATE_GROUP: Return experiments sorted by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED). Every other state is active.  - SORT_BY_ALLOCATION_START_TIME: Sort by first confirmed resource assignment, missing last in either direction. Available only in Agent-only clusters.
  * @export
  * @enum {string}
  */
@@ -4062,6 +4080,7 @@ export const V1GetExperimentsRequestSortBy = {
     SEARCHERMETRICVAL: 'SORT_BY_SEARCHER_METRIC_VAL',
     SLOTS: 'SORT_BY_SLOTS',
     STATEGROUP: 'SORT_BY_STATE_GROUP',
+    ALLOCATIONSTARTTIME: 'SORT_BY_ALLOCATION_START_TIME',
 } as const
 export type V1GetExperimentsRequestSortBy = ValueOf<typeof V1GetExperimentsRequestSortBy>
 /**
@@ -4149,7 +4168,7 @@ export interface V1GetGenericTaskConfigResponse {
     config: string;
 }
 /**
- * Sorts generic tasks by the given field.   - SORT_BY_UNSPECIFIED: Sort by start time, newest first unless order_by is ascending.  - SORT_BY_START_TIME: Sort by start time.  - SORT_BY_END_TIME: Sort by end time. Tasks without one come last, in either order.  - SORT_BY_NAME: Sort by name, as the task's name field shows it.  - SORT_BY_STATE_GROUP: Sort by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR). Every other state is active. Tasks without a state come last, in either order.  - SORT_BY_USER: Sort by user: the owner's display name, or the username without one. Tasks without an owner come last, in either order.  - SORT_BY_RESOURCE_POOL: Sort by resource pool. Tasks without one come last, in either order.  - SORT_BY_SLOTS: Sort by the slot count the task requests.
+ * Sorts generic tasks by the given field.   - SORT_BY_UNSPECIFIED: Sort by start time, newest first unless order_by is ascending.  - SORT_BY_START_TIME: Sort by start time.  - SORT_BY_END_TIME: Sort by end time. Tasks without one come last, in either order.  - SORT_BY_NAME: Sort by name, as the task's name field shows it.  - SORT_BY_STATE_GROUP: Sort by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR). Every other state is active. Tasks without a state come last, in either order.  - SORT_BY_USER: Sort by user: the owner's display name, or the username without one. Tasks without an owner come last, in either order.  - SORT_BY_RESOURCE_POOL: Sort by resource pool. Tasks without one come last, in either order.  - SORT_BY_SLOTS: Sort by the slot count the task requests.  - SORT_BY_ALLOCATION_START_TIME: Sort by first confirmed resource assignment, missing last in either direction. Available only in Agent-only clusters.
  * @export
  * @enum {string}
  */
@@ -4162,6 +4181,7 @@ export const V1GetGenericTasksRequestSortBy = {
     USER: 'SORT_BY_USER',
     RESOURCEPOOL: 'SORT_BY_RESOURCE_POOL',
     SLOTS: 'SORT_BY_SLOTS',
+    ALLOCATIONSTARTTIME: 'SORT_BY_ALLOCATION_START_TIME',
 } as const
 export type V1GetGenericTasksRequestSortBy = ValueOf<typeof V1GetGenericTasksRequestSortBy>
 /**
@@ -6095,6 +6115,12 @@ export interface V1Job {
      * @memberof V1Job
      */
     placement?: Array<V1JobPlacement>;
+    /**
+     * First resource assignment across the job's allocations, supplied by the job queue list APIs. Unset if no allocation has received resources. Available only in Agent-only clusters; omitted on other or mixed backends.
+     * @type {Date | DateString}
+     * @memberof V1Job
+     */
+    allocationStartTime?: Date | DateString;
 }
 /**
  * The slots a job holds on one agent.
@@ -7485,7 +7511,7 @@ export interface V1Notebook {
      */
     state: Taskv1State;
     /**
-     * The time the notebook was started.
+     * The time the notebook was submitted (registered with the master).
      * @type {Date | DateString}
      * @memberof V1Notebook
      */
@@ -7556,6 +7582,12 @@ export interface V1Notebook {
      * @memberof V1Notebook
      */
     endTime?: Date | DateString;
+    /**
+     * First resource assignment time, provided by the list API; unset if never assigned. Available only in Agent-only clusters; omitted on other or mixed backends.
+     * @type {Date | DateString}
+     * @memberof V1Notebook
+     */
+    allocationStartTime?: Date | DateString;
 }
 /**
  * Arguments to a notify container running.
@@ -11362,7 +11394,7 @@ export interface V1Shell {
      */
     state: Taskv1State;
     /**
-     * The time the shell was started.
+     * The time the shell was submitted (registered with the master).
      * @type {Date | DateString}
      * @memberof V1Shell
      */
@@ -11451,6 +11483,12 @@ export interface V1Shell {
      * @memberof V1Shell
      */
     endTime?: Date | DateString;
+    /**
+     * First resource assignment time, provided by the list API; unset if never assigned. Available only in Agent-only clusters; omitted on other or mixed backends.
+     * @type {Date | DateString}
+     * @memberof V1Shell
+     */
+    allocationStartTime?: Date | DateString;
 }
 /**
  * Slot wraps a single device on the agent.
@@ -12010,7 +12048,7 @@ export interface V1Tensorboard {
      */
     state: Taskv1State;
     /**
-     * The time the tensorboard was started.
+     * The time the tensorboard was submitted (registered with the master).
      * @type {Date | DateString}
      * @memberof V1Tensorboard
      */
@@ -12093,6 +12131,12 @@ export interface V1Tensorboard {
      * @memberof V1Tensorboard
      */
     endTime?: Date | DateString;
+    /**
+     * First resource assignment time, provided by the list API; unset if never assigned. Available only in Agent-only clusters; omitted on other or mixed backends.
+     * @type {Date | DateString}
+     * @memberof V1Tensorboard
+     */
+    allocationStartTime?: Date | DateString;
 }
 /**
  * Response to TestWebhookRequest.
@@ -17159,7 +17203,7 @@ export const ExperimentsApiFetchParamCreator = function (configuration?: Configu
         /**
          * 
          * @summary Get a list of experiments.
-         * @param {V1GetExperimentsRequestSortBy} [sortBy] Sort experiments by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Sorted by start time, end time, name, user, resource pool, slots or state group, experiments that tie go newest start first, then highest ID first.   - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.  - SORT_BY_ID: Returns experiments sorted by id.  - SORT_BY_DESCRIPTION: Returns experiments sorted by description.  - SORT_BY_START_TIME: Return experiments sorted by start time.  - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are returned after the ones with end_time, in either order.  - SORT_BY_STATE: Return experiments sorted by state.  - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.  - SORT_BY_PROGRESS: Return experiments sorted by progress.  - SORT_BY_USER: Return experiments sorted by user: the owner's display name, or the username without one.  - SORT_BY_NAME: Returns experiments sorted by name.  - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.  - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool. Experiments without one are returned last, in either order.  - SORT_BY_PROJECT_ID: Returns experiments sorted by project.  - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.  - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.  - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..  - SORT_BY_SLOTS: Return experiments sorted by the slot count each trial requests (resources.slots_per_trial, 1 when unset).  - SORT_BY_STATE_GROUP: Return experiments sorted by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED). Every other state is active.
+         * @param {V1GetExperimentsRequestSortBy} [sortBy] Sort experiments by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Sorted by start time, end time, name, user, resource pool, slots or state group, experiments that tie go newest start first, then highest ID first.   - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.  - SORT_BY_ID: Returns experiments sorted by id.  - SORT_BY_DESCRIPTION: Returns experiments sorted by description.  - SORT_BY_START_TIME: Return experiments sorted by start time.  - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are returned after the ones with end_time, in either order.  - SORT_BY_STATE: Return experiments sorted by state.  - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.  - SORT_BY_PROGRESS: Return experiments sorted by progress.  - SORT_BY_USER: Return experiments sorted by user: the owner's display name, or the username without one.  - SORT_BY_NAME: Returns experiments sorted by name.  - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.  - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool. Experiments without one are returned last, in either order.  - SORT_BY_PROJECT_ID: Returns experiments sorted by project.  - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.  - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.  - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..  - SORT_BY_SLOTS: Return experiments sorted by the slot count each trial requests (resources.slots_per_trial, 1 when unset).  - SORT_BY_STATE_GROUP: Return experiments sorted by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED). Every other state is active.  - SORT_BY_ALLOCATION_START_TIME: Sort by first confirmed resource assignment, missing last in either direction. Available only in Agent-only clusters.
          * @param {V1OrderBy} [orderBy] Order experiments in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
          * @param {number} [offset] Skip the number of experiments before returning results. Negative values denote number of experiments to skip from the end before returning results.
          * @param {number} [limit] Limit the number of experiments. 0 or Unspecified - returns a default of 100. -1               - returns everything. -2               - returns pagination info but no experiments.
@@ -18683,7 +18727,7 @@ export const ExperimentsApiFp = function (configuration?: Configuration) {
         /**
          * 
          * @summary Get a list of experiments.
-         * @param {V1GetExperimentsRequestSortBy} [sortBy] Sort experiments by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Sorted by start time, end time, name, user, resource pool, slots or state group, experiments that tie go newest start first, then highest ID first.   - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.  - SORT_BY_ID: Returns experiments sorted by id.  - SORT_BY_DESCRIPTION: Returns experiments sorted by description.  - SORT_BY_START_TIME: Return experiments sorted by start time.  - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are returned after the ones with end_time, in either order.  - SORT_BY_STATE: Return experiments sorted by state.  - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.  - SORT_BY_PROGRESS: Return experiments sorted by progress.  - SORT_BY_USER: Return experiments sorted by user: the owner's display name, or the username without one.  - SORT_BY_NAME: Returns experiments sorted by name.  - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.  - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool. Experiments without one are returned last, in either order.  - SORT_BY_PROJECT_ID: Returns experiments sorted by project.  - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.  - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.  - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..  - SORT_BY_SLOTS: Return experiments sorted by the slot count each trial requests (resources.slots_per_trial, 1 when unset).  - SORT_BY_STATE_GROUP: Return experiments sorted by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED). Every other state is active.
+         * @param {V1GetExperimentsRequestSortBy} [sortBy] Sort experiments by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Sorted by start time, end time, name, user, resource pool, slots or state group, experiments that tie go newest start first, then highest ID first.   - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.  - SORT_BY_ID: Returns experiments sorted by id.  - SORT_BY_DESCRIPTION: Returns experiments sorted by description.  - SORT_BY_START_TIME: Return experiments sorted by start time.  - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are returned after the ones with end_time, in either order.  - SORT_BY_STATE: Return experiments sorted by state.  - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.  - SORT_BY_PROGRESS: Return experiments sorted by progress.  - SORT_BY_USER: Return experiments sorted by user: the owner's display name, or the username without one.  - SORT_BY_NAME: Returns experiments sorted by name.  - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.  - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool. Experiments without one are returned last, in either order.  - SORT_BY_PROJECT_ID: Returns experiments sorted by project.  - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.  - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.  - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..  - SORT_BY_SLOTS: Return experiments sorted by the slot count each trial requests (resources.slots_per_trial, 1 when unset).  - SORT_BY_STATE_GROUP: Return experiments sorted by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED). Every other state is active.  - SORT_BY_ALLOCATION_START_TIME: Sort by first confirmed resource assignment, missing last in either direction. Available only in Agent-only clusters.
          * @param {V1OrderBy} [orderBy] Order experiments in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
          * @param {number} [offset] Skip the number of experiments before returning results. Negative values denote number of experiments to skip from the end before returning results.
          * @param {number} [limit] Limit the number of experiments. 0 or Unspecified - returns a default of 100. -1               - returns everything. -2               - returns pagination info but no experiments.
@@ -19397,7 +19441,7 @@ export const ExperimentsApiFactory = function (configuration?: Configuration, fe
         /**
          * 
          * @summary Get a list of experiments.
-         * @param {V1GetExperimentsRequestSortBy} [sortBy] Sort experiments by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Sorted by start time, end time, name, user, resource pool, slots or state group, experiments that tie go newest start first, then highest ID first.   - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.  - SORT_BY_ID: Returns experiments sorted by id.  - SORT_BY_DESCRIPTION: Returns experiments sorted by description.  - SORT_BY_START_TIME: Return experiments sorted by start time.  - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are returned after the ones with end_time, in either order.  - SORT_BY_STATE: Return experiments sorted by state.  - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.  - SORT_BY_PROGRESS: Return experiments sorted by progress.  - SORT_BY_USER: Return experiments sorted by user: the owner's display name, or the username without one.  - SORT_BY_NAME: Returns experiments sorted by name.  - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.  - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool. Experiments without one are returned last, in either order.  - SORT_BY_PROJECT_ID: Returns experiments sorted by project.  - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.  - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.  - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..  - SORT_BY_SLOTS: Return experiments sorted by the slot count each trial requests (resources.slots_per_trial, 1 when unset).  - SORT_BY_STATE_GROUP: Return experiments sorted by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED). Every other state is active.
+         * @param {V1GetExperimentsRequestSortBy} [sortBy] Sort experiments by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Sorted by start time, end time, name, user, resource pool, slots or state group, experiments that tie go newest start first, then highest ID first.   - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.  - SORT_BY_ID: Returns experiments sorted by id.  - SORT_BY_DESCRIPTION: Returns experiments sorted by description.  - SORT_BY_START_TIME: Return experiments sorted by start time.  - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are returned after the ones with end_time, in either order.  - SORT_BY_STATE: Return experiments sorted by state.  - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.  - SORT_BY_PROGRESS: Return experiments sorted by progress.  - SORT_BY_USER: Return experiments sorted by user: the owner's display name, or the username without one.  - SORT_BY_NAME: Returns experiments sorted by name.  - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.  - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool. Experiments without one are returned last, in either order.  - SORT_BY_PROJECT_ID: Returns experiments sorted by project.  - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.  - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.  - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..  - SORT_BY_SLOTS: Return experiments sorted by the slot count each trial requests (resources.slots_per_trial, 1 when unset).  - SORT_BY_STATE_GROUP: Return experiments sorted by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED). Every other state is active.  - SORT_BY_ALLOCATION_START_TIME: Sort by first confirmed resource assignment, missing last in either direction. Available only in Agent-only clusters.
          * @param {V1OrderBy} [orderBy] Order experiments in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
          * @param {number} [offset] Skip the number of experiments before returning results. Negative values denote number of experiments to skip from the end before returning results.
          * @param {number} [limit] Limit the number of experiments. 0 or Unspecified - returns a default of 100. -1               - returns everything. -2               - returns pagination info but no experiments.
@@ -19915,7 +19959,7 @@ export class ExperimentsApi extends BaseAPI {
     /**
      * 
      * @summary Get a list of experiments.
-     * @param {V1GetExperimentsRequestSortBy} [sortBy] Sort experiments by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Sorted by start time, end time, name, user, resource pool, slots or state group, experiments that tie go newest start first, then highest ID first.   - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.  - SORT_BY_ID: Returns experiments sorted by id.  - SORT_BY_DESCRIPTION: Returns experiments sorted by description.  - SORT_BY_START_TIME: Return experiments sorted by start time.  - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are returned after the ones with end_time, in either order.  - SORT_BY_STATE: Return experiments sorted by state.  - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.  - SORT_BY_PROGRESS: Return experiments sorted by progress.  - SORT_BY_USER: Return experiments sorted by user: the owner's display name, or the username without one.  - SORT_BY_NAME: Returns experiments sorted by name.  - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.  - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool. Experiments without one are returned last, in either order.  - SORT_BY_PROJECT_ID: Returns experiments sorted by project.  - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.  - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.  - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..  - SORT_BY_SLOTS: Return experiments sorted by the slot count each trial requests (resources.slots_per_trial, 1 when unset).  - SORT_BY_STATE_GROUP: Return experiments sorted by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED). Every other state is active.
+     * @param {V1GetExperimentsRequestSortBy} [sortBy] Sort experiments by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Sorted by start time, end time, name, user, resource pool, slots or state group, experiments that tie go newest start first, then highest ID first.   - SORT_BY_UNSPECIFIED: Returns experiments in an unsorted list.  - SORT_BY_ID: Returns experiments sorted by id.  - SORT_BY_DESCRIPTION: Returns experiments sorted by description.  - SORT_BY_START_TIME: Return experiments sorted by start time.  - SORT_BY_END_TIME: Return experiments sorted by end time. Experiments without end_time are returned after the ones with end_time, in either order.  - SORT_BY_STATE: Return experiments sorted by state.  - SORT_BY_NUM_TRIALS: Return experiments sorted by number of trials.  - SORT_BY_PROGRESS: Return experiments sorted by progress.  - SORT_BY_USER: Return experiments sorted by user: the owner's display name, or the username without one.  - SORT_BY_NAME: Returns experiments sorted by name.  - SORT_BY_FORKED_FROM: Returns experiments sorted by originating model.  - SORT_BY_RESOURCE_POOL: Returns experiments sorted by resource pool. Experiments without one are returned last, in either order.  - SORT_BY_PROJECT_ID: Returns experiments sorted by project.  - SORT_BY_CHECKPOINT_SIZE: Returns experiments sorted by checkpoint size.  - SORT_BY_CHECKPOINT_COUNT: Returns experiments sorted by checkpoint count.  - SORT_BY_SEARCHER_METRIC_VAL: Returns experiments sorted by searcher metric value..  - SORT_BY_SLOTS: Return experiments sorted by the slot count each trial requests (resources.slots_per_trial, 1 when unset).  - SORT_BY_STATE_GROUP: Return experiments sorted by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED). Every other state is active.  - SORT_BY_ALLOCATION_START_TIME: Sort by first confirmed resource assignment, missing last in either direction. Available only in Agent-only clusters.
      * @param {V1OrderBy} [orderBy] Order experiments in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
      * @param {number} [offset] Skip the number of experiments before returning results. Negative values denote number of experiments to skip from the end before returning results.
      * @param {number} [limit] Limit the number of experiments. 0 or Unspecified - returns a default of 100. -1               - returns everything. -2               - returns pagination info but no experiments.
@@ -31743,7 +31787,7 @@ export const TasksApiFetchParamCreator = function (configuration?: Configuration
          * @param {Array<number>} [slots] Limit tasks to those that request one of these slot counts (resources.slots, 0 when unset). With slots_above, a task that matches either is listed.
          * @param {number} [slotsAbove] Limit tasks to those that request more than this many slots. With slots, a task that matches either is listed.
          * @param {Array<number>} [workspaceIds] Limit tasks to these workspaces. IDs of workspaces that are gone or that the user cannot view are skipped; if none remain, no tasks are listed.
-         * @param {V1GetGenericTasksRequestSortBy} [sortBy] Sort tasks by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Tasks that tie go newest start first, then by task ID (A to Z, by code point).   - SORT_BY_UNSPECIFIED: Sort by start time, newest first unless order_by is ascending.  - SORT_BY_START_TIME: Sort by start time.  - SORT_BY_END_TIME: Sort by end time. Tasks without one come last, in either order.  - SORT_BY_NAME: Sort by name, as the task's name field shows it.  - SORT_BY_STATE_GROUP: Sort by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR). Every other state is active. Tasks without a state come last, in either order.  - SORT_BY_USER: Sort by user: the owner's display name, or the username without one. Tasks without an owner come last, in either order.  - SORT_BY_RESOURCE_POOL: Sort by resource pool. Tasks without one come last, in either order.  - SORT_BY_SLOTS: Sort by the slot count the task requests.
+         * @param {V1GetGenericTasksRequestSortBy} [sortBy] Sort tasks by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Tasks that tie go newest start first, then by task ID (A to Z, by code point).   - SORT_BY_UNSPECIFIED: Sort by start time, newest first unless order_by is ascending.  - SORT_BY_START_TIME: Sort by start time.  - SORT_BY_END_TIME: Sort by end time. Tasks without one come last, in either order.  - SORT_BY_NAME: Sort by name, as the task's name field shows it.  - SORT_BY_STATE_GROUP: Sort by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR). Every other state is active. Tasks without a state come last, in either order.  - SORT_BY_USER: Sort by user: the owner's display name, or the username without one. Tasks without an owner come last, in either order.  - SORT_BY_RESOURCE_POOL: Sort by resource pool. Tasks without one come last, in either order.  - SORT_BY_SLOTS: Sort by the slot count the task requests.  - SORT_BY_ALLOCATION_START_TIME: Sort by first confirmed resource assignment, missing last in either direction. Available only in Agent-only clusters.
          * @param {V1OrderBy} [orderBy] Order tasks in either ascending or descending order. Unspecified is ascending, or descending with SORT_BY_UNSPECIFIED.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -32376,7 +32420,7 @@ export const TasksApiFp = function (configuration?: Configuration) {
          * @param {Array<number>} [slots] Limit tasks to those that request one of these slot counts (resources.slots, 0 when unset). With slots_above, a task that matches either is listed.
          * @param {number} [slotsAbove] Limit tasks to those that request more than this many slots. With slots, a task that matches either is listed.
          * @param {Array<number>} [workspaceIds] Limit tasks to these workspaces. IDs of workspaces that are gone or that the user cannot view are skipped; if none remain, no tasks are listed.
-         * @param {V1GetGenericTasksRequestSortBy} [sortBy] Sort tasks by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Tasks that tie go newest start first, then by task ID (A to Z, by code point).   - SORT_BY_UNSPECIFIED: Sort by start time, newest first unless order_by is ascending.  - SORT_BY_START_TIME: Sort by start time.  - SORT_BY_END_TIME: Sort by end time. Tasks without one come last, in either order.  - SORT_BY_NAME: Sort by name, as the task's name field shows it.  - SORT_BY_STATE_GROUP: Sort by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR). Every other state is active. Tasks without a state come last, in either order.  - SORT_BY_USER: Sort by user: the owner's display name, or the username without one. Tasks without an owner come last, in either order.  - SORT_BY_RESOURCE_POOL: Sort by resource pool. Tasks without one come last, in either order.  - SORT_BY_SLOTS: Sort by the slot count the task requests.
+         * @param {V1GetGenericTasksRequestSortBy} [sortBy] Sort tasks by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Tasks that tie go newest start first, then by task ID (A to Z, by code point).   - SORT_BY_UNSPECIFIED: Sort by start time, newest first unless order_by is ascending.  - SORT_BY_START_TIME: Sort by start time.  - SORT_BY_END_TIME: Sort by end time. Tasks without one come last, in either order.  - SORT_BY_NAME: Sort by name, as the task's name field shows it.  - SORT_BY_STATE_GROUP: Sort by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR). Every other state is active. Tasks without a state come last, in either order.  - SORT_BY_USER: Sort by user: the owner's display name, or the username without one. Tasks without an owner come last, in either order.  - SORT_BY_RESOURCE_POOL: Sort by resource pool. Tasks without one come last, in either order.  - SORT_BY_SLOTS: Sort by the slot count the task requests.  - SORT_BY_ALLOCATION_START_TIME: Sort by first confirmed resource assignment, missing last in either direction. Available only in Agent-only clusters.
          * @param {V1OrderBy} [orderBy] Order tasks in either ascending or descending order. Unspecified is ascending, or descending with SORT_BY_UNSPECIFIED.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -32655,7 +32699,7 @@ export const TasksApiFactory = function (configuration?: Configuration, fetch?: 
          * @param {Array<number>} [slots] Limit tasks to those that request one of these slot counts (resources.slots, 0 when unset). With slots_above, a task that matches either is listed.
          * @param {number} [slotsAbove] Limit tasks to those that request more than this many slots. With slots, a task that matches either is listed.
          * @param {Array<number>} [workspaceIds] Limit tasks to these workspaces. IDs of workspaces that are gone or that the user cannot view are skipped; if none remain, no tasks are listed.
-         * @param {V1GetGenericTasksRequestSortBy} [sortBy] Sort tasks by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Tasks that tie go newest start first, then by task ID (A to Z, by code point).   - SORT_BY_UNSPECIFIED: Sort by start time, newest first unless order_by is ascending.  - SORT_BY_START_TIME: Sort by start time.  - SORT_BY_END_TIME: Sort by end time. Tasks without one come last, in either order.  - SORT_BY_NAME: Sort by name, as the task's name field shows it.  - SORT_BY_STATE_GROUP: Sort by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR). Every other state is active. Tasks without a state come last, in either order.  - SORT_BY_USER: Sort by user: the owner's display name, or the username without one. Tasks without an owner come last, in either order.  - SORT_BY_RESOURCE_POOL: Sort by resource pool. Tasks without one come last, in either order.  - SORT_BY_SLOTS: Sort by the slot count the task requests.
+         * @param {V1GetGenericTasksRequestSortBy} [sortBy] Sort tasks by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Tasks that tie go newest start first, then by task ID (A to Z, by code point).   - SORT_BY_UNSPECIFIED: Sort by start time, newest first unless order_by is ascending.  - SORT_BY_START_TIME: Sort by start time.  - SORT_BY_END_TIME: Sort by end time. Tasks without one come last, in either order.  - SORT_BY_NAME: Sort by name, as the task's name field shows it.  - SORT_BY_STATE_GROUP: Sort by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR). Every other state is active. Tasks without a state come last, in either order.  - SORT_BY_USER: Sort by user: the owner's display name, or the username without one. Tasks without an owner come last, in either order.  - SORT_BY_RESOURCE_POOL: Sort by resource pool. Tasks without one come last, in either order.  - SORT_BY_SLOTS: Sort by the slot count the task requests.  - SORT_BY_ALLOCATION_START_TIME: Sort by first confirmed resource assignment, missing last in either direction. Available only in Agent-only clusters.
          * @param {V1OrderBy} [orderBy] Order tasks in either ascending or descending order. Unspecified is ascending, or descending with SORT_BY_UNSPECIFIED.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -32842,7 +32886,7 @@ export class TasksApi extends BaseAPI {
      * @param {Array<number>} [slots] Limit tasks to those that request one of these slot counts (resources.slots, 0 when unset). With slots_above, a task that matches either is listed.
      * @param {number} [slotsAbove] Limit tasks to those that request more than this many slots. With slots, a task that matches either is listed.
      * @param {Array<number>} [workspaceIds] Limit tasks to these workspaces. IDs of workspaces that are gone or that the user cannot view are skipped; if none remain, no tasks are listed.
-     * @param {V1GetGenericTasksRequestSortBy} [sortBy] Sort tasks by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Tasks that tie go newest start first, then by task ID (A to Z, by code point).   - SORT_BY_UNSPECIFIED: Sort by start time, newest first unless order_by is ascending.  - SORT_BY_START_TIME: Sort by start time.  - SORT_BY_END_TIME: Sort by end time. Tasks without one come last, in either order.  - SORT_BY_NAME: Sort by name, as the task's name field shows it.  - SORT_BY_STATE_GROUP: Sort by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR). Every other state is active. Tasks without a state come last, in either order.  - SORT_BY_USER: Sort by user: the owner's display name, or the username without one. Tasks without an owner come last, in either order.  - SORT_BY_RESOURCE_POOL: Sort by resource pool. Tasks without one come last, in either order.  - SORT_BY_SLOTS: Sort by the slot count the task requests.
+     * @param {V1GetGenericTasksRequestSortBy} [sortBy] Sort tasks by the given field. Name, user and resource pool compare text with A-Z folded to a-z, by code point, then the text as is. Tasks that tie go newest start first, then by task ID (A to Z, by code point).   - SORT_BY_UNSPECIFIED: Sort by start time, newest first unless order_by is ascending.  - SORT_BY_START_TIME: Sort by start time.  - SORT_BY_END_TIME: Sort by end time. Tasks without one come last, in either order.  - SORT_BY_NAME: Sort by name, as the task's name field shows it.  - SORT_BY_STATE_GROUP: Sort by state group: active, then paused (PAUSED), then ended (COMPLETED, CANCELED, ERROR). Every other state is active. Tasks without a state come last, in either order.  - SORT_BY_USER: Sort by user: the owner's display name, or the username without one. Tasks without an owner come last, in either order.  - SORT_BY_RESOURCE_POOL: Sort by resource pool. Tasks without one come last, in either order.  - SORT_BY_SLOTS: Sort by the slot count the task requests.  - SORT_BY_ALLOCATION_START_TIME: Sort by first confirmed resource assignment, missing last in either direction. Available only in Agent-only clusters.
      * @param {V1OrderBy} [orderBy] Order tasks in either ascending or descending order. Unspecified is ascending, or descending with SORT_BY_UNSPECIFIED.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}

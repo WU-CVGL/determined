@@ -98,6 +98,9 @@ message GetExperimentsRequest {
     // (PAUSED), then ended (COMPLETED, CANCELED, ERROR, DELETE_FAILED).
     // Every other state is active.
     SORT_BY_STATE_GROUP = 101;
+    // Sort by first confirmed resource assignment, missing last in either
+    // direction. Available only in Agent-only clusters.
+    SORT_BY_ALLOCATION_START_TIME = 102;
   }
   // Sort experiments by the given field. Name, user and resource pool compare
   // text with A-Z folded to a-z, by code point, then the text as is. Sorted by

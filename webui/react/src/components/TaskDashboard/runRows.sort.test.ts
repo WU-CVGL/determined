@@ -1,6 +1,7 @@
 import fixture from 'fixtures/jobsSortOrder.json';
 import * as Sdk from 'services/api-ts-sdk';
 import { mapV1Command, mapV1ExperimentList, mapV1GenericTasksResponse } from 'services/decoder';
+import { timeKey } from 'utils/taskTime';
 
 import {
   commandRow,
@@ -11,7 +12,6 @@ import {
   runComparator,
   RunRow,
   SortKey,
-  timeKey,
 } from './runRows';
 
 /*

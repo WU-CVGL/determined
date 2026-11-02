@@ -1,6 +1,7 @@
 import { SortOrder } from 'antd/es/table/interface';
 
 import { Job } from 'types';
+import { timeKey } from 'utils/taskTime';
 import { compareText } from 'utils/textOrder';
 
 /** The queue order: no column sort. */
@@ -22,12 +23,18 @@ const MOST_FIRST: SortOrder[] = ['descend', 'ascend'];
 export const ACTIVE_SORTS: Record<string, ColumnSort> = {
   name: { directions: A_TO_Z_FIRST, value: (job) => ('name' in job ? job.name : undefined) },
   slots: { directions: MOST_FIRST, value: (job) => [job.allocatedSlots, job.requestedSlots] },
+  started: {
+    directions: MOST_FIRST,
+    value: (job) => {
+      if (!('allocationStartTime' in job) || !job.allocationStartTime) return undefined;
+      return timeKey(job.allocationStartTime);
+    },
+  },
   submitted: {
     directions: MOST_FIRST,
     value: (job) => {
       if (!('submissionTime' in job) || !job.submissionTime) return undefined;
-      const time = new Date(job.submissionTime).getTime();
-      return Number.isNaN(time) ? undefined : [time];
+      return timeKey(job.submissionTime);
     },
   },
   user: { directions: A_TO_Z_FIRST, value: (job, ownerName) => ownerName(job) },

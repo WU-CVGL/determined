@@ -12,6 +12,7 @@ import {
   RunState,
   ValueOf,
 } from 'types';
+import { timeKey } from 'utils/taskTime';
 import { compareCodePoints, compareText } from 'utils/textOrder';
 
 /*
@@ -285,6 +286,7 @@ export const experimentSlots = (item: BulkExperimentItem): number | undefined =>
 /* Rows */
 
 interface RunRowBase {
+  allocationStartTime?: string;
   endTime?: string;
   /** The ID as text: a task ID, or an experiment's number. */
   id: string;
@@ -324,6 +326,7 @@ const ownerName = (displayName?: string, username?: string): string | undefined 
   displayName || username || undefined;
 
 export const commandRow = (task: CommandTask): CommandRunRow => ({
+  allocationStartTime: task.allocationStartTime,
   endTime: task.endTime,
   id: task.id,
   key: runRowKey(task.type, task.id),
@@ -340,6 +343,7 @@ export const commandRow = (task: CommandTask): CommandRunRow => ({
 });
 
 export const genericTaskRow = (task: GenericTask): GenericTaskRunRow => ({
+  allocationStartTime: task.allocationStartTime,
   endTime: task.endTime,
   id: task.taskId,
   key: runRowKey(RunKind.GenericTask, task.taskId),
@@ -366,6 +370,7 @@ export const experimentRow = (item: BulkExperimentItem): ExperimentRunRow => {
     workspaceName: item.workspaceName ?? '',
   };
   return {
+    allocationStartTime: item.allocationStartTime,
     endTime: item.endTime,
     experiment,
     id: String(item.id),
@@ -389,6 +394,7 @@ export const experimentRow = (item: BulkExperimentItem): ExperimentRunRow => {
  * list.
  */
 export const SortKey = {
+  AllocationStartTime: 'allocationStartTime',
   EndTime: 'endTime',
   Kind: 'type',
   Name: 'name',
@@ -411,26 +417,6 @@ export interface RunSort {
 /** Newest first. */
 export const DEFAULT_SORT: RunSort = { desc: true, key: SortKey.StartTime };
 
-const TIME = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:?\d{2})?$/i;
-
-/**
- * A time as its milliseconds since the epoch to the second and its nanoseconds within the second:
- * the APIs write times to the microsecond or nanosecond, which Date.parse cuts to the millisecond.
- * Undefined for no time.
- */
-export const timeKey = (time?: string): [number, number] | undefined => {
-  if (!time) return undefined;
-  const parts = TIME.exec(time);
-  if (!parts) {
-    const ms = Date.parse(time);
-    return Number.isNaN(ms) ? undefined : [ms, 0];
-  }
-  const [, seconds, fraction = '', zone = 'Z'] = parts;
-  const ms = Date.parse(`${seconds}${zone}`);
-  if (Number.isNaN(ms)) return undefined;
-  return [ms, Number(fraction.padEnd(9, '0').slice(0, 9))];
-};
-
 const compareNumbers = (a: number, b: number): number => (a < b ? -1 : a > b ? 1 : 0);
 
 const compareTimeKeys = (a: [number, number], b: [number, number]): number =>
@@ -447,6 +433,8 @@ type SortValue = number | string | [number, number];
 /** A row's value of the key; undefined for a missing one, which sorts last both ways. */
 const sortValue = (row: RunRow, key: SortKey): SortValue | undefined => {
   switch (key) {
+    case SortKey.AllocationStartTime:
+      return timeKey(row.allocationStartTime);
     case SortKey.Kind:
       return RUN_KINDS.indexOf(row.kind);
     case SortKey.Name:
@@ -539,6 +527,7 @@ export const pageOfRuns = (
 ): RunRow[] => mergeRuns(lists, sort).slice(offset, offset + limit);
 
 const experimentSortBy: Record<SortKey, V1GetExperimentsRequestSortBy> = {
+  [SortKey.AllocationStartTime]: V1GetExperimentsRequestSortBy.ALLOCATIONSTARTTIME,
   [SortKey.EndTime]: V1GetExperimentsRequestSortBy.ENDTIME,
   [SortKey.Kind]: V1GetExperimentsRequestSortBy.STARTTIME,
   [SortKey.Name]: V1GetExperimentsRequestSortBy.NAME,
@@ -550,6 +539,7 @@ const experimentSortBy: Record<SortKey, V1GetExperimentsRequestSortBy> = {
 };
 
 const genericTaskSortBy: Record<SortKey, V1GetGenericTasksRequestSortBy> = {
+  [SortKey.AllocationStartTime]: V1GetGenericTasksRequestSortBy.ALLOCATIONSTARTTIME,
   [SortKey.EndTime]: V1GetGenericTasksRequestSortBy.ENDTIME,
   [SortKey.Kind]: V1GetGenericTasksRequestSortBy.STARTTIME,
   [SortKey.Name]: V1GetGenericTasksRequestSortBy.NAME,

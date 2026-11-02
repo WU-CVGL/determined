@@ -1,5 +1,6 @@
 import Icon from 'hew/Icon';
 import Tooltip from 'hew/Tooltip';
+import _ from 'lodash';
 import React, { ReactNode } from 'react';
 
 import Badge, { BadgeType } from 'components/Badge';
@@ -18,10 +19,11 @@ import {
   taskJobLabel,
 } from 'utils/job';
 import { floatToPercent } from 'utils/string';
+import { ALLOCATION_START_TOOLTIP } from 'utils/taskTime';
 import { openCommand } from 'utils/wait';
 
 import css from './JobQueue.module.scss';
-import { DEFAULT_COLUMN_WIDTHS } from './JobQueue.settings';
+import { DEFAULT_COLUMN_WIDTHS, DEFAULT_COLUMNS } from './JobQueue.settings';
 
 type Renderer<T> = (_: unknown, record: T) => ReactNode;
 export type JobTypeRenderer = Renderer<Job>;
@@ -74,6 +76,29 @@ const linkToEntityPage = (job: Job, label: ReactNode): ReactNode => {
 /** The stored layout with the GPUs column, after Slots at its default width. */
 export const withGpusColumn = (layout: ColumnLayout): ColumnLayout =>
   withColumn(layout, 'gpus', 'slots', DEFAULT_COLUMN_WIDTHS);
+
+/** Insert Started after Submitted, preserving the widths of older saved layouts. */
+export const withStartedColumn = (layout: ColumnLayout): ColumnLayout => {
+  const { columns, columnWidths } = layout;
+  const cols =
+    _.isEqual(columns, DEFAULT_COLUMNS) && columnWidths.length === columns.length - 1
+      ? columns.filter((col) => col !== 'allocationStartTime')
+      : columns;
+  // Columns saved without widths read the new default widths. Bind those by column name,
+  // rather than shifting Started's width onto Slots and every following column.
+  const defaultWidths = DEFAULT_COLUMNS.map((col) => DEFAULT_COLUMN_WIDTHS[col]);
+  const widths = _.isEqual(columnWidths, defaultWidths)
+    ? cols.map((col) => DEFAULT_COLUMN_WIDTHS[col as keyof typeof DEFAULT_COLUMN_WIDTHS])
+    : columnWidths;
+  return cols.includes('submissionTime')
+    ? withColumn(
+        { columns: cols, columnWidths: widths },
+        'allocationStartTime',
+        'submissionTime',
+        DEFAULT_COLUMN_WIDTHS,
+      )
+    : layout;
+};
 
 /**
  * The GPUs a job holds, one line per agent. With `onToggle`, the lines are a toggle button that
@@ -181,6 +206,27 @@ export const columns: (f_flat_runs: boolean) => ColumnDef<Job>[] = (f_flat_runs)
         ),
     ),
     title: 'Submitted',
+  },
+  {
+    align: 'right',
+    dataIndex: 'allocationStartTime',
+    defaultWidth: DEFAULT_COLUMN_WIDTHS.allocationStartTime,
+    key: 'started',
+    render: createOmitableRenderer<Job, FullJob>(
+      'entityId',
+      (_, record): ReactNode => (
+        <span title={ALLOCATION_START_TOOLTIP}>
+          {record.allocationStartTime
+            ? relativeTimeRenderer(
+                typeof record.allocationStartTime === 'string'
+                  ? new Date(record.allocationStartTime)
+                  : record.allocationStartTime,
+              )
+            : '—'}
+        </span>
+      ),
+    ),
+    title: 'Started',
   },
   {
     align: 'right',

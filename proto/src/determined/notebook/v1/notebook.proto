@@ -31,7 +31,7 @@ message Notebook {
   string description = 2;
   // The state of the notebook.
   determined.task.v1.State state = 3;
-  // The time the notebook was started.
+  // The time the notebook was submitted (registered with the master).
   google.protobuf.Timestamp start_time = 4;
   // The container running the notebook.
   determined.container.v1.Container container = 6;
@@ -56,4 +56,8 @@ message Notebook {
   int32 slots = 100;
   // The time the notebook ended; unset while it runs.
   google.protobuf.Timestamp end_time = 101;
+  // First resource assignment time, provided by the list API; unset if never
+  // assigned.
+  // Available only in Agent-only clusters; omitted on other or mixed backends.
+  google.protobuf.Timestamp allocation_start_time = 102;
 }
