@@ -22,13 +22,17 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/determined-ai/determined/master/internal/config"
+	detContext "github.com/determined-ai/determined/master/internal/context"
+	"github.com/determined-ai/determined/master/internal/db"
+	"github.com/determined-ai/determined/master/internal/grpcutil"
 	"github.com/determined-ai/determined/master/internal/user"
 )
 
 const (
 	// codeServerRoute serves code-server release tarballs to tasks. It is under /det/, which the
-	// authentication middleware exempts for the WebUI, so the route authenticates by itself. The
-	// wildcard keeps every other path below /det/code-server/ away from the WebUI's catch-all.
+	// authentication middleware exempts for the WebUI, so the route authenticates by itself, with
+	// a user session or the token of an allocation. The wildcard keeps every other path below
+	// /det/code-server/ away from the WebUI's catch-all.
 	codeServerRoute = "/det/code-server/*"
 	// codeServerFetchTimeout bounds one download of a tarball, about 230 MB, from upstream.
 	codeServerFetchTimeout = 15 * time.Minute
@@ -71,8 +75,60 @@ func registerCodeServerRoutes(e *echo.Echo, conf config.CodeServerConfig) error 
 			return err
 		}
 	}
-	e.GET(codeServerRoute, artifacts.serve, user.GetService().RequireAuthentication)
+	e.GET(codeServerRoute, artifacts.serve, codeServerAuthentication)
 	return nil
+}
+
+// codeServerAuthentication lets a request pass with a user session, like
+// user.Service.RequireAuthentication, or with the token of an allocation, its DET_SESSION_TOKEN. A
+// task's user session can end before the task starts; its allocation session lasts as long as the
+// allocation.
+func codeServerAuthentication(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		userErr := user.GetService().Authenticate(c)
+		if userErr == nil {
+			return next(c)
+		}
+		token := codeServerAllocationToken(c.Request())
+		if token == "" {
+			return userErr
+		}
+		session, err := grpcutil.AllocationSessionByToken(token)
+		switch {
+		case errors.Is(err, db.ErrNotFound):
+			return userErr
+		case err != nil:
+			return err
+		case session.OwnerID == nil:
+			return echo.NewHTTPError(http.StatusUnauthorized)
+		}
+		owner, err := user.ByID(c.Request().Context(), *session.OwnerID)
+		switch {
+		case errors.Is(err, db.ErrNotFound):
+			return echo.NewHTTPError(http.StatusUnauthorized)
+		case err != nil:
+			return err
+		case !owner.Active:
+			return echo.NewHTTPError(http.StatusForbidden, "user not active")
+		}
+		c.(*detContext.DetContext).SetUser(owner.ToUser())
+		return next(c)
+	}
+}
+
+// codeServerAllocationToken returns the bearer token of the request's Authorization header, or of
+// its x-allocation-token header, which the Determined Python client sends as gRPC metadata.
+func codeServerAllocationToken(r *http.Request) string {
+	for _, header := range []string{
+		echo.HeaderAuthorization,
+		grpcutil.AllocationTokenHeader,
+		grpcutil.GrpcMetadataPrefix + grpcutil.AllocationTokenHeader,
+	} {
+		if token, ok := strings.CutPrefix(r.Header.Get(header), "Bearer "); ok && token != "" {
+			return token
+		}
+	}
+	return ""
 }
 
 func codeServerTarball(version, arch string) string {

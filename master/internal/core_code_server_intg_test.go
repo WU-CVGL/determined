@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/require"
@@ -76,8 +77,7 @@ func TestCodeServerRouteAuthentication(t *testing.T) {
 	}
 	require.Equal(t, int32(0), upstreamCalls.Load())
 
-	// A task's DET_USER_TOKEN is a session of its owner, which passes. Its DET_SESSION_TOKEN
-	// authenticates the allocation to the gRPC API only.
+	// A task's DET_USER_TOKEN is a session of its owner, which passes.
 	owner := db.RequireMockUser(t, apiSrv.m.db)
 	userToken, err := getTaskSessionToken(ctx, &owner)
 	require.NoError(t, err)
@@ -85,9 +85,6 @@ func TestCodeServerRouteAuthentication(t *testing.T) {
 	allocation := db.RequireMockAllocation(t, apiSrv.m.db, task.TaskID)
 	allocationToken, err := db.StartAllocationSession(ctx, allocation.AllocationID, &owner)
 	require.NoError(t, err)
-
-	require.Equal(t, http.StatusUnauthorized, get(srv, path, "Authorization", "Bearer "+allocationToken))
-	require.Equal(t, int32(0), upstreamCalls.Load())
 
 	require.Equal(t, http.StatusOK, get(srv, path, "Authorization", "Bearer "+userToken))
 	require.Equal(t, int32(1), upstreamCalls.Load())
@@ -100,7 +97,31 @@ func TestCodeServerRouteAuthentication(t *testing.T) {
 	_, err = os.Stat(filepath.Join(conf.Dir, testCodeServerAMD64+".sha256"))
 	require.NoError(t, err)
 
+	// The task's DET_SESSION_TOKEN passes after its user session has expired, as a bearer token
+	// or in the header of the Determined Python client.
+	_, err = db.Bun().NewUpdate().Table("user_sessions").
+		Set("expiry = ?", time.Now().Add(-time.Hour)).
+		Where("user_id = ?", owner.ID).Exec(ctx)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusUnauthorized, get(srv, path, "Authorization", "Bearer "+userToken))
+	require.Equal(t, http.StatusOK, get(srv, path, "Authorization", "Bearer "+allocationToken))
+	require.Equal(t, http.StatusOK,
+		get(srv, path, "Grpc-Metadata-x-allocation-token", "Bearer "+allocationToken))
+	require.Equal(t, http.StatusOK, get(srv, path, "X-Allocation-Token", "Bearer "+allocationToken))
+	require.Equal(t, http.StatusUnauthorized,
+		get(srv, path, "Authorization", "Bearer "+userToken, "X-Allocation-Token", allocationToken))
+	require.Equal(t, int32(1), upstreamCalls.Load())
+
+	// The allocation session ends with the allocation.
+	require.NoError(t, db.DeleteAllocationSession(ctx, allocation.AllocationID))
+	require.Equal(t, http.StatusUnauthorized,
+		get(srv, path, "Authorization", "Bearer "+allocationToken))
+	require.Equal(t, http.StatusUnauthorized,
+		get(srv, path, "X-Allocation-Token", "Bearer "+allocationToken))
+
 	// Without the section, authenticated requests get 404 and anonymous ones 401.
+	userToken, err = getTaskSessionToken(ctx, &owner)
+	require.NoError(t, err)
 	disabled := codeServerAuthServer(t, apiSrv, config.DefaultCodeServerConfig())
 	require.Equal(t, http.StatusUnauthorized, get(disabled, path))
 	require.Equal(t, http.StatusNotFound, get(disabled, path, "Authorization", "Bearer "+userToken))
