@@ -2,9 +2,11 @@ package internal
 
 import (
 	"archive/tar"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/exp/maps"
 
 	"github.com/determined-ai/determined/master/pkg/archive"
 	"github.com/determined-ai/determined/master/pkg/etc"
@@ -73,5 +75,8 @@ func TestInteractiveSupervisorFiles(t *testing.T) {
 	requireInteractiveSupervisorFiles(t,
 		interactiveSupervisorFiles(&model.AgentUserGroup{UID: 1001, GID: 1002}), 1001, 1002)
 	requireInteractiveSupervisorFiles(t, interactiveSupervisorFiles(nil), 0, 0)
-	require.Len(t, interactiveServiceUnits, 2)
+	// The config's services are the services that the supervisor has a unit for.
+	units := maps.Keys(interactiveServiceUnits)
+	slices.Sort(units)
+	require.Equal(t, model.InteractiveServices, units)
 }

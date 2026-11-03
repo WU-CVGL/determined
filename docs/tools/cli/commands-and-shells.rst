@@ -86,6 +86,35 @@ and forwards a port from the local machine to the container:
 
 To stop the SSH server container and free cluster resources, run ``det shell kill <UUID>``.
 
+.. _shell-services:
+
+Services
+========
+
+A shell can run more services than its SSH server. Declare them in the shell's configuration with
+:ref:`services <job-configuration-reference>`, for example JupyterLab:
+
+.. code::
+
+   det shell start --config "services={jupyter: {}}"
+
+Each service runs in the shell's container, with the same user, files and environment as the SSH
+sessions.
+
+.. _shell-image-requirements:
+
+Image Requirements
+==================
+
+A shell's image needs:
+
+-  ``sshd`` at ``/usr/sbin/sshd``.
+-  bash 5 or later.
+-  ``/proc``.
+-  ``jupyter`` on the ``PATH``, for the ``jupyter`` service.
+
+The default images provide them. When one is missing, the task log names it.
+
 .. _shell-web-terminal:
 
 Terminals in the WebUI

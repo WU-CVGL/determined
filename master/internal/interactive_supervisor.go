@@ -17,14 +17,15 @@ import (
 const (
 	// interactiveServicesEnvVar names the services that the supervisor starts, comma-separated,
 	// the primary service first.
-	interactiveServicesEnvVar = "DET_SERVICES"
+	interactiveServicesEnvVar = tasks.ServicesEnvVar
 	// interactiveServiceSSH runs sshd. As the primary service it gets the supervisor's arguments.
-	interactiveServiceSSH = "ssh"
+	interactiveServiceSSH = model.ServiceSSH
 	// interactiveServiceJupyter runs JupyterLab.
-	interactiveServiceJupyter = "jupyter"
+	interactiveServiceJupyter = model.ServiceJupyter
 )
 
 // interactiveServiceUnits maps each service of the supervisor to the static resource of its unit.
+// Its names are model.InteractiveServices, which a config's services are checked against.
 var interactiveServiceUnits = map[string]string{
 	interactiveServiceSSH:     etc.SSHServiceResource,
 	interactiveServiceJupyter: etc.JupyterServiceResource,
