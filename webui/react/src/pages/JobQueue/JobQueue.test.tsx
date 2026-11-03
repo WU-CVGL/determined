@@ -11,15 +11,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { ThemeProvider } from 'components/ThemeProvider';
 import { SettingsProvider } from 'hooks/useSettingsProvider';
 import { DateString } from 'ioTypes';
-import {
-  getJobQ,
-  getJupyterLab,
-  getShell,
-  getShells,
-  getTask,
-  getUsers,
-  updateUserSetting,
-} from 'services/api';
+import { getJobQ, getShell, getShells, getTask, getUsers, updateUserSetting } from 'services/api';
 import * as Api from 'services/api-ts-sdk';
 import userStore from 'stores/users';
 import userSettings from 'stores/userSettings';
@@ -126,8 +118,6 @@ vi.mock('services/api', () => ({
     await mocks.hold?.({ offset, resourcePool });
     return reply;
   }),
-  getJupyterLab: vi.fn(),
-  getJupyterLabs: vi.fn(() => Promise.resolve([])),
   getShell: vi.fn(),
   getShells: vi.fn(() => Promise.resolve([])),
   getTask: vi.fn(),
@@ -153,22 +143,19 @@ vi.mock('hooks/useFeature', () => ({
   default: () => ({ isOn: (feature: string) => feature !== 'flat_runs' || features.flatRuns }),
 }));
 // The launch form itself is tested in NtscLaunchModal.test.tsx and useLaunchForm.test.tsx. The
-// stand-in is a modal, so it shows only once Launch Again opens it, and its title shows the task
-// and the type the form opens with.
+// stand-in is a modal, so it shows only once Launch Again opens it, and its title shows the task.
 vi.mock('components/NtscLaunchModal', async () => {
   const { Modal } = await import('hew/Modal');
   const Button = (await import('hew/Button')).default;
   return {
     default: ({
       initialTask,
-      initialType,
       onShellLaunched,
     }: {
       initialTask?: CommandTask;
-      initialType: CommandType;
       onShellLaunched?: (response: CommandResponse) => void;
     }) => (
-      <Modal title={`Launch form for ${initialTask?.id} (${initialType})`}>
+      <Modal title={`Launch form for ${initialTask?.id} (${initialTask?.type})`}>
         <Button onClick={() => launched.response && onShellLaunched?.(launched.response)}>
           Launch
         </Button>
@@ -515,10 +502,9 @@ describe('JobQueue', () => {
         'Manage Job',
         'Kill',
       ]);
-      // Neither the lists nor the shell and notebook APIs, which return the owner's key and token.
+      // Neither the list nor the shell API, which returns the owner's key.
       expect(getShells).not.toHaveBeenCalled();
       expect(getShell).not.toHaveBeenCalled();
-      expect(getJupyterLab).not.toHaveBeenCalled();
     });
 
     it('takes the task state from its record: no Connect via CLI before the shell runs', async () => {

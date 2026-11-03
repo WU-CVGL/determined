@@ -1,4 +1,3 @@
-import Button from 'hew/Button';
 import Spinner from 'hew/Spinner';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
@@ -9,15 +8,10 @@ import useUI from 'components/ThemeProvider';
 import { terminalCommandStates } from 'constants/states';
 import { serverAddress } from 'routes/utils';
 import { getTask } from 'services/api';
-import { CommandState, CommandType } from 'types';
+import { CommandState } from 'types';
 import handleError, { ErrorType } from 'utils/error';
 import { capitalize } from 'utils/string';
-import {
-  getJupyterLabAddress,
-  hasJupyterToken,
-  NOTEBOOK_ACCESS_DENIED,
-  WaitStatus,
-} from 'utils/wait';
+import { WaitStatus } from 'utils/wait';
 
 import css from './Wait.module.scss';
 
@@ -33,24 +27,15 @@ const Wait: React.FC = () => {
   const [searchParams] = useSearchParams();
   const { taskType } = useParams<Params>();
   const [waitStatus, setWaitStatus] = useState<WaitStatus>();
-  const [accessDenied, setAccessDenied] = useState(false);
-  const [addressFailed, setAddressFailed] = useState(false);
   const serviceAddr = searchParams.get('serviceAddr');
   const taskId = serviceAddr ? (serviceAddr.match(/[0-f-]+/) || ' ')[0] : undefined;
 
   const capitalizedTaskType = capitalize(taskType ?? '');
-  const isLoading =
-    !accessDenied &&
-    !addressFailed &&
-    (!waitStatus || !terminalCommandStates.has(waitStatus.state));
+  const isLoading = !waitStatus || !terminalCommandStates.has(waitStatus.state);
 
   let message = `Waiting for ${capitalizedTaskType} ...`;
   if (!serviceAddr) {
     message = 'Missing required parameters.';
-  } else if (accessDenied) {
-    message = NOTEBOOK_ACCESS_DENIED;
-  } else if (addressFailed) {
-    message = `${capitalizedTaskType} is ready, but its address could not be loaded.`;
   } else if (waitStatus && terminalCommandStates.has(waitStatus.state)) {
     message = `${capitalizedTaskType} has been terminated.`;
   } else if (
@@ -75,31 +60,9 @@ const Wait: React.FC = () => {
     });
   };
 
-  const openService = useCallback(async () => {
-    if (!serviceAddr || !taskId) return;
-    let address: string | undefined = serviceAddr;
-    // Listings never include a notebook's Jupyter token; only its owner and administrators
-    // can read it, and JupyterLab does not open without it.
-    if (taskType === CommandType.JupyterLab && !hasJupyterToken(serviceAddr)) {
-      try {
-        address = await getJupyterLabAddress(taskId);
-      } catch (e) {
-        handleError(e as Error, {
-          publicMessage: 'Failed to load the notebook address.',
-          silent: false,
-          type: ErrorType.Server,
-        });
-        setAddressFailed(true);
-        return;
-      }
-    }
-    setAddressFailed(false);
-    if (address) {
-      window.location.assign(serverAddress(address));
-    } else {
-      setAccessDenied(true);
-    }
-  }, [serviceAddr, taskId, taskType]);
+  const openService = useCallback(() => {
+    if (serviceAddr) window.location.assign(serverAddress(serviceAddr));
+  }, [serviceAddr]);
 
   useEffect(() => {
     if (!serviceAddr || !taskId) return;
@@ -117,7 +80,7 @@ const Wait: React.FC = () => {
           clearInterval(ival);
         } else if (lastRun.isReady) {
           clearInterval(ival);
-          await openService();
+          openService();
         }
         // TODO: use task.endTime to determine if the task is terminated.
         setWaitStatus(lastRun);
@@ -137,7 +100,6 @@ const Wait: React.FC = () => {
             <Badge state={waitStatus?.state} type={BadgeType.State} />
           </div>
         )}
-        {addressFailed && <Button onClick={openService}>Try Again</Button>}
         <Spinner spinning={isLoading} />
       </div>
     </PageMessage>

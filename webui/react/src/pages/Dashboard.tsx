@@ -8,7 +8,6 @@ import { Loadable } from 'hew/utils/loadable';
 import React, { useCallback, useEffect, useState } from 'react';
 
 import ExperimentIcons from 'components/ExperimentIcons';
-import JupyterLabButton from 'components/JupyterLabButton';
 import Link from 'components/Link';
 import Page, { BreadCrumbRoute } from 'components/Page';
 import ProjectCard from 'components/ProjectCard';
@@ -28,7 +27,6 @@ import { paths } from 'routes/utils';
 import {
   getCommands,
   getExperiments,
-  getJupyterLabs,
   getProjectsByUserActivity,
   getShells,
   getTensorBoards,
@@ -64,13 +62,6 @@ const Dashboard: React.FC = () => {
     async (user: DetailedUser) => {
       const results = await Promise.allSettled([
         getCommands({
-          limit: SUBMISSIONS_FETCH_LIMIT,
-          orderBy: 'ORDER_BY_DESC',
-          signal: canceler.signal,
-          sortBy: 'SORT_BY_START_TIME',
-          users: [user.id.toString()],
-        }),
-        getJupyterLabs({
           limit: SUBMISSIONS_FETCH_LIMIT,
           orderBy: 'ORDER_BY_DESC',
           signal: canceler.signal,
@@ -186,7 +177,6 @@ const Dashboard: React.FC = () => {
       breadcrumb={pageBreadCrumb}
       options={
         <Row>
-          <JupyterLabButton enabled={canCreateNSC} />
           <ShellButton enabled={canCreateNSC} />
         </Row>
       }

@@ -19,8 +19,8 @@ const mocks = vi.hoisted(() => {
         experiments: [],
       }),
     ),
-    getJupyterLabs: vi.fn().mockImplementation(() => Promise.resolve([])),
     getProjectsByUserActivity: vi.fn().mockImplementation(() => Promise.resolve([])),
+    getShells: vi.fn().mockImplementation(() => Promise.resolve([])),
   };
 });
 
@@ -29,9 +29,8 @@ vi.mock('services/api', () => ({
   getAvailableResourcePools: () => Promise.resolve([]),
   getCommands: () => Promise.resolve([]),
   getExperiments: mocks.getExperiments,
-  getJupyterLabs: mocks.getJupyterLabs,
   getProjectsByUserActivity: mocks.getProjectsByUserActivity,
-  getShells: () => Promise.resolve([]),
+  getShells: mocks.getShells,
   getTaskTemplates: () => Promise.resolve([]),
   getTensorBoards: () => Promise.resolve([]),
   getWorkspaces: () => Promise.resolve({ workspaces: [] }),
@@ -51,20 +50,9 @@ vi.mock('hooks/usePermissions', () => {
   };
 });
 
-// for JupyterLabButton:
+// for the launch form:
 vi.mock('hooks/useSettings', async (importOriginal) => {
-  const useSettings = vi.fn(() => {
-    const settings = {
-      jupyterLab: {
-        alt: false,
-        ctrl: false,
-        key: 'L',
-        meta: true,
-        shift: true,
-      },
-    };
-    return { isLoading: false, settings };
-  });
+  const useSettings = vi.fn(() => ({ isLoading: false, settings: {}, updateSettings: vi.fn() }));
 
   return {
     __esModule: true,
@@ -148,18 +136,16 @@ describe('Dashboard', () => {
     });
   });
   it('renders submissions', async () => {
-    mocks.getJupyterLabs.mockImplementation(() =>
+    mocks.getShells.mockImplementation(() =>
       Promise.resolve([
         {
           displayName: 'Test',
           id: 'dbf259fa-611a-4940-85c5-92463b289835',
-          name: 'JupyterLab (eminently-moving-oryx)',
+          name: 'Shell (eminently-moving-oryx)',
           resourcePool: 'aux-pool',
-          serviceAddress:
-            '/proxy/dbf259fa-611a-4940-85c5-92463b289835/?token=v2.public.eyJpZCI6MCwidGFza19pZCI6ImRiZjI1OWZhLTYxMWEtNDk0MC04NWM1LTkyNDYzYjI4OTgzNSIsInVzZXJfc2Vzc2lvbl9pZCI6bnVsbCwidXNlcl9pZCI6MTM1NH2nxyzr1aMT2lECxRF3FQDUW6I3O5EYY62JJSP_hcaiDCcRZN5EML1csdVZm76xXer8hsia0osi1DqNqmqW6eUG.bnVsbA',
           startTime: '2024-07-18T15:13:07.401Z',
           state: 'RUNNING',
-          type: 'jupyter-lab',
+          type: 'shell',
           userId: 1354,
           workspaceId: 1,
         },
@@ -352,7 +338,7 @@ describe('Dashboard', () => {
     setup();
 
     await waitFor(() => {
-      expect(screen.getByText('JupyterLab (eminently-moving-oryx)')).toBeInTheDocument();
+      expect(screen.getByText('Shell (eminently-moving-oryx)')).toBeInTheDocument();
       expect(screen.getByText('mnist_pytorch_dist_random_search')).toBeInTheDocument();
     });
   });
@@ -363,44 +349,32 @@ describe('Dashboard', () => {
       );
     });
 
-    it('offers Launch Shell next to Launch JupyterLab', async () => {
+    it('offers Launch Shell only, disabled without permission to launch', async () => {
       setup();
 
-      const jupyterLab = await screen.findByRole('button', { name: 'Launch JupyterLab' });
-      const shell = screen.getByRole('button', { name: 'Launch Shell' });
-      expect(jupyterLab).toBeDisabled();
+      const shell = await screen.findByRole('button', { name: 'Launch Shell' });
       expect(shell).toBeDisabled();
-      const jupyterLabButton = screen.getByTestId('jupyter-lab-button');
-      const shellButton = screen.getByTestId('shell-button');
-      expect(jupyterLabButton.parentElement).toBe(shellButton.parentElement);
-      expect(
-        jupyterLabButton.compareDocumentPosition(shellButton) & Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Launch JupyterLab' })).not.toBeInTheDocument();
+      expect(screen.queryByTestId('jupyter-lab-button')).not.toBeInTheDocument();
     });
 
-    it.each([
-      ['Launch Shell', 'Shell'],
-      ['Launch JupyterLab', 'JupyterLab'],
-    ])(
-      '"%s" opens the launch form with %s selected, with permission to launch',
-      async (button, type) => {
-        vi.mocked(usePermissions).mockImplementation(
-          () =>
-            ({
-              canCreateNSC: true,
-              canCreateTemplateWorkspace: () => false,
-              canCreateWorkspaceNSC: () => true,
-            }) as unknown as ReturnType<typeof usePermissions>,
-        );
-        setup();
+    it('"Launch Shell" opens the shell launch form, with permission to launch', async () => {
+      vi.mocked(usePermissions).mockImplementation(
+        () =>
+          ({
+            canCreateNSC: true,
+            canCreateTemplateWorkspace: () => false,
+            canCreateWorkspaceNSC: () => true,
+          }) as unknown as ReturnType<typeof usePermissions>,
+      );
+      setup();
 
-        const entry = await screen.findByRole('button', { name: button });
-        expect(entry).toBeEnabled();
-        await userEvent.click(entry);
-        expect(await screen.findByText('Start from')).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Launch' })).toBeInTheDocument();
-        expect(screen.getByRole('radio', { name: type })).toBeChecked();
-      },
-    );
+      const entry = await screen.findByRole('button', { name: 'Launch Shell' });
+      expect(entry).toBeEnabled();
+      await userEvent.click(entry);
+      expect(await screen.findByText('Start from')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Launch' })).toBeInTheDocument();
+      expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    });
   });
 });

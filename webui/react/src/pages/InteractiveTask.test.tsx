@@ -11,7 +11,7 @@ import authStore from 'stores/auth';
 
 import InteractiveTask from './InteractiveTask';
 
-const TASK_NAME = 'JupyterLab (test-task-name)';
+const TASK_NAME = 'TensorBoard (test-task-name)';
 const TASK_RESOURCE_POOL = 'aux-pool';
 
 vi.mock('react-router-dom', async (importOriginal) => ({
@@ -20,7 +20,7 @@ vi.mock('react-router-dom', async (importOriginal) => ({
     taskId: 'task-id',
     taskName: TASK_NAME,
     taskResourcePool: TASK_RESOURCE_POOL,
-    taskType: 'jupyter-lab',
+    taskType: 'tensor-board',
     taskUrl: 'http://taskUrl.com',
   }),
   useRouteMatch: () => ({ url: '/company/company-id1/team/team-id1' }),
@@ -28,9 +28,6 @@ vi.mock('react-router-dom', async (importOriginal) => ({
 
 vi.mock('services/api', () => ({
   getCommand: () => {
-    return Promise.resolve({});
-  },
-  getJupyterLab: () => {
     return Promise.resolve({});
   },
   getShell: () => {

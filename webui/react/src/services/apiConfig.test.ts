@@ -70,44 +70,6 @@ describe('apiConfig', () => {
       expect(result).toEqual(response.config);
       expect(JSON.stringify(result)).not.toContain('secret-key-material');
     });
-
-    it('getJupyterLabConfig returns only the config', () => {
-      const config = { description: 'JupyterLab (a-b-c)' };
-      expect(
-        utils.getJupyterLabConfig.postProcess({
-          config,
-          notebook: {
-            description: 'x',
-            id: 'nb',
-            jobId: 'j',
-            resourcePool: 'default',
-            startTime: new Date('2026-01-01T00:00:00Z'),
-            state: Taskv1State.RUNNING,
-            username: 'me',
-            workspaceId: 1,
-          },
-        }),
-      ).toEqual(config);
-    });
-
-    it('launchJupyterLab now returns the merged config', () => {
-      const config = { resources: { slots: 0 } };
-      const result = utils.launchJupyterLab.postProcess({
-        config,
-        notebook: {
-          description: 'x',
-          id: 'nb',
-          jobId: 'j',
-          resourcePool: 'default',
-          startTime: new Date('2026-01-01T00:00:00Z'),
-          state: Taskv1State.QUEUED,
-          username: 'me',
-          workspaceId: 1,
-        },
-      });
-      expect(result.config).toEqual(config);
-      expect(result.command.id).toBe('nb');
-    });
   });
 });
 

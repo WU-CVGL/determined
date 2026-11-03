@@ -1,21 +1,6 @@
 import { cloneDeep, isEqual, isNil, isPlainObject } from 'lodash';
 
-import { CommandType, RawJson } from 'types';
-
-/** The task types the launch modal can start. */
-export type NtscLaunchType = typeof CommandType.JupyterLab | typeof CommandType.Shell;
-
-/** The launch form's task types, in the order its type selector shows them. */
-export const NTSC_LAUNCH_TYPES: NtscLaunchType[] = [CommandType.JupyterLab, CommandType.Shell];
-
-/** How the launch form and its "Start from" picker name each task type. */
-export const NTSC_LAUNCH_TYPE_LABELS: Record<NtscLaunchType, string> = {
-  [CommandType.JupyterLab]: 'JupyterLab',
-  [CommandType.Shell]: 'Shell',
-};
-
-export const isNtscLaunchType = (type: CommandType): type is NtscLaunchType =>
-  (NTSC_LAUNCH_TYPES as CommandType[]).includes(type);
+import { RawJson } from 'types';
 
 /** The simple launch form's fields, as the launch helpers take them. */
 export interface NtscLaunchOptions {
@@ -33,12 +18,11 @@ export interface LaunchFormFields {
 }
 
 /**
- * The master names a shell or notebook "Shell (<pet name>)" or
- * "JupyterLab (<pet name>)" when no description is given.
+ * The master names a shell "Shell (<pet name>)" when no description is given. The configs of
+ * notebooks, in this browser's history and in templates, carry "JupyterLab (<pet name>)".
  */
 const AUTO_DESCRIPTION = /^(JupyterLab|Shell) \([a-z]+(-[a-z]+)*\)$/;
 const AUTO_JUPYTERLAB_DESCRIPTION = /^JupyterLab \([a-z]+(-[a-z]+)*\)$/;
-const AUTO_SHELL_DESCRIPTION = /^Shell \([a-z]+(-[a-z]+)*\)$/;
 
 /** Environment variable names that probably hold a credential. */
 const SECRET_ENV_NAME = /TOKEN|SECRET|PASSW|KEY|AUTH|CRED/i;
@@ -81,19 +65,14 @@ export const sanitizeConfig = (config: RawJson): RawJson => {
 };
 
 /**
- * Prepares a config for a launch of the given type: a description that the
- * master generated for the other type is removed, so that the master names the
- * new task after its own type. The launch form keeps one full config for both
- * types and adapts it here, when it is launched; a JupyterLab preview names the
- * config "JupyterLab (<pet name>)". Everything else is sent as it is for both
- * types: the notebook settings idle_timeout and notebook_idle_type are part of
- * every task's config, and a shell ignores them (the master watches
- * idle_timeout for notebooks only).
+ * Prepares a full config for a shell launch: a notebook's generated "JupyterLab (<pet name>)"
+ * description is removed, so that the master names the shell. Everything else is sent as it is.
  */
-export const configForLaunchType = (config: RawJson, type: NtscLaunchType): RawJson => {
-  const otherAutoDescription =
-    type === CommandType.Shell ? AUTO_JUPYTERLAB_DESCRIPTION : AUTO_SHELL_DESCRIPTION;
-  if (typeof config.description !== 'string' || !otherAutoDescription.test(config.description)) {
+export const configForShellLaunch = (config: RawJson): RawJson => {
+  if (
+    typeof config.description !== 'string' ||
+    !AUTO_JUPYTERLAB_DESCRIPTION.test(config.description)
+  ) {
     return config;
   }
   const out = cloneDeep(config);
@@ -151,8 +130,8 @@ export const minimalDiff = (config: RawJson, defaults: RawJson): RawJson => {
  * no telling an unset setting from a cleared one.
  *
  * The resource pool and slots are always kept: the master ignores template
- * resources for notebooks and shells, and the launch form copies them into its
- * fields when the template is picked.
+ * resources for shells, and the launch form copies them into its fields when
+ * the template is picked.
  */
 export const templateFromConfig = (config: RawJson, defaults: RawJson): RawJson => {
   const clean = sanitizeConfig(config);

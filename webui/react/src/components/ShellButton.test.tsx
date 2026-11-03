@@ -57,7 +57,7 @@ describe('ShellButton', () => {
     expect(screen.getByRole('button', { name: 'Launch Shell' })).toBeDisabled();
   });
 
-  it('opens the launch form with Shell selected, launches a shell and shows how to connect to it', async () => {
+  it('opens the shell launch form, launches a shell and shows how to connect to it', async () => {
     mocks.launchShell.mockResolvedValue({
       command: {
         id: 'shell-123',
@@ -77,8 +77,7 @@ describe('ShellButton', () => {
 
     await user.click(screen.getByRole('button', { name: 'Launch Shell' }));
     await screen.findByText('Start from');
-    expect(screen.getByRole('radio', { name: 'Shell' })).toBeChecked();
-    expect(screen.getByRole('radio', { name: 'JupyterLab' })).not.toBeChecked();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Launch' }));
 
     expect(await screen.findByText('Shell Launched')).toBeInTheDocument();

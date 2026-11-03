@@ -14,7 +14,6 @@ import {
   getGenericTask,
   getGenericTaskConfig,
   getGenericTasks,
-  getJupyterLabs,
   getShells,
   getTensorBoards,
   killGenericTask,
@@ -248,13 +247,6 @@ describe('dashboard list services', () => {
       commands: [SDK_TASK],
     });
     await expectSignalAndSlots(getCommands, spy);
-  });
-
-  it('getJupyterLabs forwards the abort signal and reads the slots', async () => {
-    const spy = vi.spyOn(detApi.Notebooks, 'getNotebooks').mockResolvedValue({
-      notebooks: [SDK_TASK],
-    });
-    await expectSignalAndSlots(getJupyterLabs, spy);
   });
 
   it('getShells forwards the abort signal and reads the slots', async () => {

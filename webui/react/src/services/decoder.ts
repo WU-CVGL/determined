@@ -200,7 +200,7 @@ const mapV1TaskState = (containerState: Sdk.Taskv1State): types.CommandState => 
 };
 
 const mapCommonV1Task = (
-  task: Sdk.V1Command | Sdk.V1Notebook | Sdk.V1Shell | Sdk.V1Tensorboard,
+  task: Sdk.V1Command | Sdk.V1Shell | Sdk.V1Tensorboard,
   type: types.CommandType,
 ): types.CommandTask => {
   return {
@@ -222,13 +222,6 @@ const mapCommonV1Task = (
 
 export const mapV1Command = (command: Sdk.V1Command): types.CommandTask => {
   return { ...mapCommonV1Task(command, types.CommandType.Command) };
-};
-
-export const mapV1Notebook = (notebook: Sdk.V1Notebook): types.CommandTask => {
-  return {
-    ...mapCommonV1Task(notebook, types.CommandType.JupyterLab),
-    serviceAddress: notebook.serviceAddress,
-  };
 };
 
 export const mapV1Shell = (shell: Sdk.V1Shell): types.CommandTask => {

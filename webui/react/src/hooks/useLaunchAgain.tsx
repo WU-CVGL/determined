@@ -1,11 +1,10 @@
 import { useCallback } from 'react';
 
 import { useLaunchForm } from 'hooks/useLaunchForm';
-import { CommandTask, Workspace } from 'types';
-import { isNtscLaunchType } from 'utils/ntscConfig';
+import { CommandTask, CommandType, Workspace } from 'types';
 
 interface Return {
-  /** Opens the launch form with the task's type selected, starting from that task's config. */
+  /** Opens the launch form for a shell, starting from that shell's config. */
   launchAgain: (task: CommandTask) => void;
   /** The launch form and the shell's launch result; render them once next to the list. */
   launchAgainModals: React.ReactNode;
@@ -13,7 +12,7 @@ interface Return {
 
 /**
  * "Launch Again" for task lists: the launch form that the task action menu's Launch Again opens
- * (the same form as Launch JupyterLab and Launch Shell), and the result shown after a shell launch.
+ * (the same form as Launch Shell), and the result shown after a shell launch.
  */
 export const useLaunchAgain = ({
   onLaunched,
@@ -30,7 +29,7 @@ export const useLaunchAgain = ({
 
   const launchAgain = useCallback(
     (task: CommandTask) => {
-      if (isNtscLaunchType(task.type)) openLaunchForm(task.type, task);
+      if (task.type === CommandType.Shell) openLaunchForm(task);
     },
     [openLaunchForm],
   );

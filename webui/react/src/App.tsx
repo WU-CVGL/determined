@@ -8,10 +8,8 @@ import React, { Suspense, useEffect, useLayoutEffect, useState } from 'react';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { HelmetProvider } from 'react-helmet-async';
-import { useParams } from 'react-router-dom';
 
 import ClusterMessageBanner from 'components/ClusterMessage';
-import JupyterLabGlobal from 'components/JupyterLabGlobal';
 import Navigation from 'components/Navigation';
 import PageMessage from 'components/PageMessage';
 import Router from 'components/Router';
@@ -21,7 +19,6 @@ import { useSessionCheck } from 'hooks/useAuthCheck';
 import useFeature from 'hooks/useFeature';
 import useKeyTracker from 'hooks/useKeyTracker';
 import usePageVisibility from 'hooks/usePageVisibility';
-import usePermissions from 'hooks/usePermissions';
 import useResize from 'hooks/useResize';
 import useRouteTracker from 'hooks/useRouteTracker';
 import { SettingsProvider } from 'hooks/useSettingsProvider';
@@ -113,14 +110,6 @@ const AppView: React.FC = () => {
     isSettingsReady && updateThemeSetting(ui.mode);
   }, [isSettingsReady, ui.mode]);
 
-  // Check permissions and params for JupyterLabGlobal.
-  const { canCreateNSC, canCreateWorkspaceNSC } = usePermissions();
-  const { workspaceId } = useParams<{
-    workspaceId: string;
-  }>();
-  const loadableWorkspace = useObservable(workspaceStore.getWorkspace(Number(workspaceId ?? '')));
-  const workspace = Loadable.getOrElse(undefined, loadableWorkspace);
-
   return Loadable.match(loadableInfo, {
     Failed: () => null, // TODO display any errors we receive
     Loaded: (info) => (
@@ -132,13 +121,6 @@ const AppView: React.FC = () => {
                 <ConfirmationProvider>
                   {/* Global app components: */}
                   <ClusterMessageBanner message={info.clusterMessage} />
-                  <JupyterLabGlobal
-                    enabled={
-                      Loadable.isLoaded(loadableUser) &&
-                      (workspace ? canCreateWorkspaceNSC({ workspace }) : canCreateNSC)
-                    }
-                    workspace={workspace ?? undefined}
-                  />
                   <Omnibar />
                   <VersionChecker version={info.version} />
                   <Navigation isClusterMessagePresent={!!info.clusterMessage}>

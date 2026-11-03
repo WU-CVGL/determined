@@ -937,12 +937,6 @@ export const getCommands = generateDetApi<
   Type.CommandTask[]
 >(Config.getCommands);
 
-export const getJupyterLabs = generateDetApi<
-  Service.GetJupyterLabsParams,
-  Api.V1GetNotebooksResponse,
-  Type.CommandTask[]
->(Config.getJupyterLabs);
-
 export const getShells = generateDetApi<
   Service.GetShellsParams,
   Api.V1GetShellsResponse,
@@ -959,12 +953,6 @@ export const killCommand = generateDetApi<Service.CommandIdParams, Api.V1KillCom
   Config.killCommand,
 );
 
-export const killJupyterLab = generateDetApi<
-  Service.CommandIdParams,
-  Api.V1KillNotebookResponse,
-  void
->(Config.killJupyterLab);
-
 export const killShell = generateDetApi<Service.CommandIdParams, Api.V1KillShellResponse, void>(
   Config.killShell,
 );
@@ -975,23 +963,11 @@ export const killTensorBoard = generateDetApi<
   void
 >(Config.killTensorBoard);
 
-export const getJupyterLab = generateDetApi<
-  Service.CommandIdParams,
-  Api.V1GetNotebookResponse,
-  Type.CommandTask
->(Config.getJupyterLab);
-
 export const getShell = generateDetApi<
   Service.CommandIdParams,
   Api.V1GetShellResponse,
   Type.CommandTask
 >(Config.getShell);
-
-export const getJupyterLabConfig = generateDetApi<
-  Service.CommandIdParams,
-  Api.V1GetNotebookResponse,
-  RawJson
->(Config.getJupyterLabConfig);
 
 export const getShellConfig = generateDetApi<
   Service.CommandIdParams,
@@ -1039,17 +1015,11 @@ export const createTaskTemplate = generateDetApi<
   Type.Template
 >(Config.createTaskTemplate);
 
-export const launchJupyterLab = generateDetApi<
-  Service.LaunchJupyterLabParams,
-  Api.V1LaunchNotebookResponse,
-  Type.CommandResponse
->(Config.launchJupyterLab);
-
-export const previewJupyterLab = generateDetApi<
-  Service.LaunchJupyterLabParams,
-  Api.V1LaunchNotebookResponse,
+export const previewShell = generateDetApi<
+  Service.LaunchShellParams,
+  Api.V1PreviewShellResponse,
   RawJson
->(Config.previewJupyterLab);
+>(Config.previewShell);
 
 export const launchShell = generateDetApi<
   Service.LaunchShellParams,
@@ -1087,7 +1057,8 @@ export const killTask = async (task: Pick<Type.CommandTask, 'id' | 'type'>): Pro
     case Type.CommandType.Command:
       return await killCommand({ commandId: task.id });
     case Type.CommandType.JupyterLab:
-      return await killJupyterLab({ commandId: task.id });
+      // The label of ended notebook records: the master has no API to kill one.
+      throw new Error(`Unable to kill ${task.id}.`);
     case Type.CommandType.Shell:
       return await killShell({ commandId: task.id });
     case Type.CommandType.TensorBoard:

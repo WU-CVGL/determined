@@ -1,22 +1,20 @@
 /**
- * A short, per-browser list of the configs a user recently launched shells and
- * JupyterLabs with. It is a convenience for the launch modal's "Start from"
- * picker and is never authoritative: the master merges and validates every
- * config again at launch, and the list can be empty or missing at any time
- * (private windows, blocked or cleared storage, another browser).
+ * A short, per-browser list of the configs a user recently launched shells
+ * with. It is a convenience for the launch modal's "Start from" picker and is
+ * never authoritative: the master merges and validates every config again at
+ * launch, and the list can be empty or missing at any time (private windows,
+ * blocked or cleared storage, another browser).
  *
- * The type of each launch is kept by storing each type's list under its own
- * key; the picker lists both types together (listAllLaunchHistory).
- *
- * What is stored, in window.localStorage under `u:<user id>/launch-history/<type>`:
+ * What is stored, in window.localStorage under `u:<user id>/launch-history/shell`:
  * the launch config the master returned (after sanitizeConfig: no entrypoint,
  * no registry_auth, no generated description, no priority), with environment
  * variables whose names look like credentials removed (from
  * environment_variables and from the env of the containers in a Kubernetes
  * pod_spec; see sensitiveEnvNames), plus the workspace id, the save time and
  * the names of the removed variables. Nothing else, and
- * never a shell's SSH key. At most LAUNCH_HISTORY_LIMIT entries per user and
- * type are kept.
+ * never a shell's SSH key. At most LAUNCH_HISTORY_LIMIT entries per user are
+ * kept. The notebooks' list, under `.../jupyter-lab`, is left as it is and not
+ * read.
  *
  * Every storage access is wrapped in try/catch; failures read as an empty list
  * and writes are dropped.
@@ -24,19 +22,15 @@
 import { isRight } from 'fp-ts/lib/Either';
 import * as io from 'io-ts';
 
-import { RawJson } from 'types';
+import { CommandType, RawJson } from 'types';
 import md5 from 'utils/md5';
-import {
-  NTSC_LAUNCH_TYPES,
-  NtscLaunchType,
-  redactSensitiveEnv,
-  sanitizeConfig,
-  stableStringify,
-} from 'utils/ntscConfig';
+import { redactSensitiveEnv, sanitizeConfig, stableStringify } from 'utils/ntscConfig';
 import { StorageManager } from 'utils/storage';
 
 export const LAUNCH_HISTORY_LIMIT = 20;
 const ENTRY_VERSION = 1;
+/** The key of the shells' list, which also prefixes each entry's ID. */
+const HISTORY_KEY = CommandType.Shell;
 
 const ioLaunchHistoryEntry = io.intersection([
   io.type({
@@ -74,13 +68,10 @@ const historyStorage = (userId: number): StorageManager | undefined => {
   return new StorageManager({ basePath: `u:${userId}/launch-history`, store });
 };
 
-export const listLaunchHistory = (
-  userId: number | undefined,
-  type: NtscLaunchType,
-): LaunchHistoryEntry[] => {
+export const listLaunchHistory = (userId: number | undefined): LaunchHistoryEntry[] => {
   if (userId === undefined) return [];
   try {
-    const stored = historyStorage(userId)?.get<unknown>(type);
+    const stored = historyStorage(userId)?.get<unknown>(HISTORY_KEY);
     if (!Array.isArray(stored)) return [];
     return stored
       .filter((entry): entry is LaunchHistoryEntry => isRight(ioLaunchHistoryEntry.decode(entry)))
@@ -90,16 +81,16 @@ export const listLaunchHistory = (
   }
 };
 
-const writeHistory = (userId: number, type: NtscLaunchType, entries: LaunchHistoryEntry[]) => {
+const writeHistory = (userId: number, entries: LaunchHistoryEntry[]) => {
   const storage = historyStorage(userId);
   if (!storage) return;
   try {
-    if (entries.length === 0) storage.remove(type);
-    else storage.set(type, entries);
+    if (entries.length === 0) storage.remove(HISTORY_KEY);
+    else storage.set(HISTORY_KEY, entries);
   } catch {
     // Most likely the storage quota. Keep the newer half, or give up quietly.
     try {
-      storage.set(type, entries.slice(0, Math.floor(entries.length / 2)));
+      storage.set(HISTORY_KEY, entries.slice(0, Math.floor(entries.length / 2)));
     } catch {
       // The history is only a convenience.
     }
@@ -108,13 +99,12 @@ const writeHistory = (userId: number, type: NtscLaunchType, entries: LaunchHisto
 
 export const recordLaunch = (
   userId: number | undefined,
-  type: NtscLaunchType,
   launch: { config?: RawJson; workspaceId?: number },
 ): void => {
   if (userId === undefined || !launch.config || launch.workspaceId === undefined) return;
   try {
     const { config, redacted } = redactSensitiveEnv(sanitizeConfig(launch.config));
-    const id = md5(`${type}:${launch.workspaceId}:${stableStringify(config)}`);
+    const id = md5(`${HISTORY_KEY}:${launch.workspaceId}:${stableStringify(config)}`);
     const entry: LaunchHistoryEntry = {
       config,
       id,
@@ -123,45 +113,26 @@ export const recordLaunch = (
       workspaceId: launch.workspaceId,
     };
     if (redacted.length !== 0) entry.redactedEnv = redacted;
-    const others = listLaunchHistory(userId, type).filter((item) => item.id !== id);
-    writeHistory(userId, type, [entry, ...others].slice(0, LAUNCH_HISTORY_LIMIT));
+    const others = listLaunchHistory(userId).filter((item) => item.id !== id);
+    writeHistory(userId, [entry, ...others].slice(0, LAUNCH_HISTORY_LIMIT));
   } catch {
     // The history is only a convenience.
   }
 };
 
-export const removeLaunchHistoryEntry = (
-  userId: number | undefined,
-  type: NtscLaunchType,
-  id: string,
-): void => {
+export const removeLaunchHistoryEntry = (userId: number | undefined, id: string): void => {
   if (userId === undefined) return;
   try {
     writeHistory(
       userId,
-      type,
-      listLaunchHistory(userId, type).filter((entry) => entry.id !== id),
+      listLaunchHistory(userId).filter((entry) => entry.id !== id),
     );
   } catch {
     // The history is only a convenience.
   }
 };
 
-export const clearLaunchHistory = (userId: number | undefined, type: NtscLaunchType): void => {
+export const clearLaunchHistory = (userId: number | undefined): void => {
   if (userId === undefined) return;
-  writeHistory(userId, type, []);
+  writeHistory(userId, []);
 };
-
-/** A history entry with the type of task it was launched as. */
-export interface TypedLaunchHistoryEntry extends LaunchHistoryEntry {
-  type: NtscLaunchType;
-}
-
-/** The history of every task type the launch form starts, newest first. */
-export const listAllLaunchHistory = (userId: number | undefined): TypedLaunchHistoryEntry[] =>
-  NTSC_LAUNCH_TYPES.flatMap((type) =>
-    listLaunchHistory(userId, type).map((entry) => ({ ...entry, type })),
-  ).sort((a, b) => b.savedAt - a.savedAt);
-
-export const clearAllLaunchHistory = (userId: number | undefined): void =>
-  NTSC_LAUNCH_TYPES.forEach((type) => clearLaunchHistory(userId, type));

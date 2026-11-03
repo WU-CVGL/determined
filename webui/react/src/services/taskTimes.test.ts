@@ -2,7 +2,6 @@ import {
   mapV1Command,
   mapV1ExperimentList,
   mapV1GenericTask,
-  mapV1Notebook,
   mapV1Shell,
   mapV1TensorBoard,
 } from 'services/decoder';
@@ -22,7 +21,6 @@ it('keeps submitted and assigned times distinct for every command kind, includin
   };
   const decode = (item: typeof wire) => [
     mapV1Command(item as Sdk.V1Command),
-    mapV1Notebook(item as Sdk.V1Notebook),
     mapV1Shell(item as Sdk.V1Shell),
     mapV1TensorBoard(item as Sdk.V1Tensorboard),
   ];

@@ -8,15 +8,12 @@ import {
   activateExperiment,
   archiveExperiment,
   getExperiments,
-  getJupyterLabs,
   getTensorBoards,
   killExperiment,
-  killJupyterLab,
   killTensorBoard,
   openOrCreateTensorBoard,
   pauseExperiment,
 } from 'services/api';
-import { launchJupyterLab } from 'utils/jupyter';
 
 const root: NonLeafNode = {
   options: [
@@ -72,23 +69,6 @@ const root: NonLeafNode = {
     {
       aliases: ['stop', 'cancel'],
       options: [
-        {
-          options: async (): Promise<Children> => {
-            const cmds = await getJupyterLabs({
-              orderBy: 'ORDER_BY_DESC',
-              sortBy: 'SORT_BY_START_TIME',
-            });
-
-            const options: LeafNode[] = cmds
-              .filter((cmd) => !terminalCommandStates.has(cmd.state))
-              .map((cmd) => ({
-                onAction: () => killJupyterLab({ commandId: cmd.id }),
-                title: `${cmd.name}`, // differentiate view only vs command text?
-              }));
-            return options;
-          },
-          title: 'jupyterLab',
-        },
         {
           options: async (): Promise<Children> => {
             const cmds = await getTensorBoards({
@@ -161,19 +141,6 @@ const root: NonLeafNode = {
             },
           ],
           title: 'tensorBoard',
-        },
-        {
-          options: [
-            {
-              onAction: () => launchJupyterLab({ slots: 0 }),
-              title: 'zeroSlot',
-            },
-            {
-              onAction: () => launchJupyterLab({ slots: 1 }),
-              title: 'oneSlot',
-            },
-          ],
-          title: 'jupyterLab',
         },
       ],
       title: 'launch',

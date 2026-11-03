@@ -15,7 +15,6 @@ import {
   getAgents,
   getExperiments,
   getGenericTasks,
-  getJupyterLabs,
   getShells,
   getTensorBoards,
   getUsers,
@@ -47,6 +46,7 @@ import handleError from 'utils/error';
 import { isDangerMenuItem, isDisabledMenuItem, menuLabels, openMenuItem } from 'utils/tests/menu';
 
 import { fetchRunPage } from './fetchRuns';
+import { RunKind } from './runRows';
 import TaskDashboard from './TaskDashboard';
 import { MIN_SORT_FILTER_WIDTHS } from './TaskDashboard.settings';
 
@@ -58,7 +58,7 @@ const CURRENT_USER_ID = 3;
 /* The states the list APIs report for the generic task and the experiment. */
 const listed = vi.hoisted(() => ({ experimentState: 'ACTIVE', genericState: 'ACTIVE' }));
 
-/* With a user ID, the user may control only their own notebooks, shells, commands and TensorBoards. */
+/* With a user ID, the user may control only their own shells, commands and TensorBoards. */
 const access = vi.hoisted(() => ({ onlyOwnRunsOf: undefined as number | undefined }));
 
 /* The real fetchRunPage, which a test may replace for some queries. */
@@ -76,14 +76,14 @@ const SHELL: CommandTask = {
   workspaceId: 1,
 };
 
-const NOTEBOOK: CommandTask = {
-  id: 'nb-1',
-  name: 'cpu-notebook',
+const CPU_SHELL: CommandTask = {
+  id: 'shell-2',
+  name: 'cpu-shell',
   resourcePool: 'default',
   slots: 0,
   startTime: '2026-01-02T00:00:00Z',
   state: CommandState.Running,
-  type: CommandType.JupyterLab,
+  type: CommandType.Shell,
   userId: 4,
   workspaceId: 1,
 };
@@ -143,7 +143,6 @@ vi.mock('services/api', () => ({
   getCurrentUser: () => Promise.resolve({ id: 3, isActive: true, isAdmin: false, username: 'me' }),
   getExperiments: vi.fn(),
   getGenericTasks: vi.fn(),
-  getJupyterLabs: vi.fn(),
   getShells: vi.fn(),
   getTensorBoards: vi.fn(() => Promise.resolve([])),
   getUsers: vi.fn(() => Promise.resolve({ users: [] })),
@@ -182,9 +181,6 @@ vi.mock('./fetchRuns', async (importOriginal) => {
   return { ...actual, fetchRunPage: vi.fn(actual.fetchRunPage) };
 });
 vi.mock('hooks/useTaskResourcesEnabled', () => ({ default: () => true }));
-vi.mock('components/JupyterLabButton', () => ({
-  default: () => <div data-testid="jupyter-lab-button" />,
-}));
 vi.mock('components/ShellButton', () => ({ default: () => <div data-testid="shell-button" /> }));
 vi.mock('hew/Tooltip');
 vi.mock('utils/error', async (importOriginal) => ({
@@ -427,8 +423,7 @@ describe('TaskDashboard', () => {
     vi.mocked(fetchRunPage).mockImplementation(real.fetchRunPage);
     listed.experimentState = RunState.Running;
     listed.genericState = GenericTaskState.Active;
-    vi.mocked(getShells).mockResolvedValue([SHELL]);
-    vi.mocked(getJupyterLabs).mockResolvedValue([NOTEBOOK]);
+    vi.mocked(getShells).mockResolvedValue([SHELL, CPU_SHELL]);
     vi.mocked(getGenericTasks).mockImplementation((params) =>
       Promise.resolve({
         pagination: { limit: 0, offset: 0, total: params.limit === 1 ? 5 : 1 },
@@ -457,10 +452,9 @@ describe('TaskDashboard', () => {
     const names = screen
       .getAllByRole('row')
       .map((tr) => tr.textContent ?? '')
-      .filter((text) => /gpu-shell|eval-sweep|cpu-notebook|bert-finetune/.test(text))
-      .map((text) => text.match(/gpu-shell|eval-sweep|cpu-notebook|bert-finetune/)?.[0]);
-    expect(names).toEqual(['gpu-shell', 'eval-sweep', 'cpu-notebook', 'bert-finetune']);
-    expect(screen.getByTestId('jupyter-lab-button')).toBeInTheDocument();
+      .filter((text) => /gpu-shell|eval-sweep|cpu-shell|bert-finetune/.test(text))
+      .map((text) => text.match(/gpu-shell|eval-sweep|cpu-shell|bert-finetune/)?.[0]);
+    expect(names).toEqual(['gpu-shell', 'eval-sweep', 'cpu-shell', 'bert-finetune']);
     expect(screen.getByTestId('shell-button')).toBeInTheDocument();
     // The toolbar has the search and the launch buttons only.
     for (const testId of ['owner', 'slots', 'kind-experiment']) {
@@ -547,7 +541,7 @@ describe('TaskDashboard', () => {
         expect(lastListCall(getExperiments)).toMatchObject({ limit: 2, sortBy: 'SORT_BY_NAME' }),
       AFTER_LOAD,
     );
-    // By name: bert-finetune, cpu-notebook | eval-sweep, gpu-shell.
+    // By name: bert-finetune, cpu-shell | eval-sweep, gpu-shell.
     expect(screen.queryByText('eval-sweep')).not.toBeInTheDocument();
 
     await user.click(screen.getByTitle('2'));
@@ -601,7 +595,6 @@ describe('TaskDashboard', () => {
     expect(lastListCall(getExperiments)).toMatchObject({ projectId: 1 });
     expect(lastListCall(getGenericTasks)).toMatchObject({ projectId: 1 });
     expect(getShells).not.toHaveBeenCalled();
-    expect(getJupyterLabs).not.toHaveBeenCalled();
     expect(screen.queryByText('gpu-shell')).not.toBeInTheDocument();
     expect(screen.queryByTestId('shell-button')).not.toBeInTheDocument();
     expect(options(await openFilter('Filter by kind'))).toEqual(['Experiment', 'Generic Task']);
@@ -642,7 +635,7 @@ describe('TaskDashboard', () => {
 
     expect(await screen.findByText('eval-sweep')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText('gpu-shell')).not.toBeInTheDocument());
-    expect(screen.queryByText('cpu-notebook')).not.toBeInTheDocument();
+    expect(screen.queryByText('cpu-shell')).not.toBeInTheDocument();
     expect(ticked(await openFilter('Filter by kind'))).toEqual(['Generic Task']);
   });
 
@@ -664,10 +657,19 @@ describe('TaskDashboard', () => {
   }, 30_000);
 
   it('keeps old ?type values of the task list working', async () => {
+    setup({ tasksOnly: true }, '/tasks?type=shell');
+
+    expect(await screen.findByText('cpu-shell', {}, AFTER_LOAD)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('eval-sweep')).not.toBeInTheDocument());
+  });
+
+  it('decodes ?type=jupyter-lab, the kind of ended notebook records, and lists none of them', async () => {
     setup({ tasksOnly: true }, '/tasks?type=jupyter-lab');
 
-    expect(await screen.findByText('cpu-notebook', {}, AFTER_LOAD)).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByText('gpu-shell')).not.toBeInTheDocument());
+    await waitFor(() => expect(fetchRunPage).toHaveBeenCalled(), AFTER_LOAD);
+    expect(vi.mocked(fetchRunPage).mock.lastCall?.[0].kinds).toEqual([RunKind.JupyterLab]);
+    expect(getShells).not.toHaveBeenCalled();
+    expect(screen.queryByText('gpu-shell')).not.toBeInTheDocument();
   });
 
   it('sets the whole view from a URL with any of its keys: no filter or the default sort where it has none', async () => {
@@ -872,7 +874,7 @@ describe('TaskDashboard', () => {
     vi.mocked(getAgents).mockResolvedValue([AGENT('a', 8), AGENT('b', 2)]);
     clusterStore.fetchAgents();
     setup();
-    expect(await screen.findByText('cpu-notebook')).toBeInTheDocument();
+    expect(await screen.findByText('cpu-shell')).toBeInTheDocument();
     await settingsLoaded();
 
     const dropdown = await openFilter('Filter by slots');
@@ -899,7 +901,7 @@ describe('TaskDashboard', () => {
     );
     expect(lastListCall(getExperiments)).toMatchObject({ slots: [0], slotsAbove: 8 });
     await waitFor(() => expect(screen.queryByText('gpu-shell')).not.toBeInTheDocument());
-    expect(screen.getByText('cpu-notebook')).toBeInTheDocument();
+    expect(screen.getByText('cpu-shell')).toBeInTheDocument();
     await waitFor(() => expect(stored().slots).toEqual(['0', 'multi:8']));
   });
 
@@ -1053,7 +1055,8 @@ describe('TaskDashboard', () => {
     const configOf = (config: unknown) => config as BulkExperimentItem['config'];
     vi.mocked(getShells).mockResolvedValue([
       SHELL,
-      { ...SHELL, id: 'shell-2', name: 'old-shell', slots: undefined },
+      CPU_SHELL,
+      { ...SHELL, id: 'shell-3', name: 'old-shell', slots: undefined },
     ]);
     vi.mocked(getExperiments).mockImplementation(() =>
       Promise.resolve({
@@ -1077,7 +1080,7 @@ describe('TaskDashboard', () => {
     expect(await slots('stale-run')).toHaveTextContent(/^1$/);
     expect(await slots('gpu-shell')).toHaveTextContent(/^1$/);
     expect(await slots('old-shell')).toHaveTextContent(/^—$/);
-    expect(await slots('cpu-notebook')).toHaveTextContent(/^0$/);
+    expect(await slots('cpu-shell')).toHaveTextContent(/^0$/);
     expect(await slots('eval-sweep')).toHaveTextContent(/^1$/);
   });
 
@@ -1277,7 +1280,7 @@ describe('TaskDashboard', () => {
     // A definite table width keeps the columns at their own widths, which 'max-content' would
     // widen to their longest content.
     expect(screen.getAllByRole('table')[0].style.width).toBe('100%');
-    const names = ['bert-finetune', 'eval-sweep', 'gpu-shell', 'cpu-notebook'];
+    const names = ['bert-finetune', 'eval-sweep', 'gpu-shell', 'cpu-shell'];
     for (const name of names) {
       expect(screen.getByText(name).closest('td')).toHaveClass('ant-table-cell-ellipsis');
     }
@@ -1626,8 +1629,8 @@ describe('TaskDashboard', () => {
       listed.experimentState = RunState.Completed;
       setup();
       await settingsLoaded();
-      // Another user's notebook and an experiment that has ended.
-      await selectRow('cpu-notebook');
+      // Another user's shell and an experiment that has ended.
+      await selectRow('cpu-shell');
       await selectRow('bert-finetune');
 
       await user.click(screen.getByText('Select an action...'));

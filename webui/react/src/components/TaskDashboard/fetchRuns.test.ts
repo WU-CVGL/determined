@@ -2,7 +2,6 @@ import {
   getCommands,
   getExperiments,
   getGenericTasks,
-  getJupyterLabs,
   getShells,
   getTensorBoards,
 } from 'services/api';
@@ -24,7 +23,6 @@ vi.mock('services/api', () => ({
   getCommands: vi.fn(),
   getExperiments: vi.fn(),
   getGenericTasks: vi.fn(),
-  getJupyterLabs: vi.fn(),
   getShells: vi.fn(),
   getTensorBoards: vi.fn(),
 }));
@@ -105,15 +103,14 @@ describe('fetchRunPage', () => {
     vi.mocked(getCommands).mockResolvedValue([
       command('cmd-gpu', CommandType.Command, '2026-01-05T00:00:00Z', { slots: 2 }),
     ]);
-    vi.mocked(getJupyterLabs).mockResolvedValue([
-      command('nb-cpu', CommandType.JupyterLab, '2026-01-03T00:00:00Z'),
-      command('nb-ended', CommandType.JupyterLab, '2026-01-01T00:00:00Z', {
+    vi.mocked(getShells).mockResolvedValue([
+      command('sh-cpu', CommandType.Shell, '2026-01-03T00:00:00Z'),
+      command('sh-ended', CommandType.Shell, '2026-01-01T00:00:00Z', {
         state: CommandState.Terminated,
         userId: 2,
         workspaceId: 4,
       }),
     ]);
-    vi.mocked(getShells).mockResolvedValue([]);
     vi.mocked(getTensorBoards).mockResolvedValue([]);
     vi.mocked(getGenericTasks).mockResolvedValue(
       genericPage([generic('g1', '2026-01-04T00:00:00Z')], 7),
@@ -131,9 +128,9 @@ describe('fetchRunPage', () => {
     expect(page.rows.map((row) => row.key)).toEqual([
       'command:cmd-gpu',
       'generic-task:g1',
-      'jupyter-lab:nb-cpu',
+      'shell:sh-cpu',
       'experiment:5',
-      'jupyter-lab:nb-ended',
+      'shell:sh-ended',
     ]);
     // 3 tasks listed whole, and the totals of the two paged sources.
     expect(page.total).toBe(3 + 7 + 11);
@@ -174,13 +171,13 @@ describe('fetchRunPage', () => {
       orderBy: 'ORDER_BY_ASC',
       sortBy: 'SORT_BY_NAME',
     });
-    // "cmd-gpu" < "exp 5" < "g1" < "nb-cpu" < "nb-ended"
+    // "cmd-gpu" < "exp 5" < "g1" < "sh-cpu" < "sh-ended"
     expect(page.rows.map((row) => row.key)).toEqual([
       'command:cmd-gpu',
       'experiment:5',
       'generic-task:g1',
-      'jupyter-lab:nb-cpu',
-      'jupyter-lab:nb-ended',
+      'shell:sh-cpu',
+      'shell:sh-ended',
     ]);
   });
 
@@ -214,11 +211,11 @@ describe('fetchRunPage', () => {
     expect(listCall(getGenericTasks)?.userIds).toEqual([3, 2]);
     expect(listCall(getExperiments)?.userIds).toEqual([3, 2]);
     expect(vi.mocked(getCommands).mock.calls[0][0]).toMatchObject({ users: ['3', '2'] });
-    expect(vi.mocked(getJupyterLabs).mock.calls[0][0]).toMatchObject({ users: ['3', '2'] });
+    expect(vi.mocked(getShells).mock.calls[0][0]).toMatchObject({ users: ['3', '2'] });
     // The mock lists every user's tasks; only the owners' are shown.
-    expect(page.rows.filter((row) => row.kind === RunKind.JupyterLab).map((row) => row.id)).toEqual(
-      ['nb-ended'],
-    );
+    expect(page.rows.filter((row) => row.kind === RunKind.Shell).map((row) => row.id)).toEqual([
+      'sh-ended',
+    ]);
   });
 
   it('lists all users without an owner filter', async () => {
@@ -229,23 +226,33 @@ describe('fetchRunPage', () => {
     expect(vi.mocked(getShells).mock.calls[0][0].users).toBeUndefined();
   });
 
-  it('asks for all the notebooks, shells, commands and TensorBoards (limit 0)', async () => {
+  it('asks for all the shells, commands and TensorBoards (limit 0)', async () => {
     await fetchRunPage(globalJobs());
 
-    [getCommands, getJupyterLabs, getShells, getTensorBoards].forEach((fn) =>
+    [getCommands, getShells, getTensorBoards].forEach((fn) =>
       expect(vi.mocked(fn).mock.calls[0][0].limit).toBe(0),
     );
   });
 
   it('fetches only the kinds of the filter', async () => {
-    const page = await fetchRunPage(globalJobs({ kinds: [RunKind.JupyterLab] }));
+    const page = await fetchRunPage(globalJobs({ kinds: [RunKind.Shell] }));
 
     expect(getGenericTasks).not.toHaveBeenCalled();
     expect(getExperiments).not.toHaveBeenCalled();
     expect(getCommands).not.toHaveBeenCalled();
-    expect(getShells).not.toHaveBeenCalled();
-    expect(page.rows.map((row) => row.key)).toEqual(['jupyter-lab:nb-cpu', 'jupyter-lab:nb-ended']);
+    expect(getTensorBoards).not.toHaveBeenCalled();
+    expect(page.rows.map((row) => row.key)).toEqual(['shell:sh-cpu', 'shell:sh-ended']);
     expect(page.total).toBe(2);
+  });
+
+  it('fetches nothing for the JupyterLab kind of ended notebook records', async () => {
+    const page = await fetchRunPage(globalJobs({ kinds: [RunKind.JupyterLab] }));
+
+    [getCommands, getShells, getTensorBoards, getGenericTasks, getExperiments].forEach((fn) =>
+      expect(fn).not.toHaveBeenCalled(),
+    );
+    expect(page.rows).toEqual([]);
+    expect(page.total).toBe(0);
   });
 
   describe('slots', () => {
@@ -274,16 +281,13 @@ describe('fetchRunPage', () => {
       }
     });
 
-    it('filters notebooks, shells, commands and TensorBoards by their slots here', async () => {
-      const kinds = [CommandType.Command, CommandType.JupyterLab];
+    it('filters shells, commands and TensorBoards by their slots here', async () => {
+      const kinds = [CommandType.Command, CommandType.Shell];
       const many = await fetchRunPage(globalJobs({ kinds, slots: slotsQuery(['multi:1']) }));
       expect(many.rows.map((row) => row.key)).toEqual(['command:cmd-gpu']);
 
       const none = await fetchRunPage(globalJobs({ kinds, slots: slotsQuery(['0']) }));
-      expect(none.rows.map((row) => row.key)).toEqual([
-        'jupyter-lab:nb-cpu',
-        'jupyter-lab:nb-ended',
-      ]);
+      expect(none.rows.map((row) => row.key)).toEqual(['shell:sh-cpu', 'shell:sh-ended']);
       // The task lists themselves are not filtered by the master.
       expect(vi.mocked(getCommands).mock.calls[0][0]).not.toHaveProperty('slots');
       expect(vi.mocked(getCommands).mock.calls[0][0]).not.toHaveProperty('slotsAbove');
@@ -322,7 +326,7 @@ describe('fetchRunPage', () => {
       page.rows.filter(
         (row) => row.kind !== RunKind.Experiment && row.kind !== RunKind.GenericTask,
       ),
-    ).toEqual([expect.objectContaining({ id: 'nb-ended' })]);
+    ).toEqual([expect.objectContaining({ id: 'sh-ended' })]);
   });
 
   it("lists a project's experiments and generic tasks only", async () => {
@@ -330,7 +334,6 @@ describe('fetchRunPage', () => {
     const page = await fetchRunPage({ kinds: kindsOf(scope, true), limit: 20, offset: 0, scope });
 
     expect(getCommands).not.toHaveBeenCalled();
-    expect(getJupyterLabs).not.toHaveBeenCalled();
     expect(getShells).not.toHaveBeenCalled();
     expect(getTensorBoards).not.toHaveBeenCalled();
     expect(listCall(getGenericTasks)).toMatchObject({ projectId: 1 });
@@ -357,21 +360,15 @@ describe('fetchRunPage', () => {
     expect(page.errors[RunKind.Shell]).toBeInstanceOf(Error);
     expect(Object.keys(page.errors).sort()).toEqual([RunKind.Experiment, RunKind.Shell].sort());
     expect(page.rows.some((row) => row.kind === RunKind.Experiment)).toBe(false);
-    expect(page.total).toBe(3 + 7);
+    // The shells are left out with the experiments: the command and the generic tasks remain.
+    expect(page.total).toBe(1 + 7);
   });
 
   it('forwards the abort signal to every call', async () => {
     const signal = new AbortController().signal;
     await fetchRunPage(globalJobs(), signal);
 
-    [
-      getCommands,
-      getJupyterLabs,
-      getShells,
-      getTensorBoards,
-      getGenericTasks,
-      getExperiments,
-    ].forEach((fn) =>
+    [getCommands, getShells, getTensorBoards, getGenericTasks, getExperiments].forEach((fn) =>
       vi.mocked(fn).mock.calls.forEach((call) => expect(call[1]).toEqual({ signal })),
     );
   });

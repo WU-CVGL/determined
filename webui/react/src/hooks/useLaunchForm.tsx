@@ -4,28 +4,19 @@ import { useCallback, useState } from 'react';
 import NtscLaunchModalComponent from 'components/NtscLaunchModal';
 import ShellLaunchedModalComponent from 'components/ShellLaunchedModal';
 import { CommandResponse, CommandTask, Workspace } from 'types';
-import { NtscLaunchType } from 'utils/ntscConfig';
 
 interface Return {
   /** The launch form and the shell's launch result; render them once. */
   launchFormModals: React.ReactNode;
-  /**
-   * Opens the launch form with the given task type selected. With a task ("Launch Again"), the
-   * form starts from that task's config.
-   */
-  openLaunchForm: (type: NtscLaunchType, initialTask?: CommandTask) => void;
+  /** Opens the launch form. With a task ("Launch Again"), the form starts from that task's config. */
+  openLaunchForm: (initialTask?: CommandTask) => void;
 }
 
 interface LaunchRequest {
   initialTask?: CommandTask;
-  type: NtscLaunchType;
 }
 
-/**
- * The launch form for JupyterLab and shells, and what follows a launch. The user can switch the
- * task type in the form, so every entry point shows the shell's launch result (ShellLaunchedModal)
- * after a shell launch; a JupyterLab launch opens the notebook's wait page itself.
- */
+/** The shell launch form, and the shell's launch result (ShellLaunchedModal) after a launch. */
 export const useLaunchForm = ({
   onShellLaunched,
   workspace,
@@ -43,8 +34,8 @@ export const useLaunchForm = ({
   const openShellLaunched = ShellLaunchedModal.open;
 
   const openLaunchForm = useCallback(
-    (type: NtscLaunchType, initialTask?: CommandTask) => {
-      setRequest({ initialTask, type });
+    (initialTask?: CommandTask) => {
+      setRequest({ initialTask });
       openLaunchModal();
     },
     [openLaunchModal],
@@ -65,7 +56,6 @@ export const useLaunchForm = ({
         {request && (
           <LaunchModal.Component
             initialTask={request.initialTask}
-            initialType={request.type}
             key={request.initialTask?.id}
             workspace={workspace}
             onShellLaunched={handleShellLaunched}
