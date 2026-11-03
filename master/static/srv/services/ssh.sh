@@ -5,6 +5,11 @@
 
 [[ ${supervisor_phase-} != pre-init ]] || return 0
 
+if [[ ! -x /usr/sbin/sshd ]]; then
+    echo "ssh service: sshd is not installed" >&2
+    exit 127
+fi
+
 # Prepend each key in authorized_keys with a set of environment="KEY=VALUE"
 # options to inject the entire docker environment into the eventual ssh
 # session via an options in the authorized keys file.  See syntax described in

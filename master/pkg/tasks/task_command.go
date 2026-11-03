@@ -62,6 +62,13 @@ type GenericCommandSpec struct {
 	// saved without it finds its sshd as its default TCP proxy port in Base.ExtraProxyPorts.
 	SSHDPort int
 
+	// Services are the services of a shell, the primary one, ssh, first: their ports and how the
+	// master proxies each. The master builds the services' proxies and environment from them on
+	// every start, also on a restore. Empty for notebooks, commands and TensorBoards, and for shells
+	// saved before the master recorded them, whose proxies follow the task type: a shell's sshd is
+	// at SSHDPort or its default TCP proxy port, and a notebook reaches every port over HTTPS.
+	Services []InteractiveService
+
 	WatchProxyIdleTimeout  bool
 	WatchRunnerIdleTimeout bool
 
@@ -135,7 +142,8 @@ func (s GenericCommandSpec) ToTaskSpec() TaskSpec {
 // - unify TrialSpec and GenericCommandSpec
 // - move CommandConfig to expconf
 
-// MakeEnvPorts fills in `Environment.Ports` i.e. exposed ports for container config.
+// MakeEnvPorts fills in `Environment.Ports` i.e. exposed ports for container config: the proxy
+// ports and the services' ports.
 func (s *GenericCommandSpec) MakeEnvPorts() {
 	if s.Config.Environment.Ports != nil {
 		panic("CommandSpec Environment.Ports are only supposed to be generated once.")
@@ -147,9 +155,13 @@ func (s *GenericCommandSpec) MakeEnvPorts() {
 		port := pp.ProxyPort()
 		s.Config.Environment.Ports[strconv.Itoa(port)] = port
 	}
+	for _, service := range s.Services {
+		s.Config.Environment.Ports[strconv.Itoa(service.Port)] = service.Port
+	}
 }
 
-// ProxyPorts combines user-defined and system proxy configs.
+// ProxyPorts combines user-defined and system proxy configs. The services' ports are not among
+// them: their records in Services hold them.
 func (s *GenericCommandSpec) ProxyPorts() expconf.ProxyPortsConfig {
 	env := schemas.WithDefaults(s.Config.Environment.ToExpconf())
 	epp := schemas.WithDefaults(s.Base.ExtraProxyPorts)

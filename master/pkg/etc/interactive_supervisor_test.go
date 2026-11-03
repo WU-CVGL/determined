@@ -783,6 +783,14 @@ func TestSupervisorRejectsInvalidServices(t *testing.T) {
 	}
 }
 
+// sshUnitWith returns the ssh unit with sshd at path, in its check and in the line that runs it.
+func sshUnitWith(t *testing.T, path string) string {
+	t.Helper()
+	unit := staticScript(t, SSHServiceResource)
+	require.Equal(t, 2, strings.Count(unit, sshdPath), "the check and the line that runs sshd")
+	return strings.ReplaceAll(unit, sshdPath, path)
+}
+
 // The ssh unit under the supervisor: the sessions' environment is the one after the init, sshd gets
 // the supervisor's arguments, its log loses the login records message, and its readiness is
 // reported and logged, also with a strict startup hook.
@@ -806,9 +814,7 @@ done
 printf '%s\r\n' "Attempt to write login records by non-root user (aborting)" "Accepted publickey for det" >&2
 exit 0
 `)
-	unit := staticScript(t, SSHServiceResource)
-	require.Contains(t, unit, sshdPath)
-	s.staticUnit("ssh", strings.Replace(unit, sshdPath, sshd, 1))
+	s.staticUnit("ssh", sshUnitWith(t, sshd))
 	require.NoError(t, os.WriteFile(filepath.Join(s.run, "ssh", "authorized_keys_unmodified"),
 		[]byte("ssh-ed25519 AAAAkey det\n"), 0o600))
 	sshdArgs := []string{"-f", "/run/determined/ssh/sshd_config", "-p", "2222", "-D", "-e"}
@@ -831,10 +837,10 @@ exit 0
 	require.Equal(t, []string{"[ssh] start", "[ssh] ready", "[ssh] exited 0"}, s.logLines())
 }
 
-// The jupyter unit under the supervisor: the idle check runs in the background while JupyterLab
-// runs in the foreground with today's flags, and the idle check ends with it, also with a strict
-// startup hook. SHELL is the user's login shell before the init, so that the startup hook sees it
-// and may set another one for JupyterLab.
+// The jupyter unit under the supervisor on a notebook: the idle check runs in the background while
+// JupyterLab runs in the foreground with today's flags, and the idle check ends with it, also with
+// a strict startup hook. SHELL is the user's login shell before the init, so that the startup hook
+// sees it and may set another one for JupyterLab.
 func TestSupervisorJupyterUnit(t *testing.T) {
 	out, err := exec.Command("bash", "-c", `getent passwd "$(whoami)" | cut -d: -f7`).Output()
 	require.NoError(t, err)
@@ -855,7 +861,7 @@ func TestSupervisorJupyterUnit(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := testSupervisorJupyterUnit(t, tc.hook)
+			s := testSupervisorJupyterUnit(t, tc.hook, notebookJupyter)
 			seen, err := os.ReadFile(s.order + ".hook-shell")
 			require.NoError(t, err)
 			require.Equal(t, loginShell+"\n", string(seen), "the hook's SHELL")
@@ -864,18 +870,46 @@ func TestSupervisorJupyterUnit(t *testing.T) {
 	}
 }
 
-func testSupervisorJupyterUnit(t *testing.T, hook string) *supervisorRun {
+// jupyterTask is the task that the jupyter unit runs in: its environment from the master and the
+// base URL that JupyterLab must get.
+type jupyterTask struct {
+	env     []string
+	baseURL string
+	// idle is whether the idle check runs.
+	idle bool
+}
+
+var (
+	// notebookJupyter is a notebook saved by a master that set no base URL.
+	notebookJupyter = jupyterTask{
+		env:     []string{"NOTEBOOK_IDLE_TYPE=kernels_or_terminals"},
+		baseURL: "/proxy/task-1/",
+		idle:    true,
+	}
+	// shellJupyter is a shell with the jupyter service: no idle type, a base URL at its port.
+	shellJupyter = jupyterTask{
+		env:     []string{"NOTEBOOK_BASE_URL=/proxy/task-1:2900/"},
+		baseURL: "/proxy/task-1:2900/",
+	}
+)
+
+func testSupervisorJupyterUnit(t *testing.T, hook string, task jupyterTask) *supervisorRun {
 	s := newSupervisorRun(t, "jupyter")
 	s.hook(hook)
 	bin := filepath.Join(s.dir, "bin")
 	require.NoError(t, os.Mkdir(bin, 0o700))
 	writeScript(t, filepath.Join(bin, "jupyter"), `
 printf '%s\0' "$@" >"$ORDER_FILE.jupyter-args"
-for _ in $(seq 400); do
-    [[ -s $IDLE_PID_FILE ]] && break
-    sleep 0.05
-done
-idle=$(cat "$IDLE_PID_FILE")
+if [[ -n $EXPECT_IDLE ]]; then
+    for _ in $(seq 400); do
+        [[ -s $IDLE_PID_FILE ]] && break
+        sleep 0.05
+    done
+else
+    # Time for an idle check to start, which it must not.
+    sleep 1
+fi
+idle=$(cat "$IDLE_PID_FILE" 2>/dev/null)
 if [[ -n $idle && -d /proc/$idle ]]; then
     echo "idle check runs" >>"$ORDER_FILE"
 fi
@@ -888,30 +922,46 @@ done
 exit 0
 `)
 	s.staticUnit("jupyter", staticScript(t, JupyterServiceResource))
+	expectIdle := ""
+	if task.idle {
+		expectIdle = "1"
+	}
+	// The task's variables only, whatever the test's environment has.
+	s.env = slices.DeleteFunc(s.env, func(kv string) bool {
+		return strings.HasPrefix(kv, "NOTEBOOK_IDLE_TYPE=") || strings.HasPrefix(kv, "NOTEBOOK_BASE_URL=")
+	})
 	s.env = append(s.env,
 		"PATH="+bin+":"+os.Getenv("PATH"),
 		"NOTEBOOK_PORT=2900",
 		"DET_TASK_ID=task-1",
 		"DET_NOTEBOOK_TOKEN=secret",
 		"SHELL=/opt/image/sh",
+		"EXPECT_IDLE="+expectIdle,
 	)
+	s.env = append(s.env, task.env...)
 	s.start()
 	require.Equal(t, 0, s.wait())
 
 	order := s.orderLines()
-	require.Contains(t, order, "idle check runs")
 	require.Contains(t, order, "posted jupyter")
 	require.Regexp(t, regexp.MustCompile(`^SHELL=/`), findPrefix(order, "SHELL="))
 	idle, err := os.ReadFile(filepath.Join(s.dir, "idle-pid"))
-	require.NoError(t, err)
-	_, err = os.Stat(filepath.Join("/proc", strings.TrimSpace(string(idle))))
-	require.True(t, os.IsNotExist(err), "the idle check is gone")
+	if task.idle {
+		require.Contains(t, order, "idle check runs")
+		require.NoError(t, err)
+		_, err = os.Stat(filepath.Join("/proc", strings.TrimSpace(string(idle))))
+		require.True(t, os.IsNotExist(err), "the idle check is gone")
+	} else {
+		require.NotContains(t, order, "idle check runs")
+		require.True(t, os.IsNotExist(err), "the idle check never started")
+	}
 
 	logFormat := "%(levelname)s: [%(name)s] %(message)s"
 	want := []string{
 		"lab", "--ServerApp.port=2900",
+		"--ServerApp.port_retries=0",
 		"--ServerApp.allow_origin=*",
-		"--ServerApp.base_url=/proxy/task-1/",
+		"--ServerApp.base_url=" + task.baseURL,
 		"--ServerApp.allow_root=True",
 		"--ServerApp.certfile=" + s.run + "/jupyter/jupyterCert.pem",
 		"--ServerApp.keyfile=" + s.run + "/jupyter/jupyterKey.key",
@@ -956,6 +1006,123 @@ func TestSupervisorUnitsPreInit(t *testing.T) {
 			require.Equal(t, 1, strings.Count(string(out), "\n"), string(out))
 		})
 	}
+}
+
+// On a shell, the jupyter unit runs JupyterLab under the base URL that the master sets, and no
+// idle check, which only notebooks can report to.
+func TestSupervisorJupyterUnitOnShell(t *testing.T) {
+	testSupervisorJupyterUnit(t, defaultHook, shellJupyter)
+}
+
+// A notebook saved by an older master gets the base URL at its task ID; an empty base URL is
+// unset.
+func TestSupervisorJupyterUnitDefaultBaseURL(t *testing.T) {
+	task := notebookJupyter
+	task.env = append(slices.Clone(task.env), "NOTEBOOK_BASE_URL=")
+	testSupervisorJupyterUnit(t, defaultHook, task)
+}
+
+// replace changes the one occurrence of old in the supervisor to new.
+func (s *supervisorRun) replace(old, new string) {
+	s.t.Helper()
+	path := filepath.Join(s.run, InteractiveSupervisorResource)
+	b, err := os.ReadFile(path) //nolint:gosec
+	require.NoError(s.t, err)
+	require.Equal(s.t, 1, strings.Count(string(b), old), old)
+	b = []byte(strings.Replace(string(b), old, new, 1))
+	require.NoError(s.t, os.WriteFile(path, b, 0o700)) //nolint:gosec
+}
+
+// The supervisor needs bash 5 or later and /proc, and says which is missing before the init.
+func TestSupervisorRequiresBashAndProc(t *testing.T) {
+	for _, tc := range []struct {
+		name, old, new, want string
+	}{
+		{
+			name: "bash",
+			old:  "BASH_VERSINFO[0] < 5",
+			new:  "BASH_VERSINFO[0] < 99",
+			want: "interactive task: bash 5 or later is required, found ",
+		},
+		{
+			name: "proc",
+			old:  "[[ ! -r /proc/self/stat ]]",
+			new:  "[[ ! -r /proc/self/no-such-file ]]",
+			want: "interactive task: /proc is required\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newSupervisorRun(t, "p")
+			s.unit("p", "echo p >>\"$ORDER_FILE\"\n")
+			s.replace(tc.old, tc.new)
+			s.start()
+			require.Equal(t, 1, s.wait())
+			require.Empty(t, s.orderLines(), "nothing runs")
+			require.True(t, strings.HasPrefix(s.stderr.String(), tc.want), s.stderr.String())
+			require.Equal(t, 1, strings.Count(s.stderr.String(), "\n"), s.stderr.String())
+		})
+	}
+}
+
+// pathWithout returns $PATH without the directories that have program.
+func pathWithout(t *testing.T, program string) string {
+	t.Helper()
+	var dirs []string
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		if _, err := os.Stat(filepath.Join(dir, program)); err == nil {
+			if dir == "/usr/bin" || dir == "/bin" {
+				t.Skipf("%s is installed in %s", program, dir)
+			}
+			continue
+		}
+		dirs = append(dirs, dir)
+	}
+	return strings.Join(dirs, string(filepath.ListSeparator))
+}
+
+// The jupyter unit says when the image has no jupyter and exits 127, before it starts anything;
+// as a service besides the primary one, the task stays up.
+func TestSupervisorJupyterUnitWithoutJupyter(t *testing.T) {
+	for _, services := range []string{"jupyter", "p,jupyter"} {
+		t.Run(services, func(t *testing.T) {
+			s := newSupervisorRun(t, services)
+			s.unit("p", waitUntilOrder("p done")+"exit 0\n")
+			s.staticUnit("jupyter", staticScript(t, JupyterServiceResource))
+			s.env = append(s.env, "PATH="+pathWithout(t, "jupyter"), "NOTEBOOK_IDLE_TYPE=activity")
+			s.start()
+			missing := "jupyter service: jupyter is not installed\n[jupyter] exited 127\n"
+			s.waitForLog("[jupyter] exited 127")
+			require.Contains(t, s.stderr.String(), missing)
+			if services == "jupyter" {
+				require.Equal(t, 127, s.wait())
+				require.Equal(t, []string{"[jupyter] start", "[jupyter] exited 127"}, s.logLines())
+			} else {
+				require.True(t, s.running())
+				require.NoError(t, os.WriteFile(s.order, []byte("p done\n"), 0o600))
+				require.Equal(t, 0, s.wait())
+				require.Equal(t, []string{
+					"[p] start", "[jupyter] start", "[jupyter] exited 127", "[p] exited 0",
+				}, s.logLines())
+			}
+			_, err := os.Stat(filepath.Join(s.dir, "idle-pid"))
+			require.True(t, os.IsNotExist(err), "the idle check never started")
+		})
+	}
+}
+
+// The ssh unit says when the image has no sshd and exits 127, before it writes the sessions'
+// environment.
+func TestSupervisorSSHUnitWithoutSSHD(t *testing.T) {
+	s := newSupervisorRun(t, "ssh")
+	s.staticUnit("ssh", sshUnitWith(t, filepath.Join(s.dir, "no-sshd")))
+	require.NoError(t, os.WriteFile(filepath.Join(s.run, "ssh", "authorized_keys_unmodified"),
+		[]byte("ssh-ed25519 AAAAkey det\n"), 0o600))
+	s.start("-p", "2222")
+	require.Equal(t, 127, s.wait())
+	require.Contains(t, s.stderr.String(), "ssh service: sshd is not installed\n[ssh] exited 127\n")
+	require.Equal(t, []string{"[ssh] start", "[ssh] exited 127"}, s.logLines())
+	_, err := os.Stat(filepath.Join(s.run, "ssh", "authorized_keys"))
+	require.True(t, os.IsNotExist(err), "no environment written")
 }
 
 func findPrefix(lines []string, prefix string) string {

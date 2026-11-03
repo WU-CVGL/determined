@@ -52,11 +52,14 @@ type CommandConfig struct {
 	Debug            bool                `json:"debug"`
 	Pbs              expconf.PbsConfig   `json:"pbs,omitempty"`
 	Slurm            expconf.SlurmConfig `json:"slurm,omitempty"`
+	// Services are the services that a shell runs besides its sshd, by name. Only shells take
+	// them.
+	Services map[string]ServiceConfig `json:"services,omitempty"`
 }
 
 // Validate implements the check.Validatable interface.
 func (c *CommandConfig) Validate() []error {
-	return []error{
+	return append([]error{
 		check.GreaterThanOrEqualTo(c.Resources.Slots, 0, "resources.slots must be >= 0"),
 		check.GreaterThan(len(c.Entrypoint), 0, "entrypoint must be non-empty"),
 		check.Contains(
@@ -69,5 +72,5 @@ func (c *CommandConfig) Validate() []error {
 			"invalid notebook idle type",
 		),
 		check.True(c.Resources.IsSingleNode == nil, "resources.is_single_node cannot be set for NTSCs"),
-	}
+	}, validateServices(c.Services)...)
 }

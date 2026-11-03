@@ -26,6 +26,7 @@ import (
 	"github.com/determined-ai/determined/master/pkg/logger"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/protoutils"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 	"github.com/determined-ai/determined/proto/pkg/commandv1"
@@ -160,6 +161,10 @@ func (c *Command) Start(ctx context.Context) error {
 		}
 	}
 
+	// The services' environment comes from the persisted spec, as the proxies below do, so that a
+	// restore gets the same.
+	c.GenericCommandSpec.SetServicesEnv(c.taskID)
+
 	fitting := sproto.FittingRequirements{
 		SingleAgent: true, GPUTopology: c.Config.Resources.GPUTopology(),
 		GPUGroups: c.Config.Resources.GPUGroupRequests(),
@@ -175,11 +180,9 @@ func (c *Command) Start(ctx context.Context) error {
 			SlotsNeeded:         c.Config.Resources.Slots,
 			ResourcePool:        c.Config.Resources.ResourcePool,
 			FittingRequirements: fitting,
-			// Every port of a notebook is reached over HTTPS; Jupyter serves a master-signed cert.
-			ProxyPorts: sproto.NewProxyPortConfig(
-				c.GenericCommandSpec.ProxyPorts(), c.taskID, c.TaskType == model.TaskTypeNotebook),
-			IdleTimeout: idleWatcherConfig,
-			Restore:     c.restored,
+			ProxyPorts:          proxyPortConfigs(c.GenericCommandSpec, c.taskID),
+			IdleTimeout:         idleWatcherConfig,
+			Restore:             c.restored,
 		}, c.db, c.rm, c.GenericCommandSpec, c.OnExit)
 	if err != nil {
 		return err
@@ -258,7 +261,8 @@ func (c *Command) OnExit(ae *task.AllocationExited) {
 		c.syslog.WithError(err).Errorf(
 			"failure to delete user session for task: %v", c.taskID)
 	}
-	if c.TaskType == model.TaskTypeNotebook {
+	// Notebooks and shells that run JupyterLab have a notebook session for its token.
+	if c.Base.ExtraEnvVars[model.NotebookSessionEnvVar] != "" {
 		if err := internaldb.DeleteNotebookSessionByTask(context.TODO(), c.taskID); err != nil {
 			c.syslog.WithError(err).Errorf(
 				"failure to delete notebook session for task: %v", c.taskID)
@@ -515,4 +519,37 @@ func (c *Command) serviceAddress() string {
 
 func (c *Command) stringID() string {
 	return c.taskID.String()
+}
+
+// proxyPortConfigs returns the proxies of a command's ports, built from its persisted spec on
+// every start and restore. Each service's port gets one proxy from its record in spec.Services,
+// and the other ports, such as those of the config's environment, are plain; a plain port that a
+// record owns is skipped. A spec without records reaches every port over HTTPS if it is a
+// notebook, since JupyterLab serves a master-signed cert.
+func proxyPortConfigs(spec tasks.GenericCommandSpec, taskID model.TaskID) []*sproto.ProxyPortConfig {
+	if len(spec.Services) == 0 {
+		return sproto.NewProxyPortConfig(
+			spec.ProxyPorts(), taskID, spec.TaskType == model.TaskTypeNotebook)
+	}
+	ports := make([]*sproto.ProxyPortConfig, 0, len(spec.Services))
+	owned := make(map[int]bool, len(spec.Services))
+	for _, service := range spec.Services {
+		owned[service.Port] = true
+		ports = append(ports, &sproto.ProxyPortConfig{
+			ServiceID:       service.ServiceID(taskID),
+			Port:            service.Port,
+			ProxyTCP:        service.ProxyTCP,
+			Unauthenticated: service.Unauthenticated,
+			TLS:             service.TLS,
+			Exec:            service.Exec,
+			StripPrefix:     service.StripPrefix,
+		})
+	}
+	var plain expconf.ProxyPortsConfig
+	for _, pp := range spec.ProxyPorts() {
+		if !owned[pp.ProxyPort()] {
+			plain = append(plain, pp)
+		}
+	}
+	return append(ports, sproto.NewProxyPortConfig(plain, taskID, false)...)
 }

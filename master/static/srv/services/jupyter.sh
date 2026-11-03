@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
-# The jupyter service: JupyterLab, with the idle check in the background. The supervisor sources
-# this file before the init, to set SHELL, and after it.
+# The jupyter service: JupyterLab, with the idle check of a notebook in the background, under the
+# base URL that the master sets, NOTEBOOK_BASE_URL; tasks saved before the master set it are at
+# their task ID. The supervisor sources this file before the init, to set SHELL, and after it.
 
 if [[ ${supervisor_phase-} == pre-init ]]; then
     # Use user's preferred SHELL in JupyterLab terminals, unless a startup hook sets another one.
@@ -13,7 +14,16 @@ if [[ ${supervisor_phase-} == pre-init ]]; then
     return 0
 fi
 
-"$DET_PYTHON_EXECUTABLE" /run/determined/jupyter/check_idle.py &
+if ! command -v jupyter >/dev/null; then
+    echo "jupyter service: jupyter is not installed" >&2
+    exit 127
+fi
+
+# The idle check reports to the notebook API, which only takes notebooks: only they set the idle
+# type.
+if [[ -n ${NOTEBOOK_IDLE_TYPE+set} ]]; then
+    "$DET_PYTHON_EXECUTABLE" /run/determined/jupyter/check_idle.py &
+fi
 
 JUPYTER_LAB_LOG_FORMAT="%(levelname)s: [%(name)s] %(message)s"
 READINESS_REGEX='^.*Jupyter Server .* is running.*$'
@@ -34,9 +44,11 @@ jupyter_ready_check() {
 
 # The group makes the log helper a child of this shell rather than of JupyterLab.
 {
+    # A busy port fails the service: Jupyter Server would move off it, but the master proxies it.
     jupyter lab --ServerApp.port=${NOTEBOOK_PORT} \
+        --ServerApp.port_retries=0 \
         --ServerApp.allow_origin="*" \
-        --ServerApp.base_url="/proxy/${DET_TASK_ID}/" \
+        --ServerApp.base_url="${NOTEBOOK_BASE_URL:-/proxy/${DET_TASK_ID}/}" \
         --ServerApp.allow_root=True \
         --ServerApp.certfile=/run/determined/jupyter/jupyterCert.pem \
         --ServerApp.keyfile=/run/determined/jupyter/jupyterKey.key \

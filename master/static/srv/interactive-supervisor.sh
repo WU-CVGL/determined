@@ -30,6 +30,17 @@
 #   is best-effort; the supervisor's scan of the group in /proc/*/stat is the backstop that finds
 #   and stops what is left of the group on any kernel.
 # - Processes that leave the group on purpose (setsid) belong to the container's lifetime.
+#
+# The image must have bash 5 or later and /proc; without them the supervisor stops before the init.
+
+if ((BASH_VERSINFO[0] < 5)); then
+    echo "interactive task: bash 5 or later is required, found ${BASH_VERSION}" >&2
+    exit 1
+fi
+if [[ ! -r /proc/self/stat ]]; then
+    echo "interactive task: /proc is required" >&2
+    exit 1
+fi
 
 source /run/determined/task-setup.sh
 

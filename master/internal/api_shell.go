@@ -3,7 +3,9 @@ package internal
 import (
 	"archive/tar"
 	"context"
+	"encoding/json"
 	"fmt"
+	"math/rand"
 	"strconv"
 
 	petname "github.com/dustinkirkland/golang-petname"
@@ -18,6 +20,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/command"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
+	"github.com/determined-ai/determined/master/internal/proxy"
 	"github.com/determined-ai/determined/master/internal/rbac/audit"
 	"github.com/determined-ai/determined/master/pkg/archive"
 	"github.com/determined-ai/determined/master/pkg/check"
@@ -211,16 +214,49 @@ func (a *apiServer) SetShellPriority(
 	return &apiv1.SetShellPriorityResponse{Shell: cmd.ToV1Shell()}, nil
 }
 
+// sshService is the ssh service of a shell, at sshd's port: the shell's primary service and its
+// default TCP proxy port, which the proxy passes without a master login, since sshd checks the
+// shell's key.
+func sshService(port int) tasks.InteractiveService {
+	return tasks.InteractiveService{
+		Name:             interactiveServiceSSH,
+		Port:             port,
+		DefaultServiceID: true,
+		ProxyTCP:         true,
+		Unauthenticated:  true,
+	}
+}
+
+// freeServicePort returns a random port of [min, max] for the named service of a spec, other than
+// the ports of its proxy ports, the config's and the launch's, and of the services it already has,
+// so that each container port has one proxy.
+func freeServicePort(spec *tasks.GenericCommandSpec, name string, min, max int) (int, error) {
+	used := map[int]bool{}
+	for _, pp := range spec.ProxyPorts() {
+		used[pp.ProxyPort()] = true
+	}
+	for _, service := range spec.Services {
+		used[service.Port] = true
+	}
+	var free []int
+	for port := min; port <= max; port++ {
+		if !used[port] {
+			free = append(free, port)
+		}
+	}
+	if len(free) == 0 {
+		return 0, status.Errorf(codes.InvalidArgument,
+			"services: %s: no free port in %d-%d", name, min, max)
+	}
+	//nolint:gosec // Weak RNG doesn't matter here.
+	return free[rand.Intn(len(free))], nil
+}
+
 // setShellSSHD makes a shell spec run its sshd on the given container port: the entrypoint starts
-// sshd there, the port is the shell's default TCP proxy port, and SSHDPort records it.
+// sshd there, the port is the shell's ssh service and default TCP proxy port, and SSHDPort records
+// it.
 func setShellSSHD(spec *tasks.GenericCommandSpec, port int) {
-	// Shell authentication happens through SSH keys, instead.
-	spec.Base.ExtraProxyPorts = append(spec.Base.ExtraProxyPorts, expconf.ProxyPort{
-		RawProxyPort:        port,
-		RawProxyTCP:         ptrs.Ptr(true),
-		RawUnauthenticated:  ptrs.Ptr(true),
-		RawDefaultServiceID: ptrs.Ptr(true),
-	})
+	spec.AddService(sshService(port))
 	spec.SSHDPort = port
 	// The supervisor hands its arguments to its primary service, sshd.
 	spec.Config.Entrypoint = interactiveSupervisorEntrypoint(
@@ -237,10 +273,11 @@ func (a *apiServer) LaunchShell(
 	}
 
 	launchReq, launchWarnings, err := a.getCommandLaunchParams(ctx, &protoCommandParams{
-		TemplateName: req.TemplateName,
-		WorkspaceID:  req.WorkspaceId,
-		Config:       req.Config,
-		Files:        req.Files,
+		TemplateName:  req.TemplateName,
+		WorkspaceID:   req.WorkspaceId,
+		Config:        req.Config,
+		Files:         req.Files,
+		AllowServices: true,
 	}, user)
 	if err != nil {
 		return nil, api.WrapWithFallbackCode(err, codes.InvalidArgument,
@@ -261,7 +298,11 @@ func (a *apiServer) LaunchShell(
 
 	// Selecting a random port mitigates the risk of multiple processes binding
 	// the same port on an agent in host mode.
-	setShellSSHD(launchReq.Spec, getRandomPort(minSshdPort, maxSshdPort))
+	sshdPort, err := freeServicePort(launchReq.Spec, interactiveServiceSSH, minSshdPort, maxSshdPort)
+	if err != nil {
+		return nil, err
+	}
+	setShellSSHD(launchReq.Spec, sshdPort)
 
 	if err = check.Validate(launchReq.Spec.Config); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
@@ -282,11 +323,26 @@ func (a *apiServer) LaunchShell(
 			tar.TypeReg,
 		),
 	}
+	// The declared services after ssh, the primary one, in sorted order, which Command.Start
+	// passes on to the supervisor from their records.
+	for _, name := range model.DeclaredServices(launchReq.Spec.Config.Services) {
+		switch name {
+		case interactiveServiceSSH:
+			// Every shell runs it.
+		case interactiveServiceJupyter:
+			files, err := addShellJupyter(launchReq.Spec)
+			if err != nil {
+				return nil, err
+			}
+			launchReq.Spec.AdditionalFiles = append(launchReq.Spec.AdditionalFiles, files...)
+		default:
+			return nil, status.Errorf(codes.InvalidArgument, "services: unknown service %q", name)
+		}
+	}
 	launchReq.Spec.AdditionalFiles = append(launchReq.Spec.AdditionalFiles,
 		interactiveSupervisorFiles(launchReq.Spec.Base.AgentUserGroup)...)
 
 	addExtraEnvVars(launchReq.Spec, map[string]string{"DET_TASK_TYPE": string(model.TaskTypeShell)})
-	setInteractiveServices(launchReq.Spec, interactiveServiceSSH)
 
 	oidcPachydermEnvVars, err := a.getOIDCPachydermEnvVars(session)
 	if err != nil {
@@ -303,10 +359,7 @@ func (a *apiServer) LaunchShell(
 	launchReq.Spec.Keys = &keys
 
 	// Launch a Shell.
-	cmd, err := command.DefaultCmdService.LaunchGenericCommand(
-		model.TaskTypeShell,
-		model.JobTypeShell,
-		launchReq)
+	cmd, err := command.DefaultCmdService.LaunchShellCommand(launchReq, user)
 	if err != nil {
 		return nil, err
 	}
@@ -320,4 +373,40 @@ func (a *apiServer) LaunchShell(
 		Config:   protoutils.ToStruct(launchReq.Spec.Config),
 		Warnings: pkgCommand.LaunchWarningToProto(launchWarnings),
 	}, nil
+}
+
+// jupyterService is the jupyter service of a shell: at "<task>:<port>", reached over HTTPS, since
+// JupyterLab serves the master-signed cert, by the task's owner and admins only, since it runs
+// code as the owner. JupyterLab serves under its base URL, so the proxy keeps the path.
+func jupyterService(port int) tasks.InteractiveService {
+	return tasks.InteractiveService{
+		Name: interactiveServiceJupyter,
+		Port: port,
+		TLS:  true,
+		Exec: true,
+	}
+}
+
+// addShellJupyter adds the jupyter service to a shell spec: JupyterLab's port, from the notebooks'
+// range, which does not overlap sshd's, outside the spec's other ports, its environment and its
+// files, which it returns. The command service adds its token, and Command.Start its base URL.
+func addShellJupyter(spec *tasks.GenericCommandSpec) (archive.Archive, error) {
+	key, cert, err := proxy.GenSignedCert()
+	if err != nil {
+		return nil, err
+	}
+	configBytes, err := json.Marshal(spec.Config)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "cannot marshal shell config: %s", err)
+	}
+	port, err := freeServicePort(spec, interactiveServiceJupyter, minNotebookPort, maxNotebookPort)
+	if err != nil {
+		return nil, err
+	}
+	spec.AddService(jupyterService(port))
+	addExtraEnvVars(spec, map[string]string{
+		"NOTEBOOK_PORT":   strconv.Itoa(port),
+		"NOTEBOOK_CONFIG": string(configBytes),
+	})
+	return jupyterFiles(spec.Base.AgentUserGroup, key, cert), nil
 }
