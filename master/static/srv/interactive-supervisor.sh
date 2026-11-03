@@ -78,15 +78,18 @@ passed() {
 }
 
 # Wait up to $1 seconds for the processes $2..., children of this shell, to exit. Fails if one is
-# left.
+# left. A process that was just signalled usually exits at once: the polls start at 1 ms and double
+# up to 0.1 s.
 wait_for_children() {
-    local deadline pid
+    local deadline pid interval poll_us=1000
     deadline_in deadline "$1"
     shift
     for pid; do
         while kill -0 "$pid" 2>/dev/null; do
             ! passed "$deadline" || return 1
-            sleep 0.1
+            printf -v interval 0.%06d "$poll_us"
+            sleep "$interval"
+            ((poll_us = poll_us < 50000 ? poll_us * 2 : 100000))
         done
     done
 }
