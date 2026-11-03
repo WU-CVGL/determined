@@ -22,7 +22,8 @@ import (
 )
 
 // checkIdleDetermined is the part of the determined package that check_idle.py uses: the task
-// session sends JSON with the allocation token, as the real one does, and raises on an HTTP error.
+// session sends JSON with the allocation token, as the real one does, and raises on an HTTP error;
+// it refuses a shell's report that would be retried.
 var checkIdleDetermined = map[string]string{
 	"determined/__init__.py":        "",
 	"determined/common/__init__.py": "",
@@ -38,6 +39,7 @@ class TaskSession:
     def __init__(self, master, token):
         self.master = master
         self.token = token
+        self.max_retries = None
 
     def _send(self, method, path, json, timeout):
         request = urllib.request.Request(
@@ -53,7 +55,13 @@ class TaskSession:
         with opener.open(request, timeout=timeout) as response:
             response.read()
 
+    def with_retry(self, max_retries):
+        self.max_retries = max_retries
+        return self
+
     def post(self, path, json=None, timeout=None):
+        if self.max_retries != 0:
+            raise RuntimeError("a shell's report is not retried")
         self._send("POST", path, json, timeout)
 
     def put(self, path, json=None, timeout=None):

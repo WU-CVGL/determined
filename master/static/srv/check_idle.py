@@ -67,12 +67,12 @@ def report_timing(idle_timeout: Optional[str]) -> Timing:
     """
     A shell's timing for its idle timeout T in seconds: a round of checks starts every T/4, at least
     every second and at most every 30 s; a JupyterLab request times out after T/4, at most 3 s, and
-    the report to the master after T/4, at most 10 s. A round starts at most an interval after the
-    previous report, since a report takes at most an interval, and it reports a busy or running
-    kernel after one request: two such reports are at most interval + request + report <= 3T/4
-    apart, for any T of at least 4 s. Activity found in the terminals takes a second request, so
-    at most T. At a shell's shortest timeout, 10 s, each of these is 2.5 s, so a JupyterLab that
-    answers within 2 s is reported in time.
+    the report to the master, which is not retried, after T/4, at most 10 s. A round starts at most
+    an interval after the previous report, since a report takes at most an interval, and it reports
+    a busy or running kernel after one request: two such reports are at most interval + request +
+    report <= 3T/4 apart, for any T of at least 4 s. Activity found in the terminals takes a second
+    request, so at most T. At a shell's shortest timeout, 10 s, each of these is 2.5 s, so a
+    JupyterLab that answers within 2 s is reported in time.
     """
     timing = Timing()
     if idle_timeout is None:
@@ -172,6 +172,9 @@ def main():
     master_url = api.canonicalize_master_url(os.environ["DET_MASTER"])
     cert = certs.default_load(master_url)
     sess = authentication.login_from_task(master_url, cert=cert)
+    if report_task:
+        # A retried report would come later than its timeout; the next round reports again.
+        sess = sess.with_retry(0)
     try:
         idle_type = IdleType[os.environ["NOTEBOOK_IDLE_TYPE"].upper()]
     except KeyError:
