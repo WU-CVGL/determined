@@ -32,9 +32,12 @@ import (
 // "posted <service>" unless --no-post; check_idle.py records its pid; report_service_states.py,
 // the reporter of the services' states, records its process group in REPORTER_GROUP_FILE and runs
 // as itself with REPORTER_PYTHON, posting to the stand-in master, or without it only waits for the
-// stop line.
+// stop line; "-c" runs the program with REPORTER_PYTHON, as the vscode unit's download does.
 const pythonStandIn = `
 case $1 in
+-c)
+    exec "$REPORTER_PYTHON" "$@"
+    ;;
 -m)
     [[ "$*" == "-m determined.exec.prep_container --resources --proxy --download_context_directory" ]] || exit 2
     echo prep >>"$ORDER_FILE"
@@ -857,6 +860,7 @@ exit 0
 	s.staticUnit("ssh", sshUnitWith(t, sshd))
 	require.NoError(t, os.WriteFile(filepath.Join(s.run, "ssh", "authorized_keys_unmodified"),
 		[]byte("ssh-ed25519 AAAAkey det\n"), 0o600))
+	s.env = append(s.env, "HASHED_PASSWORD="+codeServerHash)
 	sshdArgs := []string{"-f", "/run/determined/ssh/sshd_config", "-p", "2222", "-D", "-e"}
 	s.start(sshdArgs...)
 	require.Equal(t, 0, s.wait())
@@ -865,6 +869,8 @@ exit 0
 	require.NoError(t, err)
 	require.Contains(t, string(keys), `environment="HOOK_VAR=hook",`)
 	require.Contains(t, string(keys), `environment="DET_SERVICES=ssh",`)
+	// The vscode service's login stays out of the sessions.
+	require.NotContains(t, string(keys), "HASHED_PASSWORD")
 	require.True(t, strings.HasSuffix(string(keys), " ssh-ed25519 AAAAkey det\n"), string(keys))
 	args, err := os.ReadFile(s.order + ".sshd-args")
 	require.NoError(t, err)
@@ -1026,12 +1032,13 @@ exit 0
 	return s
 }
 
-// Before the init, the units only set their defaults and return: the ssh unit none, the jupyter
-// unit SHELL.
+// Before the init, the units only set their defaults and return: the ssh and vscode units none, the
+// jupyter unit SHELL.
 func TestSupervisorUnitsPreInit(t *testing.T) {
 	for unit, want := range map[string]string{
 		SSHServiceResource:     "returned \n",
 		JupyterServiceResource: "returned /",
+		VSCodeServiceResource:  "returned \n",
 	} {
 		t.Run(unit, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "unit.sh")
@@ -1180,9 +1187,9 @@ const (
 	standInAllocationToken = "allocation-token"
 )
 
-// determinedStandIn is the part of the determined package that report_service_states.py uses: the
-// task session posts JSON with the allocation token, as the real one does, and raises on an HTTP
-// error or a timeout.
+// determinedStandIn is the part of the determined package that report_service_states.py and the
+// vscode unit's download use: the task session posts JSON and gets a response, streamed or not,
+// with the allocation token, as the real one does, and raises on an HTTP error or a timeout.
 var determinedStandIn = map[string]string{
 	"determined/__init__.py":        "",
 	"determined/common/__init__.py": "",
@@ -1215,6 +1222,37 @@ class BaseSession:
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         with opener.open(request, timeout=timeout) as response:
             response.read()
+
+    def get(self, path, params=None, headers=None, timeout=None, stream=False):
+        request = urllib.request.Request(
+            self.master + path,
+            headers={"Grpc-Metadata-x-allocation-token": "Bearer " + self.token},
+        )
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        return _Response(opener.open(request))
+
+
+class _Response:
+    def __init__(self, response):
+        self._response = response
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self._response.close()
+
+    @property
+    def text(self):
+        with self._response:
+            return self._response.read().decode()
+
+    def iter_content(self, size):
+        while True:
+            chunk = self._response.read(size)
+            if not chunk:
+                return
+            yield chunk
 `,
 	"determined/common/api/authentication.py": `import os
 
@@ -1272,6 +1310,12 @@ type standInMaster struct {
 
 	mu    sync.Mutex
 	posts []servicesPost
+	// codeServer holds the files that the master serves below /det/code-server/ to the
+	// allocation's token, by their path below it; a tarball waits for codeServerGate when it is
+	// set. codeServerGets lists every path below it that was asked for, in order.
+	codeServer     map[string][]byte
+	codeServerGate chan struct{}
+	codeServerGets []string
 }
 
 func newStandInMaster(t *testing.T, file string) *standInMaster {
@@ -1285,6 +1329,10 @@ func newStandInMaster(t *testing.T, file string) *standInMaster {
 }
 
 func (m *standInMaster) serve(w http.ResponseWriter, r *http.Request) {
+	if path, ok := strings.CutPrefix(r.URL.Path, "/det/code-server/"); ok {
+		m.serveCodeServer(w, r, path)
+		return
+	}
 	var body struct {
 		Sequence int `json:"sequence"`
 		Services []struct {
