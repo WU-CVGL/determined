@@ -85,11 +85,13 @@ const (
 var checkIdleRounds = []string{"idle", "idle", "idle", "busy", "busy", "broken", "broken", "broken"}
 
 // checkIdleJupyter stands in for JupyterLab's REST API under its base URL with its token. Each
-// request for the kernels starts a round of checks, which answers as states says, then as after.
+// request for the kernels starts a round of checks, which answers as states says, then as after,
+// and answers delay late.
 type checkIdleJupyter struct {
 	baseURL string
 	states  []string
 	after   string
+	delay   time.Duration
 
 	mu     sync.Mutex
 	rounds int
@@ -112,6 +114,13 @@ func (j *checkIdleJupyter) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	state := j.state
 	j.mu.Unlock()
+	if path == checkIdleKernelsPath && j.delay > 0 {
+		select {
+		case <-time.After(j.delay):
+		case <-r.Context().Done():
+			return
+		}
+	}
 
 	switch {
 	case state == "broken":
@@ -315,5 +324,45 @@ func TestCheckIdleReportsWithinIdleTimeout(t *testing.T) {
 	require.GreaterOrEqual(t, len(arrivals), 5, "a report about every second over %s", observe)
 	for i := 1; i < len(arrivals); i++ {
 		require.LessOrEqual(t, arrivals[i].Sub(arrivals[i-1]), maxGap, "report %d", i)
+	}
+}
+
+// A JupyterLab that answers after check_idle.py's 3 s request timeout is unreadable on a shell, so
+// it is not reported, and is read as it answers on a notebook, which waits for it as before: an
+// idle notebook is reported idle, not active.
+func TestCheckIdleSlowJupyter(t *testing.T) {
+	const delay = 3500 * time.Millisecond
+	for name, tc := range map[string]struct {
+		after string
+		env   []string
+		want  []checkIdleReport
+	}{
+		"shell": {
+			after: "busy",
+			env:   []string{"DET_ACTIVITY_REPORT=task", "DET_IDLE_TIMEOUT_SECONDS=30"},
+		},
+		"notebook": {
+			after: "idle",
+			want: []checkIdleReport{{
+				Method: http.MethodPut,
+				Path:   "/api/v1/notebooks/task-1/report_idle",
+				Body:   map[string]any{"idle": true},
+			}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			run := startCheckIdle(t, &checkIdleJupyter{after: tc.after, delay: delay},
+				checkIdleReportInterval, tc.env...)
+			// The second round starts once the first has ended and its report, if any, is sent.
+			deadline := time.Now().Add(30 * time.Second)
+			for run.jupyter.roundsStarted() < 2 {
+				require.True(t, time.Now().Before(deadline), "check_idle.py stopped checking: %s",
+					run.stderr.String())
+				time.Sleep(10 * time.Millisecond)
+			}
+			run.master.mu.Lock()
+			defer run.master.mu.Unlock()
+			require.Equal(t, tc.want, run.master.reports)
+		})
 	}
 }

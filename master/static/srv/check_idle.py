@@ -20,6 +20,7 @@ class IdleType(enum.Enum):
 REPORT_IDLE_INTERVAL = 30
 # A shell's task reports at a fraction of its idle timeout, but not more often than this.
 MIN_REPORT_INTERVAL = 1
+# A shell's task gives up on a JupyterLab request after this long; a notebook waits for it.
 JUPYTER_TIMEOUT_SECONDS = 3
 MASTER_TIMEOUT_SECONDS = 10
 
@@ -65,8 +66,10 @@ def report_interval(idle_timeout: Optional[str]) -> float:
     return min(REPORT_IDLE_INTERVAL, max(MIN_REPORT_INTERVAL, seconds / 3))
 
 
-def is_idle(request_address: str, token: str, mode: IdleType) -> Optional[bool]:
-    """Whether JupyterLab is idle, or None when its state cannot be read."""
+def is_idle(
+    request_address: str, token: str, mode: IdleType, timeout: Optional[float]
+) -> Optional[bool]:
+    """Whether JupyterLab is idle, or None when its state cannot be read within timeout."""
     auth_header = {"Authorization": f"token {token}"}
 
     def get(path: str):
@@ -74,7 +77,7 @@ def is_idle(request_address: str, token: str, mode: IdleType) -> Optional[bool]:
             f"{request_address}{path}",
             headers=auth_header,
             verify=False,
-            timeout=JUPYTER_TIMEOUT_SECONDS,
+            timeout=timeout,
         ).json()
 
     try:
@@ -112,8 +115,10 @@ def main():
     # A shell reports to its task's activity record, a notebook to the notebook API.
     report_task = os.environ.get("DET_ACTIVITY_REPORT") == "task"
     interval = REPORT_IDLE_INTERVAL
+    jupyter_timeout = None
     if report_task:
         interval = report_interval(os.environ.get("DET_IDLE_TIMEOUT_SECONDS"))
+        jupyter_timeout = JUPYTER_TIMEOUT_SECONDS
     master_url = api.canonicalize_master_url(os.environ["DET_MASTER"])
     cert = certs.default_load(master_url)
     sess = authentication.login_from_task(master_url, cert=cert)
@@ -132,7 +137,7 @@ def main():
         # The interval counts from the start of the round, so that its requests take part of it.
         start = time.monotonic()
         try:
-            idle = is_idle(notebook_server, token, idle_type)
+            idle = is_idle(notebook_server, token, idle_type, jupyter_timeout)
             if report_task:
                 # Only a busy JupyterLab is reported: an unreadable one is not activity.
                 if idle is False:
