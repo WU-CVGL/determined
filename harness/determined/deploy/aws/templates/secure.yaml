@@ -216,11 +216,6 @@ Parameters:
     Description: Prefix for output CloudWatch log group (the full log group will be "/<prefix>/<stack>")
     Default: determined
 
-  NotebookTimeout:
-    Type: Number
-    Description: Specifies the duration in seconds before idle notebook instances are automatically terminated.
-    Default: 0
-
   InitialUserPassword:
     Type: String
     Description: Default password for the built-in 'determined' and 'admin' user.
@@ -314,10 +309,6 @@ Parameters:
           cpu: {{ .cpu_env_image }}
           gpu: {{ .gpu_env_image }}
         {{- end }}
-      {{ end }}
-
-      {{ if ne .notebook_timeout 0.0 }}
-      notebook_timeout: {{ .notebook_timeout }}
       {{ end }}
   ### END INJECT CODE
 
@@ -914,7 +905,6 @@ Resources:
             scheme: $scheme
             cpu_env_image: ${CpuEnvImage}
             gpu_env_image: ${GpuEnvImage}
-            notebook_timeout: ${NotebookTimeout}
             
             security:
               initial_user_password: "${InitialUserPassword}"

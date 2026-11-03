@@ -42,7 +42,6 @@ COMMON_TEMPLATE_PARAMETER_KEYS = [
     constants.cloudformation.AGENT_IMAGE_NAME,
     constants.cloudformation.DOCKER_USER,
     constants.cloudformation.DOCKER_PASS,
-    constants.cloudformation.NOTEBOOK_TIMEOUT,
     constants.cloudformation.GENAI_VERSION,
     constants.cloudformation.GENAI_SHARED_FS_MOUNT_PATH,
     constants.cloudformation.INITIAL_USER_PASSWORD,

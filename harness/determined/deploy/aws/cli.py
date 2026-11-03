@@ -276,7 +276,6 @@ def deploy_aws(command: str, args: argparse.Namespace) -> None:
         constants.cloudformation.AGENT_IMAGE_NAME: agent_image_name,
         constants.cloudformation.DOCKER_USER: args.docker_user,
         constants.cloudformation.DOCKER_PASS: args.docker_pass,
-        constants.cloudformation.NOTEBOOK_TIMEOUT: args.notebook_timeout,
         constants.cloudformation.GENAI_VERSION: args.genai_version,
         constants.cloudformation.GENAI_SHARED_FS_MOUNT_PATH: args.genai_shared_fs_mount_path,
     }
@@ -687,12 +686,6 @@ args_description = cli.Cmd(
                     "--docker-pass",
                     type=str,
                     help="Docker password used to pull the Determined master and agent images",
-                ),
-                cli.Arg(
-                    "--notebook-timeout",
-                    type=int,
-                    help="Specifies the duration in seconds before idle notebook instances "
-                    "are automatically terminated",
                 ),
                 cli.Arg(
                     "--genai-version",
