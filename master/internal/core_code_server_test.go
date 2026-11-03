@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -453,6 +454,39 @@ func TestCodeServerUpstreamErrorOmitsRedirectURL(t *testing.T) {
 		}
 	}
 	require.True(t, logged, "the download error is logged")
+	require.Empty(t, cst.files(t))
+}
+
+// TestCodeServerDownloadWriteError checks that a failure to write the download, such as a full
+// disk, is reported with its text as an error of the master, not of the upstream.
+func TestCodeServerDownloadWriteError(t *testing.T) {
+	if _, err := os.Stat("/dev/full"); err != nil {
+		t.Skip("no /dev/full")
+	}
+	cst := newCodeServerTest(t, nil, nil)
+	hook := captureLog(t)
+	tmp := filepath.Join(cst.dir, testCodeServerAMD64+".tmp")
+
+	require.NoError(t, os.Symlink("/dev/full", tmp))
+	err := cst.artifacts.prepare(testCodeServerVersion, "amd64")
+	require.ErrorIs(t, err, syscall.ENOSPC)
+	require.NotErrorIs(t, err, errCodeServerUpstream)
+	require.Contains(t, err.Error(), tmp)
+	require.Empty(t, cst.files(t))
+
+	require.NoError(t, os.Symlink("/dev/full", tmp))
+	rec := cst.get("/det/code-server/4.144.0/" + testCodeServerAMD64)
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	logged := false
+	for _, e := range hook.AllEntries() {
+		line, lineErr := e.String()
+		require.NoError(t, lineErr)
+		if strings.Contains(line, "serving code-server 4.144.0 for amd64") {
+			require.Contains(t, line, "no space left on device")
+			logged = true
+		}
+	}
+	require.True(t, logged, "the write error is logged")
 	require.Empty(t, cst.files(t))
 }
 

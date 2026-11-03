@@ -374,8 +374,13 @@ func (a *codeServerArtifacts) download(arch, path string) (err error) {
 		}
 	}()
 	h := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(f, h), resp.Body); err != nil {
+	fw := &errRecordingWriter{w: f}
+	if _, err := io.Copy(io.MultiWriter(fw, h), resp.Body); err != nil {
 		_ = f.Close()
+		// A write error, such as a full disk, is the master's own, not the upstream's.
+		if fw.err != nil {
+			return fw.err
+		}
 		return codeServerUpstreamError(rawURL, err)
 	}
 	if err := syncAndClose(f); err != nil {
@@ -393,6 +398,20 @@ func (a *codeServerArtifacts) download(arch, path string) (err error) {
 		a.remember(path, info, sum)
 	}
 	return writeChecksumFile(path, sum)
+}
+
+// errRecordingWriter writes to w and records the error of a write that fails.
+type errRecordingWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (e *errRecordingWriter) Write(p []byte) (int, error) {
+	n, err := e.w.Write(p)
+	if err != nil {
+		e.err = err
+	}
+	return n, err
 }
 
 // codeServerUpstreamError describes an error of the HTTP client's request to rawURL by the
