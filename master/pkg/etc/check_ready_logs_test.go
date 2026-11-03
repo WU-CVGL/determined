@@ -116,7 +116,8 @@ func newReadyCheck(t *testing.T, outcomes []string, input string, args ...string
 	script := staticScript(t, TaskCheckReadyLogsResource)
 	require.Contains(t, script, "\nBACKOFF_SECONDS = 5\n")
 	script = strings.Replace(script, "\nBACKOFF_SECONDS = 5\n", "\nBACKOFF_SECONDS = 0.05\n", 1)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, TaskCheckReadyLogsResource), []byte(script), 0o600))
+	scriptPath := filepath.Join(dir, TaskCheckReadyLogsResource)
+	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o600))
 	pythonPath := filepath.Join(dir, "pylib")
 	writeDeterminedStandIn(t, pythonPath)
 	for name, body := range readyCheckStandIn {

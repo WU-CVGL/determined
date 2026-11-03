@@ -32,11 +32,11 @@
 # - Processes that leave the group on purpose (setsid) belong to the container's lifetime.
 # - Each service's state goes to the master: STARTING when it starts, READY when its readiness
 #   check matches, EXITED when it has stopped, or UNAVAILABLE when it exited 127 before it was
-#   READY, as a unit does when its program is missing. One reporter, report_service_states.py, a child of the supervisor
-#   in its own process group, keeps the snapshot of every service's state and posts it whenever it
-#   changes and periodically, so that a master that restarted learns the states again. A post
-#   never holds up a service. The reporter starts before the services and stops with the
-#   supervisor.
+#   READY, as a unit does when its program is missing. One reporter, report_service_states.py, a
+#   child of the supervisor in its own process group, keeps the snapshot of every service's state
+#   and posts it whenever it changes and periodically, so that a master that restarted learns the
+#   states again. A post never holds up a service. The reporter starts before the services and
+#   stops with the supervisor.
 #
 # The image must have bash 5 or later and /proc; without them the supervisor stops before the init.
 
