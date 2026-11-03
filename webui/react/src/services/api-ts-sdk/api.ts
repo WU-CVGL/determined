@@ -9260,6 +9260,56 @@ export interface V1PreviewHPSearchResponse {
     summary?: V1SearchSummary;
 }
 /**
+ * Request to preview the config of a shell.
+ * @export
+ * @interface V1PreviewShellRequest
+ */
+export interface V1PreviewShellRequest {
+    /**
+     * Shell config (JSON).
+     * @type {any}
+     * @memberof V1PreviewShellRequest
+     */
+    config?: any;
+    /**
+     * Template name.
+     * @type {string}
+     * @memberof V1PreviewShellRequest
+     */
+    templateName?: string;
+    /**
+     * The files to run with the command.
+     * @type {Array<V1File>}
+     * @memberof V1PreviewShellRequest
+     */
+    files?: Array<V1File>;
+    /**
+     * Workspace ID. Defaults to 'Uncategorized' workspace if not specified.
+     * @type {number}
+     * @memberof V1PreviewShellRequest
+     */
+    workspaceId?: number;
+}
+/**
+ * Response to PreviewShellRequest.
+ * @export
+ * @interface V1PreviewShellResponse
+ */
+export interface V1PreviewShellResponse {
+    /**
+     * The config that a shell launched with the request runs, but for what the launch chooses: the entrypoint and, when the config sets none, the description.
+     * @type {any}
+     * @memberof V1PreviewShellResponse
+     */
+    config: any;
+    /**
+     * List of any related warnings.
+     * @type {Array<V1LaunchWarning>}
+     * @memberof V1PreviewShellResponse
+     */
+    warnings?: Array<V1LaunchWarning>;
+}
+/**
  * Project is a named collection of experiments.
  * @export
  * @interface V1Project
@@ -31763,6 +31813,44 @@ export const ShellsApiFetchParamCreator = function (configuration?: Configuratio
         },
         /**
          * 
+         * @summary Preview the config of a shell: the merge of the master's defaults, the template and the request, checked as a launch checks it, with the launch's warnings, without launching the shell. The config differs from the one a launch of the same request returns in what the launch chooses: its entrypoint and, when the config sets none, its description; the services' ports are not part of the config. idle_timeout appears only when the master's defaults, the template or the request set it.
+         * @param {V1PreviewShellRequest} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        previewShell(body: V1PreviewShellRequest, options: any = {}): FetchArgs {
+            // verify required parameter 'body' is not null or undefined
+            if (body === null || body === undefined) {
+                throw new RequiredError('body','Required parameter body was null or undefined when calling previewShell.');
+            }
+            const localVarPath = `/api/v1/shells/preview`;
+            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
+            const localVarRequestOptions = { method: 'POST', ...options };
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+            
+            // authentication BearerToken required
+            if (configuration && configuration.apiKey) {
+                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
+                    ? configuration.apiKey("Authorization")
+                    : configuration.apiKey;
+                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
+            }
+            
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            
+            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
+            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
+            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
+            localVarRequestOptions.body = JSON.stringify(body)
+            
+            return {
+                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @summary Set the priority of the requested shell.
          * @param {string} shellId The id of the shell.
          * @param {V1SetShellPriorityRequest} body
@@ -31898,6 +31986,25 @@ export const ShellsApiFp = function (configuration?: Configuration) {
         },
         /**
          * 
+         * @summary Preview the config of a shell: the merge of the master's defaults, the template and the request, checked as a launch checks it, with the launch's warnings, without launching the shell. The config differs from the one a launch of the same request returns in what the launch chooses: its entrypoint and, when the config sets none, its description; the services' ports are not part of the config. idle_timeout appears only when the master's defaults, the template or the request set it.
+         * @param {V1PreviewShellRequest} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        previewShell(body: V1PreviewShellRequest, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1PreviewShellResponse> {
+            const localVarFetchArgs = ShellsApiFetchParamCreator(configuration).previewShell(body, options);
+            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
+                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                        return response.json();
+                    } else {
+                        throw response;
+                    }
+                });
+            };
+        },
+        /**
+         * 
          * @summary Set the priority of the requested shell.
          * @param {string} shellId The id of the shell.
          * @param {V1SetShellPriorityRequest} body
@@ -31973,6 +32080,16 @@ export const ShellsApiFactory = function (configuration?: Configuration, fetch?:
         },
         /**
          * 
+         * @summary Preview the config of a shell: the merge of the master's defaults, the template and the request, checked as a launch checks it, with the launch's warnings, without launching the shell. The config differs from the one a launch of the same request returns in what the launch chooses: its entrypoint and, when the config sets none, its description; the services' ports are not part of the config. idle_timeout appears only when the master's defaults, the template or the request set it.
+         * @param {V1PreviewShellRequest} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        previewShell(body: V1PreviewShellRequest, options?: any) {
+            return ShellsApiFp(configuration).previewShell(body, options)(fetch, basePath);
+        },
+        /**
+         * 
          * @summary Set the priority of the requested shell.
          * @param {string} shellId The id of the shell.
          * @param {V1SetShellPriorityRequest} body
@@ -32044,6 +32161,18 @@ export class ShellsApi extends BaseAPI {
      */
     public launchShell(body: V1LaunchShellRequest, options?: any) {
         return ShellsApiFp(this.configuration).launchShell(body, options)(this.fetch, this.basePath)
+    }
+    
+    /**
+     * 
+     * @summary Preview the config of a shell: the merge of the master's defaults, the template and the request, checked as a launch checks it, with the launch's warnings, without launching the shell. The config differs from the one a launch of the same request returns in what the launch chooses: its entrypoint and, when the config sets none, its description; the services' ports are not part of the config. idle_timeout appears only when the master's defaults, the template or the request set it.
+     * @param {V1PreviewShellRequest} body
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof ShellsApi
+     */
+    public previewShell(body: V1PreviewShellRequest, options?: any) {
+        return ShellsApiFp(this.configuration).previewShell(body, options)(this.fetch, this.basePath)
     }
     
     /**

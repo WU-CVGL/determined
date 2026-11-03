@@ -240,7 +240,7 @@ func (a *apiServer) LaunchTensorboard(
 		return nil, status.Errorf(codes.Internal, "failed to get the user: %s", err)
 	}
 
-	launchReq, launchWarnings, err := a.getCommandLaunchParams(ctx, &protoCommandParams{
+	launchReq, launchWarnings, err := a.prepareCommandLaunch(ctx, &protoCommandParams{
 		TemplateName: req.TemplateName,
 		WorkspaceID:  req.WorkspaceId,
 		Config:       req.Config,
@@ -256,6 +256,9 @@ func (a *apiServer) LaunchTensorboard(
 	launchReq.Spec.Metadata.TrialIDs = req.TrialIds
 
 	if err = a.isNTSCPermittedToLaunch(ctx, launchReq.Spec, user); err != nil {
+		return nil, err
+	}
+	if err = startTaskSession(ctx, user, launchReq.Spec); err != nil {
 		return nil, err
 	}
 

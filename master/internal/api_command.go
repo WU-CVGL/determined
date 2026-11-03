@@ -64,7 +64,12 @@ type protoCommandParams struct {
 	NotebookIdleType string
 }
 
-func (a *apiServer) getCommandLaunchParams(ctx context.Context, req *protoCommandParams,
+// prepareCommandLaunch prepares the launch of an NTSC task from a request, without side effects:
+// the merged config of the defaults, the template and the request, the resolved pool, the base task
+// spec and the context directory, checked against pool access, the GPU topology and the config
+// policies. It starts no task session; the launch does, once the launch is authorized (see
+// startTaskSession).
+func (a *apiServer) prepareCommandLaunch(ctx context.Context, req *protoCommandParams,
 	aUser *model.User) (
 	*command.CreateGeneric, []pkgCommand.LaunchWarning, error,
 ) {
@@ -186,12 +191,6 @@ func (a *apiServer) getCommandLaunchParams(ctx context.Context, req *protoComman
 		return nil, nil, status.Errorf(codes.InvalidArgument, "failed constraint check: %v", err)
 	}
 
-	token, err := getTaskSessionToken(ctx, userModel)
-	if err != nil {
-		return nil, nil, err
-	}
-	taskSpec.UserSessionToken = token
-
 	cmdSpec.Base = taskSpec
 	cmdSpec.Config = config
 
@@ -199,6 +198,18 @@ func (a *apiServer) getCommandLaunchParams(ctx context.Context, req *protoComman
 		Spec:             &cmdSpec,
 		ContextDirectory: contextDirectory,
 	}, launchWarnings, nil
+}
+
+// startTaskSession starts the session of the request's user that a launched task acts with, and
+// adds its token to the task's spec. A launch calls it once the launch is authorized, so that a
+// refused launch or a preview starts none.
+func startTaskSession(ctx context.Context, user *model.User, spec *tasks.GenericCommandSpec) error {
+	token, err := getTaskSessionToken(ctx, user)
+	if err != nil {
+		return err
+	}
+	spec.Base.UserSessionToken = token
+	return nil
 }
 
 func (a *apiServer) GetCommands(
@@ -384,7 +395,7 @@ func (a *apiServer) LaunchCommand(
 		return nil, status.Errorf(codes.Internal, "failed to get the user: %s", err)
 	}
 
-	launchReq, launchWarnings, err := a.getCommandLaunchParams(ctx, &protoCommandParams{
+	launchReq, launchWarnings, err := a.prepareCommandLaunch(ctx, &protoCommandParams{
 		TemplateName: req.TemplateName,
 		WorkspaceID:  req.WorkspaceId,
 		Config:       req.Config,
@@ -396,6 +407,9 @@ func (a *apiServer) LaunchCommand(
 	}
 
 	if err = a.isNTSCPermittedToLaunch(ctx, launchReq.Spec, user); err != nil {
+		return nil, err
+	}
+	if err = startTaskSession(ctx, user, launchReq.Spec); err != nil {
 		return nil, err
 	}
 

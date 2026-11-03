@@ -274,7 +274,7 @@ func (a *apiServer) LaunchNotebook(
 		return nil, status.Errorf(codes.Internal, "failed to get the user: %s", err)
 	}
 
-	launchReq, launchWarnings, err := a.getCommandLaunchParams(ctx, &protoCommandParams{
+	launchReq, launchWarnings, err := a.prepareCommandLaunch(ctx, &protoCommandParams{
 		TemplateName: req.TemplateName,
 		WorkspaceID:  req.WorkspaceId,
 		Config:       req.Config,
@@ -287,6 +287,11 @@ func (a *apiServer) LaunchNotebook(
 
 	if err = a.isNTSCPermittedToLaunch(ctx, launchReq.Spec, user); err != nil {
 		return nil, err
+	}
+	if !req.Preview {
+		if err = startTaskSession(ctx, user, launchReq.Spec); err != nil {
+			return nil, err
+		}
 	}
 
 	notebookKey, notebookCert, err := proxy.GenSignedCert()

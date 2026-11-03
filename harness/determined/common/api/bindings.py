@@ -12616,6 +12616,88 @@ class v1PreviewHPSearchResponse(Printable):
             out["summary"] = None if self.summary is None else self.summary.to_json(omit_unset)
         return out
 
+class v1PreviewShellRequest(Printable):
+    """Request to preview the config of a shell."""
+    config: "typing.Optional[typing.Dict[str, typing.Any]]" = None
+    files: "typing.Optional[typing.Sequence[v1File]]" = None
+    templateName: "typing.Optional[str]" = None
+    workspaceId: "typing.Optional[int]" = None
+
+    def __init__(
+        self,
+        *,
+        config: "typing.Union[typing.Dict[str, typing.Any], None, Unset]" = _unset,
+        files: "typing.Union[typing.Sequence[v1File], None, Unset]" = _unset,
+        templateName: "typing.Union[str, None, Unset]" = _unset,
+        workspaceId: "typing.Union[int, None, Unset]" = _unset,
+    ):
+        if not isinstance(config, Unset):
+            self.config = config
+        if not isinstance(files, Unset):
+            self.files = files
+        if not isinstance(templateName, Unset):
+            self.templateName = templateName
+        if not isinstance(workspaceId, Unset):
+            self.workspaceId = workspaceId
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1PreviewShellRequest":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+        }
+        if "config" in obj:
+            kwargs["config"] = obj["config"]
+        if "files" in obj:
+            kwargs["files"] = [v1File.from_json(x) for x in obj["files"]] if obj["files"] is not None else None
+        if "templateName" in obj:
+            kwargs["templateName"] = obj["templateName"]
+        if "workspaceId" in obj:
+            kwargs["workspaceId"] = obj["workspaceId"]
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+        }
+        if not omit_unset or "config" in vars(self):
+            out["config"] = self.config
+        if not omit_unset or "files" in vars(self):
+            out["files"] = None if self.files is None else [x.to_json(omit_unset) for x in self.files]
+        if not omit_unset or "templateName" in vars(self):
+            out["templateName"] = self.templateName
+        if not omit_unset or "workspaceId" in vars(self):
+            out["workspaceId"] = self.workspaceId
+        return out
+
+class v1PreviewShellResponse(Printable):
+    """Response to PreviewShellRequest."""
+    warnings: "typing.Optional[typing.Sequence[v1LaunchWarning]]" = None
+
+    def __init__(
+        self,
+        *,
+        config: "typing.Dict[str, typing.Any]",
+        warnings: "typing.Union[typing.Sequence[v1LaunchWarning], None, Unset]" = _unset,
+    ):
+        self.config = config
+        if not isinstance(warnings, Unset):
+            self.warnings = warnings
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1PreviewShellResponse":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "config": obj["config"],
+        }
+        if "warnings" in obj:
+            kwargs["warnings"] = [v1LaunchWarning(x) for x in obj["warnings"]] if obj["warnings"] is not None else None
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "config": self.config,
+        }
+        if not omit_unset or "warnings" in vars(self):
+            out["warnings"] = None if self.warnings is None else [x.value for x in self.warnings]
+        return out
+
 class v1Project(Printable):
     """Project is a named collection of experiments."""
     description: "typing.Optional[str]" = None
@@ -24701,6 +24783,34 @@ def post_PreviewHPSearch(
     if _resp.status_code == 200:
         return v1PreviewHPSearchResponse.from_json(_resp.json())
     raise APIHttpError("post_PreviewHPSearch", _resp)
+
+def post_PreviewShell(
+    session: "api.BaseSession",
+    *,
+    body: "v1PreviewShellRequest",
+) -> "v1PreviewShellResponse":
+    """Preview the config of a shell: the merge of the master's defaults, the
+    template and the request, checked as a launch checks it, with the launch's
+    warnings, without launching the shell. The config differs from the one a
+    launch of the same request returns in what the launch chooses: its
+    entrypoint and, when the config sets none, its description; the services'
+    ports are not part of the config. idle_timeout appears only when the
+    master's defaults, the template or the request set it.
+    """
+    _params = None
+    _resp = session._do_request(
+        method="POST",
+        path="/api/v1/shells/preview",
+        params=_params,
+        json=body.to_json(True),
+        data=None,
+        headers=None,
+        timeout=None,
+        stream=False,
+    )
+    if _resp.status_code == 200:
+        return v1PreviewShellResponse.from_json(_resp.json())
+    raise APIHttpError("post_PreviewShell", _resp)
 
 def put_PutExperiment(
     session: "api.BaseSession",

@@ -1543,6 +1543,22 @@ service Determined {
       tags: "Shells"
     };
   }
+  // Preview the config of a shell: the merge of the master's defaults, the
+  // template and the request, checked as a launch checks it, with the launch's
+  // warnings, without launching the shell. The config differs from the one a
+  // launch of the same request returns in what the launch chooses: its
+  // entrypoint and, when the config sets none, its description; the services'
+  // ports are not part of the config. idle_timeout appears only when the
+  // master's defaults, the template or the request set it.
+  rpc PreviewShell(PreviewShellRequest) returns (PreviewShellResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/shells/preview"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
+      tags: "Shells"
+    };
+  }
 
   // Get a list of commands.
   rpc GetCommands(GetCommandsRequest) returns (GetCommandsResponse) {
