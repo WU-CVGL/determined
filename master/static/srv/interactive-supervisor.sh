@@ -23,6 +23,10 @@
 #   the service's exit status, the supervisor stops what is left of the group as a stop does and
 #   logs the exit once the group is empty. The subshell only stops its own helpers, since it
 #   cannot kill its own group: its background jobs get SIGTERM, then SIGKILL after the grace.
+# - A log helper that is held up from outside the group is killed with its descendants, the deepest
+#   first, as /proc/<pid>/task/*/children lists them (CONFIG_PROC_CHILDREN). This ordered reaping
+#   is best-effort; the supervisor's scan of the group in /proc/*/stat is the backstop that finds
+#   and stops what is left of the group on any kernel.
 # - Processes that leave the group on purpose (setsid) belong to the container's lifetime.
 
 source /run/determined/task-setup.sh
@@ -62,8 +66,8 @@ source /run/determined/interactive-init.sh
 set +e
 
 # The waits poll, and a poll takes time of its own: they wait until a deadline rather than for a
-# number of polls. deadline_in sets the variable $1 to the time $2 seconds from now, in microseconds,
-# without the decimal point of EPOCHREALTIME, which depends on the locale.
+# number of polls. deadline_in sets the variable $1 to the time $2 seconds from now, in
+# microseconds, without the decimal point of EPOCHREALTIME, which depends on the locale.
 deadline_in() {
     printf -v "$1" %d $((${EPOCHREALTIME//[!0-9]/} + $2 * 1000000))
 }
@@ -88,7 +92,9 @@ wait_for_children() {
 }
 
 # Kill the descendants of the process $1, the deepest first, so that each parent reaps its children
-# before it is killed itself.
+# before it is killed itself. Best-effort: the children files need CONFIG_PROC_CHILDREN, and a
+# child may start or exit between the reads. The supervisor's scan of the service's process group
+# finds and stops the members left in it on any kernel.
 kill_descendants() {
     local tasks child deadline
     local -a ids children=()
