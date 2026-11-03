@@ -179,10 +179,11 @@ func TestGetTaskServicesWithoutRecords(t *testing.T) {
 }
 
 // The task's container reports the snapshot of its services' states with its allocation token,
-// and the listing shows it; other users and other tasks' containers are refused, as are snapshots
-// that name an unknown service, miss one, carry the unspecified state. A snapshot with a lower
-// sequence than the last accepted one changes nothing. When the task ends, every service is
-// EXITED, also once the command service no longer has the task.
+// and the listing shows it. As for AllocationReady, the task's owner, the owner's other tasks'
+// containers and admins may report it too; other users and their tasks' containers are refused,
+// as are snapshots that name an unknown service, miss one, carry the unspecified state. A
+// snapshot with a lower sequence than the last accepted one changes nothing. When the task ends,
+// every service is EXITED, also once the command service no longer has the task.
 func TestReportTaskServices(t *testing.T) {
 	const (
 		ssh     = model.ServiceSSH
@@ -194,6 +195,14 @@ func TestReportTaskServices(t *testing.T) {
 	other, _, otherTaskID := launchOwnedCommand(t, s.api)
 	otherAllocationID := model.AllocationID(otherTaskID + ".1")
 	ownSession := allocationSessionCtx(t, allocationID, owner)
+	// Another task of the same owner.
+	sameOwnerReq := mockGenericReq(t, s.api.m.db)
+	sameOwnerReq.Spec.Base.Owner = &model.User{ID: owner.ID}
+	sameOwnerCmd, err := command.DefaultCmdService.LaunchGenericCommand(
+		model.TaskTypeCommand, model.JobTypeCommand, sameOwnerReq)
+	require.NoError(t, err)
+	sameOwnerSession := allocationSessionCtx(
+		t, model.AllocationID(sameOwnerCmd.ToV1Command().Id+".1"), owner)
 
 	report := func(
 		ctx context.Context, sequence int32, states map[string]taskv1.TaskService_State,
@@ -216,10 +225,10 @@ func TestReportTaskServices(t *testing.T) {
 	exited := all(taskv1.TaskService_STATE_EXITED, taskv1.TaskService_STATE_EXITED)
 	require.Equal(t, unspecified, serviceStatesOf(s.services(adminCtx, t, taskID)))
 
-	// Refused without the allocation's own token, its owner or an admin.
+	// Refused for another user and that user's task.
 	for name, ctx := range map[string]context.Context{
-		"user":       ntscUserCtx(t, other),
-		"other task": allocationSessionCtx(t, otherAllocationID, other),
+		"user":               ntscUserCtx(t, other),
+		"other owner's task": allocationSessionCtx(t, otherAllocationID, other),
 	} {
 		require.Equal(t, codes.PermissionDenied, status.Code(report(ctx, 1, ready)), name)
 	}
@@ -242,23 +251,38 @@ func TestReportTaskServices(t *testing.T) {
 	// The container's snapshots; a re-post of the current one is accepted, an older one is not.
 	require.NoError(t, report(ownSession, 1, starting))
 	require.Equal(t, starting, serviceStatesOf(s.services(adminCtx, t, taskID)))
-	require.NoError(t, report(ownSession, 3, ready))
-	require.NoError(t, report(ownSession, 3, ready))
-	require.NoError(t, report(ownSession, 2, starting))
+	// The owner, the owner's other task and an admin pass the same gate.
+	sshReady := all(taskv1.TaskService_STATE_READY, taskv1.TaskService_STATE_STARTING)
+	reporters := map[string]context.Context{
+		"owner":              ntscUserCtx(t, owner),
+		"owner's other task": sameOwnerSession,
+		"admin":              adminCtx,
+	}
+	for i, name := range []string{"owner", "owner's other task", "admin"} {
+		states := sshReady
+		if i%2 == 1 {
+			states = starting
+		}
+		require.NoError(t, report(reporters[name], int32(2+i), states), name)
+		require.Equal(t, states, serviceStatesOf(s.services(adminCtx, t, taskID)), name)
+	}
+	require.NoError(t, report(ownSession, 6, ready))
+	require.NoError(t, report(ownSession, 6, ready))
+	require.NoError(t, report(ownSession, 5, starting))
 	require.Equal(t, ready, serviceStatesOf(s.services(ntscUserCtx(t, owner), t, taskID)))
 	require.Equal(t, ready, serviceStatesOf(s.services(ntscUserCtx(t, other), t, taskID)))
 	// Another task's services are its own.
 	require.Empty(t, s.services(adminCtx, t, otherTaskID).Services)
 
 	// The end of the task.
-	_, err := command.DefaultCmdService.KillNTSC(taskID, model.TaskTypeShell)
+	_, err = command.DefaultCmdService.KillNTSC(taskID, model.TaskTypeShell)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		return serviceStatesOf(s.services(adminCtx, t, taskID))[ssh] ==
 			taskv1.TaskService_STATE_EXITED
 	}, 10*time.Second, 50*time.Millisecond)
 	require.Equal(t, exited, serviceStatesOf(s.services(adminCtx, t, taskID)))
-	err = report(ownSession, 4, all(taskv1.TaskService_STATE_READY, taskv1.TaskService_STATE_READY))
+	err = report(ownSession, 7, all(taskv1.TaskService_STATE_READY, taskv1.TaskService_STATE_READY))
 	require.NotContains(t, []codes.Code{codes.PermissionDenied, codes.InvalidArgument},
 		status.Code(err))
 	require.Equal(t, exited, serviceStatesOf(s.services(adminCtx, t, taskID)))
