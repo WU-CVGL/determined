@@ -27,11 +27,12 @@ import (
 )
 
 // pythonStandIn stands in for DET_PYTHON_EXECUTABLE: prep_container records itself and exits with
-// PREP_EXIT; check_ready_logs.py reads its input like the real one and, on the first match, records
-// "posted <service>" unless --no-post, logs "[<service>] ready" and writes "<service> READY" to the
-// --report-to FIFO; check_idle.py records its pid; report_service_states.py, the reporter of the
-// services' states, records its process group in REPORTER_GROUP_FILE and runs as itself with
-// REPORTER_PYTHON, posting to the stand-in master, or without it only waits for the stop line.
+// PREP_EXIT; check_ready_logs.py reads its input like the real one and, on the first match, writes
+// "<service> READY" to the --report-to FIFO, logs "[<service>] ready" and records
+// "posted <service>" unless --no-post; check_idle.py records its pid; report_service_states.py,
+// the reporter of the services' states, records its process group in REPORTER_GROUP_FILE and runs
+// as itself with REPORTER_PYTHON, posting to the stand-in master, or without it only waits for the
+// stop line.
 const pythonStandIn = `
 case $1 in
 -m)
@@ -54,14 +55,14 @@ case $1 in
     printf '%s post=%s\n' "$service" "$post" >>"$READY_ARGS_FILE"
     while IFS= read -r line; do
         if [[ $line =~ ^($regex) ]]; then
-            if [[ -n $post ]]; then
-                echo "posted $service" >>"$ORDER_FILE"
-            fi
             if [[ -n $service ]]; then
-                printf '[%s] ready\n' "$service" >&2
                 if [[ -n $report ]]; then
                     printf '%s READY\n' "$service" >"$report"
                 fi
+                printf '[%s] ready\n' "$service" >&2
+            fi
+            if [[ -n $post ]]; then
+                echo "posted $service" >>"$ORDER_FILE"
             fi
             exit 0
         fi

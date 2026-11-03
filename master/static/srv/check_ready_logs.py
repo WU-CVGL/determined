@@ -10,12 +10,21 @@ import sys
 import time
 from typing import Optional, Pattern
 
-from requests.exceptions import RequestException
-
 from determined.common import api
-from determined.common.api import authentication, certs
+from determined.common.api import authentication, certs, errors
 
 BACKOFF_SECONDS = 5
+TIMEOUT_SECONDS = 10
+
+
+def retryable(e: Exception) -> bool:
+    # The session raises MasterNotFoundException for a connection failure, a plain
+    # BadRequestException for any other failed request, such as a read timeout, and APIException
+    # with the status for an HTTP error. The other classes it raises, for a 401, 403 or 404, are
+    # answers that a retry does not change.
+    if isinstance(e, errors.APIException):
+        return e.status_code >= 500
+    return isinstance(e, errors.MasterNotFoundException) or type(e) is errors.BadRequestException
 
 
 def post_ready(sess: api.Session, allocation_id: str, state: str):
@@ -24,11 +33,11 @@ def post_ready(sess: api.Session, allocation_id: str, state: str):
     # them to kill us.
     while True:
         try:
-            sess.post(f"/api/v1/allocations/{allocation_id}/{state}")
+            sess.post(f"/api/v1/allocations/{allocation_id}/{state}", timeout=TIMEOUT_SECONDS)
             return
-        except RequestException as e:
-            if e.response is not None and e.response.status_code < 500:
-                raise e
+        except Exception as e:
+            if not retryable(e):
+                raise
             time.sleep(BACKOFF_SECONDS)
 
 
@@ -65,12 +74,13 @@ def main(
         allocation_id = str(os.environ["DET_ALLOCATION_ID"])
     for line in sys.stdin:
         if ready.match(line):
-            if sess is not None:
-                post_ready(sess, allocation_id, "ready")
+            # The service's state does not wait for the master.
             if service:
-                print(f"[{service}] ready", file=sys.stderr, flush=True)
                 if report_to:
                     report_ready(report_to, service)
+                print(f"[{service}] ready", file=sys.stderr, flush=True)
+            if sess is not None:
+                post_ready(sess, allocation_id, "ready")
             return
         if waiting and waiting.match(line):
             if sess is not None:
