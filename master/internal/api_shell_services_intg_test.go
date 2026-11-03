@@ -189,7 +189,6 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 	require.Nil(t, alloc.IdleTimeout)
 	require.True(t, spec.WatchTaskActivity)
 	require.False(t, spec.WatchProxyIdleTimeout)
-	require.False(t, spec.WatchRunnerIdleTimeout)
 
 	// The environment of both services, merged with the others.
 	env := spec.Base.ExtraEnvVars
@@ -348,7 +347,6 @@ func TestLaunchShellIdleTimeout(t *testing.T) {
 				TimeoutDuration: 45 * time.Minute,
 			}, allocateRequest(t, rm, taskID).IdleTimeout)
 			require.False(t, spec.WatchProxyIdleTimeout)
-			require.False(t, spec.WatchRunnerIdleTimeout)
 
 			env := spec.Base.ExtraEnvVars
 			if tc.services == nil {

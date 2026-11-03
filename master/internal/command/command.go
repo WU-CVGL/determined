@@ -520,8 +520,8 @@ func proxyPortConfigs(spec tasks.GenericCommandSpec, taskID model.TaskID) []*spr
 }
 
 // idleTimeoutConfig returns how the task's idle time is watched, if its config sets an idle
-// timeout: a shell's through its task's activity record, a notebook's and a TensorBoard's through
-// their proxy and runner state, as their launches chose. Other tasks are not watched.
+// timeout: a shell's through its task's activity record, a TensorBoard's and a restored notebook's
+// through the last request to its proxy, as their launches chose. Other tasks are not watched.
 func idleTimeoutConfig(spec tasks.GenericCommandSpec, taskID model.TaskID) *sproto.IdleTimeoutConfig {
 	if spec.Config.IdleTimeout == nil {
 		return nil
@@ -534,8 +534,8 @@ func idleTimeoutConfig(spec tasks.GenericCommandSpec, taskID model.TaskID) *spro
 	switch {
 	case spec.WatchTaskActivity:
 		cfg.UseTaskActivity, cfg.TaskID = true, taskID
-	case spec.WatchProxyIdleTimeout || spec.WatchRunnerIdleTimeout:
-		cfg.UseProxyState, cfg.UseRunnerState = spec.WatchProxyIdleTimeout, spec.WatchRunnerIdleTimeout
+	case spec.WatchProxyIdleTimeout:
+		cfg.UseProxyState = true
 	default:
 		return nil
 	}

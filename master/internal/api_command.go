@@ -61,9 +61,6 @@ type protoCommandParams struct {
 	MustZeroSlot bool
 	// AllowServices accepts the config's services, which only shells run.
 	AllowServices bool
-	// NotebookIdleType, when set, replaces the default notebook_idle_type, before the template and
-	// the config apply.
-	NotebookIdleType string
 }
 
 // prepareCommandLaunch prepares the launch of an NTSC task from a request, without side effects:
@@ -130,9 +127,6 @@ func (a *apiServer) prepareCommandLaunch(ctx context.Context, req *protoCommandP
 
 	// Get the full configuration.
 	config := model.DefaultConfig(&taskSpec.TaskContainerDefaults)
-	if req.NotebookIdleType != "" {
-		config.NotebookIdleType = req.NotebookIdleType
-	}
 	if req.TemplateName != "" {
 		err := templates.UnmarshalTemplateConfig(ctx, req.TemplateName, aUser, &config, false)
 		if err != nil {

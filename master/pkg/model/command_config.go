@@ -18,13 +18,14 @@ const (
 )
 
 // DefaultConfig is the default configuration used by all
-// commands (e.g., commands, notebooks, shells) if a request
-// does not specify any configuration options.
+// commands (e.g., commands, shells, TensorBoards) if a request
+// does not specify any configuration options. notebook_idle_type is the activity of a shell's
+// JupyterLab, unless the config sets another.
 func DefaultConfig(taskContainerDefaults *TaskContainerDefaultsConfig) CommandConfig {
 	out := CommandConfig{
 		Resources:        DefaultResourcesConfig(taskContainerDefaults),
 		Environment:      DefaultEnvConfig(taskContainerDefaults),
-		NotebookIdleType: NotebookIdleTypeKernelsOrTerminals,
+		NotebookIdleType: NotebookIdleTypeActivity,
 	}
 
 	if taskContainerDefaults != nil {

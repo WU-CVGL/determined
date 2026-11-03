@@ -286,8 +286,6 @@ func (a *apiServer) prepareShellLaunch(
 		Config:        req.Config,
 		Files:         req.Files,
 		AllowServices: true,
-		// A shell's JupyterLab is active while a kernel executes, unless its config says otherwise.
-		NotebookIdleType: model.NotebookIdleTypeActivity,
 	}, user)
 	if err != nil {
 		return nil, nil, api.WrapWithFallbackCode(err, codes.InvalidArgument,

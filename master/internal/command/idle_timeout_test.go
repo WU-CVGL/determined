@@ -1,6 +1,7 @@
 package command
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -13,8 +14,8 @@ import (
 )
 
 // A task's idle watcher follows its persisted spec: a shell is watched through its activity record
-// and only with an idle timeout; notebooks and TensorBoards keep their watchers; other tasks have
-// none.
+// and only with an idle timeout; TensorBoards and restored notebooks through their proxy; other
+// tasks have none.
 func TestIdleTimeoutConfig(t *testing.T) {
 	const taskID = model.TaskID("task")
 	timeout := ptrs.Ptr(model.Duration(30 * time.Minute))
@@ -24,8 +25,10 @@ func TestIdleTimeoutConfig(t *testing.T) {
 		return s
 	}
 	shell := func(s *tasks.GenericCommandSpec) { s.WatchTaskActivity = true }
+	// A notebook's persisted spec also has "WatchRunnerIdleTimeout": true, which the master ignores.
 	notebook := func(s *tasks.GenericCommandSpec) {
-		s.WatchProxyIdleTimeout, s.WatchRunnerIdleTimeout = true, true
+		require.NoError(t, json.Unmarshal(
+			[]byte(`{"WatchProxyIdleTimeout": true, "WatchRunnerIdleTimeout": true}`), s))
 	}
 	tensorBoard := func(s *tasks.GenericCommandSpec) { s.WatchProxyIdleTimeout = true }
 	command := func(*tasks.GenericCommandSpec) {}
@@ -37,7 +40,7 @@ func TestIdleTimeoutConfig(t *testing.T) {
 
 	require.Nil(t, idleTimeoutConfig(spec(nil, notebook), taskID))
 	require.Equal(t, &sproto.IdleTimeoutConfig{
-		ServiceID: "task", UseProxyState: true, UseRunnerState: true, TimeoutDuration: 30 * time.Minute,
+		ServiceID: "task", UseProxyState: true, TimeoutDuration: 30 * time.Minute,
 	}, idleTimeoutConfig(spec(timeout, notebook), taskID))
 	require.Equal(t, &sproto.IdleTimeoutConfig{
 		ServiceID: "task", UseProxyState: true, TimeoutDuration: 30 * time.Minute,
