@@ -928,12 +928,15 @@ service Determined {
       tags: "Internal"
     };
   }
-  // Report the state of a service of an interactive task. Only the task's own
-  // container, its owner and admins may report it.
-  rpc ReportTaskServiceState(ReportTaskServiceStateRequest)
-      returns (ReportTaskServiceStateResponse) {
+  // Report the state of every service of an interactive task. The task's
+  // container posts the complete snapshot of its services' states whenever one
+  // changes and again periodically; the master replaces the task's states with
+  // each snapshot it accepts. Only the task's own container, its owner and
+  // admins may report it.
+  rpc ReportTaskServices(ReportTaskServicesRequest)
+      returns (ReportTaskServicesResponse) {
     option (google.api.http) = {
-      post: "/api/v1/allocations/{allocation_id}/services/{service}/state"
+      post: "/api/v1/allocations/{allocation_id}/services"
       body: "*"
     };
     option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {

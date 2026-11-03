@@ -270,21 +270,37 @@ message AllocationWaitingRequest {
 // Response to AllocationWaitingRequest.
 message AllocationWaitingResponse {}
 
-// Report the state of a service of an interactive task. The task's container
-// reports each of its services.
-message ReportTaskServiceStateRequest {
+// The state of one service in a ReportTaskServicesRequest.
+message TaskServiceReport {
   option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
-    json_schema: { required: [ "allocation_id", "service", "state" ] }
+    json_schema: { required: [ "name", "state" ] }
+  };
+  // The name of the service.
+  string name = 1;
+  // The state of the service. STATE_UNSPECIFIED is not a state to report.
+  determined.task.v1.TaskService.State state = 2;
+}
+
+// Report the states of the services of an interactive task: the complete
+// snapshot, with every service of the task exactly once.
+message ReportTaskServicesRequest {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: { required: [ "allocation_id", "sequence", "services" ] }
   };
   // The id of the allocation.
   string allocation_id = 1;
-  // The name of the service.
-  string service = 2;
-  // The state of the service. STATE_UNSPECIFIED is not a state to report.
-  determined.task.v1.TaskService.State state = 3;
+  // The number of the snapshot. The container increases it whenever a
+  // service's state changes and posts the same number again when it re-posts
+  // an unchanged snapshot. The master ignores a snapshot whose number is lower
+  // than that of the last one it accepted for the task, so a retried or
+  // reordered post cannot roll the states back; a master that restarted
+  // accepts the next snapshot whatever its number. Must not be negative.
+  int32 sequence = 2;
+  // The state of each service of the task.
+  repeated TaskServiceReport services = 3;
 }
-// Response to ReportTaskServiceStateRequest.
-message ReportTaskServiceStateResponse {}
+// Response to ReportTaskServicesRequest.
+message ReportTaskServicesResponse {}
 
 // Stream task logs.
 message TaskLogsRequest {

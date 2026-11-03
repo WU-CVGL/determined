@@ -13450,36 +13450,36 @@ class v1RendezvousInfo(Printable):
         }
         return out
 
-class v1ReportTaskServiceStateRequest(Printable):
-    """Report the state of a service of an interactive task. The task's container
-    reports each of its services.
+class v1ReportTaskServicesRequest(Printable):
+    """Report the states of the services of an interactive task: the complete
+    snapshot, with every service of the task exactly once.
     """
 
     def __init__(
         self,
         *,
         allocationId: str,
-        service: str,
-        state: "v1TaskServiceState",
+        sequence: int,
+        services: "typing.Sequence[v1TaskServiceReport]",
     ):
         self.allocationId = allocationId
-        self.service = service
-        self.state = state
+        self.sequence = sequence
+        self.services = services
 
     @classmethod
-    def from_json(cls, obj: Json) -> "v1ReportTaskServiceStateRequest":
+    def from_json(cls, obj: Json) -> "v1ReportTaskServicesRequest":
         kwargs: "typing.Dict[str, typing.Any]" = {
             "allocationId": obj["allocationId"],
-            "service": obj["service"],
-            "state": v1TaskServiceState(obj["state"]),
+            "sequence": obj["sequence"],
+            "services": [v1TaskServiceReport.from_json(x) for x in obj["services"]],
         }
         return cls(**kwargs)
 
     def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
         out: "typing.Dict[str, typing.Any]" = {
             "allocationId": self.allocationId,
-            "service": self.service,
-            "state": self.state.value,
+            "sequence": self.sequence,
+            "services": [x.to_json(omit_unset) for x in self.services],
         }
         return out
 
@@ -16478,6 +16478,33 @@ class v1TaskService(Printable):
             "serviceId": self.serviceId,
             "state": self.state.value,
             "url": self.url,
+        }
+        return out
+
+class v1TaskServiceReport(Printable):
+    """The state of one service in a ReportTaskServicesRequest."""
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        state: "v1TaskServiceState",
+    ):
+        self.name = name
+        self.state = state
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1TaskServiceReport":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "name": obj["name"],
+            "state": v1TaskServiceState(obj["state"]),
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "name": self.name,
+            "state": self.state.value,
         }
         return out
 
@@ -24939,27 +24966,26 @@ def post_ReportCheckpoint(
         return
     raise APIHttpError("post_ReportCheckpoint", _resp)
 
-def post_ReportTaskServiceState(
+def post_ReportTaskServices(
     session: "api.BaseSession",
     *,
     allocationId: str,
-    body: "v1ReportTaskServiceStateRequest",
-    service: str,
+    body: "v1ReportTaskServicesRequest",
 ) -> None:
-    """Report the state of a service of an interactive task. Only the task's own
-    container, its owner and admins may report it.
+    """Report the state of every service of an interactive task. The task's
+    container posts the complete snapshot of its services' states whenever one
+    changes and again periodically; the master replaces the task's states with
+    each snapshot it accepts. Only the task's own container, its owner and
+    admins may report it.
 
     - allocationId: The id of the allocation.
-    - service: The name of the service.
     """
     _params = None
     if type(allocationId) == str:
         allocationId = parse.quote(allocationId)
-    if type(service) == str:
-        service = parse.quote(service)
     _resp = session._do_request(
         method="POST",
-        path=f"/api/v1/allocations/{allocationId}/services/{service}/state",
+        path=f"/api/v1/allocations/{allocationId}/services",
         params=_params,
         json=body.to_json(True),
         data=None,
@@ -24969,7 +24995,7 @@ def post_ReportTaskServiceState(
     )
     if _resp.status_code == 200:
         return
-    raise APIHttpError("post_ReportTaskServiceState", _resp)
+    raise APIHttpError("post_ReportTaskServices", _resp)
 
 def post_ReportTrialMetrics(
     session: "api.BaseSession",
