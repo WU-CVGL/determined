@@ -107,9 +107,10 @@ To list a shell's services with their states and addresses:
 
    det task services <shell id>
 
-A service is ``STARTING``, then ``READY``; ``EXITED`` once it has stopped, or ``UNAVAILABLE`` when
-its program is not in the image (see :ref:`shell-image-requirements`). A service other than the
-SSH server can stop without ending the shell.
+A service is ``UNSPECIFIED`` until the shell reports its state, which also takes a short time after
+the master restarts. It is ``STARTING``, then ``READY``; ``EXITED`` once it has stopped, or
+``UNAVAILABLE`` when its program is not in the image (see :ref:`shell-image-requirements`). A
+service other than the SSH server can stop without ending the shell.
 
 To open JupyterLab in the browser once it is ``READY``:
 
