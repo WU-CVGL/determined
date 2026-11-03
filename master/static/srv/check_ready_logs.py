@@ -10,6 +10,8 @@ import sys
 import time
 from typing import Optional, Pattern
 
+import requests
+
 from determined.common import api
 from determined.common.api import authentication, certs, errors
 
@@ -20,11 +22,14 @@ TIMEOUT_SECONDS = 10
 def retryable(e: Exception) -> bool:
     # The session raises MasterNotFoundException for a connection failure, a plain
     # BadRequestException for any other failed request, such as a read timeout, and APIException
-    # with the status for an HTTP error. The other classes it raises, for a 401, 403 or 404, are
-    # answers that a retry does not change.
+    # with the status for an HTTP error; it lets an SSL error through as it is. The other classes
+    # it raises, for a 401, 403 or 404, are answers that a retry does not change.
     if isinstance(e, errors.APIException):
         return e.status_code >= 500
-    return isinstance(e, errors.MasterNotFoundException) or type(e) is errors.BadRequestException
+    return (
+        isinstance(e, (errors.MasterNotFoundException, requests.exceptions.SSLError))
+        or type(e) is errors.BadRequestException
+    )
 
 
 def post_ready(sess: api.Session, allocation_id: str, state: str):
@@ -33,7 +38,9 @@ def post_ready(sess: api.Session, allocation_id: str, state: str):
     # them to kill us.
     while True:
         try:
-            sess.post(f"/api/v1/allocations/{allocation_id}/{state}", timeout=TIMEOUT_SECONDS)
+            sess.post(
+                f"/api/v1/allocations/{allocation_id}/{state}", timeout=TIMEOUT_SECONDS
+            )
             return
         except Exception as e:
             if not retryable(e):
