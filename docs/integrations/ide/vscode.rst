@@ -73,7 +73,7 @@ takes the first of:
 
 -  The cache in the home directory, ``~/.cache/determined/code-server/<version>/linux-<arch>``, or
    in the directory that ``DET_CODE_SERVER_CACHE`` names. The cache holds each release for each
-   architecture.
+   architecture, next to the lock file ``<version>/linux-<arch>.lock`` of its install.
 
 -  The master: the service downloads the release for the container's architecture, checks its
    SHA-256, and installs it into the cache. Shells that share a home directory install a release
@@ -83,7 +83,7 @@ An administrator can provide code-server to every task instead: mount a director
 extracted release into the containers read-only, for example with ``bind_mounts`` in
 ``task_container_defaults``, and set ``DET_CODE_SERVER_DIR`` to its path in the containers'
 environment. When that directory has ``bin/code-server``, the service uses it before the sources
-above, whatever its release.
+above without checking its release, which must still be 4.14.1 or later.
 
 Keeping Downloads, Extensions and Settings
 ==========================================
@@ -108,8 +108,8 @@ When the Service Is UNAVAILABLE
 
 The ``vscode`` service is ``UNAVAILABLE`` when the shell cannot run code-server: the image lacks
 what it needs (see :ref:`shell-image-requirements`), the cache cannot be written, or the master does
-not serve the release. The shell's task log, which ``det task logs <shell id>`` prints, has one line
-that starts with ``vscode service:`` and names the reason. The shell and its SSH server keep
+not serve the release. The shell's task log, which ``det task logs <shell id>`` prints, names the
+reason in its last line that starts with ``vscode service:``. The shell and its SSH server keep
 running.
 
 The service downloads code-server over the shell's connection to the master: a shell whose
