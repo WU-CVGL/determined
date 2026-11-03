@@ -26,38 +26,40 @@ const (
 // filterDefinition matches the first line of the filter's definition, in any of bash's forms.
 var filterDefinition = regexp.MustCompile(`(?m)^[ \t]*(?:function[ \t]+)?` + filterFunc + `\b`)
 
-// sshdLine matches the start of the line that runs sshd, with or without exec, but not a comment
-// that names it.
-var sshdLine = regexp.MustCompile(`(?m)^[ \t]*(?:exec[ \t]+)?` + regexp.QuoteMeta(sshdPath) + `\b`)
+// sshdLine matches the start of the line that runs sshd, with or without exec or a group around it,
+// but not a comment that names it.
+var sshdLine = regexp.MustCompile(
+	`(?m)^[ \t]*(?:\{[ \t]+)?(?:exec[ \t]+)?` + regexp.QuoteMeta(sshdPath) + `\b`)
 
-// shellEntrypointTail returns the end of shell-entrypoint.sh, from the definition of the sshd log
-// filter on, split at the start of the line that runs sshd: the filter and the readiness regex, then
-// the sshd command to the end of the script. It assumes only that order, not how the code is laid out.
-func shellEntrypointTail(t *testing.T) (defs, sshdCommand string) {
+// sshUnitTail returns the end of the ssh service's unit, from the definition of the sshd log filter
+// on, split at the start of the line that runs sshd: the filter, the readiness regex and the log
+// helpers, then the sshd command to the end of the unit. It assumes only that order, not how the
+// code is laid out.
+func sshUnitTail(t *testing.T) (defs, sshdCommand string) {
 	t.Helper()
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash is not installed")
 	}
 	require.NoError(t, SetRootPath("../../static/srv"))
-	script := string(MustStaticFile(ShellEntrypointResource))
+	script := string(MustStaticFile(SSHServiceResource))
 
 	start := filterDefinition.FindStringIndex(script)
-	require.NotNil(t, start, "shell-entrypoint.sh defines %s", filterFunc)
+	require.NotNil(t, start, "%s defines %s", SSHServiceResource, filterFunc)
 	tail := script[start[0]:]
 	sshd := sshdLine.FindAllStringIndex(tail, -1)
 	require.Len(t, sshd, 1, "one line after the filter runs %s", sshdPath)
 	return tail[:sshd[0][0]], tail[sshd[0][0]:]
 }
 
-// filterCommand runs the sshd log filter from shell-entrypoint.sh with the shell options that the
-// script sets.
+// filterCommand runs the sshd log filter from the ssh unit with the shell options that the
+// supervisor sets.
 func filterCommand(t *testing.T) *exec.Cmd {
 	t.Helper()
-	defs, _ := shellEntrypointTail(t)
+	defs, _ := sshUnitTail(t)
 	return exec.Command("bash", "-c", "set -e\nshopt -s extglob\n"+defs+filterFunc) //nolint:gosec
 }
 
-func TestShellEntrypointDropsLoginRecordsMessage(t *testing.T) {
+func TestSSHUnitDropsLoginRecordsMessage(t *testing.T) {
 	// Lines that only resemble the message, and lines that a careless read would change.
 	unchanged := strings.Join([]string{
 		sshdListening + "\r",
@@ -112,7 +114,7 @@ func TestShellEntrypointDropsLoginRecordsMessage(t *testing.T) {
 
 // The readiness check must get "Server listening on" while sshd still runs, so the filter passes
 // each line on as soon as it reads it.
-func TestShellEntrypointLoginRecordsFilterStreams(t *testing.T) {
+func TestSSHUnitLoginRecordsFilterStreams(t *testing.T) {
 	cmd := filterCommand(t)
 	stdin, err := cmd.StdinPipe()
 	require.NoError(t, err)
@@ -175,18 +177,19 @@ func writeScript(t *testing.T, path, body string) {
 	require.NoError(t, os.WriteFile(path, []byte("#!/usr/bin/env bash\n"+body), 0o700)) //nolint:gosec
 }
 
-// The end of shell-entrypoint.sh, with stand-ins for sshd and check_ready_logs.py: sshd gets the
-// script's arguments, the readiness check gets "Server listening on" as its regex and sees that line
-// while sshd runs, the task log gets every line but the login records message, and the script exits
+// The end of the ssh unit, with stand-ins for sshd and check_ready_logs.py: sshd gets the
+// unit's arguments, the readiness check gets "Server listening on" as its regex and sees that line
+// while sshd runs, the task log gets every line but the login records message, and the unit exits
 // with sshd's exit status.
-func TestShellEntrypointSSHDLogs(t *testing.T) {
-	defs, sshdCommand := shellEntrypointTail(t)
+func TestSSHUnitSSHDLogs(t *testing.T) {
+	defs, sshdCommand := sshUnitTail(t)
 	// The only check on how the end of the script is written: sshd's command has no pipe. A command
 	// in a pipeline, such as tee in "filter | tee -p >(check) >&2", is forked before its words are
 	// expanded, so the readiness check in its arguments becomes tee's child, which tee never reaps.
 	// On bash 5.1 the exited check then stays a zombie under tee; with the filter writing into tee's
 	// process substitution instead, as sshd did in the stock script, it does not. The stand-ins
-	// below cannot see that difference, so the test looks for the pipe instead.
+	// below cannot see that difference, so the test looks for the pipe instead. The supervisor tests
+	// check that the unit leaves no process behind.
 	require.NotContains(t, sshdCommand, "|", "sshd's log must not go through a pipe")
 	if err := exec.Command("tee", "-p").Run(); err != nil {
 		t.Skip("tee does not support -p (GNU coreutils 8.24 or later)")
@@ -230,7 +233,7 @@ exit 3
 		"-f", "/run/determined/ssh/sshd_config", "-p", "2222", "-D", "-e", "-o", "LogLevel VERBOSE",
 	}
 	cmd := exec.CommandContext(ctx, "bash", //nolint:gosec
-		append([]string{"-c", "set -e\nshopt -s extglob\n" + tail, "shell-entrypoint.sh"}, sshdArgs...)...)
+		append([]string{"-c", "set -e\nshopt -s extglob\n" + tail, "ssh.sh"}, sshdArgs...)...)
 	cmd.WaitDelay = 10 * time.Second
 	cmd.Env = append(os.Environ(),
 		"DET_PYTHON_EXECUTABLE="+python,
