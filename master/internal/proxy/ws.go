@@ -25,7 +25,9 @@ func connectWithbackoff(tlsConn *tls.Conn) error {
 	return err
 }
 
-func newSingleHostReverseWebSocketProxy(c echo.Context, t *url.URL) http.Handler {
+// newSingleHostReverseWebSocketProxy proxies a WebSocket connection to t. The connection holds
+// its task active from the forwarded upgrade request until it closes.
+func newSingleHostReverseWebSocketProxy(c echo.Context, t *url.URL, a activity) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		in, _, err := c.Response().Hijack()
 		if err != nil {
@@ -95,6 +97,8 @@ func newSingleHostReverseWebSocketProxy(c echo.Context, t *url.URL) http.Handler
 			return
 		}
 
+		release := a.hold()
+		defer release()
 		copyReqErr := asyncCopy(out, in)
 		copyResErr := asyncCopy(in, out)
 		logCopyError(c, "request", t, <-copyReqErr)

@@ -84,6 +84,16 @@ type Options struct {
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
 	// OnStarted, when set, is called once the login shell has started.
 	OnStarted func()
+	// Activity, when set, hears of the session's activity for the idle policy of its task.
+	Activity Activity
+}
+
+// Activity hears of a terminal session's activity.
+type Activity interface {
+	// Hold is called when the session starts, and release when it has ended.
+	Hold() (release func())
+	// Touch is called on every input from the browser and output to it.
+	Touch()
 }
 
 func (o Options) withDefaults() Options {
@@ -164,6 +174,10 @@ func Serve(ctx context.Context, ws *websocket.Conn, t Target, o Options, log *lo
 	o = o.withDefaults()
 	if log == nil {
 		log = logrus.WithField("component", "shell-terminal")
+	}
+	if o.Activity != nil {
+		release := o.Activity.Hold()
+		defer release()
 	}
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
@@ -357,6 +371,9 @@ func (s *session) send(ctx context.Context, f frame) bool {
 
 func (s *session) touch() {
 	s.lastActivity.Store(time.Now().UnixNano())
+	if s.opts.Activity != nil {
+		s.opts.Activity.Touch()
+	}
 }
 
 // handlePong extends the read deadline only for a pong that answers the outstanding ping, so

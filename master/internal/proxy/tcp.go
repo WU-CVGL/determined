@@ -45,7 +45,9 @@ func (w *websocketReadWriter) Write(buf []byte) (int, error) {
 	return len(buf), nil
 }
 
-func newSingleHostReverseTCPOverWebSocketProxy(c echo.Context, t *url.URL) http.Handler {
+// newSingleHostReverseTCPOverWebSocketProxy proxies a TCP connection to t over a WebSocket. A
+// connection that it accepts is activity of its task.
+func newSingleHostReverseTCPOverWebSocketProxy(c echo.Context, t *url.URL, a activity) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		dialer := proxy.FromEnvironment()
 
@@ -68,6 +70,7 @@ func newSingleHostReverseTCPOverWebSocketProxy(c echo.Context, t *url.URL) http.
 			return
 		}
 
+		a.touch()
 		rw := &websocketReadWriter{ws: ws, buf: new(bytes.Buffer)}
 		copyReqErr := asyncCopy(rw, out)
 		copyResErr := asyncCopy(out, rw)
