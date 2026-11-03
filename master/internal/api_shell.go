@@ -437,8 +437,8 @@ const (
 	codeServerPasswordBytes = 32
 )
 
-// The argon2id parameters of a code-server password's hash: RFC 9106's and OWASP's lowest memory
-// setting. A password of codeServerPasswordBytes random bytes needs no harder hash, and code-server
+// The argon2id parameters of a code-server password's hash: OWASP's minimum setting (19 MiB, t=2,
+// p=1). A password of codeServerPasswordBytes random bytes needs no harder hash, and code-server
 // checks the hash on every login.
 const (
 	codeServerArgon2Time    = 2
