@@ -101,7 +101,6 @@ func addShellJupyter(spec *tasks.GenericCommandSpec) (archive.Archive, error) {
 	}
 	if spec.Config.IdleTimeout != nil {
 		env[tasks.NotebookIdleTypeEnvVar] = spec.Config.NotebookIdleType
-		env[tasks.ActivityReportEnvVar] = tasks.ActivityReportTask
 		env[tasks.IdleTimeoutSecondsEnvVar] = strconv.FormatFloat(
 			time.Duration(*spec.Config.IdleTimeout).Seconds(), 'f', -1, 64)
 	}

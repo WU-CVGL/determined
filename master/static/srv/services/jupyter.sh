@@ -19,8 +19,8 @@ if ! command -v jupyter >/dev/null; then
     exit 127
 fi
 
-# The idle check reports JupyterLab's state, a notebook's to the notebook API and a shell's to its
-# task's activity record. The master sets the idle type only where the idle time is watched.
+# The idle check reports a busy JupyterLab to its task's activity record. The master sets the idle
+# type only where the idle time is watched.
 if [[ -n ${NOTEBOOK_IDLE_TYPE+set} ]]; then
     "$DET_PYTHON_EXECUTABLE" /run/determined/jupyter/check_idle.py &
 fi

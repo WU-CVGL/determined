@@ -201,8 +201,8 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 	require.Equal(t, spec.Config.Description, notebookConfig.Description)
 	// Nor does JupyterLab's idle check run.
 	require.NotContains(t, env, tasks.NotebookIdleTypeEnvVar)
-	require.NotContains(t, env, tasks.ActivityReportEnvVar)
 	require.NotContains(t, env, tasks.IdleTimeoutSecondsEnvVar)
+	require.NotContains(t, env, "DET_ACTIVITY_REPORT")
 
 	// JupyterLab's token is a notebook session of the owner.
 	require.NotEmpty(t, env[model.NotebookSessionEnvVar])
@@ -268,8 +268,7 @@ func TestLaunchShellWithoutExtraServices(t *testing.T) {
 			require.Equal(t, "ssh", env["DET_SERVICES"])
 			for _, key := range []string{
 				model.NotebookSessionEnvVar, "NOTEBOOK_PORT", "NOTEBOOK_CONFIG", "NOTEBOOK_BASE_URL",
-				tasks.NotebookIdleTypeEnvVar, tasks.ActivityReportEnvVar,
-				tasks.IdleTimeoutSecondsEnvVar,
+				tasks.NotebookIdleTypeEnvVar, tasks.IdleTimeoutSecondsEnvVar,
 			} {
 				require.NotContains(t, env, key)
 			}
@@ -351,13 +350,13 @@ func TestLaunchShellIdleTimeout(t *testing.T) {
 			env := spec.Base.ExtraEnvVars
 			if tc.services == nil {
 				require.NotContains(t, env, tasks.NotebookIdleTypeEnvVar)
-				require.NotContains(t, env, tasks.ActivityReportEnvVar)
 				require.NotContains(t, env, tasks.IdleTimeoutSecondsEnvVar)
 				return
 			}
 			require.Equal(t, tc.wantIdleType, env[tasks.NotebookIdleTypeEnvVar])
 			require.Equal(t, tc.wantIdleType, spec.Config.NotebookIdleType)
-			require.Equal(t, tasks.ActivityReportTask, env[tasks.ActivityReportEnvVar])
+			// The idle check has one mode, the task's activity record.
+			require.NotContains(t, env, "DET_ACTIVITY_REPORT")
 			require.Equal(t, "2700", env[tasks.IdleTimeoutSecondsEnvVar])
 		})
 	}

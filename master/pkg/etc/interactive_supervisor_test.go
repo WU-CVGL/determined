@@ -883,9 +883,9 @@ exit 0
 	require.Equal(t, []string{"[ssh] start", "[ssh] ready", "[ssh] exited 0"}, s.logLines())
 }
 
-// The jupyter unit under the supervisor on a notebook: the idle check runs in the background while
-// JupyterLab runs in the foreground with today's flags, and the idle check ends with it, also with
-// a strict startup hook. SHELL is the user's login shell before the init, so that the startup hook
+// The jupyter unit under the supervisor on a shell with an idle timeout: the idle check runs in the
+// background while JupyterLab runs in the foreground with its flags, and the idle check ends with
+// it, also with a strict startup hook. SHELL is the user's login shell before the init, so that the startup hook
 // sees it and may set another one for JupyterLab.
 func TestSupervisorJupyterUnit(t *testing.T) {
 	out, err := exec.Command("bash", "-c", `getent passwd "$(whoami)" | cut -d: -f7`).Output()
@@ -907,7 +907,7 @@ func TestSupervisorJupyterUnit(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := testSupervisorJupyterUnit(t, tc.hook, notebookJupyter)
+			s := testSupervisorJupyterUnit(t, tc.hook, shellJupyterWatched)
 			seen, err := os.ReadFile(s.order + ".hook-shell")
 			require.NoError(t, err)
 			require.Equal(t, loginShell+"\n", string(seen), "the hook's SHELL")
@@ -926,12 +926,8 @@ type jupyterTask struct {
 }
 
 var (
-	// notebookJupyter is a notebook saved by a master that set no base URL.
-	notebookJupyter = jupyterTask{
-		env:     []string{"NOTEBOOK_IDLE_TYPE=kernels_or_terminals"},
-		baseURL: "/proxy/task-1/",
-		idle:    true,
-	}
+	// unsetBaseURLJupyter is a task whose master set no base URL.
+	unsetBaseURLJupyter = jupyterTask{baseURL: "/proxy/task-1/"}
 	// shellJupyter is a shell with the jupyter service: no idle type, a base URL at its port.
 	shellJupyter = jupyterTask{
 		env:     []string{"NOTEBOOK_BASE_URL=/proxy/task-1:2900/"},
@@ -941,7 +937,7 @@ var (
 	shellJupyterWatched = jupyterTask{
 		env: []string{
 			"NOTEBOOK_BASE_URL=/proxy/task-1:2900/", "NOTEBOOK_IDLE_TYPE=activity",
-			"DET_ACTIVITY_REPORT=task",
+			"DET_IDLE_TIMEOUT_SECONDS=2700",
 		},
 		baseURL: "/proxy/task-1:2900/",
 		idle:    true,
@@ -1075,10 +1071,9 @@ func TestSupervisorJupyterUnitOnShell(t *testing.T) {
 	})
 }
 
-// A notebook saved by an older master gets the base URL at its task ID; an empty base URL is
-// unset.
+// Without a base URL from the master, JupyterLab serves at its task ID; an empty base URL is unset.
 func TestSupervisorJupyterUnitDefaultBaseURL(t *testing.T) {
-	task := notebookJupyter
+	task := unsetBaseURLJupyter
 	task.env = append(slices.Clone(task.env), "NOTEBOOK_BASE_URL=")
 	testSupervisorJupyterUnit(t, defaultHook, task)
 }
