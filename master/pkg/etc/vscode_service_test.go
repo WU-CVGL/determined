@@ -99,13 +99,28 @@ func codeServerArch(t *testing.T) string {
 	}
 }
 
-// codeServerStandIn is a code-server of release version: it prints the release for --version.
+// codeServerStandIn is a code-server of release version. Like code-server, it reads its config
+// file first, ~/.config/code-server/config.yaml without --config, and when that file is missing it
+// writes it and logs so on its standard output. Then it prints the release for --version.
 // Otherwise it records its arguments, the HASHED_PASSWORD that it gets and, in the order file,
 // "code-server <tag>", logs that it serves on DET_CODE_SERVER_PORT, and exits once the order file
 // has "stop code-server".
 func codeServerStandIn(version, tag string) string {
 	return `
-if [[ ${1-} == --version ]]; then
+config=$HOME/.config/code-server/config.yaml
+version=
+for ((i = 1; i <= $#; i++)); do
+    case ${!i} in
+    --config) ((i++)) && config=${!i} ;;
+    --version) version=1 ;;
+    esac
+done
+mkdir -p "${config%/*}" || exit 1
+if [[ ! -e $config ]]; then
+    echo "password: generated" >"$config" || exit 1
+    echo "[2026-01-01T00:00:00.000Z] info  Wrote default config file to $config"
+fi
+if [[ -n $version ]]; then
     echo "` + version + ` 0123abc with Code 1.0.0"
     exit 0
 fi
@@ -341,6 +356,8 @@ func TestVSCodeUnitResolveOrder(t *testing.T) {
 			v.master.serveCodeServerRelease(t, codeServerOther, "other", false)
 
 			v.runVSCode(tc.want)
+			// Asking code-server on the PATH for its release leaves the home as it was.
+			require.NoDirExists(t, filepath.Join(home, ".config", "code-server"))
 			if tc.path == codeServerOther && !tc.dir {
 				require.Contains(t, v.stderr.String(), skipped)
 				require.Equal(t, 1, strings.Count(v.stderr.String(), "skipping"))

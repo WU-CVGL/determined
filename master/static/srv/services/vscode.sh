@@ -150,9 +150,17 @@ vscode_bin=
 if [[ -n ${DET_CODE_SERVER_DIR-} && -x $DET_CODE_SERVER_DIR/bin/code-server ]]; then
     vscode_bin=$DET_CODE_SERVER_DIR/bin/code-server
 elif vscode_path=$(command -v code-server); then
-    # "code-server --version" prints, for example, "4.96.4 <commit> with Code 1.96.4".
-    vscode_path_version=$(code-server --version 2>/dev/null) || true
-    vscode_path_version=${vscode_path_version%%[[:space:]]*}
+    # "code-server --version" prints, for example, "4.96.4 <commit> with Code 1.96.4". code-server
+    # reads its config file first and, when there is none, writes one into the home and logs that;
+    # the empty config file /dev/null keeps it from touching the home.
+    vscode_path_out=$("$vscode_path" --config /dev/null --version 2>/dev/null) || true
+    vscode_path_version=
+    while IFS= read -r vscode_line; do
+        if [[ $vscode_line =~ ^([0-9]+\.[0-9]+\.[0-9]+)([[:space:]]|$) ]]; then
+            vscode_path_version=${BASH_REMATCH[1]}
+            break
+        fi
+    done <<<"$vscode_path_out"
     if [[ $vscode_path_version == "$vscode_version" ]]; then
         vscode_bin=$vscode_path
     else
