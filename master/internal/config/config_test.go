@@ -583,6 +583,8 @@ func TestPrintableConfig(t *testing.T) {
 	registryAuthSecret := "i_love_cellos"
 	startupScriptSecret := "my_startup_script_secret"
 	containerStartupScriptSecret := "my_container_startup_secret"
+	codeServerMirrorSecret := "my_code_server_mirror_secret"
+	codeServerQuerySecret := "my_code_server_query_secret"
 
 	raw := fmt.Sprintf(`
 db:
@@ -623,8 +625,13 @@ additional_resource_managers:
           type: gcp
           startup_script: %v
           container_startup_script: %v
+
+interactive:
+  code_server:
+    url_template: https://mirror:%v@mirror.example/{version}/{arch}.tar.gz?token=%v
 `, s3Key, s3Secret, masterSecret, webuiSecret, registryAuthSecret, startupScriptSecret,
-		containerStartupScriptSecret, startupScriptSecret, containerStartupScriptSecret)
+		containerStartupScriptSecret, startupScriptSecret, containerStartupScriptSecret,
+		codeServerMirrorSecret, codeServerQuerySecret)
 
 	provConfig := provconfig.DefaultConfig()
 	provConfig.StartupScript = startupScriptSecret
@@ -659,6 +666,10 @@ additional_resource_managers:
 			NetworkMode:       "bridge",
 			PreemptionTimeout: model.DefaultPreemptionTimeout,
 		},
+		Interactive: InteractiveConfig{CodeServer: CodeServerConfig{
+			URLTemplate: "https://mirror:" + codeServerMirrorSecret +
+				"@mirror.example/{version}/{arch}.tar.gz?token=" + codeServerQuerySecret,
+		}},
 		ResourceConfig: ResourceConfig{
 			AdditionalResourceManagersInternal: []*ResourceManagerWithPoolsConfig{
 				{
@@ -705,9 +716,17 @@ additional_resource_managers:
 	assert.Assert(t, !bytes.Contains(printable, []byte(registryAuthSecret)))
 	assert.Assert(t, !bytes.Contains(printable, []byte(startupScriptSecret)))
 	assert.Assert(t, !bytes.Contains(printable, []byte(containerStartupScriptSecret)))
+	assert.Assert(t, !bytes.Contains(printable, []byte(codeServerMirrorSecret)))
+	assert.Assert(t, !bytes.Contains(printable, []byte(codeServerQuerySecret)))
 
 	// Ensure that the original was unmodified.
 	assert.DeepEqual(t, unmarshaled, expected)
+
+	// The default url_template is printed.
+	unmarshaled.Interactive.CodeServer.URLTemplate = DefaultCodeServerURLTemplate
+	printable, err = unmarshaled.Printable()
+	assert.NilError(t, err)
+	assert.Assert(t, bytes.Contains(printable, []byte(DefaultCodeServerURLTemplate)))
 }
 
 func TestRMPreemptionStatus(t *testing.T) {
