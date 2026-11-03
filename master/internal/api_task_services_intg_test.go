@@ -178,11 +178,16 @@ func TestGetTaskServicesWithoutRecords(t *testing.T) {
 	require.NotNil(t, resp.Services)
 }
 
-// The task's container reports its services' states with its allocation token, and the listing
-// shows them; other users and other tasks' containers are refused, as are unknown services and
-// the unspecified state. When the task ends, every service is EXITED, also once the command
-// service no longer has the task.
-func TestReportTaskServiceState(t *testing.T) {
+// The task's container reports the snapshot of its services' states with its allocation token,
+// and the listing shows it; other users and other tasks' containers are refused, as are snapshots
+// that name an unknown service, miss one, carry the unspecified state. A snapshot with a lower
+// sequence than the last accepted one changes nothing. When the task ends, every service is
+// EXITED, also once the command service no longer has the task.
+func TestReportTaskServices(t *testing.T) {
+	const (
+		ssh     = model.ServiceSSH
+		jupyter = model.ServiceJupyter
+	)
 	s, adminCtx := setupServicesTest(t)
 	owner, taskID := s.launchShellWithServices(t)
 	allocationID := model.AllocationID(taskID + ".1")
@@ -190,16 +195,25 @@ func TestReportTaskServiceState(t *testing.T) {
 	otherAllocationID := model.AllocationID(otherTaskID + ".1")
 	ownSession := allocationSessionCtx(t, allocationID, owner)
 
-	report := func(ctx context.Context, service string, state taskv1.TaskService_State) error {
-		_, err := s.api.ReportTaskServiceState(ctx, &apiv1.ReportTaskServiceStateRequest{
-			AllocationId: string(allocationID), Service: service, State: state,
-		})
+	report := func(
+		ctx context.Context, sequence int32, states map[string]taskv1.TaskService_State,
+	) error {
+		req := &apiv1.ReportTaskServicesRequest{AllocationId: string(allocationID), Sequence: sequence}
+		for _, name := range []string{ssh, jupyter, "vscode"} {
+			if state, ok := states[name]; ok {
+				req.Services = append(req.Services, &apiv1.TaskServiceReport{Name: name, State: state})
+			}
+		}
+		_, err := s.api.ReportTaskServices(ctx, req)
 		return err
 	}
-	unspecified := map[string]taskv1.TaskService_State{
-		model.ServiceSSH:     taskv1.TaskService_STATE_UNSPECIFIED,
-		model.ServiceJupyter: taskv1.TaskService_STATE_UNSPECIFIED,
+	all := func(sshState, jupyterState taskv1.TaskService_State) map[string]taskv1.TaskService_State {
+		return map[string]taskv1.TaskService_State{ssh: sshState, jupyter: jupyterState}
 	}
+	unspecified := all(taskv1.TaskService_STATE_UNSPECIFIED, taskv1.TaskService_STATE_UNSPECIFIED)
+	starting := all(taskv1.TaskService_STATE_STARTING, taskv1.TaskService_STATE_STARTING)
+	ready := all(taskv1.TaskService_STATE_READY, taskv1.TaskService_STATE_UNAVAILABLE)
+	exited := all(taskv1.TaskService_STATE_EXITED, taskv1.TaskService_STATE_EXITED)
 	require.Equal(t, unspecified, serviceStatesOf(s.services(adminCtx, t, taskID)))
 
 	// Refused without the allocation's own token, its owner or an admin.
@@ -207,45 +221,44 @@ func TestReportTaskServiceState(t *testing.T) {
 		"user":       ntscUserCtx(t, other),
 		"other task": allocationSessionCtx(t, otherAllocationID, other),
 	} {
-		err := report(ctx, model.ServiceSSH, taskv1.TaskService_STATE_READY)
-		require.Equal(t, codes.PermissionDenied, status.Code(err), name)
+		require.Equal(t, codes.PermissionDenied, status.Code(report(ctx, 1, ready)), name)
 	}
-	require.Error(t, report(context.Background(), model.ServiceSSH, taskv1.TaskService_STATE_READY))
+	require.Error(t, report(context.Background(), 1, ready))
 	require.Equal(t, unspecified, serviceStatesOf(s.services(adminCtx, t, taskID)))
 
-	// Unknown services and the unspecified state are invalid.
-	require.Equal(t, codes.InvalidArgument,
-		status.Code(report(ownSession, "vscode", taskv1.TaskService_STATE_READY)))
-	require.Equal(t, codes.InvalidArgument,
-		status.Code(report(ownSession, model.ServiceSSH, taskv1.TaskService_STATE_UNSPECIFIED)))
-
-	// The container's reports, each idempotent.
-	require.NoError(t, report(ownSession, model.ServiceSSH, taskv1.TaskService_STATE_STARTING))
-	require.NoError(t, report(ownSession, model.ServiceSSH, taskv1.TaskService_STATE_READY))
-	require.NoError(t, report(ownSession, model.ServiceSSH, taskv1.TaskService_STATE_READY))
-	require.NoError(t, report(ownSession, model.ServiceJupyter, taskv1.TaskService_STATE_UNAVAILABLE))
-	want := map[string]taskv1.TaskService_State{
-		model.ServiceSSH:     taskv1.TaskService_STATE_READY,
-		model.ServiceJupyter: taskv1.TaskService_STATE_UNAVAILABLE,
+	// A snapshot must hold every service of the task once, each with a state.
+	for name, invalid := range map[string]map[string]taskv1.TaskService_State{
+		"unknown service": {
+			ssh: taskv1.TaskService_STATE_READY, jupyter: taskv1.TaskService_STATE_READY,
+			"vscode": taskv1.TaskService_STATE_READY,
+		},
+		"missing service": {ssh: taskv1.TaskService_STATE_READY},
+		"unspecified":     all(taskv1.TaskService_STATE_READY, taskv1.TaskService_STATE_UNSPECIFIED),
+	} {
+		require.Equal(t, codes.InvalidArgument, status.Code(report(ownSession, 1, invalid)), name)
 	}
-	require.Equal(t, want, serviceStatesOf(s.services(ntscUserCtx(t, owner), t, taskID)))
-	require.Equal(t, want, serviceStatesOf(s.services(ntscUserCtx(t, other), t, taskID)))
+	require.Equal(t, unspecified, serviceStatesOf(s.services(adminCtx, t, taskID)))
+
+	// The container's snapshots; a re-post of the current one is accepted, an older one is not.
+	require.NoError(t, report(ownSession, 1, starting))
+	require.Equal(t, starting, serviceStatesOf(s.services(adminCtx, t, taskID)))
+	require.NoError(t, report(ownSession, 3, ready))
+	require.NoError(t, report(ownSession, 3, ready))
+	require.NoError(t, report(ownSession, 2, starting))
+	require.Equal(t, ready, serviceStatesOf(s.services(ntscUserCtx(t, owner), t, taskID)))
+	require.Equal(t, ready, serviceStatesOf(s.services(ntscUserCtx(t, other), t, taskID)))
 	// Another task's services are its own.
 	require.Empty(t, s.services(adminCtx, t, otherTaskID).Services)
 
 	// The end of the task.
 	_, err := command.DefaultCmdService.KillNTSC(taskID, model.TaskTypeShell)
 	require.NoError(t, err)
-	exited := map[string]taskv1.TaskService_State{
-		model.ServiceSSH:     taskv1.TaskService_STATE_EXITED,
-		model.ServiceJupyter: taskv1.TaskService_STATE_EXITED,
-	}
 	require.Eventually(t, func() bool {
-		return serviceStatesOf(s.services(adminCtx, t, taskID))[model.ServiceSSH] ==
+		return serviceStatesOf(s.services(adminCtx, t, taskID))[ssh] ==
 			taskv1.TaskService_STATE_EXITED
 	}, 10*time.Second, 50*time.Millisecond)
 	require.Equal(t, exited, serviceStatesOf(s.services(adminCtx, t, taskID)))
-	err = report(ownSession, model.ServiceJupyter, taskv1.TaskService_STATE_READY)
+	err = report(ownSession, 4, all(taskv1.TaskService_STATE_READY, taskv1.TaskService_STATE_READY))
 	require.NotContains(t, []codes.Code{codes.PermissionDenied, codes.InvalidArgument},
 		status.Code(err))
 	require.Equal(t, exited, serviceStatesOf(s.services(adminCtx, t, taskID)))

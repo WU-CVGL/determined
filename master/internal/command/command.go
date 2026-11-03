@@ -66,9 +66,10 @@ type Command struct {
 	endTime          *time.Time
 	restored         bool
 	contextDirectory []byte // Don't rely on this being set outsides of PreStart non restore case.
-	// serviceStates holds the last state that the task's container reported for each service, by
-	// name; see services.go.
-	serviceStates map[string]taskv1.TaskService_State
+	// serviceStates holds the states of the last snapshot of the task's services that its container
+	// reported, by name, and serviceSequence that snapshot's sequence; see services.go.
+	serviceStates   map[string]taskv1.TaskService_State
+	serviceSequence int32
 
 	logCtx logger.Context
 	syslog *logrus.Entry

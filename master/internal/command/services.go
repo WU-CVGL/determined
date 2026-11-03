@@ -19,11 +19,14 @@ import (
 // A task's services and their runtime state.
 //
 // The services of a task are part of its persisted spec (GenericCommandSpec.Services). Their state
-// is not: the task's container reports each service's state (ReportTaskServiceState), and the
-// command keeps the last report of each in memory, next to the rest of its runtime state. A
-// master that restarts starts without states, until the containers report again, which they do
-// periodically. When the task's allocation exits, every service is EXITED; the states go away
-// with the command when the command service forgets it.
+// is not: the task's container reports the snapshot of all its services' states
+// (ReportTaskServices) whenever one changes and periodically, and the command keeps the last
+// snapshot that it accepted in memory, next to the rest of its runtime state, guarded by the
+// command's mutex. Each snapshot replaces the previous one as a whole. A snapshot whose sequence
+// is lower than the last accepted one is ignored, so that a late or retried post cannot roll the
+// states back. A master that restarts starts without states and with the sequence at zero, until
+// the container's next snapshot. When the task's allocation exits, every service is EXITED; the
+// states go away with the command when the command service forgets it.
 
 // TaskService is a service of a task with its state.
 type TaskService struct {
@@ -103,10 +106,18 @@ func findService(
 	return tasks.InteractiveService{}, false
 }
 
-// setServiceState records the state that the container of the allocation allocationID reported
-// for one of the task's services. Once the allocation has exited, every service stays EXITED.
-func (c *Command) setServiceState(
-	allocationID model.AllocationID, name string, state taskv1.TaskService_State,
+// ServiceState is the state of one service in a snapshot that the task's container reports.
+type ServiceState struct {
+	Name  string
+	State taskv1.TaskService_State
+}
+
+// setServiceStates replaces the states of the task's services with the snapshot that the
+// container of the allocation allocationID reported, which must hold every service of the task
+// exactly once, each with a state. A snapshot with a lower sequence than the last accepted one,
+// or one that arrives after the allocation has exited, changes nothing.
+func (c *Command) setServiceStates(
+	allocationID model.AllocationID, sequence int32, snapshot []ServiceState,
 ) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -114,16 +125,35 @@ func (c *Command) setServiceState(
 	if c.allocationID != allocationID {
 		return api.NotFoundErrs("allocation", string(allocationID), true)
 	}
-	if _, ok := findService(c.GenericCommandSpec, c.taskType, name); !ok {
-		return status.Errorf(codes.InvalidArgument, "task %s has no service %q", c.taskID, name)
+	if sequence < 0 {
+		return status.Errorf(codes.InvalidArgument, "sequence: %d is negative", sequence)
 	}
-	if c.exitStatus != nil {
+	states := make(map[string]taskv1.TaskService_State, len(snapshot))
+	for _, s := range snapshot {
+		if _, ok := findService(c.GenericCommandSpec, c.taskType, s.Name); !ok {
+			return status.Errorf(codes.InvalidArgument, "task %s has no service %q", c.taskID, s.Name)
+		}
+		if _, ok := states[s.Name]; ok {
+			return status.Errorf(codes.InvalidArgument, "service %q is reported twice", s.Name)
+		}
+		if s.State == taskv1.TaskService_STATE_UNSPECIFIED {
+			return status.Errorf(codes.InvalidArgument, "service %q: a state is required", s.Name)
+		}
+		if _, ok := taskv1.TaskService_State_name[int32(s.State)]; !ok {
+			return status.Errorf(codes.InvalidArgument, "service %q: unknown state %d", s.Name, s.State)
+		}
+		states[s.Name] = s.State
+	}
+	for _, s := range taskServices(c.GenericCommandSpec, c.taskType) {
+		if _, ok := states[s.Name]; !ok {
+			return status.Errorf(codes.InvalidArgument, "service %q is missing", s.Name)
+		}
+	}
+	if c.exitStatus != nil || sequence < c.serviceSequence {
 		return nil
 	}
-	if c.serviceStates == nil {
-		c.serviceStates = map[string]taskv1.TaskService_State{}
-	}
-	c.serviceStates[name] = state
+	c.serviceStates = states
+	c.serviceSequence = sequence
 	return nil
 }
 
@@ -242,10 +272,10 @@ func (cs *CommandService) GetTaskServiceCredential(
 	return c.serviceCredential(name)
 }
 
-// SetTaskServiceState records the state of a service of the task of allocation allocationID, as
-// the task's container reports it.
-func (cs *CommandService) SetTaskServiceState(
-	allocationID model.AllocationID, name string, state taskv1.TaskService_State,
+// SetTaskServiceStates replaces the states of the services of the task of allocation
+// allocationID with the snapshot that the task's container reported.
+func (cs *CommandService) SetTaskServiceStates(
+	allocationID model.AllocationID, sequence int32, snapshot []ServiceState,
 ) error {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
@@ -254,5 +284,5 @@ func (cs *CommandService) SetTaskServiceState(
 	if !ok {
 		return api.NotFoundErrs("allocation", string(allocationID), true)
 	}
-	return c.setServiceState(allocationID, name, state)
+	return c.setServiceStates(allocationID, sequence, snapshot)
 }

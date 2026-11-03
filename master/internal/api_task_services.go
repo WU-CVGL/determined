@@ -137,22 +137,20 @@ func (a *apiServer) GetTaskServiceCredential(
 	return resp, nil
 }
 
-func (a *apiServer) ReportTaskServiceState(
-	ctx context.Context, req *apiv1.ReportTaskServiceStateRequest,
-) (*apiv1.ReportTaskServiceStateResponse, error) {
+func (a *apiServer) ReportTaskServices(
+	ctx context.Context, req *apiv1.ReportTaskServicesRequest,
+) (*apiv1.ReportTaskServicesResponse, error) {
 	if err := a.canControlAllocation(ctx, req.AllocationId); err != nil {
 		return nil, err
 	}
-	if req.State == taskv1.TaskService_STATE_UNSPECIFIED {
-		return nil, status.Error(codes.InvalidArgument, "state: a service's state is required")
+	snapshot := make([]command.ServiceState, 0, len(req.Services))
+	for _, s := range req.Services {
+		snapshot = append(snapshot, command.ServiceState{Name: s.GetName(), State: s.GetState()})
 	}
-	if _, ok := taskv1.TaskService_State_name[int32(req.State)]; !ok {
-		return nil, status.Errorf(codes.InvalidArgument, "state: unknown state %d", req.State)
-	}
-	if err := command.DefaultCmdService.SetTaskServiceState(
-		model.AllocationID(req.AllocationId), req.Service, req.State,
+	if err := command.DefaultCmdService.SetTaskServiceStates(
+		model.AllocationID(req.AllocationId), req.Sequence, snapshot,
 	); err != nil {
 		return nil, err
 	}
-	return &apiv1.ReportTaskServiceStateResponse{}, nil
+	return &apiv1.ReportTaskServicesResponse{}, nil
 }
