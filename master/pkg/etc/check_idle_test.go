@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -78,6 +79,8 @@ const (
 	checkIdleReportInterval  = "0.05"
 	checkIdleRoundsToObserve = 8
 	checkIdleKernelsPath     = "/api/kernels"
+	checkIdleTerminalsPath   = "/api/terminals"
+	checkIdleSessionsPath    = "/api/sessions"
 )
 
 // checkIdleRounds is what the stand-in JupyterLab answers in each round of checks, one per report:
@@ -86,16 +89,23 @@ var checkIdleRounds = []string{"idle", "idle", "idle", "busy", "busy", "broken",
 
 // checkIdleJupyter stands in for JupyterLab's REST API under its base URL with its token. Each
 // request for the kernels starts a round of checks, which answers as states says, then as after,
-// and answers delay late.
+// and every answer comes delay late. It records the path of every request and when it came.
 type checkIdleJupyter struct {
 	baseURL string
 	states  []string
 	after   string
 	delay   time.Duration
 
-	mu     sync.Mutex
-	rounds int
-	state  string
+	mu       sync.Mutex
+	rounds   int
+	state    string
+	requests []checkIdleRequest
+}
+
+// checkIdleRequest is a request that the stand-in JupyterLab received.
+type checkIdleRequest struct {
+	path string
+	at   time.Time
 }
 
 func (j *checkIdleJupyter) serve(w http.ResponseWriter, r *http.Request) {
@@ -105,6 +115,7 @@ func (j *checkIdleJupyter) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	j.mu.Lock()
+	j.requests = append(j.requests, checkIdleRequest{path: path, at: time.Now()})
 	if path == checkIdleKernelsPath {
 		j.state = j.after
 		if j.rounds < len(j.states) {
@@ -114,7 +125,7 @@ func (j *checkIdleJupyter) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	state := j.state
 	j.mu.Unlock()
-	if path == checkIdleKernelsPath && j.delay > 0 {
+	if j.delay > 0 {
 		select {
 		case <-time.After(j.delay):
 		case <-r.Context().Done():
@@ -139,6 +150,24 @@ func (j *checkIdleJupyter) roundsStarted() int {
 	return j.rounds
 }
 
+// received returns the requests that the stand-in JupyterLab has received.
+func (j *checkIdleJupyter) received() []checkIdleRequest {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return slices.Clone(j.requests)
+}
+
+// roundStarts returns when each round of checks started.
+func (j *checkIdleJupyter) roundStarts() []time.Time {
+	var starts []time.Time
+	for _, r := range j.received() {
+		if r.path == checkIdleKernelsPath {
+			starts = append(starts, r.at)
+		}
+	}
+	return starts
+}
+
 // checkIdleReport is a report that the stand-in master received.
 type checkIdleReport struct {
 	Method, Path string
@@ -150,6 +179,13 @@ type checkIdleMaster struct {
 	mu       sync.Mutex
 	reports  []checkIdleReport
 	arrivals []time.Time
+}
+
+// received returns the reports that the stand-in master has received and when each came.
+func (m *checkIdleMaster) received() ([]checkIdleReport, []time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.reports), slices.Clone(m.arrivals)
 }
 
 func (m *checkIdleMaster) serve(w http.ResponseWriter, r *http.Request) {
@@ -239,6 +275,17 @@ func startCheckIdle(
 	return &checkIdleRun{jupyter: jupyter, master: master, stderr: stderr}
 }
 
+// waitRounds waits until the stand-in JupyterLab has seen n rounds of checks start.
+func (r *checkIdleRun) waitRounds(t *testing.T, n int) {
+	t.Helper()
+	deadline := time.Now().Add(60 * time.Second)
+	for r.jupyter.roundsStarted() < n {
+		require.True(t, time.Now().Before(deadline), "check_idle.py stopped checking: %s",
+			r.stderr.String())
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // runCheckIdle runs check_idle.py with a report interval of checkIdleReportInterval against a
 // stand-in JupyterLab at baseURL that answers as checkIdleRounds says, with the extra environment
 // env, until JupyterLab has answered every round, and returns the reports that reached the master
@@ -295,14 +342,14 @@ func TestCheckIdleReportsNotebookIdle(t *testing.T) {
 	}
 }
 
-// On a shell, check_idle.py reports a busy JupyterLab at a third of the task's idle timeout, at
-// least every second, counted from the start of each round: with a timeout of 3 s, the reports
+// On a shell, check_idle.py reports a busy JupyterLab at a quarter of the task's idle timeout, at
+// least every second, counted from the start of each round: with a timeout of 4 s, the reports
 // reach the master about a second apart, so that its record is touched more often than the
 // timeout. The script runs with the report interval it ships with.
 func TestCheckIdleReportsWithinIdleTimeout(t *testing.T) {
 	run := startCheckIdle(t, &checkIdleJupyter{baseURL: "/proxy/task-1:2900/", after: "busy"}, "",
 		"NOTEBOOK_BASE_URL=/proxy/task-1:2900/", "DET_ACTIVITY_REPORT=task",
-		"NOTEBOOK_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=3")
+		"NOTEBOOK_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=4")
 
 	const (
 		observe = 4 * time.Second
@@ -311,9 +358,7 @@ func TestCheckIdleReportsWithinIdleTimeout(t *testing.T) {
 	var arrivals []time.Time
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		run.master.mu.Lock()
-		arrivals = append([]time.Time{}, run.master.arrivals...)
-		run.master.mu.Unlock()
+		_, arrivals = run.master.received()
 		if len(arrivals) > 1 && arrivals[len(arrivals)-1].Sub(arrivals[0]) >= observe {
 			break
 		}
@@ -327,9 +372,110 @@ func TestCheckIdleReportsWithinIdleTimeout(t *testing.T) {
 	}
 }
 
-// A JupyterLab that answers after check_idle.py's 3 s request timeout is unreadable on a shell, so
-// it is not reported, and is read as it answers on a notebook, which waits for it as before: an
-// idle notebook is reported idle, not active.
+// At a shell's shortest idle timeout, 10 s, a busy kernel keeps the shell alive although every
+// JupyterLab answer takes 2 s: check_idle.py reads only the kernels before it reports, so the
+// reports reach the master less than the timeout apart.
+func TestCheckIdleSlowJupyterShortestTimeout(t *testing.T) {
+	const timeout = 10 * time.Second
+	run := startCheckIdle(t, &checkIdleJupyter{after: "busy", delay: 2 * time.Second}, "",
+		"DET_ACTIVITY_REPORT=task", "NOTEBOOK_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=10")
+
+	var arrivals []time.Time
+	deadline := time.Now().Add(60 * time.Second)
+	for len(arrivals) < 4 {
+		require.True(t, time.Now().Before(deadline), "check_idle.py stopped reporting: %s",
+			run.stderr.String())
+		time.Sleep(50 * time.Millisecond)
+		_, arrivals = run.master.received()
+	}
+	for i := 1; i < len(arrivals); i++ {
+		require.Less(t, arrivals[i].Sub(arrivals[i-1]), timeout, "report %d", i)
+	}
+	for _, r := range run.jupyter.received() {
+		require.Equal(t, checkIdleKernelsPath, r.path)
+	}
+}
+
+// On a shell, check_idle.py reads what the idle type needs and reports as soon as it knows:
+// a busy kernel in activity mode, and a kernel in kernels_or_terminals mode, after the kernels
+// alone; kernel_connections reads only the kernels; the sessions are never read. A notebook reads
+// the kernels, the terminals and the sessions in every round, as before.
+func TestCheckIdleQueriesByIdleType(t *testing.T) {
+	kernels := []string{checkIdleKernelsPath}
+	kernelsTerminals := []string{checkIdleKernelsPath, checkIdleTerminalsPath}
+	all := []string{checkIdleKernelsPath, checkIdleTerminalsPath, checkIdleSessionsPath}
+	shell := "DET_ACTIVITY_REPORT=task"
+	for name, tc := range map[string]struct {
+		idleType, state string
+		notebook        bool
+		wantPaths       []string
+		wantReports     bool
+	}{
+		"activity, busy":                {"activity", "busy", false, kernels, true},
+		"activity, idle":                {"activity", "idle", false, kernelsTerminals, false},
+		"kernel_connections, connected": {"kernel_connections", "busy", false, kernels, true},
+		"kernel_connections, idle":      {"kernel_connections", "idle", false, kernels, false},
+		"kernels_or_terminals, kernel":  {"kernels_or_terminals", "busy", false, kernels, true},
+		"kernels_or_terminals, idle": {
+			"kernels_or_terminals", "idle", false, kernelsTerminals, false,
+		},
+		"notebook, activity, busy":             {"activity", "busy", true, all, true},
+		"notebook, kernel_connections, idle":   {"kernel_connections", "idle", true, all, true},
+		"notebook, kernels_or_terminals, idle": {"kernels_or_terminals", "idle", true, all, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := []string{"NOTEBOOK_IDLE_TYPE=" + tc.idleType}
+			if !tc.notebook {
+				env = append(env, shell)
+			}
+			run := startCheckIdle(t, &checkIdleJupyter{after: tc.state}, checkIdleReportInterval,
+				env...)
+			run.waitRounds(t, 5)
+
+			// The rounds before the last, which may still be under way.
+			received := run.jupyter.received()
+			var rounds [][]string
+			for _, r := range received {
+				if r.path == checkIdleKernelsPath {
+					rounds = append(rounds, nil)
+				}
+				rounds[len(rounds)-1] = append(rounds[len(rounds)-1], r.path)
+			}
+			for i, paths := range rounds[:len(rounds)-1] {
+				require.Equal(t, tc.wantPaths, paths, "round %d", i)
+			}
+			reports, _ := run.master.received()
+			if tc.wantReports {
+				require.GreaterOrEqual(t, len(reports), len(rounds)-1)
+			} else {
+				require.Empty(t, reports)
+			}
+		})
+	}
+}
+
+// On a shell, a JupyterLab request times out after a quarter of the idle timeout when that is
+// shorter than 3 s: with a timeout of 10 s, a JupyterLab that answers after 4 s is unreadable, so
+// it is not reported, and the rounds start 2.5 s apart.
+func TestCheckIdleJupyterTimeoutFollowsInterval(t *testing.T) {
+	run := startCheckIdle(t, &checkIdleJupyter{after: "busy", delay: 4 * time.Second}, "",
+		"DET_ACTIVITY_REPORT=task", "NOTEBOOK_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=10")
+	run.waitRounds(t, 3)
+
+	starts := run.jupyter.roundStarts()
+	for i := 1; i < len(starts); i++ {
+		gap := starts[i].Sub(starts[i-1])
+		require.GreaterOrEqual(t, gap, 2400*time.Millisecond, "round %d", i)
+		require.Less(t, gap, 2900*time.Millisecond, "round %d", i)
+	}
+	reports, _ := run.master.received()
+	require.Empty(t, reports)
+}
+
+// A JupyterLab request past check_idle.py's 3 s request timeout is unreadable on a shell, so it is
+// not reported, and the next round starts on schedule: at once, since the round overran its
+// interval. A notebook waits for the answer as before: an idle notebook is reported idle, not
+// active.
 func TestCheckIdleSlowJupyter(t *testing.T) {
 	const delay = 3500 * time.Millisecond
 	for name, tc := range map[string]struct {
@@ -354,15 +500,15 @@ func TestCheckIdleSlowJupyter(t *testing.T) {
 			run := startCheckIdle(t, &checkIdleJupyter{after: tc.after, delay: delay},
 				checkIdleReportInterval, tc.env...)
 			// The second round starts once the first has ended and its report, if any, is sent.
-			deadline := time.Now().Add(30 * time.Second)
-			for run.jupyter.roundsStarted() < 2 {
-				require.True(t, time.Now().Before(deadline), "check_idle.py stopped checking: %s",
-					run.stderr.String())
-				time.Sleep(10 * time.Millisecond)
+			run.waitRounds(t, 2)
+			reports, _ := run.master.received()
+			require.Equal(t, tc.want, reports)
+			if tc.want == nil {
+				starts := run.jupyter.roundStarts()
+				gap := starts[1].Sub(starts[0])
+				require.GreaterOrEqual(t, gap, 3*time.Second)
+				require.Less(t, gap, delay)
 			}
-			run.master.mu.Lock()
-			defer run.master.mu.Unlock()
-			require.Equal(t, tc.want, run.master.reports)
 		})
 	}
 }

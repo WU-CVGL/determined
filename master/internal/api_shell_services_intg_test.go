@@ -361,8 +361,8 @@ func TestLaunchShellIdleTimeout(t *testing.T) {
 	}
 }
 
-// A shell refuses an idle_timeout shorter than the idle watcher's tick, with or without jupyter,
-// and takes one of exactly that length.
+// A shell refuses an idle_timeout shorter than 10s, with or without jupyter, and takes one of
+// exactly that length.
 func TestLaunchShellIdleTimeoutMinimum(t *testing.T) {
 	api, _, ctx := setupAPITest(t, nil)
 	cs, err := command.NewService(api.m.db, api.m.rm)
@@ -380,14 +380,14 @@ func TestLaunchShellIdleTimeoutMinimum(t *testing.T) {
 			require.NoError(t, err)
 			return api.LaunchShell(ctx, &apiv1.LaunchShellRequest{Config: raw})
 		}
-		for _, timeout := range []string{"1ns", "1s", "4.9s"} {
+		for _, timeout := range []string{"1ns", "1s", "5s", "9.9s"} {
 			_, err := launch(timeout)
 			require.Equal(t, codes.InvalidArgument, status.Code(err), "%s: %v", timeout, err)
-			require.ErrorContains(t, err, "idle_timeout must be at least 5s", timeout)
+			require.ErrorContains(t, err, "idle_timeout must be at least 10s", timeout)
 		}
-		resp, err := launch("5s")
+		resp, err := launch("10s")
 		require.NoError(t, err)
-		require.Equal(t, 5*time.Second,
+		require.Equal(t, 10*time.Second,
 			allocateRequest(t, rm, resp.Shell.Id).IdleTimeout.TimeoutDuration)
 	}
 }
