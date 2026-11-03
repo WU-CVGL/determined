@@ -22,6 +22,7 @@ const ShellTerminal = React.lazy(() => import('pages/ShellTerminal'));
 import SignIn from 'pages/SignIn'; // no React.lazy to avoid e2e ci error
 import SignOut from 'pages/SignOut';
 const TaskResources = React.lazy(() => import('pages/TaskResources'));
+const TaskServiceOpen = React.lazy(() => import('pages/TaskServiceOpen'));
 const TaskLogsWrapper = React.lazy(() =>
   import('pages/TaskLogs').then((module) => ({ default: module.TaskLogsWrapper })),
 );
@@ -63,6 +64,7 @@ const routeComponentMap: Record<string, React.ReactNode> = {
   taskList: <JobsPage key="tasks" tasksOnly />,
   taskLogs: <TaskLogsWrapper />,
   taskResources: <TaskResources />,
+  taskServiceOpen: <TaskServiceOpen />,
   templates: <TemplatesPage />,
   trialDetails: <TrialDetails />,
   uncategorized: <ProjectDetails key="uncategorized" />,

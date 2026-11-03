@@ -30,6 +30,13 @@
 #   is best-effort; the supervisor's scan of the group in /proc/*/stat is the backstop that finds
 #   and stops what is left of the group on any kernel.
 # - Processes that leave the group on purpose (setsid) belong to the container's lifetime.
+# - Each service's state goes to the master: STARTING when it starts, READY when its readiness
+#   check matches, EXITED when it has stopped, or UNAVAILABLE when it exited 127 before it was
+#   READY, as a unit does when its program is missing. One reporter, report_service_states.py, a
+#   child of the supervisor in its own process group, keeps the snapshot of every service's state
+#   and posts it whenever it changes and periodically, so that a master that restarted learns the
+#   states again. A post never holds up a service. The reporter starts before the services and
+#   stops with the supervisor.
 #
 # The image must have bash 5 or later and /proc; without them the supervisor stops before the init.
 
@@ -50,6 +57,8 @@ set -e
 supervisor_units=/run/determined/services
 supervisor_stop_grace_seconds=10
 supervisor_log_drain_seconds=2
+supervisor_report_drain_seconds=2
+supervisor_reporter=/run/determined/report_service_states.py
 
 IFS=, read -r -a supervisor_services <<<"${DET_SERVICES-}"
 if ((${#supervisor_services[@]} == 0)); then
@@ -181,12 +190,70 @@ service_exited() {
     exit "$status"
 }
 
+# The services' states: the supervisor and the readiness checks write lines to a FIFO in
+# supervisor_report_dir, which the reporter reads: "<service> STARTING", "<service> READY", and
+# "<service> EXITED <status>" with the service's exit status, which the reporter turns into
+# UNAVAILABLE for 127 before READY; "- -" stops the reporter. The supervisor keeps the FIFO open
+# for reading and writing, so that a write never blocks on a reader or fails without one, and the
+# reporter sees the end of the FIFO only when the supervisor is gone. Without a FIFO nothing is
+# reported.
+supervisor_report_dir=
+supervisor_report_fd=
+supervisor_report_pid=
+
+# Write the state $2 of the service $1, with its fields, for the reporter.
+report_state() {
+    [[ -n $supervisor_report_fd ]] || return 0
+    printf '%s %s\n' "$1" "$2" >&"$supervisor_report_fd" 2>/dev/null
+}
+
+# Write the exit of the service $1 that has stopped with the status $2.
+report_exit() {
+    report_state "$1" "EXITED $2"
+}
+
+start_reporter() {
+    supervisor_report_dir=$(mktemp -d 2>/dev/null) || supervisor_report_dir=
+    if [[ -z $supervisor_report_dir ]] || ! mkfifo -m 600 "$supervisor_report_dir/states" 2>/dev/null ||
+        ! exec {supervisor_report_fd}<>"$supervisor_report_dir/states"; then
+        [[ -z $supervisor_report_dir ]] || rm -rf "$supervisor_report_dir"
+        supervisor_report_dir=
+        supervisor_report_fd=
+        return 0
+    fi
+    # The reporter gets no descriptor of the FIFO; it opens it for reading.
+    "$DET_PYTHON_EXECUTABLE" "$supervisor_reporter" "$supervisor_report_dir/states" \
+        "${supervisor_services[@]}" {supervisor_report_fd}>&- &
+    supervisor_report_pid=$!
+}
+
+# Stop the reporter once it has posted the last snapshot, or after supervisor_report_drain_seconds:
+# then it is killed, with whatever it started, the deepest process first so that each is reaped,
+# and its group as a last resort.
+stop_reporter() {
+    [[ -n $supervisor_report_pid ]] || return 0
+    report_state - -
+    if ! wait_for_children "$supervisor_report_drain_seconds" "$supervisor_report_pid"; then
+        kill -s TERM "$supervisor_report_pid" 2>/dev/null
+        kill_descendants "$supervisor_report_pid"
+        if ! wait_for_children 1 "$supervisor_report_pid"; then
+            kill_descendants "$supervisor_report_pid"
+            kill -s KILL -- "-$supervisor_report_pid" 2>/dev/null
+        fi
+    fi
+    wait "$supervisor_report_pid" 2>/dev/null
+    exec {supervisor_report_fd}>&-
+    rm -rf "$supervisor_report_dir"
+    supervisor_report_pid=
+}
+
 declare -A service_pids=()
 
 start_service() {
     local name=$1 is_primary=$2
     shift 2
     printf '[%s] start\n' "$name" >&2
+    report_state "$name" STARTING
     (
         # Outlive the service when a stop signals the process group, and end with its status.
         trap service_stop_seen=1 INT TERM HUP
@@ -194,6 +261,11 @@ start_service() {
         exec {service_stdout}>&1 {service_stderr}>&2
         trap service_exited EXIT
         service_ready_args=(--service "$name")
+        if [[ -n $supervisor_report_fd ]]; then
+            # The service gets no descriptor of the supervisor's; the check opens the FIFO.
+            exec {supervisor_report_fd}>&-
+            service_ready_args+=(--report-to "$supervisor_report_dir/states")
+        fi
         if [[ -z $is_primary ]]; then
             service_ready_args+=(--no-post)
         fi
@@ -250,6 +322,7 @@ await_services() {
         for name in "${supervisor_stopping[@]}"; do
             if service_stopped "$name"; then
                 printf '[%s] exited %d\n' "$name" "${service_status[$name]}" >&2
+                report_exit "$name" "${service_status[$name]}"
                 unset "service_pids[$name]" "service_status[$name]"
             else
                 left+=("$name")
@@ -296,6 +369,7 @@ stop_services() {
             service_status[$name]=$?
         fi
         printf '[%s] exited %d\n' "$name" "${service_status[$name]}" >&2
+        report_exit "$name" "${service_status[$name]}"
         unset "service_pids[$name]" "service_status[$name]"
     done
 }
@@ -315,6 +389,7 @@ reap_services() {
                 service_stopped "$name"
                 status=${service_status[$name]}
                 stop_services TERM "" "${supervisor_services[@]}"
+                stop_reporter
                 exit "$status"
             fi
             stop_services TERM 1 "$name"
@@ -330,8 +405,10 @@ trap 'stop_signal=${stop_signal:-INT}' INT
 trap 'stop_signal=${stop_signal:-TERM}' TERM
 trap 'stop_signal=${stop_signal:-HUP}' HUP
 
-# Job control puts each service in its own process group.
+# Job control puts each service, and the reporter, in its own process group.
 set -m
+
+start_reporter
 
 start_service "$supervisor_primary" 1 "$@"
 for supervisor_name in "${supervisor_services[@]:1}"; do
@@ -345,4 +422,5 @@ while [[ -z $stop_signal ]]; do
 done
 
 stop_services "$stop_signal" "" "${supervisor_services[@]}"
+stop_reporter
 exit $((128 + $(kill -l "$stop_signal")))

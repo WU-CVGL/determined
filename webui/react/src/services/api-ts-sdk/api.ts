@@ -746,6 +746,17 @@ export interface StreamResultOfV1TrialsSnapshotResponse {
     error?: RuntimeStreamError;
 }
 /**
+ * How the master proxies a service.   - PROTOCOL_UNSPECIFIED: The protocol is unknown.  - PROTOCOL_TCP: A TCP stream, reached through `det shell open` or a TCP tunnel to the service ID.  - PROTOCOL_HTTP: HTTP and WebSocket requests under the service's URL.
+ * @export
+ * @enum {string}
+ */
+export const TaskServiceProtocol = {
+    UNSPECIFIED: 'PROTOCOL_UNSPECIFIED',
+    TCP: 'PROTOCOL_TCP',
+    HTTP: 'PROTOCOL_HTTP',
+} as const
+export type TaskServiceProtocol = ValueOf<typeof TaskServiceProtocol>
+/**
  * The current state of the task.   - STATE_UNSPECIFIED: The task state is unknown.  - STATE_PULLING: The task's base image is being pulled from the Docker registry.  - STATE_STARTING: The image has been pulled and the task is being started, but the task is not ready yet.  - STATE_RUNNING: The service in the task is running.  - STATE_TERMINATED: The task has exited or has been aborted.  - STATE_TERMINATING: The task has begun to exit.  - STATE_WAITING: The task is waiting on something to complete.  - STATE_QUEUED: Additional state to cover queueing operations.
  * @export
  * @enum {string}
@@ -5081,6 +5092,80 @@ export interface V1GetTaskResponse {
      * @memberof V1GetTaskResponse
      */
     task: V1Task;
+}
+/**
+ * Response to GetTaskServiceCredentialRequest: the fields of the service's credential.
+ * @export
+ * @interface V1GetTaskServiceCredentialResponse
+ */
+export interface V1GetTaskServiceCredentialResponse {
+    /**
+     * The ssh service: the private key that logs in to the task's SSH server.
+     * @type {string}
+     * @memberof V1GetTaskServiceCredentialResponse
+     */
+    privateKey?: string;
+    /**
+     * The ssh service: the public key of the key pair.
+     * @type {string}
+     * @memberof V1GetTaskServiceCredentialResponse
+     */
+    publicKey?: string;
+    /**
+     * The ssh service: the user that the key logs in as.
+     * @type {string}
+     * @memberof V1GetTaskServiceCredentialResponse
+     */
+    user?: string;
+    /**
+     * The jupyter service: the token that JupyterLab accepts as a login.
+     * @type {string}
+     * @memberof V1GetTaskServiceCredentialResponse
+     */
+    token?: string;
+    /**
+     * The jupyter service: the path under the master that opens JupyterLab with the token, "/proxy/<service ID>/?token=<token>".
+     * @type {string}
+     * @memberof V1GetTaskServiceCredentialResponse
+     */
+    url?: string;
+}
+/**
+ * Response to GetTaskServicesRequest.
+ * @export
+ * @interface V1GetTaskServicesResponse
+ */
+export interface V1GetTaskServicesResponse {
+    /**
+     * The id of the task.
+     * @type {string}
+     * @memberof V1GetTaskServicesResponse
+     */
+    taskId: string;
+    /**
+     * The id of the user who owns the task.
+     * @type {number}
+     * @memberof V1GetTaskServicesResponse
+     */
+    userId: number;
+    /**
+     * The id of the workspace of the task.
+     * @type {number}
+     * @memberof V1GetTaskServicesResponse
+     */
+    workspaceId: number;
+    /**
+     * The name of the task's primary service, whose readiness makes the task ready; empty for a task without services.
+     * @type {string}
+     * @memberof V1GetTaskServicesResponse
+     */
+    primary: string;
+    /**
+     * The services of the task, the primary one first. Commands and TensorBoards have none.
+     * @type {Array<V1TaskService>}
+     * @memberof V1GetTaskServicesResponse
+     */
+    services: Array<V1TaskService>;
 }
 /**
  * Response to GetTasksRequest.
@@ -9754,6 +9839,38 @@ export interface V1RendezvousInfo {
 export interface V1ReportCheckpointResponse {
 }
 /**
+ * Report the states of the services of an interactive task: the complete snapshot, with every service of the task exactly once.
+ * @export
+ * @interface V1ReportTaskServicesRequest
+ */
+export interface V1ReportTaskServicesRequest {
+    /**
+     * The id of the allocation.
+     * @type {string}
+     * @memberof V1ReportTaskServicesRequest
+     */
+    allocationId: string;
+    /**
+     * The number of the snapshot. The container increases it whenever a service's state changes and posts the same number again when it re-posts an unchanged snapshot. The master ignores a snapshot whose number is lower than that of the last one it accepted for the task, so a retried or reordered post cannot roll the states back; a master that restarted accepts the next snapshot whatever its number. Must not be negative.
+     * @type {number}
+     * @memberof V1ReportTaskServicesRequest
+     */
+    sequence: number;
+    /**
+     * The state of each service of the task.
+     * @type {Array<V1TaskServiceReport>}
+     * @memberof V1ReportTaskServicesRequest
+     */
+    services: Array<V1TaskServiceReport>;
+}
+/**
+ * Response to ReportTaskServicesRequest.
+ * @export
+ * @interface V1ReportTaskServicesResponse
+ */
+export interface V1ReportTaskServicesResponse {
+}
+/**
  * Persist the given metrics for the trial.
  * @export
  * @interface V1ReportTrialMetricsRequest
@@ -11982,6 +12099,81 @@ export interface V1TaskResourceWarning {
      */
     message: string;
 }
+/**
+ * TaskService is one service of an interactive task, a program that runs in the task's container and that the master proxies, such as the SSH server of a shell or JupyterLab.
+ * @export
+ * @interface V1TaskService
+ */
+export interface V1TaskService {
+    /**
+     * The name of the service, such as "ssh" or "jupyter".
+     * @type {string}
+     * @memberof V1TaskService
+     */
+    name: string;
+    /**
+     * The state of the service.
+     * @type {V1TaskServiceState}
+     * @memberof V1TaskService
+     */
+    state: V1TaskServiceState;
+    /**
+     * The proxy service ID of the service: the task ID for the task's primary service, "<task ID>:<port>" for the others.
+     * @type {string}
+     * @memberof V1TaskService
+     */
+    serviceId: string;
+    /**
+     * How the master proxies the service.
+     * @type {TaskServiceProtocol}
+     * @memberof V1TaskService
+     */
+    protocol: TaskServiceProtocol;
+    /**
+     * The path under the master at which an HTTP service is reached, "/proxy/<service ID>/"; empty for a TCP service.
+     * @type {string}
+     * @memberof V1TaskService
+     */
+    url: string;
+    /**
+     * Whether the user who asked may connect to the service and read its credential: the task's owner and admins may.
+     * @type {boolean}
+     * @memberof V1TaskService
+     */
+    mayConnect: boolean;
+}
+/**
+ * The state of one service in a ReportTaskServicesRequest.
+ * @export
+ * @interface V1TaskServiceReport
+ */
+export interface V1TaskServiceReport {
+    /**
+     * The name of the service.
+     * @type {string}
+     * @memberof V1TaskServiceReport
+     */
+    name: string;
+    /**
+     * The state of the service. STATE_UNSPECIFIED is not a state to report.
+     * @type {V1TaskServiceState}
+     * @memberof V1TaskServiceReport
+     */
+    state: V1TaskServiceState;
+}
+/**
+ * The state of a service, as the task's container reports it to the master.   - STATE_UNSPECIFIED: The container has not reported the service's state since the task or the master started.  - STATE_STARTING: The service is starting.  - STATE_READY: The service accepts connections.  - STATE_EXITED: The service has exited, or the task has ended.  - STATE_UNAVAILABLE: The service cannot run in the task's image, for example because its program is not installed.
+ * @export
+ * @enum {string}
+ */
+export const V1TaskServiceState = {
+    UNSPECIFIED: 'STATE_UNSPECIFIED',
+    STARTING: 'STATE_STARTING',
+    READY: 'STATE_READY',
+    EXITED: 'STATE_EXITED',
+    UNAVAILABLE: 'STATE_UNAVAILABLE',
+} as const
+export type V1TaskServiceState = ValueOf<typeof V1TaskServiceState>
 /**
  * Type of the task - TASK_TYPE_UNSPECIFIED: The task type is unknown  - TASK_TYPE_TRIAL: "TRIAL" task type for the enum public.task_type in Postgres.  - TASK_TYPE_NOTEBOOK: "NOTEBOOK" task type for the enum public.task_type in Postgres.  - TASK_TYPE_SHELL: "SHELL" task type for the enum public.task_type in Postgres.  - TASK_TYPE_COMMAND: "COMMAND" task type for the enum public.task_type in Postgres.  - TASK_TYPE_TENSORBOARD: "TENSORBOARD" task type for the enum public.task_type in Postgres.  - TASK_TYPE_CHECKPOINT_GC: "CHECKPOINT_GC" task type for the enum public.task_type in Postgres.  - TASK_TYPE_GENERIC: "GENERIC" task type for the enum public.task_type in Postgres.
  * @export
@@ -22822,6 +23014,50 @@ export const InternalApiFetchParamCreator = function (configuration?: Configurat
         },
         /**
          * 
+         * @summary Report the state of every service of an interactive task. The task's container posts the complete snapshot of its services' states whenever one changes and again periodically; the master replaces the task's states with each snapshot it accepts. Only the task's own container, its owner and admins may report it.
+         * @param {string} allocationId The id of the allocation.
+         * @param {V1ReportTaskServicesRequest} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        reportTaskServices(allocationId: string, body: V1ReportTaskServicesRequest, options: any = {}): FetchArgs {
+            // verify required parameter 'allocationId' is not null or undefined
+            if (allocationId === null || allocationId === undefined) {
+                throw new RequiredError('allocationId','Required parameter allocationId was null or undefined when calling reportTaskServices.');
+            }
+            // verify required parameter 'body' is not null or undefined
+            if (body === null || body === undefined) {
+                throw new RequiredError('body','Required parameter body was null or undefined when calling reportTaskServices.');
+            }
+            const localVarPath = `/api/v1/allocations/{allocationId}/services`
+                .replace(`{${"allocationId"}}`, encodeURIComponent(String(allocationId)));
+            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
+            const localVarRequestOptions = { method: 'POST', ...options };
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+            
+            // authentication BearerToken required
+            if (configuration && configuration.apiKey) {
+                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
+                    ? configuration.apiKey("Authorization")
+                    : configuration.apiKey;
+                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
+            }
+            
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            
+            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
+            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
+            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
+            localVarRequestOptions.body = JSON.stringify(body)
+            
+            return {
+                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @summary Record metrics for specified trial.
          * @param {number} metricsTrialId The trial associated with these metrics.
          * @param {V1ReportTrialMetricsRequest} body
@@ -24795,6 +25031,26 @@ export const InternalApiFp = function (configuration?: Configuration) {
         },
         /**
          * 
+         * @summary Report the state of every service of an interactive task. The task's container posts the complete snapshot of its services' states whenever one changes and again periodically; the master replaces the task's states with each snapshot it accepts. Only the task's own container, its owner and admins may report it.
+         * @param {string} allocationId The id of the allocation.
+         * @param {V1ReportTaskServicesRequest} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        reportTaskServices(allocationId: string, body: V1ReportTaskServicesRequest, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1ReportTaskServicesResponse> {
+            const localVarFetchArgs = InternalApiFetchParamCreator(configuration).reportTaskServices(allocationId, body, options);
+            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
+                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                        return response.json();
+                    } else {
+                        throw response;
+                    }
+                });
+            };
+        },
+        /**
+         * 
          * @summary Record metrics for specified trial.
          * @param {number} metricsTrialId The trial associated with these metrics.
          * @param {V1ReportTrialMetricsRequest} body
@@ -25801,6 +26057,17 @@ export const InternalApiFactory = function (configuration?: Configuration, fetch
         },
         /**
          * 
+         * @summary Report the state of every service of an interactive task. The task's container posts the complete snapshot of its services' states whenever one changes and again periodically; the master replaces the task's states with each snapshot it accepts. Only the task's own container, its owner and admins may report it.
+         * @param {string} allocationId The id of the allocation.
+         * @param {V1ReportTaskServicesRequest} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        reportTaskServices(allocationId: string, body: V1ReportTaskServicesRequest, options?: any) {
+            return InternalApiFp(configuration).reportTaskServices(allocationId, body, options)(fetch, basePath);
+        },
+        /**
+         * 
          * @summary Record metrics for specified trial.
          * @param {number} metricsTrialId The trial associated with these metrics.
          * @param {V1ReportTrialMetricsRequest} body
@@ -26771,6 +27038,19 @@ export class InternalApi extends BaseAPI {
      */
     public reportCheckpoint(body: V1Checkpoint, options?: any) {
         return InternalApiFp(this.configuration).reportCheckpoint(body, options)(this.fetch, this.basePath)
+    }
+    
+    /**
+     * 
+     * @summary Report the state of every service of an interactive task. The task's container posts the complete snapshot of its services' states whenever one changes and again periodically; the master replaces the task's states with each snapshot it accepts. Only the task's own container, its owner and admins may report it.
+     * @param {string} allocationId The id of the allocation.
+     * @param {V1ReportTaskServicesRequest} body
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof InternalApi
+     */
+    public reportTaskServices(allocationId: string, body: V1ReportTaskServicesRequest, options?: any) {
+        return InternalApiFp(this.configuration).reportTaskServices(allocationId, body, options)(this.fetch, this.basePath)
     }
     
     /**
@@ -32078,6 +32358,84 @@ export const TasksApiFetchParamCreator = function (configuration?: Configuration
         },
         /**
          * 
+         * @summary Get the credential of a service of an interactive task: the SSH key pair and login user of the ssh service, the token and URL of the jupyter service. Only the task's owner and admins may read it; an admin's read of another user's credential is logged.
+         * @param {string} taskId The id of the task.
+         * @param {string} service The name of the service.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getTaskServiceCredential(taskId: string, service: string, options: any = {}): FetchArgs {
+            // verify required parameter 'taskId' is not null or undefined
+            if (taskId === null || taskId === undefined) {
+                throw new RequiredError('taskId','Required parameter taskId was null or undefined when calling getTaskServiceCredential.');
+            }
+            // verify required parameter 'service' is not null or undefined
+            if (service === null || service === undefined) {
+                throw new RequiredError('service','Required parameter service was null or undefined when calling getTaskServiceCredential.');
+            }
+            const localVarPath = `/api/v1/tasks/{taskId}/services/{service}/credential`
+                .replace(`{${"taskId"}}`, encodeURIComponent(String(taskId)))
+                .replace(`{${"service"}}`, encodeURIComponent(String(service)));
+            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
+            const localVarRequestOptions = { method: 'GET', ...options };
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+            
+            // authentication BearerToken required
+            if (configuration && configuration.apiKey) {
+                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
+                    ? configuration.apiKey("Authorization")
+                    : configuration.apiKey;
+                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
+            }
+            
+            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
+            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
+            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
+            
+            return {
+                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary Get the services of an interactive task and their states. Whoever may see the task may list its services; the list holds no credentials.
+         * @param {string} taskId The id of the task.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getTaskServices(taskId: string, options: any = {}): FetchArgs {
+            // verify required parameter 'taskId' is not null or undefined
+            if (taskId === null || taskId === undefined) {
+                throw new RequiredError('taskId','Required parameter taskId was null or undefined when calling getTaskServices.');
+            }
+            const localVarPath = `/api/v1/tasks/{taskId}/services`
+                .replace(`{${"taskId"}}`, encodeURIComponent(String(taskId)));
+            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
+            const localVarRequestOptions = { method: 'GET', ...options };
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+            
+            // authentication BearerToken required
+            if (configuration && configuration.apiKey) {
+                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
+                    ? configuration.apiKey("Authorization")
+                    : configuration.apiKey;
+                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
+            }
+            
+            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
+            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
+            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
+            
+            return {
+                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @summary Kill a generic task and its descendants, or its whole tree from the root.
          * @param {string} taskId The id of the task.
          * @param {V1KillGenericTaskRequest} body
@@ -32536,6 +32894,45 @@ export const TasksApiFp = function (configuration?: Configuration) {
         },
         /**
          * 
+         * @summary Get the credential of a service of an interactive task: the SSH key pair and login user of the ssh service, the token and URL of the jupyter service. Only the task's owner and admins may read it; an admin's read of another user's credential is logged.
+         * @param {string} taskId The id of the task.
+         * @param {string} service The name of the service.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getTaskServiceCredential(taskId: string, service: string, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetTaskServiceCredentialResponse> {
+            const localVarFetchArgs = TasksApiFetchParamCreator(configuration).getTaskServiceCredential(taskId, service, options);
+            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
+                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                        return response.json();
+                    } else {
+                        throw response;
+                    }
+                });
+            };
+        },
+        /**
+         * 
+         * @summary Get the services of an interactive task and their states. Whoever may see the task may list its services; the list holds no credentials.
+         * @param {string} taskId The id of the task.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getTaskServices(taskId: string, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetTaskServicesResponse> {
+            const localVarFetchArgs = TasksApiFetchParamCreator(configuration).getTaskServices(taskId, options);
+            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
+                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                        return response.json();
+                    } else {
+                        throw response;
+                    }
+                });
+            };
+        },
+        /**
+         * 
          * @summary Kill a generic task and its descendants, or its whole tree from the root.
          * @param {string} taskId The id of the task.
          * @param {V1KillGenericTaskRequest} body
@@ -32761,6 +33158,27 @@ export const TasksApiFactory = function (configuration?: Configuration, fetch?: 
         },
         /**
          * 
+         * @summary Get the credential of a service of an interactive task: the SSH key pair and login user of the ssh service, the token and URL of the jupyter service. Only the task's owner and admins may read it; an admin's read of another user's credential is logged.
+         * @param {string} taskId The id of the task.
+         * @param {string} service The name of the service.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getTaskServiceCredential(taskId: string, service: string, options?: any) {
+            return TasksApiFp(configuration).getTaskServiceCredential(taskId, service, options)(fetch, basePath);
+        },
+        /**
+         * 
+         * @summary Get the services of an interactive task and their states. Whoever may see the task may list its services; the list holds no credentials.
+         * @param {string} taskId The id of the task.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getTaskServices(taskId: string, options?: any) {
+            return TasksApiFp(configuration).getTaskServices(taskId, options)(fetch, basePath);
+        },
+        /**
+         * 
          * @summary Kill a generic task and its descendants, or its whole tree from the root.
          * @param {string} taskId The id of the task.
          * @param {V1KillGenericTaskRequest} body
@@ -32956,6 +33374,31 @@ export class TasksApi extends BaseAPI {
      */
     public getTasks(options?: any) {
         return TasksApiFp(this.configuration).getTasks(options)(this.fetch, this.basePath)
+    }
+    
+    /**
+     * 
+     * @summary Get the credential of a service of an interactive task: the SSH key pair and login user of the ssh service, the token and URL of the jupyter service. Only the task's owner and admins may read it; an admin's read of another user's credential is logged.
+     * @param {string} taskId The id of the task.
+     * @param {string} service The name of the service.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof TasksApi
+     */
+    public getTaskServiceCredential(taskId: string, service: string, options?: any) {
+        return TasksApiFp(this.configuration).getTaskServiceCredential(taskId, service, options)(this.fetch, this.basePath)
+    }
+    
+    /**
+     * 
+     * @summary Get the services of an interactive task and their states. Whoever may see the task may list its services; the list holds no credentials.
+     * @param {string} taskId The id of the task.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof TasksApi
+     */
+    public getTaskServices(taskId: string, options?: any) {
+        return TasksApiFp(this.configuration).getTaskServices(taskId, options)(this.fetch, this.basePath)
     }
     
     /**

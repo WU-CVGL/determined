@@ -10,6 +10,7 @@ import os
 import pathlib
 import re
 import urllib
+import webbrowser
 from typing import IO, Any, Dict, Iterable, List, Optional, Tuple, Union
 
 import termcolor
@@ -457,6 +458,11 @@ def launch_command(
         body["workspaceId"] = workspace_id
 
     return sess.post(endpoint, json=body).json()
+
+
+def open_in_browser(master: str, path: str) -> None:
+    """Open a path under the master in the browser."""
+    webbrowser.open(f"{master}/{path.lstrip('/')}")
 
 
 def make_interactive_task_url(
