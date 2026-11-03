@@ -44,7 +44,9 @@ jupyter_ready_check() {
 
 # The group makes the log helper a child of this shell rather than of JupyterLab.
 {
+    # A busy port fails the service: Jupyter Server would move off it, but the master proxies it.
     jupyter lab --ServerApp.port=${NOTEBOOK_PORT} \
+        --ServerApp.port_retries=0 \
         --ServerApp.allow_origin="*" \
         --ServerApp.base_url="${NOTEBOOK_BASE_URL:-/proxy/${DET_TASK_ID}/}" \
         --ServerApp.allow_root=True \

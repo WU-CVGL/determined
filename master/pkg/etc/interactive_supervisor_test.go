@@ -875,6 +875,7 @@ exit 0
 	logFormat := "%(levelname)s: [%(name)s] %(message)s"
 	want := []string{
 		"lab", "--ServerApp.port=2900",
+		"--ServerApp.port_retries=0",
 		"--ServerApp.allow_origin=*",
 		"--ServerApp.base_url=" + task.baseURL,
 		"--ServerApp.allow_root=True",
