@@ -486,6 +486,14 @@ func TestVSCodeUnitUnavailable(t *testing.T) {
 			},
 		},
 		{
+			name: "release before session-socket",
+			line: "vscode service: needs code-server 4.14.1 or later, not 4.14.0",
+			setup: func(v *vscodeTask) {
+				v.env = append(v.env, "DET_CODE_SERVER_VERSION=4.14.0")
+				v.master.serveCodeServerRelease(t, "4.14.0", "download", false)
+			},
+		},
+		{
 			name: "old glibc",
 			line: "vscode service: code-server needs glibc 2.28 or later, found 2.17",
 			setup: func(v *vscodeTask) {

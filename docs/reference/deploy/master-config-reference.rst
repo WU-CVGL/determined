@@ -1911,7 +1911,7 @@ leaves nothing in ``dir``, and the next request downloads again.
 The code-server release that the master downloads, as ``<major>.<minor>.<patch>``. Required. The
 master downloads only this release, and tarballs of earlier releases left in ``dir`` stay available
 to the tasks that use them. Requests for other releases that are not in ``dir`` are answered with
-``404``.
+``404``. The ``vscode`` service supports code-server 4.14.1 and later.
 
 ``dir``
 -------

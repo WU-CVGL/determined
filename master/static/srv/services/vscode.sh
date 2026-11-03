@@ -30,8 +30,14 @@ vscode_unavailable() {
 
 vscode_version=${DET_CODE_SERVER_VERSION-}
 vscode_port=${DET_CODE_SERVER_PORT-}
-if [[ ! $vscode_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+if [[ ! $vscode_version =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
     vscode_unavailable "DET_CODE_SERVER_VERSION is not a release: \"$vscode_version\""
+fi
+# The config file sets session-socket, which code-server has since 4.14.1; earlier releases refuse
+# to start with it.
+if ((10#${BASH_REMATCH[1]} < 4 || (10#${BASH_REMATCH[1]} == 4 && (10#${BASH_REMATCH[2]} < 14 ||
+    (10#${BASH_REMATCH[2]} == 14 && 10#${BASH_REMATCH[3]} < 1))))); then
+    vscode_unavailable "needs code-server 4.14.1 or later, not $vscode_version"
 fi
 if [[ ! $vscode_port =~ ^[0-9]+$ ]]; then
     vscode_unavailable "DET_CODE_SERVER_PORT is not a port: \"$vscode_port\""
