@@ -205,29 +205,47 @@ func (s *Service) getAuthLevel(c echo.Context) int {
 // ProcessAuthentication is a middleware processing function that attempts
 // to authenticate incoming HTTP requests.
 func (s *Service) ProcessAuthentication(next echo.HandlerFunc) echo.HandlerFunc {
+	authenticated := s.RequireAuthentication(next)
 	return func(c echo.Context) error {
 		if s.getAuthLevel(c) == authNone {
 			return next(c)
 		}
+		return authenticated(c)
+	}
+}
 
-		user, session, err := s.UserAndSessionFromRequest(c.Request())
-		switch err {
-		case nil:
-			if !user.Active {
-				return echo.NewHTTPError(http.StatusForbidden, "user not active")
-			}
-
-			// Set data on the request context that might be useful to
-			// event handlers.
-			c.(*detContext.DetContext).SetUser(*user)
-			c.(*detContext.DetContext).SetUserSession(*session)
-			return next(c)
-		case db.ErrNotFound, ErrAccessTokenRevoked, ErrRemoteUserTokenExpired:
-			// The session has ended, or the access token was revoked (by a new password, for one).
-			return echo.NewHTTPError(http.StatusUnauthorized)
-		default:
+// RequireAuthentication authenticates every request the way ProcessAuthentication authenticates
+// the routes that need it. It is the route middleware of the routes under paths that
+// ProcessAuthentication exempts, such as /det/.
+func (s *Service) RequireAuthentication(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		if err := s.Authenticate(c); err != nil {
 			return err
 		}
+		return next(c)
+	}
+}
+
+// Authenticate sets the user and the user session of the request on c, or returns the error that
+// RequireAuthentication answers the request with.
+func (s *Service) Authenticate(c echo.Context) error {
+	user, session, err := s.UserAndSessionFromRequest(c.Request())
+	switch err {
+	case nil:
+		if !user.Active {
+			return echo.NewHTTPError(http.StatusForbidden, "user not active")
+		}
+
+		// Set data on the request context that might be useful to
+		// event handlers.
+		c.(*detContext.DetContext).SetUser(*user)
+		c.(*detContext.DetContext).SetUserSession(*session)
+		return nil
+	case db.ErrNotFound, ErrAccessTokenRevoked, ErrRemoteUserTokenExpired:
+		// The session has ended, or the access token was revoked (by a new password, for one).
+		return echo.NewHTTPError(http.StatusUnauthorized)
+	default:
+		return err
 	}
 }
 
