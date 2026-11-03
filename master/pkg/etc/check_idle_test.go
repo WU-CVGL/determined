@@ -213,8 +213,11 @@ type checkIdleReport struct {
 	Body         map[string]any
 }
 
-// checkIdleMaster records the reports that come with the allocation token, and when they came.
+// checkIdleMaster records the reports that come with the allocation token, and when they came, and
+// answers each delay later.
 type checkIdleMaster struct {
+	delay time.Duration
+
 	mu       sync.Mutex
 	reports  []checkIdleReport
 	arrivals []time.Time
@@ -238,6 +241,13 @@ func (m *checkIdleMaster) serve(w http.ResponseWriter, r *http.Request) {
 	m.reports = append(m.reports, checkIdleReport{Method: r.Method, Path: r.URL.Path, Body: body})
 	m.arrivals = append(m.arrivals, time.Now())
 	m.mu.Unlock()
+	if m.delay > 0 {
+		select {
+		case <-time.After(m.delay):
+		case <-r.Context().Done():
+			return
+		}
+	}
 	_, _ = w.Write([]byte("{}"))
 }
 
@@ -254,6 +264,15 @@ type checkIdleRun struct {
 // interval is replaced by it; otherwise the script runs as the master ships it.
 func startCheckIdle(
 	t *testing.T, jupyter *checkIdleJupyter, interval string, env ...string,
+) *checkIdleRun {
+	t.Helper()
+	return startCheckIdleWith(t, jupyter, &checkIdleMaster{}, interval, env...)
+}
+
+// startCheckIdleWith is startCheckIdle with the stand-in master master.
+func startCheckIdleWith(
+	t *testing.T, jupyter *checkIdleJupyter, master *checkIdleMaster, interval string,
+	env ...string,
 ) *checkIdleRun {
 	t.Helper()
 	if out, err := exec.Command("python3", "-c", "import requests").CombinedOutput(); err != nil {
@@ -290,7 +309,6 @@ func startCheckIdle(
 	t.Cleanup(jupyterSrv.Close)
 	jupyterURL, err := url.Parse(jupyterSrv.URL)
 	require.NoError(t, err)
-	master := &checkIdleMaster{}
 	masterSrv := httptest.NewServer(http.HandlerFunc(master.serve))
 	t.Cleanup(masterSrv.Close)
 
@@ -398,6 +416,7 @@ func TestCheckIdleReportsWithinIdleTimeout(t *testing.T) {
 	const (
 		observe = 4 * time.Second
 		maxGap  = 1500 * time.Millisecond
+		meanGap = 1200 * time.Millisecond
 	)
 	var arrivals []time.Time
 	deadline := time.Now().Add(30 * time.Second)
@@ -414,14 +433,21 @@ func TestCheckIdleReportsWithinIdleTimeout(t *testing.T) {
 	for i := 1; i < len(arrivals); i++ {
 		require.LessOrEqual(t, arrivals[i].Sub(arrivals[i-1]), maxGap, "report %d", i)
 	}
+	// On average a second apart, not a third of the timeout.
+	span := arrivals[len(arrivals)-1].Sub(arrivals[0])
+	require.Less(t, span, time.Duration(len(arrivals)-1)*meanGap, "%d reports", len(arrivals))
 }
 
 // At a shell's shortest idle timeout, 10 s, a busy kernel keeps the shell alive although every
-// JupyterLab answer takes 2 s: check_idle.py reads only the kernels before it reports, so the
-// reports reach the master less than the timeout apart.
+// JupyterLab answer takes 2 s: the rounds start 2.5 s apart and check_idle.py reads only the
+// kernels before it reports, so the reports reach the master at most the interval and one answer
+// apart.
 func TestCheckIdleSlowJupyterShortestTimeout(t *testing.T) {
-	const timeout = 10 * time.Second
-	run := startCheckIdle(t, &checkIdleJupyter{after: "busy", delay: 2 * time.Second}, "",
+	const (
+		interval = 2500 * time.Millisecond
+		delay    = 2 * time.Second
+	)
+	run := startCheckIdle(t, &checkIdleJupyter{after: "busy", delay: delay}, "",
 		"DET_ACTIVITY_REPORT=task", "NOTEBOOK_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=10")
 
 	var arrivals []time.Time
@@ -433,10 +459,35 @@ func TestCheckIdleSlowJupyterShortestTimeout(t *testing.T) {
 		_, arrivals = run.master.received()
 	}
 	for i := 1; i < len(arrivals); i++ {
-		require.Less(t, arrivals[i].Sub(arrivals[i-1]), timeout, "report %d", i)
+		require.Less(t, arrivals[i].Sub(arrivals[i-1]), interval+delay, "report %d", i)
+	}
+	starts := run.jupyter.roundStarts()
+	for i := 1; i < len(starts); i++ {
+		gap := starts[i].Sub(starts[i-1])
+		require.GreaterOrEqual(t, gap, 2400*time.Millisecond, "round %d", i)
+		require.Less(t, gap, 2900*time.Millisecond, "round %d", i)
 	}
 	for _, r := range run.jupyter.received() {
 		require.Equal(t, checkIdleKernelsPath, r.path)
+	}
+}
+
+// On a shell, the activity report gives up after a quarter of the idle timeout when that is
+// shorter than 10 s: with a timeout of 10 s, a master that answers after 4 s still receives every
+// report, and the next round starts 2.5 s after the report was sent.
+func TestCheckIdleSlowMaster(t *testing.T) {
+	run := startCheckIdleWith(t, &checkIdleJupyter{after: "busy"},
+		&checkIdleMaster{delay: 4 * time.Second}, "",
+		"DET_ACTIVITY_REPORT=task", "NOTEBOOK_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=10")
+	run.waitRounds(t, 4)
+
+	starts := run.jupyter.roundStarts()
+	_, arrivals := run.master.received()
+	require.GreaterOrEqual(t, len(arrivals), len(starts)-1)
+	for i := 1; i < len(starts); i++ {
+		gap := starts[i].Sub(arrivals[i-1])
+		require.GreaterOrEqual(t, gap, 2400*time.Millisecond, "round %d", i)
+		require.Less(t, gap, 2900*time.Millisecond, "round %d", i)
 	}
 }
 
