@@ -1885,12 +1885,12 @@ Configures what the master provides to interactive tasks.
 ``code_server``
 ===============
 
-The code-server releases that the master serves to tasks on ``/det/code-server/<version>/<file>``.
-``<file>`` is ``code-server-<version>-linux-<arch>.tar.gz`` or that name followed by ``.sha256``,
-for the architectures ``amd64`` and ``arm64``. Requests need the session of any user, sent as a
-bearer token or in the session cookie; a task may instead send its allocation token,
-``DET_SESSION_TOKEN``, as a bearer token. Without this section, the master serves no code-server
-files.
+The code-server releases that the master serves to tasks on ``/det/code-server/<version>/<file>``,
+for the ``vscode`` service of shells (see :ref:`vscode-browser`). ``<file>`` is
+``code-server-<version>-linux-<arch>.tar.gz`` or that name followed by ``.sha256``, for the
+architectures ``amd64`` and ``arm64``. Requests need the session of any user, sent as a bearer token
+or in the session cookie; a task may instead send its allocation token, ``DET_SESSION_TOKEN``, as a
+bearer token. Without this section, the master serves no code-server files.
 
 On the first request for a tarball of ``version`` that is not in ``dir``, the master downloads it
 from ``url_template``, checks it against ``sha256``, and stores it in ``dir`` together with a
@@ -1911,7 +1911,7 @@ leaves nothing in ``dir``, and the next request downloads again.
 The code-server release that the master downloads, as ``<major>.<minor>.<patch>``. Required. The
 master downloads only this release, and tarballs of earlier releases left in ``dir`` stay available
 to the tasks that use them. Requests for other releases that are not in ``dir`` are answered with
-``404``.
+``404``. The ``vscode`` service supports code-server 4.14.1 and later.
 
 ``dir``
 -------

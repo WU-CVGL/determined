@@ -118,8 +118,12 @@ message GetTaskServiceCredentialResponse {
   // The jupyter service: the token that JupyterLab accepts as a login.
   optional string token = 4;
   // The jupyter service: the path under the master that opens JupyterLab
-  // with the token, "/proxy/<service ID>/?token=<token>".
+  // with the token, "/proxy/<service ID>/?token=<token>". The vscode service:
+  // the path under the master at which code-server serves,
+  // "/proxy/<service ID>/", whose login form "<url>login" takes the password.
   optional string url = 5;
+  // The vscode service: the password of code-server's login form.
+  optional string password = 6;
 }
 
 // Request task resource measurements for a bounded Unix-time range.
