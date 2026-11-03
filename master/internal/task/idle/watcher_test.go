@@ -119,6 +119,19 @@ func TestIdleTimeoutWatcherUseTaskActivityHeld(t *testing.T) {
 	require.GreaterOrEqual(t, fired.Load().Sub(released), timeout)
 }
 
+// A held task is never timed out, however short its timeout.
+func TestIdleTimeoutWatcherUseTaskActivityHeldTinyTimeout(t *testing.T) {
+	const taskID = model.TaskID("held-tiny")
+	fired := registerTaskWatcher(t, taskID, time.Nanosecond)
+
+	release := Hold(taskID)
+	time.Sleep(20 * TickInterval)
+	require.Nil(t, fired.Load())
+
+	release()
+	require.True(t, waitForCondition(time.Second, func() bool { return fired.Load() != nil }))
+}
+
 func TestIdleTimeoutWatcherUseTaskActivityTouched(t *testing.T) {
 	const taskID = model.TaskID("touched")
 	timeout := 200 * time.Millisecond
