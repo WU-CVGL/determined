@@ -233,7 +233,7 @@ def services(args: argparse.Namespace) -> None:
             s.name,
             s.state.value.replace("STATE_", ""),
             s.serviceId,
-            f"{args.master}{s.url}" if s.url else "",
+            f"{args.master.rstrip('/')}{s.url}" if s.url else "",
         ]
         for s in resp.services
     ]

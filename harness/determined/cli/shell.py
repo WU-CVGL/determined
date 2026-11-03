@@ -24,6 +24,9 @@ def add_services(config: Dict[str, Any], services: List[str]) -> None:
     if not services:
         return
     declared = config.get("services") or {}
+    if not isinstance(declared, dict):
+        # The master's validation answers for a malformed config.
+        return
     for name in services:
         declared.setdefault(name, {})
     config["services"] = declared

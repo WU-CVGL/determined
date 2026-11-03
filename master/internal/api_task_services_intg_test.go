@@ -282,9 +282,10 @@ func TestReportTaskServices(t *testing.T) {
 			taskv1.TaskService_STATE_EXITED
 	}, 10*time.Second, 50*time.Millisecond)
 	require.Equal(t, exited, serviceStatesOf(s.services(adminCtx, t, taskID)))
+	// A late snapshot changes nothing: the allocation session goes with the allocation, so the
+	// post is refused as unauthenticated, or ignored if the session is still there.
 	err = report(ownSession, 7, all(taskv1.TaskService_STATE_READY, taskv1.TaskService_STATE_READY))
-	require.NotContains(t, []codes.Code{codes.PermissionDenied, codes.InvalidArgument},
-		status.Code(err))
+	require.Contains(t, []codes.Code{codes.OK, codes.Unauthenticated}, status.Code(err))
 	require.Equal(t, exited, serviceStatesOf(s.services(adminCtx, t, taskID)))
 
 	// A master without the command, as after a restart once the task has ended, lists them from
