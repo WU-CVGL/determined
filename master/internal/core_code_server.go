@@ -355,7 +355,7 @@ func (a *codeServerArtifacts) download(arch, path string) (err error) {
 	}
 	resp, err := a.client.Do(req)
 	if err != nil {
-		return codeServerUpstreamError(err)
+		return codeServerUpstreamError(rawURL, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
@@ -376,7 +376,7 @@ func (a *codeServerArtifacts) download(arch, path string) (err error) {
 	h := sha256.New()
 	if _, err := io.Copy(io.MultiWriter(f, h), resp.Body); err != nil {
 		_ = f.Close()
-		return codeServerUpstreamError(err)
+		return codeServerUpstreamError(rawURL, err)
 	}
 	if err := syncAndClose(f); err != nil {
 		return err
@@ -395,16 +395,18 @@ func (a *codeServerArtifacts) download(arch, path string) (err error) {
 	return writeChecksumFile(path, sum)
 }
 
-// codeServerUpstreamError describes an error of the HTTP client by the operation, the URL in its
-// redacted form, and the class of the error. It leaves out the error's text, which can quote a URL
-// with credentials, such as that of a redirect's Location header that does not parse.
-func codeServerUpstreamError(err error) error {
+// codeServerUpstreamError describes an error of the HTTP client's request to rawURL by the
+// operation, rawURL in its redacted form, and the class of the error. It leaves out the error's
+// text and its URL, which can be that of a redirect chosen by the upstream, with credentials in its
+// path or in a Location header that does not parse.
+func codeServerUpstreamError(rawURL string, err error) error {
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
-		return fmt.Errorf("%w: %s %s: %s", errCodeServerUpstream, urlErr.Op, redactURL(urlErr.URL),
+		return fmt.Errorf("%w: %s %s: %s", errCodeServerUpstream, urlErr.Op, redactURL(rawURL),
 			codeServerErrorClass(urlErr.Err))
 	}
-	return fmt.Errorf("%w: %s", errCodeServerUpstream, codeServerErrorClass(err))
+	return fmt.Errorf("%w: %s: %s", errCodeServerUpstream, redactURL(rawURL),
+		codeServerErrorClass(err))
 }
 
 // codeServerErrorClass names the class of err by its type, and whether it is a timeout.

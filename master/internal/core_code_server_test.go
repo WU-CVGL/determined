@@ -382,6 +382,15 @@ func TestCodeServerUpstreamErrorsRedactURL(t *testing.T) {
 	})
 }
 
+// captureLog records the entries of the standard logger until the test ends.
+func captureLog(t *testing.T) *logrustest.Hook {
+	hook := &logrustest.Hook{}
+	hooks := log.StandardLogger().ReplaceHooks(log.LevelHooks{})
+	log.AddHook(hook)
+	t.Cleanup(func() { log.StandardLogger().ReplaceHooks(hooks) })
+	return hook
+}
+
 // TestCodeServerUpstreamErrorOmitsInnerText checks that a download error, as returned and as
 // logged, does not carry the text of the HTTP client's error, which can quote a URL with
 // credentials, such as a redirect's Location header that does not parse.
@@ -391,10 +400,7 @@ func TestCodeServerUpstreamErrorOmitsInnerText(t *testing.T) {
 		w.Header().Set("Location", "/%zz?token="+secret)
 		w.WriteHeader(http.StatusFound)
 	}, nil)
-	hook := &logrustest.Hook{}
-	hooks := log.StandardLogger().ReplaceHooks(log.LevelHooks{})
-	log.AddHook(hook)
-	t.Cleanup(func() { log.StandardLogger().ReplaceHooks(hooks) })
+	hook := captureLog(t)
 
 	err := cst.artifacts.prepare(testCodeServerVersion, "amd64")
 	require.ErrorIs(t, err, errCodeServerUpstream)
@@ -412,6 +418,37 @@ func TestCodeServerUpstreamErrorOmitsInnerText(t *testing.T) {
 		require.NotContains(t, line, "token=")
 		if strings.Contains(line, "serving code-server 4.144.0 for amd64") {
 			require.Contains(t, line, "code-server download failed")
+			logged = true
+		}
+	}
+	require.True(t, logged, "the download error is logged")
+	require.Empty(t, cst.files(t))
+}
+
+// TestCodeServerUpstreamErrorOmitsRedirectURL checks that a download error names the configured
+// URL, not that of a redirect, whose path the upstream chooses and can carry a token.
+func TestCodeServerUpstreamErrorOmitsRedirectURL(t *testing.T) {
+	const secret = "secret-path-dummy"
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close()
+	cst := newCodeServerTest(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, closed.URL+"/"+secret+"/x.tar.gz", http.StatusFound)
+	}, nil)
+	hook := captureLog(t)
+
+	err := cst.artifacts.prepare(testCodeServerVersion, "amd64")
+	require.ErrorIs(t, err, errCodeServerUpstream)
+	require.Contains(t, err.Error(), "/code-server-4.144.0-linux-amd64.tar.gz: ")
+	require.NotContains(t, err.Error(), secret)
+
+	rec := cst.get("/det/code-server/4.144.0/" + testCodeServerAMD64)
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	logged := false
+	for _, e := range hook.AllEntries() {
+		line, lineErr := e.String()
+		require.NoError(t, lineErr)
+		require.NotContains(t, line, secret)
+		if strings.Contains(line, "serving code-server 4.144.0 for amd64") {
 			logged = true
 		}
 	}
