@@ -109,14 +109,23 @@ To list a shell's services with their states and addresses:
 
 A service is ``UNSPECIFIED`` until the shell reports its state, which also takes a short time after
 the master restarts. It is ``STARTING``, then ``READY``; ``EXITED`` once it has stopped, or
-``UNAVAILABLE`` when its program is not in the image (see :ref:`shell-image-requirements`). A
-service other than the SSH server can stop without ending the shell.
+``UNAVAILABLE`` when its program is not in the image or cannot be installed (see
+:ref:`shell-image-requirements`). A service other than the SSH server can stop without ending the
+shell.
 
 To open JupyterLab in the browser once it is ``READY``:
 
 .. code::
 
    det task open <shell id> jupyter
+
+To start a shell with VS Code in the browser, the ``vscode`` service, and open it (see
+:ref:`vscode-browser`):
+
+.. code::
+
+   det shell start --service vscode
+   det task open <shell id> vscode
 
 Only the user who started the shell and administrators can open its services.
 
@@ -131,6 +140,8 @@ A shell's image needs:
 -  bash 5 or later.
 -  ``/proc``.
 -  ``jupyter`` on the ``PATH``, for the ``jupyter`` service.
+-  glibc 2.28 or later, for the ``vscode`` service; and to install code-server from the master,
+   ``tar``, ``flock`` and a writable home directory (see :ref:`vscode-browser`).
 
 The default images provide them. When one is missing, the task log names it.
 
