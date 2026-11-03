@@ -5,6 +5,7 @@ package command
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/rm/tasklist"
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/internal/task"
+	"github.com/determined-ai/determined/master/internal/task/tasklogger"
 	"github.com/determined-ai/determined/master/pkg/aproto"
 	"github.com/determined-ai/determined/master/pkg/cproto"
 	"github.com/determined-ai/determined/master/pkg/device"
@@ -126,6 +128,10 @@ func restartWithQueuedTask(
 		_ = task.DefaultService.Detach(shell.allocationID)
 		_ = tasklist.GroupPriorityChangeRegistry.Delete(shell.jobID)
 	})
+	if taskType == model.TaskTypeNotebook {
+		// The restore ends a notebook (TestRestoreNotebookEnded), so it does not stay queued.
+		return restored, restartedRM, q
+	}
 	require.NoError(t, internaldb.CloseOpenAllocations(
 		context.Background(), task.DefaultService.GetAllAllocationIDs(),
 	))
@@ -146,6 +152,87 @@ func restartWithQueuedTask(
 	require.Nil(t, row.StartTime)
 	require.Nil(t, row.EndTime)
 	return restored, restartedRM, q
+}
+
+// taskLogs is a task log backend that keeps the logs it gets.
+type taskLogs struct {
+	mu   sync.Mutex
+	logs []*model.TaskLog
+}
+
+func (w *taskLogs) AddTaskLogs(logs []*model.TaskLog) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.logs = append(w.logs, logs...)
+	return nil
+}
+
+// of returns the lines of the logs of the task taskID.
+func (w *taskLogs) of(taskID model.TaskID) []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var lines []string
+	for _, l := range w.logs {
+		if l.TaskID == string(taskID) {
+			lines = append(lines, l.Log)
+		}
+	}
+	return lines
+}
+
+// withTaskLogs makes the master's task logs go to a new taskLogs until the test ends.
+func withTaskLogs(t *testing.T) *taskLogs {
+	logs := &taskLogs{}
+	tasklogger.SetDefaultLogger(tasklogger.New(logs))
+	t.Cleanup(func() { tasklogger.SetDefaultLogger(nil) })
+	return logs
+}
+
+// The master ends a notebook that it restores, which nothing else could end, with one line in its
+// task log, after it restored it with its proxies and its watch of the proxy; a restored shell keeps
+// running.
+func TestRestoreNotebookEnded(t *testing.T) {
+	logs := withTaskLogs(t)
+	notebook, restartedRM, _ := restartWithQueuedTask(t, time.Now().UTC().Add(-time.Hour),
+		model.TaskTypeNotebook, model.JobTypeNotebook, func(req *CreateGeneric) {
+			req.Spec.Base.ExtraProxyPorts = expconf.ProxyPortsConfig{
+				{RawProxyPort: 2950, RawDefaultServiceID: ptrs.Ptr(true)},
+			}
+			req.Spec.Config.IdleTimeout = ptrs.Ptr(model.Duration(30 * time.Minute))
+			req.Spec.WatchProxyIdleTimeout = true
+		})
+	taskID := string(notebook.taskID)
+	var allocated []sproto.AllocateRequest
+	for _, call := range restartedRM.Calls {
+		if call.Method == "Allocate" {
+			allocated = append(allocated, call.Arguments.Get(0).(sproto.AllocateRequest))
+		}
+	}
+	require.Len(t, allocated, 1)
+	require.Equal(t, []*sproto.ProxyPortConfig{{ServiceID: taskID, Port: 2950, TLS: true}},
+		allocated[0].ProxyPorts)
+	require.Equal(t, &sproto.IdleTimeoutConfig{
+		ServiceID: taskID, UseProxyState: true, TimeoutDuration: 30 * time.Minute,
+	}, allocated[0].IdleTimeout)
+	require.Eventually(t, func() bool {
+		return !slices.Contains(task.DefaultService.GetAllAllocationIDs(), notebook.allocationID)
+	}, 5*time.Second, 10*time.Millisecond)
+	// The master's line, once, besides the allocation's own lines about its end.
+	const line = "notebooks are not supported: ended at the master's start\n"
+	require.Eventually(t, func() bool { return slices.Contains(logs.of(notebook.taskID), line) },
+		5*time.Second, 10*time.Millisecond)
+	n := 0
+	for _, l := range logs.of(notebook.taskID) {
+		if l == line {
+			n++
+		}
+	}
+	require.Equal(t, 1, n, "%q", logs.of(notebook.taskID))
+
+	shell, _, _ := restartWithQueuedShell(t, time.Now().UTC().Add(-time.Hour))
+	time.Sleep(200 * time.Millisecond)
+	require.Contains(t, task.DefaultService.GetAllAllocationIDs(), shell.allocationID)
+	require.NotContains(t, logs.of(shell.taskID), line)
 }
 
 // A shell that waits for resources when the master stops still waits after the master restarts,
