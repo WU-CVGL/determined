@@ -21,6 +21,9 @@ const (
 	ActivityReportEnvVar = "DET_ACTIVITY_REPORT"
 	// ActivityReportTask is the value of ActivityReportEnvVar for the task's activity record.
 	ActivityReportTask = "task"
+	// IdleTimeoutSecondsEnvVar is the task's idle timeout in seconds, at a fraction of which
+	// JupyterLab's idle check reports to its task's activity record.
+	IdleTimeoutSecondsEnvVar = "DET_IDLE_TIMEOUT_SECONDS"
 )
 
 // InteractiveService is one service of an interactive task, as GenericCommandSpec.Services

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
+	"time"
 
 	petname "github.com/dustinkirkland/golang-petname"
 	"github.com/pkg/errors"
@@ -393,7 +394,7 @@ func jupyterService(port int) tasks.InteractiveService {
 // range, which does not overlap sshd's, outside the spec's other ports, its environment and its
 // files, which it returns. The command service adds its token, and Command.Start its base URL.
 // When the shell's idle time is watched, JupyterLab's idle check reports to the task's activity
-// record.
+// record, more often than the idle timeout.
 func addShellJupyter(spec *tasks.GenericCommandSpec) (archive.Archive, error) {
 	key, cert, err := proxy.GenSignedCert()
 	if err != nil {
@@ -415,6 +416,8 @@ func addShellJupyter(spec *tasks.GenericCommandSpec) (archive.Archive, error) {
 	if spec.Config.IdleTimeout != nil {
 		env[tasks.NotebookIdleTypeEnvVar] = spec.Config.NotebookIdleType
 		env[tasks.ActivityReportEnvVar] = tasks.ActivityReportTask
+		env[tasks.IdleTimeoutSecondsEnvVar] = strconv.FormatFloat(
+			time.Duration(*spec.Config.IdleTimeout).Seconds(), 'f', -1, 64)
 	}
 	addExtraEnvVars(spec, env)
 	return jupyterFiles(spec.Base.AgentUserGroup, key, cert), nil

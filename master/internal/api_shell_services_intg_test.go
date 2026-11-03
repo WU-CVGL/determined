@@ -196,6 +196,7 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 	// Nor does JupyterLab's idle check run.
 	require.NotContains(t, env, tasks.NotebookIdleTypeEnvVar)
 	require.NotContains(t, env, tasks.ActivityReportEnvVar)
+	require.NotContains(t, env, tasks.IdleTimeoutSecondsEnvVar)
 
 	// JupyterLab's token is a notebook session of the owner.
 	require.NotEmpty(t, env[model.NotebookSessionEnvVar])
@@ -263,6 +264,7 @@ func TestLaunchShellWithoutExtraServices(t *testing.T) {
 			for _, key := range []string{
 				model.NotebookSessionEnvVar, "NOTEBOOK_PORT", "NOTEBOOK_CONFIG", "NOTEBOOK_BASE_URL",
 				tasks.NotebookIdleTypeEnvVar, tasks.ActivityReportEnvVar,
+				tasks.IdleTimeoutSecondsEnvVar,
 			} {
 				require.NotContains(t, env, key)
 			}
@@ -277,7 +279,8 @@ func TestLaunchShellWithoutExtraServices(t *testing.T) {
 }
 
 // A shell with an idle timeout is watched through its task's activity record, with or without
-// extra services; with jupyter, JupyterLab's idle check reports there with the config's idle type.
+// extra services; with jupyter, JupyterLab's idle check reports there with the config's idle type
+// and the timeout.
 func TestLaunchShellIdleTimeout(t *testing.T) {
 	api, _, ctx := setupAPITest(t, nil)
 	cs, err := command.NewService(api.m.db, api.m.rm)
@@ -312,10 +315,12 @@ func TestLaunchShellIdleTimeout(t *testing.T) {
 			if services == nil {
 				require.NotContains(t, env, tasks.NotebookIdleTypeEnvVar)
 				require.NotContains(t, env, tasks.ActivityReportEnvVar)
+				require.NotContains(t, env, tasks.IdleTimeoutSecondsEnvVar)
 				return
 			}
 			require.Equal(t, model.NotebookIdleTypeActivity, env[tasks.NotebookIdleTypeEnvVar])
 			require.Equal(t, tasks.ActivityReportTask, env[tasks.ActivityReportEnvVar])
+			require.Equal(t, "2700", env[tasks.IdleTimeoutSecondsEnvVar])
 		})
 	}
 }
@@ -424,6 +429,7 @@ func TestLaunchNotebookProxiesUnchanged(t *testing.T) {
 	require.Equal(t, "/proxy/"+taskID+"/", env["NOTEBOOK_BASE_URL"])
 	require.Equal(t, model.NotebookIdleTypeKernelsOrTerminals, env["NOTEBOOK_IDLE_TYPE"])
 	require.NotContains(t, env, tasks.ActivityReportEnvVar)
+	require.NotContains(t, env, tasks.IdleTimeoutSecondsEnvVar)
 	require.Len(t, notebookSessions(t, taskID), 1)
 	paths := containerFilePaths(spec)
 	requireOncePerPath(t, paths)

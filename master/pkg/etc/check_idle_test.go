@@ -38,7 +38,7 @@ class TaskSession:
         self.master = master
         self.token = token
 
-    def _send(self, method, path, json):
+    def _send(self, method, path, json, timeout):
         request = urllib.request.Request(
             self.master + path,
             data=_json.dumps(json).encode(),
@@ -49,14 +49,14 @@ class TaskSession:
             },
         )
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(request, timeout=5) as response:
+        with opener.open(request, timeout=timeout) as response:
             response.read()
 
-    def post(self, path, json=None):
-        self._send("POST", path, json)
+    def post(self, path, json=None, timeout=None):
+        self._send("POST", path, json, timeout)
 
-    def put(self, path, json=None):
-        self._send("PUT", path, json)
+    def put(self, path, json=None, timeout=None):
+        self._send("PUT", path, json, timeout)
 `,
 	"determined/common/api/authentication.py": `import os
 
@@ -85,9 +85,11 @@ const (
 var checkIdleRounds = []string{"idle", "idle", "idle", "busy", "busy", "broken", "broken", "broken"}
 
 // checkIdleJupyter stands in for JupyterLab's REST API under its base URL with its token. Each
-// request for the kernels starts a round of checks.
+// request for the kernels starts a round of checks, which answers as states says, then as after.
 type checkIdleJupyter struct {
 	baseURL string
+	states  []string
+	after   string
 
 	mu     sync.Mutex
 	rounds int
@@ -102,9 +104,9 @@ func (j *checkIdleJupyter) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	j.mu.Lock()
 	if path == checkIdleKernelsPath {
-		j.state = "idle"
-		if j.rounds < len(checkIdleRounds) {
-			j.state = checkIdleRounds[j.rounds]
+		j.state = j.after
+		if j.rounds < len(j.states) {
+			j.state = j.states[j.rounds]
 		}
 		j.rounds++
 	}
@@ -134,10 +136,11 @@ type checkIdleReport struct {
 	Body         map[string]any
 }
 
-// checkIdleMaster records the reports that come with the allocation token.
+// checkIdleMaster records the reports that come with the allocation token, and when they came.
 type checkIdleMaster struct {
-	mu      sync.Mutex
-	reports []checkIdleReport
+	mu       sync.Mutex
+	reports  []checkIdleReport
+	arrivals []time.Time
 }
 
 func (m *checkIdleMaster) serve(w http.ResponseWriter, r *http.Request) {
@@ -149,15 +152,25 @@ func (m *checkIdleMaster) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	m.mu.Lock()
 	m.reports = append(m.reports, checkIdleReport{Method: r.Method, Path: r.URL.Path, Body: body})
+	m.arrivals = append(m.arrivals, time.Now())
 	m.mu.Unlock()
 	_, _ = w.Write([]byte("{}"))
 }
 
-// runCheckIdle runs check_idle.py under the system python3 with the stand-in determined package,
-// against a stand-in JupyterLab at baseURL, with the extra environment env, until JupyterLab has
-// answered every round of checkIdleRounds, and returns the reports that reached the master by
-// then.
-func runCheckIdle(t *testing.T, baseURL string, env ...string) []checkIdleReport {
+// checkIdleRun is a running check_idle.py with its stand-ins.
+type checkIdleRun struct {
+	jupyter *checkIdleJupyter
+	master  *checkIdleMaster
+	stderr  *syncBuffer
+}
+
+// startCheckIdle starts check_idle.py under the system python3 with the stand-in determined
+// package, against a stand-in JupyterLab at baseURL, which answers as jupyter's states and after
+// say, with the extra environment env, until the test ends. With interval set, the script's report
+// interval is replaced by it; otherwise the script runs as the master ships it.
+func startCheckIdle(
+	t *testing.T, jupyter *checkIdleJupyter, interval string, env ...string,
+) *checkIdleRun {
 	t.Helper()
 	if out, err := exec.Command("python3", "-c", "import requests").CombinedOutput(); err != nil {
 		t.Skipf("python3 with requests is not installed: %v %s", err, out)
@@ -171,25 +184,26 @@ func runCheckIdle(t *testing.T, baseURL string, env ...string) []checkIdleReport
 	}
 	script := staticScript(t, NotebookIdleCheckResource)
 	require.Contains(t, script, "\nREPORT_IDLE_INTERVAL = 30\n")
-	script = strings.Replace(script, "\nREPORT_IDLE_INTERVAL = 30\n",
-		"\nREPORT_IDLE_INTERVAL = "+checkIdleReportInterval+"\n", 1)
+	if interval != "" {
+		script = strings.Replace(script, "\nREPORT_IDLE_INTERVAL = 30\n",
+			"\nREPORT_IDLE_INTERVAL = "+interval+"\n", 1)
+	}
 	scriptPath := filepath.Join(dir, "check_idle.py")
 	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o600))
 
-	jupyter := &checkIdleJupyter{baseURL: baseURL}
-	if baseURL == "" {
+	if jupyter.baseURL == "" {
 		jupyter.baseURL = "/proxy/task-1/"
 	}
 	jupyterSrv := httptest.NewUnstartedServer(http.HandlerFunc(jupyter.serve))
 	// check_idle.py first waits for the port with a plain connection, which ends without TLS.
 	jupyterSrv.Config.ErrorLog = log.New(io.Discard, "", 0)
 	jupyterSrv.StartTLS()
-	defer jupyterSrv.Close()
+	t.Cleanup(jupyterSrv.Close)
 	jupyterURL, err := url.Parse(jupyterSrv.URL)
 	require.NoError(t, err)
 	master := &checkIdleMaster{}
 	masterSrv := httptest.NewServer(http.HandlerFunc(master.serve))
-	defer masterSrv.Close()
+	t.Cleanup(masterSrv.Close)
 
 	cmd := exec.Command("python3", scriptPath) //nolint:gosec
 	// The task's environment only: no proxy reaches the stand-ins.
@@ -205,23 +219,37 @@ func runCheckIdle(t *testing.T, baseURL string, env ...string) []checkIdleReport
 		"NOTEBOOK_PORT=" + jupyterURL.Port(),
 		"NOTEBOOK_IDLE_TYPE=kernels_or_terminals",
 	}, env...)
-	var stderr syncBuffer
-	cmd.Stderr = &stderr
+	stderr := &syncBuffer{}
+	cmd.Stderr = stderr
 	require.NoError(t, cmd.Start())
-	defer func() {
+	// Registered last, so it runs before the stand-ins close.
+	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
-	}()
+	})
+	return &checkIdleRun{jupyter: jupyter, master: master, stderr: stderr}
+}
+
+// runCheckIdle runs check_idle.py with a report interval of checkIdleReportInterval against a
+// stand-in JupyterLab at baseURL that answers as checkIdleRounds says, with the extra environment
+// env, until JupyterLab has answered every round, and returns the reports that reached the master
+// by then.
+func runCheckIdle(t *testing.T, baseURL string, env ...string) []checkIdleReport {
+	t.Helper()
+	run := startCheckIdle(t, &checkIdleJupyter{
+		baseURL: baseURL, states: checkIdleRounds, after: "idle",
+	}, checkIdleReportInterval, env...)
 
 	// Once the next round has started, the report of the last observed one has reached the master.
 	deadline := time.Now().Add(30 * time.Second)
-	for jupyter.roundsStarted() <= checkIdleRoundsToObserve {
-		require.True(t, time.Now().Before(deadline), "check_idle.py stopped checking: %s", stderr.String())
+	for run.jupyter.roundsStarted() <= checkIdleRoundsToObserve {
+		require.True(t, time.Now().Before(deadline), "check_idle.py stopped checking: %s",
+			run.stderr.String())
 		time.Sleep(10 * time.Millisecond)
 	}
-	master.mu.Lock()
-	defer master.mu.Unlock()
-	return append([]checkIdleReport{}, master.reports...)
+	run.master.mu.Lock()
+	defer run.master.mu.Unlock()
+	return append([]checkIdleReport{}, run.master.reports...)
 }
 
 // On a shell, check_idle.py checks JupyterLab under its base URL and reports a busy JupyterLab to
@@ -255,5 +283,37 @@ func TestCheckIdleReportsNotebookIdle(t *testing.T) {
 			}
 			require.Equal(t, []any{true, true, true, false, false, false, false, false}, idle)
 		})
+	}
+}
+
+// On a shell, check_idle.py reports a busy JupyterLab at a third of the task's idle timeout, at
+// least every second, counted from the start of each round: with a timeout of 3 s, the reports
+// reach the master about a second apart, so that its record is touched more often than the
+// timeout. The script runs with the report interval it ships with.
+func TestCheckIdleReportsWithinIdleTimeout(t *testing.T) {
+	run := startCheckIdle(t, &checkIdleJupyter{baseURL: "/proxy/task-1:2900/", after: "busy"}, "",
+		"NOTEBOOK_BASE_URL=/proxy/task-1:2900/", "DET_ACTIVITY_REPORT=task",
+		"NOTEBOOK_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=3")
+
+	const (
+		observe = 4 * time.Second
+		maxGap  = 1500 * time.Millisecond
+	)
+	var arrivals []time.Time
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		run.master.mu.Lock()
+		arrivals = append([]time.Time{}, run.master.arrivals...)
+		run.master.mu.Unlock()
+		if len(arrivals) > 1 && arrivals[len(arrivals)-1].Sub(arrivals[0]) >= observe {
+			break
+		}
+		require.True(t, time.Now().Before(deadline), "check_idle.py stopped reporting: %s",
+			run.stderr.String())
+		time.Sleep(50 * time.Millisecond)
+	}
+	require.GreaterOrEqual(t, len(arrivals), 5, "a report about every second over %s", observe)
+	for i := 1; i < len(arrivals); i++ {
+		require.LessOrEqual(t, arrivals[i].Sub(arrivals[i-1]), maxGap, "report %d", i)
 	}
 }
