@@ -315,8 +315,8 @@ def run_command(session: api.Session) -> str:
     return cmd.id
 
 
-def start_notebook(sess: api.Session) -> str:
-    return detproc.check_output(sess, ["det", "notebook", "start", "-d"]).strip()
+def start_shell(sess: api.Session) -> str:
+    return detproc.check_output(sess, ["det", "shell", "start", "-d"]).strip()
 
 
 def start_tensorboard(sess: api.Session, experiment_id: int) -> str:
@@ -340,24 +340,24 @@ def delete_experiments(sess: api.Session, *experiment_ids: int) -> None:
         eids.remove(experiment_id)
 
 
-def kill_notebooks(sess: api.Session, *notebook_ids: str) -> None:
-    nids = set(notebook_ids)
-    while nids:
+def kill_shells(sess: api.Session, *shell_ids: str) -> None:
+    sids = set(shell_ids)
+    while sids:
         output = extract_columns(
-            detproc.check_output(sess, ["det", "notebook", "list", "-a"]), [0, 3]
+            detproc.check_output(sess, ["det", "shell", "list", "-a"]), [0, 3]
         )  # id, state
 
         # Get set of running IDs.
         running_ids = {task_id for task_id, state in output if state == "RUNNING"}
 
-        intersection = running_ids & nids
+        intersection = running_ids & sids
         if not intersection:
             time.sleep(0.5)
             continue
 
-        notebook_id = intersection.pop()
-        detproc.check_output(sess, ["det", "notebook", "kill", notebook_id])
-        nids.remove(notebook_id)
+        shell_id = intersection.pop()
+        detproc.check_output(sess, ["det", "shell", "kill", shell_id])
+        sids.remove(shell_id)
 
 
 def kill_tensorboards(sess: api.Session, *tensorboard_ids: str) -> None:
@@ -380,28 +380,28 @@ def kill_tensorboards(sess: api.Session, *tensorboard_ids: str) -> None:
 
 
 @pytest.mark.e2e_cpu
-def test_notebook_creation_and_listing() -> None:
+def test_shell_creation_and_listing() -> None:
     sess1, _ = api_utils.create_test_user()
     sess2, _ = api_utils.create_test_user()
 
-    notebook_id1 = start_notebook(sess1)
+    shell_id1 = start_shell(sess1)
 
-    notebook_id2 = start_notebook(sess2)
+    shell_id2 = start_shell(sess2)
 
     # Listing should only give us user 2's experiment.
-    output = extract_columns(detproc.check_output(sess2, ["det", "notebook", "list"]), [0, 1])
+    output = extract_columns(detproc.check_output(sess2, ["det", "shell", "list"]), [0, 1])
 
-    output = extract_columns(detproc.check_output(sess1, ["det", "notebook", "list"]), [0, 1])
-    assert (notebook_id1, sess1.username) in output
-    assert (notebook_id2, sess2.username) not in output
+    output = extract_columns(detproc.check_output(sess1, ["det", "shell", "list"]), [0, 1])
+    assert (shell_id1, sess1.username) in output
+    assert (shell_id2, sess2.username) not in output
 
     # Now test listing all.
-    output = extract_columns(detproc.check_output(sess1, ["det", "notebook", "list", "-a"]), [0, 1])
-    assert (notebook_id1, sess1.username) in output
-    assert (notebook_id2, sess2.username) in output
+    output = extract_columns(detproc.check_output(sess1, ["det", "shell", "list", "-a"]), [0, 1])
+    assert (shell_id1, sess1.username) in output
+    assert (shell_id2, sess2.username) in output
 
     # Clean up, killing experiments.
-    kill_notebooks(api_utils.admin_session(), notebook_id1, notebook_id2)
+    kill_shells(api_utils.admin_session(), shell_id1, shell_id2)
 
 
 @pytest.mark.e2e_cpu

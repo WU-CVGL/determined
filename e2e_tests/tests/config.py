@@ -36,7 +36,7 @@ SCIM_USERNAME = "determined"
 SCIM_PASSWORD = "password"
 
 ALL_NTSC = set(api.NTSC_Kind.__members__.values())
-PROXIED_NTSC = {api.NTSC_Kind.notebook, api.NTSC_Kind.tensorboard}
+PROXIED_NTSC = {api.NTSC_Kind.tensorboard}
 
 DEFAULT_RM_CLUSTER_NAME = "defaultrm"
 DEFAULT_RM_KUBECONFIG = "/tmp/defaultrm-kubeconf"

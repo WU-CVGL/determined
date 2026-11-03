@@ -62,9 +62,9 @@ def interactive_command(sess: api.Session, args: List[str]) -> Iterator[_Interac
 
     Example usage:
 
-    with util.interactive_command(sess, ["notebook", "start"]) as notebook:
-        for line in notebook.stdout:
-            if "Jupyter Notebook is running" in line:
+    with util.interactive_command(sess, ["cmd", "run", "sleep 10s"]) as sleep_cmd:
+        for line in sleep_cmd.stdout:
+            if "have started" in line:
                 break
     """
 
@@ -112,7 +112,7 @@ def get_command(sess: api.Session, command_id: str) -> Any:
 
 
 def get_command_config(sess: api.Session, command_type: str, task_id: str) -> str:
-    assert command_type in ["command", "notebook", "shell"]
+    assert command_type in ["command", "shell"]
     command = ["det", "-m", conf.make_master_url(), command_type, "config", task_id]
     env = os.environ.copy()
     env["DET_DEBUG"] = "true"

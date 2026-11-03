@@ -1,10 +1,11 @@
 import functools
+import time
 import uuid
 from typing import Any, Callable, Dict, Optional, Sequence, Tuple, TypeVar
 
 import pytest
 
-from determined.common import api
+from determined.common import api, util
 from determined.common.api import authentication, bindings, certs, errors
 from determined.experimental import client
 from tests import config as conf
@@ -87,12 +88,7 @@ def launch_ntsc(
     exp_id: Optional[int] = None,
     template: Optional[str] = None,
 ) -> api.AnyNTSC:
-    if typ == api.NTSC_Kind.notebook:
-        return bindings.post_LaunchNotebook(
-            session,
-            body=bindings.v1LaunchNotebookRequest(workspaceId=workspace_id, templateName=template),
-        ).notebook
-    elif typ == api.NTSC_Kind.tensorboard:
+    if typ == api.NTSC_Kind.tensorboard:
         experiment_ids = [exp_id] if exp_id else []
         return bindings.post_LaunchTensorboard(
             session,
@@ -121,9 +117,7 @@ def launch_ntsc(
 
 
 def kill_ntsc(session: api.Session, typ: api.NTSC_Kind, ntsc_id: str) -> None:
-    if typ == api.NTSC_Kind.notebook:
-        bindings.post_KillNotebook(session, notebookId=ntsc_id)
-    elif typ == api.NTSC_Kind.tensorboard:
+    if typ == api.NTSC_Kind.tensorboard:
         bindings.post_KillTensorboard(session, tensorboardId=ntsc_id)
     elif typ == api.NTSC_Kind.shell:
         bindings.post_KillShell(session, shellId=ntsc_id)
@@ -134,11 +128,7 @@ def kill_ntsc(session: api.Session, typ: api.NTSC_Kind, ntsc_id: str) -> None:
 
 
 def set_prio_ntsc(session: api.Session, typ: api.NTSC_Kind, ntsc_id: str, prio: int) -> None:
-    if typ == api.NTSC_Kind.notebook:
-        bindings.post_SetNotebookPriority(
-            session, notebookId=ntsc_id, body=bindings.v1SetNotebookPriorityRequest(priority=prio)
-        )
-    elif typ == api.NTSC_Kind.tensorboard:
+    if typ == api.NTSC_Kind.tensorboard:
         bindings.post_SetTensorboardPriority(
             session,
             tensorboardId=ntsc_id,
@@ -159,9 +149,7 @@ def set_prio_ntsc(session: api.Session, typ: api.NTSC_Kind, ntsc_id: str, prio: 
 def list_ntsc(
     session: api.Session, typ: api.NTSC_Kind, workspace_id: Optional[int] = None
 ) -> Sequence[api.AnyNTSC]:
-    if typ == api.NTSC_Kind.notebook:
-        return bindings.get_GetNotebooks(session, workspaceId=workspace_id).notebooks
-    elif typ == api.NTSC_Kind.tensorboard:
+    if typ == api.NTSC_Kind.tensorboard:
         return bindings.get_GetTensorboards(session, workspaceId=workspace_id).tensorboards
     elif typ == api.NTSC_Kind.shell:
         return bindings.get_GetShells(session, workspaceId=workspace_id).shells
@@ -169,6 +157,53 @@ def list_ntsc(
         return bindings.get_GetCommands(session, workspaceId=workspace_id).commands
     else:
         raise ValueError("unknown type")
+
+
+def launch_shell_with_jupyter(session: api.Session, workspace_id: int) -> bindings.v1Shell:
+    return bindings.post_LaunchShell(
+        session,
+        body=bindings.v1LaunchShellRequest(
+            workspaceId=workspace_id, config={"services": {"jupyter": {}}}
+        ),
+    ).shell
+
+
+def wait_for_service_ready(
+    session: api.Session, task_id: str, name: str, timeout: int = 300
+) -> bindings.v1TaskService:
+    """Wait for a service of an interactive task to accept connections and return it."""
+
+    def get_service() -> Tuple[bool, Optional[bindings.v1TaskService]]:
+        services = bindings.get_GetTaskServices(session, taskId=task_id).services
+        service = next((s for s in services if s.name == name), None)
+        if service is not None and service.state in (
+            bindings.v1TaskServiceState.EXITED,
+            bindings.v1TaskServiceState.UNAVAILABLE,
+        ):
+            raise AssertionError(f"service {name} of task {task_id} is {service.state.value}")
+        return service is not None and service.state == bindings.v1TaskServiceState.READY, service
+
+    service = util.wait_for(get_service, timeout=timeout, interval=1)
+    assert service is not None
+    return service
+
+
+def get_jupyter_page(session: api.Session, task_id: str) -> str:
+    """Return the page of a task's jupyter service, opened through the master's proxy."""
+    service = wait_for_service_ready(session, task_id, "jupyter")
+    cred = bindings.get_GetTaskServiceCredential(session, taskId=task_id, service="jupyter")
+    assert cred.token, f"no jupyter token for task {task_id}"
+    for _ in range(30):
+        try:
+            r = session.get(service.url.lstrip("/"), params={"token": cred.token})
+        except errors.APIException as e:
+            # The master registers the proxy shortly after the service reports it is ready.
+            if e.status_code not in (404, 502):
+                raise
+            time.sleep(1)
+            continue
+        return r.text
+    raise AssertionError(f"the jupyter service of task {task_id} did not answer")
 
 
 F = TypeVar("F", bound=Callable)

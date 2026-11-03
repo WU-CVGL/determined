@@ -149,7 +149,7 @@ def run_zero_slot_command(sess: api.Session, sleep: int) -> str:
     return run_command(sess, sleep=sleep, slots=0)
 
 
-TaskType = Literal["command", "notebook", "tensorboard", "shell"]
+TaskType = Literal["command", "tensorboard", "shell"]
 
 
 def get_task_info(sess: api.Session, task_type: TaskType, task_id: str) -> Dict[str, Any]:
