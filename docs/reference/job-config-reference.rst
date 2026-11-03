@@ -191,6 +191,8 @@ The following configuration settings are supported:
 
    -  ``ssh``: The SSH server, which every shell runs.
 
+   A service's port is chosen outside the ports of ``environment.proxy_ports``.
+
    For example, a shell that also runs JupyterLab:
 
    .. code:: yaml
