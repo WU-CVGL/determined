@@ -369,3 +369,61 @@ message TaskLog {
   // The output stream (e.g. stdout, stderr).
   optional string stdtype = 11;
 }
+
+// TaskService is one service of an interactive task, a program that runs in
+// the task's container and that the master proxies, such as the SSH server of
+// a shell or JupyterLab.
+message TaskService {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: {
+      required: [
+        "name",
+        "state",
+        "service_id",
+        "protocol",
+        "url",
+        "may_connect"
+      ]
+    }
+  };
+  // The state of a service, as the task's container reports it to the master.
+  enum State {
+    // The container has not reported the service's state since the task or
+    // the master started.
+    STATE_UNSPECIFIED = 0;
+    // The service is starting.
+    STATE_STARTING = 1;
+    // The service accepts connections.
+    STATE_READY = 2;
+    // The service has exited, or the task has ended.
+    STATE_EXITED = 3;
+    // The service cannot run in the task's image, for example because its
+    // program is not installed.
+    STATE_UNAVAILABLE = 4;
+  }
+  // How the master proxies a service.
+  enum Protocol {
+    // The protocol is unknown.
+    PROTOCOL_UNSPECIFIED = 0;
+    // A TCP stream, reached through `det shell open` or a TCP tunnel to the
+    // service ID.
+    PROTOCOL_TCP = 1;
+    // HTTP and WebSocket requests under the service's URL.
+    PROTOCOL_HTTP = 2;
+  }
+  // The name of the service, such as "ssh" or "jupyter".
+  string name = 1;
+  // The state of the service.
+  State state = 2;
+  // The proxy service ID of the service: the task ID for the task's primary
+  // service, "<task ID>:<port>" for the others.
+  string service_id = 3;
+  // How the master proxies the service.
+  Protocol protocol = 4;
+  // The path under the master at which an HTTP service is reached,
+  // "/proxy/<service ID>/"; empty for a TCP service.
+  string url = 5;
+  // Whether the user who asked may connect to the service and read its
+  // credential: the task's owner and admins may.
+  bool may_connect = 6;
+}

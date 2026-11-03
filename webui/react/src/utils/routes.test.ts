@@ -313,6 +313,19 @@ describe('Routes Utilities', () => {
     });
   });
 
+  describe('replaceWithExternalUrl', () => {
+    beforeEach(() => {
+      window.location.replace = vi.fn();
+    });
+
+    it('should replace the page with the external URL', () => {
+      const externalUrl = 'https://www.determined.ai/blog';
+      routes.replaceWithExternalUrl(externalUrl);
+      expect(window.location.replace).toHaveBeenCalledTimes(1);
+      expect(window.location.replace).toHaveBeenCalledWith(externalUrl);
+    });
+  });
+
   describe('routeToReactUrl', () => {
     let instance: RemixRouter;
 

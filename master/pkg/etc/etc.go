@@ -39,6 +39,9 @@ const (
 	SSHServiceResource = "services/ssh.sh"
 	// JupyterServiceResource is the supervisor's unit for JupyterLab.
 	JupyterServiceResource = "services/jupyter.sh"
+	// ServiceStateReporterResource is the interactive task supervisor's reporter, which posts the
+	// snapshot of the states of the task's services to the master.
+	ServiceStateReporterResource = "report_service_states.py"
 	// TaskCheckReadyLogsResource is the script to parse logs to check if a task is ready.
 	TaskCheckReadyLogsResource = "check_ready_logs.py"
 	// TaskShipLogsShellResource is the shell script to call the python script to ship logs.

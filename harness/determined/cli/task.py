@@ -1,7 +1,9 @@
 import argparse
 import functools
 import json
+import os
 import pathlib
+import urllib.parse
 from typing import Any, Dict, List, Union, cast
 
 import termcolor
@@ -221,6 +223,51 @@ def list_generic(args: argparse.Namespace) -> None:
     render.tabulate_or_csv(headers, values, args.csv)
 
 
+def services(args: argparse.Namespace) -> None:
+    sess = cli.setup_session(args)
+    resp = bindings.get_GetTaskServices(sess, taskId=args.task_id)
+    if args.json:
+        render.print_json(resp.to_json())
+        return
+    headers = ["Name", "State", "Service ID", "URL"]
+    values = [
+        [
+            s.name,
+            s.state.value.replace("STATE_", ""),
+            s.serviceId,
+            f"{args.master.rstrip('/')}{s.url}" if s.url else "",
+        ]
+        for s in resp.services
+    ]
+    render.tabulate_or_csv(headers, values, False)
+
+
+def open_service(args: argparse.Namespace) -> None:
+    sess = cli.setup_session(args)
+    resp = bindings.get_GetTaskServices(sess, taskId=args.task_id)
+    service = next((s for s in resp.services if s.name == args.service), None)
+    if service is None:
+        raise cli.errors.CliError(f"Task {args.task_id} has no service {args.service}.")
+    if service.protocol == bindings.TaskServiceProtocol.TCP:
+        raise cli.errors.CliError(
+            f"Cannot open {service.name} in a browser; use 'det shell open {args.task_id}'."
+        )
+    if service.state != bindings.v1TaskServiceState.READY:
+        state = service.state.value.replace("STATE_", "")
+        raise cli.errors.CliError(f"Cannot open {service.name}: it is {state}.")
+    if not service.mayConnect:
+        raise cli.errors.CliError(
+            f"Cannot open {service.name}: only the user who started the task or an administrator "
+            "can open it."
+        )
+    # The WebUI's page logs the browser in to the master, then fetches the credential as the
+    # browser's user and opens the service.
+    public_url = os.environ.get("PUBLIC_URL", "/det")
+    task_id = urllib.parse.quote(args.task_id, safe="")
+    name = urllib.parse.quote(service.name, safe="")
+    ntsc.open_in_browser(args.master, f"{public_url}/tasks/{task_id}/services/{name}/open")
+
+
 def cleanup_logs(args: argparse.Namespace) -> None:
     response = bindings.post_CleanupLogs(cli.setup_session(args))
     print(f"Deleted {response.removedCount} rows of log entries.")
@@ -362,6 +409,24 @@ args_description: List[Any] = [
                         cli.output_format_args["csv"],
                         cli.output_format_args["json"],
                     ),
+                ],
+            ),
+            cli.Cmd(
+                "services",
+                services,
+                "list the services of a task",
+                [
+                    cli.Arg("task_id", type=str, help="task ID"),
+                    cli.Arg("--json", action="store_true", help="print as JSON"),
+                ],
+            ),
+            cli.Cmd(
+                "open",
+                open_service,
+                "open a service of a task in a browser",
+                [
+                    cli.Arg("task_id", type=str, help="task ID"),
+                    cli.Arg("service", type=str, help="service name"),
                 ],
             ),
             cli.Cmd("cleanup-logs", cleanup_logs, "cleanup expired task logs", []),

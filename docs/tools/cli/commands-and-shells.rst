@@ -92,14 +92,33 @@ Services
 ========
 
 A shell can run more services than its SSH server. Declare them in the shell's configuration with
-:ref:`services <job-configuration-reference>`, for example JupyterLab:
+:ref:`services <job-configuration-reference>`, or with ``--service``, for example JupyterLab:
 
 .. code::
 
-   det shell start --config "services={jupyter: {}}"
+   det shell start --service jupyter
 
-Each service runs in the shell's container, with the same user, files and environment as the SSH
-sessions.
+This is the same as ``det shell start --config "services={jupyter: {}}"``. Each service runs in the
+shell's container, with the same user, files and environment as the SSH sessions.
+
+To list a shell's services with their states and addresses:
+
+.. code::
+
+   det task services <shell id>
+
+A service is ``UNSPECIFIED`` until the shell reports its state, which also takes a short time after
+the master restarts. It is ``STARTING``, then ``READY``; ``EXITED`` once it has stopped, or
+``UNAVAILABLE`` when its program is not in the image (see :ref:`shell-image-requirements`). A
+service other than the SSH server can stop without ending the shell.
+
+To open JupyterLab in the browser once it is ``READY``:
+
+.. code::
+
+   det task open <shell id> jupyter
+
+Only the user who started the shell and administrators can open its services.
 
 A shell is not terminated for being idle unless its configuration sets :ref:`idle_timeout
 <job-configuration-reference>`. With it, open SSH sessions and browser terminals, browser sessions

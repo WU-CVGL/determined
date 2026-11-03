@@ -1370,6 +1370,27 @@ export const getTask: DetApi<
   request: (params: Service.GetTaskParams) => detApi.Tasks.getTask(params.taskId),
 };
 
+export const getTaskServices: DetApi<
+  Service.GetTaskParams,
+  Api.V1GetTaskServicesResponse,
+  Api.V1GetTaskServicesResponse
+> = {
+  name: 'getTaskServices',
+  postProcess: identity,
+  request: (params: Service.GetTaskParams) => detApi.Tasks.getTaskServices(params.taskId),
+};
+
+export const getTaskServiceCredential: DetApi<
+  Service.GetTaskServiceParams,
+  Api.V1GetTaskServiceCredentialResponse,
+  Api.V1GetTaskServiceCredentialResponse
+> = {
+  name: 'getTaskServiceCredential',
+  postProcess: identity,
+  request: (params: Service.GetTaskServiceParams) =>
+    detApi.Tasks.getTaskServiceCredential(params.taskId, params.service),
+};
+
 export const getActiveTasks: DetApi<
   Record<string, never>,
   Api.V1GetActiveTasksCountResponse,
