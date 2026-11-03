@@ -101,6 +101,11 @@ A shell can run more services than its SSH server. Declare them in the shell's c
 Each service runs in the shell's container, with the same user, files and environment as the SSH
 sessions.
 
+A shell is not terminated for being idle unless its configuration sets :ref:`idle_timeout
+<job-configuration-reference>`. With it, open browser terminals, browser sessions of its services
+such as JupyterLab, and busy JupyterLab kernels count as activity, so a browser page kept open on
+the shell can delay its termination.
+
 .. _shell-image-requirements:
 
 Image Requirements
