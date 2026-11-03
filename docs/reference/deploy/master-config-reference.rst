@@ -1949,6 +1949,11 @@ Deployment notes:
    serves it without downloading and writes its ``.sha256`` file on the first request, and again
    after the tarball changes. It never deletes a tarball that it did not download.
 
+-  A task uses the ``version`` that was configured when it was created. Before changing ``version``,
+   make sure that the tarball of the release that running and queued tasks use is in ``dir`` for
+   each architecture in use: the master downloads the configured release when a task first asks for
+   it, and the file can also be placed there. Leave it in ``dir`` while tasks use it.
+
 *************
  ``logging``
 *************
