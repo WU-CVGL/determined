@@ -1408,8 +1408,8 @@ const reportFailed = "interactive task: reporting the services' states failed: "
 
 // The master gets the snapshot of every service's state whenever a state changes, with a new
 // sequence: STARTING when a service starts, READY when its readiness check matches, EXITED once it
-// has stopped, and UNAVAILABLE instead when it exited 127. The primary service's exit reaches the
-// master before the supervisor exits, with the task's status.
+// has stopped, and UNAVAILABLE instead when it exited 127 before it was READY. The primary
+// service's exit reaches the master before the supervisor exits, with the task's status.
 func TestSupervisorReportsServiceStates(t *testing.T) {
 	requireReporterPython(t)
 	for name, hook := range map[string]string{"default hook": defaultHook, "strict hook": strictHook} {
@@ -1440,6 +1440,25 @@ func TestSupervisorReportsServiceStates(t *testing.T) {
 			s.requireReporterGone()
 		})
 	}
+}
+
+// A service that exits 127 after it was READY has run in the image: it is EXITED, not UNAVAILABLE.
+func TestSupervisorReportsExit127AfterReady(t *testing.T) {
+	requireReporterPython(t)
+	s := newSupervisorRun(t, "p,q")
+	s.unit("p", readyLog+waitUntilPosted("q", "EXITED")+`{ bash -c 'echo up >&2; exit 3'; } 2> >(log)`+"\n")
+	s.unit("q", readyLog+waitUntilPosted("q", "STARTING")+`{ bash -c 'echo up >&2; `+
+		inService(waitUntilPosted("q", "READY"))+`exit 127'; } 2> >(log)`+"\n")
+	s.start()
+	require.Equal(t, 3, s.wait())
+
+	posts := s.master.received()
+	require.Equal(t, posts, s.master.accepted())
+	requireSnapshots(t, posts, "p", "q")
+	require.Equal(t, []string{"STARTING", "READY", "EXITED"}, statesOf(posts, "q"), posts)
+	require.Equal(t, "p=EXITED q=EXITED", posts[len(posts)-1].States)
+	require.Contains(t, s.logLines(), "[q] exited 127")
+	s.requireReporterGone()
 }
 
 // The reporter posts the current snapshot again every DET_SERVICE_STATE_REPORT_SECONDS, with the

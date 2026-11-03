@@ -3,12 +3,15 @@ report_service_states.py reports the states of the services of an interactive ta
 for the interactive task supervisor, which starts it before the services and stops it when they
 have stopped.
 
-It reads "<service> <state>" lines from the FIFO that the supervisor and the services' readiness
-checks write, and keeps the current snapshot of every service's state. Once every service has a
-state, it posts the snapshot (ReportTaskServices) whenever it changes, with a new sequence number,
-and again every DET_SERVICE_STATE_REPORT_SECONDS (30), so that a master that restarted learns the
-states. After a failed post it posts the current snapshot again with a short backoff; it never
-posts a past snapshot. The first failed post after a successful one is logged.
+It reads lines from the FIFO that the supervisor and the services' readiness checks write,
+"<service> STARTING", "<service> READY" and "<service> EXITED <status>" with the service's exit
+status, and keeps the current snapshot of every service's state. A service that exits 127 before
+it was READY is UNAVAILABLE, as a unit exits when its program is missing; any other exit is
+EXITED. Once every service has a state, it posts the snapshot (ReportTaskServices) whenever it
+changes, with a new sequence number, and again every DET_SERVICE_STATE_REPORT_SECONDS (30), so
+that a master that restarted learns the states. After a failed post it posts the current snapshot
+again with a short backoff; it never posts a past snapshot. The first failed post after a
+successful one is logged.
 
 The line "- -" makes it post the current snapshot once more if the master does not have it yet,
 and exit. It also exits when the FIFO has no writer left, as when the supervisor is gone.
@@ -18,12 +21,13 @@ import os
 import select
 import sys
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from determined.common import api
 from determined.common.api import authentication, certs
 
-STATES = ("STARTING", "READY", "EXITED", "UNAVAILABLE")
+# The exit status of a unit whose program is missing.
+MISSING_STATUS = "127"
 DEFAULT_REPORT_SECONDS = 30
 TIMEOUT_SECONDS = 5
 FINAL_TIMEOUT_SECONDS = 1
@@ -43,6 +47,7 @@ class Reporter:
     def __init__(self, services: List[str]) -> None:
         self.services = services
         self.states: Dict[str, str] = {}
+        self.ready: Set[str] = set()
         # The sequence of the last snapshot posted, and of the last one that the master took;
         # changed says that the current snapshot has not been posted yet and needs a new sequence.
         self.sequence = 0
@@ -51,10 +56,20 @@ class Reporter:
         self.failing = False
         self.session: Optional[api.BaseSession] = None
 
-    def update(self, name: str, state: str) -> bool:
-        """Take the state of a service; return whether that made a new snapshot to post."""
-        if name not in self.services or state not in STATES or self.states.get(name) == state:
+    def update(self, fields: List[str]) -> bool:
+        """Take the fields of a line; return whether that made a new snapshot to post."""
+        if len(fields) == 2 and fields[1] in ("STARTING", "READY"):
+            name, state = fields
+        elif len(fields) == 3 and fields[1] == "EXITED":
+            name, state = fields[0], "EXITED"
+            if fields[2] == MISSING_STATUS and name not in self.ready:
+                state = "UNAVAILABLE"
+        else:
             return False
+        if name not in self.services or self.states.get(name) == state:
+            return False
+        if state == "READY":
+            self.ready.add(name)
         self.states[name] = state
         if len(self.states) < len(self.services):
             return False
@@ -126,7 +141,7 @@ def main(fifo: str, services: List[str]) -> None:
                     if reporter.unposted():
                         reporter.post(FINAL_TIMEOUT_SECONDS)
                     return
-                if len(fields) == 2 and reporter.update(fields[0], fields[1]):
+                if reporter.update(fields):
                     due = time.monotonic()
                     backoff = BACKOFF_SECONDS
         if due is not None and time.monotonic() >= due:

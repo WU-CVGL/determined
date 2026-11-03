@@ -31,8 +31,8 @@
 #   and stops what is left of the group on any kernel.
 # - Processes that leave the group on purpose (setsid) belong to the container's lifetime.
 # - Each service's state goes to the master: STARTING when it starts, READY when its readiness
-#   check matches, EXITED when it has stopped, or UNAVAILABLE when it exited 127, as a unit does
-#   when its program is missing. One reporter, report_service_states.py, a child of the supervisor
+#   check matches, EXITED when it has stopped, or UNAVAILABLE when it exited 127 before it was
+#   READY, as a unit does when its program is missing. One reporter, report_service_states.py, a child of the supervisor
 #   in its own process group, keeps the snapshot of every service's state and posts it whenever it
 #   changes and periodically, so that a master that restarted learns the states again. A post
 #   never holds up a service. The reporter starts before the services and stops with the
@@ -190,28 +190,26 @@ service_exited() {
     exit "$status"
 }
 
-# The services' states: the supervisor and the readiness checks write "<service> <state>" lines to
-# a FIFO in supervisor_report_dir, which the reporter reads; the supervisor keeps it open for
-# reading and writing, so that a write never blocks on a reader or fails without one, and the
+# The services' states: the supervisor and the readiness checks write lines to a FIFO in
+# supervisor_report_dir, which the reporter reads: "<service> STARTING", "<service> READY", and
+# "<service> EXITED <status>" with the service's exit status, which the reporter turns into
+# UNAVAILABLE for 127 before READY; "- -" stops the reporter. The supervisor keeps the FIFO open
+# for reading and writing, so that a write never blocks on a reader or fails without one, and the
 # reporter sees the end of the FIFO only when the supervisor is gone. Without a FIFO nothing is
 # reported.
 supervisor_report_dir=
 supervisor_report_fd=
 supervisor_report_pid=
 
-# Write the state $2 of the service $1 for the reporter.
+# Write the state $2 of the service $1, with its fields, for the reporter.
 report_state() {
     [[ -n $supervisor_report_fd ]] || return 0
     printf '%s %s\n' "$1" "$2" >&"$supervisor_report_fd" 2>/dev/null
 }
 
-# Write the state of the service $1 that has stopped with the status $2.
+# Write the exit of the service $1 that has stopped with the status $2.
 report_exit() {
-    if (($2 == 127)); then
-        report_state "$1" UNAVAILABLE
-    else
-        report_state "$1" EXITED
-    fi
+    report_state "$1" "EXITED $2"
 }
 
 start_reporter() {
