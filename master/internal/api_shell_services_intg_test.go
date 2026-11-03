@@ -514,6 +514,31 @@ func TestLaunchNotebookProxiesUnchanged(t *testing.T) {
 	}, allocateRequest(t, rm, resp.Notebook.Id).IdleTimeout)
 }
 
+// A notebook takes the master's notebook_timeout as its idle timeout, and none from a
+// notebook_timeout that is not positive.
+func TestLaunchNotebookMasterTimeout(t *testing.T) {
+	api, _, ctx := setupAPITest(t, nil)
+	cs, err := command.NewService(api.m.db, api.m.rm)
+	require.NoError(t, err)
+	command.SetDefaultService(cs)
+	rm := api.m.rm.(*mocks.ResourceManager)
+	defer func(t *int) { api.m.config.NotebookTimeout = t }(api.m.config.NotebookTimeout)
+
+	for timeout, want := range map[int]*sproto.IdleTimeoutConfig{
+		0:  nil,
+		-1: nil,
+		90: {UseProxyState: true, UseRunnerState: true, TimeoutDuration: 90 * time.Second},
+	} {
+		api.m.config.NotebookTimeout = &timeout
+		resp, err := api.LaunchNotebook(ctx, &apiv1.LaunchNotebookRequest{})
+		require.NoError(t, err, timeout)
+		if want != nil {
+			want.ServiceID = resp.Notebook.Id
+		}
+		require.Equal(t, want, allocateRequest(t, rm, resp.Notebook.Id).IdleTimeout, timeout)
+	}
+}
+
 // Only shells take services, and only the ones the supervisor has units for, with no options.
 func TestLaunchRejectsServices(t *testing.T) {
 	api, _, ctx := setupAPITest(t, nil)
