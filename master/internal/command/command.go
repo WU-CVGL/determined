@@ -66,6 +66,9 @@ type Command struct {
 	endTime          *time.Time
 	restored         bool
 	contextDirectory []byte // Don't rely on this being set outsides of PreStart non restore case.
+	// serviceStates holds the last state that the task's container reported for each service, by
+	// name; see services.go.
+	serviceStates map[string]taskv1.TaskService_State
 
 	logCtx logger.Context
 	syslog *logrus.Entry
@@ -252,6 +255,7 @@ func (c *Command) OnExit(ae *task.AllocationExited) {
 	endTime := time.Now().UTC()
 	c.exitStatus = ae
 	c.endTime = &endTime
+	c.markServicesExited()
 
 	if err := internaldb.CompleteTask(context.TODO(), c.taskID, endTime); err != nil {
 		c.syslog.WithError(err).Error("marking task complete")
