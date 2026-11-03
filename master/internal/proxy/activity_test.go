@@ -258,8 +258,9 @@ func TestProxyWebSocketClientGoneReleasesTask(t *testing.T) {
 	}, 5*time.Second, 10*time.Millisecond)
 }
 
-// An accepted TCP connection, such as an SSH client's, touches its task's record when it opens.
-func TestProxyTCPConnectionTouchesTask(t *testing.T) {
+// tcpProxyClient opens a proxied TCP connection, as an SSH client of `det shell open` does, to a
+// service of the task "task", and checks that the service's first bytes reach it.
+func tcpProxyClient(t *testing.T) (*websocket.Conn, net.Conn, *recordingActivity) {
 	p, base, activity := newActivityProxy(t)
 	ln, conns := listenUpstream(t)
 	p.RegisterService("task", Service{
@@ -271,12 +272,43 @@ func TestProxyTCPConnectionTouchesTask(t *testing.T) {
 	ws, resp, err := dialer.Dial("ws"+strings.TrimPrefix(base, "http")+"/proxy/task/", nil)
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
-	defer func() { _ = ws.Close() }()
+	t.Cleanup(func() { _ = ws.Close() })
 	upstream := acceptUpstream(t, conns)
 	_, err = upstream.Write([]byte("SSH-2.0-test\r\n"))
 	require.NoError(t, err)
 	_, data, err := ws.ReadMessage()
 	require.NoError(t, err)
 	require.Equal(t, "SSH-2.0-test\r\n", string(data))
-	require.Equal(t, recordedActivity{touches: 1}, activity.of("task"))
+	return ws, upstream, activity
+}
+
+// An accepted TCP connection, such as an SSH client's, holds its task's record while it is open.
+// A client that goes away without closing its WebSocket ends the connection to the service and
+// releases the task.
+func TestProxyTCPConnectionHoldsTask(t *testing.T) {
+	ws, upstream, activity := tcpProxyClient(t)
+	require.Equal(t, recordedActivity{holds: 1}, activity.of("task"))
+
+	require.NoError(t, ws.Close())
+	require.NoError(t, upstream.SetReadDeadline(time.Now().Add(5*time.Second)))
+	_, err := upstream.Read(make([]byte, 1))
+	require.Equal(t, io.EOF, err, "the service's connection ends")
+	require.Eventually(t, func() bool {
+		return activity.of("task") == recordedActivity{holds: 1, releases: 1}
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+// A service that hangs up, as an SSH server does at the end of a session, ends the client's
+// connection and releases the task.
+func TestProxyTCPServiceHangUpReleasesTask(t *testing.T) {
+	ws, upstream, activity := tcpProxyClient(t)
+	require.Equal(t, recordedActivity{holds: 1}, activity.of("task"))
+
+	require.NoError(t, upstream.Close())
+	require.NoError(t, ws.SetReadDeadline(time.Now().Add(5*time.Second)))
+	_, _, err := ws.ReadMessage()
+	require.Error(t, err, "the client's connection ends")
+	require.Eventually(t, func() bool {
+		return activity.of("task") == recordedActivity{holds: 1, releases: 1}
+	}, 5*time.Second, 10*time.Millisecond)
 }

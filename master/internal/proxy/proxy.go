@@ -469,3 +469,11 @@ func logCopyError(c echo.Context, direction string, target *url.URL, err error) 
 	}
 	logf("error copying %s body for %v: %v", direction, target, err)
 }
+
+// logCopyErrorAfterClose logs err, the error of the copy that ended second, after the proxy closed
+// both connections of a proxied connection because the first copy ended, unless it is that close.
+func logCopyErrorAfterClose(c echo.Context, direction string, target *url.URL, err error) {
+	if !errors.Is(err, net.ErrClosed) {
+		logCopyError(c, direction, target, err)
+	}
+}

@@ -113,20 +113,15 @@ func newSingleHostReverseWebSocketProxy(c echo.Context, t *url.URL, a activity) 
 		// both connections, which ends the other copy: a client that goes away without a close
 		// handshake does not leave the service's connection open, nor the task held. The other
 		// copy's error from that close is not logged.
-		logOther := func(direction string, err error) {
-			if !errors.Is(err, net.ErrClosed) {
-				logCopyError(c, direction, t, err)
-			}
-		}
 		select {
 		case err := <-copyReqErr:
 			logCopyError(c, "request", t, err)
 			closeConns()
-			logOther("response", <-copyResErr)
+			logCopyErrorAfterClose(c, "response", t, <-copyResErr)
 		case err := <-copyResErr:
 			logCopyError(c, "response", t, err)
 			closeConns()
-			logOther("request", <-copyReqErr)
+			logCopyErrorAfterClose(c, "request", t, <-copyReqErr)
 		}
 	})
 }

@@ -102,9 +102,10 @@ Each service runs in the shell's container, with the same user, files and enviro
 sessions.
 
 A shell is not terminated for being idle unless its configuration sets :ref:`idle_timeout
-<job-configuration-reference>`. With it, open browser terminals, browser sessions of its services
-such as JupyterLab, and running JupyterLab kernels and terminals (see ``notebook_idle_type``) count
-as activity, so a browser page kept open on the shell can delay its termination.
+<job-configuration-reference>`. With it, open SSH sessions and browser terminals, browser sessions
+of its services such as JupyterLab, and running JupyterLab kernels and terminals (see
+``notebook_idle_type``) count as activity, so an SSH session or a browser page kept open on the
+shell can delay its termination.
 
 .. _shell-image-requirements:
 

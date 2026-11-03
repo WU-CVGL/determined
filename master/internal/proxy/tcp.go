@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
 
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
@@ -45,8 +46,9 @@ func (w *websocketReadWriter) Write(buf []byte) (int, error) {
 	return len(buf), nil
 }
 
-// newSingleHostReverseTCPOverWebSocketProxy proxies a TCP connection to t over a WebSocket. A
-// connection that it accepts is activity of its task.
+// newSingleHostReverseTCPOverWebSocketProxy proxies a TCP connection to t over a WebSocket. The
+// connection, such as an SSH client's, holds its task active from when it is accepted until it
+// closes. It closes when either side ends it, also without a close handshake.
 func newSingleHostReverseTCPOverWebSocketProxy(c echo.Context, t *url.URL, a activity) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		dialer := proxy.FromEnvironment()
@@ -58,24 +60,48 @@ func newSingleHostReverseTCPOverWebSocketProxy(c echo.Context, t *url.URL, a act
 				errors.Errorf("error dialing to %v: %v", t, err)))
 			return
 		}
-		defer func() {
-			if cerr := out.Close(); cerr != nil {
-				c.Logger().Error(cerr)
-			}
-		}()
+		var ws *websocket.Conn
+		var closeOnce sync.Once
+		closeConns := func() {
+			closeOnce.Do(func() {
+				if cerr := out.Close(); cerr != nil {
+					c.Logger().Error(cerr)
+				}
+				if ws == nil {
+					return
+				}
+				if cerr := ws.Close(); cerr != nil {
+					c.Logger().Error(cerr)
+				}
+			})
+		}
+		defer closeConns()
 
-		ws, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		ws, err = (&websocket.Upgrader{}).Upgrade(w, r, nil)
 		if err != nil {
 			c.Error(echo.NewHTTPError(http.StatusBadGateway, errors.Wrap(err, "error upgrading")))
 			return
 		}
 
-		a.touch()
+		release := a.hold()
+		defer release()
 		rw := &websocketReadWriter{ws: ws, buf: new(bytes.Buffer)}
 		copyReqErr := asyncCopy(rw, out)
 		copyResErr := asyncCopy(out, rw)
 
-		logCopyError(c, "request", t, <-copyReqErr)
-		logCopyError(c, "response", t, <-copyResErr)
+		// The first copy to end, on a close, an end of stream or an error of either side, closes
+		// both connections, which ends the other copy: a client that goes away without closing
+		// its WebSocket does not leave the service's connection open, nor the task held. The
+		// other copy's error from that close is not logged.
+		select {
+		case err := <-copyReqErr:
+			logCopyError(c, "request", t, err)
+			closeConns()
+			logCopyErrorAfterClose(c, "response", t, <-copyResErr)
+		case err := <-copyResErr:
+			logCopyError(c, "response", t, err)
+			closeConns()
+			logCopyErrorAfterClose(c, "request", t, <-copyReqErr)
+		}
 	})
 }

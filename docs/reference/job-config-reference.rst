@@ -167,12 +167,13 @@ The following configuration settings are supported:
    notebooks and TensorBoard instances:
 
    -  Shells: There is no default; a shell is only terminated for being idle when this is set. The
-      idle time counts from the last activity, once no browser terminal or WebSocket connection to
-      the shell is open. Activity is a browser terminal, a request to any of the shell's services
-      through the master, an open WebSocket connection to one of them, a new SSH connection through
-      the master, and, for the ``jupyter`` service, a JupyterLab that is active as defined by the
-      ``notebook_idle_type`` option. A browser page kept open on the shell can therefore delay its
-      termination. Processes that run in the shell are not activity.
+      idle time counts from the last activity, once no browser terminal, SSH connection through the
+      master or WebSocket connection to the shell is open. Activity is a browser terminal, an SSH
+      connection through the master, a request to any of the shell's services through the master, an
+      open WebSocket connection to one of them, and, for the ``jupyter`` service, a JupyterLab that
+      is active as defined by the ``notebook_idle_type`` option. An SSH session or a browser page
+      kept open on the shell can therefore delay its termination. Processes that run in the shell
+      are not activity.
 
    -  Notebooks: The default is the master's :ref:`notebook_timeout
       <master-config-notebook-timeout>`. A notebook instance is considered to be idle if it is not
