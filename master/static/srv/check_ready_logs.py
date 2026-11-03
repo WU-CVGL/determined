@@ -32,19 +32,31 @@ def post_ready(sess: api.Session, allocation_id: str, state: str):
             time.sleep(BACKOFF_SECONDS)
 
 
-def main(ready: Pattern, waiting: Optional[Pattern] = None):
-    master_url = api.canonicalize_master_url(os.environ["DET_MASTER"])
-    cert = certs.default_load(master_url)
-    # This only runs on-cluster, so it is expected the username and session token are present in the
-    # environment.
-    sess = authentication.login_from_task(master_url, cert=cert)
-    allocation_id = str(os.environ["DET_ALLOCATION_ID"])
+def main(
+    ready: Pattern,
+    waiting: Optional[Pattern] = None,
+    service: Optional[str] = None,
+    post: bool = True,
+):
+    sess = None
+    allocation_id = ""
+    if post:
+        master_url = api.canonicalize_master_url(os.environ["DET_MASTER"])
+        cert = certs.default_load(master_url)
+        # This only runs on-cluster, so it is expected the username and session token are present
+        # in the environment.
+        sess = authentication.login_from_task(master_url, cert=cert)
+        allocation_id = str(os.environ["DET_ALLOCATION_ID"])
     for line in sys.stdin:
         if ready.match(line):
-            post_ready(sess, allocation_id, "ready")
+            if sess is not None:
+                post_ready(sess, allocation_id, "ready")
+            if service:
+                print(f"[{service}] ready", file=sys.stderr, flush=True)
             return
         if waiting and waiting.match(line):
-            post_ready(sess, allocation_id, "waiting")
+            if sess is not None:
+                post_ready(sess, allocation_id, "waiting")
             return
 
 
@@ -58,11 +70,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--waiting-regex", type=str, help="the pattern to match task waiting"
     )
+    parser.add_argument(
+        "--service", type=str, help="the service whose readiness the task log gets"
+    )
+    parser.add_argument(
+        "--no-post", action="store_true", help="do not report readiness to the master"
+    )
     args = parser.parse_args()
 
     ready_regex = re.compile(args.ready_regex)
-    if args.waiting_regex:
-        waiting_regrex = re.compile(args.waiting_regex)
-        main(ready_regex, waiting_regrex)
-    else:
-        main(ready_regex, None)
+    waiting_regex = re.compile(args.waiting_regex) if args.waiting_regex else None
+    main(ready_regex, waiting_regex, args.service, not args.no_post)

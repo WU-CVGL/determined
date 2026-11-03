@@ -41,8 +41,12 @@ const (
 
 var (
 	taskReadyCheckLogs = "/run/determined/check_ready_logs.py"
-	// interactiveInitScript is where the notebook and shell entrypoints source their shared init.
+	// interactiveInitScript is where the interactive task supervisor sources the container init.
 	interactiveInitScript = "/run/determined/interactive-init.sh"
+	// interactiveSupervisorScript is the process of notebook and shell tasks.
+	interactiveSupervisorScript = "/run/determined/interactive-supervisor.sh"
+	// interactiveServicesDir holds the supervisor's service units, <service>.sh.
+	interactiveServicesDir = "/run/determined/services"
 
 	taskLogsBatchMissWaitTime   = time.Second
 	taskLogsFieldsBatchWaitTime = 5 * time.Second

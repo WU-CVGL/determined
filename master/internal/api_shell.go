@@ -9,7 +9,6 @@ import (
 	petname "github.com/dustinkirkland/golang-petname"
 	"github.com/pkg/errors"
 
-	"golang.org/x/exp/maps"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -223,9 +222,10 @@ func setShellSSHD(spec *tasks.GenericCommandSpec, port int) {
 		RawDefaultServiceID: ptrs.Ptr(true),
 	})
 	spec.SSHDPort = port
-	spec.Config.Entrypoint = []string{
-		shellEntrypointScript, "-f", shellSSHDConfigFile, "-p", strconv.Itoa(port), "-D", "-e",
-	}
+	// The supervisor hands its arguments to its primary service, sshd.
+	spec.Config.Entrypoint = interactiveSupervisorEntrypoint(
+		"-f", shellSSHDConfigFile, "-p", strconv.Itoa(port), "-D", "-e",
+	)
 }
 
 func (a *apiServer) LaunchShell(
@@ -268,6 +268,7 @@ func (a *apiServer) LaunchShell(
 	}
 
 	launchReq.Spec.AdditionalFiles = archive.Archive{
+		// A wrapper that runs the supervisor with this task's service, for whatever names it.
 		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(
 			shellEntrypointScript,
 			etc.MustStaticFile(etc.ShellEntrypointResource),
@@ -280,21 +281,18 @@ func (a *apiServer) LaunchShell(
 			0o700,
 			tar.TypeReg,
 		),
-		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(
-			interactiveInitScript,
-			etc.MustStaticFile(etc.InteractiveInitScriptResource),
-			0o700,
-			tar.TypeReg,
-		),
 	}
+	launchReq.Spec.AdditionalFiles = append(launchReq.Spec.AdditionalFiles,
+		interactiveSupervisorFiles(launchReq.Spec.Base.AgentUserGroup)...)
 
-	launchReq.Spec.Base.ExtraEnvVars = map[string]string{"DET_TASK_TYPE": string(model.TaskTypeShell)}
+	addExtraEnvVars(launchReq.Spec, map[string]string{"DET_TASK_TYPE": string(model.TaskTypeShell)})
+	setInteractiveServices(launchReq.Spec, interactiveServiceSSH)
 
 	oidcPachydermEnvVars, err := a.getOIDCPachydermEnvVars(session)
 	if err != nil {
 		return nil, err
 	}
-	maps.Copy(launchReq.Spec.Base.ExtraEnvVars, oidcPachydermEnvVars)
+	addExtraEnvVars(launchReq.Spec, oidcPachydermEnvVars)
 
 	keys, err := ssh.GenerateKey(launchReq.Spec.Base.SSHConfig)
 	if err != nil {

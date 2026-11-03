@@ -5,6 +5,7 @@ package etc
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/pkg/errors"
 
@@ -28,9 +29,16 @@ const (
 	NotebookEntrypointResource = "notebook-entrypoint.sh"
 	// NotebookIdleCheckResource is the script to check if a notebook is idle.
 	NotebookIdleCheckResource = "check_idle.py"
-	// InteractiveInitScriptResource is the container init that the notebook and shell entrypoints
-	// source.
+	// InteractiveInitScriptResource is the container init that the interactive task supervisor
+	// sources.
 	InteractiveInitScriptResource = "interactive-init.sh"
+	// InteractiveSupervisorResource is the process of notebook and shell tasks: it runs the init,
+	// then the services in DET_SERVICES.
+	InteractiveSupervisorResource = "interactive-supervisor.sh"
+	// SSHServiceResource is the supervisor's unit for sshd.
+	SSHServiceResource = "services/ssh.sh"
+	// JupyterServiceResource is the supervisor's unit for JupyterLab.
+	JupyterServiceResource = "services/jupyter.sh"
 	// TaskCheckReadyLogsResource is the script to parse logs to check if a task is ready.
 	TaskCheckReadyLogsResource = "check_ready_logs.py"
 	// TaskShipLogsShellResource is the shell script to call the python script to ship logs.
@@ -71,8 +79,9 @@ func MustStaticFile(name string) []byte {
 	path := filepath.Join(staticRoot, name)
 
 	// Check that the final path is inside the root directory.
-	insideDir, err := filepath.Match(filepath.Join(staticRoot, "*"), path)
+	rel, err := filepath.Rel(staticRoot, path)
 	check.Panic(errors.Wrapf(err, "unable to find static file: %s", name))
+	insideDir := rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 	check.Panic(
 		check.TrueSilent(
 			insideDir,

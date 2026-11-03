@@ -40,40 +40,47 @@ func staticScript(t *testing.T, name string) string {
 	return string(MustStaticFile(name))
 }
 
-// Each interactive entrypoint sources the shared init once, after task-setup.sh and "set -e" and
-// before its own service starts, and no longer runs the init's steps itself.
-func TestInteractiveEntrypointsSourceInitOnce(t *testing.T) {
-	for _, tc := range []struct {
-		entrypoint string
-		// Lines of the entrypoint's own part, which must come after the init.
-		serviceParts []*regexp.Regexp
-	}{
-		{NotebookEntrypointResource, []*regexp.Regexp{regexp.MustCompile(`(?m)^.*check_idle\.py`)}},
-		{ShellEntrypointResource, []*regexp.Regexp{regexp.MustCompile(`(?m)^mapfile `), filterDefinition}},
+// The supervisor sources the shared init once, after task-setup.sh and "set -e" and before it starts
+// any service. The units and the entrypoints, which only start the supervisor, run no init step.
+func TestInteractiveSupervisorSourcesInitOnce(t *testing.T) {
+	script := staticScript(t, InteractiveSupervisorResource)
+
+	sources := initSource.FindAllStringIndex(script, -1)
+	require.Len(t, sources, 1, "the supervisor sources %s once", InteractiveInitScriptResource)
+	at := sources[0][0]
+	for name, before := range map[string]*regexp.Regexp{
+		"task-setup.sh": taskSetupSource, "set -e": setErrexit,
 	} {
-		t.Run(tc.entrypoint, func(t *testing.T) {
-			script := staticScript(t, tc.entrypoint)
+		loc := before.FindStringIndex(script)
+		require.NotNil(t, loc, "the supervisor has %s", name)
+		require.Less(t, loc[0], at, "%s comes before the init", name)
+	}
+	start := regexp.MustCompile(`(?m)^start_service `).FindStringIndex(script)
+	require.NotNil(t, start)
+	require.Greater(t, start[0], at, "services start after the init")
+	require.NotContains(t, script, "prep_container")
+	require.NotContains(t, script, "STARTUP_HOOK")
 
-			sources := initSource.FindAllStringIndex(script, -1)
-			require.Len(t, sources, 1, "%s sources %s once", tc.entrypoint, InteractiveInitScriptResource)
-			at := sources[0][0]
+	for _, name := range []string{
+		NotebookEntrypointResource, ShellEntrypointResource, SSHServiceResource, JupyterServiceResource,
+	} {
+		script := staticScript(t, name)
+		require.False(t, initSource.MatchString(script), "%s does not source the init", name)
+		require.False(t, taskSetupSource.MatchString(script), "%s does not source task-setup.sh", name)
+		require.NotContains(t, script, "prep_container", name)
+		require.NotContains(t, script, "STARTUP_HOOK", name)
+	}
+}
 
-			for name, before := range map[string]*regexp.Regexp{
-				"task-setup.sh": taskSetupSource, "set -e": setErrexit,
-			} {
-				loc := before.FindStringIndex(script)
-				require.NotNil(t, loc, "%s has %s", tc.entrypoint, name)
-				require.Less(t, loc[0], at, "%s comes before the init", name)
-			}
-			for _, after := range tc.serviceParts {
-				loc := after.FindStringIndex(script)
-				require.NotNil(t, loc, "%s has %s", tc.entrypoint, after)
-				require.Greater(t, loc[0], at, "%s comes after the init", after)
-			}
-
-			require.NotContains(t, script, "prep_container")
-			require.NotContains(t, script, "STARTUP_HOOK")
-		})
+// The notebook and shell entrypoints are wrappers that run the supervisor with their one service
+// and their arguments.
+func TestInteractiveEntrypointsRunSupervisor(t *testing.T) {
+	for entrypoint, service := range map[string]string{
+		NotebookEntrypointResource: "jupyter", ShellEntrypointResource: "ssh",
+	} {
+		script := staticScript(t, entrypoint)
+		require.Regexp(t, `(?m)^DET_SERVICES=`+service+` exec /run/determined/`+
+			regexp.QuoteMeta(InteractiveSupervisorResource)+` "\$@"$`, script, entrypoint)
 	}
 }
 
