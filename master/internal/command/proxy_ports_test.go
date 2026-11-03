@@ -80,3 +80,28 @@ func TestProxyPortConfigsFromRecords(t *testing.T) {
 		{ServiceID: "task-1:8080", Port: 8080},
 	}, proxyPortConfigs(spec, "task-1"))
 }
+
+// A spec with records may also hold copies of the services' ports in its extra proxy ports, as
+// specs saved before the records alone held them do. Each such port still gets only the policy
+// of its record.
+func TestProxyPortConfigsSkipCopiesOfRecords(t *testing.T) {
+	var spec tasks.GenericCommandSpec
+	spec.TaskType = model.TaskTypeShell
+	spec.Services = []tasks.InteractiveService{
+		{
+			Name: model.ServiceSSH, Port: 3210, DefaultServiceID: true, ProxyTCP: true,
+			Unauthenticated: true,
+		},
+		{Name: model.ServiceJupyter, Port: 2950, TLS: true, Exec: true},
+	}
+	spec.Base.ExtraProxyPorts = expconf.ProxyPortsConfig{
+		sshdProxyPort(3210), {RawProxyPort: 2950},
+	}
+	spec.Config.Environment.ProxyPorts = model.ProxyPortsConfig{userProxyPort}
+
+	require.Equal(t, []*sproto.ProxyPortConfig{
+		{ServiceID: "task-1", Port: 3210, ProxyTCP: true, Unauthenticated: true},
+		{ServiceID: "task-1:2950", Port: 2950, TLS: true, Exec: true},
+		{ServiceID: "task-1:8080", Port: 8080},
+	}, proxyPortConfigs(spec, "task-1"))
+}
