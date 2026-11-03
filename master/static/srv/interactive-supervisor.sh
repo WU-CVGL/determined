@@ -61,20 +61,36 @@ source /run/determined/interactive-init.sh
 # From here on the supervisor handles failures itself; each unit sets "set -e" again.
 set +e
 
-# Wait up to $2 seconds for the process $1, a child of this shell, to exit.
-wait_for_child() {
-    local i
-    for ((i = 0; i < $2 * 10; i++)); do
-        kill -0 "$1" 2>/dev/null || return 0
-        sleep 0.1
+# The waits poll, and a poll takes time of its own: they wait until a deadline rather than for a
+# number of polls. deadline_in sets the variable $1 to the time $2 seconds from now, in microseconds,
+# without the decimal point of EPOCHREALTIME, which depends on the locale.
+deadline_in() {
+    printf -v "$1" %d $((${EPOCHREALTIME//[!0-9]/} + $2 * 1000000))
+}
+
+# Whether the time $1, from deadline_in, has come.
+passed() {
+    ((${EPOCHREALTIME//[!0-9]/} >= $1))
+}
+
+# Wait up to $1 seconds for the processes $2..., children of this shell, to exit. Fails if one is
+# left.
+wait_for_children() {
+    local deadline pid
+    deadline_in deadline "$1"
+    shift
+    for pid; do
+        while kill -0 "$pid" 2>/dev/null; do
+            ! passed "$deadline" || return 1
+            sleep 0.1
+        done
     done
-    ! kill -0 "$1" 2>/dev/null
 }
 
 # Kill the descendants of the process $1, the deepest first, so that each parent reaps its children
 # before it is killed itself.
 kill_descendants() {
-    local tasks child i
+    local tasks child deadline
     local -a ids children=()
     for tasks in /proc/"$1"/task/*/children; do
         [[ -r $tasks ]] || continue
@@ -85,8 +101,8 @@ kill_descendants() {
     for child in "${children[@]}"; do
         kill_descendants "$child"
         kill -KILL "$child" 2>/dev/null
-        for ((i = 0; i < 10; i++)); do
-            [[ -e /proc/$child ]] || break
+        deadline_in deadline 1
+        while [[ -e /proc/$child ]] && ! passed "$deadline"; do
             sleep 0.1
         done
     done
@@ -119,9 +135,9 @@ service_exited() {
     done
     if [[ ${!-} != "$service_inherited_pid" ]]; then
         pid=$!
-        if ! wait_for_child "$pid" "$supervisor_log_drain_seconds"; then
+        if ! wait_for_children "$supervisor_log_drain_seconds" "$pid"; then
             kill -TERM -- "-$BASHPID" 2>/dev/null
-            if ! wait_for_child "$pid" "$supervisor_log_drain_seconds"; then
+            if ! wait_for_children "$supervisor_log_drain_seconds" "$pid"; then
                 # Held up from outside the group, as by an sshd session: kill the log helper.
                 kill_descendants "$pid"
                 kill -KILL "$pid" 2>/dev/null
@@ -193,9 +209,10 @@ service_stopped() {
 # Wait up to $1 seconds for the services in supervisor_stopping to stop, or until a stop signal
 # when $2 is set. Log each that stops and keep the others in supervisor_stopping.
 await_services() {
-    local name i
+    local name deadline
     local -a left
-    for ((i = 0; ; i++)); do
+    deadline_in deadline "$1"
+    while :; do
         left=()
         for name in "${supervisor_stopping[@]}"; do
             if service_stopped "$name"; then
@@ -206,7 +223,7 @@ await_services() {
             fi
         done
         supervisor_stopping=("${left[@]}")
-        if ((${#left[@]} == 0 || i >= $1 * 10)) || [[ -n $2 && -n $stop_signal ]]; then
+        if ((${#left[@]} == 0)) || passed "$deadline" || [[ -n $2 && -n $stop_signal ]]; then
             return 0
         fi
         sleep 0.1
