@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -23,7 +24,8 @@ import (
 
 // checkIdleDetermined is the part of the determined package that check_idle.py uses: the task
 // session sends JSON with the allocation token, as the real one does, and raises on an HTTP error;
-// it refuses a shell's report that would be retried.
+// it refuses a shell's report that would be retried, and it bounds a report by the total time of a
+// urllib3 timeout.
 var checkIdleDetermined = map[string]string{
 	"determined/__init__.py":        "",
 	"determined/common/__init__.py": "",
@@ -52,6 +54,7 @@ class TaskSession:
             },
         )
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        timeout = getattr(timeout, "total", timeout)
         with opener.open(request, timeout=timeout) as response:
             response.read()
 
@@ -97,12 +100,14 @@ var checkIdleRounds = []string{"idle", "idle", "idle", "busy", "busy", "broken",
 
 // checkIdleJupyter stands in for JupyterLab's REST API under its base URL with its token. Each
 // request for the kernels starts a round of checks, which answers as states says, then as after,
-// and every answer comes delay late. It records the path of every request and when it came.
+// and every answer comes delay late, every TLS handshake handshakeDelay late. It records the path
+// of every request and when it came.
 type checkIdleJupyter struct {
-	baseURL string
-	states  []string
-	after   string
-	delay   time.Duration
+	baseURL        string
+	states         []string
+	after          string
+	delay          time.Duration
+	handshakeDelay time.Duration
 
 	mu       sync.Mutex
 	rounds   int
@@ -174,6 +179,32 @@ func (j *checkIdleJupyter) roundStarts() []time.Time {
 		}
 	}
 	return starts
+}
+
+// checkIdleStallListener delays the first read on each connection it accepts by stall, and so the
+// TLS handshake on it.
+type checkIdleStallListener struct {
+	net.Listener
+	stall time.Duration
+}
+
+func (l checkIdleStallListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return &checkIdleStallConn{Conn: conn, stall: l.stall}, nil
+}
+
+type checkIdleStallConn struct {
+	net.Conn
+	stall time.Duration
+	once  sync.Once
+}
+
+func (c *checkIdleStallConn) Read(b []byte) (int, error) {
+	c.once.Do(func() { time.Sleep(c.stall) })
+	return c.Conn.Read(b)
 }
 
 // checkIdleReport is a report that the stand-in master received.
@@ -250,6 +281,11 @@ func startCheckIdle(
 	jupyterSrv := httptest.NewUnstartedServer(http.HandlerFunc(jupyter.serve))
 	// check_idle.py first waits for the port with a plain connection, which ends without TLS.
 	jupyterSrv.Config.ErrorLog = log.New(io.Discard, "", 0)
+	if jupyter.handshakeDelay > 0 {
+		jupyterSrv.Listener = checkIdleStallListener{
+			Listener: jupyterSrv.Listener, stall: jupyter.handshakeDelay,
+		}
+	}
 	jupyterSrv.StartTLS()
 	t.Cleanup(jupyterSrv.Close)
 	jupyterURL, err := url.Parse(jupyterSrv.URL)
@@ -478,6 +514,34 @@ func TestCheckIdleJupyterTimeoutFollowsInterval(t *testing.T) {
 	}
 	reports, _ := run.master.received()
 	require.Empty(t, reports)
+}
+
+// On a shell, a JupyterLab request's timeout bounds it from connecting to the answer: with a
+// timeout of 10 s, a JupyterLab that delays its TLS handshake and its answer by 1.5 s each is
+// unreadable, so it is not reported, and one that delays each by 1 s is reported.
+func TestCheckIdleJupyterTimeoutBoundsWholeRequest(t *testing.T) {
+	for name, tc := range map[string]struct {
+		delay    time.Duration
+		reported bool
+	}{
+		"3 s in all": {1500 * time.Millisecond, false},
+		"2 s in all": {time.Second, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			run := startCheckIdle(t, &checkIdleJupyter{
+				after: "busy", delay: tc.delay, handshakeDelay: tc.delay,
+			}, "", "DET_ACTIVITY_REPORT=task", "NOTEBOOK_IDLE_TYPE=activity",
+				"DET_IDLE_TIMEOUT_SECONDS=10")
+			// The third round starts once the second has sent its report, if any.
+			run.waitRounds(t, 3)
+			reports, _ := run.master.received()
+			if tc.reported {
+				require.GreaterOrEqual(t, len(reports), 2)
+			} else {
+				require.Empty(t, reports)
+			}
+		})
+	}
 }
 
 // A JupyterLab request past check_idle.py's 3 s request timeout is unreadable on a shell, so it is

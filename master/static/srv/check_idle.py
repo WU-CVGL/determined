@@ -6,6 +6,7 @@ import time
 from typing import Optional
 
 import requests
+from urllib3.util import Timeout
 
 from determined.common import api
 from determined.common.api import authentication, certs
@@ -67,7 +68,8 @@ def report_timing(idle_timeout: Optional[str]) -> Timing:
     """
     A shell's timing for its idle timeout T in seconds: a round of checks starts every T/4, at least
     every second and at most every 30 s; a JupyterLab request times out after T/4, at most 3 s, and
-    the report to the master, which is not retried, after T/4, at most 10 s. A round starts at most
+    the report to the master, which is not retried, after T/4, at most 10 s. Each of these timeouts
+    bounds its request from connecting to the answer, not each phase of it. A round starts at most
     an interval after the previous report, since a report takes at most an interval, and it reports
     a busy or running kernel after one request: two such reports are at most interval + request +
     report <= 3T/4 apart, for any T of at least 4 s. Activity found in the terminals takes a second
@@ -117,7 +119,7 @@ def is_idle(
                     f"{request_address}{path}",
                     headers=auth_header,
                     verify=False,
-                    timeout=timeout,
+                    timeout=None if timeout is None else Timeout(total=timeout),
                 ).json()
             except Exception as e:
                 raise Unreadable(path) from e
@@ -197,7 +199,7 @@ def main():
                     sess.post(
                         f"/api/v1/allocations/{os.environ['DET_ALLOCATION_ID']}/activity",
                         json={"active": True},
-                        timeout=timing.master,
+                        timeout=Timeout(total=timing.master),
                     )
             else:
                 sess.put(

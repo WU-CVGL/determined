@@ -43,9 +43,9 @@ const (
 	minSshdPort = 3200
 	maxSshdPort = minSshdPort + 299
 	// minShellIdleTimeout is the shortest idle_timeout a shell takes: JupyterLab's idle check
-	// reports every quarter of the timeout and gives each request as long, 2.5 s at this minimum,
-	// so that a JupyterLab that answers within 2 s still reaches the task's record more often than
-	// the timeout. It is also longer than the idle watcher's tick.
+	// reports every quarter of the timeout and gives each request as long in all, 2.5 s at this
+	// minimum, so that a JupyterLab that answers within 2 s still reaches the task's record more
+	// often than the timeout. It is also longer than the idle watcher's tick.
 	minShellIdleTimeout = 10 * time.Second
 )
 
