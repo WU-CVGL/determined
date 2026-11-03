@@ -307,16 +307,22 @@ func TestVSCodeUnitResolveOrder(t *testing.T) {
 		path  string
 		cache bool
 		want  string
+		// strict runs the unit after a startup hook with "set -euo pipefail".
+		strict bool
 	}{
 		{name: "dir", dir: true, path: codeServerPinned, cache: true, want: "dir"},
 		{name: "path", path: codeServerPinned, cache: true, want: "path"},
 		{name: "cache", path: codeServerOther, cache: true, want: "cache"},
 		{name: "download", path: codeServerOther, want: "download"},
 		{name: "download without code-server on the path", want: "download"},
+		{name: "download after a strict hook", path: codeServerOther, want: "download", strict: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
 			v := newVSCodeTask(t, "vscode", home)
+			if tc.strict {
+				v.hook(strictHook)
+			}
 			admin := filepath.Join(v.dir, "admin")
 			require.NoError(t, os.Mkdir(admin, 0o700))
 			if tc.dir {
