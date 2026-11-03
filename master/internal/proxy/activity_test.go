@@ -3,6 +3,8 @@ package proxy
 import (
 	"bufio"
 	"context"
+	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -196,6 +198,64 @@ func TestProxyWebSocketHoldsTask(t *testing.T) {
 		return activity.of("task") == recordedActivity{holds: 1, releases: 1}
 	}, 5*time.Second, 10*time.Millisecond)
 	<-served
+}
+
+// A client that goes away without a close handshake ends the connection to a service that stays
+// silent, and releases the task.
+func TestProxyWebSocketClientGoneReleasesTask(t *testing.T) {
+	p, base, activity := newActivityProxy(t)
+	ln, conns := listenUpstream(t)
+	p.RegisterService("task:2900", Service{
+		URL: &url.URL{Scheme: "http", Host: ln.Addr().String()}, TaskID: "task",
+	})
+
+	// The service answers the upgrade, then only reads.
+	upstreamEnd := make(chan error, 1)
+	go func() {
+		var conn net.Conn
+		select {
+		case conn = <-conns:
+		case <-time.After(5 * time.Second):
+			upstreamEnd <- errors.New("the proxy never connected to the service")
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		r := bufio.NewReader(conn)
+		if _, err := http.ReadRequest(r); err != nil {
+			upstreamEnd <- err
+			return
+		}
+		if _, err := conn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\n" +
+			"Upgrade: websocket\r\nConnection: Upgrade\r\n" +
+			"Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n")); err != nil {
+			upstreamEnd <- err
+			return
+		}
+		if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			upstreamEnd <- err
+			return
+		}
+		_, err := r.Read(make([]byte, 1))
+		upstreamEnd <- err
+	}()
+
+	conn, err := net.Dial("tcp", strings.TrimPrefix(base, "http://"))
+	require.NoError(t, err)
+	_, err = conn.Write([]byte("GET /proxy/task:2900/ HTTP/1.1\r\n" +
+		"Host: master\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n" +
+		"Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"))
+	require.NoError(t, err)
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, recordedActivity{holds: 1}, activity.of("task"))
+
+	require.NoError(t, conn.Close())
+	require.Equal(t, io.EOF, <-upstreamEnd, "the service's connection ends")
+	require.Eventually(t, func() bool {
+		return activity.of("task") == recordedActivity{holds: 1, releases: 1}
+	}, 5*time.Second, 10*time.Millisecond)
 }
 
 // An accepted TCP connection, such as an SSH client's, touches its task's record when it opens.
