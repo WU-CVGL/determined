@@ -28,7 +28,6 @@ def read_only_tasks(resources: Resources) -> LocustTasksWithMeta:
     tasks.append(LocustGetTaskWithMeta("/api/v1/master/telemetry", test_name="get telemetry"))
     tasks.append(LocustGetTaskWithMeta("/api/v1/tensorboards", test_name="get tensorboards"))
     tasks.append(LocustGetTaskWithMeta("/api/v1/shells", test_name="get shells"))
-    tasks.append(LocustGetTaskWithMeta("/api/v1/notebooks", test_name="get notebooks"))
     tasks.append(LocustGetTaskWithMeta("/api/v1/commands", test_name="get commands"))
     tasks.append(LocustGetTaskWithMeta("/api/v1/job-queues", test_name="get job queues"))
     tasks.append(LocustGetTaskWithMeta("/api/v1/job-queues/stats", test_name="get job queue stats"))
@@ -103,9 +102,6 @@ def read_only_tasks(resources: Resources) -> LocustTasksWithMeta:
                                            params={"sortBy": "SORT_BY_UNSPECIFIED",
                                                    "orderBy": "ORDER_BY_UNSPECIFIED",
                                                    "workspaceId": resources.workspace_id}))
-        tasks.append(LocustGetTaskWithMeta(
-            "/api/v1/notebooks", test_name="get workspace notebooks",
-            params={"limit": 1000, "workspaceId": resources.workspace_id}))
         # This was formerly "get workspace commands" in legacy K6 testing.
         tasks.append(LocustGetTaskWithMeta("/api/v1/shells", test_name="shells",
                                            params={"limit": 1000,
@@ -291,7 +287,6 @@ def read_only_tasks(resources: Resources) -> LocustTasksWithMeta:
 
     # The following require launching things to test:
     #   commands
-    #   notebooks
     #   shells
     #   tensorboards
 

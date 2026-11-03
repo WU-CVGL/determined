@@ -69,26 +69,32 @@ Tensorboard instance from the experiment in the WebUI.
 When fine-tuning is complete, interactive inference can be run by using the included
 `textual_inversion.ipynb` on the same Master which performed the Experiment.
 
-In order to launch the
-notebook with the requisite files included in its context, first modify
-the `HF_AUTH_TOKEN=YOUR_HF_AUTH_TOKEN_HERE` line in the `detsd-notebook.yaml` config file,
+In order to launch
+JupyterLab in a shell with the requisite files included in its context, first modify
+the `HF_AUTH_TOKEN=YOUR_HF_AUTH_TOKEN_HERE` line in the `detsd-shell.yaml` config file,
 analogously to the above, and then run the following command in the root of
 this repo:
 
 ```bash
-det notebook start --config-file detsd-notebook.yaml -i detsd -i startup-hook.sh -i learned_embeddings_dict_demo.pt -i textual_inversion.ipynb
+det shell start --detach --config-file detsd-shell.yaml -i detsd -i startup-hook.sh -i learned_embeddings_dict_demo.pt -i textual_inversion.ipynb
 ```
 
-where the `-i` flags are short for `--include` and they ensure that the following files will be
-included the directory where the Jupyter notebook will be launched:
+which prints the shell's ID. The `-i` flags are short for `--include` and they ensure that the
+following files will be included in the directory where JupyterLab will be launched:
 
-* `detsd-notebook.yaml`: the notebook config file.
+* `detsd-shell.yaml`: the shell config file, which runs JupyterLab as the shell's `jupyter` service.
 * `detsd`: the python module directory containing the `DetSDTextualInversionPipeline` we will use to
   generate images.
 * `learned_embeddings_dict_demo.pt`: pickle file containing a `det-logo-demo` concept, highly
   trained on Determined AI logo images.
 * `startup-hook.sh`: a startup script which installs necessary dependencies.
 * `textual_inversion.ipynb`: the to-be-launched notebook.
+
+Once `det task services <shell ID>` shows the `jupyter` service as `READY`, open JupyterLab with
+
+```bash
+det task open <shell ID> jupyter
+```
 
 Then, simply run the `textual_inversion.ipynb` notebook from top to bottom. Further instructions may
 be
@@ -229,7 +235,7 @@ Summary of important files and directories:
 - `finetune_const.yaml`: Basic config file for a fine-tuning Experiment.
 - `finetune_const_advanced.yaml`: Advanced config file for a fine-tuning Experiment.
 - `generate_grid.yaml`: Config file for a generation Experiment.
-- `detsd-notebook.yaml`: Config file for launching the `textual_inversion.ipynb` notebook.
+- `detsd-shell.yaml`: Config file for launching a shell with JupyterLab for the `textual_inversion.ipynb` notebook.
 
 #### Other Files and Directories
 
