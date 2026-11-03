@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	log "github.com/sirupsen/logrus"
+	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/require"
 
 	"github.com/determined-ai/determined/master/internal/config"
@@ -227,6 +229,9 @@ func TestCodeServerUpstreamErrors(t *testing.T) {
 		rec := cst.get("/det/code-server/4.144.0/" + testCodeServerAMD64)
 		require.Equal(t, http.StatusBadGateway, rec.Code)
 		require.Empty(t, cst.files(t))
+		err := cst.artifacts.prepare(testCodeServerVersion, "amd64")
+		require.ErrorIs(t, err, errCodeServerUpstream)
+		require.Contains(t, err.Error(), ": timeout (")
 	})
 
 	t.Run("network", func(t *testing.T) {
@@ -371,9 +376,47 @@ func TestCodeServerUpstreamErrorsRedactURL(t *testing.T) {
 		}, func(c *config.CodeServerConfig) { c.URLTemplate += "?token=" + secret })
 		err := cst.artifacts.prepare(testCodeServerVersion, "amd64")
 		require.ErrorIs(t, err, errCodeServerUpstream)
-		require.Contains(t, err.Error(), "redirects")
+		require.Contains(t, err.Error(),
+			"/code-server-4.144.0-linux-amd64.tar.gz: *errors.errorString")
 		require.NotContains(t, err.Error(), secret)
 	})
+}
+
+// TestCodeServerUpstreamErrorOmitsInnerText checks that a download error, as returned and as
+// logged, does not carry the text of the HTTP client's error, which can quote a URL with
+// credentials, such as a redirect's Location header that does not parse.
+func TestCodeServerUpstreamErrorOmitsInnerText(t *testing.T) {
+	const secret = "review-dummy"
+	cst := newCodeServerTest(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "/%zz?token="+secret)
+		w.WriteHeader(http.StatusFound)
+	}, nil)
+	hook := &logrustest.Hook{}
+	hooks := log.StandardLogger().ReplaceHooks(log.LevelHooks{})
+	log.AddHook(hook)
+	t.Cleanup(func() { log.StandardLogger().ReplaceHooks(hooks) })
+
+	err := cst.artifacts.prepare(testCodeServerVersion, "amd64")
+	require.ErrorIs(t, err, errCodeServerUpstream)
+	require.Contains(t, err.Error(), "/code-server-4.144.0-linux-amd64.tar.gz")
+	require.NotContains(t, err.Error(), secret)
+	require.NotContains(t, err.Error(), "token=")
+
+	rec := cst.get("/det/code-server/4.144.0/" + testCodeServerAMD64)
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	logged := false
+	for _, e := range hook.AllEntries() {
+		line, lineErr := e.String()
+		require.NoError(t, lineErr)
+		require.NotContains(t, line, secret)
+		require.NotContains(t, line, "token=")
+		if strings.Contains(line, "serving code-server 4.144.0 for amd64") {
+			require.Contains(t, line, "code-server download failed")
+			logged = true
+		}
+	}
+	require.True(t, logged, "the download error is logged")
+	require.Empty(t, cst.files(t))
 }
 
 // placeCodeServerFile writes content to the file at path in place, as an administrator would, with

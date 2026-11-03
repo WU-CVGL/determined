@@ -395,14 +395,25 @@ func (a *codeServerArtifacts) download(arch, path string) (err error) {
 	return writeChecksumFile(path, sum)
 }
 
-// codeServerUpstreamError wraps an error of the HTTP client, naming the URL in its redacted form.
+// codeServerUpstreamError describes an error of the HTTP client by the operation, the URL in its
+// redacted form, and the class of the error. It leaves out the error's text, which can quote a URL
+// with credentials, such as that of a redirect's Location header that does not parse.
 func codeServerUpstreamError(err error) error {
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
-		return fmt.Errorf("%w: %s %s: %w", errCodeServerUpstream, urlErr.Op, redactURL(urlErr.URL),
-			urlErr.Err)
+		return fmt.Errorf("%w: %s %s: %s", errCodeServerUpstream, urlErr.Op, redactURL(urlErr.URL),
+			codeServerErrorClass(urlErr.Err))
 	}
-	return fmt.Errorf("%w: %w", errCodeServerUpstream, err)
+	return fmt.Errorf("%w: %s", errCodeServerUpstream, codeServerErrorClass(err))
+}
+
+// codeServerErrorClass names the class of err by its type, and whether it is a timeout.
+func codeServerErrorClass(err error) string {
+	var timeout interface{ Timeout() bool }
+	if errors.As(err, &timeout) && timeout.Timeout() {
+		return fmt.Sprintf("timeout (%T)", err)
+	}
+	return fmt.Sprintf("%T", err)
 }
 
 // redactURL returns the scheme, host and path of raw, without credentials in its userinfo or its
