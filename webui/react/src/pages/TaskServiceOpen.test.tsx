@@ -17,6 +17,8 @@ import TaskServiceOpen from './TaskServiceOpen';
 
 const TASK_ID = 'task-1';
 const JUPYTER_ID = `${TASK_ID}:2900`;
+const VSCODE_ID = `${TASK_ID}:2901`;
+const VSCODE_LOGIN = `https://det.example.org/proxy/${VSCODE_ID}/login`;
 
 vi.mock('services/api', () => ({
   getTaskServiceCredential: vi.fn(),
@@ -59,6 +61,19 @@ const services = (jupyter: Partial<V1TaskService> = {}): V1GetTaskServicesRespon
   workspaceId: 1,
 });
 
+const withVSCode = (): V1GetTaskServicesResponse => {
+  const response = services();
+  response.services.push({
+    mayConnect: true,
+    name: 'vscode',
+    protocol: TaskServiceProtocol.HTTP,
+    serviceId: VSCODE_ID,
+    state: V1TaskServiceState.READY,
+    url: `/proxy/${VSCODE_ID}/`,
+  });
+  return response;
+};
+
 const setup = (service: string) =>
   render(
     <UIProvider theme={DefaultTheme.Light}>
@@ -77,6 +92,11 @@ describe('TaskServiceOpen', () => {
     vi.mocked(getTaskServices).mockReset();
     vi.mocked(getTaskServiceCredential).mockReset();
     vi.mocked(replaceWithExternalUrl).mockReset();
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('opens the URL of the credential', async () => {
@@ -93,6 +113,54 @@ describe('TaskServiceOpen', () => {
     );
     expect(getTaskServices).toHaveBeenCalledWith({ taskId: TASK_ID });
     expect(getTaskServiceCredential).toHaveBeenCalledWith({ service: 'jupyter', taskId: TASK_ID });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('logs in to code-server with its login form, then opens it', async () => {
+    vi.mocked(getTaskServices).mockResolvedValue(withVSCode());
+    vi.mocked(getTaskServiceCredential).mockResolvedValue({
+      password: 'pass&word=',
+      url: `/proxy/${VSCODE_ID}/`,
+    });
+    vi.mocked(fetch).mockResolvedValue({ status: 0, type: 'opaqueredirect' } as Response);
+    setup('vscode');
+    await waitFor(() =>
+      expect(replaceWithExternalUrl).toHaveBeenCalledWith(
+        `https://det.example.org/proxy/${VSCODE_ID}/`,
+      ),
+    );
+    expect(getTaskServiceCredential).toHaveBeenCalledWith({ service: 'vscode', taskId: TASK_ID });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [address, init] = vi.mocked(fetch).mock.calls[0];
+    expect(address).toBe(VSCODE_LOGIN);
+    expect(init).toMatchObject({
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      method: 'POST',
+      redirect: 'manual',
+    });
+    expect(Object.fromEntries(new URLSearchParams(init?.body as string))).toEqual({
+      base: `/proxy/${VSCODE_ID}/`,
+      href: VSCODE_LOGIN,
+      password: 'pass&word=',
+    });
+    expect(vi.mocked(fetch).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(replaceWithExternalUrl).mock.invocationCallOrder[0],
+    );
+  });
+
+  it('shows a failed code-server login once and does not open it', async () => {
+    vi.mocked(getTaskServices).mockResolvedValue(withVSCode());
+    vi.mocked(getTaskServiceCredential).mockResolvedValue({
+      password: 'wrong',
+      url: `/proxy/${VSCODE_ID}/`,
+    });
+    // code-server answers a failed login with its form.
+    vi.mocked(fetch).mockResolvedValue({ status: 200, type: 'basic' } as Response);
+    setup('vscode');
+    expect(await screen.findByText('vscode: login failed')).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(replaceWithExternalUrl).not.toHaveBeenCalled();
   });
 
   it('opens the URL of the service without one in the credential', async () => {
