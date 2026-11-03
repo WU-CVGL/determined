@@ -59,7 +59,9 @@ var (
 	ErrPermissionDenied = status.Error(codes.PermissionDenied, "user does not have permission")
 )
 
-func allocationSessionByTokenBun(token string) (*model.AllocationSession, error) {
+// AllocationSessionByToken returns the allocation session of token, or db.ErrNotFound if token is
+// not the token of an allocation session. The session of an allocation ends with the allocation.
+func AllocationSessionByToken(token string) (*model.AllocationSession, error) {
 	v2 := paseto.NewV2()
 
 	var claims model.AllocationSession
@@ -106,7 +108,7 @@ func getAllocationSessionBun(ctx context.Context) (*model.AllocationSession, err
 	}
 	token = strings.TrimPrefix(token, "Bearer ")
 
-	switch session, err := allocationSessionByTokenBun(token); err {
+	switch session, err := AllocationSessionByToken(token); err {
 	case nil:
 		return session, nil
 	case db.ErrNotFound:
