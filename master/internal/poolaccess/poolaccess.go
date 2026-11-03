@@ -11,10 +11,10 @@
 // treated as "no record"), and an empty pool name (Internal). The check never picks another pool.
 //
 // Invariant: CanUseResourcePool, directly or through a Memo, is called only from the admission
-// check sites (command, shell, notebook and TensorBoard launch; generic task create and unpause;
-// experiment create, continue and activate; job-queue pool moves) and when a workspace default pool
-// or the pool of an experiment config policy is set. UsablePools is called only by the resource
-// pool list (GetResourcePools). Nothing at or below task.DefaultService.StartAllocation or
+// check sites (command, shell and TensorBoard launch and the shell preview; generic task create and
+// unpause; experiment create, continue and activate; job-queue pool moves) and when a workspace
+// default pool or the pool of an experiment config policy is set. UsablePools is called only by the
+// resource pool list (GetResourcePools). Nothing at or below task.DefaultService.StartAllocation or
 // rm.Allocate calls either. Continuations (experiment, trial, command and generic task restore;
 // trial allocations and restarts; generic task resume recovery and retried resume plans) are not
 // checked, because they continue work that a pool has accepted. Checkpoint GC is not checked
