@@ -89,11 +89,8 @@ func (Records) Touch(taskID model.TaskID) { Touch(taskID) }
 // Hold calls the package's Hold.
 func (Records) Hold(taskID model.TaskID) (release func()) { return Hold(taskID) }
 
-// TaskRecorder records the activity of one task, for its browser terminals.
+// TaskRecorder records the activity of one task, for its browser terminals, which hold it.
 type TaskRecorder model.TaskID
-
-// Touch calls the package's Touch for the task.
-func (t TaskRecorder) Touch() { Touch(model.TaskID(t)) }
 
 // Hold calls the package's Hold for the task.
 func (t TaskRecorder) Hold() (release func()) { return Hold(model.TaskID(t)) }

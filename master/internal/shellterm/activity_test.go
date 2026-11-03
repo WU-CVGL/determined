@@ -14,7 +14,7 @@ import (
 
 // countingActivity counts the calls of a session's Activity.
 type countingActivity struct {
-	holds, releases, touches atomic.Int64
+	holds, releases atomic.Int64
 }
 
 func (a *countingActivity) Hold() func() {
@@ -22,10 +22,8 @@ func (a *countingActivity) Hold() func() {
 	return func() { a.releases.Add(1) }
 }
 
-func (a *countingActivity) Touch() { a.touches.Add(1) }
-
-// A session holds its task active while it is open, its input and output touch the record, and it
-// releases the hold once when it ends.
+// A session holds its task active while it is open, through its input and output, and releases
+// the hold once when it ends.
 func TestBridgeActivity(t *testing.T) {
 	signer, pub, _ := shellKeys(t, config.KeyTypeED25519)
 	sshd := newFakeSSHD(t, signer, pub, behaviorEcho)
@@ -41,11 +39,9 @@ func TestBridgeActivity(t *testing.T) {
 	require.Equal(t, int64(1), activity.holds.Load())
 	require.Zero(t, activity.releases.Load())
 
-	before := activity.touches.Load()
 	require.NoError(t, ws.WriteMessage(websocket.BinaryMessage, []byte("hello activity\r")))
 	c.waitOutput(t, "hello activity")
-	// The input and at least one chunk of its echo.
-	require.GreaterOrEqual(t, activity.touches.Load()-before, int64(2))
+	require.Equal(t, int64(1), activity.holds.Load())
 	require.Zero(t, activity.releases.Load())
 
 	require.NoError(t, ws.WriteMessage(websocket.BinaryMessage, []byte("exit 0\r")))

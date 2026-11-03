@@ -84,16 +84,15 @@ type Options struct {
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
 	// OnStarted, when set, is called once the login shell has started.
 	OnStarted func()
-	// Activity, when set, hears of the session's activity for the idle policy of its task.
+	// Activity, when set, holds the session's task active for its idle policy while the session
+	// is open.
 	Activity Activity
 }
 
-// Activity hears of a terminal session's activity.
+// Activity holds a terminal session's task active.
 type Activity interface {
 	// Hold is called when the session starts, and release when it has ended.
 	Hold() (release func())
-	// Touch is called on every input from the browser and output to it.
-	Touch()
 }
 
 func (o Options) withDefaults() Options {
@@ -371,9 +370,6 @@ func (s *session) send(ctx context.Context, f frame) bool {
 
 func (s *session) touch() {
 	s.lastActivity.Store(time.Now().UnixNano())
-	if s.opts.Activity != nil {
-		s.opts.Activity.Touch()
-	}
 }
 
 // handlePong extends the read deadline only for a pong that answers the outstanding ping, so
