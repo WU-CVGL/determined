@@ -240,6 +240,8 @@ vscode_ready_check() {
 # which it applies after them, keep it there and leave the variables to the task's programs.
 # Upstream deprecates these two flags: check that they still exist when the supported range of
 # code-server releases changes.
+#
+# --ignore-last-opened: the task's directory, not the last one opened from the shared home.
 {
     "$vscode_bin" --config "$vscode_config" \
         --bind-addr "0.0.0.0:$vscode_port" \
@@ -251,5 +253,6 @@ vscode_ready_check() {
         --disable-telemetry \
         --disable-update-check \
         --disable-workspace-trust \
+        --ignore-last-opened \
         "$PWD"
 } > >(vscode_log) 2>&1

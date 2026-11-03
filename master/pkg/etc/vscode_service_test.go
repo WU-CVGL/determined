@@ -249,6 +249,7 @@ func (v *vscodeTask) requireServed(tag string) {
 		"--disable-telemetry",
 		"--disable-update-check",
 		"--disable-workspace-trust",
+		"--ignore-last-opened",
 		v.work,
 	}
 	args, err := os.ReadFile(v.order + ".code-server-args")
