@@ -164,8 +164,8 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 	require.Equal(t, model.ServiceJupyter, jupyter.Name)
 	require.GreaterOrEqual(t, ssh.Port, minSshdPort)
 	require.LessOrEqual(t, ssh.Port, maxSshdPort)
-	require.GreaterOrEqual(t, jupyter.Port, minNotebookPort)
-	require.LessOrEqual(t, jupyter.Port, maxNotebookPort)
+	require.GreaterOrEqual(t, jupyter.Port, minServicePort)
+	require.LessOrEqual(t, jupyter.Port, maxServicePort)
 	require.NotEqual(t, ssh.Port, jupyter.Port)
 	require.Equal(t, ssh.Port, spec.SSHDPort)
 	require.Equal(t, []string{
@@ -219,7 +219,7 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 		"/run/determined/services/ssh.sh", "/run/determined/services/jupyter.sh",
 		"/run/determined/ssh/authorized_keys_unmodified", "/run/determined/ssh/sshd_config",
 		jupyterDir, jupyterConfigDir, jupyterDataDir, jupyterRuntimeDir, jupyterIdleCheck,
-		notebookDefaultPage, jupyterKeyPath, jupyterCertPath,
+		jupyterDefaultPage, jupyterKeyPath, jupyterCertPath,
 	} {
 		require.Contains(t, paths, path)
 	}
@@ -407,9 +407,9 @@ func TestLaunchShellServicePortsAvoidProxyPorts(t *testing.T) {
 	command.SetDefaultService(cs)
 	rm := api.m.rm.(*mocks.ResourceManager)
 
-	sshPort, jupyterPort := minSshdPort+42, minNotebookPort+137
+	sshPort, jupyterPort := minSshdPort+42, minServicePort+137
 	declared := append(portsExcept(minSshdPort, maxSshdPort, sshPort),
-		portsExcept(minNotebookPort, maxNotebookPort, jupyterPort)...)
+		portsExcept(minServicePort, maxServicePort, jupyterPort)...)
 	resp, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
 		Config: shellConfig(t, map[string]any{"jupyter": map[string]any{}}, declared...),
 	})
@@ -456,12 +456,12 @@ func TestLaunchShellServicePortsExhausted(t *testing.T) {
 			"services: ssh: no free port in 3200-3499",
 		},
 		"jupyter": {
-			shellConfig(t, jupyter, portsExcept(minNotebookPort, maxNotebookPort)...),
+			shellConfig(t, jupyter, portsExcept(minServicePort, maxServicePort)...),
 			"services: jupyter: no free port in 2900-3199",
 		},
 		"vscode": {
 			shellConfig(t, map[string]any{"vscode": map[string]any{}},
-				portsExcept(minNotebookPort, maxNotebookPort)...),
+				portsExcept(minServicePort, maxServicePort)...),
 			"services: vscode: no free port in 2900-3199",
 		},
 	} {
@@ -471,9 +471,9 @@ func TestLaunchShellServicePortsExhausted(t *testing.T) {
 		require.ErrorContains(t, err, tc.msg, name)
 	}
 
-	// Without jupyter, the notebooks' range is free to declare.
+	// Without jupyter, the services' range is free to declare.
 	_, err = api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
-		Config: shellConfig(t, nil, portsExcept(minNotebookPort, maxNotebookPort)...),
+		Config: shellConfig(t, nil, portsExcept(minServicePort, maxServicePort)...),
 	})
 	require.NoError(t, err)
 }
@@ -641,7 +641,7 @@ func requireCodeServerHash(t *testing.T, hash, password string) {
 }
 
 // A shell with the vscode service runs code-server next to sshd and JupyterLab: at
-// "<task>:<port>", with a port of its own from the notebooks' range, over plain HTTP behind a
+// "<task>:<port>", with a port of its own from the services' range, over plain HTTP behind a
 // master login and the owner rule, with its prefix stripped. The master pins the release it
 // serves and mints a password, which the spec keeps in its metadata: the container gets only its
 // argon2id hash, in neither its environment nor its files the password itself.
@@ -665,8 +665,8 @@ func TestLaunchShellWithVSCodeService(t *testing.T) {
 	ssh, jupyter, vscode := spec.Services[0], spec.Services[1], spec.Services[2]
 	require.Equal(t, model.ServiceSSH, ssh.Name)
 	require.Equal(t, model.ServiceJupyter, jupyter.Name)
-	require.GreaterOrEqual(t, vscode.Port, minNotebookPort)
-	require.LessOrEqual(t, vscode.Port, maxNotebookPort)
+	require.GreaterOrEqual(t, vscode.Port, minServicePort)
+	require.LessOrEqual(t, vscode.Port, maxServicePort)
 	require.NotEqual(t, jupyter.Port, vscode.Port)
 	require.Equal(t, tasks.InteractiveService{
 		Name: model.ServiceVSCode, Port: vscode.Port, Exec: true, StripPrefix: true,

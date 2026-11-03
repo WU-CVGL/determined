@@ -46,7 +46,7 @@ import (
 )
 
 const (
-	// Agent ports 2600 - 3500 are split between TensorBoards, Notebooks, and Shells.
+	// Agent ports 2600 - 3500 are split between TensorBoards, services, and sshd.
 	minTensorBoardPort        = 2600
 	maxTensorBoardPort        = minTensorBoardPort + 299
 	tensorboardEntrypointFile = "/run/determined/tensorboard/tensorboard-entrypoint.sh"

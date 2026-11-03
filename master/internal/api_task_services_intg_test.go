@@ -158,7 +158,7 @@ func TestGetTaskServicesWithoutRecords(t *testing.T) {
 
 	notebookReq := mockGenericReq(t, s.api.m.db)
 	notebookReq.Spec.Base.ExtraProxyPorts = expconf.ProxyPortsConfig{{
-		RawProxyPort: minNotebookPort, RawDefaultServiceID: ptrs.Ptr(true),
+		RawProxyPort: minServicePort, RawDefaultServiceID: ptrs.Ptr(true),
 	}}
 	notebook, err := command.DefaultCmdService.LaunchNotebookCommand(
 		notebookReq, notebookReq.Spec.Base.Owner)

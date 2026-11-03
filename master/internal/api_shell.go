@@ -5,7 +5,6 @@ import (
 	"context"
 	cryptorand "crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"slices"
@@ -26,7 +25,6 @@ import (
 	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
-	"github.com/determined-ai/determined/master/internal/proxy"
 	"github.com/determined-ai/determined/master/internal/rbac/audit"
 	"github.com/determined-ai/determined/master/pkg/archive"
 	"github.com/determined-ai/determined/master/pkg/check"
@@ -44,7 +42,7 @@ import (
 const (
 	shellSSHDConfigFile   = "/run/determined/ssh/sshd_config"
 	shellEntrypointScript = "/run/determined/ssh/shell-entrypoint.sh"
-	// Agent ports 2600 - 3500 are split between TensorBoards, Notebooks, and Shells.
+	// Agent ports 2600 - 3500 are split between TensorBoards, services, and sshd.
 	minSshdPort = 3200
 	maxSshdPort = minSshdPort + 299
 	// minShellIdleTimeout is the shortest idle_timeout a shell takes: the idle watcher's tick, so
@@ -359,7 +357,7 @@ func servicePortRange(name string) (lo, hi int) {
 	if name == interactiveServiceSSH {
 		return minSshdPort, maxSshdPort
 	}
-	return minNotebookPort, maxNotebookPort
+	return minServicePort, maxServicePort
 }
 
 // PreviewShell returns the config that a shell launched with the request runs, but for what the
@@ -500,52 +498,6 @@ func (a *apiServer) addShellService(
 	}
 }
 
-// jupyterService is the jupyter service of a shell: at "<task>:<port>", reached over HTTPS, since
-// JupyterLab serves the master-signed cert, by the task's owner and admins only, since it runs
-// code as the owner. JupyterLab serves under its base URL, so the proxy keeps the path.
-func jupyterService(port int) tasks.InteractiveService {
-	return tasks.InteractiveService{
-		Name: interactiveServiceJupyter,
-		Port: port,
-		TLS:  true,
-		Exec: true,
-	}
-}
-
-// addShellJupyter adds the jupyter service to a shell spec: JupyterLab's port, from the notebooks'
-// range, which does not overlap sshd's, outside the spec's other ports, its environment and its
-// files, which it returns. The command service adds its token, and Command.Start its base URL.
-// When the shell's idle time is watched, JupyterLab's idle check reports to the task's activity
-// record, more often than the idle timeout.
-func addShellJupyter(spec *tasks.GenericCommandSpec) (archive.Archive, error) {
-	key, cert, err := proxy.GenSignedCert()
-	if err != nil {
-		return nil, err
-	}
-	configBytes, err := json.Marshal(spec.Config)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "cannot marshal shell config: %s", err)
-	}
-	lo, hi := servicePortRange(interactiveServiceJupyter)
-	port, err := freeServicePort(spec, interactiveServiceJupyter, lo, hi)
-	if err != nil {
-		return nil, err
-	}
-	spec.AddService(jupyterService(port))
-	env := map[string]string{
-		"NOTEBOOK_PORT":   strconv.Itoa(port),
-		"NOTEBOOK_CONFIG": string(configBytes),
-	}
-	if spec.Config.IdleTimeout != nil {
-		env[tasks.NotebookIdleTypeEnvVar] = spec.Config.NotebookIdleType
-		env[tasks.ActivityReportEnvVar] = tasks.ActivityReportTask
-		env[tasks.IdleTimeoutSecondsEnvVar] = strconv.FormatFloat(
-			time.Duration(*spec.Config.IdleTimeout).Seconds(), 'f', -1, 64)
-	}
-	addExtraEnvVars(spec, env)
-	return jupyterFiles(spec.Base.AgentUserGroup, key, cert), nil
-}
-
 const (
 	// codeServerRunDir holds the files of a shell's code-server run: its config file and its
 	// session socket.
@@ -601,7 +553,7 @@ func codeServerPasswordHash(password string) (string, error) {
 		base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(key)), nil
 }
 
-// addShellVSCode adds the vscode service to a shell spec: a port from the notebooks' range,
+// addShellVSCode adds the vscode service to a shell spec: a port from the services' range,
 // outside the spec's other ports, and a new password, which the spec keeps in its metadata, as it
 // keeps the private key. The container gets the password's hash, the release that conf serves now,
 // which the shell keeps, and the port, in its environment, and the run directory, which

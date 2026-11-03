@@ -118,20 +118,19 @@ func processProxyAuthentication(c echo.Context, service *proxy.Service) (done bo
 	taskID := model.TaskID(strings.SplitN(c.Param("service"), ":", 2)[0])
 	exec := service != nil && service.Exec
 
-	// Notebooks require special auth token passed as a URL parameter.
-	token := extractNotebookTokenFromRequest(c.Request())
+	// JupyterLab's token, in the URL or the Authorization header, logs in to its task.
+	token := extractJupyterTokenFromRequest(c.Request())
 	var usr *model.User
 	var session *model.UserSession
-	var notebookSession *model.NotebookSession
+	var jupyterSession *model.NotebookSession
 
 	if token != "" {
-		// Notebooks go through special token param auth.
-		usr, notebookSession, err = user.GetService().UserAndNotebookSessionFromToken(token)
+		usr, jupyterSession, err = user.GetService().UserAndNotebookSessionFromToken(token)
 		if err != nil {
 			return true, err
 		}
-		if notebookSession.TaskID != taskID {
-			return true, fmt.Errorf("invalid notebook session token for task (%v)", taskID)
+		if jupyterSession.TaskID != taskID {
+			return true, fmt.Errorf("invalid jupyter token for task (%v)", taskID)
 		}
 	} else {
 		// Without a bearer token, the browser's session cookie authenticates the request, so a
@@ -198,7 +197,7 @@ func processProxyAuthentication(c echo.Context, service *proxy.Service) (done bo
 			ctx, *usr, spec.WorkspaceID)
 	}
 	if err == nil && exec {
-		err = authorizeExecPort(ctx, *usr, session, notebookSession != nil, taskID)
+		err = authorizeExecPort(ctx, *usr, session, jupyterSession != nil, taskID)
 	}
 	return err != nil, authz.SubIfUnauthorized(err, serviceNotFoundErr)
 }
@@ -221,14 +220,14 @@ var execPortAudits = func() *lru.Cache[execPortAuditKey, struct{}] {
 }()
 
 // authorizeExecPort lets only the task's owner and admins reach a port whose service runs code as
-// the owner, the rule for the task's credentials (canReadTaskCredential). A notebook token of the
+// the owner, the rule for the task's credentials (canReadTaskCredential). A jupyter token of the
 // task acts as its owner. The first request in each session of an admin to another user's task is
 // logged. Others are refused with an authz error.
 func authorizeExecPort(
-	ctx context.Context, usr model.User, session *model.UserSession, notebookToken bool,
+	ctx context.Context, usr model.User, session *model.UserSession, jupyterToken bool,
 	taskID model.TaskID,
 ) error {
-	if notebookToken {
+	if jupyterToken {
 		return nil
 	}
 	ownerID, err := command.TaskOwnerID(ctx, taskID)
@@ -251,24 +250,6 @@ func authorizeExecPort(
 		logCredentialRead(usr, "exec port", string(taskID), int32(ownerID))
 	}
 	return nil
-}
-
-// extractNotebookTokenFromRequest looks for auth token for Jupyter notebooks
-// in two places:
-// 1. A token query parameter in the request URL.
-// 2. An HTTP Authorization header with a "token" type.
-func extractNotebookTokenFromRequest(r *http.Request) string {
-	token := r.URL.Query().Get("token")
-	authRaw := r.Header.Get("Authorization")
-	if token != "" {
-		return token
-	} else if authRaw != "" {
-		if strings.HasPrefix(authRaw, "token ") {
-			return strings.TrimPrefix(authRaw, "token ")
-		}
-	}
-	// If we found no token, then abort the request with an HTTP 401.
-	return ""
 }
 
 // useAuthenticationMiddleware registers the middleware that authenticates requests to e, and the

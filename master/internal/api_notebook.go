@@ -23,7 +23,6 @@ import (
 	"github.com/determined-ai/determined/master/internal/proxy"
 	"github.com/determined-ai/determined/master/internal/rbac/audit"
 	"github.com/determined-ai/determined/master/internal/task/idle"
-	"github.com/determined-ai/determined/master/pkg/archive"
 	"github.com/determined-ai/determined/master/pkg/check"
 	pkgCommand "github.com/determined-ai/determined/master/pkg/command"
 	"github.com/determined-ai/determined/master/pkg/etc"
@@ -38,20 +37,7 @@ import (
 	"github.com/determined-ai/determined/proto/pkg/workspacev1"
 )
 
-const (
-	jupyterDir        = "/run/determined/jupyter/"
-	jupyterConfigDir  = "/run/determined/jupyter/config"
-	jupyterDataDir    = "/run/determined/jupyter/data"
-	jupyterRuntimeDir = "/run/determined/jupyter/runtime"
-	jupyterEntrypoint = "/run/determined/jupyter/notebook-entrypoint.sh"
-	jupyterIdleCheck  = "/run/determined/jupyter/check_idle.py"
-	jupyterCertPath   = "/run/determined/jupyter/jupyterCert.pem"
-	jupyterKeyPath    = "/run/determined/jupyter/jupyterKey.key"
-	// Agent ports 2600 - 3500 are split between TensorBoards, Notebooks, and Shells.
-	minNotebookPort     = 2900
-	maxNotebookPort     = minNotebookPort + 299
-	notebookDefaultPage = "/run/determined/workdir/README.ipynb"
-)
+const jupyterEntrypoint = "/run/determined/jupyter/notebook-entrypoint.sh"
 
 func (a *apiServer) GetNotebooks(
 	ctx context.Context, req *apiv1.GetNotebooksRequest,
@@ -112,7 +98,7 @@ func (a *apiServer) GetNotebook(
 		if err != nil {
 			return nil, err
 		}
-		resp.Notebook.ServiceAddress = command.NotebookServiceAddress(
+		resp.Notebook.ServiceAddress = jupyterServiceAddress(
 			resp.Notebook.ServiceAddress, token)
 		logCredentialRead(*curUser, "notebook token", req.NotebookId, resp.Notebook.UserId)
 	}
@@ -321,7 +307,7 @@ func (a *apiServer) LaunchNotebook(
 
 	// Selecting a random port mitigates the risk of multiple processes binding
 	// the same port on an agent in host mode.
-	port := getRandomPort(minNotebookPort, maxNotebookPort)
+	port := getRandomPort(minServicePort, maxServicePort)
 	configBytes, err := json.Marshal(launchReq.Spec.Config)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "cannot marshal notebook config: %s", err.Error())
@@ -382,7 +368,7 @@ func (a *apiServer) LaunchNotebook(
 
 	// The caller owns the new notebook and needs the token to open it.
 	notebook := genericCmd.ToV1Notebook()
-	notebook.ServiceAddress = command.NotebookServiceAddress(
+	notebook.ServiceAddress = jupyterServiceAddress(
 		notebook.ServiceAddress, genericCmd.NotebookToken())
 
 	return &apiv1.LaunchNotebookResponse{
@@ -390,29 +376,4 @@ func (a *apiServer) LaunchNotebook(
 		Config:   protoutils.ToStruct(launchReq.Spec.Config),
 		Warnings: pkgCommand.LaunchWarningToProto(launchWarnings),
 	}, nil
-}
-
-// jupyterFiles returns the run-dir files of the jupyter service: its directories, the idle check,
-// the default page, and the master-signed key and cert that JupyterLab serves HTTPS with.
-func jupyterFiles(aug *model.AgentUserGroup, key, cert []byte) archive.Archive {
-	return archive.Archive{
-		aug.OwnedArchiveItem(jupyterDir, nil, 0o700, tar.TypeDir),
-		aug.OwnedArchiveItem(jupyterConfigDir, nil, 0o700, tar.TypeDir),
-		aug.OwnedArchiveItem(jupyterDataDir, nil, 0o700, tar.TypeDir),
-		aug.OwnedArchiveItem(jupyterRuntimeDir, nil, 0o700, tar.TypeDir),
-		aug.OwnedArchiveItem(
-			jupyterIdleCheck,
-			etc.MustStaticFile(etc.NotebookIdleCheckResource),
-			0o700,
-			tar.TypeReg,
-		),
-		aug.OwnedArchiveItem(
-			notebookDefaultPage,
-			etc.MustStaticFile(etc.NotebookTemplateResource),
-			0o644,
-			tar.TypeReg,
-		),
-		aug.OwnedArchiveItem(jupyterKeyPath, key, 0o600, tar.TypeReg),
-		aug.OwnedArchiveItem(jupyterCertPath, cert, 0o600, tar.TypeReg),
-	}
 }
