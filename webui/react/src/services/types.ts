@@ -184,6 +184,11 @@ export interface GetTaskParams {
   taskId: string;
 }
 
+export interface GetTaskServiceParams {
+  service: string;
+  taskId: string;
+}
+
 export interface GetGenericTasksParams extends PaginationParams {
   parentId?: string;
   /** The tasks of this project. */

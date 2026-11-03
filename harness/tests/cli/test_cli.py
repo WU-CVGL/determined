@@ -361,11 +361,11 @@ def test_task_open(requests_mock: requests_mock.Mocker, capsys: pytest.CaptureFi
         json={"token": "tok", "url": f"/proxy/{jupyter_id}/?token=tok"},
     )
 
-    # The credential's URL opens JupyterLab.
+    # The WebUI's page opens the service as the browser's user; the CLI reads no credential.
     with mock.patch("webbrowser.open") as browser_open:
         cli.main(["task", "open", task_id, "jupyter"])
-    browser_open.assert_called_once_with(f"{MASTER_HOST}/proxy/{jupyter_id}/?token=tok")
-    assert credential.call_count == 1
+    browser_open.assert_called_once_with(f"{MASTER_HOST}/det/tasks/{task_id}/services/jupyter/open")
+    assert credential.call_count == 0
 
     # A TCP service is opened with det shell open, and an unknown service does not open.
     for service, message in [("ssh", f"det shell open {task_id}"), ("vscode", "no service")]:
@@ -375,7 +375,7 @@ def test_task_open(requests_mock: requests_mock.Mocker, capsys: pytest.CaptureFi
         assert e.value.code == 1
         browser_open.assert_not_called()
         assert message in capsys.readouterr().err
-    assert credential.call_count == 1
+    assert credential.call_count == 0
 
     # A service that is not ready does not open.
     mock_task_services(requests_mock, task_id, jupyter_state="STATE_STARTING")
@@ -385,7 +385,7 @@ def test_task_open(requests_mock: requests_mock.Mocker, capsys: pytest.CaptureFi
     assert e.value.code == 1
     browser_open.assert_not_called()
     assert "STARTING" in capsys.readouterr().err
-    assert credential.call_count == 1
+    assert credential.call_count == 0
 
 
 def test_create_reject_large_model_def(

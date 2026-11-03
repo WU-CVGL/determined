@@ -16,6 +16,12 @@ const routes: RouteConfig[] = [
     title: 'Shell Terminal',
   },
   {
+    id: 'taskServiceOpen',
+    needAuth: true,
+    path: '/tasks/:taskId/services/:service/open',
+    title: 'Task Service',
+  },
+  {
     id: 'workspaceDetails',
     needAuth: true,
     path: '/workspaces/:workspaceId/:tab',

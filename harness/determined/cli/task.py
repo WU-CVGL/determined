@@ -1,7 +1,9 @@
 import argparse
 import functools
 import json
+import os
 import pathlib
+import urllib.parse
 from typing import Any, Dict, List, Union, cast
 
 import termcolor
@@ -258,8 +260,12 @@ def open_service(args: argparse.Namespace) -> None:
             f"Cannot open {service.name}: only the user who started the task or an administrator "
             "can open it."
         )
-    cred = bindings.get_GetTaskServiceCredential(sess, taskId=args.task_id, service=service.name)
-    ntsc.open_in_browser(args.master, cred.url or service.url)
+    # The WebUI's page logs the browser in to the master, then fetches the credential as the
+    # browser's user and opens the service.
+    public_url = os.environ.get("PUBLIC_URL", "/det")
+    task_id = urllib.parse.quote(args.task_id, safe="")
+    name = urllib.parse.quote(service.name, safe="")
+    ntsc.open_in_browser(args.master, f"{public_url}/tasks/{task_id}/services/{name}/open")
 
 
 def cleanup_logs(args: argparse.Namespace) -> None:
