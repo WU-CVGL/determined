@@ -232,6 +232,158 @@ def test_notebook_open_needs_token(
             assert "only the user who started it or an administrator" in capsys.readouterr().err
 
 
+def mock_cli_login(requests_mock: requests_mock.Mocker) -> None:
+    requests_mock.get("/info", status_code=200, json={"version": "1.0"})
+    requests_mock.get(
+        "/api/v1/me", status_code=200, json={"username": constants.DEFAULT_DETERMINED_USER}
+    )
+    fake_user = {"username": "fakeuser", "admin": False, "active": True}
+    requests_mock.post(
+        "/api/v1/auth/login", status_code=200, json={"token": "fake-token", "user": fake_user}
+    )
+
+
+def test_shell_start_services(requests_mock: requests_mock.Mocker) -> None:
+    # --service adds to the services of the config, which other flags also set.
+    mock_cli_login(requests_mock)
+    shell_id = str(uuid.uuid4())
+    launch = requests_mock.post(
+        "/api/v1/shells",
+        status_code=requests.codes.ok,
+        json={
+            "config": {},
+            "shell": {
+                "description": "shell",
+                "id": shell_id,
+                "jobId": "j",
+                "resourcePool": "default",
+                "startTime": "2026-01-01T00:00:00Z",
+                "state": "STATE_QUEUED",
+                "username": "fakeuser",
+                "workspaceId": 1,
+            },
+        },
+    )
+
+    cli.main(["shell", "start", "-d", "--service", "jupyter", "--service", "ssh"])
+    assert launch.last_request.json()["config"] == {"services": {"jupyter": {}, "ssh": {}}}
+
+    cli.main(
+        [
+            "shell",
+            "start",
+            "-d",
+            "--config",
+            "services={ssh: {}}",
+            "--config",
+            "resources.slots=1",
+            "--service",
+            "jupyter",
+        ]
+    )
+    assert launch.last_request.json()["config"] == {
+        "services": {"ssh": {}, "jupyter": {}},
+        "resources": {"slots": 1},
+    }
+
+    cli.main(["shell", "start", "-d"])
+    assert launch.last_request.json()["config"] == {}
+
+
+def mock_task_services(
+    requests_mock: requests_mock.Mocker, task_id: str, jupyter_state: str = "STATE_READY"
+) -> None:
+    jupyter_id = f"{task_id}:2900"
+    requests_mock.get(
+        f"/api/v1/tasks/{task_id}/services",
+        status_code=requests.codes.ok,
+        json={
+            "taskId": task_id,
+            "userId": 1,
+            "workspaceId": 1,
+            "primary": "ssh",
+            "services": [
+                {
+                    "name": "ssh",
+                    "state": "STATE_READY",
+                    "serviceId": task_id,
+                    "protocol": "PROTOCOL_TCP",
+                    "url": "",
+                    "mayConnect": True,
+                },
+                {
+                    "name": "jupyter",
+                    "state": jupyter_state,
+                    "serviceId": jupyter_id,
+                    "protocol": "PROTOCOL_HTTP",
+                    "url": f"/proxy/{jupyter_id}/",
+                    "mayConnect": True,
+                },
+            ],
+        },
+    )
+
+
+def test_task_services(
+    requests_mock: requests_mock.Mocker, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mock_cli_login(requests_mock)
+    task_id = str(uuid.uuid4())
+    mock_task_services(requests_mock, task_id, jupyter_state="STATE_STARTING")
+
+    cli.main(["task", "services", task_id])
+    lines = capsys.readouterr().out.splitlines()
+    assert ["Name", "State", "Service", "ID", "URL"] == lines[0].replace("|", " ").split()
+    rows = [line.replace("|", " ").split() for line in lines[2:]]
+    assert rows == [
+        ["ssh", "READY", task_id],
+        ["jupyter", "STARTING", f"{task_id}:2900", f"{MASTER_HOST}/proxy/{task_id}:2900/"],
+    ]
+
+    cli.main(["task", "services", task_id, "--json"])
+    out = json.loads(capsys.readouterr().out)
+    assert out["primary"] == "ssh"
+    assert [s["name"] for s in out["services"]] == ["ssh", "jupyter"]
+
+
+def test_task_open(requests_mock: requests_mock.Mocker, capsys: pytest.CaptureFixture[str]) -> None:
+    mock_cli_login(requests_mock)
+    task_id = str(uuid.uuid4())
+    jupyter_id = f"{task_id}:2900"
+    mock_task_services(requests_mock, task_id)
+    credential = requests_mock.get(
+        f"/api/v1/tasks/{task_id}/services/jupyter/credential",
+        status_code=requests.codes.ok,
+        json={"token": "tok", "url": f"/proxy/{jupyter_id}/?token=tok"},
+    )
+
+    # The credential's URL opens JupyterLab.
+    with mock.patch("webbrowser.open") as browser_open:
+        cli.main(["task", "open", task_id, "jupyter"])
+    browser_open.assert_called_once_with(f"{MASTER_HOST}/proxy/{jupyter_id}/?token=tok")
+    assert credential.call_count == 1
+
+    # A TCP service is opened with det shell open, and an unknown service does not open.
+    for service, message in [("ssh", f"det shell open {task_id}"), ("vscode", "no service")]:
+        with mock.patch("webbrowser.open") as browser_open:
+            with pytest.raises(SystemExit) as e:
+                cli.main(["task", "open", task_id, service])
+        assert e.value.code == 1
+        browser_open.assert_not_called()
+        assert message in capsys.readouterr().err
+    assert credential.call_count == 1
+
+    # A service that is not ready does not open.
+    mock_task_services(requests_mock, task_id, jupyter_state="STATE_STARTING")
+    with mock.patch("webbrowser.open") as browser_open:
+        with pytest.raises(SystemExit) as e:
+            cli.main(["task", "open", task_id, "jupyter"])
+    assert e.value.code == 1
+    browser_open.assert_not_called()
+    assert "STARTING" in capsys.readouterr().err
+    assert credential.call_count == 1
+
+
 def test_create_reject_large_model_def(
     requests_mock: requests_mock.Mocker, tmp_path: pathlib.Path
 ) -> None:

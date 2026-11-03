@@ -94,7 +94,7 @@ def open_notebook(args: argparse.Namespace) -> None:
         currentSlotsExceeded=False,
     )
 
-    webbrowser.open(f"{args.master}/{nb_path}")
+    ntsc.open_in_browser(args.master, nb_path)
 
 
 args_description: cli.ArgsDescription = [
