@@ -23,9 +23,12 @@ def add_services(config: Dict[str, Any], services: List[str]) -> None:
     """Add services to the services map of a shell config, keeping the ones it has."""
     if not services:
         return
-    declared = config.get("services") or {}
-    if not isinstance(declared, dict):
-        # The master's validation answers for a malformed config.
+    # Only a missing key leaves the services undeclared; the master's validation answers for any
+    # other value that is not a map.
+    declared = config.get("services")
+    if declared is None:
+        declared = {}
+    elif not isinstance(declared, dict):
         return
     for name in services:
         declared.setdefault(name, {})

@@ -289,6 +289,10 @@ def test_shell_start_services(requests_mock: requests_mock.Mocker) -> None:
     cli.main(["shell", "start", "-d"])
     assert launch.last_request.json()["config"] == {}
 
+    # A services value that is not a map goes to the master as it is.
+    cli.main(["shell", "start", "-d", "--config", "services=[]", "--service", "jupyter"])
+    assert launch.last_request.json()["config"] == {"services": []}
+
 
 def mock_task_services(
     requests_mock: requests_mock.Mocker, task_id: str, jupyter_state: str = "STATE_READY"
