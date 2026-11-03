@@ -92,6 +92,12 @@ func (w *Watcher) tick(ctx context.Context) (done bool) {
 		lastActivity = ptrs.Ptr(service.LastRequested)
 	}
 
+	if w.cfg.UseTaskActivity {
+		if t := w.taskActivity(); t != nil && (lastActivity == nil || t.After(*lastActivity)) {
+			lastActivity = t
+		}
+	}
+
 	if w.cfg.UseRunnerState {
 		w.mu.Lock()
 		if lastActivity == nil ||
@@ -120,4 +126,20 @@ func (w *Watcher) tick(ctx context.Context) (done bool) {
 		return true
 	}
 	return false
+}
+
+// taskActivity returns the last activity of the watched task: now while something holds it, nil
+// before its first activity.
+func (w *Watcher) taskActivity() *time.Time {
+	a, ok := ActivityOf(w.cfg.TaskID)
+	switch {
+	case !ok:
+		return nil
+	case a.Holds > 0:
+		return ptrs.Ptr(time.Now())
+	case a.LastActivity.IsZero():
+		return nil
+	default:
+		return &a.LastActivity
+	}
 }
