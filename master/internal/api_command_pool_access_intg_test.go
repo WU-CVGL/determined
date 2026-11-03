@@ -156,6 +156,10 @@ func TestLaunchNTSCChecksResolvedPool(t *testing.T) {
 	requirePoolDenied(t, err, other, wscompute)
 	require.Equal(t, sessions, countUserSessions(adminCtx, t, other.ID),
 		"a refused launch must not start a task session")
+	_, err = api.PreviewShell(otherCtx, &apiv1.PreviewShellRequest{Config: ntscPoolConfig(t, open)})
+	require.NoError(t, err)
+	require.Equal(t, sessions, countUserSessions(adminCtx, t, other.ID),
+		"a preview must not start a task session")
 
 	resp, err := api.LaunchCommand(otherCtx, &apiv1.LaunchCommandRequest{Config: ntscPoolConfig(t, open)})
 	require.NoError(t, err)

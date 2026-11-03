@@ -204,7 +204,7 @@ func TestRestoreNotebookEnded(t *testing.T) {
 	taskID := string(notebook.taskID)
 	var allocated []sproto.AllocateRequest
 	for _, call := range restartedRM.Calls {
-		if call.Method == "Allocate" {
+		if call.Method == "Allocate" { //nolint:goconst // the mock's method name
 			allocated = append(allocated, call.Arguments.Get(0).(sproto.AllocateRequest))
 		}
 	}

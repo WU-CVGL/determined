@@ -270,8 +270,9 @@ func TestNSCControlChecksOwnerBeforeMutation(t *testing.T) {
 
 	cmdID := cmd.ToV1Command().Id
 	shellID, tbID := shell.ToV1Shell().Id, tensorboard.ToV1Tensorboard().Id
-	states := []interface{}{cmd.ToV1Command().State,
-		shell.ToV1Shell().State, tensorboard.ToV1Tensorboard().State}
+	states := []interface{}{
+		cmd.ToV1Command().State, shell.ToV1Shell().State, tensorboard.ToV1Tensorboard().State,
+	}
 	_, err := api.KillCommand(ctx, &apiv1.KillCommandRequest{CommandId: cmdID})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 	_, err = api.KillShell(ctx, &apiv1.KillShellRequest{ShellId: shellID})
@@ -285,8 +286,9 @@ func TestNSCControlChecksOwnerBeforeMutation(t *testing.T) {
 	_, err = api.SetTensorboardPriority(ctx,
 		&apiv1.SetTensorboardPriorityRequest{TensorboardId: tbID})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
-	require.Equal(t, states, []interface{}{
-		cmd.ToV1Command().State, shell.ToV1Shell().State, tensorboard.ToV1Tensorboard().State})
+	require.Equal(t, []interface{}{
+		cmd.ToV1Command().State, shell.ToV1Shell().State, tensorboard.ToV1Tensorboard().State,
+	}, states)
 	authz.AssertExpectations(t)
 }
 
@@ -823,6 +825,7 @@ func TestAuthZCanCreateNSC(t *testing.T) {
 	mockRM := MockRM()
 	mockRM.On("SmallerValueIsHigherPriority", mock.Anything).Return(true, nil)
 	api.m.rm = mockRM
+	sessions := countUserSessions(ctx, t, curUser.ID)
 	// A shell's preview is refused as its launch is.
 	_, err = api.PreviewShell(ctx, &apiv1.PreviewShellRequest{})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
@@ -846,6 +849,8 @@ func TestAuthZCanCreateNSC(t *testing.T) {
 	_, err = api.LaunchShell(ctx, &apiv1.LaunchShellRequest{})
 	require.Error(t, err)
 	require.NotEqual(t, codes.PermissionDenied, status.Code(err))
+	require.Equal(t, sessions, countUserSessions(ctx, t, curUser.ID),
+		"a launch refused by the authorization must not start a task session")
 }
 
 // HACK: duplicated from command package.
