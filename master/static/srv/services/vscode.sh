@@ -214,7 +214,9 @@ disable-update-check: true
 disable-workspace-trust: true
 VSCODE_CONFIG
 
-READINESS_REGEX='^.*HTTP server listening on '
+# code-server logs, for example, "[...] info  HTTP server listening on http://0.0.0.0:8080/". The
+# check takes the task's address only, so that a code-server that listens elsewhere is never READY.
+READINESS_REGEX='^.*HTTP server listening on http://0\.0\.0\.0:'"$vscode_port/"
 
 # code-server's log goes to tee, which copies it to the task log and to the readiness check. tee
 # ignores the signals that stop code-server, so that it passes on its last lines, and waits for
@@ -232,9 +234,17 @@ vscode_ready_check() {
 
 # The group makes the log helper a child of this shell rather than of code-server. code-server
 # logs to its standard output and error. It opens the task's working directory.
+#
+# code-server applies the environment variables PORT and CODE_SERVER_HOST after --bind-addr, so
+# that a task that sets them would move it off the port the master proxies; --host and --port,
+# which it applies after them, keep it there and leave the variables to the task's programs.
+# Upstream deprecates these two flags: check that they still exist when the supported range of
+# code-server releases changes.
 {
     "$vscode_bin" --config "$vscode_config" \
         --bind-addr "0.0.0.0:$vscode_port" \
+        --host 0.0.0.0 \
+        --port "$vscode_port" \
         --auth password \
         --user-data-dir "$vscode_data" \
         --extensions-dir "$vscode_data/extensions" \

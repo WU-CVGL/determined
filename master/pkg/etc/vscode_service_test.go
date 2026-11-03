@@ -102,19 +102,39 @@ func codeServerArch(t *testing.T) string {
 // codeServerStandIn is a code-server of release version. Like code-server, it reads its config
 // file first, ~/.config/code-server/config.yaml without --config, and when that file is missing it
 // writes it and logs so on its standard output. Then it prints the release for --version.
-// Otherwise it records its arguments, the HASHED_PASSWORD that it gets and, in the order file,
-// "code-server <tag>", logs that it serves on DET_CODE_SERVER_PORT, and exits once the order file
-// has "stop code-server".
+// Otherwise it records its arguments, its environment, the HASHED_PASSWORD that it gets and, in
+// the order file, "code-server <tag>", logs the address that it serves on, and exits once the order
+// file has "stop code-server".
 func codeServerStandIn(version, tag string) string {
+	return codeServerStandInWith(version, tag, true)
+}
+
+// codeServerStandInWith is codeServerStandIn, which takes its address as code-server does: from
+// --bind-addr, then CODE_SERVER_HOST and PORT from the environment, then, when flags is set,
+// --host and --port.
+func codeServerStandInWith(version, tag string, flags bool) string {
+	hostPort := ""
+	if flags {
+		hostPort = `
+    --host) ((i++)) && arg_host=${!i} ;;
+    --port) ((i++)) && arg_port=${!i} ;;`
+	}
 	return `
 config=$HOME/.config/code-server/config.yaml
 version=
+host=localhost
+port=8080
+arg_host=
+arg_port=
 for ((i = 1; i <= $#; i++)); do
     case ${!i} in
     --config) ((i++)) && config=${!i} ;;
     --version) version=1 ;;
+    --bind-addr) ((i++)) && host=${!i%:*} && port=${!i##*:} ;;` + hostPort + `
     esac
 done
+host=${arg_host:-${CODE_SERVER_HOST:-$host}}
+port=${arg_port:-${PORT:-$port}}
 mkdir -p "${config%/*}" || exit 1
 if [[ ! -e $config ]]; then
     echo "password: generated" >"$config" || exit 1
@@ -125,9 +145,10 @@ if [[ -n $version ]]; then
     exit 0
 fi
 printf '%s\0' "$@" >"$ORDER_FILE.code-server-args"
+env -0 >"$ORDER_FILE.code-server-env"
 printf '%s' "${HASHED_PASSWORD-}" >"$ORDER_FILE.code-server-hash"
 echo "code-server ` + tag + `" >>"$ORDER_FILE"
-echo "[2026-01-01T00:00:00.000Z] info  HTTP server listening on http://0.0.0.0:$DET_CODE_SERVER_PORT/"
+echo "[2026-01-01T00:00:00.000Z] info  HTTP server listening on http://$host:$port/"
 ` + waitUntilOrder("stop code-server") + "exit 0\n"
 }
 
@@ -220,6 +241,8 @@ func (v *vscodeTask) requireServed(tag string) {
 	want := []string{
 		"--config", filepath.Join(run, "config.yaml"),
 		"--bind-addr", "0.0.0.0:" + codeServerPort,
+		"--host", "0.0.0.0",
+		"--port", codeServerPort,
 		"--auth", "password",
 		"--user-data-dir", data,
 		"--extensions-dir", filepath.Join(data, "extensions"),
@@ -260,6 +283,14 @@ func (v *vscodeTask) runVSCode(tag string) {
 	require.Equal(v.t, 0, v.wait(), v.stderr.String())
 	v.requireServed(tag)
 	require.Equal(v.t, []string{"[vscode] start", "[vscode] ready", "[vscode] exited 0"}, v.logLines())
+}
+
+// requireEnv checks that code-server got the environment variable kv.
+func (v *vscodeTask) requireEnv(kv string) {
+	v.t.Helper()
+	env, err := os.ReadFile(v.order + ".code-server-env")
+	require.NoError(v.t, err)
+	require.Contains(v.t, "\x00"+string(env), "\x00"+kv+"\x00")
 }
 
 // writeCodeServer writes the stand-in code-server of version, tagged tag, to dir/bin.
@@ -546,4 +577,33 @@ printf '%s\r\n' "Server listening on 0.0.0.0 port 2222." >&2
 			require.NotContains(t, string(keys), "HASHED_PASSWORD")
 		})
 	}
+}
+
+// code-server takes PORT and CODE_SERVER_HOST from its environment over --bind-addr. The unit keeps
+// it on the task's port when the task sets them, and leaves them to the task's programs.
+func TestVSCodeUnitKeepsItsPort(t *testing.T) {
+	requireReporterPython(t)
+	v := newVSCodeTask(t, "vscode", t.TempDir())
+	v.env = append(v.env, "PORT=3000", "CODE_SERVER_HOST=127.0.0.1")
+	writeScript(t, filepath.Join(v.bin, "code-server"), codeServerStandIn(codeServerPinned, "path"))
+	v.runVSCode("path")
+	v.requireEnv("PORT=3000")
+	v.requireEnv("CODE_SERVER_HOST=127.0.0.1")
+}
+
+// A code-server that listens on another port than the task's is never READY.
+func TestVSCodeUnitNotReadyOnAnotherPort(t *testing.T) {
+	requireReporterPython(t)
+	v := newVSCodeTask(t, "vscode", t.TempDir())
+	v.env = append(v.env, "PORT=3000")
+	writeScript(t, filepath.Join(v.bin, "code-server"),
+		codeServerStandInWith(codeServerPinned, "path", false))
+	v.start()
+	waitFor(t, "code-server listening", func() bool {
+		return strings.Contains(v.stderr.String(), "HTTP server listening on http://0.0.0.0:3000/\n")
+	})
+	v.addOrder("stop code-server")
+	require.Equal(t, 0, v.wait(), v.stderr.String())
+	require.Equal(t, []string{"[vscode] start", "[vscode] exited 0"}, v.logLines())
+	require.NotContains(t, statesOf(v.master.received(), "vscode"), "READY")
 }
