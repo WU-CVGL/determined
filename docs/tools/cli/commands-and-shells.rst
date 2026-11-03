@@ -140,8 +140,8 @@ A shell's image needs:
 -  bash 5 or later.
 -  ``/proc``.
 -  ``jupyter`` on the ``PATH``, for the ``jupyter`` service.
--  glibc 2.28 or later, for the ``vscode`` service; and to install code-server from the master,
-   ``tar``, ``flock`` and a writable home directory (see :ref:`vscode-browser`).
+-  glibc 2.28 or later and a writable home directory, for the ``vscode`` service, and ``tar`` and
+   ``flock`` to install code-server from the master (see :ref:`vscode-browser`).
 
 The default images provide them. When one is missing, the task log names it.
 
