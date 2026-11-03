@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/determined-ai/determined/master/pkg/model"
-	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 )
 
@@ -16,12 +15,13 @@ func TestInteractiveServiceID(t *testing.T) {
 	require.Equal(t, "task-1:2950", InteractiveService{Port: 2950}.ServiceID("task-1"))
 }
 
-// AddService records the service and exposes its port, after the ports already there; the records
-// and the ports survive the spec's JSON, which the master persists.
+// AddService records the service, whose port the container exposes but which is not an extra proxy
+// port; the records survive the spec's JSON, which the master persists.
 func TestAddService(t *testing.T) {
 	userPort := expconf.ProxyPort{RawProxyPort: 8080}
 	var spec GenericCommandSpec
 	spec.Base.ExtraProxyPorts = expconf.ProxyPortsConfig{userPort}
+	spec.Config.Environment.ProxyPorts = model.ProxyPortsConfig{{ProxyPort: 8888}}
 	ssh := InteractiveService{
 		Name: model.ServiceSSH, Port: 3210, DefaultServiceID: true, ProxyTCP: true,
 		Unauthenticated: true,
@@ -31,17 +31,9 @@ func TestAddService(t *testing.T) {
 	spec.AddService(jupyter)
 
 	require.Equal(t, []InteractiveService{ssh, jupyter}, spec.Services)
-	require.Equal(t, expconf.ProxyPortsConfig{
-		userPort,
-		{
-			RawProxyPort: 3210, RawProxyTCP: ptrs.Ptr(true), RawUnauthenticated: ptrs.Ptr(true),
-			RawDefaultServiceID: ptrs.Ptr(true),
-		},
-		{
-			RawProxyPort: 2950, RawProxyTCP: ptrs.Ptr(false), RawUnauthenticated: ptrs.Ptr(false),
-			RawDefaultServiceID: ptrs.Ptr(false),
-		},
-	}, spec.Base.ExtraProxyPorts)
+	require.Equal(t, expconf.ProxyPortsConfig{userPort}, spec.Base.ExtraProxyPorts)
+	require.Equal(t, map[string]int{"8080": 8080, "8888": 8888, "3210": 3210, "2950": 2950},
+		spec.ToTaskSpec().Environment.Ports())
 
 	got, ok := spec.Service(model.ServiceJupyter)
 	require.True(t, ok)

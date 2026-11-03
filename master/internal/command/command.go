@@ -521,28 +521,26 @@ func (c *Command) stringID() string {
 }
 
 // proxyPortConfigs returns the proxies of a command's ports, built from its persisted spec on
-// every start and restore. A service's port follows its record in spec.Services, and the other
-// ports, such as those of the config's environment, are plain. A spec without records reaches
-// every port over HTTPS if it is a notebook, since JupyterLab serves a master-signed cert.
+// every start and restore. Each service's port gets one proxy from its record in spec.Services,
+// and the other ports, such as those of the config's environment, are plain; the launch keeps the
+// two apart. A spec without records reaches every port over HTTPS if it is a notebook, since
+// JupyterLab serves a master-signed cert.
 func proxyPortConfigs(spec tasks.GenericCommandSpec, taskID model.TaskID) []*sproto.ProxyPortConfig {
-	ports := sproto.NewProxyPortConfig(
-		spec.ProxyPorts(), taskID, len(spec.Services) == 0 && spec.TaskType == model.TaskTypeNotebook)
-	// A service's own extra proxy port comes before any other on its port.
-	recorded := map[int]bool{}
-	for _, service := range spec.Services {
-		for _, port := range ports {
-			if port.Port != service.Port || recorded[port.Port] {
-				continue
-			}
-			recorded[port.Port] = true
-			port.ServiceID = service.ServiceID(taskID)
-			port.ProxyTCP = service.ProxyTCP
-			port.Unauthenticated = service.Unauthenticated
-			port.TLS = service.TLS
-			port.Exec = service.Exec
-			port.StripPrefix = service.StripPrefix
-			break
-		}
+	if len(spec.Services) == 0 {
+		return sproto.NewProxyPortConfig(
+			spec.ProxyPorts(), taskID, spec.TaskType == model.TaskTypeNotebook)
 	}
-	return ports
+	ports := make([]*sproto.ProxyPortConfig, 0, len(spec.Services))
+	for _, service := range spec.Services {
+		ports = append(ports, &sproto.ProxyPortConfig{
+			ServiceID:       service.ServiceID(taskID),
+			Port:            service.Port,
+			ProxyTCP:        service.ProxyTCP,
+			Unauthenticated: service.Unauthenticated,
+			TLS:             service.TLS,
+			Exec:            service.Exec,
+			StripPrefix:     service.StripPrefix,
+		})
+	}
+	return append(ports, sproto.NewProxyPortConfig(spec.ProxyPorts(), taskID, false)...)
 }

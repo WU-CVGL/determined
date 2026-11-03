@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"strconv"
 
 	petname "github.com/dustinkirkland/golang-petname"
@@ -226,6 +227,31 @@ func sshService(port int) tasks.InteractiveService {
 	}
 }
 
+// freeServicePort returns a random port of [min, max] for the named service of a spec, other than
+// the ports of its proxy ports, the config's and the launch's, and of the services it already has,
+// so that each container port has one proxy.
+func freeServicePort(spec *tasks.GenericCommandSpec, name string, min, max int) (int, error) {
+	used := map[int]bool{}
+	for _, pp := range spec.ProxyPorts() {
+		used[pp.ProxyPort()] = true
+	}
+	for _, service := range spec.Services {
+		used[service.Port] = true
+	}
+	var free []int
+	for port := min; port <= max; port++ {
+		if !used[port] {
+			free = append(free, port)
+		}
+	}
+	if len(free) == 0 {
+		return 0, status.Errorf(codes.InvalidArgument,
+			"services: %s: no free port in %d-%d", name, min, max)
+	}
+	//nolint:gosec // Weak RNG doesn't matter here.
+	return free[rand.Intn(len(free))], nil
+}
+
 // setShellSSHD makes a shell spec run its sshd on the given container port: the entrypoint starts
 // sshd there, the port is the shell's ssh service and default TCP proxy port, and SSHDPort records
 // it.
@@ -272,7 +298,11 @@ func (a *apiServer) LaunchShell(
 
 	// Selecting a random port mitigates the risk of multiple processes binding
 	// the same port on an agent in host mode.
-	setShellSSHD(launchReq.Spec, getRandomPort(minSshdPort, maxSshdPort))
+	sshdPort, err := freeServicePort(launchReq.Spec, interactiveServiceSSH, minSshdPort, maxSshdPort)
+	if err != nil {
+		return nil, err
+	}
+	setShellSSHD(launchReq.Spec, sshdPort)
 
 	if err = check.Validate(launchReq.Spec.Config); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
@@ -358,8 +388,8 @@ func jupyterService(port int) tasks.InteractiveService {
 }
 
 // addShellJupyter adds the jupyter service to a shell spec: JupyterLab's port, from the notebooks'
-// range, which does not overlap sshd's, its environment and its files, which it returns. The
-// command service adds its token, and Command.Start its base URL.
+// range, which does not overlap sshd's, outside the spec's other ports, its environment and its
+// files, which it returns. The command service adds its token, and Command.Start its base URL.
 func addShellJupyter(spec *tasks.GenericCommandSpec) (archive.Archive, error) {
 	key, cert, err := proxy.GenSignedCert()
 	if err != nil {
@@ -369,7 +399,10 @@ func addShellJupyter(spec *tasks.GenericCommandSpec) (archive.Archive, error) {
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "cannot marshal shell config: %s", err)
 	}
-	port := getRandomPort(minNotebookPort, maxNotebookPort)
+	port, err := freeServicePort(spec, interactiveServiceJupyter, minNotebookPort, maxNotebookPort)
+	if err != nil {
+		return nil, err
+	}
 	spec.AddService(jupyterService(port))
 	addExtraEnvVars(spec, map[string]string{
 		"NOTEBOOK_PORT":   strconv.Itoa(port),

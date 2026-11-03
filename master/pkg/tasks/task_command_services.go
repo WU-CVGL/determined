@@ -5,8 +5,6 @@ import (
 	"strings"
 
 	"github.com/determined-ai/determined/master/pkg/model"
-	"github.com/determined-ai/determined/master/pkg/ptrs"
-	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 )
 
 const (
@@ -48,21 +46,11 @@ func (s InteractiveService) ServiceID(taskID model.TaskID) string {
 	return string(taskID) + ":" + strconv.Itoa(s.Port)
 }
 
-// proxyPort returns the extra proxy port that exposes the service's port.
-func (s InteractiveService) proxyPort() expconf.ProxyPort {
-	return expconf.ProxyPort{
-		RawProxyPort:        s.Port,
-		RawProxyTCP:         ptrs.Ptr(s.ProxyTCP),
-		RawUnauthenticated:  ptrs.Ptr(s.Unauthenticated),
-		RawDefaultServiceID: ptrs.Ptr(s.DefaultServiceID),
-	}
-}
-
-// AddService records a service of the task and exposes its port as an extra proxy port. The
-// first service added is the primary one.
+// AddService records a service of the task. The first service added is the primary one. The
+// service's port is exposed and proxied from its record, so it is not one of the extra proxy
+// ports.
 func (s *GenericCommandSpec) AddService(service InteractiveService) {
 	s.Services = append(s.Services, service)
-	s.Base.ExtraProxyPorts = append(s.Base.ExtraProxyPorts, service.proxyPort())
 }
 
 // Service returns the recorded service name, if the task has it.

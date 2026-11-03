@@ -142,7 +142,8 @@ func (s GenericCommandSpec) ToTaskSpec() TaskSpec {
 // - unify TrialSpec and GenericCommandSpec
 // - move CommandConfig to expconf
 
-// MakeEnvPorts fills in `Environment.Ports` i.e. exposed ports for container config.
+// MakeEnvPorts fills in `Environment.Ports` i.e. exposed ports for container config: the proxy
+// ports and the services' ports.
 func (s *GenericCommandSpec) MakeEnvPorts() {
 	if s.Config.Environment.Ports != nil {
 		panic("CommandSpec Environment.Ports are only supposed to be generated once.")
@@ -154,9 +155,13 @@ func (s *GenericCommandSpec) MakeEnvPorts() {
 		port := pp.ProxyPort()
 		s.Config.Environment.Ports[strconv.Itoa(port)] = port
 	}
+	for _, service := range s.Services {
+		s.Config.Environment.Ports[strconv.Itoa(service.Port)] = service.Port
+	}
 }
 
-// ProxyPorts combines user-defined and system proxy configs.
+// ProxyPorts combines user-defined and system proxy configs. The services' ports are not among
+// them: their records in Services hold them.
 func (s *GenericCommandSpec) ProxyPorts() expconf.ProxyPortsConfig {
 	env := schemas.WithDefaults(s.Config.Environment.ToExpconf())
 	epp := schemas.WithDefaults(s.Base.ExtraProxyPorts)
