@@ -32,11 +32,27 @@ def post_ready(sess: api.Session, allocation_id: str, state: str):
             time.sleep(BACKOFF_SECONDS)
 
 
+def report_ready(report_to: str, service: str) -> None:
+    # The interactive task supervisor reads the services' states from the FIFO report_to and posts
+    # them. Without a reader, or with a full FIFO, the state is lost rather than waited for.
+    try:
+        fd = os.open(report_to, os.O_WRONLY | os.O_NONBLOCK)
+    except OSError:
+        return
+    try:
+        os.write(fd, f"{service} READY\n".encode())
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def main(
     ready: Pattern,
     waiting: Optional[Pattern] = None,
     service: Optional[str] = None,
     post: bool = True,
+    report_to: Optional[str] = None,
 ):
     sess = None
     allocation_id = ""
@@ -53,6 +69,8 @@ def main(
                 post_ready(sess, allocation_id, "ready")
             if service:
                 print(f"[{service}] ready", file=sys.stderr, flush=True)
+                if report_to:
+                    report_ready(report_to, service)
             return
         if waiting and waiting.match(line):
             if sess is not None:
@@ -76,8 +94,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--no-post", action="store_true", help="do not report readiness to the master"
     )
+    parser.add_argument(
+        "--report-to", type=str, help="the FIFO to write the service's readiness to"
+    )
     args = parser.parse_args()
 
     ready_regex = re.compile(args.ready_regex)
     waiting_regex = re.compile(args.waiting_regex) if args.waiting_regex else None
-    main(ready_regex, waiting_regex, args.service, not args.no_post)
+    main(ready_regex, waiting_regex, args.service, not args.no_post, args.report_to)

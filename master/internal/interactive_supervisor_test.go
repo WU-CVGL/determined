@@ -42,6 +42,7 @@ func requireInteractiveSupervisorFiles(t *testing.T, files archive.Archive, uid,
 	want := map[string]string{
 		"/run/determined/interactive-init.sh":       etc.InteractiveInitScriptResource,
 		"/run/determined/interactive-supervisor.sh": etc.InteractiveSupervisorResource,
+		"/run/determined/report_service_state.py":   etc.ServiceStateReporterResource,
 		"/run/determined/services/ssh.sh":           etc.SSHServiceResource,
 		"/run/determined/services/jupyter.sh":       etc.JupyterServiceResource,
 	}

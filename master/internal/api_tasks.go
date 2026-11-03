@@ -47,6 +47,8 @@ var (
 	interactiveSupervisorScript = "/run/determined/interactive-supervisor.sh"
 	// interactiveServicesDir holds the supervisor's service units, <service>.sh.
 	interactiveServicesDir = "/run/determined/services"
+	// serviceStateReporterScript reports the state of a service to the master for the supervisor.
+	serviceStateReporterScript = "/run/determined/report_service_state.py"
 
 	taskLogsBatchMissWaitTime   = time.Second
 	taskLogsFieldsBatchWaitTime = 5 * time.Second

@@ -50,8 +50,8 @@ func addExtraEnvVars(spec *tasks.GenericCommandSpec, vars map[string]string) {
 	maps.Copy(spec.Base.ExtraEnvVars, vars)
 }
 
-// interactiveSupervisorFiles returns the run-dir files of the supervisor: the init, the supervisor
-// and the unit of every service.
+// interactiveSupervisorFiles returns the run-dir files of the supervisor: the init, the supervisor,
+// the reporter of the services' states and the unit of every service.
 func interactiveSupervisorFiles(aug *model.AgentUserGroup) archive.Archive {
 	files := archive.Archive{
 		aug.OwnedArchiveItem(
@@ -63,6 +63,12 @@ func interactiveSupervisorFiles(aug *model.AgentUserGroup) archive.Archive {
 		aug.OwnedArchiveItem(
 			interactiveSupervisorScript,
 			etc.MustStaticFile(etc.InteractiveSupervisorResource),
+			0o700,
+			tar.TypeReg,
+		),
+		aug.OwnedArchiveItem(
+			serviceStateReporterScript,
+			etc.MustStaticFile(etc.ServiceStateReporterResource),
 			0o700,
 			tar.TypeReg,
 		),

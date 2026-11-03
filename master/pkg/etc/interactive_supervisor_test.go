@@ -24,7 +24,10 @@ import (
 
 // pythonStandIn stands in for DET_PYTHON_EXECUTABLE: prep_container records itself and exits with
 // PREP_EXIT; check_ready_logs.py reads its input like the real one and, on the first match, records
-// "posted <service>" unless --no-post, and logs "[<service>] ready"; check_idle.py records its pid.
+// "posted <service>" unless --no-post, logs "[<service>] ready" and writes "<service> READY" to the
+// --report-to FIFO; check_idle.py records its pid; report_service_state.py, the reporter of the
+// services' states, appends its arguments to REPORTS_FILE and its process group to
+// REPORTER_GROUP_FILE, sleeps REPORT_SLEEP seconds and exits with REPORT_EXIT.
 const pythonStandIn = `
 case $1 in
 -m)
@@ -34,12 +37,13 @@ case $1 in
     ;;
 "$RUN_DIR"/check_ready_logs.py)
     shift
-    regex= service= post=1
+    regex= service= post=1 report=
     while (($#)); do
         case $1 in
         --ready-regex) regex=$2; shift 2 ;;
         --service) service=$2; shift 2 ;;
         --no-post) post=; shift ;;
+        --report-to) report=$2; shift 2 ;;
         *) exit 2 ;;
         esac
     done
@@ -51,10 +55,23 @@ case $1 in
             fi
             if [[ -n $service ]]; then
                 printf '[%s] ready\n' "$service" >&2
+                if [[ -n $report ]]; then
+                    printf '%s READY\n' "$service" >"$report"
+                fi
             fi
             exit 0
         fi
     done
+    ;;
+"$RUN_DIR"/report_service_state.py)
+    shift
+    printf '%s\n' "$*" >>"$REPORTS_FILE"
+    stat=$(</proc/self/stat)
+    stat=${stat##*) }
+    read -r _ _ group _ <<<"$stat"
+    echo "$group" >>"$REPORTER_GROUP_FILE"
+    sleep "${REPORT_SLEEP:-0}"
+    exit "${REPORT_EXIT:-0}"
     ;;
 "$RUN_DIR"/jupyter/check_idle.py)
     echo "$$" >"$IDLE_PID_FILE"
@@ -148,6 +165,8 @@ func newSupervisorRun(t *testing.T, services string) *supervisorRun {
 		"ORDER_FILE="+s.order,
 		"READY_ARGS_FILE="+filepath.Join(dir, "ready-args"),
 		"IDLE_PID_FILE="+filepath.Join(dir, "idle-pid"),
+		"REPORTS_FILE="+filepath.Join(dir, "reports"),
+		"REPORTER_GROUP_FILE="+filepath.Join(dir, "reporter-group"),
 		"PS4=+ ",
 		"TCD_STARTUP_HOOK=",
 		"HOOK_VAR=",
@@ -1047,4 +1066,136 @@ func findPrefix(lines []string, prefix string) string {
 		}
 	}
 	return ""
+}
+
+// reports returns the states that the reporter posted, "<service> <state>", in order.
+func (s *supervisorRun) reports() []string {
+	s.t.Helper()
+	b, err := os.ReadFile(filepath.Join(s.dir, "reports"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	require.NoError(s.t, err)
+	return strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
+}
+
+// reportsOf returns the states posted for the service name, in order.
+func reportsOf(reports []string, name string) []string {
+	var states []string
+	for _, r := range reports {
+		if service, state, ok := strings.Cut(r, " "); ok && service == name {
+			states = append(states, state)
+		}
+	}
+	return states
+}
+
+// waitUntilReport is a unit line that waits until the reporter has posted a line.
+func waitUntilReport(line string) string {
+	return `for _ in $(seq 400); do grep -qx '` + line + `' "$REPORTS_FILE" && break; sleep 0.05; done` + "\n"
+}
+
+// requireReporterGone checks that nothing is left of the reporter's process groups.
+func (s *supervisorRun) requireReporterGone() {
+	s.t.Helper()
+	b, err := os.ReadFile(filepath.Join(s.dir, "reporter-group"))
+	require.NoError(s.t, err)
+	groups := strings.Fields(string(b))
+	require.NotEmpty(s.t, groups)
+	for _, g := range groups {
+		group, err := strconv.Atoi(g)
+		require.NoError(s.t, err)
+		require.ErrorIs(s.t, unix.Kill(-group, 0), unix.ESRCH, "the reporter's group %d is gone", group)
+	}
+}
+
+// Each service's states are posted in order: STARTING when it starts, READY when its readiness
+// check matches, EXITED once it has stopped, and UNAVAILABLE instead when it exited 127. The
+// primary service's exit is posted before the supervisor exits, with the task's status.
+func TestSupervisorReportsServiceStates(t *testing.T) {
+	for name, hook := range map[string]string{"default hook": defaultHook, "strict hook": strictHook} {
+		t.Run(name, func(t *testing.T) {
+			s := newSupervisorRun(t, "p,q,r")
+			s.hook(hook)
+			s.unit("p", readyLog+`{ bash -c '`+strings.ReplaceAll(
+				waitUntilReport("q EXITED")+waitUntilReport("r UNAVAILABLE"), "'", `'\''`)+
+				`echo up >&2; sleep 0.5; exit 3'; } 2> >(log)`+"\n")
+			s.unit("q", readyLog+`{ bash -c 'echo up >&2; sleep 0.5; exit 5'; } 2> >(log)`+"\n")
+			s.unit("r", "exit 127\n")
+			s.start()
+			require.Equal(t, 3, s.wait())
+
+			reports := s.reports()
+			require.Equal(t, []string{"STARTING", "READY", "EXITED"}, reportsOf(reports, "p"), reports)
+			require.Equal(t, []string{"STARTING", "READY", "EXITED"}, reportsOf(reports, "q"), reports)
+			require.Equal(t, []string{"STARTING", "UNAVAILABLE"}, reportsOf(reports, "r"), reports)
+			require.Equal(t, "p EXITED", reports[len(reports)-1])
+			require.NotContains(t, s.stderr.String(), "reporting the state")
+			s.requireReporterGone()
+		})
+	}
+}
+
+// The reporter posts every service's current state again every
+// DET_SERVICE_STATE_REPORT_SECONDS, and is gone with the supervisor.
+func TestSupervisorReReportsServiceStates(t *testing.T) {
+	s := newSupervisorRun(t, "p,q")
+	s.env = append(s.env, "DET_SERVICE_STATE_REPORT_SECONDS=1")
+	s.unit("p", readyLog+`{ bash -c 'echo up >&2; exec sleep 300'; } 2> >(log)`+"\n")
+	s.unit("q", "sleep 300\n")
+	s.start()
+	s.waitForLog("[p] ready")
+	waitFor(t, "a report of each service's state after the first", func() bool {
+		reports := s.reports()
+		ready := slices.Index(reports, "p READY")
+		return ready >= 0 && slices.Contains(reports[ready+1:], "p READY") &&
+			slices.Contains(reports[ready+1:], "q STARTING")
+	})
+	s.signal(syscall.SIGTERM)
+	require.Equal(t, 128+int(syscall.SIGTERM), s.wait())
+	reports := s.reports()
+	require.Equal(t, "STARTING", reportsOf(reports, "p")[0])
+	require.Equal(t, "EXITED", reportsOf(reports, "p")[len(reportsOf(reports, "p"))-1])
+	require.Equal(t, "EXITED", reportsOf(reports, "q")[len(reportsOf(reports, "q"))-1])
+	s.requireReporterGone()
+	require.ElementsMatch(t,
+		[]string{"[p] start", "[q] start", "[p] ready", "[p] exited 143", "[q] exited 143"}, s.logLines())
+}
+
+// A reporter that fails or hangs does not hold up the services or change the task's status; a
+// failure is logged once, and a post that hangs is stopped with the supervisor, which may log it.
+func TestSupervisorReportFailure(t *testing.T) {
+	for name, tc := range map[string]struct {
+		env       string
+		minFailed int
+	}{
+		"fails": {"REPORT_EXIT=1", 1},
+		"hangs": {"REPORT_SLEEP=300", 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newSupervisorRun(t, "p,q")
+			s.env = append(s.env, tc.env, "DET_SERVICE_STATE_REPORT_SECONDS=1")
+			s.unit("p", readyLog+`{ bash -c 'echo up >&2; exec sleep 300'; } 2> >(log)`+"\n")
+			s.unit("q", waitUntilOrder("go")+"exit 4\n")
+			s.start()
+			s.waitForLog("[p] ready")
+			require.NoError(t, os.WriteFile(s.order, []byte("go\n"), 0o600))
+			s.waitForLog("[q] exited 4")
+			require.True(t, s.running())
+			time.Sleep(1500 * time.Millisecond)
+
+			s.signal(syscall.SIGTERM)
+			start := time.Now()
+			require.Equal(t, 128+int(syscall.SIGTERM), s.wait())
+			require.Less(t, time.Since(start), 10*time.Second)
+			failed := strings.Count(s.stderr.String(), "interactive task: reporting the state of ")
+			require.GreaterOrEqual(t, failed, tc.minFailed)
+			require.LessOrEqual(t, failed, 1)
+			require.NotContains(t, s.stderr.String(), "Killed")
+			require.ElementsMatch(t, []string{
+				"[p] start", "[q] start", "[p] ready", "[q] exited 4", "[p] exited 143",
+			}, s.logLines())
+			s.requireReporterGone()
+		})
+	}
 }
