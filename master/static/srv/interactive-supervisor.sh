@@ -22,7 +22,13 @@
 # - A service has stopped once its process group is empty. When its unit's subshell exits, with
 #   the service's exit status, the supervisor stops what is left of the group as a stop does and
 #   logs the exit once the group is empty. The subshell only stops its own helpers, since it
-#   cannot kill its own group.
+#   cannot kill its own group: its background jobs get SIGTERM, then SIGKILL after the grace. On a
+#   stop, which has signalled them with the service, they get SIGKILL at once, so that the subshell
+#   exits with the service's status before the supervisor's own grace runs out.
+# - A log helper that is held up from outside the group is killed with its descendants, the deepest
+#   first, as /proc/<pid>/task/*/children lists them (CONFIG_PROC_CHILDREN). This ordered reaping
+#   is best-effort; the supervisor's scan of the group in /proc/*/stat is the backstop that finds
+#   and stops what is left of the group on any kernel.
 # - Processes that leave the group on purpose (setsid) belong to the container's lifetime.
 # - Each service's state goes to the master: STARTING when it starts, READY when its readiness
 #   check matches, EXITED when it has stopped, or UNAVAILABLE when it exited 127, as a unit does
@@ -81,20 +87,41 @@ source /run/determined/interactive-init.sh
 # From here on the supervisor handles failures itself; each unit sets "set -e" again.
 set +e
 
-# Wait up to $2 seconds for the process $1, a child of this shell, to exit.
-wait_for_child() {
-    local i
-    for ((i = 0; i < $2 * 10; i++)); do
-        kill -0 "$1" 2>/dev/null || return 0
-        sleep 0.1
+# The waits poll, and a poll takes time of its own: they wait until a deadline rather than for a
+# number of polls. deadline_in sets the variable $1 to the time $2 seconds from now, in
+# microseconds, without the decimal point of EPOCHREALTIME, which depends on the locale.
+deadline_in() {
+    printf -v "$1" %d $((${EPOCHREALTIME//[!0-9]/} + $2 * 1000000))
+}
+
+# Whether the time $1, from deadline_in, has come.
+passed() {
+    ((${EPOCHREALTIME//[!0-9]/} >= $1))
+}
+
+# Wait up to $1 seconds for the processes $2..., children of this shell, to exit. Fails if one is
+# left. A process that was just signalled usually exits at once: the polls start at 1 ms and double
+# up to 0.1 s.
+wait_for_children() {
+    local deadline pid interval poll_us=1000
+    deadline_in deadline "$1"
+    shift
+    for pid; do
+        while kill -0 "$pid" 2>/dev/null; do
+            ! passed "$deadline" || return 1
+            printf -v interval 0.%06d "$poll_us"
+            sleep "$interval"
+            ((poll_us = poll_us < 50000 ? poll_us * 2 : 100000))
+        done
     done
-    ! kill -0 "$1" 2>/dev/null
 }
 
 # Kill the descendants of the process $1, the deepest first, so that each parent reaps its children
-# before it is killed itself.
+# before it is killed itself. Best-effort: the children files need CONFIG_PROC_CHILDREN, and a
+# child may start or exit between the reads. The supervisor's scan of the service's process group
+# finds and stops the members left in it on any kernel.
 kill_descendants() {
-    local tasks child i
+    local tasks child deadline
     local -a ids children=()
     for tasks in /proc/"$1"/task/*/children; do
         [[ -r $tasks ]] || continue
@@ -105,18 +132,19 @@ kill_descendants() {
     for child in "${children[@]}"; do
         kill_descendants "$child"
         kill -KILL "$child" 2>/dev/null
-        for ((i = 0; i < 10; i++)); do
-            [[ -e /proc/$child ]] || break
+        deadline_in deadline 1
+        while [[ -e /proc/$child ]] && ! passed "$deadline"; do
             sleep 0.1
         done
     done
 }
 
 # The EXIT trap of a service's subshell: once the service has exited, stop the unit's background
-# helpers and give its log helper a moment to pass on the last lines. A log helper that still
-# waits for input is held up by what is left of the service's process group, which is stopped
-# then, or by a process outside it, and is then killed, so that nothing outlives the subshell
-# (ship_logs.py reaps nothing).
+# helpers, with SIGTERM and then SIGKILL after the grace, or with SIGKILL at once on a stop, and
+# give its log helper a moment to pass on the last lines. A log helper that still waits for input
+# is held up by what is left of the service's process group, which is stopped then, or by a
+# process outside it, and is then killed, so that nothing outlives the subshell (ship_logs.py
+# reaps nothing).
 service_exited() {
     local status=$?
     set +e
@@ -131,17 +159,27 @@ service_exited() {
             exec {fd}>&-
         fi
     done
-    local helpers pid
-    helpers=$(jobs -pr)
-    for pid in $helpers; do
-        kill "$pid" 2>/dev/null
-        wait "$pid" 2>/dev/null
-    done
+    local IFS=$' \t\n' pid
+    local -a helpers=($(jobs -pr))
+    if ((${#helpers[@]} > 0)); then
+        # A stop has signalled the helpers with the service, and its grace has been running since.
+        if [[ -z ${service_stop_seen-} ]]; then
+            kill -TERM "${helpers[@]}" 2>/dev/null
+            wait_for_children "$supervisor_stop_grace_seconds" "${helpers[@]}"
+        fi
+        # Wait for each killed helper at once, before bash reports it as a killed job.
+        for pid in "${helpers[@]}"; do
+            if kill -0 "$pid" 2>/dev/null; then
+                kill -KILL "$pid" 2>/dev/null
+            fi
+            wait "$pid" 2>/dev/null
+        done
+    fi
     if [[ ${!-} != "$service_inherited_pid" ]]; then
         pid=$!
-        if ! wait_for_child "$pid" "$supervisor_log_drain_seconds"; then
+        if ! wait_for_children "$supervisor_log_drain_seconds" "$pid"; then
             kill -TERM -- "-$BASHPID" 2>/dev/null
-            if ! wait_for_child "$pid" "$supervisor_log_drain_seconds"; then
+            if ! wait_for_children "$supervisor_log_drain_seconds" "$pid"; then
                 # Held up from outside the group, as by an sshd session: kill the log helper.
                 kill_descendants "$pid"
                 kill -KILL "$pid" 2>/dev/null
@@ -197,10 +235,10 @@ start_reporter() {
 stop_reporter() {
     [[ -n $supervisor_report_pid ]] || return 0
     report_state - -
-    if ! wait_for_child "$supervisor_report_pid" "$supervisor_report_drain_seconds"; then
+    if ! wait_for_children "$supervisor_report_drain_seconds" "$supervisor_report_pid"; then
         kill -s TERM "$supervisor_report_pid" 2>/dev/null
         kill_descendants "$supervisor_report_pid"
-        if ! wait_for_child "$supervisor_report_pid" 1; then
+        if ! wait_for_children 1 "$supervisor_report_pid"; then
             kill_descendants "$supervisor_report_pid"
             kill -s KILL -- "-$supervisor_report_pid" 2>/dev/null
         fi
@@ -220,7 +258,7 @@ start_service() {
     report_state "$name" STARTING
     (
         # Outlive the service when a stop signals the process group, and end with its status.
-        trap : INT TERM HUP
+        trap service_stop_seen=1 INT TERM HUP
         service_inherited_pid=${!-}
         exec {service_stdout}>&1 {service_stderr}>&2
         trap service_exited EXIT
@@ -278,9 +316,10 @@ service_stopped() {
 # Wait up to $1 seconds for the services in supervisor_stopping to stop, or until a stop signal
 # when $2 is set. Log each that stops and keep the others in supervisor_stopping.
 await_services() {
-    local name i
+    local name deadline
     local -a left
-    for ((i = 0; ; i++)); do
+    deadline_in deadline "$1"
+    while :; do
         left=()
         for name in "${supervisor_stopping[@]}"; do
             if service_stopped "$name"; then
@@ -292,7 +331,7 @@ await_services() {
             fi
         done
         supervisor_stopping=("${left[@]}")
-        if ((${#left[@]} == 0 || i >= $1 * 10)) || [[ -n $2 && -n $stop_signal ]]; then
+        if ((${#left[@]} == 0)) || passed "$deadline" || [[ -n $2 && -n $stop_signal ]]; then
             return 0
         fi
         sleep 0.1

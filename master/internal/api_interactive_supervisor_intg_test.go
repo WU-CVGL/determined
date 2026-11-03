@@ -51,8 +51,7 @@ func TestInteractiveLaunchersUseSupervisor(t *testing.T) {
 	shell, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{})
 	require.NoError(t, err)
 	spec := launchedSpec(t, shell.Shell.Id)
-	require.Len(t, spec.Base.ExtraProxyPorts, 1)
-	port := strconv.Itoa(spec.Base.ExtraProxyPorts[0].ProxyPort())
+	port := strconv.Itoa(spec.SSHDPort)
 	require.Equal(t, []string{
 		interactiveSupervisorScript, "-f", shellSSHDConfigFile, "-p", port, "-D", "-e",
 	}, spec.Config.Entrypoint)

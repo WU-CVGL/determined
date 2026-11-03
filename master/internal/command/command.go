@@ -26,6 +26,7 @@ import (
 	"github.com/determined-ai/determined/master/pkg/logger"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/protoutils"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 	"github.com/determined-ai/determined/proto/pkg/commandv1"
@@ -526,28 +527,34 @@ func (c *Command) stringID() string {
 }
 
 // proxyPortConfigs returns the proxies of a command's ports, built from its persisted spec on
-// every start and restore. A service's port follows its record in spec.Services, and the other
-// ports, such as those of the config's environment, are plain. A spec without records reaches
-// every port over HTTPS if it is a notebook, since JupyterLab serves a master-signed cert.
+// every start and restore. Each service's port gets one proxy from its record in spec.Services,
+// and the other ports, such as those of the config's environment, are plain; a plain port that a
+// record owns is skipped. A spec without records reaches every port over HTTPS if it is a
+// notebook, since JupyterLab serves a master-signed cert.
 func proxyPortConfigs(spec tasks.GenericCommandSpec, taskID model.TaskID) []*sproto.ProxyPortConfig {
-	ports := sproto.NewProxyPortConfig(
-		spec.ProxyPorts(), taskID, len(spec.Services) == 0 && spec.TaskType == model.TaskTypeNotebook)
-	// A service's own extra proxy port comes before any other on its port.
-	recorded := map[int]bool{}
+	if len(spec.Services) == 0 {
+		return sproto.NewProxyPortConfig(
+			spec.ProxyPorts(), taskID, spec.TaskType == model.TaskTypeNotebook)
+	}
+	ports := make([]*sproto.ProxyPortConfig, 0, len(spec.Services))
+	owned := make(map[int]bool, len(spec.Services))
 	for _, service := range spec.Services {
-		for _, port := range ports {
-			if port.Port != service.Port || recorded[port.Port] {
-				continue
-			}
-			recorded[port.Port] = true
-			port.ServiceID = service.ServiceID(taskID)
-			port.ProxyTCP = service.ProxyTCP
-			port.Unauthenticated = service.Unauthenticated
-			port.TLS = service.TLS
-			port.Exec = service.Exec
-			port.StripPrefix = service.StripPrefix
-			break
+		owned[service.Port] = true
+		ports = append(ports, &sproto.ProxyPortConfig{
+			ServiceID:       service.ServiceID(taskID),
+			Port:            service.Port,
+			ProxyTCP:        service.ProxyTCP,
+			Unauthenticated: service.Unauthenticated,
+			TLS:             service.TLS,
+			Exec:            service.Exec,
+			StripPrefix:     service.StripPrefix,
+		})
+	}
+	var plain expconf.ProxyPortsConfig
+	for _, pp := range spec.ProxyPorts() {
+		if !owned[pp.ProxyPort()] {
+			plain = append(plain, pp)
 		}
 	}
-	return ports
+	return append(ports, sproto.NewProxyPortConfig(plain, taskID, false)...)
 }

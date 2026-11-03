@@ -6,6 +6,7 @@ package internal
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -33,6 +34,51 @@ func servicesConfig(t *testing.T, services any) *structpb.Struct {
 	config, err := structpb.NewStruct(map[string]any{"services": services})
 	require.NoError(t, err)
 	return config
+}
+
+// shellConfig returns a launch config with the given services, if any, and the given ports in
+// environment.proxy_ports.
+func shellConfig(t *testing.T, services any, proxyPorts ...int) *structpb.Struct {
+	t.Helper()
+	ports := make([]any, 0, len(proxyPorts))
+	for _, port := range proxyPorts {
+		ports = append(ports, map[string]any{"proxy_port": float64(port)})
+	}
+	raw := map[string]any{"environment": map[string]any{"proxy_ports": ports}}
+	if services != nil {
+		raw["services"] = services
+	}
+	config, err := structpb.NewStruct(raw)
+	require.NoError(t, err)
+	return config
+}
+
+// portsExcept returns the ports of [min, max] other than the given ones.
+func portsExcept(min, max int, except ...int) []int {
+	var ports []int
+	for port := min; port <= max; port++ {
+		if !slices.Contains(except, port) {
+			ports = append(ports, port)
+		}
+	}
+	return ports
+}
+
+// requireOnePolicyPerPort checks that every container port and every proxy service ID has one
+// proxy policy.
+func requireOnePolicyPerPort(t *testing.T, ports []*sproto.ProxyPortConfig) {
+	t.Helper()
+	byPort, byID := map[int]int{}, map[string]int{}
+	for _, p := range ports {
+		byPort[p.Port]++
+		byID[p.ServiceID]++
+	}
+	for port, n := range byPort {
+		require.Equal(t, 1, n, "port %d has %d proxy policies", port, n)
+	}
+	for id, n := range byID {
+		require.Equal(t, 1, n, "service ID %s has %d proxy policies", id, n)
+	}
 }
 
 // allocateRequest returns the request with which the master allocated the task's resources.
@@ -96,7 +142,7 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 	})
 
 	resp, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
-		Config: servicesConfig(t, map[string]any{"jupyter": map[string]any{}}),
+		Config: shellConfig(t, map[string]any{"jupyter": map[string]any{}}, 8080),
 	})
 	require.NoError(t, err)
 	taskID := resp.Shell.Id
@@ -119,15 +165,18 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 		interactiveSupervisorScript, "-f", shellSSHDConfigFile, "-p", strconv.Itoa(ssh.Port),
 		"-D", "-e",
 	}, spec.Config.Entrypoint)
-	require.Len(t, spec.Base.ExtraProxyPorts, 2)
+	// The services' ports are in their records only.
+	require.Empty(t, spec.Base.ExtraProxyPorts)
 
-	// The proxies: sshd as the shell's default TCP port without a master login, JupyterLab over
-	// HTTPS for its owner and admins, under its own prefix.
+	// The proxies, one per port: sshd as the shell's default TCP port without a master login,
+	// JupyterLab over HTTPS for its owner and admins, under its own prefix, and the config's port
+	// plain.
 	jupyterID := taskID + ":" + strconv.Itoa(jupyter.Port)
 	alloc := allocateRequest(t, rm, taskID)
 	require.Equal(t, []*sproto.ProxyPortConfig{
 		{ServiceID: taskID, Port: ssh.Port, ProxyTCP: true, Unauthenticated: true},
 		{ServiceID: jupyterID, Port: jupyter.Port, TLS: true, Exec: true},
+		{ServiceID: taskID + ":8080", Port: 8080},
 	}, alloc.ProxyPorts)
 	// Idle is not watched on shells.
 	require.Nil(t, alloc.IdleTimeout)
@@ -199,8 +248,7 @@ func TestLaunchShellWithoutExtraServices(t *testing.T) {
 			port := spec.Services[0].Port
 			require.Equal(t, sshService(port), spec.Services[0])
 			require.Equal(t, port, spec.SSHDPort)
-			require.Len(t, spec.Base.ExtraProxyPorts, 1)
-			require.Equal(t, port, spec.Base.ExtraProxyPorts[0].ProxyPort())
+			require.Empty(t, spec.Base.ExtraProxyPorts)
 			require.Equal(t, []*sproto.ProxyPortConfig{
 				{ServiceID: taskID, Port: port, ProxyTCP: true, Unauthenticated: true},
 			}, allocateRequest(t, rm, taskID).ProxyPorts)
@@ -221,6 +269,80 @@ func TestLaunchShellWithoutExtraServices(t *testing.T) {
 			require.NotContains(t, paths, jupyterCertPath)
 		})
 	}
+}
+
+// A service's port is never one of the config's proxy ports: with every port of both ranges but one
+// declared, sshd and JupyterLab get the ones left, and each port has one proxy policy.
+func TestLaunchShellServicePortsAvoidProxyPorts(t *testing.T) {
+	api, _, ctx := setupAPITest(t, nil)
+	cs, err := command.NewService(api.m.db, api.m.rm)
+	require.NoError(t, err)
+	command.SetDefaultService(cs)
+	rm := api.m.rm.(*mocks.ResourceManager)
+
+	sshPort, jupyterPort := minSshdPort+42, minNotebookPort+137
+	declared := append(portsExcept(minSshdPort, maxSshdPort, sshPort),
+		portsExcept(minNotebookPort, maxNotebookPort, jupyterPort)...)
+	resp, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
+		Config: shellConfig(t, map[string]any{"jupyter": map[string]any{}}, declared...),
+	})
+	require.NoError(t, err)
+	taskID := resp.Shell.Id
+	spec := launchedSpec(t, taskID)
+
+	require.Len(t, spec.Services, 2)
+	require.Equal(t, sshPort, spec.Services[0].Port)
+	require.Equal(t, sshPort, spec.SSHDPort)
+	require.Equal(t, jupyterPort, spec.Services[1].Port)
+	require.Equal(t, strconv.Itoa(jupyterPort), spec.Base.ExtraEnvVars["NOTEBOOK_PORT"])
+
+	ports := allocateRequest(t, rm, taskID).ProxyPorts
+	require.Len(t, ports, 2+len(declared))
+	requireOnePolicyPerPort(t, ports)
+	require.Equal(t, []*sproto.ProxyPortConfig{
+		{ServiceID: taskID, Port: sshPort, ProxyTCP: true, Unauthenticated: true},
+		{ServiceID: taskID + ":" + strconv.Itoa(jupyterPort), Port: jupyterPort, TLS: true, Exec: true},
+	}, ports[:2])
+	for _, p := range ports[2:] {
+		require.Equal(t, &sproto.ProxyPortConfig{
+			ServiceID: taskID + ":" + strconv.Itoa(p.Port), Port: p.Port,
+		}, p)
+	}
+}
+
+// When the config's proxy ports take every port of a service's range, the launch fails and names
+// the range.
+func TestLaunchShellServicePortsExhausted(t *testing.T) {
+	api, _, ctx := setupAPITest(t, nil)
+	cs, err := command.NewService(api.m.db, api.m.rm)
+	require.NoError(t, err)
+	command.SetDefaultService(cs)
+	jupyter := map[string]any{"jupyter": map[string]any{}}
+
+	for name, tc := range map[string]struct {
+		config *structpb.Struct
+		msg    string
+	}{
+		"ssh": {
+			shellConfig(t, nil, portsExcept(minSshdPort, maxSshdPort)...),
+			"services: ssh: no free port in 3200-3499",
+		},
+		"jupyter": {
+			shellConfig(t, jupyter, portsExcept(minNotebookPort, maxNotebookPort)...),
+			"services: jupyter: no free port in 2900-3199",
+		},
+	} {
+		_, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{Config: tc.config})
+		require.Error(t, err, name)
+		require.Equal(t, codes.InvalidArgument, status.Code(err), "%s: %v", name, err)
+		require.ErrorContains(t, err, tc.msg, name)
+	}
+
+	// Without jupyter, the notebooks' range is free to declare.
+	_, err = api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
+		Config: shellConfig(t, nil, portsExcept(minNotebookPort, maxNotebookPort)...),
+	})
+	require.NoError(t, err)
 }
 
 // A notebook keeps its launch: JupyterLab at the bare task ID, every port over HTTPS, no service

@@ -216,7 +216,8 @@ func TestRestoreQueuedShellKilled(t *testing.T) {
 
 // A shell finds its sshd after a master restart: a shell saved without its sshd port, as the
 // master saved every shell before it recorded the port, as its default TCP proxy port, and a
-// shell saved with it at the recorded port.
+// shell saved with it at the recorded port, also one with service records, whose ports are not
+// in its extra proxy ports.
 func TestRestoreQueuedShellFindsSSHD(t *testing.T) {
 	if proxy.DefaultProxy == nil {
 		proxy.InitProxy(nil, nil)
@@ -224,10 +225,12 @@ func TestRestoreQueuedShellFindsSSHD(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		sshdPort int
+		records  bool
 		want     string
 	}{
 		{name: "saved without the sshd port", want: "10.0.0.7:40002"},
 		{name: "saved with the sshd port", sshdPort: 2222, want: "10.0.0.7:40003"},
+		{name: "saved with service records", sshdPort: 2222, records: true, want: "10.0.0.7:40003"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			shell, _, q := restartWithQueuedShell(t, time.Now().UTC().Add(-time.Hour),
@@ -236,7 +239,19 @@ func TestRestoreQueuedShellFindsSSHD(t *testing.T) {
 						PrivateKey: []byte(*req.Spec.Metadata.PrivateKey),
 						PublicKey:  []byte(*req.Spec.Metadata.PublicKey),
 					}
-					// The ports LaunchShell registers, and another TCP port.
+					req.Spec.SSHDPort = tc.sshdPort
+					if tc.records {
+						// The records LaunchShell writes, and another port.
+						req.Spec.AddService(tasks.InteractiveService{
+							Name: model.ServiceSSH, Port: tc.sshdPort, DefaultServiceID: true,
+							ProxyTCP: true, Unauthenticated: true,
+						})
+						req.Spec.Config.Environment.ProxyPorts = model.ProxyPortsConfig{
+							{ProxyPort: 3210},
+						}
+						return
+					}
+					// The ports LaunchShell registered, and another TCP port.
 					req.Spec.Base.ExtraProxyPorts = expconf.ProxyPortsConfig{
 						{
 							RawProxyPort:        3210,
@@ -246,7 +261,6 @@ func TestRestoreQueuedShellFindsSSHD(t *testing.T) {
 						},
 						{RawProxyPort: 2222, RawProxyTCP: ptrs.Ptr(true)},
 					}
-					req.Spec.SSHDPort = tc.sshdPort
 				})
 			require.Equal(t, tc.sshdPort, shell.SSHDPort)
 

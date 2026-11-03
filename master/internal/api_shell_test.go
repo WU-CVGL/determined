@@ -6,9 +6,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
+	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
-	"github.com/determined-ai/determined/master/pkg/schemas"
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 )
@@ -28,23 +30,36 @@ func TestSetShellSSHD(t *testing.T) {
 	require.Less(t, p+1, len(spec.Config.Entrypoint))
 	require.Equal(t, strconv.Itoa(port), spec.Config.Entrypoint[p+1])
 
-	// The same port is the shell's only default TCP proxy port, which the master proxies and which
-	// shells saved without SSHDPort fall back to; the user's ports stay.
-	ports := schemas.WithDefaults(spec.Base.ExtraProxyPorts)
-	require.Len(t, ports, 2)
-	require.Equal(t, userPort.RawProxyPort, ports[0].ProxyPort())
-	require.False(t, ports[0].DefaultServiceID())
-	var defaultTCP []int
-	for _, pp := range ports {
-		if pp.DefaultServiceID() && pp.ProxyTCP() {
-			defaultTCP = append(defaultTCP, pp.ProxyPort())
-		}
-	}
-	require.Equal(t, []int{port}, defaultTCP)
-	require.True(t, ports[1].Unauthenticated())
-
-	// The port is the shell's ssh service, its primary one.
+	// The port is the shell's ssh service, its primary one, whose record the master proxies it
+	// by; the extra proxy ports stay as they were.
 	require.Equal(t, []tasks.InteractiveService{{
 		Name: "ssh", Port: port, DefaultServiceID: true, ProxyTCP: true, Unauthenticated: true,
 	}}, spec.Services)
+	require.Equal(t, expconf.ProxyPortsConfig{userPort}, spec.Base.ExtraProxyPorts)
+}
+
+// A service's port is a port of its range that no proxy port and no other service of the spec
+// has; with none left, the launch is invalid and the message names the range.
+func TestFreeServicePort(t *testing.T) {
+	spec := &tasks.GenericCommandSpec{}
+	spec.Config.Environment.ProxyPorts = model.ProxyPortsConfig{{ProxyPort: 10}}
+	spec.Base.ExtraProxyPorts = expconf.ProxyPortsConfig{{RawProxyPort: 11}}
+	spec.AddService(tasks.InteractiveService{Name: "ssh", Port: 12})
+
+	for i := 0; i < 50; i++ {
+		port, err := freeServicePort(spec, "jupyter", 10, 13)
+		require.NoError(t, err)
+		require.Equal(t, 13, port)
+	}
+	seen := map[int]bool{}
+	for i := 0; i < 200; i++ {
+		port, err := freeServicePort(spec, "jupyter", 12, 15)
+		require.NoError(t, err)
+		seen[port] = true
+	}
+	require.Equal(t, map[int]bool{13: true, 14: true, 15: true}, seen)
+
+	_, err := freeServicePort(spec, "jupyter", 10, 12)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.ErrorContains(t, err, "services: jupyter: no free port in 10-12")
 }

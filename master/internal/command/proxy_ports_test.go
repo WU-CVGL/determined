@@ -55,26 +55,53 @@ func TestProxyPortConfigsWithoutRecords(t *testing.T) {
 		proxyPortConfigs(command, "task-1"))
 }
 
-// A shell's services get their recorded policies on their own ports, and the config's ports stay
-// plain, also on a port that a service has.
+// A spec with service records gets one proxy policy per container port: each service's from its
+// record, and the config's ports and the launch's own extra ports plain. The services' ports are
+// in the records only.
 func TestProxyPortConfigsFromRecords(t *testing.T) {
 	var spec tasks.GenericCommandSpec
 	spec.TaskType = model.TaskTypeShell
-	spec.AddService(tasks.InteractiveService{
-		Name: model.ServiceSSH, Port: 3210, DefaultServiceID: true, ProxyTCP: true,
-		Unauthenticated: true,
-	})
-	spec.AddService(tasks.InteractiveService{
-		Name: model.ServiceJupyter, Port: 2950, TLS: true, Exec: true,
-	})
-	spec.AddService(tasks.InteractiveService{Name: "editor", Port: 2700, StripPrefix: true})
-	spec.Config.Environment.ProxyPorts = model.ProxyPortsConfig{userProxyPort, {ProxyPort: 2950}}
+	spec.Services = []tasks.InteractiveService{
+		{
+			Name: model.ServiceSSH, Port: 3210, DefaultServiceID: true, ProxyTCP: true,
+			Unauthenticated: true,
+		},
+		{Name: model.ServiceJupyter, Port: 2950, TLS: true, Exec: true},
+		{Name: "editor", Port: 2700, StripPrefix: true},
+	}
+	spec.Base.ExtraProxyPorts = expconf.ProxyPortsConfig{{RawProxyPort: 2600}}
+	spec.Config.Environment.ProxyPorts = model.ProxyPortsConfig{userProxyPort}
 
 	require.Equal(t, []*sproto.ProxyPortConfig{
 		{ServiceID: "task-1", Port: 3210, ProxyTCP: true, Unauthenticated: true},
 		{ServiceID: "task-1:2950", Port: 2950, TLS: true, Exec: true},
 		{ServiceID: "task-1:2700", Port: 2700, StripPrefix: true},
+		{ServiceID: "task-1:2600", Port: 2600},
 		{ServiceID: "task-1:8080", Port: 8080},
-		{ServiceID: "task-1:2950", Port: 2950},
+	}, proxyPortConfigs(spec, "task-1"))
+}
+
+// A spec with records may also hold copies of the services' ports in its extra proxy ports, as
+// specs saved before the records alone held them do. Each such port still gets only the policy
+// of its record.
+func TestProxyPortConfigsSkipCopiesOfRecords(t *testing.T) {
+	var spec tasks.GenericCommandSpec
+	spec.TaskType = model.TaskTypeShell
+	spec.Services = []tasks.InteractiveService{
+		{
+			Name: model.ServiceSSH, Port: 3210, DefaultServiceID: true, ProxyTCP: true,
+			Unauthenticated: true,
+		},
+		{Name: model.ServiceJupyter, Port: 2950, TLS: true, Exec: true},
+	}
+	spec.Base.ExtraProxyPorts = expconf.ProxyPortsConfig{
+		sshdProxyPort(3210), {RawProxyPort: 2950},
+	}
+	spec.Config.Environment.ProxyPorts = model.ProxyPortsConfig{userProxyPort}
+
+	require.Equal(t, []*sproto.ProxyPortConfig{
+		{ServiceID: "task-1", Port: 3210, ProxyTCP: true, Unauthenticated: true},
+		{ServiceID: "task-1:2950", Port: 2950, TLS: true, Exec: true},
+		{ServiceID: "task-1:8080", Port: 8080},
 	}, proxyPortConfigs(spec, "task-1"))
 }
