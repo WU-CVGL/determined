@@ -42,7 +42,7 @@ type TaskServices struct {
 }
 
 // TaskServiceCredential is the credential of a service: the SSH key pair and login user of the
-// ssh service, the token of the jupyter service.
+// ssh service, the token of the jupyter service, the password of the vscode service.
 type TaskServiceCredential struct {
 	Service    tasks.InteractiveService
 	OwnerID    model.UserID
@@ -50,6 +50,7 @@ type TaskServiceCredential struct {
 	PublicKey  string
 	User       string
 	Token      string
+	Password   string
 }
 
 // taskServices returns the services of a task: its records, or, for a task saved without them,
@@ -215,6 +216,11 @@ func (c *Command) serviceCredential(name string) (TaskServiceCredential, error) 
 		if cred.Token == "" {
 			return TaskServiceCredential{}, notFound
 		}
+	case model.ServiceVSCode:
+		if c.Metadata.CodeServerPassword == nil {
+			return TaskServiceCredential{}, notFound
+		}
+		cred.Password = *c.Metadata.CodeServerPassword
 	default:
 		return TaskServiceCredential{}, notFound
 	}
