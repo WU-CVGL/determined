@@ -328,6 +328,17 @@ class ResourcesSummaryDevices(Printable):
             out["devices"] = None if self.devices is None else [x.to_json(omit_unset) for x in self.devices]
         return out
 
+class TaskServiceProtocol(DetEnum):
+    """How the master proxies a service.
+    - PROTOCOL_UNSPECIFIED: The protocol is unknown.
+    - PROTOCOL_TCP: A TCP stream, reached through `det shell open` or a TCP tunnel to the
+    service ID.
+    - PROTOCOL_HTTP: HTTP and WebSocket requests under the service's URL.
+    """
+    UNSPECIFIED = "PROTOCOL_UNSPECIFIED"
+    TCP = "PROTOCOL_TCP"
+    HTTP = "PROTOCOL_HTTP"
+
 class TrialProfilerMetricLabelsProfilerMetricType(DetEnum):
     """To distinguish the 2 different categories of metrics.
     - PROFILER_METRIC_TYPE_UNSPECIFIED: Zero-value (not allowed).
@@ -6700,6 +6711,106 @@ class v1GetTaskResponse(Printable):
     def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
         out: "typing.Dict[str, typing.Any]" = {
             "task": self.task.to_json(omit_unset),
+        }
+        return out
+
+class v1GetTaskServiceCredentialResponse(Printable):
+    """Response to GetTaskServiceCredentialRequest: the fields of the service's
+    credential.
+    """
+    privateKey: "typing.Optional[str]" = None
+    publicKey: "typing.Optional[str]" = None
+    token: "typing.Optional[str]" = None
+    url: "typing.Optional[str]" = None
+    user: "typing.Optional[str]" = None
+
+    def __init__(
+        self,
+        *,
+        privateKey: "typing.Union[str, None, Unset]" = _unset,
+        publicKey: "typing.Union[str, None, Unset]" = _unset,
+        token: "typing.Union[str, None, Unset]" = _unset,
+        url: "typing.Union[str, None, Unset]" = _unset,
+        user: "typing.Union[str, None, Unset]" = _unset,
+    ):
+        if not isinstance(privateKey, Unset):
+            self.privateKey = privateKey
+        if not isinstance(publicKey, Unset):
+            self.publicKey = publicKey
+        if not isinstance(token, Unset):
+            self.token = token
+        if not isinstance(url, Unset):
+            self.url = url
+        if not isinstance(user, Unset):
+            self.user = user
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1GetTaskServiceCredentialResponse":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+        }
+        if "privateKey" in obj:
+            kwargs["privateKey"] = obj["privateKey"]
+        if "publicKey" in obj:
+            kwargs["publicKey"] = obj["publicKey"]
+        if "token" in obj:
+            kwargs["token"] = obj["token"]
+        if "url" in obj:
+            kwargs["url"] = obj["url"]
+        if "user" in obj:
+            kwargs["user"] = obj["user"]
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+        }
+        if not omit_unset or "privateKey" in vars(self):
+            out["privateKey"] = self.privateKey
+        if not omit_unset or "publicKey" in vars(self):
+            out["publicKey"] = self.publicKey
+        if not omit_unset or "token" in vars(self):
+            out["token"] = self.token
+        if not omit_unset or "url" in vars(self):
+            out["url"] = self.url
+        if not omit_unset or "user" in vars(self):
+            out["user"] = self.user
+        return out
+
+class v1GetTaskServicesResponse(Printable):
+    """Response to GetTaskServicesRequest."""
+
+    def __init__(
+        self,
+        *,
+        primary: str,
+        services: "typing.Sequence[v1TaskService]",
+        taskId: str,
+        userId: int,
+        workspaceId: int,
+    ):
+        self.primary = primary
+        self.services = services
+        self.taskId = taskId
+        self.userId = userId
+        self.workspaceId = workspaceId
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1GetTaskServicesResponse":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "primary": obj["primary"],
+            "services": [v1TaskService.from_json(x) for x in obj["services"]],
+            "taskId": obj["taskId"],
+            "userId": obj["userId"],
+            "workspaceId": obj["workspaceId"],
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "primary": self.primary,
+            "services": [x.to_json(omit_unset) for x in self.services],
+            "taskId": self.taskId,
+            "userId": self.userId,
+            "workspaceId": self.workspaceId,
         }
         return out
 
@@ -13339,6 +13450,39 @@ class v1RendezvousInfo(Printable):
         }
         return out
 
+class v1ReportTaskServicesRequest(Printable):
+    """Report the states of the services of an interactive task: the complete
+    snapshot, with every service of the task exactly once.
+    """
+
+    def __init__(
+        self,
+        *,
+        allocationId: str,
+        sequence: int,
+        services: "typing.Sequence[v1TaskServiceReport]",
+    ):
+        self.allocationId = allocationId
+        self.sequence = sequence
+        self.services = services
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1ReportTaskServicesRequest":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "allocationId": obj["allocationId"],
+            "sequence": obj["sequence"],
+            "services": [v1TaskServiceReport.from_json(x) for x in obj["services"]],
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "allocationId": self.allocationId,
+            "sequence": self.sequence,
+            "services": [x.to_json(omit_unset) for x in self.services],
+        }
+        return out
+
 class v1ReportTrialMetricsRequest(Printable):
     """Persist the given metrics for the trial."""
 
@@ -16290,6 +16434,95 @@ class v1TaskResourceWarning(Printable):
             "message": self.message,
         }
         return out
+
+class v1TaskService(Printable):
+    """TaskService is one service of an interactive task, a program that runs in
+    the task's container and that the master proxies, such as the SSH server of
+    a shell or JupyterLab.
+    """
+
+    def __init__(
+        self,
+        *,
+        mayConnect: bool,
+        name: str,
+        protocol: "TaskServiceProtocol",
+        serviceId: str,
+        state: "v1TaskServiceState",
+        url: str,
+    ):
+        self.mayConnect = mayConnect
+        self.name = name
+        self.protocol = protocol
+        self.serviceId = serviceId
+        self.state = state
+        self.url = url
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1TaskService":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "mayConnect": obj["mayConnect"],
+            "name": obj["name"],
+            "protocol": TaskServiceProtocol(obj["protocol"]),
+            "serviceId": obj["serviceId"],
+            "state": v1TaskServiceState(obj["state"]),
+            "url": obj["url"],
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "mayConnect": self.mayConnect,
+            "name": self.name,
+            "protocol": self.protocol.value,
+            "serviceId": self.serviceId,
+            "state": self.state.value,
+            "url": self.url,
+        }
+        return out
+
+class v1TaskServiceReport(Printable):
+    """The state of one service in a ReportTaskServicesRequest."""
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        state: "v1TaskServiceState",
+    ):
+        self.name = name
+        self.state = state
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1TaskServiceReport":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "name": obj["name"],
+            "state": v1TaskServiceState(obj["state"]),
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "name": self.name,
+            "state": self.state.value,
+        }
+        return out
+
+class v1TaskServiceState(DetEnum):
+    """The state of a service, as the task's container reports it to the master.
+    - STATE_UNSPECIFIED: The container has not reported the service's state since the task or
+    the master started.
+    - STATE_STARTING: The service is starting.
+    - STATE_READY: The service accepts connections.
+    - STATE_EXITED: The service has exited, or the task has ended.
+    - STATE_UNAVAILABLE: The service cannot run in the task's image, for example because its
+    program is not installed.
+    """
+    UNSPECIFIED = "STATE_UNSPECIFIED"
+    STARTING = "STATE_STARTING"
+    READY = "STATE_READY"
+    EXITED = "STATE_EXITED"
+    UNAVAILABLE = "STATE_UNAVAILABLE"
 
 class v1TaskType(DetEnum):
     """Type of the task
@@ -21642,6 +21875,66 @@ def get_GetTaskResourcesCapability(
         return v1GetTaskResourcesCapabilityResponse.from_json(_resp.json())
     raise APIHttpError("get_GetTaskResourcesCapability", _resp)
 
+def get_GetTaskServiceCredential(
+    session: "api.BaseSession",
+    *,
+    service: str,
+    taskId: str,
+) -> "v1GetTaskServiceCredentialResponse":
+    """Get the credential of a service of an interactive task: the SSH key pair
+    and login user of the ssh service, the token and URL of the jupyter
+    service. Only the task's owner and admins may read it; an admin's read of
+    another user's credential is logged.
+
+    - service: The name of the service.
+    - taskId: The id of the task.
+    """
+    _params = None
+    if type(taskId) == str:
+        taskId = parse.quote(taskId)
+    if type(service) == str:
+        service = parse.quote(service)
+    _resp = session._do_request(
+        method="GET",
+        path=f"/api/v1/tasks/{taskId}/services/{service}/credential",
+        params=_params,
+        json=None,
+        data=None,
+        headers=None,
+        timeout=None,
+        stream=False,
+    )
+    if _resp.status_code == 200:
+        return v1GetTaskServiceCredentialResponse.from_json(_resp.json())
+    raise APIHttpError("get_GetTaskServiceCredential", _resp)
+
+def get_GetTaskServices(
+    session: "api.BaseSession",
+    *,
+    taskId: str,
+) -> "v1GetTaskServicesResponse":
+    """Get the services of an interactive task and their states. Whoever may see
+    the task may list its services; the list holds no credentials.
+
+    - taskId: The id of the task.
+    """
+    _params = None
+    if type(taskId) == str:
+        taskId = parse.quote(taskId)
+    _resp = session._do_request(
+        method="GET",
+        path=f"/api/v1/tasks/{taskId}/services",
+        params=_params,
+        json=None,
+        data=None,
+        headers=None,
+        timeout=None,
+        stream=False,
+    )
+    if _resp.status_code == 200:
+        return v1GetTaskServicesResponse.from_json(_resp.json())
+    raise APIHttpError("get_GetTaskServices", _resp)
+
 def get_GetTasks(
     session: "api.BaseSession",
 ) -> "v1GetTasksResponse":
@@ -24672,6 +24965,37 @@ def post_ReportCheckpoint(
     if _resp.status_code == 200:
         return
     raise APIHttpError("post_ReportCheckpoint", _resp)
+
+def post_ReportTaskServices(
+    session: "api.BaseSession",
+    *,
+    allocationId: str,
+    body: "v1ReportTaskServicesRequest",
+) -> None:
+    """Report the state of every service of an interactive task. The task's
+    container posts the complete snapshot of its services' states whenever one
+    changes and again periodically; the master replaces the task's states with
+    each snapshot it accepts. Only the task's own container, its owner and
+    admins may report it.
+
+    - allocationId: The id of the allocation.
+    """
+    _params = None
+    if type(allocationId) == str:
+        allocationId = parse.quote(allocationId)
+    _resp = session._do_request(
+        method="POST",
+        path=f"/api/v1/allocations/{allocationId}/services",
+        params=_params,
+        json=body.to_json(True),
+        data=None,
+        headers=None,
+        timeout=None,
+        stream=False,
+    )
+    if _resp.status_code == 200:
+        return
+    raise APIHttpError("post_ReportTaskServices", _resp)
 
 def post_ReportTrialMetrics(
     session: "api.BaseSession",

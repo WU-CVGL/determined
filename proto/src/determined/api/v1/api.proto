@@ -928,6 +928,21 @@ service Determined {
       tags: "Internal"
     };
   }
+  // Report the state of every service of an interactive task. The task's
+  // container posts the complete snapshot of its services' states whenever one
+  // changes and again periodically; the master replaces the task's states with
+  // each snapshot it accepts. Only the task's own container, its owner and
+  // admins may report it.
+  rpc ReportTaskServices(ReportTaskServicesRequest)
+      returns (ReportTaskServicesResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/allocations/{allocation_id}/services"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
+      tags: "Internal"
+    };
+  }
   // Get details about an Allocation.
   rpc GetAllocation(GetAllocationRequest) returns (GetAllocationResponse) {
     option (google.api.http) = {
@@ -1643,6 +1658,32 @@ service Determined {
   rpc GetTask(GetTaskRequest) returns (GetTaskResponse) {
     option (google.api.http) = {
       get: "/api/v1/tasks/{task_id}"
+    };
+    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
+      tags: "Tasks"
+    };
+  }
+
+  // Get the services of an interactive task and their states. Whoever may see
+  // the task may list its services; the list holds no credentials.
+  rpc GetTaskServices(GetTaskServicesRequest)
+      returns (GetTaskServicesResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/tasks/{task_id}/services"
+    };
+    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
+      tags: "Tasks"
+    };
+  }
+
+  // Get the credential of a service of an interactive task: the SSH key pair
+  // and login user of the ssh service, the token and URL of the jupyter
+  // service. Only the task's owner and admins may read it; an admin's read of
+  // another user's credential is logged.
+  rpc GetTaskServiceCredential(GetTaskServiceCredentialRequest)
+      returns (GetTaskServiceCredentialResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/tasks/{task_id}/services/{service}/credential"
     };
     option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
       tags: "Tasks"

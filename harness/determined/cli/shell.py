@@ -19,9 +19,26 @@ from determined.common import api
 from determined.common.api import bindings
 
 
+def add_services(config: Dict[str, Any], services: List[str]) -> None:
+    """Add services to the services map of a shell config, keeping the ones it has."""
+    if not services:
+        return
+    # Only a missing key leaves the services undeclared; the master's validation answers for any
+    # other value that is not a map.
+    declared = config.get("services")
+    if declared is None:
+        declared = {}
+    elif not isinstance(declared, dict):
+        return
+    for name in services:
+        declared.setdefault(name, {})
+    config["services"] = declared
+
+
 def start_shell(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
     config = ntsc.parse_config(args.config_file, None, args.config, args.volume)
+    add_services(config, args.service)
     workspace_id = cli.workspace.get_workspace_id_from_args(args)
 
     resp = ntsc.launch_command(
@@ -282,6 +299,12 @@ args_description: cli.ArgsDescription = [
                         help=ntsc.INCLUDE_DESC,
                     ),
                     cli.Arg("--config", action="append", default=[], help=ntsc.CONFIG_DESC),
+                    cli.Arg(
+                        "--service",
+                        action="append",
+                        default=[],
+                        help="service to run in the shell",
+                    ),
                     cli.Arg(
                         "--template",
                         type=str,

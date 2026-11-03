@@ -4,8 +4,11 @@ package etc
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -23,8 +27,12 @@ import (
 )
 
 // pythonStandIn stands in for DET_PYTHON_EXECUTABLE: prep_container records itself and exits with
-// PREP_EXIT; check_ready_logs.py reads its input like the real one and, on the first match, records
-// "posted <service>" unless --no-post, and logs "[<service>] ready"; check_idle.py records its pid.
+// PREP_EXIT; check_ready_logs.py reads its input like the real one and, on the first match, writes
+// "<service> READY" to the --report-to FIFO, logs "[<service>] ready" and records
+// "posted <service>" unless --no-post; check_idle.py records its pid; report_service_states.py,
+// the reporter of the services' states, records its process group in REPORTER_GROUP_FILE and runs
+// as itself with REPORTER_PYTHON, posting to the stand-in master, or without it only waits for the
+// stop line.
 const pythonStandIn = `
 case $1 in
 -m)
@@ -34,27 +42,43 @@ case $1 in
     ;;
 "$RUN_DIR"/check_ready_logs.py)
     shift
-    regex= service= post=1
+    regex= service= post=1 report=
     while (($#)); do
         case $1 in
         --ready-regex) regex=$2; shift 2 ;;
         --service) service=$2; shift 2 ;;
         --no-post) post=; shift ;;
+        --report-to) report=$2; shift 2 ;;
         *) exit 2 ;;
         esac
     done
     printf '%s post=%s\n' "$service" "$post" >>"$READY_ARGS_FILE"
     while IFS= read -r line; do
         if [[ $line =~ ^($regex) ]]; then
+            if [[ -n $service ]]; then
+                if [[ -n $report ]]; then
+                    printf '%s READY\n' "$service" >"$report"
+                fi
+                printf '[%s] ready\n' "$service" >&2
+            fi
             if [[ -n $post ]]; then
                 echo "posted $service" >>"$ORDER_FILE"
-            fi
-            if [[ -n $service ]]; then
-                printf '[%s] ready\n' "$service" >&2
             fi
             exit 0
         fi
     done
+    ;;
+"$RUN_DIR"/report_service_states.py)
+    stat=$(</proc/self/stat)
+    stat=${stat##*) }
+    read -r _ _ group _ <<<"$stat"
+    echo "$group" >>"$REPORTER_GROUP_FILE"
+    if [[ -n $REPORTER_PYTHON ]]; then
+        exec "$REPORTER_PYTHON" "$@"
+    fi
+    while read -r name _; do
+        [[ $name != - ]] || exit 0
+    done <"$2"
     ;;
 "$RUN_DIR"/jupyter/check_idle.py)
     echo "$$" >"$IDLE_PID_FILE"
@@ -98,6 +122,7 @@ type supervisorRun struct {
 	env    []string
 	cmd    *exec.Cmd
 	stderr syncBuffer
+	master *standInMaster
 	done   chan struct{}
 	err    error
 	// killedGroups is set when a service is killed with its process group: its members die at
@@ -139,7 +164,13 @@ func newSupervisorRun(t *testing.T, services string) *supervisorRun {
 		[]byte(staticScript(t, InteractiveInitScriptResource)), 0o600))
 	writeScript(t, filepath.Join(s.run, TaskSetupScriptResource), `echo setup >>"$ORDER_FILE"`+"\n")
 	writeScript(t, filepath.Join(dir, "python"), pythonStandIn)
+	require.NoError(t, os.WriteFile(filepath.Join(s.run, ServiceStateReporterResource),
+		[]byte(staticScript(t, ServiceStateReporterResource)), 0o600))
 	s.hook(defaultHook)
+	s.master = newStandInMaster(t, filepath.Join(dir, "reports"))
+	reporterPython, _ := exec.LookPath("python3")
+	pythonPath := filepath.Join(dir, "pylib")
+	writeDeterminedStandIn(t, pythonPath)
 
 	s.env = append(os.Environ(),
 		"DET_SERVICES="+services,
@@ -148,6 +179,15 @@ func newSupervisorRun(t *testing.T, services string) *supervisorRun {
 		"ORDER_FILE="+s.order,
 		"READY_ARGS_FILE="+filepath.Join(dir, "ready-args"),
 		"IDLE_PID_FILE="+filepath.Join(dir, "idle-pid"),
+		"REPORTS_FILE="+filepath.Join(dir, "reports"),
+		"REPORTER_GROUP_FILE="+filepath.Join(dir, "reporter-group"),
+		"REPORTER_PYTHON="+reporterPython,
+		"PYTHONPATH="+pythonPath,
+		"DET_MASTER="+s.master.srv.URL,
+		"DET_USER=det",
+		"DET_SESSION_TOKEN="+standInAllocationToken,
+		"DET_ALLOCATION_ID="+standInAllocationID,
+		"DET_SERVICE_STATE_REPORT_SECONDS=",
 		"PS4=+ ",
 		"TCD_STARTUP_HOOK=",
 		"HOOK_VAR=",
@@ -1132,4 +1172,387 @@ func findPrefix(lines []string, prefix string) string {
 		}
 	}
 	return ""
+}
+
+// The allocation of the stand-in master's task and its token.
+const (
+	standInAllocationID    = "task.1"
+	standInAllocationToken = "allocation-token"
+)
+
+// determinedStandIn is the part of the determined package that report_service_states.py uses: the
+// task session posts JSON with the allocation token, as the real one does, and raises on an HTTP
+// error or a timeout.
+var determinedStandIn = map[string]string{
+	"determined/__init__.py":        "",
+	"determined/common/__init__.py": "",
+	"determined/common/api/__init__.py": `import json as _json
+import urllib.request
+
+
+def canonicalize_master_url(url):
+    return url.rstrip("/")
+
+
+class BaseSession:
+    def __init__(self, master, token):
+        self.master = master
+        self.token = token
+
+    def with_retry(self, retries):
+        return self
+
+    def post(self, path, json=None, timeout=None):
+        request = urllib.request.Request(
+            self.master + path,
+            data=_json.dumps(json).encode(),
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Grpc-Metadata-x-allocation-token": "Bearer " + self.token,
+            },
+        )
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(request, timeout=timeout) as response:
+            response.read()
+`,
+	"determined/common/api/authentication.py": `import os
+
+from determined.common import api
+
+
+def login_from_task(master_address, cert):
+    return api.BaseSession(master_address, os.environ["DET_SESSION_TOKEN"])
+`,
+	"determined/common/api/certs.py": `def default_load(master_url):
+    return None
+`,
+}
+
+func writeDeterminedStandIn(t *testing.T, dir string) {
+	t.Helper()
+	for name, body := range determinedStandIn {
+		path := filepath.Join(dir, name)
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+		require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+	}
+}
+
+// requireReporterPython skips a test of the reporter itself without python3.
+func requireReporterPython(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 is not installed")
+	}
+}
+
+// How the stand-in master answers a snapshot.
+const (
+	masterAccepts int32 = iota
+	masterRefuses
+	masterHangs
+)
+
+// servicesPost is a snapshot that the stand-in master received: its sequence, "<name>=<state>" of
+// each service in the order posted, and whether the master took it.
+type servicesPost struct {
+	Sequence int
+	States   string
+	Accepted bool
+}
+
+// standInMaster takes the reporter's snapshots for the allocation standInAllocationID with its
+// token, records each in order, in memory and as a line "<sequence> <states>" in a file, which
+// units can wait for, and accepts, refuses or does not answer them as its mode says.
+type standInMaster struct {
+	srv  *httptest.Server
+	file string
+	mode atomic.Int32
+	stop chan struct{}
+
+	mu    sync.Mutex
+	posts []servicesPost
+}
+
+func newStandInMaster(t *testing.T, file string) *standInMaster {
+	t.Helper()
+	m := &standInMaster{file: file, stop: make(chan struct{})}
+	m.srv = httptest.NewServer(http.HandlerFunc(m.serve))
+	t.Cleanup(m.srv.Close)
+	// Before the server's Close, which waits for the requests it does not answer.
+	t.Cleanup(func() { close(m.stop) })
+	return m
+}
+
+func (m *standInMaster) serve(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Sequence int `json:"sequence"`
+		Services []struct {
+			Name  string `json:"name"`
+			State string `json:"state"`
+		} `json:"services"`
+	}
+	if r.Method != http.MethodPost ||
+		r.URL.Path != "/api/v1/allocations/"+standInAllocationID+"/services" ||
+		r.Header.Get("Grpc-Metadata-x-allocation-token") != "Bearer "+standInAllocationToken ||
+		json.NewDecoder(r.Body).Decode(&body) != nil {
+		http.Error(w, "unexpected request", http.StatusBadRequest)
+		return
+	}
+	states := make([]string, 0, len(body.Services))
+	for _, s := range body.Services {
+		states = append(states, s.Name+"="+strings.TrimPrefix(s.State, "STATE_"))
+	}
+	mode := m.mode.Load()
+	post := servicesPost{
+		Sequence: body.Sequence, States: strings.Join(states, " "), Accepted: mode == masterAccepts,
+	}
+	m.mu.Lock()
+	m.posts = append(m.posts, post)
+	f, err := os.OpenFile(m.file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err == nil {
+		_, _ = fmt.Fprintf(f, "%d %s\n", post.Sequence, post.States)
+		_ = f.Close()
+	}
+	m.mu.Unlock()
+
+	switch mode {
+	case masterAccepts:
+		_, _ = w.Write([]byte("{}"))
+	case masterRefuses:
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	default:
+		select {
+		case <-r.Context().Done():
+		case <-m.stop:
+		}
+	}
+}
+
+// received returns the snapshots that the master received, in order; accepted those it took.
+func (m *standInMaster) received() []servicesPost {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.posts)
+}
+
+func (m *standInMaster) accepted() []servicesPost {
+	return slices.DeleteFunc(m.received(), func(p servicesPost) bool { return !p.Accepted })
+}
+
+// statesOf returns the states of the service name in the posts, without repeats.
+func statesOf(posts []servicesPost, name string) []string {
+	var states []string
+	for _, p := range posts {
+		for _, s := range strings.Fields(p.States) {
+			if service, state, _ := strings.Cut(s, "="); service == name &&
+				(len(states) == 0 || states[len(states)-1] != state) {
+				states = append(states, state)
+			}
+		}
+	}
+	return states
+}
+
+// requireSnapshots checks that each post holds every service once, in order, and that the
+// sequence starts at 1, increases with each change and stays with a re-post of the same
+// snapshot.
+func requireSnapshots(t *testing.T, posts []servicesPost, services ...string) {
+	t.Helper()
+	require.NotEmpty(t, posts)
+	require.Equal(t, 1, posts[0].Sequence, posts)
+	for i, p := range posts {
+		var names []string
+		for _, s := range strings.Fields(p.States) {
+			name, _, _ := strings.Cut(s, "=")
+			names = append(names, name)
+		}
+		require.Equal(t, services, names, p)
+		if i == 0 {
+			continue
+		}
+		if prev := posts[i-1]; p.States == prev.States {
+			require.Equal(t, prev.Sequence, p.Sequence, posts)
+		} else {
+			require.Greater(t, p.Sequence, prev.Sequence, posts)
+		}
+	}
+}
+
+// waitUntilPosted is a unit line that waits until the master has received a snapshot with the
+// state of the service name.
+func waitUntilPosted(name, state string) string {
+	return `for _ in $(seq 400); do grep -qE ' ` + name + `=` + state +
+		`( |$)' "$REPORTS_FILE" && break; sleep 0.05; done` + "\n"
+}
+
+// inService quotes unit lines to run in the service, a "bash -c" of the unit.
+func inService(lines string) string {
+	return strings.ReplaceAll(lines, "'", `'\''`)
+}
+
+// requireReporterGone checks that nothing is left of the reporter's process groups.
+func (s *supervisorRun) requireReporterGone() {
+	s.t.Helper()
+	b, err := os.ReadFile(filepath.Join(s.dir, "reporter-group"))
+	require.NoError(s.t, err)
+	groups := strings.Fields(string(b))
+	require.NotEmpty(s.t, groups)
+	for _, g := range groups {
+		group, err := strconv.Atoi(g)
+		require.NoError(s.t, err)
+		require.ErrorIs(s.t, unix.Kill(-group, 0), unix.ESRCH, "the reporter's group %d is gone", group)
+	}
+}
+
+const reportFailed = "interactive task: reporting the services' states failed: "
+
+// The master gets the snapshot of every service's state whenever a state changes, with a new
+// sequence: STARTING when a service starts, READY when its readiness check matches, EXITED once it
+// has stopped, and UNAVAILABLE instead when it exited 127 before it was READY. The primary
+// service's exit reaches the master before the supervisor exits, with the task's status.
+func TestSupervisorReportsServiceStates(t *testing.T) {
+	requireReporterPython(t)
+	for name, hook := range map[string]string{"default hook": defaultHook, "strict hook": strictHook} {
+		t.Run(name, func(t *testing.T) {
+			s := newSupervisorRun(t, "p,q,r")
+			s.hook(hook)
+			s.unit("p", readyLog+waitUntilPosted("p", "STARTING")+waitUntilPosted("q", "EXITED")+
+				waitUntilPosted("r", "UNAVAILABLE")+`{ bash -c 'echo up >&2; `+
+				inService(waitUntilPosted("p", "READY"))+`exit 3'; } 2> >(log)`+"\n")
+			s.unit("q", readyLog+waitUntilPosted("q", "STARTING")+`{ bash -c 'echo up >&2; `+
+				inService(waitUntilPosted("q", "READY"))+`exit 5'; } 2> >(log)`+"\n")
+			s.unit("r", waitUntilPosted("r", "STARTING")+"exit 127\n")
+			s.start()
+			require.Equal(t, 3, s.wait())
+
+			posts := s.master.received()
+			require.Equal(t, posts, s.master.accepted())
+			requireSnapshots(t, posts, "p", "q", "r")
+			require.Equal(t, []string{"STARTING", "READY", "EXITED"}, statesOf(posts, "p"), posts)
+			require.Equal(t, []string{"STARTING", "READY", "EXITED"}, statesOf(posts, "q"), posts)
+			require.Equal(t, []string{"STARTING", "UNAVAILABLE"}, statesOf(posts, "r"), posts)
+			require.Equal(t, "p=EXITED q=EXITED r=UNAVAILABLE", posts[len(posts)-1].States)
+			require.NotContains(t, s.stderr.String(), reportFailed)
+			require.ElementsMatch(t, []string{
+				"[p] start", "[q] start", "[r] start", "[r] exited 127", "[q] ready", "[q] exited 5",
+				"[p] ready", "[p] exited 3",
+			}, s.logLines())
+			s.requireReporterGone()
+		})
+	}
+}
+
+// A service that exits 127 after it was READY has run in the image: it is EXITED, not UNAVAILABLE.
+func TestSupervisorReportsExit127AfterReady(t *testing.T) {
+	requireReporterPython(t)
+	s := newSupervisorRun(t, "p,q")
+	s.unit("p", readyLog+waitUntilPosted("q", "EXITED")+`{ bash -c 'echo up >&2; exit 3'; } 2> >(log)`+"\n")
+	s.unit("q", readyLog+waitUntilPosted("q", "STARTING")+`{ bash -c 'echo up >&2; `+
+		inService(waitUntilPosted("q", "READY"))+`exit 127'; } 2> >(log)`+"\n")
+	s.start()
+	require.Equal(t, 3, s.wait())
+
+	posts := s.master.received()
+	require.Equal(t, posts, s.master.accepted())
+	requireSnapshots(t, posts, "p", "q")
+	require.Equal(t, []string{"STARTING", "READY", "EXITED"}, statesOf(posts, "q"), posts)
+	require.Equal(t, "p=EXITED q=EXITED", posts[len(posts)-1].States)
+	require.Contains(t, s.logLines(), "[q] exited 127")
+	s.requireReporterGone()
+}
+
+// The reporter posts the current snapshot again every DET_SERVICE_STATE_REPORT_SECONDS, with the
+// same sequence, and is gone with the supervisor. A change that comes before the first post, as
+// p's readiness may, is part of the first snapshot.
+func TestSupervisorRePostsServiceStates(t *testing.T) {
+	requireReporterPython(t)
+	s := newSupervisorRun(t, "p,q")
+	s.env = append(s.env, "DET_SERVICE_STATE_REPORT_SECONDS=1")
+	s.unit("p", readyLog+`{ bash -c 'echo up >&2; exec sleep 300'; } 2> >(log)`+"\n")
+	s.unit("q", "sleep 300\n")
+	s.start()
+	s.waitForLog("[p] ready")
+	waitFor(t, "two re-posts of the current snapshot", func() bool {
+		posts := s.master.received()
+		n := 0
+		for _, p := range posts {
+			if p.States == "p=READY q=STARTING" {
+				n++
+			}
+		}
+		return n >= 3
+	})
+	s.signal(syscall.SIGTERM)
+	require.Equal(t, 128+int(syscall.SIGTERM), s.wait())
+
+	posts := s.master.received()
+	requireSnapshots(t, posts, "p", "q")
+	require.Equal(t, "p=EXITED q=EXITED", posts[len(posts)-1].States)
+	require.NotContains(t, s.stderr.String(), reportFailed)
+	s.requireReporterGone()
+	require.ElementsMatch(t,
+		[]string{"[p] start", "[q] start", "[p] ready", "[p] exited 143", "[q] exited 143"}, s.logLines())
+}
+
+// A master that refuses the snapshots or does not answer them holds up no service and does not
+// change the task's status. The failure is logged once; the retry carries the current snapshot,
+// not the ones the master missed. A master that does not answer at the stop does not hold up the
+// supervisor's exit.
+func TestSupervisorReportFailure(t *testing.T) {
+	requireReporterPython(t)
+	for name, tc := range map[string]struct {
+		mode    int32
+		recover bool
+	}{
+		"refused":                {masterRefuses, true},
+		"unanswered":             {masterHangs, true},
+		"unanswered at the stop": {masterHangs, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newSupervisorRun(t, "p,q")
+			s.master.mode.Store(tc.mode)
+			s.unit("p", readyLog+`{ bash -c 'echo up >&2; exec sleep 300'; } 2> >(log)`+"\n")
+			s.unit("q", waitUntilOrder("go")+"exit 4\n")
+			started := time.Now()
+			s.start()
+			s.waitForLog("[p] ready")
+			// Less than the reporter's timeout of a post.
+			require.Less(t, time.Since(started), 4*time.Second)
+			require.NoError(t, os.WriteFile(s.order, []byte("go\n"), 0o600))
+			s.waitForLog("[q] exited 4")
+			require.True(t, s.running())
+			waitFor(t, "a snapshot", func() bool { return len(s.master.received()) > 0 })
+
+			if tc.recover {
+				s.master.mode.Store(masterAccepts)
+				waitFor(t, "the current snapshot", func() bool { return len(s.master.accepted()) > 0 })
+				received, accepted := s.master.received(), s.master.accepted()
+				require.Equal(t, "p=READY q=EXITED", accepted[0].States, received)
+				require.Equal(t, slices.MaxFunc(received, func(a, b servicesPost) int {
+					return a.Sequence - b.Sequence
+				}).Sequence, accepted[0].Sequence, received)
+				require.Equal(t, 1, strings.Count(s.stderr.String(), reportFailed), s.stderr.String())
+			}
+
+			s.signal(syscall.SIGTERM)
+			stopped := time.Now()
+			require.Equal(t, 128+int(syscall.SIGTERM), s.wait())
+			require.Less(t, time.Since(stopped), 10*time.Second)
+			require.LessOrEqual(t, strings.Count(s.stderr.String(), reportFailed), 1, s.stderr.String())
+			require.NotContains(t, s.stderr.String(), "Killed")
+			require.ElementsMatch(t, []string{
+				"[p] start", "[q] start", "[p] ready", "[q] exited 4", "[p] exited 143",
+			}, s.logLines())
+			received := s.master.received()
+			requireSnapshots(t, received, "p", "q")
+			if tc.recover {
+				for _, p := range s.master.accepted() {
+					require.Contains(t, []string{"p=READY q=EXITED", "p=EXITED q=EXITED"}, p.States)
+				}
+				require.Equal(t, "p=EXITED q=EXITED", received[len(received)-1].States)
+			}
+			s.requireReporterGone()
+		})
+	}
 }

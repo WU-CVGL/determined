@@ -71,6 +71,11 @@ export const routeToExternalUrl = (path: string): void => {
   logger.trace('routing to external url', path);
   window.location.assign(path);
 };
+/* Like routeToExternalUrl, without leaving the current page in the history. */
+export const replaceWithExternalUrl = (path: string): void => {
+  logger.trace('replacing with external url', path);
+  window.location.replace(path);
+};
 export const routeToReactUrl = (path: string): void => {
   logger.trace('routing to react url', path);
   router.getRouter().navigate(`${process.env.PUBLIC_URL}${stripUrl(path)}`);

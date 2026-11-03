@@ -532,6 +532,18 @@ export const getTask = generateDetApi<
   Type.TaskItem | undefined
 >(Config.getTask);
 
+export const getTaskServices = generateDetApi<
+  Service.GetTaskParams,
+  Api.V1GetTaskServicesResponse,
+  Api.V1GetTaskServicesResponse
+>(Config.getTaskServices);
+
+export const getTaskServiceCredential = generateDetApi<
+  Service.GetTaskServiceParams,
+  Api.V1GetTaskServiceCredentialResponse,
+  Api.V1GetTaskServiceCredentialResponse
+>(Config.getTaskServiceCredential);
+
 export const getActiveTasks = generateDetApi<
   Record<string, never>,
   Api.V1GetActiveTasksCountResponse,
