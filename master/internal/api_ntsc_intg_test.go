@@ -635,7 +635,9 @@ func TestAllocationMutationsRequireOwnSessionOwnerOrAdmin(t *testing.T) {
 }
 
 // A busy service's report from the task's container touches the task's activity record; an idle
-// report does not, and reports from other users or tasks are refused.
+// report does not. Another owner's user session and another owner's allocation token are refused;
+// a token of the same owner's other allocation follows canControlAllocation, as AllocationReady
+// does, and is not covered here.
 func TestReportTaskActivity(t *testing.T) {
 	api, authz, _, _ := setupNTSCAuthzTest(t)
 	authz.On("CanGetNSC", mock.Anything, mock.Anything, mock.Anything).Return(nil)
@@ -659,8 +661,8 @@ func TestReportTaskActivity(t *testing.T) {
 	}
 
 	for name, ctx := range map[string]context.Context{
-		"user":       ntscUserCtx(t, other),
-		"other task": allocationSessionCtx(t, otherAllocationID, other),
+		"other owner's user session":     ntscUserCtx(t, other),
+		"other owner's allocation token": allocationSessionCtx(t, otherAllocationID, other),
 	} {
 		require.Equal(t, codes.PermissionDenied, status.Code(report(ctx, true)), name)
 	}
