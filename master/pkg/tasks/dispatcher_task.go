@@ -541,7 +541,7 @@ func (t *TaskSpec) computeResources(
 // specified in the configuration, as shown in the example below, then
 // more than one node will be allocated, which is not desirable.
 //
-// det notebook start --config resources.slots=8
+// det shell start --config resources.slots=8
 //
 // Therefore, explicitly request a single node.
 //

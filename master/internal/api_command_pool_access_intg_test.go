@@ -147,14 +147,12 @@ func TestLaunchNTSCChecksResolvedPool(t *testing.T) {
 	requirePoolDenied(t, err, other, wscompute)
 	_, err = api.LaunchTensorboard(otherCtx, &apiv1.LaunchTensorboardRequest{ExperimentIds: []int32{1}})
 	requirePoolDenied(t, err, other, wsaux)
-	// So is an explicit pool, and a notebook preview reports the refusal.
+	// So is an explicit pool, and a shell preview reports the refusal.
 	_, err = api.LaunchShell(otherCtx, &apiv1.LaunchShellRequest{Config: ntscPoolConfig(t, wscompute)})
 	requirePoolDenied(t, err, other, wscompute)
-	_, err = api.LaunchNotebook(otherCtx, &apiv1.LaunchNotebookRequest{
-		Config: ntscPoolConfig(t, wsaux), Preview: true,
-	})
+	_, err = api.PreviewShell(otherCtx, &apiv1.PreviewShellRequest{Config: ntscPoolConfig(t, wsaux)})
 	requirePoolDenied(t, err, other, wsaux)
-	_, err = api.LaunchNotebook(otherCtx, &apiv1.LaunchNotebookRequest{Preview: true})
+	_, err = api.PreviewShell(otherCtx, &apiv1.PreviewShellRequest{})
 	requirePoolDenied(t, err, other, wscompute)
 	require.Equal(t, sessions, countUserSessions(adminCtx, t, other.ID),
 		"a refused launch must not start a task session")
@@ -169,9 +167,10 @@ func TestLaunchNTSCChecksResolvedPool(t *testing.T) {
 		resp, err := api.LaunchCommand(ctx, &apiv1.LaunchCommandRequest{})
 		require.NoError(t, err, name)
 		require.Equal(t, wscompute, resp.Config.AsMap()["resources"].(map[string]any)["resource_pool"])
-		_, err = api.LaunchNotebook(ctx, &apiv1.LaunchNotebookRequest{
-			Config: ntscPoolConfig(t, wsaux), Preview: true,
+		preview, err := api.PreviewShell(ctx, &apiv1.PreviewShellRequest{
+			Config: ntscPoolConfig(t, wsaux),
 		})
 		require.NoError(t, err, name)
+		require.Equal(t, wsaux, preview.Config.AsMap()["resources"].(map[string]any)["resource_pool"])
 	}
 }

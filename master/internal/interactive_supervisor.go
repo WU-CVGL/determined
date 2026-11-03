@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"path"
 	"slices"
-	"strings"
 
 	"golang.org/x/exp/maps"
 
@@ -15,9 +14,6 @@ import (
 )
 
 const (
-	// interactiveServicesEnvVar names the services that the supervisor starts, comma-separated,
-	// the primary service first.
-	interactiveServicesEnvVar = tasks.ServicesEnvVar
 	// interactiveServiceSSH runs sshd. As the primary service it gets the supervisor's arguments.
 	interactiveServiceSSH = model.ServiceSSH
 	// interactiveServiceJupyter runs JupyterLab.
@@ -34,15 +30,10 @@ var interactiveServiceUnits = map[string]string{
 	interactiveServiceVSCode:  etc.VSCodeServiceResource,
 }
 
-// interactiveSupervisorEntrypoint is the entrypoint of a notebook or shell task: the supervisor,
-// which passes primaryArgs on to its primary service's unit.
+// interactiveSupervisorEntrypoint is the entrypoint of a shell task: the supervisor, which passes
+// primaryArgs on to its primary service's unit.
 func interactiveSupervisorEntrypoint(primaryArgs ...string) []string {
 	return append([]string{interactiveSupervisorScript}, primaryArgs...)
-}
-
-// setInteractiveServices tells the supervisor which services to start, the primary one first.
-func setInteractiveServices(spec *tasks.GenericCommandSpec, services ...string) {
-	addExtraEnvVars(spec, map[string]string{interactiveServicesEnvVar: strings.Join(services, ",")})
 }
 
 // addExtraEnvVars adds vars to the task's extra environment variables, keeping the others.

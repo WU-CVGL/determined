@@ -39,7 +39,9 @@ import (
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
+	"github.com/determined-ai/determined/proto/pkg/rbacv1"
 	"github.com/determined-ai/determined/proto/pkg/utilv1"
+	"github.com/determined-ai/determined/proto/pkg/workspacev1"
 )
 
 const (
@@ -209,6 +211,54 @@ func startTaskSession(ctx context.Context, user *model.User, spec *tasks.Generic
 		return err
 	}
 	spec.Base.UserSessionToken = token
+	return nil
+}
+
+// isNTSCPermittedToLaunch checks authorization to launch in a given
+// workspace.
+func (a *apiServer) isNTSCPermittedToLaunch(
+	ctx context.Context, spec *tasks.GenericCommandSpec, user *model.User,
+) error {
+	workspaceID := spec.Metadata.WorkspaceID
+	if workspaceID == 0 {
+		return status.Errorf(codes.InvalidArgument, "workspace_id is required")
+	}
+
+	w := &workspacev1.Workspace{}
+	notFoundErr := api.NotFoundErrs("workspace", strconv.Itoa(int(workspaceID)), true)
+	if err := a.m.db.QueryProto(
+		"get_workspace", w, workspaceID, user.ID,
+	); errors.Is(err, db.ErrNotFound) {
+		return notFoundErr
+	} else if err != nil {
+		return errors.Wrapf(err, "error fetching workspace (%d) from database", workspaceID)
+	}
+	if w.Archived {
+		return notFoundErr
+	}
+
+	if spec.TaskType == model.TaskTypeTensorboard {
+		if err := command.AuthZProvider.Get().CanGetTensorboard(
+			ctx, *user, workspaceID, spec.Metadata.ExperimentIDs, spec.Metadata.TrialIDs,
+		); err != nil {
+			var pdErr authz.PermissionDeniedError
+			if errors.As(err, &pdErr) {
+				for _, perm := range pdErr.RequiredPermissions {
+					if perm == rbacv1.PermissionType_PERMISSION_TYPE_VIEW_WORKSPACE {
+						return apiutils.ErrNotFound
+					}
+				}
+			}
+
+			return apiutils.MapAndFilterErrors(err, nil, nil)
+		}
+	} else {
+		if err := command.AuthZProvider.Get().CanCreateNSC(
+			ctx, *user, workspaceID); err != nil {
+			return apiutils.MapAndFilterErrors(err, nil, nil)
+		}
+	}
+
 	return nil
 }
 

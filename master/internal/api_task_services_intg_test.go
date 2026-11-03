@@ -138,7 +138,7 @@ func TestGetTaskServicesShellWithJupyter(t *testing.T) {
 }
 
 // Tasks saved without service records list the service of their type: a shell its sshd at the
-// task ID, a notebook JupyterLab at the task ID; a command has no services.
+// task ID, a notebook record JupyterLab at the task ID; a command has no services.
 func TestGetTaskServicesWithoutRecords(t *testing.T) {
 	s, adminCtx := setupServicesTest(t)
 
@@ -160,10 +160,11 @@ func TestGetTaskServicesWithoutRecords(t *testing.T) {
 	notebookReq.Spec.Base.ExtraProxyPorts = expconf.ProxyPortsConfig{{
 		RawProxyPort: minServicePort, RawDefaultServiceID: ptrs.Ptr(true),
 	}}
-	notebook, err := command.DefaultCmdService.LaunchNotebookCommand(
-		notebookReq, notebookReq.Spec.Base.Owner)
+	// A notebook, as the master saved them.
+	notebook, err := command.DefaultCmdService.LaunchGenericCommand(
+		model.TaskTypeNotebook, model.JobTypeNotebook, notebookReq)
 	require.NoError(t, err)
-	notebookID := notebook.ToV1Notebook().Id
+	notebookID := notebook.ToV1Command().Id
 	resp := s.services(adminCtx, t, notebookID)
 	require.Equal(t, model.ServiceJupyter, resp.Primary)
 	require.Equal(t, []*taskv1.TaskService{{

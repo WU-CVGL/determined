@@ -101,7 +101,7 @@ func setupShellTerminalTest(
 	nbReq.Spec.Base.Owner = &model.User{ID: env.owner.ID}
 	nb, err := command.DefaultCmdService.LaunchGenericCommand(model.TaskTypeNotebook, model.JobTypeNotebook, nbReq)
 	require.NoError(t, err)
-	env.notebookID = model.TaskID(nb.ToV1Notebook().Id)
+	env.notebookID = model.TaskID(nb.ToV1Command().Id)
 
 	cfg := config.DefaultShellTerminalConfig()
 	if cfgFn != nil {

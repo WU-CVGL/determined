@@ -29,7 +29,6 @@ func TestV1EndTime(t *testing.T) {
 	endTimes := func() []*timestamppb.Timestamp {
 		return []*timestamppb.Timestamp{
 			c.ToV1Command().EndTime,
-			c.ToV1Notebook().EndTime,
 			c.ToV1Shell().EndTime,
 			c.ToV1Tensorboard().EndTime,
 		}

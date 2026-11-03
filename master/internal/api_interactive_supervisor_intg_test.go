@@ -40,8 +40,8 @@ func requireArchivePath(t *testing.T, spec tasks.GenericCommandSpec, path string
 	require.Failf(t, "missing file", "%s is not in the task's files", path)
 }
 
-// Shells and notebooks run the supervisor with their one service; the task's other extra
-// environment variables stay, and the entrypoint wrappers still ship.
+// Shells run the supervisor with their service; the task's other extra environment variables stay,
+// and the entrypoint wrapper still ships.
 func TestInteractiveLaunchersUseSupervisor(t *testing.T) {
 	api, _, ctx := setupAPITest(t, nil)
 	cs, err := command.NewService(api.m.db, api.m.rm)
@@ -60,18 +60,4 @@ func TestInteractiveLaunchersUseSupervisor(t *testing.T) {
 	requireInteractiveSupervisorFiles(t, spec.AdditionalFiles, 0, 0)
 	requireArchivePath(t, spec, shellEntrypointScript)
 	requireArchivePath(t, spec, taskReadyCheckLogs)
-
-	notebook, err := api.LaunchNotebook(ctx, &apiv1.LaunchNotebookRequest{})
-	require.NoError(t, err)
-	spec = launchedSpec(t, notebook.Notebook.Id)
-	require.Equal(t, []string{interactiveSupervisorScript}, spec.Config.Entrypoint)
-	env := spec.Base.ExtraEnvVars
-	require.Equal(t, "jupyter", env["DET_SERVICES"])
-	require.Equal(t, string(model.TaskTypeNotebook), env["DET_TASK_TYPE"])
-	require.Equal(t, strconv.Itoa(spec.Base.ExtraProxyPorts[0].ProxyPort()), env["NOTEBOOK_PORT"])
-	require.NotEmpty(t, env["NOTEBOOK_CONFIG"])
-	require.NotEmpty(t, env["DET_NOTEBOOK_TOKEN"], "the command service adds the token")
-	requireInteractiveSupervisorFiles(t, spec.AdditionalFiles, 0, 0)
-	requireArchivePath(t, spec, jupyterEntrypoint)
-	requireArchivePath(t, spec, jupyterIdleCheck)
 }

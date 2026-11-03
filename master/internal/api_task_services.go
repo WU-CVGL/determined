@@ -20,7 +20,7 @@ import (
 )
 
 // canViewTaskServices returns the current user and the task's metadata if the user may see the
-// NTSC task taskID, by the rule of GetShell, GetNotebook and the proxy: the workspace's NSC view
+// NTSC task taskID, by the rule of GetShell and the proxy: the workspace's NSC view
 // permission, or for a TensorBoard the TensorBoard's. Anyone else gets NotFound, as for a task
 // that does not exist.
 func canViewTaskServices(

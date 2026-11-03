@@ -16,7 +16,6 @@ import "determined/api/v1/group.proto";
 import "determined/api/v1/job.proto";
 import "determined/api/v1/master.proto";
 import "determined/api/v1/model.proto";
-import "determined/api/v1/notebook.proto";
 import "determined/api/v1/project.proto";
 import "determined/api/v1/rbac.proto";
 import "determined/api/v1/run.proto";
@@ -1433,65 +1432,6 @@ service Determined {
     };
     option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
       tags: "Templates"
-    };
-  }
-
-  // Get a list of notebooks.
-  rpc GetNotebooks(GetNotebooksRequest) returns (GetNotebooksResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/notebooks"
-    };
-    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
-      tags: "Notebooks"
-    };
-  }
-  // Get the requested notebook.
-  rpc GetNotebook(GetNotebookRequest) returns (GetNotebookResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/notebooks/{notebook_id}"
-    };
-    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
-      tags: "Notebooks"
-    };
-  }
-  // Send notebook idle data to master
-  rpc IdleNotebook(IdleNotebookRequest) returns (IdleNotebookResponse) {
-    option (google.api.http) = {
-      put: "/api/v1/notebooks/{notebook_id}/report_idle"
-      body: "*"
-    };
-    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
-      tags: "Internal"
-    };
-  }
-  // Kill the requested notebook.
-  rpc KillNotebook(KillNotebookRequest) returns (KillNotebookResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/notebooks/{notebook_id}/kill"
-    };
-    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
-      tags: "Notebooks"
-    };
-  }
-  // Set the priority of the requested notebook.
-  rpc SetNotebookPriority(SetNotebookPriorityRequest)
-      returns (SetNotebookPriorityResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/notebooks/{notebook_id}/set_priority"
-      body: "*"
-    };
-    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
-      tags: "Notebooks"
-    };
-  }
-  // Launch a notebook.
-  rpc LaunchNotebook(LaunchNotebookRequest) returns (LaunchNotebookResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/notebooks"
-      body: "*"
-    };
-    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
-      tags: "Notebooks"
     };
   }
 

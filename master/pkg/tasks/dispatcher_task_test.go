@@ -422,8 +422,8 @@ func Test_makeLocalVolumn(t *testing.T) {
 			want: false,
 		},
 		{
-			// The notebook's and the shell's shared init rides in the same archive as their
-			// entrypoints, like check_ready_logs.py, so that archive decides; on its own it is local.
+			// The shell's init rides in the same archive as its
+			// entrypoint, like check_ready_logs.py, so that archive decides; on its own it is local.
 			name: "Test InteractiveInitScriptResource",
 			arg: cproto.RunArchive{
 				Archive: archive.Archive{
