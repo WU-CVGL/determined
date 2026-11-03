@@ -65,8 +65,8 @@ Only the user who started the shell and administrators can open its editor.
 Where code-server Comes From
 ============================
 
-A shell runs the code-server release that the master served when the shell was created. The service
-takes the first of:
+A shell runs the code-server release that the master served when the shell was created, which the
+service takes from the first of:
 
 -  ``code-server`` on the image's ``PATH``, when it is that release. The service skips another
    release on the ``PATH`` and says so in the task log.
@@ -79,11 +79,14 @@ takes the first of:
    SHA-256, and installs it into the cache. Shells that share a home directory install a release
    once, also when they start at the same time.
 
-An administrator can provide code-server to every task instead: mount a directory that holds an
-extracted release into the containers read-only, for example with ``bind_mounts`` in
+An administrator can override this release for every task: mount a directory that holds an extracted
+release into the containers read-only, for example with ``bind_mounts`` in
 ``task_container_defaults``, and set ``DET_CODE_SERVER_DIR`` to its path in the containers'
 environment. When that directory has ``bin/code-server``, the service uses it before the sources
-above without checking its release, which must still be 4.14.1 or later.
+above without checking its release, which must be 4.14.1 or later.
+
+The service supports glibc 2.28 or later, the baseline of this integration; code-server's own
+minimum differs by release.
 
 Keeping Downloads, Extensions and Settings
 ==========================================

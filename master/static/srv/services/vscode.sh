@@ -46,8 +46,8 @@ if [[ -z ${HASHED_PASSWORD-} ]]; then
     vscode_unavailable "HASHED_PASSWORD is not set"
 fi
 
-# The Node.js that code-server bundles needs glibc 2.28 or later. ldd prints, for example,
-# "ldd (Ubuntu GLIBC 2.35-0ubuntu3) 2.35" first.
+# The service supports glibc 2.28 or later, whatever the minimum of the code-server release. ldd
+# prints, for example, "ldd (Ubuntu GLIBC 2.35-0ubuntu3) 2.35" first.
 vscode_glibc=$(ldd --version 2>/dev/null) || true
 vscode_glibc=${vscode_glibc%%$'\n'*}
 vscode_glibc=${vscode_glibc##* }
