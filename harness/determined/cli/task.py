@@ -354,7 +354,7 @@ args_description: List[Any] = [
     cli.Cmd(
         "task",
         None,
-        "manage tasks (commands, experiments, notebooks, shells, tensorboards)",
+        "manage tasks (commands, experiments, shells, tensorboards)",
         [
             cli.Cmd(
                 "list ls",

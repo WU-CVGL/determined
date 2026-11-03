@@ -139,7 +139,7 @@ def print_launch_warnings(warnings: Sequence[bindings.v1LaunchWarning]) -> None:
 
 def wait_ntsc_ready(session: api.Session, ntsc_type: api.NTSC_Kind, eid: str) -> None:
     """
-    Use to wait for a notebook, tensorboard, or shell command to become ready.
+    Use to wait for a tensorboard, shell, or command to become ready.
     """
     name = ntsc_type.value
     loading_animator = render.Animator(f"Waiting for {name} to become ready")

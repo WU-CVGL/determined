@@ -15,7 +15,7 @@ import termcolor
 
 from determined import cli
 from determined.cli import ntsc, render, task
-from determined.common import api
+from determined.common import api, context
 from determined.common.api import bindings
 
 
@@ -40,6 +40,17 @@ def start_shell(args: argparse.Namespace) -> None:
     config = ntsc.parse_config(args.config_file, None, args.config, args.volume)
     add_services(config, args.service)
     workspace_id = cli.workspace.get_workspace_id_from_args(args)
+
+    if args.preview:
+        body = bindings.v1PreviewShellRequest(
+            config=config,
+            files=context.read_v1_context(args.context, args.include),
+            templateName=args.template,
+            workspaceId=workspace_id,
+        )
+        preview = bindings.post_PreviewShell(sess, body=body)
+        print(render.format_object_as_yaml(preview.config))
+        return
 
     resp = ntsc.launch_command(
         sess,
@@ -320,6 +331,9 @@ args_description: cli.ArgsDescription = [
                         "--show-ssh-command",
                         action="store_true",
                         help="show ssh command (e.g. for use in IDE) when starting the shell",
+                    ),
+                    cli.Arg(
+                        "--preview", action="store_true", help="preview the shell configuration"
                     ),
                 ],
             ),
