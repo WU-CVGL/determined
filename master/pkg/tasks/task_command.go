@@ -22,6 +22,9 @@ type genericCommandSpecMetadata struct {
 	ExperimentIDs []int32             `json:"experiment_ids"`
 	TrialIDs      []int32             `json:"trial_ids"`
 	WorkspaceID   model.AccessScopeID `json:"workspace_id"`
+	// CodeServerPassword is the password of the vscode service's code-server, the same class of
+	// secret as the private key. The container gets its hash only.
+	CodeServerPassword *string `json:"codeServerPassword,omitempty"`
 }
 
 // MarshalToMap converts typed struct into a map.

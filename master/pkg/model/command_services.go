@@ -15,10 +15,12 @@ const (
 	ServiceSSH = "ssh"
 	// ServiceJupyter runs JupyterLab.
 	ServiceJupyter = "jupyter"
+	// ServiceVSCode runs VS Code in the browser, coder/code-server.
+	ServiceVSCode = "vscode"
 )
 
 // InteractiveServices lists every service of ServiceSSH, ServiceJupyter, ... in sorted order.
-var InteractiveServices = []string{ServiceJupyter, ServiceSSH}
+var InteractiveServices = []string{ServiceJupyter, ServiceSSH, ServiceVSCode}
 
 // ServiceConfig holds the options of one service in CommandConfig.Services. A service has no
 // options yet; an object leaves room for them without changing the type of the config.
