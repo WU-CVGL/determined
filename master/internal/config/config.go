@@ -158,6 +158,7 @@ func DefaultConfig() *Config {
 		},
 		FeatureSwitches: []string{},
 		ShellTerminal:   DefaultShellTerminalConfig(),
+		Interactive:     InteractiveConfig{CodeServer: DefaultCodeServerConfig()},
 		ResourceConfig:  *DefaultResourceConfig(),
 		Observability: ObservabilityConfig{
 			EnablePrometheus: true,
@@ -199,6 +200,7 @@ type Config struct {
 	FeatureSwitches       []string                          `json:"feature_switches"`
 	ReservedPorts         []int                             `json:"reserved_ports"`
 	ShellTerminal         ShellTerminalConfig               `json:"shell_terminal"`
+	Interactive           InteractiveConfig                 `json:"interactive"`
 	ResourcePoolAccess    ResourcePoolAccessConfig          `json:"resource_pool_access"`
 	ResourceConfig
 
@@ -271,6 +273,11 @@ func (c Config) Printable() ([]byte, error) {
 		auth.Username = hiddenValue
 		auth.Password = hiddenValue
 		c.Scim.Auth.BasicAuthConfig = &auth
+	}
+
+	// A mirror's URL may carry credentials, in its query for one.
+	if configCopy.Interactive.CodeServer.URLTemplate != DefaultCodeServerURLTemplate {
+		configCopy.Interactive.CodeServer.URLTemplate = hiddenValue
 	}
 
 	configCopy.CheckpointStorage = configCopy.CheckpointStorage.Printable()
