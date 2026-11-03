@@ -178,8 +178,9 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 		{ServiceID: jupyterID, Port: jupyter.Port, TLS: true, Exec: true},
 		{ServiceID: taskID + ":8080", Port: 8080},
 	}, alloc.ProxyPorts)
-	// Idle is not watched on shells.
+	// Without an idle timeout, the shell's idle time is not watched.
 	require.Nil(t, alloc.IdleTimeout)
+	require.True(t, spec.WatchTaskActivity)
 	require.False(t, spec.WatchProxyIdleTimeout)
 	require.False(t, spec.WatchRunnerIdleTimeout)
 
@@ -192,8 +193,9 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 	var notebookConfig model.CommandConfig
 	require.NoError(t, json.Unmarshal([]byte(env["NOTEBOOK_CONFIG"]), &notebookConfig))
 	require.Equal(t, spec.Config.Description, notebookConfig.Description)
-	// The idle check reports to the notebook API, which takes notebooks only.
-	require.NotContains(t, env, "NOTEBOOK_IDLE_TYPE")
+	// Nor does JupyterLab's idle check run.
+	require.NotContains(t, env, tasks.NotebookIdleTypeEnvVar)
+	require.NotContains(t, env, tasks.ActivityReportEnvVar)
 
 	// JupyterLab's token is a notebook session of the owner.
 	require.NotEmpty(t, env[model.NotebookSessionEnvVar])
@@ -249,15 +251,18 @@ func TestLaunchShellWithoutExtraServices(t *testing.T) {
 			require.Equal(t, sshService(port), spec.Services[0])
 			require.Equal(t, port, spec.SSHDPort)
 			require.Empty(t, spec.Base.ExtraProxyPorts)
+			alloc := allocateRequest(t, rm, taskID)
 			require.Equal(t, []*sproto.ProxyPortConfig{
 				{ServiceID: taskID, Port: port, ProxyTCP: true, Unauthenticated: true},
-			}, allocateRequest(t, rm, taskID).ProxyPorts)
+			}, alloc.ProxyPorts)
+			// No idle timeout, no reaping.
+			require.Nil(t, alloc.IdleTimeout)
 
 			env := spec.Base.ExtraEnvVars
 			require.Equal(t, "ssh", env["DET_SERVICES"])
 			for _, key := range []string{
 				model.NotebookSessionEnvVar, "NOTEBOOK_PORT", "NOTEBOOK_CONFIG", "NOTEBOOK_BASE_URL",
-				"NOTEBOOK_IDLE_TYPE",
+				tasks.NotebookIdleTypeEnvVar, tasks.ActivityReportEnvVar,
 			} {
 				require.NotContains(t, env, key)
 			}
@@ -267,6 +272,50 @@ func TestLaunchShellWithoutExtraServices(t *testing.T) {
 			requireOncePerPath(t, paths)
 			require.NotContains(t, paths, jupyterDir)
 			require.NotContains(t, paths, jupyterCertPath)
+		})
+	}
+}
+
+// A shell with an idle timeout is watched through its task's activity record, with or without
+// extra services; with jupyter, JupyterLab's idle check reports there with the config's idle type.
+func TestLaunchShellIdleTimeout(t *testing.T) {
+	api, _, ctx := setupAPITest(t, nil)
+	cs, err := command.NewService(api.m.db, api.m.rm)
+	require.NoError(t, err)
+	command.SetDefaultService(cs)
+	rm := api.m.rm.(*mocks.ResourceManager)
+
+	for name, services := range map[string]any{
+		"ssh":     nil,
+		"jupyter": map[string]any{"jupyter": map[string]any{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			config := map[string]any{"idle_timeout": "45m", "notebook_idle_type": "activity"}
+			if services != nil {
+				config["services"] = services
+			}
+			raw, err := structpb.NewStruct(config)
+			require.NoError(t, err)
+			resp, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{Config: raw})
+			require.NoError(t, err)
+			taskID := resp.Shell.Id
+			spec := launchedSpec(t, taskID)
+
+			require.Equal(t, &sproto.IdleTimeoutConfig{
+				ServiceID: taskID, TaskID: model.TaskID(taskID), UseTaskActivity: true,
+				TimeoutDuration: 45 * time.Minute,
+			}, allocateRequest(t, rm, taskID).IdleTimeout)
+			require.False(t, spec.WatchProxyIdleTimeout)
+			require.False(t, spec.WatchRunnerIdleTimeout)
+
+			env := spec.Base.ExtraEnvVars
+			if services == nil {
+				require.NotContains(t, env, tasks.NotebookIdleTypeEnvVar)
+				require.NotContains(t, env, tasks.ActivityReportEnvVar)
+				return
+			}
+			require.Equal(t, model.NotebookIdleTypeActivity, env[tasks.NotebookIdleTypeEnvVar])
+			require.Equal(t, tasks.ActivityReportTask, env[tasks.ActivityReportEnvVar])
 		})
 	}
 }
@@ -366,16 +415,30 @@ func TestLaunchNotebookProxiesUnchanged(t *testing.T) {
 		alloc.ProxyPorts)
 	require.True(t, spec.WatchProxyIdleTimeout)
 	require.True(t, spec.WatchRunnerIdleTimeout)
+	require.False(t, spec.WatchTaskActivity)
+	// The master sets no notebook_timeout here, so the notebook has no idle timeout.
+	require.Nil(t, alloc.IdleTimeout)
 
 	env := spec.Base.ExtraEnvVars
 	require.Equal(t, "jupyter", env["DET_SERVICES"])
 	require.Equal(t, "/proxy/"+taskID+"/", env["NOTEBOOK_BASE_URL"])
 	require.Equal(t, model.NotebookIdleTypeKernelsOrTerminals, env["NOTEBOOK_IDLE_TYPE"])
+	require.NotContains(t, env, tasks.ActivityReportEnvVar)
 	require.Len(t, notebookSessions(t, taskID), 1)
 	paths := containerFilePaths(spec)
 	requireOncePerPath(t, paths)
 	require.Contains(t, paths, jupyterEntrypoint)
 	require.NotContains(t, paths, "/run/determined/ssh/authorized_keys_unmodified")
+
+	// With an idle timeout, the notebook's watcher reads its proxy and its idle reports, as before.
+	raw, err := structpb.NewStruct(map[string]any{"idle_timeout": "45m"})
+	require.NoError(t, err)
+	resp, err = api.LaunchNotebook(ctx, &apiv1.LaunchNotebookRequest{Config: raw})
+	require.NoError(t, err)
+	require.Equal(t, &sproto.IdleTimeoutConfig{
+		ServiceID: resp.Notebook.Id, UseProxyState: true, UseRunnerState: true,
+		TimeoutDuration: 45 * time.Minute,
+	}, allocateRequest(t, rm, resp.Notebook.Id).IdleTimeout)
 }
 
 // Only shells take services, and only the ones the supervisor has units for, with no options.

@@ -891,6 +891,15 @@ var (
 		env:     []string{"NOTEBOOK_BASE_URL=/proxy/task-1:2900/"},
 		baseURL: "/proxy/task-1:2900/",
 	}
+	// shellJupyterWatched is a shell with the jupyter service and an idle timeout.
+	shellJupyterWatched = jupyterTask{
+		env: []string{
+			"NOTEBOOK_BASE_URL=/proxy/task-1:2900/", "NOTEBOOK_IDLE_TYPE=activity",
+			"DET_ACTIVITY_REPORT=task",
+		},
+		baseURL: "/proxy/task-1:2900/",
+		idle:    true,
+	}
 )
 
 func testSupervisorJupyterUnit(t *testing.T, hook string, task jupyterTask) *supervisorRun {
@@ -1008,10 +1017,15 @@ func TestSupervisorUnitsPreInit(t *testing.T) {
 	}
 }
 
-// On a shell, the jupyter unit runs JupyterLab under the base URL that the master sets, and no
-// idle check, which only notebooks can report to.
+// On a shell, the jupyter unit runs JupyterLab under the base URL that the master sets, and the
+// idle check only when the master sets the idle type, for a shell with an idle timeout.
 func TestSupervisorJupyterUnitOnShell(t *testing.T) {
-	testSupervisorJupyterUnit(t, defaultHook, shellJupyter)
+	t.Run("not watched", func(t *testing.T) {
+		testSupervisorJupyterUnit(t, defaultHook, shellJupyter)
+	})
+	t.Run("watched", func(t *testing.T) {
+		testSupervisorJupyterUnit(t, defaultHook, shellJupyterWatched)
+	})
 }
 
 // A notebook saved by an older master gets the base URL at its task ID; an empty base URL is

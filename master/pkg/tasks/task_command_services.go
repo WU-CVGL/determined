@@ -13,6 +13,14 @@ const (
 	ServicesEnvVar = "DET_SERVICES"
 	// NotebookBaseURLEnvVar is the path under which JupyterLab serves: /proxy/<service ID>/.
 	NotebookBaseURLEnvVar = "NOTEBOOK_BASE_URL"
+	// NotebookIdleTypeEnvVar is the notebook_idle_type of JupyterLab's idle check. The jupyter
+	// service starts the check when it is set.
+	NotebookIdleTypeEnvVar = "NOTEBOOK_IDLE_TYPE"
+	// ActivityReportEnvVar set to ActivityReportTask makes JupyterLab's idle check report to its
+	// task's activity record instead of the notebook API.
+	ActivityReportEnvVar = "DET_ACTIVITY_REPORT"
+	// ActivityReportTask is the value of ActivityReportEnvVar for the task's activity record.
+	ActivityReportTask = "task"
 )
 
 // InteractiveService is one service of an interactive task, as GenericCommandSpec.Services

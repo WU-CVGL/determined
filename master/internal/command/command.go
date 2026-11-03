@@ -150,16 +150,8 @@ func (c *Command) Start(ctx context.Context) error {
 		}
 	}
 
-	var idleWatcherConfig *sproto.IdleTimeoutConfig
-	if c.Config.IdleTimeout != nil && (c.WatchProxyIdleTimeout || c.WatchRunnerIdleTimeout) {
-		idleWatcherConfig = &sproto.IdleTimeoutConfig{
-			ServiceID:       string(c.taskID),
-			UseProxyState:   c.WatchProxyIdleTimeout,
-			UseRunnerState:  c.WatchRunnerIdleTimeout,
-			TimeoutDuration: time.Duration(*c.Config.IdleTimeout),
-			Debug:           c.Config.Debug,
-		}
-	}
+	// The watcher comes from the persisted spec, so that a restore gets it again.
+	idleWatcherConfig := idleTimeoutConfig(c.GenericCommandSpec, c.taskID)
 
 	// The services' environment comes from the persisted spec, as the proxies below do, so that a
 	// restore gets the same.
@@ -552,4 +544,27 @@ func proxyPortConfigs(spec tasks.GenericCommandSpec, taskID model.TaskID) []*spr
 		}
 	}
 	return append(ports, sproto.NewProxyPortConfig(plain, taskID, false)...)
+}
+
+// idleTimeoutConfig returns how the task's idle time is watched, if its config sets an idle
+// timeout: a shell's through its task's activity record, a notebook's and a TensorBoard's through
+// their proxy and runner state, as their launches chose. Other tasks are not watched.
+func idleTimeoutConfig(spec tasks.GenericCommandSpec, taskID model.TaskID) *sproto.IdleTimeoutConfig {
+	if spec.Config.IdleTimeout == nil {
+		return nil
+	}
+	cfg := sproto.IdleTimeoutConfig{
+		ServiceID:       string(taskID),
+		TimeoutDuration: time.Duration(*spec.Config.IdleTimeout),
+		Debug:           spec.Config.Debug,
+	}
+	switch {
+	case spec.WatchTaskActivity:
+		cfg.UseTaskActivity, cfg.TaskID = true, taskID
+	case spec.WatchProxyIdleTimeout || spec.WatchRunnerIdleTimeout:
+		cfg.UseProxyState, cfg.UseRunnerState = spec.WatchProxyIdleTimeout, spec.WatchRunnerIdleTimeout
+	default:
+		return nil
+	}
+	return &cfg
 }

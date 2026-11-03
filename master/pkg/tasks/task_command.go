@@ -71,6 +71,9 @@ type GenericCommandSpec struct {
 
 	WatchProxyIdleTimeout  bool
 	WatchRunnerIdleTimeout bool
+	// WatchTaskActivity watches the task's activity record (see the idle package) when its config
+	// has an idle timeout. Shells set it.
+	WatchTaskActivity bool
 
 	TaskType model.TaskType
 }

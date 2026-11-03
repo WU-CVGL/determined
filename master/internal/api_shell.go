@@ -303,6 +303,8 @@ func (a *apiServer) LaunchShell(
 		return nil, err
 	}
 	setShellSSHD(launchReq.Spec, sshdPort)
+	// A shell's idle time is watched only when its config sets idle_timeout.
+	launchReq.Spec.WatchTaskActivity = true
 
 	if err = check.Validate(launchReq.Spec.Config); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
@@ -390,6 +392,8 @@ func jupyterService(port int) tasks.InteractiveService {
 // addShellJupyter adds the jupyter service to a shell spec: JupyterLab's port, from the notebooks'
 // range, which does not overlap sshd's, outside the spec's other ports, its environment and its
 // files, which it returns. The command service adds its token, and Command.Start its base URL.
+// When the shell's idle time is watched, JupyterLab's idle check reports to the task's activity
+// record.
 func addShellJupyter(spec *tasks.GenericCommandSpec) (archive.Archive, error) {
 	key, cert, err := proxy.GenSignedCert()
 	if err != nil {
@@ -404,9 +408,14 @@ func addShellJupyter(spec *tasks.GenericCommandSpec) (archive.Archive, error) {
 		return nil, err
 	}
 	spec.AddService(jupyterService(port))
-	addExtraEnvVars(spec, map[string]string{
+	env := map[string]string{
 		"NOTEBOOK_PORT":   strconv.Itoa(port),
 		"NOTEBOOK_CONFIG": string(configBytes),
-	})
+	}
+	if spec.Config.IdleTimeout != nil {
+		env[tasks.NotebookIdleTypeEnvVar] = spec.Config.NotebookIdleType
+		env[tasks.ActivityReportEnvVar] = tasks.ActivityReportTask
+	}
+	addExtraEnvVars(spec, env)
 	return jupyterFiles(spec.Base.AgentUserGroup, key, cert), nil
 }
