@@ -65,6 +65,63 @@ message GetTaskResponse {
   determined.task.v1.Task task = 1;
 }
 
+// Get the services of a task.
+message GetTaskServicesRequest {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: { required: [ "task_id" ] }
+  };
+  // The id of the task.
+  string task_id = 1;
+}
+
+// Response to GetTaskServicesRequest.
+message GetTaskServicesResponse {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: {
+      required: [ "task_id", "user_id", "workspace_id", "primary", "services" ]
+    }
+  };
+  // The id of the task.
+  string task_id = 1;
+  // The id of the user who owns the task.
+  int32 user_id = 2;
+  // The id of the workspace of the task.
+  int32 workspace_id = 3;
+  // The name of the task's primary service, whose readiness makes the task
+  // ready; empty for a task without services.
+  string primary = 4;
+  // The services of the task, the primary one first. Commands and TensorBoards
+  // have none.
+  repeated determined.task.v1.TaskService services = 5;
+}
+
+// Get the credential of a service of a task.
+message GetTaskServiceCredentialRequest {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: { required: [ "task_id", "service" ] }
+  };
+  // The id of the task.
+  string task_id = 1;
+  // The name of the service.
+  string service = 2;
+}
+
+// Response to GetTaskServiceCredentialRequest: the fields of the service's
+// credential.
+message GetTaskServiceCredentialResponse {
+  // The ssh service: the private key that logs in to the task's SSH server.
+  optional string private_key = 1;
+  // The ssh service: the public key of the key pair.
+  optional string public_key = 2;
+  // The ssh service: the user that the key logs in as.
+  optional string user = 3;
+  // The jupyter service: the token that JupyterLab accepts as a login.
+  optional string token = 4;
+  // The jupyter service: the path under the master that opens JupyterLab
+  // with the token, "/proxy/<service ID>/?token=<token>".
+  optional string url = 5;
+}
+
 // Request task resource measurements for a bounded Unix-time range.
 message GetTaskResourcesRequest {
   option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
@@ -212,6 +269,22 @@ message AllocationWaitingRequest {
 }
 // Response to AllocationWaitingRequest.
 message AllocationWaitingResponse {}
+
+// Report the state of a service of an interactive task. The task's container
+// reports each of its services.
+message ReportTaskServiceStateRequest {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: { required: [ "allocation_id", "service", "state" ] }
+  };
+  // The id of the allocation.
+  string allocation_id = 1;
+  // The name of the service.
+  string service = 2;
+  // The state of the service. STATE_UNSPECIFIED is not a state to report.
+  determined.task.v1.TaskService.State state = 3;
+}
+// Response to ReportTaskServiceStateRequest.
+message ReportTaskServiceStateResponse {}
 
 // Stream task logs.
 message TaskLogsRequest {
