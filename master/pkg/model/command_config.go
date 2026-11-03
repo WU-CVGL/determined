@@ -72,5 +72,6 @@ func (c *CommandConfig) Validate() []error {
 			"invalid notebook idle type",
 		),
 		check.True(c.Resources.IsSingleNode == nil, "resources.is_single_node cannot be set for NTSCs"),
+		check.True(c.IdleTimeout == nil || *c.IdleTimeout > 0, "idle_timeout must be positive"),
 	}, validateServices(c.Services)...)
 }

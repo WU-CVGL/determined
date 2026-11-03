@@ -163,8 +163,8 @@ The following configuration settings are supported:
 
 -  ``idle_timeout``: Specifies the duration before an idle instance is automatically terminated.
    This string is a sequence of decimal numbers, each with optional fraction and a unit suffix, such
-   as "30s", "1h", or "1m30s". Valid time units are "s", "m", "h". This is only used by shells,
-   notebooks and TensorBoard instances:
+   as "30s", "1h", or "1m30s". Valid time units are "s", "m", "h". The duration must be positive.
+   This is only used by shells, notebooks and TensorBoard instances:
 
    -  Shells: There is no default; a shell is only terminated for being idle when this is set. The
       idle time counts from the last activity, once no browser terminal, SSH connection through the
