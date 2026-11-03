@@ -22,7 +22,7 @@
 # - A service has stopped once its process group is empty. When its unit's subshell exits, with
 #   the service's exit status, the supervisor stops what is left of the group as a stop does and
 #   logs the exit once the group is empty. The subshell only stops its own helpers, since it
-#   cannot kill its own group.
+#   cannot kill its own group: its background jobs get SIGTERM, then SIGKILL after the grace.
 # - Processes that leave the group on purpose (setsid) belong to the container's lifetime.
 
 source /run/determined/task-setup.sh
@@ -109,10 +109,10 @@ kill_descendants() {
 }
 
 # The EXIT trap of a service's subshell: once the service has exited, stop the unit's background
-# helpers and give its log helper a moment to pass on the last lines. A log helper that still
-# waits for input is held up by what is left of the service's process group, which is stopped
-# then, or by a process outside it, and is then killed, so that nothing outlives the subshell
-# (ship_logs.py reaps nothing).
+# helpers, with SIGTERM and then SIGKILL after the grace, and give its log helper a moment to pass
+# on the last lines. A log helper that still waits for input is held up by what is left of the
+# service's process group, which is stopped then, or by a process outside it, and is then killed,
+# so that nothing outlives the subshell (ship_logs.py reaps nothing).
 service_exited() {
     local status=$?
     set +e
@@ -127,12 +127,19 @@ service_exited() {
             exec {fd}>&-
         fi
     done
-    local helpers pid
-    helpers=$(jobs -pr)
-    for pid in $helpers; do
-        kill "$pid" 2>/dev/null
-        wait "$pid" 2>/dev/null
-    done
+    local IFS=$' \t\n' pid
+    local -a helpers=($(jobs -pr))
+    if ((${#helpers[@]} > 0)); then
+        kill -TERM "${helpers[@]}" 2>/dev/null
+        wait_for_children "$supervisor_stop_grace_seconds" "${helpers[@]}"
+        # Wait for each killed helper at once, before bash reports it as a killed job.
+        for pid in "${helpers[@]}"; do
+            if kill -0 "$pid" 2>/dev/null; then
+                kill -KILL "$pid" 2>/dev/null
+            fi
+            wait "$pid" 2>/dev/null
+        done
+    fi
     if [[ ${!-} != "$service_inherited_pid" ]]; then
         pid=$!
         if ! wait_for_children "$supervisor_log_drain_seconds" "$pid"; then

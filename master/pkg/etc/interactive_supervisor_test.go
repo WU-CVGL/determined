@@ -565,6 +565,37 @@ while :; do sleep 0.05; done
 		[]string{"[p] start", "[q] start", "[p] exited 143", "[q] exited 0"}, s.logLines())
 }
 
+// Once a service has exited, its unit's background helpers get SIGTERM, and one that ignores it is
+// killed after the grace period: the exit is logged then, and the task ends with the service's
+// status.
+func TestSupervisorKillsHelperThatIgnoresStop(t *testing.T) {
+	s := newSupervisorRun(t, "p")
+	helper := filepath.Join(s.dir, "helper")
+	s.unit("p", fmt.Sprintf(`bash -c 'trap "" TERM; echo "$$" >"$1.tmp"; mv "$1.tmp" "$1"; exec sleep 300' bash %[1]q \
+    </dev/null >/dev/null 2>&1 &
+for _ in $(seq 400); do [[ -e %[1]q ]] && break; sleep 0.05; done
+exit 7
+`, helper))
+	s.start()
+	waitFor(t, "the helper", func() bool {
+		_, err := os.Stat(helper)
+		return err == nil
+	})
+	// The grace is 1 s; the service exits right after it starts the helper.
+	took := waitForWithin(t, "[p] exited 7", 4*time.Second, func() bool {
+		return strings.Contains(s.stderr.String(), "[p] exited 7\n")
+	})
+	require.Greater(t, took, 800*time.Millisecond, "the helper had the grace period")
+	require.Equal(t, 7, s.wait())
+
+	b, err := os.ReadFile(helper) //nolint:gosec
+	require.NoError(t, err)
+	_, err = os.Stat(filepath.Join("/proc", strings.TrimSpace(string(b))))
+	require.True(t, os.IsNotExist(err), "the helper is gone")
+	require.Equal(t, []string{"[p] start", "[p] exited 7"}, s.logLines())
+	require.NotContains(t, s.stderr.String(), "Killed")
+}
+
 // SIGINT, SIGTERM and SIGHUP reach every service, and the supervisor then exits as if killed by the
 // signal.
 func TestSupervisorForwardsStopSignals(t *testing.T) {
