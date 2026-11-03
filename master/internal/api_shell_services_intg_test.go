@@ -361,6 +361,37 @@ func TestLaunchShellIdleTimeout(t *testing.T) {
 	}
 }
 
+// A shell refuses an idle_timeout shorter than the idle watcher's tick, with or without jupyter,
+// and takes one of exactly that length.
+func TestLaunchShellIdleTimeoutMinimum(t *testing.T) {
+	api, _, ctx := setupAPITest(t, nil)
+	cs, err := command.NewService(api.m.db, api.m.rm)
+	require.NoError(t, err)
+	command.SetDefaultService(cs)
+	rm := api.m.rm.(*mocks.ResourceManager)
+
+	for _, services := range []map[string]any{nil, {"jupyter": map[string]any{}}} {
+		launch := func(timeout string) (*apiv1.LaunchShellResponse, error) {
+			config := map[string]any{"idle_timeout": timeout}
+			if services != nil {
+				config["services"] = services
+			}
+			raw, err := structpb.NewStruct(config)
+			require.NoError(t, err)
+			return api.LaunchShell(ctx, &apiv1.LaunchShellRequest{Config: raw})
+		}
+		for _, timeout := range []string{"1ns", "1s", "4.9s"} {
+			_, err := launch(timeout)
+			require.Equal(t, codes.InvalidArgument, status.Code(err), "%s: %v", timeout, err)
+			require.ErrorContains(t, err, "idle_timeout must be at least 5s", timeout)
+		}
+		resp, err := launch("5s")
+		require.NoError(t, err)
+		require.Equal(t, 5*time.Second,
+			allocateRequest(t, rm, resp.Shell.Id).IdleTimeout.TimeoutDuration)
+	}
+}
+
 // A service's port is never one of the config's proxy ports: with every port of both ranges but one
 // declared, sshd and JupyterLab get the ones left, and each port has one proxy policy.
 func TestLaunchShellServicePortsAvoidProxyPorts(t *testing.T) {

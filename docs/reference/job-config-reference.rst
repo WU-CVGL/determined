@@ -166,14 +166,14 @@ The following configuration settings are supported:
    as "30s", "1h", or "1m30s". Valid time units are "s", "m", "h". The duration must be positive.
    This is only used by shells, notebooks and TensorBoard instances:
 
-   -  Shells: There is no default; a shell is only terminated for being idle when this is set. The
-      idle time counts from the last activity, once no browser terminal, SSH connection through the
-      master or WebSocket connection to the shell is open. Activity is a browser terminal, an SSH
-      connection through the master, a request to any of the shell's services through the master, an
-      open WebSocket connection to one of them, and, for the ``jupyter`` service, JupyterLab
-      activity as ``notebook_idle_type`` defines it; by default a kernel that is executing. An SSH
-      session or a browser page kept open on the shell can therefore delay its termination.
-      Processes that run in the shell are not activity.
+   -  Shells: There is no default, and the shortest value is ``5s``; a shell is only terminated for
+      being idle when this is set. The idle time counts from the last activity, once no browser
+      terminal, SSH connection through the master or WebSocket connection to the shell is open.
+      Activity is a browser terminal, an SSH connection through the master, a request to any of the
+      shell's services through the master, an open WebSocket connection to one of them, and, for the
+      ``jupyter`` service, JupyterLab activity as ``notebook_idle_type`` defines it; by default a
+      kernel that is executing. An SSH session or a browser page kept open on the shell can
+      therefore delay its termination. Processes that run in the shell are not activity.
 
    -  Notebooks: The default is the master's :ref:`notebook_timeout
       <master-config-notebook-timeout>`. A notebook instance is considered to be idle if it is not

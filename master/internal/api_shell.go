@@ -42,6 +42,10 @@ const (
 	// Agent ports 2600 - 3500 are split between TensorBoards, Notebooks, and Shells.
 	minSshdPort = 3200
 	maxSshdPort = minSshdPort + 299
+	// minShellIdleTimeout is the shortest idle_timeout a shell takes: the idle watcher's tick, so
+	// that JupyterLab's activity, reported every third of the timeout but at most every second,
+	// reaches the task's record more often than the timeout.
+	minShellIdleTimeout = 5 * time.Second
 )
 
 func (a *apiServer) GetShells(
@@ -311,6 +315,10 @@ func (a *apiServer) LaunchShell(
 
 	if err = check.Validate(launchReq.Spec.Config); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	if t := launchReq.Spec.Config.IdleTimeout; t != nil && time.Duration(*t) < minShellIdleTimeout {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"idle_timeout must be at least %s", minShellIdleTimeout)
 	}
 
 	launchReq.Spec.AdditionalFiles = archive.Archive{
