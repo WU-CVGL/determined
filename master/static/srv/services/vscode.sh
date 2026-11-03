@@ -53,7 +53,7 @@ vscode_glibc=${vscode_glibc%%$'\n'*}
 vscode_glibc=${vscode_glibc##* }
 if [[ ! $vscode_glibc =~ ^([0-9]+)\.([0-9]+)$ ]] ||
     ((BASH_REMATCH[1] < 2 || (BASH_REMATCH[1] == 2 && BASH_REMATCH[2] < 28))); then
-    vscode_unavailable "code-server needs glibc 2.28 or later, found ${vscode_glibc:-none}"
+    vscode_unavailable "needs glibc 2.28 or later, found ${vscode_glibc:-none}"
 fi
 
 # vscode_fetch downloads the master's file $1 and its checksum file $1.sha256, and writes the file

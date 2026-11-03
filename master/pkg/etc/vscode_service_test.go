@@ -527,7 +527,7 @@ func TestVSCodeUnitUnavailable(t *testing.T) {
 		},
 		{
 			name: "old glibc",
-			line: "vscode service: code-server needs glibc 2.28 or later, found 2.17",
+			line: "vscode service: needs glibc 2.28 or later, found 2.17",
 			setup: func(v *vscodeTask) {
 				writeScript(t, filepath.Join(v.bin, "ldd"), `echo "ldd (GNU libc) 2.17"`+"\n")
 				v.master.serveCodeServerRelease(t, codeServerPinned, "download", false)
