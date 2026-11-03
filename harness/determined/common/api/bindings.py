@@ -13339,6 +13339,41 @@ class v1RendezvousInfo(Printable):
         }
         return out
 
+class v1ReportTaskActivityRequest(Printable):
+    """Report the activity of a service of a task."""
+    active: "typing.Optional[bool]" = None
+    allocationId: "typing.Optional[str]" = None
+
+    def __init__(
+        self,
+        *,
+        active: "typing.Union[bool, None, Unset]" = _unset,
+        allocationId: "typing.Union[str, None, Unset]" = _unset,
+    ):
+        if not isinstance(active, Unset):
+            self.active = active
+        if not isinstance(allocationId, Unset):
+            self.allocationId = allocationId
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1ReportTaskActivityRequest":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+        }
+        if "active" in obj:
+            kwargs["active"] = obj["active"]
+        if "allocationId" in obj:
+            kwargs["allocationId"] = obj["allocationId"]
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+        }
+        if not omit_unset or "active" in vars(self):
+            out["active"] = self.active
+        if not omit_unset or "allocationId" in vars(self):
+            out["allocationId"] = self.allocationId
+        return out
+
 class v1ReportTrialMetricsRequest(Printable):
     """Persist the given metrics for the trial."""
 
@@ -24672,6 +24707,34 @@ def post_ReportCheckpoint(
     if _resp.status_code == 200:
         return
     raise APIHttpError("post_ReportCheckpoint", _resp)
+
+def post_ReportTaskActivity(
+    session: "api.BaseSession",
+    *,
+    allocationId: str,
+    body: "v1ReportTaskActivityRequest",
+) -> None:
+    """Report the activity of a service of the allocation's task, for its idle
+    timeout.
+
+    - allocationId: The id of the allocation.
+    """
+    _params = None
+    if type(allocationId) == str:
+        allocationId = parse.quote(allocationId)
+    _resp = session._do_request(
+        method="POST",
+        path=f"/api/v1/allocations/{allocationId}/activity",
+        params=_params,
+        json=body.to_json(True),
+        data=None,
+        headers=None,
+        timeout=None,
+        stream=False,
+    )
+    if _resp.status_code == 200:
+        return
+    raise APIHttpError("post_ReportTaskActivity", _resp)
 
 def post_ReportTrialMetrics(
     session: "api.BaseSession",

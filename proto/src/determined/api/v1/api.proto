@@ -928,6 +928,18 @@ service Determined {
       tags: "Internal"
     };
   }
+  // Report the activity of a service of the allocation's task, for its idle
+  // timeout.
+  rpc ReportTaskActivity(ReportTaskActivityRequest)
+      returns (ReportTaskActivityResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/allocations/{allocation_id}/activity"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
+      tags: "Internal"
+    };
+  }
   // Get details about an Allocation.
   rpc GetAllocation(GetAllocationRequest) returns (GetAllocationResponse) {
     option (google.api.http) = {

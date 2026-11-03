@@ -3,6 +3,7 @@ import logging
 import os
 import socket
 import time
+from typing import Optional
 
 import requests
 
@@ -34,7 +35,7 @@ def wait_for_jupyter(addr):
                 s.connect(addr)
                 # Connection worked, we're done here.
                 return
-            except ConnectionError as e:
+            except ConnectionError:
                 if (i + 1) % 10 == 0:
                     # Every 10 seconds without reaching jupyter, start telling the user.
                     # This is beyond the range of expected startup times.
@@ -43,7 +44,8 @@ def wait_for_jupyter(addr):
             i += 1
 
 
-def is_idle(request_address: str, token: str, mode: IdleType):
+def is_idle(request_address: str, token: str, mode: IdleType) -> Optional[bool]:
+    """Whether JupyterLab is idle, or None when its state cannot be read."""
     auth_header = {"Authorization": f"token {token}"}
     try:
         kernels = requests.get(
@@ -57,7 +59,7 @@ def is_idle(request_address: str, token: str, mode: IdleType):
         ).json()
     except Exception:
         logging.warning("Cannot get notebook kernel status", exc_info=True)
-        return False
+        return None
 
     if mode == IdleType.KERNELS_OR_TERMINALS:
         return len(kernels) == 0 and len(terminals) == 0 and len(sessions) == 0
@@ -78,9 +80,13 @@ def is_idle(request_address: str, token: str, mode: IdleType):
 def main():
     requests.packages.urllib3.disable_warnings()
     port = os.environ["NOTEBOOK_PORT"]
-    notebook_id = os.environ["DET_TASK_ID"]
+    task_id = os.environ["DET_TASK_ID"]
     token = os.environ["DET_NOTEBOOK_TOKEN"]
-    notebook_server = f"https://127.0.0.1:{port}/proxy/{notebook_id}"
+    # JupyterLab serves under the base URL that the jupyter unit gives it.
+    base_url = os.environ.get("NOTEBOOK_BASE_URL") or f"/proxy/{task_id}/"
+    notebook_server = f"https://127.0.0.1:{port}{base_url.rstrip('/')}"
+    # A shell reports to its task's activity record, a notebook to the notebook API.
+    report_task = os.environ.get("DET_ACTIVITY_REPORT") == "task"
     master_url = api.canonicalize_master_url(os.environ["DET_MASTER"])
     cert = certs.default_load(master_url)
     sess = authentication.login_from_task(master_url, cert=cert)
@@ -98,10 +104,18 @@ def main():
     while True:
         try:
             idle = is_idle(notebook_server, token, idle_type)
-            sess.put(
-                f"/api/v1/notebooks/{notebook_id}/report_idle",
-                json={"idle": idle},
-            )
+            if report_task:
+                # Only a busy JupyterLab is reported: an unreadable one is not activity.
+                if idle is False:
+                    sess.post(
+                        f"/api/v1/allocations/{os.environ['DET_ALLOCATION_ID']}/activity",
+                        json={"active": True},
+                    )
+            else:
+                sess.put(
+                    f"/api/v1/notebooks/{task_id}/report_idle",
+                    json={"idle": bool(idle)},
+                )
         except Exception:
             logging.warning("ignoring error communicating with master", exc_info=True)
         time.sleep(REPORT_IDLE_INTERVAL)
