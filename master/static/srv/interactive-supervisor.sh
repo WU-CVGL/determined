@@ -26,10 +26,10 @@
 # - Processes that leave the group on purpose (setsid) belong to the container's lifetime.
 # - Each service's state goes to the master: STARTING when it starts, READY when its readiness
 #   check matches, EXITED when it has stopped, or UNAVAILABLE when it exited 127, as a unit does
-#   when its program is missing. One reporter, a child of the supervisor, posts the states in the
-#   order they happen and every service's current state again every
-#   DET_SERVICE_STATE_REPORT_SECONDS (30), so that a master that restarted learns them again. A
-#   post never holds up a service; the first failed post is logged. The reporter stops with the
+#   when its program is missing. One reporter, report_service_states.py, a child of the supervisor
+#   in its own process group, keeps the snapshot of every service's state and posts it whenever it
+#   changes and periodically, so that a master that restarted learns the states again. A post
+#   never holds up a service. The reporter starts before the services and stops with the
 #   supervisor.
 #
 # The image must have bash 5 or later and /proc; without them the supervisor stops before the init.
@@ -51,12 +51,8 @@ set -e
 supervisor_units=/run/determined/services
 supervisor_stop_grace_seconds=10
 supervisor_log_drain_seconds=2
-supervisor_report_seconds=${DET_SERVICE_STATE_REPORT_SECONDS:-30}
-if [[ ! $supervisor_report_seconds =~ ^[1-9][0-9]*$ ]]; then
-    supervisor_report_seconds=30
-fi
 supervisor_report_drain_seconds=2
-supervisor_reporter=/run/determined/report_service_state.py
+supervisor_reporter=/run/determined/report_service_states.py
 
 IFS=, read -r -a supervisor_services <<<"${DET_SERVICES-}"
 if ((${#supervisor_services[@]} == 0)); then
@@ -157,7 +153,10 @@ service_exited() {
 }
 
 # The services' states: the supervisor and the readiness checks write "<service> <state>" lines to
-# a FIFO in supervisor_report_dir, which the reporter reads. Without a FIFO nothing is reported.
+# a FIFO in supervisor_report_dir, which the reporter reads; the supervisor keeps it open for
+# reading and writing, so that a write never blocks on a reader or fails without one, and the
+# reporter sees the end of the FIFO only when the supervisor is gone. Without a FIFO nothing is
+# reported.
 supervisor_report_dir=
 supervisor_report_fd=
 supervisor_report_pid=
@@ -177,49 +176,6 @@ report_exit() {
     fi
 }
 
-# Post the state $2 of the service $1 to the master, once. The first failure of the reporter is
-# logged.
-post_state() {
-    local out
-    if ! out=$("$DET_PYTHON_EXECUTABLE" "$supervisor_reporter" "$1" "$2" 2>&1) &&
-        [[ -z $report_failed ]]; then
-        report_failed=1
-        printf 'interactive task: reporting the state of %s failed: %s\n' "$1" "${out##*$'\n'}" >&2
-    fi
-}
-
-# The reporter: post each state as it comes, and the current state of every service again every
-# supervisor_report_seconds. A line "- -" stops it, and SIGTERM once the post it runs has ended.
-report_states() {
-    local name state wait_seconds next report_failed= report_stopping=
-    local -A current=()
-    trap 'report_stopping=1' TERM
-    next=$((SECONDS + supervisor_report_seconds))
-    while [[ -z $report_stopping ]]; do
-        if ((SECONDS >= next)); then
-            for name in "${supervisor_services[@]}"; do
-                if [[ -n ${current[$name]-} && -z $report_stopping ]]; then
-                    post_state "$name" "${current[$name]}"
-                fi
-            done
-            next=$((SECONDS + supervisor_report_seconds))
-        fi
-        wait_seconds=$((next - SECONDS))
-        ((wait_seconds > 0)) || wait_seconds=1
-        if read -r -t "$wait_seconds" -u "$supervisor_report_fd" name state; then
-            if [[ $name == - ]]; then
-                return 0
-            fi
-            if [[ -n ${supervisor_seen[$name]-} && -z $report_stopping ]]; then
-                current[$name]=$state
-                post_state "$name" "$state"
-            fi
-        elif (($? <= 128)); then
-            return 0
-        fi
-    done
-}
-
 start_reporter() {
     supervisor_report_dir=$(mktemp -d 2>/dev/null) || supervisor_report_dir=
     if [[ -z $supervisor_report_dir ]] || ! mkfifo -m 600 "$supervisor_report_dir/states" 2>/dev/null ||
@@ -229,13 +185,15 @@ start_reporter() {
         supervisor_report_fd=
         return 0
     fi
-    report_states &
+    # The reporter gets no descriptor of the FIFO; it opens it for reading.
+    "$DET_PYTHON_EXECUTABLE" "$supervisor_reporter" "$supervisor_report_dir/states" \
+        "${supervisor_services[@]}" {supervisor_report_fd}>&- &
     supervisor_report_pid=$!
 }
 
-# Stop the reporter once it has posted what it got, or after supervisor_report_drain_seconds: then
-# it stops after the post it runs, which is killed, the deepest process first so that each is
-# reaped. Its group is killed as a last resort.
+# Stop the reporter once it has posted the last snapshot, or after supervisor_report_drain_seconds:
+# then it is killed, with whatever it started, the deepest process first so that each is reaped,
+# and its group as a last resort.
 stop_reporter() {
     [[ -n $supervisor_report_pid ]] || return 0
     report_state - -
