@@ -256,6 +256,17 @@ describe('InteractiveTask', () => {
     expect(await screen.findByText('Command')).toBeInTheDocument();
   });
 
+  it('gives a task of another type, which has no lookup, its logs and resources', async () => {
+    vi.mocked(getTask).mockResolvedValue(taskWith(false, V1TaskType.GENERIC));
+    vi.mocked(getTaskServices).mockResolvedValue(servicesWith([]));
+    setup();
+    expect(await screen.findByTestId('logs-pane')).toBeInTheDocument();
+    expect(tabLabels()).toEqual(['Logs', 'Resources']);
+    expect(screen.getByText(TASK_ID)).toBeInTheDocument();
+    expect(getShells).not.toHaveBeenCalled();
+    expect(getCommand).not.toHaveBeenCalled();
+  });
+
   it('names an ended task by its ID when its lookup is gone', async () => {
     vi.mocked(getTask).mockResolvedValue(
       taskWith(false, V1TaskType.SHELL, CommandState.Terminated, '2026-01-01T01:00:00Z'),

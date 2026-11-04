@@ -90,12 +90,14 @@ const LogsPane: React.FC<{ taskId: string }> = ({ taskId }) => {
   const taskSettingsConfig = useMemo(() => settingsConfigForTask(taskId), [taskId]);
   const { resetSettings, settings, updateSettings } = useSettings<Settings>(taskSettingsConfig);
   return (
-    <TaskLogsViewer
-      resetSettings={resetSettings}
-      settings={settings}
-      taskId={taskId}
-      updateSettings={updateSettings}
-    />
+    <div className={css.pane}>
+      <TaskLogsViewer
+        resetSettings={resetSettings}
+        settings={settings}
+        taskId={taskId}
+        updateSettings={updateSettings}
+      />
+    </div>
   );
 };
 
@@ -198,10 +200,11 @@ export const InteractiveTask: React.FC = () => {
   }, [taskId]);
 
   const commandType = commandTypeOfTask(task?.taskType);
+  const loaded = !!task;
 
   // The name and pool, from the lookup of the task's type; an ended task has none.
   useEffect(() => {
-    if (!task) return;
+    if (!loaded) return;
     let cancelled = false;
     lookupCommand(taskId, commandType)
       .then((response) => {
@@ -216,9 +219,7 @@ export const InteractiveTask: React.FC = () => {
     return () => {
       cancelled = true;
     };
-    // Once the task's type is known.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId, commandType]);
+  }, [taskId, commandType, loaded]);
 
   const selectTab = useCallback(
     (tab: string) =>

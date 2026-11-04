@@ -18,7 +18,10 @@ import { InteractiveTaskTab } from 'types';
  */
 class TaskBar extends NamedComponent {
   readonly defaultSelector = '[class^="TaskBar_base"]';
-  readonly name = new BaseComponent({ parent: this, selector: 'span:first-child' });
+  readonly name = new BaseComponent({
+    parent: this,
+    selector: '[class^="TaskBar_barContent"] > span:first-child',
+  });
   readonly actions = new TaskBarMenu({
     clickThisComponentToOpen: new BaseComponent({
       parent: this,
