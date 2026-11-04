@@ -23,6 +23,7 @@ import {
 import { CommandState, CommandTask, CommandType, TaskItem } from 'types';
 import { DetError } from 'utils/error';
 import { TaskPhase } from 'utils/task';
+import { isDisabledMenuItem } from 'utils/tests/menu';
 
 import InteractiveTask from './InteractiveTask';
 
@@ -457,6 +458,10 @@ describe('InteractiveTask', () => {
     expect(await screen.findByTestId('terminal-pane')).toHaveAttribute('data-phase', 'ended');
     expect(screen.getByText(TASK_ID)).toBeInTheDocument();
     expect(document.title).toBe(TASK_ID);
+    // Nothing to kill any more.
+    await userEvent.click(screen.getByTestId('task-action-dropdown-trigger'));
+    await screen.findByText('Kill');
+    expect(isDisabledMenuItem('Kill')).toBe(true);
   });
 
   it('shows why the task cannot be shown', async () => {

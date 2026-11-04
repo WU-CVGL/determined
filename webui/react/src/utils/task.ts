@@ -217,10 +217,7 @@ export const canKillGenericTask = (
   return canControl && !!task.state && killableGenericTaskStates.has(task.state);
 };
 
-export const isTaskKillable = (
-  task: Type.AnyTask | Type.FullExperimentItem,
-  canModifyWorkspaceNSC: boolean,
-): boolean => {
+export const isTaskKillable = (task: { state: State }, canModifyWorkspaceNSC: boolean): boolean => {
   return (
     canModifyWorkspaceNSC &&
     (killableRunStates.includes(task.state as Type.RunState) ||

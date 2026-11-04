@@ -6,9 +6,10 @@ import React, { useCallback, useMemo } from 'react';
 import usePermissions from 'hooks/usePermissions';
 import { paths } from 'routes/utils';
 import { killTask } from 'services/api';
-import { CommandType } from 'types';
+import { CommandState, CommandType } from 'types';
 import handleError from 'utils/error';
 import { routeToReactUrl } from 'utils/routes';
+import { isTaskKillable } from 'utils/task';
 
 import css from './TaskBar.module.scss';
 
@@ -19,6 +20,8 @@ interface Props {
   /** The task's owner and workspace, which decide who may kill it; without them, nobody can. */
   owner?: { userId: number; workspaceId: number };
   resourcePool: string;
+  /** The task's state: only a task that has not ended can be killed. */
+  state?: CommandState;
   /** The task's type, for the kill API; a notebook, the label of ended records, has none. */
   type?: CommandType;
 }
@@ -34,6 +37,7 @@ export const TaskBar: React.FC<Props> = ({
   name,
   owner,
   resourcePool,
+  state,
   type,
 }: Props) => {
   const { canModifyWorkspaceNSC } = usePermissions();
@@ -43,7 +47,11 @@ export const TaskBar: React.FC<Props> = ({
     !!type &&
     type !== CommandType.JupyterLab &&
     !!owner &&
-    canModifyWorkspaceNSC({ userId: owner.userId, workspace: { id: owner.workspaceId } });
+    !!state &&
+    isTaskKillable(
+      { state },
+      canModifyWorkspaceNSC({ userId: owner.userId, workspace: { id: owner.workspaceId } }),
+    );
 
   const deleteTask = useCallback(() => {
     if (!type) return;

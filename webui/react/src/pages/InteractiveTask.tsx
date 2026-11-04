@@ -354,6 +354,9 @@ export const InteractiveTask: React.FC = () => {
 
   const state = task?.allocations[0]?.state;
   const title = ui.isPageHidden ? getTitleState(state, name) : name;
+  // The state for the task bar's Kill: ended by the phase, else the allocation's, queued without one.
+  let killState: CommandState | undefined;
+  if (task) killState = phase === 'ended' ? CommandState.Terminated : state ?? CommandState.Queued;
 
   let content: React.ReactNode;
   if (error) {
@@ -400,6 +403,7 @@ export const InteractiveTask: React.FC = () => {
             name={name}
             owner={taskServices?.owner}
             resourcePool={command?.resourcePool ?? ''}
+            state={killState}
             type={commandType}
           />
         </div>
