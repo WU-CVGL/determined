@@ -66,7 +66,7 @@ type protoCommandParams struct {
 // prepareCommandLaunch prepares the launch of an NTSC task from a request, without side effects:
 // the merged config of the defaults, the template and the request, the resolved pool, the base task
 // spec and the context directory, checked against pool access, the GPU topology and the config
-// policies. It starts no task session; the launch does, once the launch is authorized (see
+// policies. It starts no task session; the launch does, just before it starts the task (see
 // startTaskSession).
 func (a *apiServer) prepareCommandLaunch(ctx context.Context, req *protoCommandParams,
 	aUser *model.User) (
@@ -197,8 +197,8 @@ func (a *apiServer) prepareCommandLaunch(ctx context.Context, req *protoCommandP
 }
 
 // startTaskSession starts the session of the request's user that a launched task acts with, and
-// adds its token to the task's spec. A launch calls it once the launch is authorized, so that a
-// refused launch or a preview starts none.
+// adds its token to the task's spec. A launch calls it after its last check, just before it starts
+// the task, so that a refused launch or a preview starts none.
 func startTaskSession(ctx context.Context, user *model.User, spec *tasks.GenericCommandSpec) error {
 	token, err := getTaskSessionToken(ctx, user)
 	if err != nil {
@@ -453,9 +453,6 @@ func (a *apiServer) LaunchCommand(
 	if err = a.isNTSCPermittedToLaunch(ctx, launchReq.Spec, user); err != nil {
 		return nil, err
 	}
-	if err = startTaskSession(ctx, user, launchReq.Spec); err != nil {
-		return nil, err
-	}
 
 	// Postprocess the launchReq.Spec.
 	if launchReq.Spec.Config.Description == "" {
@@ -494,6 +491,9 @@ func (a *apiServer) LaunchCommand(
 		return nil, err
 	}
 	maps.Copy(launchReq.Spec.Base.ExtraEnvVars, oidcPachydermEnvVars)
+	if err = startTaskSession(ctx, user, launchReq.Spec); err != nil {
+		return nil, err
+	}
 
 	// Launch a command.
 	cmd, err := command.DefaultCmdService.LaunchGenericCommand(

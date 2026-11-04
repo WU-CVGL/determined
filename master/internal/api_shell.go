@@ -384,8 +384,8 @@ func (a *apiServer) PreviewShell(
 }
 
 // LaunchShell launches a shell: the preparation that PreviewShell shares, then, in order, the
-// task's session, the description, sshd's port and the supervisor, the idle watch, the files and
-// environment of each service, the SSH keys and the launch itself.
+// description, sshd's port and the supervisor, the idle watch, the files and environment of each
+// service, the SSH keys, the task's session and the launch itself.
 func (a *apiServer) LaunchShell(
 	ctx context.Context, req *apiv1.LaunchShellRequest,
 ) (*apiv1.LaunchShellResponse, error) {
@@ -396,9 +396,6 @@ func (a *apiServer) LaunchShell(
 
 	launchReq, launchWarnings, err := a.prepareShellLaunch(ctx, req, user)
 	if err != nil {
-		return nil, err
-	}
-	if err = startTaskSession(ctx, user, launchReq.Spec); err != nil {
 		return nil, err
 	}
 
@@ -463,6 +460,9 @@ func (a *apiServer) LaunchShell(
 	launchReq.Spec.Metadata.PrivateKey = ptrs.Ptr(string(keys.PrivateKey))
 	launchReq.Spec.Metadata.PublicKey = ptrs.Ptr(string(keys.PublicKey))
 	launchReq.Spec.Keys = &keys
+	if err = startTaskSession(ctx, user, launchReq.Spec); err != nil {
+		return nil, err
+	}
 
 	// Launch a Shell.
 	cmd, err := command.DefaultCmdService.LaunchShellCommand(launchReq, user)

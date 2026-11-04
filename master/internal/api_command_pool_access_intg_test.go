@@ -6,6 +6,7 @@ package internal
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"testing"
 
@@ -160,6 +161,17 @@ func TestLaunchNTSCChecksResolvedPool(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, sessions, countUserSessions(adminCtx, t, other.ID),
 		"a preview must not start a task session")
+	// Nor does a launch that a check after its authorization refuses.
+	badIdleType := ntscPoolConfig(t, open)
+	badIdleType.Fields["notebook_idle_type"] = structpb.NewStringValue("bogus")
+	_, err = api.LaunchCommand(otherCtx, &apiv1.LaunchCommandRequest{Config: badIdleType})
+	require.Equal(t, codes.InvalidArgument, status.Code(err), "%v", err)
+	_, err = api.LaunchTensorboard(otherCtx, &apiv1.LaunchTensorboardRequest{
+		Config: ntscPoolConfig(t, open), ExperimentIds: []int32{math.MaxInt32},
+	})
+	require.Error(t, err)
+	require.Equal(t, sessions, countUserSessions(adminCtx, t, other.ID),
+		"a refused launch must not start a task session")
 
 	resp, err := api.LaunchCommand(otherCtx, &apiv1.LaunchCommandRequest{Config: ntscPoolConfig(t, open)})
 	require.NoError(t, err)

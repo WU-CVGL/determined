@@ -258,9 +258,6 @@ func (a *apiServer) LaunchTensorboard(
 	if err = a.isNTSCPermittedToLaunch(ctx, launchReq.Spec, user); err != nil {
 		return nil, err
 	}
-	if err = startTaskSession(ctx, user, launchReq.Spec); err != nil {
-		return nil, err
-	}
 
 	exps, err := a.getTensorBoardConfigsFromReq(ctx, a.m.db, req)
 	if err != nil {
@@ -486,6 +483,9 @@ func (a *apiServer) LaunchTensorboard(
 
 	if err = check.Validate(req.Config); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid TensorBoard config: %s", err.Error())
+	}
+	if err = startTaskSession(ctx, user, launchReq.Spec); err != nil {
+		return nil, err
 	}
 
 	// Launch a TensorBoard.
