@@ -5,7 +5,6 @@ import Spinner from 'hew/Spinner';
 import { StateOfUnion } from 'hew/Theme';
 import Tooltip from 'hew/Tooltip';
 import { Label } from 'hew/Typography';
-import { Loadable } from 'hew/utils/loadable';
 import React from 'react';
 
 import Badge, { BadgeType } from 'components/Badge';
@@ -18,9 +17,7 @@ import TimeDuration from 'components/TimeDuration';
 import UserAvatar from 'components/UserAvatar';
 import { OMITTED_STR } from 'constants/accessControl';
 import { commandTypeToLabel } from 'constants/states';
-import { isFeatureOn } from 'hooks/useFeature';
 import { paths } from 'routes/utils';
-import userStore from 'stores/users';
 import {
   BulkExperimentItem,
   CommandTask,
@@ -36,7 +33,7 @@ import {
   Workspace,
 } from 'types';
 import { getDuration } from 'utils/datetime';
-import { canBeOpened, canOpenShellTerminal, isExperimentTask } from 'utils/task';
+import { canBeOpened } from 'utils/task';
 import { openCommand } from 'utils/wait';
 
 import css from './Table.module.scss';
@@ -165,28 +162,15 @@ export const taskTypeRenderer: TaskRenderer = (_, record) => (
 );
 
 export const taskNameRenderer: TaskRenderer = (_id, record) => {
-  if (
-    !isExperimentTask(record) &&
-    isFeatureOn('shell_terminal') &&
-    canOpenShellTerminal(record, Loadable.getOrElse(undefined, userStore.currentUser.get()))
-  ) {
-    return (
-      <div>
-        <a
-          href={`${process.env.PUBLIC_URL}${paths.shellTerminal(record.id)}`}
-          target={`shell-terminal-${record.id}`}
-          title={record.name}>
-          <span>{record.name}</span>
-        </a>
-      </div>
-    );
-  }
   return (
     <div>
       <ConditionalWrapper
         condition={canBeOpened(record)}
         wrapper={(ch) => (
-          <a href={`${process.env.PUBLIC_URL}${paths.interactive(record)}`} target={record.id}>
+          <a
+            href={`${process.env.PUBLIC_URL}${paths.interactiveTask(record.id)}`}
+            target={record.id}
+            title={record.name}>
             {ch}
           </a>
         )}>

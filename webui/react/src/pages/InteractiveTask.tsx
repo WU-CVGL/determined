@@ -20,7 +20,7 @@ import { V1TaskService } from 'services/api-ts-sdk';
 import { errorText } from 'services/taskService';
 import { CommandState, CommandTask, CommandType, InteractiveTaskTab, TaskItem } from 'types';
 import handleError, { ErrorLevel, ErrorType, handleWarning } from 'utils/error';
-import { commandTypeOfTask, hasTaskService, taskPhase } from 'utils/task';
+import { canOpenShellTerminal, commandTypeOfTask, hasTaskService, taskPhase } from 'utils/task';
 import { waitPageUrl } from 'utils/wait';
 
 import css from './InteractiveTask.module.scss';
@@ -234,9 +234,7 @@ export const InteractiveTask: React.FC = () => {
   // The tabs the task has: its services first, then the logs and resources of every task.
   const tabKeys = useMemo(() => {
     const keys: InteractiveTaskTab[] = [];
-    if (terminalEnabled && services.find((s) => s.name === 'ssh')?.mayConnect) {
-      keys.push(InteractiveTaskTab.Terminal);
-    }
+    if (terminalEnabled && canOpenShellTerminal(services)) keys.push(InteractiveTaskTab.Terminal);
     if (hasTaskService(services, 'jupyter')) keys.push(InteractiveTaskTab.JupyterLab);
     if (hasTaskService(services, 'vscode')) keys.push(InteractiveTaskTab.VSCode);
     if (command?.type === CommandType.TensorBoard && command.serviceAddress) {

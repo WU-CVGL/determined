@@ -6,7 +6,7 @@ import { useToast } from 'hew/Toast';
 import useConfirm from 'hew/useConfirm';
 import { Loadable } from 'hew/utils/loadable';
 import { useObservable } from 'micro-observables';
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import css from 'components/ActionDropdown/ActionDropdown.module.scss';
@@ -15,14 +15,15 @@ import useFeature from 'hooks/useFeature';
 import usePermissions from 'hooks/usePermissions';
 import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
 import { paths } from 'routes/utils';
-import { killTask } from 'services/api';
-import { openShellTerminalTab } from 'services/shellTerminal';
+import { getTaskServices, killTask } from 'services/api';
+import { V1TaskService } from 'services/api-ts-sdk';
 import userStore from 'stores/users';
-import { TaskAction as Action, CommandTask, CommandType } from 'types';
+import { TaskAction as Action, CommandTask, CommandType, InteractiveTaskTab } from 'types';
 import { copyToClipboard } from 'utils/dom';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import { capitalize } from 'utils/string';
-import { canConnectToTask, canOpenShellTerminal, isTaskKillable } from 'utils/task';
+import { canBeOpened, canConnectToTask, canOpenShellTerminal, isTaskKillable } from 'utils/task';
+import { openInteractiveTask } from 'utils/wait';
 
 interface Props {
   children?: React.ReactNode;
@@ -51,6 +52,24 @@ const TaskActionDropdown: React.FC<Props> = ({
 
   const confirm = useConfirm();
 
+  // The task's services, read when the menu opens: they say whether the user may connect.
+  const [services, setServices] = useState<V1TaskService[]>();
+  const loadServices = useCallback(
+    (open: boolean) => {
+      if (!open || services !== undefined || !canBeOpened(task)) return;
+      getTaskServices({ taskId: task.id })
+        .then((response) => setServices(response.services))
+        .catch((e) => {
+          handleError(e, {
+            publicMessage: 'Unable to load the services of the task.',
+            silent: true,
+          });
+          setServices([]);
+        });
+    },
+    [services, task],
+  );
+
   const taskConnectFields: TaskConnectField[] = useMemo(() => {
     switch (task.type) {
       case CommandType.Shell:
@@ -71,11 +90,12 @@ const TaskActionDropdown: React.FC<Props> = ({
     const items: MenuItem[] = [{ key: Action.ViewLogs, label: 'View Logs' }];
     if (resourcesEnabled) items.push({ key: Action.ViewResources, label: 'View Resources' });
     items.push({ key: Action.CopyTaskID, label: 'Copy Task ID' });
-    // Only the owner or an admin gets the shell's key from the master.
-    if (canConnectToTask(task, currentUser)) {
+    // Only the owner or an admin gets the shell's key from the master; a task that has ended
+    // has no session to connect to.
+    if (canBeOpened(task) && canConnectToTask(services ?? [])) {
       items.push({ key: Action.Connect, label: 'Connect via CLI' });
     }
-    if (terminalEnabled && canOpenShellTerminal(task, currentUser)) {
+    if (terminalEnabled && canBeOpened(task) && canOpenShellTerminal(services ?? [])) {
       items.push({ key: Action.OpenTerminal, label: 'Open Terminal' });
     }
     // A UI rule only: the API lets anyone who can view a task read its config.
@@ -108,6 +128,7 @@ const TaskActionDropdown: React.FC<Props> = ({
     onLaunchAgain,
     onManageJob,
     resourcesEnabled,
+    services,
     terminalEnabled,
   ]);
 
@@ -120,7 +141,7 @@ const TaskActionDropdown: React.FC<Props> = ({
           TaskConnectModal.open();
           break;
         case Action.OpenTerminal:
-          openShellTerminalTab(task.id);
+          openInteractiveTask(task.id, { tab: InteractiveTaskTab.Terminal });
           onComplete?.(key);
           break;
         case Action.LaunchAgain:
@@ -174,14 +195,18 @@ const TaskActionDropdown: React.FC<Props> = ({
   );
   return children ? (
     <>
-      <Dropdown isContextMenu menu={menuItems} onClick={handleDropdown}>
+      <Dropdown isContextMenu menu={menuItems} onClick={handleDropdown} onOpenChange={loadServices}>
         {children}
       </Dropdown>
       {taskConnectModal}
     </>
   ) : (
     <div className={css.base} title="Open actions menu">
-      <Dropdown menu={menuItems} placement="bottomRight" onClick={handleDropdown}>
+      <Dropdown
+        menu={menuItems}
+        placement="bottomRight"
+        onClick={handleDropdown}
+        onOpenChange={loadServices}>
         <Button
           icon={<Icon name="overflow-vertical" size="small" title="Action menu" />}
           type="text"

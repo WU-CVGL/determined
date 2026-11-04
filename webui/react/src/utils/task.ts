@@ -14,31 +14,23 @@ import { CommandState, RunState, State } from 'types';
 import { runStateSortValues } from './experiment';
 
 /**
- * Whether to offer a browser terminal for a task: a running shell of the user's own, or any
- * running shell for an admin. The master enforces the same rule.
+ * Whether to offer a browser terminal in a task: it has an SSH service that the master lets the
+ * user connect to (the task's owner, or an admin). The master enforces the same rule.
  */
 export const canOpenShellTerminal = (
-  task: Pick<Type.CommandTask, 'state' | 'type' | 'userId'>,
-  user?: Pick<Type.DetailedUser, 'id' | 'isAdmin'>,
+  services: Pick<V1TaskService, 'mayConnect' | 'name'>[],
 ): boolean => {
-  if (!user || task.type !== Type.CommandType.Shell || task.state !== CommandState.Running) {
-    return false;
-  }
-  return user.isAdmin || user.id === task.userId;
+  return services.some((s) => s.name === 'ssh' && s.mayConnect);
 };
 
 /**
- * Whether to offer Connect via CLI (a shell's `det shell open`) for a task: a running shell of the
- * user's own, or of anyone for an admin. The master gives a shell's key only to them.
+ * Whether to offer Connect via CLI (`det shell open`) for a task: the same rule as the terminal,
+ * since the master gives the SSH service's key to the same users.
  */
 export const canConnectToTask = (
-  task: Pick<Type.CommandTask, 'state' | 'type' | 'userId'>,
-  user?: Pick<Type.DetailedUser, 'id' | 'isAdmin'>,
+  services: Pick<V1TaskService, 'mayConnect' | 'name'>[],
 ): boolean => {
-  if (!user || task.type !== Type.CommandType.Shell || task.state !== CommandState.Running) {
-    return false;
-  }
-  return user.isAdmin || user.id === task.userId;
+  return canOpenShellTerminal(services);
 };
 
 /** Where a task is for the panes that connect to it: waiting for it, ready, or ended. */
@@ -72,10 +64,10 @@ export const hasTaskService = (services: Pick<V1TaskService, 'name'>[], name: st
   return services.some((s) => s.name === name);
 };
 
+/** Whether a task has a page to open: an experiment's, or the task page of a task that has not ended. */
 export const canBeOpened = (task: Type.AnyTask): boolean => {
   if (isExperimentTask(task)) return true;
-  if (terminalCommandStates.has(task.state)) return false;
-  return !!task.serviceAddress;
+  return !terminalCommandStates.has(task.state);
 };
 
 /* eslint-disable-next-line @typescript-eslint/no-explicit-any */

@@ -1,9 +1,10 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import UIProvider, { DefaultTheme } from 'hew/Theme';
 import { ConfirmationProvider } from 'hew/useConfirm';
 import { MemoryRouter } from 'react-router-dom';
 
+import { getTaskServices } from 'services/api';
 import userStore from 'stores/users';
 import { CommandState, CommandTask, CommandType, DetailedUser } from 'types';
 import { isDangerMenuItem, menuLabels } from 'utils/tests/menu';
@@ -22,13 +23,19 @@ vi.mock('hooks/usePermissions', () => ({
 }));
 vi.mock('routes/utils', () => ({
   paths: {
-    shellTerminal: (id: string) => `/shells/${id}/terminal`,
+    interactiveTask: (id: string, params: { tab?: string } = {}) =>
+      `/tasks/${id}/interactive${params.tab ? `?tab=${params.tab}` : ''}`,
     taskLogs: () => '/logs',
     taskResources: (id: string) => `/tasks/${id}/resources`,
   },
   serverAddress: () => 'http://localhost',
 }));
-vi.mock('services/api', () => ({ killTask: vi.fn() }));
+/** The task's services as the master reports them when the menu opens: a shell's SSH by default. */
+const services = vi.hoisted(() => ({ list: [{ mayConnect: true, name: 'ssh' }] }));
+vi.mock('services/api', () => ({
+  getTaskServices: vi.fn(() => Promise.resolve({ services: services.list })),
+  killTask: vi.fn(),
+}));
 const feature = vi.hoisted(() => ({ on: true }));
 vi.mock('hooks/useFeature', () => ({ default: () => ({ isOn: () => feature.on }) }));
 
@@ -126,6 +133,8 @@ describe('TaskActionDropdown', () => {
   beforeEach(() => {
     mocks.canCreateWorkspaceNSC = true;
     resources.enabled = false;
+    services.list = [{ mayConnect: true, name: 'ssh' }];
+    vi.mocked(getTaskServices).mockClear();
     setCurrentUser(101);
   });
 
@@ -146,8 +155,13 @@ describe('TaskActionDropdown', () => {
     'offers only View Logs, View Resources and Copy Task ID on %s notebook record',
     async (_, state) => {
       resources.enabled = true;
+      // A notebook record's one service is JupyterLab: nothing to connect to.
+      services.list = [{ mayConnect: true, name: 'jupyter' }];
       const onLaunchAgain = await openLaunchAgainMenu({ ...notebook, state }, owner);
       await screen.findByText('View Logs');
+      if (state === CommandState.Running) {
+        await waitFor(() => expect(getTaskServices).toHaveBeenCalledTimes(1));
+      }
       expect(menuLabels()).toEqual(['View Logs', 'View Resources', 'Copy Task ID']);
       expect(onLaunchAgain).not.toHaveBeenCalled();
     },
@@ -157,40 +171,60 @@ describe('TaskActionDropdown', () => {
     const shellLabel = 'Connect via CLI';
     const exactly = (label: string) => screen.queryByText(label, { exact: true });
 
-    it('is offered on the user’s own running shell', async () => {
-      await openMenu(101, runningShell);
-      expect(exactly(shellLabel)).toBeInTheDocument();
+    it('is offered on a running shell the master lets the user connect to', async () => {
+      await openMenu(102, runningShell);
+      await waitFor(() => expect(exactly(shellLabel)).toBeInTheDocument());
+      expect(getTaskServices).toHaveBeenCalledWith({ taskId: 'task-1' });
     });
 
-    it('is not offered on another user’s running shell', async () => {
+    it('is not offered on a shell the master does not let the user connect to', async () => {
+      services.list = [{ mayConnect: false, name: 'ssh' }];
       await openMenu(102, runningShell);
       await screen.findByText('View Logs');
+      await waitFor(() => expect(getTaskServices).toHaveBeenCalledTimes(1));
       expect(exactly(shellLabel)).not.toBeInTheDocument();
     });
 
-    it('is not offered on another user’s running shell in the right-click menu', async () => {
+    it('is not offered in the right-click menu either', async () => {
+      services.list = [{ mayConnect: false, name: 'ssh' }];
       openContextMenu(102, runningShell);
       await screen.findByText('View Logs');
+      await waitFor(() => expect(getTaskServices).toHaveBeenCalledTimes(1));
       expect(exactly(shellLabel)).not.toBeInTheDocument();
     });
 
-    it('is offered to an admin on another user’s running shell', async () => {
-      setCurrentUser(1, true);
-      await openMenu(102, runningShell);
-      expect(exactly(shellLabel)).toBeInTheDocument();
+    it('is offered in the right-click menu', async () => {
+      openContextMenu(102, runningShell);
+      await waitFor(() => expect(exactly(shellLabel)).toBeInTheDocument());
     });
 
-    it('is not offered on a task that is not running', async () => {
+    it('is offered on a shell that is still queued, which the CLI waits for', async () => {
       await openMenu(101, { state: CommandState.Queued, type: CommandType.Shell });
+      await waitFor(() => expect(exactly(shellLabel)).toBeInTheDocument());
+    });
+
+    it('is not offered on a task that has ended, whose services are not read', async () => {
+      await openMenu(101, { state: CommandState.Terminated, type: CommandType.Shell });
       await screen.findByText('View Logs');
+      expect(exactly(shellLabel)).not.toBeInTheDocument();
+      expect(getTaskServices).not.toHaveBeenCalled();
+    });
+
+    it('is not offered on a task without an SSH service', async () => {
+      services.list = [];
+      await openMenu(101, { state: CommandState.Running, type: CommandType.Command });
+      await screen.findByText('View Logs');
+      await waitFor(() => expect(getTaskServices).toHaveBeenCalledTimes(1));
       expect(exactly(shellLabel)).not.toBeInTheDocument();
     });
 
-    it('is not offered before the current user is known', async () => {
-      userStore.reset();
+    it('reads the services once per menu', async () => {
       await openMenu(101, runningShell);
-      await screen.findByText('View Logs');
-      expect(exactly(shellLabel)).not.toBeInTheDocument();
+      await waitFor(() => expect(exactly(shellLabel)).toBeInTheDocument());
+      await userEvent.keyboard('{Escape}');
+      await userEvent.click(screen.getByRole('button'));
+      await waitFor(() => expect(exactly(shellLabel)).toBeInTheDocument());
+      expect(getTaskServices).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -200,11 +234,11 @@ describe('TaskActionDropdown', () => {
       setCurrentUser(101);
     });
 
-    it('opens the terminal of the user’s own running shell in a tab', async () => {
+    it('opens the Terminal tab of the task page in a tab named after the task', async () => {
       const open = vi.spyOn(window, 'open').mockReturnValue(null);
       await openMenu(101, runningShell);
-      await userEvent.click(screen.getByText('Open Terminal'));
-      expect(open).toHaveBeenCalledWith('/shells/task-1/terminal', 'shell-terminal-task-1');
+      await userEvent.click(await screen.findByText('Open Terminal'));
+      expect(open).toHaveBeenCalledWith('/tasks/task-1/interactive?tab=terminal', 'task-1', '');
       // The CLI command is still offered.
       expect(screen.getByText('Connect via CLI')).toBeInTheDocument();
       open.mockRestore();
@@ -215,30 +249,29 @@ describe('TaskActionDropdown', () => {
       expect(await screen.findByText('Open Terminal')).toBeInTheDocument();
     });
 
-    it('is hidden for another user’s shell', async () => {
+    it('is hidden for a shell the master does not let the user connect to', async () => {
+      services.list = [{ mayConnect: false, name: 'ssh' }];
       await openMenu(102, runningShell);
+      await waitFor(() => expect(getTaskServices).toHaveBeenCalledTimes(1));
       expect(screen.queryByText('Open Terminal')).not.toBeInTheDocument();
     });
 
-    it('is shown to admins for any running shell', async () => {
-      setCurrentUser(1, true);
-      await openMenu(102, runningShell);
-      expect(screen.getByText('Open Terminal')).toBeInTheDocument();
-    });
-
-    it('is hidden for shells that are not running and for other tasks', async () => {
-      await openMenu(101, { ...runningShell, state: CommandState.Queued });
+    it('is hidden for shells that have ended', async () => {
+      await openMenu(101, { ...runningShell, state: CommandState.Terminated });
       expect(screen.queryByText('Open Terminal')).not.toBeInTheDocument();
     });
 
-    it('is hidden for commands', async () => {
+    it('is hidden for tasks without an SSH service', async () => {
+      services.list = [];
       await openMenu(101, { state: CommandState.Running, type: CommandType.Command });
+      await waitFor(() => expect(getTaskServices).toHaveBeenCalledTimes(1));
       expect(screen.queryByText('Open Terminal')).not.toBeInTheDocument();
     });
 
     it('is hidden when the master turns the terminal off', async () => {
       feature.on = false;
       await openMenu(101, runningShell);
+      await waitFor(() => expect(screen.getByText('Connect via CLI')).toBeInTheDocument());
       expect(screen.queryByText('Open Terminal')).not.toBeInTheDocument();
     });
   });
@@ -270,10 +303,13 @@ describe('TaskActionDropdown', () => {
       expect(screen.queryByText('Launch Again')).not.toBeInTheDocument();
     });
 
-    it('follows the signed-in user, as Connect and Open Terminal do', async () => {
-      // Another user's running shell: none of the owner's actions, which all ask who is signed in.
+    it('is left out with Connect and Open Terminal on another user’s shell', async () => {
+      // Another user's running shell: the master lets no one but its owner and admins connect, and
+      // Launch Again asks who is signed in.
+      services.list = [{ mayConnect: false, name: 'ssh' }];
       await openLaunchAgainMenu(runningShell, other);
       await screen.findByText('View Logs');
+      await waitFor(() => expect(getTaskServices).toHaveBeenCalledTimes(1));
       ['Connect via CLI', 'Open Terminal', 'Launch Again'].forEach((label) =>
         expect(menuLabels()).not.toContain(label),
       );
@@ -354,8 +390,7 @@ describe('TaskActionDropdown', () => {
 
     it('lists every action of the owner’s running shell in the fixed order', async () => {
       await openLaunchAgainMenu(runningShell, owner);
-      await screen.findByText('Launch Again');
-      expect(menuLabels()).toEqual(FULL_SHELL_MENU);
+      await waitFor(() => expect(menuLabels()).toEqual(FULL_SHELL_MENU));
     });
 
     it.each([
@@ -363,7 +398,7 @@ describe('TaskActionDropdown', () => {
       ['right-click menu', true],
     ])('shows Kill in red and the other actions not, in the %s', async (_, contextMenu) => {
       await openLaunchAgainMenu(runningShell, owner, contextMenu);
-      await screen.findByText('Launch Again');
+      await waitFor(() => expect(menuLabels()).toEqual(FULL_SHELL_MENU));
       expect(isDangerMenuItem('Kill')).toBe(true);
       FULL_SHELL_MENU.filter((label) => label !== 'Kill').forEach((label) =>
         expect(isDangerMenuItem(label)).toBe(false),
@@ -372,14 +407,15 @@ describe('TaskActionDropdown', () => {
 
     it('uses the same order in the right-click menu', async () => {
       await openLaunchAgainMenu(runningShell, owner, true);
-      await screen.findByText('Launch Again');
-      expect(menuLabels()).toEqual(FULL_SHELL_MENU);
+      await waitFor(() => expect(menuLabels()).toEqual(FULL_SHELL_MENU));
     });
 
     it('leaves out what does not apply and keeps the order of the rest', async () => {
+      services.list = [{ mayConnect: false, name: 'ssh' }];
       setCurrentUser(102);
       await openLaunchAgainMenu({ ...runningShell, userId: 103 }, other);
       await screen.findByText('View Logs');
+      await waitFor(() => expect(getTaskServices).toHaveBeenCalledTimes(1));
       // Another user's shell: no Connect via CLI, Open Terminal, Launch Again or Kill.
       expect(menuLabels()).toEqual(['View Logs', 'View Resources', 'Copy Task ID']);
     });
@@ -387,8 +423,9 @@ describe('TaskActionDropdown', () => {
     it('leaves out View Resources when the master does not offer it', async () => {
       resources.enabled = false;
       await openLaunchAgainMenu(runningShell, owner);
-      await screen.findByText('Launch Again');
-      expect(menuLabels()).toEqual(FULL_SHELL_MENU.filter((label) => label !== 'View Resources'));
+      await waitFor(() =>
+        expect(menuLabels()).toEqual(FULL_SHELL_MENU.filter((label) => label !== 'View Resources')),
+      );
     });
 
     it('puts Manage Job after Launch Again and before Kill when offered', async () => {

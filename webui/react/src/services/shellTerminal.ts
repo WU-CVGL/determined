@@ -1,4 +1,4 @@
-import { paths, serverAddress } from 'routes/utils';
+import { serverAddress } from 'routes/utils';
 
 /**
  * Client for the master's shell terminal WebSocket (GET /ws/shells/:id/terminal).
@@ -288,12 +288,4 @@ export const openTerminalLink = (
   if (!confirmFn(`Open this link from the terminal in a new tab?\n\n${href}`)) return false;
   openFn(href, '_blank', 'noopener,noreferrer');
   return true;
-};
-
-/** Opens the terminal page of a shell in its own browser tab. */
-export const openShellTerminalTab = (shellId: string): void => {
-  window.open(
-    `${process.env.PUBLIC_URL}${paths.shellTerminal(shellId)}`,
-    `shell-terminal-${shellId}`,
-  );
 };

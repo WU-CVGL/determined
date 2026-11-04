@@ -11,8 +11,8 @@ import useFeature from 'hooks/useFeature';
 import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
 import { paths } from 'routes/utils';
 import { V1LaunchWarning } from 'services/api-ts-sdk';
-import { openShellTerminalTab } from 'services/shellTerminal';
-import { CommandResponse } from 'types';
+import { CommandResponse, InteractiveTaskTab } from 'types';
+import { openInteractiveTask } from 'utils/wait';
 
 interface Props {
   response: CommandResponse;
@@ -42,7 +42,7 @@ const ShellLaunchedModalComponent: React.FC<Props> = ({ response }: Props) => {
             block
             size="large"
             type="primary"
-            onClick={() => openShellTerminalTab(command.id)}>
+            onClick={() => openInteractiveTask(command.id, { tab: InteractiveTaskTab.Terminal })}>
             Open Terminal
           </Button>
           <Body inactive>

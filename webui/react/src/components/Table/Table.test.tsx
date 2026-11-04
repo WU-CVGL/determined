@@ -21,21 +21,17 @@ const renderName = (record: CommandTask) =>
   render(<MemoryRouter>{taskNameRenderer(record.id, record, 0)}</MemoryRouter>);
 
 describe('taskNameRenderer', () => {
-  it('links a running shell of the user to its terminal', () => {
-    userStore.updateCurrentUser({ id: 5, isActive: true, isAdmin: false, username: 'owner' });
+  it('links a running task to its task page, in a tab named after it', () => {
+    userStore.updateCurrentUser({ id: 6, isActive: true, isAdmin: false, username: 'other' });
     renderName(shell);
     const link = screen.getByText(shell.name).closest('a');
-    expect(link).toHaveAttribute('href', '/shells/shell-1/terminal');
-    expect(link).toHaveAttribute('target', 'shell-terminal-shell-1');
+    expect(link).toHaveAttribute('href', '/tasks/shell-1/interactive');
+    expect(link).toHaveAttribute('target', 'shell-1');
     // The whole name, which a narrow column cuts short.
     expect(link).toHaveAttribute('title', shell.name);
   });
 
-  it('does not link other users’ or stopped shells', () => {
-    userStore.updateCurrentUser({ id: 6, isActive: true, isAdmin: false, username: 'other' });
-    renderName(shell);
-    expect(screen.queryByRole('link')).not.toBeInTheDocument();
-    userStore.updateCurrentUser({ id: 5, isActive: true, isAdmin: false, username: 'owner' });
+  it('does not link stopped tasks', () => {
     renderName({ ...shell, id: 'shell-2', state: CommandState.Terminated });
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
   });

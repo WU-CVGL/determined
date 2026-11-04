@@ -72,8 +72,9 @@ describe('ShellLaunchedModal', () => {
 
     await userEvent.click(button);
     expect(open).toHaveBeenCalledWith(
-      expect.stringContaining('/shells/shell-123/terminal'),
-      'shell-terminal-shell-123',
+      expect.stringContaining('/tasks/shell-123/interactive?tab=terminal'),
+      'shell-123',
+      '',
     );
     open.mockRestore();
   });

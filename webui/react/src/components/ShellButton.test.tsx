@@ -24,6 +24,7 @@ vi.mock('hooks/useTaskResourcesEnabled', () => ({ default: () => true }));
 vi.mock('utils/wait', () => ({
   openCommand: () => null,
   openCommandResponse: mocks.openCommandResponse,
+  openInteractiveTask: () => null,
   waitPageUrl: () => '',
 }));
 
