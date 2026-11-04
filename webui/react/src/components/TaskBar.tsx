@@ -1,14 +1,12 @@
 import Dropdown, { MenuItem } from 'hew/Dropdown';
 import Icon from 'hew/Icon';
 import useConfirm from 'hew/useConfirm';
-import { Failed, Loadable } from 'hew/utils/loadable';
 import React, { useCallback, useMemo } from 'react';
 
-import { useAsync } from 'hooks/useAsync';
 import usePermissions from 'hooks/usePermissions';
 import { paths } from 'routes/utils';
-import { getCommand, getShell, getTensorBoard, killTask } from 'services/api';
-import { CommandTask, CommandType } from 'types';
+import { killTask } from 'services/api';
+import { CommandType } from 'types';
 import handleError from 'utils/error';
 import { routeToReactUrl } from 'utils/routes';
 
@@ -18,16 +16,12 @@ interface Props {
   handleViewLogsClick: () => void;
   id: string;
   name: string;
+  /** The task's owner and workspace, which decide who may kill it; without them, nobody can. */
+  owner?: { userId: number; workspaceId: number };
   resourcePool: string;
-  type: CommandType;
+  /** The task's type, for the kill API; a notebook, the label of ended records, has none. */
+  type?: CommandType;
 }
-
-/** The task types the master can look up; a notebook, the label of ended records, has none. */
-const taskGetters: Partial<Record<CommandType, typeof getCommand>> = {
-  [CommandType.Command]: getCommand,
-  [CommandType.Shell]: getShell,
-  [CommandType.TensorBoard]: getTensorBoard,
-};
 
 const MenuKey = {
   Kill: 'kill',
@@ -38,65 +32,55 @@ export const TaskBar: React.FC<Props> = ({
   handleViewLogsClick,
   id,
   name,
+  owner,
   resourcePool,
   type,
 }: Props) => {
   const { canModifyWorkspaceNSC } = usePermissions();
   const confirm = useConfirm();
 
-  const task = useAsync<CommandTask>(async () => {
-    const call = taskGetters[type];
-    if (!call) return Failed(new Error(`${type} ${id} not found`));
-    return await call({ commandId: id });
-  }, [type, id]);
+  const canKill =
+    !!type &&
+    type !== CommandType.JupyterLab &&
+    !!owner &&
+    canModifyWorkspaceNSC({ userId: owner.userId, workspace: { id: owner.workspaceId } });
 
-  const deleteTask = useCallback(
-    (task: CommandTask) => {
-      confirm({
-        content: 'Are you sure you want to kill this task?',
-        danger: true,
-        okText: 'Kill',
-        onConfirm: async () => {
-          try {
-            await killTask(task);
-            routeToReactUrl(paths.taskList());
-          } catch (e) {
-            handleError(e, {
-              publicMessage: `Unable to kill task ${task.id}.`,
-              publicSubject: 'Kill failed.',
-              silent: false,
-            });
-          }
-        },
-        onError: handleError,
-        title: 'Confirm Task Kill',
-      });
-    },
-    [confirm],
-  );
+  const deleteTask = useCallback(() => {
+    if (!type) return;
+    confirm({
+      content: 'Are you sure you want to kill this task?',
+      danger: true,
+      okText: 'Kill',
+      onConfirm: async () => {
+        try {
+          await killTask({ id, type });
+          routeToReactUrl(paths.taskList());
+        } catch (e) {
+          handleError(e, {
+            publicMessage: `Unable to kill task ${id}.`,
+            publicSubject: 'Kill failed.',
+            silent: false,
+          });
+        }
+      },
+      onError: handleError,
+      title: 'Confirm Task Kill',
+    });
+  }, [confirm, id, type]);
 
   // The task action menu's order: View Logs first, the destructive Kill last.
   const menuItems: MenuItem[] = useMemo(
     () => [
       { key: MenuKey.ViewLogs, label: 'View Logs' },
-      {
-        danger: true,
-        disabled: Loadable.match(task, {
-          _: () => true,
-          Loaded: (t) =>
-            !canModifyWorkspaceNSC({ userId: t.userId, workspace: { id: t.workspaceId } }),
-        }),
-        key: MenuKey.Kill,
-        label: 'Kill',
-      },
+      { danger: true, disabled: !canKill, key: MenuKey.Kill, label: 'Kill' },
     ],
-    [canModifyWorkspaceNSC, task],
+    [canKill],
   );
 
   const handleDropdown = (key: string) => {
     switch (key) {
       case MenuKey.Kill:
-        Loadable.forEach(task, deleteTask);
+        deleteTask();
         break;
       case MenuKey.ViewLogs:
         handleViewLogsClick();
@@ -108,10 +92,10 @@ export const TaskBar: React.FC<Props> = ({
     <div className={css.base}>
       <div className={css.barContent}>
         <span>{name}</span>
-        <span>&#8212;</span>
+        {resourcePool && <span>&#8212;</span>}
         <Dropdown menu={menuItems} placement="bottomRight" onClick={handleDropdown}>
           <div className={css.dropdownTrigger} data-testid="task-action-dropdown-trigger">
-            <span className={css.dropdownTrigger}>{resourcePool}</span>
+            {resourcePool && <span className={css.dropdownTrigger}>{resourcePool}</span>}
             <Icon name="arrow-down" title="Action menu" />
           </div>
         </Dropdown>

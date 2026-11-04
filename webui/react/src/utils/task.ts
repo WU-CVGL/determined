@@ -6,6 +6,7 @@ import {
   killableRunStates,
   terminalCommandStates,
 } from 'constants/states';
+import { V1TaskService, V1TaskType } from 'services/api-ts-sdk';
 import { LaunchTensorBoardParams } from 'services/types';
 import * as Type from 'types';
 import { CommandState, RunState, State } from 'types';
@@ -38,6 +39,37 @@ export const canConnectToTask = (
     return false;
   }
   return user.isAdmin || user.id === task.userId;
+};
+
+/** Where a task is for the panes that connect to it: waiting for it, ready, or ended. */
+export type TaskPhase = 'waiting' | 'ready' | 'ended';
+
+/* The phase of a task from its current allocation, the first one the master lists. */
+export const taskPhase = (task: Pick<Type.TaskItem, 'allocations' | 'endTime'>): TaskPhase => {
+  const allocation = task.allocations[0];
+  if (task.endTime || allocation?.state === CommandState.Terminated) return 'ended';
+  return allocation?.isReady ? 'ready' : 'waiting';
+};
+
+/** The command type of a task's type, for the task APIs that take one; none for other tasks. */
+export const commandTypeOfTask = (taskType?: V1TaskType): Type.CommandType | undefined => {
+  switch (taskType) {
+    case V1TaskType.COMMAND:
+      return Type.CommandType.Command;
+    case V1TaskType.NOTEBOOK:
+      return Type.CommandType.JupyterLab;
+    case V1TaskType.SHELL:
+      return Type.CommandType.Shell;
+    case V1TaskType.TENSORBOARD:
+      return Type.CommandType.TensorBoard;
+    default:
+      return undefined;
+  }
+};
+
+/** Whether a task has the named service, whatever its state. */
+export const hasTaskService = (services: Pick<V1TaskService, 'name'>[], name: string): boolean => {
+  return services.some((s) => s.name === name);
 };
 
 export const canBeOpened = (task: Type.AnyTask): boolean => {

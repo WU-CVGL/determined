@@ -16,17 +16,17 @@ import {
 import authStore from 'stores/auth';
 import { copyToClipboard } from 'utils/dom';
 import handleError from 'utils/error';
+import { TaskPhase } from 'utils/task';
 
 import css from './ShellTerminalPane.module.scss';
 
-/** Where the shell is, as the page that polls it says. */
-export type ShellTerminalPhase = 'waiting' | 'ready' | 'ended';
 type Connection = 'connecting' | 'connected' | 'closed';
 
 interface Props {
   /** Whether the pane is shown; a hidden terminal measures nothing, so it is fitted when shown. */
   active: boolean;
-  phase: ShellTerminalPhase;
+  /** Where the shell is, as the page that polls it says. */
+  phase: TaskPhase;
   shellId: string;
 }
 

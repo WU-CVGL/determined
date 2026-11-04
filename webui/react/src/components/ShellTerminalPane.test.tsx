@@ -11,8 +11,9 @@ import { ShellTerminalClose, ShellTerminalHandlers } from 'services/shellTermina
 import authStore from 'stores/auth';
 import userStore from 'stores/users';
 import { reloadPage } from 'utils/browser';
+import { TaskPhase } from 'utils/task';
 
-import ShellTerminalPane, { ShellTerminalPhase } from './ShellTerminalPane';
+import ShellTerminalPane from './ShellTerminalPane';
 
 const SHELL_ID = 'shell-1';
 
@@ -97,7 +98,7 @@ const Pane = ({
 }: {
   active?: boolean;
   beside?: React.ReactNode;
-  phase: ShellTerminalPhase;
+  phase: TaskPhase;
 }) => (
   <BrowserRouter>
     <UIProvider theme={DefaultTheme.Light}>
@@ -109,7 +110,7 @@ const Pane = ({
   </BrowserRouter>
 );
 
-const setup = (phase: ShellTerminalPhase, beside?: React.ReactNode) =>
+const setup = (phase: TaskPhase, beside?: React.ReactNode) =>
   render(<Pane beside={beside} phase={phase} />);
 
 const closeSession = (close: Partial<ShellTerminalClose>) =>

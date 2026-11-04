@@ -4,9 +4,15 @@ const routes: RouteConfig[] = [
   { id: 'default', needAuth: true, path: '/' },
   { id: 'dashboard', needAuth: true, path: '/dashboard', title: 'Home' },
   {
+    id: 'interactiveTask',
+    needAuth: true,
+    path: '/tasks/:taskId/interactive',
+    title: 'Interactive Task',
+  },
+  {
     id: 'interactive',
     needAuth: true,
-    path: '/interactive/:taskId/:taskType/:taskName/:taskResourcePool/:taskUrl',
+    path: '/interactive/:taskId/*',
     title: 'Interactive Task',
   },
   {

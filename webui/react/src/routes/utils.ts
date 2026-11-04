@@ -4,7 +4,7 @@ import { KeyboardEvent } from 'react';
 import { globalStorage } from 'globalStorage';
 import { ClusterApi, Configuration } from 'services/api-ts-sdk';
 import { BrandingType } from 'stores/determinedInfo';
-import { CommandTask, RouteConfig } from 'types';
+import { CommandTask, InteractiveTaskTab, RouteConfig } from 'types';
 import {
   AnyMouseEvent,
   AnyMouseEventHandler,
@@ -131,6 +131,18 @@ export const paths = {
       .map(encodeURIComponent)
       .join('/');
     return `/${path}/?currentSlotsExceeded=${maxSlotsExceeded}`;
+  },
+  /** The task page: a task's services, logs and resources by its ID. */
+  interactiveTask: (
+    taskId: string,
+    params: { currentSlotsExceeded?: boolean; tab?: InteractiveTaskTab } = {},
+  ): string => {
+    const path = `/tasks/${encodeURIComponent(taskId)}/interactive`;
+    const query = new URLSearchParams();
+    if (params.tab) query.set('tab', params.tab);
+    if (params.currentSlotsExceeded) query.set('currentSlotsExceeded', 'true');
+    const search = query.toString();
+    return search ? `${path}?${search}` : path;
   },
   /** The Jobs page: runs of every kind. */
   jobs: (): string => {
