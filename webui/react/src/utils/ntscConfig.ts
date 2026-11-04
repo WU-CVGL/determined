@@ -2,10 +2,20 @@ import { cloneDeep, isEqual, isNil, isPlainObject } from 'lodash';
 
 import { RawJson } from 'types';
 
+/** The services a shell can run besides sshd, which every shell runs: config.services.<name>. */
+export const SHELL_SERVICES = ['jupyter', 'vscode'] as const;
+
+export type ShellService = (typeof SHELL_SERVICES)[number];
+
+const isShellService = (name: unknown): name is ShellService =>
+  (SHELL_SERVICES as readonly unknown[]).includes(name);
+
 /** The simple launch form's fields, as the launch helpers take them. */
 export interface NtscLaunchOptions {
   name?: string;
   pool?: string;
+  /** The services of SHELL_SERVICES to run. */
+  services?: string[];
   slots?: number;
   template?: string;
   workspaceId?: number;
@@ -14,6 +24,8 @@ export interface NtscLaunchOptions {
 export interface LaunchFormFields {
   name?: string;
   pool?: string;
+  /** The services of SHELL_SERVICES to run; undefined leaves a config's services as they are. */
+  services?: string[];
   slots?: number;
 }
 
@@ -33,14 +45,23 @@ const asObject = (value: unknown): RawJson | undefined =>
 export const isAutoDescription = (description: unknown): boolean =>
   typeof description === 'string' && AUTO_DESCRIPTION.test(description);
 
-/** The config the simple form sends: a description and the resources. */
-export const simpleLaunchConfig = (options: NtscLaunchOptions): RawJson => ({
-  description: options.name === '' ? undefined : options.name,
-  resources: {
-    resource_pool: options.pool === '' ? undefined : options.pool,
-    slots: options.slots,
-  },
-});
+/**
+ * The config the simple form sends: a description, the resources and, when any is picked, the
+ * services, each with no options (`services.<name>: {}`).
+ */
+export const simpleLaunchConfig = (options: NtscLaunchOptions): RawJson => {
+  const services = (options.services ?? []).filter(isShellService);
+  return {
+    description: options.name === '' ? undefined : options.name,
+    resources: {
+      resource_pool: options.pool === '' ? undefined : options.pool,
+      slots: options.slots,
+    },
+    ...(services.length === 0
+      ? {}
+      : { services: Object.fromEntries(services.map((name) => [name, {}])) }),
+  };
+};
 
 /**
  * Prepares a merged config (from the master) for another launch.
@@ -153,9 +174,11 @@ export const templateFromConfig = (config: RawJson, defaults: RawJson): RawJson 
 export const formFieldsFromConfig = (config: RawJson): LaunchFormFields => {
   const resources = asObject(config.resources);
   const description = config.description;
+  const services = asObject(config.services);
   return {
     name: typeof description === 'string' && !isAutoDescription(description) ? description : '',
     pool: typeof resources?.resource_pool === 'string' ? resources.resource_pool : undefined,
+    services: SHELL_SERVICES.filter((name) => !isNil(services?.[name])),
     slots: typeof resources?.slots === 'number' ? resources.slots : undefined,
   };
 };
@@ -172,6 +195,17 @@ export const configFromForm = (base: RawJson, fields: LaunchFormFields): RawJson
   if (fields.slots !== undefined && fields.slots !== null) resources.slots = fields.slots;
   else delete resources.slots;
   out.resources = resources;
+
+  // The known services follow the form; another name and a picked service's options are kept.
+  if (fields.services !== undefined) {
+    const services: RawJson = { ...asObject(out.services) };
+    SHELL_SERVICES.forEach((name) => {
+      if (!fields.services?.includes(name)) delete services[name];
+      else if (isNil(services[name])) services[name] = {};
+    });
+    if (Object.keys(services).length !== 0) out.services = services;
+    else delete out.services;
+  }
   return out;
 };
 

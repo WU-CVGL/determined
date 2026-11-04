@@ -1,5 +1,6 @@
 import Alert from 'hew/Alert';
 import Button from 'hew/Button';
+import Checkbox from 'hew/Checkbox';
 import Form, { FormInstance } from 'hew/Form';
 import Input from 'hew/Input';
 import InputNumber from 'hew/InputNumber';
@@ -8,7 +9,7 @@ import Row from 'hew/Row';
 import Select, { Option, SelectValue } from 'hew/Select';
 import Spinner from 'hew/Spinner';
 import { Loadable, Loaded, NotLoaded } from 'hew/utils/loadable';
-import { number, string, undefined as undefinedType, union } from 'io-ts';
+import { array, number, string, undefined as undefinedType, union } from 'io-ts';
 import yaml from 'js-yaml';
 import { isPlainObject } from 'lodash';
 import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
@@ -31,19 +32,30 @@ import {
   formFieldsFromConfig,
   NtscLaunchOptions,
   sanitizeConfig,
+  SHELL_SERVICES,
   templateFromConfig,
   templateResources,
 } from 'utils/ntscConfig';
 import { useObservable } from 'utils/observable';
-import { launchShell, previewShell } from 'utils/shell';
+import { launchShell, PREVIEW_ERROR, previewShell } from 'utils/shell';
 
 const DEFAULT_SLOT_COUNT = 1;
 const BASE_FORM_ID = 'ntsc-launch-form';
 
-/** The simple form's values. `source` is the "Start from" picker's value. */
-interface LaunchFormValues extends NtscLaunchOptions {
+/**
+ * The simple form's values. `source` is the "Start from" picker's value; `services` holds a
+ * checkbox per service of SHELL_SERVICES.
+ */
+interface LaunchFormValues extends Omit<NtscLaunchOptions, 'services'> {
+  services?: Partial<Record<string, boolean>>;
   source?: string;
 }
+
+const checkedServices = (values: LaunchFormValues): string[] =>
+  SHELL_SERVICES.filter((name) => values.services?.[name]);
+
+const serviceChecks = (services: string[] = []): Record<string, boolean> =>
+  Object.fromEntries(SHELL_SERVICES.map((name) => [name, services.includes(name)]));
 
 /** The user's last-used form values, kept on the server. */
 const settingsConfig: SettingsConfig<NtscLaunchOptions> = {
@@ -59,6 +71,12 @@ const settingsConfig: SettingsConfig<NtscLaunchOptions> = {
       skipUrlEncoding: true,
       storageKey: 'pool',
       type: union([string, undefinedType]),
+    },
+    services: {
+      defaultValue: [],
+      skipUrlEncoding: true,
+      storageKey: 'services',
+      type: union([array(string), undefinedType]),
     },
     slots: {
       defaultValue: DEFAULT_SLOT_COUNT,
@@ -83,7 +101,6 @@ const settingsConfig: SettingsConfig<NtscLaunchOptions> = {
 };
 
 const copy = {
-  configError: 'Unable to fetch shell config.',
   configRequired: 'Shell config required',
   docsLabel: 'Read about shell settings',
   title: 'Launch Shell',
@@ -92,6 +109,7 @@ const copy = {
 const settingsFromForm = (values: LaunchFormValues): NtscLaunchOptions => ({
   name: values.name,
   pool: values.pool,
+  services: checkedServices(values),
   slots: values.slots,
   template: templateNameFromStartFrom(values.source),
   workspaceId: values.workspaceId,
@@ -109,8 +127,8 @@ const CodeEditor = React.lazy(() => import('hew/CodeEditor'));
 
 /**
  * The shell launch modal: a simple form (workspace, "Start from", name, pool,
- * slots) and a full-config YAML mode, previewed through the master's shell
- * preview.
+ * slots, services) and a full-config YAML mode, previewed through the master's
+ * shell preview with what a launch of the simple form sends.
  *
  * Start from a template: the template name is sent with the simple fields.
  * Start from a config (a recent task or this browser's history): the config
@@ -169,10 +187,14 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   const simpleOptions = useCallback(
     (fields: LaunchFormValues) =>
       baseConfig
-        ? { config: configFromForm(baseConfig, fields), workspaceId: fields.workspaceId }
+        ? {
+            config: configFromForm(baseConfig, { ...fields, services: checkedServices(fields) }),
+            workspaceId: fields.workspaceId,
+          }
         : {
             name: fields.name,
             pool: fields.pool,
+            services: checkedServices(fields),
             slots: fields.slots,
             template: templateNameFromStartFrom(fields.source),
             workspaceId: fields.workspaceId,
@@ -189,7 +211,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       const newConfig = await previewShell(simpleOptions(fields));
       setConfig(Loaded(yaml.dump(newConfig)));
     } catch (e) {
-      setConfigError(copy.configError);
+      setConfigError(e instanceof Error ? e.message : PREVIEW_ERROR);
     }
   }, [form, simpleOptions]);
 
@@ -244,7 +266,12 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
         const fields = formFieldsFromConfig(base);
         setBaseConfig(base);
         setRedactedEnv(start.redactedEnv);
-        form.setFieldsValue({ name: fields.name, pool: fields.pool, slots: fields.slots });
+        form.setFieldsValue({
+          name: fields.name,
+          pool: fields.pool,
+          services: serviceChecks(fields.services),
+          slots: fields.slots,
+        });
         if (!workspace) {
           const sourceWorkspace = workspaces.find((w) => w.id === start.workspaceId);
           if (sourceWorkspace) setCurrentWorkspace(sourceWorkspace);
@@ -307,6 +334,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     } catch (e) {
       handleError(e, {
         level: ErrorLevel.Error,
+        publicMessage: e instanceof Error && e.message !== PREVIEW_ERROR ? e.message : undefined,
         publicSubject: 'Unable to load the cluster defaults. Try Save as Template again.',
         silent: false,
         type: ErrorType.Server,
@@ -677,6 +705,20 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
           max={resourceInfo.maxSlots === -1 ? Number.MAX_SAFE_INTEGER : resourceInfo.maxSlots}
           min={0}
         />
+      </Form.Item>
+      <Form.Item>
+        <Row>
+          {SHELL_SERVICES.map((name) => (
+            <Form.Item
+              initialValue={defaults?.services?.includes(name) ?? false}
+              key={name}
+              name={['services', name]}
+              noStyle
+              valuePropName="checked">
+              <Checkbox>{name}</Checkbox>
+            </Form.Item>
+          ))}
+        </Row>
       </Form.Item>
     </Form>
   );
