@@ -2,6 +2,5 @@
 
 **Improvements**
 
--  API: List the services of a task with their states, and give the task's owner the credential
-   of a service. CLI: ``det shell start --service`` starts a shell with services,
-   ``det task services`` lists them and ``det task open`` opens one.
+-  CLI, API: ``det task services`` lists a task's services and their states, and ``det task open``
+   opens one for the task's owner or an administrator.

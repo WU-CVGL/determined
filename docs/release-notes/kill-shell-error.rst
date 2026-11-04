@@ -2,4 +2,5 @@
 
 **Bug Fixes**
 
--  API: Return the error of a failed shell kill instead of a nil pointer panic.
+-  API: Return the error when killing a shell fails instead of failing the request with an internal
+   error.
