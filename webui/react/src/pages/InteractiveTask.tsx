@@ -225,11 +225,11 @@ export const InteractiveTask: React.FC = () => {
         }
       }
     };
-    // One more read, on request; a success resumes the reads of the poll.
+    // One more read, on request; a success resumes the reads of the poll while it runs.
     retryServicesRef.current = async () => {
       setRetrying(true);
       await pollServices();
-      if (!cancelled) setRetrying(false);
+      setRetrying(false);
     };
     const poll = async () => {
       const [outcome] = await Promise.all([
@@ -282,8 +282,6 @@ export const InteractiveTask: React.FC = () => {
     [setSearchParams],
   );
 
-  const retryServices = useCallback(() => void retryServicesRef.current?.(), []);
-
   const name = command?.name || taskId;
   const phase = task ? taskPhase(task) : 'waiting';
   const services = useMemo(() => taskServices?.services ?? [], [taskServices]);
@@ -305,6 +303,13 @@ export const InteractiveTask: React.FC = () => {
   }, [command, requestedTab, resourcesEnabled, services, terminalEnabled]);
 
   const activeKey = tabKeys.find((key) => key === requestedTab) ?? tabKeys[0];
+
+  // Without a tab in the URL, the page stays on the tab it shows when a Retry adds the service
+  // tabs before it; a tab in the URL is the one asked for.
+  const retryServices = useCallback(() => {
+    if (!requestedTab) selectTab(activeKey);
+    void retryServicesRef.current?.();
+  }, [activeKey, requestedTab, selectTab]);
 
   const items: TabItem[] = useMemo(() => {
     if (!task) return [];

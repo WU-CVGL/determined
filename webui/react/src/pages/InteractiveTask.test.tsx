@@ -373,54 +373,59 @@ describe('InteractiveTask', () => {
     }
   });
 
-  it('shows the logs and resources with Retry when the services cannot be read, and the service tabs once they are', async () => {
-    vi.useFakeTimers();
-    try {
-      vi.mocked(getTaskServices).mockImplementation(() =>
-        Promise.reject(new DetError(undefined, { publicMessage: 'master unreachable' })),
-      );
-      setup('?tab=logs');
-      // Four failures: at the start and after 2, 4 and 6 seconds.
-      await act(() => vi.advanceTimersByTimeAsync(7000));
-      expect(getTaskServices).toHaveBeenCalledTimes(4);
-      expect(screen.queryByRole('tab')).not.toBeInTheDocument();
-      await act(() => vi.advanceTimersByTimeAsync(1000));
-      await act(() => vi.advanceTimersByTimeAsync(0));
-      expect(getTaskServices).toHaveBeenCalledTimes(5);
-      expect(screen.getByText('master unreachable')).toBeInTheDocument();
-      expect(tabLabels()).toEqual(['Logs', 'Resources']);
-      expect(screen.getByTestId('logs-pane')).toBeInTheDocument();
-      // The task is still polled; the services are not until Retry.
-      await act(() => vi.advanceTimersByTimeAsync(4000));
-      expect(getTaskServices).toHaveBeenCalledTimes(5);
-      expect(getTask).toHaveBeenCalledTimes(7);
+  // With no tab in the query, as the task links open the page, and with the Logs tab in it.
+  it.each(['', '?tab=logs'])(
+    'shows the logs and resources with Retry when the services cannot be read, and the service tabs on the same tab once they are (query %j)',
+    async (search) => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(getTaskServices).mockImplementation(() =>
+          Promise.reject(new DetError(undefined, { publicMessage: 'master unreachable' })),
+        );
+        setup(search);
+        // Four failures: at the start and after 2, 4 and 6 seconds.
+        await act(() => vi.advanceTimersByTimeAsync(7000));
+        expect(getTaskServices).toHaveBeenCalledTimes(4);
+        expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+        await act(() => vi.advanceTimersByTimeAsync(1000));
+        await act(() => vi.advanceTimersByTimeAsync(0));
+        expect(getTaskServices).toHaveBeenCalledTimes(5);
+        expect(screen.getByText('master unreachable')).toBeInTheDocument();
+        expect(tabLabels()).toEqual(['Logs', 'Resources']);
+        expect(screen.getByTestId('logs-pane')).toBeInTheDocument();
+        // The task is still polled; the services are not until Retry.
+        await act(() => vi.advanceTimersByTimeAsync(4000));
+        expect(getTaskServices).toHaveBeenCalledTimes(5);
+        expect(getTask).toHaveBeenCalledTimes(7);
 
-      // One read per Retry; a failure is shown again.
-      vi.mocked(getTaskServices).mockRejectedValueOnce(
-        new DetError(undefined, { publicMessage: 'still unreachable' }),
-      );
-      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-      await act(() => vi.advanceTimersByTimeAsync(0));
-      expect(getTaskServices).toHaveBeenCalledTimes(6);
-      expect(screen.getByText('still unreachable')).toBeInTheDocument();
-      expect(tabLabels()).toEqual(['Logs', 'Resources']);
+        // One read per Retry; a failure is shown again.
+        vi.mocked(getTaskServices).mockRejectedValueOnce(
+          new DetError(undefined, { publicMessage: 'still unreachable' }),
+        );
+        fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+        await act(() => vi.advanceTimersByTimeAsync(0));
+        expect(getTaskServices).toHaveBeenCalledTimes(6);
+        expect(screen.getByText('still unreachable')).toBeInTheDocument();
+        expect(tabLabels()).toEqual(['Logs', 'Resources']);
 
-      vi.mocked(getTaskServices).mockResolvedValue(
-        servicesWith(['ssh', 'jupyter', 'vscode'], true, V1TaskServiceState.READY),
-      );
-      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-      await act(() => vi.advanceTimersByTimeAsync(0));
-      expect(getTaskServices).toHaveBeenCalledTimes(7);
-      expect(screen.queryByText('still unreachable')).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
-      expect(tabLabels()).toEqual(['Terminal', 'JupyterLab', 'VS Code', 'Logs', 'Resources']);
-      // The logs stay mounted and shown.
-      expect(screen.getByTestId('logs-pane')).toBeInTheDocument();
-      expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+        vi.mocked(getTaskServices).mockResolvedValue(
+          servicesWith(['ssh', 'jupyter', 'vscode'], true, V1TaskServiceState.READY),
+        );
+        fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+        await act(() => vi.advanceTimersByTimeAsync(0));
+        expect(getTaskServices).toHaveBeenCalledTimes(7);
+        expect(screen.queryByText('still unreachable')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+        expect(tabLabels()).toEqual(['Terminal', 'JupyterLab', 'VS Code', 'Logs', 'Resources']);
+        // The logs stay mounted and shown; no other pane is mounted.
+        expect(document.querySelector('.ant-tabs-tab-active')?.textContent).toBe('Logs');
+        expect(screen.getByTestId('logs-pane')).toBeInTheDocument();
+        expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it('takes a not-found answer to Retry as final: no services, and no notice', async () => {
     vi.useFakeTimers();
