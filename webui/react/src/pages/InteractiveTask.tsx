@@ -173,8 +173,10 @@ export const InteractiveTask: React.FC = () => {
         // The server's text, before the handler puts its own on the error.
         const text = errorText(e);
         handleError(e, { publicMessage: 'Unable to load the task.', silent: true });
-        if (++failures >= MAX_POLL_FAILURES) {
-          if (!loaded) setError(text);
+        if (loaded) return undefined;
+        // A task the master does not know is not asked for again; another failure may pass.
+        if (isNotFound(e as Error) || ++failures >= MAX_POLL_FAILURES) {
+          setError(text);
           return 'gone';
         }
         return undefined;

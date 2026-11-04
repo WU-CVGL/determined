@@ -354,23 +354,64 @@ describe('InteractiveTask', () => {
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
   });
 
-  it('gives up on the task after repeated failures, with the error', async () => {
+  it('shows at once that the master does not know the task', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getTask).mockRejectedValue(
+        new DetError(undefined, { publicMessage: `task ${TASK_ID} not found` }),
+      );
+      setup();
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(screen.getByText(`task ${TASK_ID} not found`)).toBeInTheDocument();
+      expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+      await act(() => vi.advanceTimersByTimeAsync(4000));
+      expect(getTask).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('gives up on a task that has not loaded after repeated failures, with the error', async () => {
     vi.useFakeTimers();
     try {
       vi.mocked(getTask).mockImplementation(() =>
-        Promise.reject(new DetError(undefined, { publicMessage: 'task not found' })),
+        Promise.reject(new DetError(undefined, { publicMessage: 'master unreachable' })),
       );
       setup();
       // Four failures: at the start and after 2, 4 and 6 seconds.
       await act(() => vi.advanceTimersByTimeAsync(7000));
       expect(getTask).toHaveBeenCalledTimes(4);
-      expect(screen.queryByText('task not found')).not.toBeInTheDocument();
+      expect(screen.queryByText('master unreachable')).not.toBeInTheDocument();
       await act(() => vi.advanceTimersByTimeAsync(1000));
       await act(() => vi.advanceTimersByTimeAsync(0));
-      expect(screen.getByText('task not found')).toBeInTheDocument();
+      expect(screen.getByText('master unreachable')).toBeInTheDocument();
       expect(getTask).toHaveBeenCalledTimes(5);
       await act(() => vi.advanceTimersByTimeAsync(4000));
       expect(getTask).toHaveBeenCalledTimes(5);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps polling a loaded task through failures, so that the panes follow it', async () => {
+    vi.useFakeTimers();
+    try {
+      setup();
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(screen.getByTestId('terminal-pane')).toHaveAttribute('data-phase', 'waiting');
+
+      vi.mocked(getTask).mockImplementation(() =>
+        Promise.reject(new DetError(undefined, { publicMessage: 'master unreachable' })),
+      );
+      await act(() => vi.advanceTimersByTimeAsync(12000));
+      expect(getTask).toHaveBeenCalledTimes(7);
+      expect(screen.getByTestId('terminal-pane')).toHaveAttribute('data-phase', 'waiting');
+      expect(screen.queryByText('master unreachable')).not.toBeInTheDocument();
+
+      vi.mocked(getTask).mockResolvedValue(taskWith(true));
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+      expect(getTask).toHaveBeenCalledTimes(8);
+      expect(screen.getByTestId('terminal-pane')).toHaveAttribute('data-phase', 'ready');
     } finally {
       vi.useRealTimers();
     }
