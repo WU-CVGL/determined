@@ -138,6 +138,18 @@ describe('launchHistory', () => {
       expect(listLaunchHistory(1).map((entry) => entry.config.description)).toEqual(['good']);
     });
 
+    it('drops entries of an earlier version', () => {
+      const earlier = {
+        config: { notebook_idle_type: 'activity' },
+        id: 'shell:old',
+        savedAt: 1,
+        v: 1,
+        workspaceId: 1,
+      };
+      window.localStorage.setItem('u:1/launch-history/shell', JSON.stringify([earlier]));
+      expect(listLaunchHistory(1)).toEqual([]);
+    });
+
     it('tolerates a getItem that throws', () => {
       vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
         throw new DOMException('denied', 'SecurityError');

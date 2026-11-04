@@ -27,7 +27,7 @@ import { redactSensitiveEnv, sanitizeConfig, stableStringify } from 'utils/ntscC
 import { StorageManager } from 'utils/storage';
 
 export const LAUNCH_HISTORY_LIMIT = 20;
-const ENTRY_VERSION = 1;
+const ENTRY_VERSION = 2;
 /** The key of the shells' list, which also prefixes each entry's ID. */
 const HISTORY_KEY = CommandType.Shell;
 
