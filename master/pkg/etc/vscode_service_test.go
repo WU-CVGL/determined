@@ -890,18 +890,21 @@ func TestVSCodeUnitOverlappingInstalls(t *testing.T) {
 
 // A task without the lock does not replace a release without the marker, which only a holder of
 // the lock does: after waiting for that, it runs code-server from its own temporary directory and
-// removes it when it exits, also when code-server exits with an error, before the supervisor's
-// own cleanup of the service.
+// removes it when it exits, also when code-server exits with an error or a stop of the shell ends
+// it, before the supervisor's own cleanup of the service.
 func TestVSCodeUnitIncompleteWithoutLock(t *testing.T) {
 	requireReporterPython(t)
 	for _, status := range []int{0, 3} {
 		t.Run("exit "+strconv.Itoa(status), func(t *testing.T) {
-			testVSCodeUnitIncompleteWithoutLock(t, status)
+			testVSCodeUnitIncompleteWithoutLock(t, status, false)
 		})
 	}
+	t.Run("stop", func(t *testing.T) { testVSCodeUnitIncompleteWithoutLock(t, 0, true) })
 }
 
-func testVSCodeUnitIncompleteWithoutLock(t *testing.T, status int) {
+// testVSCodeUnitIncompleteWithoutLock runs code-server, which exits with status, from the task's
+// own temporary directory; with stop set, a stop of the shell ends it instead.
+func testVSCodeUnitIncompleteWithoutLock(t *testing.T, status int, stop bool) {
 	v := newVSCodeTask(t, "vscode", t.TempDir())
 	arch := codeServerArch(t)
 	script := codeServerStandIn(codeServerPinned, "download")
@@ -920,11 +923,20 @@ func testVSCodeUnitIncompleteWithoutLock(t *testing.T, status int) {
 	writeCodeServer(t, dir, codeServerPinned, "partial")
 	v.start()
 	v.waitForLog("[vscode] ready")
-	v.addOrder("stop code-server")
-	require.Equal(t, status, v.wait(), v.stderr.String())
+	exited := status
+	if stop {
+		// The stop signals the service's group, whose members die at once.
+		v.killedGroups = true
+		v.signal(syscall.SIGTERM)
+		exited = 128 + int(syscall.SIGTERM)
+		require.Equal(t, exited, v.wait(), v.stderr.String())
+	} else {
+		v.addOrder("stop code-server")
+		require.Equal(t, status, v.wait(), v.stderr.String())
+	}
 	v.requireServed("download")
 	require.Equal(t, []string{
-		"[vscode] start", "[vscode] ready", "[vscode] exited " + strconv.Itoa(status),
+		"[vscode] start", "[vscode] ready", "[vscode] exited " + strconv.Itoa(exited),
 	}, v.logLines())
 
 	line := regexp.MustCompile(`(?m)^vscode service: installed code-server ` + codeServerPinned +
