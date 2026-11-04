@@ -19,11 +19,12 @@ test.describe('Workspace Tasks', () => {
       const jupyter = launchModal.service('jupyter');
       await jupyter.pwLocator.click();
       await expect(jupyter.input.pwLocator).toBeChecked();
+      const openPages = context.pages().length;
       await launchModal.footer.submit.pwLocator.click();
 
       // The launch result shows how to connect; nothing opens in a new tab.
       await shellLaunchedModal.pwLocator.waitFor();
-      expect(context.pages()).toHaveLength(1);
+      expect(context.pages()).toHaveLength(openPages);
       await shellLaunchedModal.close();
 
       await firstRow.pwLocator.waitFor({ timeout: 10_000 });
