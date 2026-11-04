@@ -12,7 +12,7 @@ import { useLaunchForm } from 'hooks/useLaunchForm';
 import { SettingsProvider } from 'hooks/useSettingsProvider';
 import authStore from 'stores/auth';
 import userStore from 'stores/users';
-import { CommandState, CommandTask, CommandType, WorkspaceState } from 'types';
+import { CommandState, CommandTask, CommandType, RawJson, WorkspaceState } from 'types';
 
 const mocks = vi.hoisted(() => ({
   getShellConfig: vi.fn(),
@@ -34,7 +34,9 @@ vi.mock('services/api', () => ({
   getUserSetting: () => Promise.resolve({ settings: [] }),
   getWorkspaces: () => Promise.resolve({ workspaces: [] }),
   launchShell: mocks.launchShell,
-  previewShell: () => Promise.resolve({}),
+  // A master without code-server: it runs jupyter by default.
+  previewShell: (params: { config?: RawJson }) =>
+    Promise.resolve({ ...params.config, services: { jupyter: {}, ...params.config?.services } }),
   updateUserSetting: () => Promise.resolve(),
 }));
 
@@ -246,11 +248,18 @@ describe('useLaunchForm', () => {
         expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('old shell'),
       );
       expect(mocks.getShellConfig).toHaveBeenCalledWith({ commandId: 'shell-old' });
+      await waitFor(() =>
+        expect(screen.getByRole('checkbox', { name: 'JupyterLab' })).toBeChecked(),
+      );
       await user.click(screen.getByRole('button', { name: 'Launch' }));
 
       expect(await screen.findByText('Interactive Task Launched')).toBeInTheDocument();
       expect(mocks.launchShell).toHaveBeenCalledWith({
-        config: { description: 'old shell', resources: { resource_pool: 'gpu', slots: 1 } },
+        config: {
+          description: 'old shell',
+          resources: { resource_pool: 'gpu', slots: 1 },
+          services: { jupyter: {} },
+        },
         workspaceId: WORKSPACE.id,
       });
       expect(mocks.onShellLaunched).toHaveBeenCalledTimes(1);

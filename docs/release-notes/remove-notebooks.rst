@@ -4,8 +4,8 @@
 
 -  CLI, API, WebUI: Remove notebooks: ``det notebook``, the notebook API (``/api/v1/notebooks``) and
    the WebUI's JupyterLab launch. JupyterLab runs as the ``jupyter`` service of a shell: ``det shell
-   start --service jupyter`` and ``det task open <shell id> jupyter``, or **jupyter** in the WebUI's
-   **Launch Interactive Task** form. See :ref:`jupyter-service`.
+   start`` and ``det task open <shell id> jupyter``, or **Launch Interactive Task** in the WebUI.
+   See :ref:`jupyter-service`.
 
 -  Master: Remove the ``notebook_timeout`` setting. A master configuration that sets it does not
    start, so remove it before upgrading. The Helm chart's ``notebookTimeout`` and ``det deploy aws

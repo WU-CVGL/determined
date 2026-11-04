@@ -193,22 +193,27 @@ The following configuration settings are supported:
       treated as idle, since JupyterLab does not provide activity information for those case.)
 
 -  ``services``: Shells only. The services that the shell runs in its container besides its SSH
-   server, as a map from the name of each service to an object, which is empty. The services are:
+   server, as a map from the name of each service to an object with one option:
+
+   -  ``enabled``: Whether the shell runs the service. The default is ``true``.
+
+   The services are:
 
    -  ``jupyter``: JupyterLab.
-
-   -  ``ssh``: The SSH server, which every shell runs.
-
+   -  ``ssh``: The SSH server, which every shell runs; it cannot be disabled.
    -  ``vscode``: VS Code in the browser, code-server. See :ref:`vscode-browser`.
 
-   A service's port is chosen outside the ports of ``environment.proxy_ports``.
+   By default a shell runs ``jupyter``, and ``vscode`` when the master serves code-server (see
+   :ref:`master-config-interactive`): the launch adds each of them to the map unless the map, or the
+   template's, has it. A service's port is chosen outside the ports of ``environment.proxy_ports``.
 
-   For example, a shell that also runs JupyterLab:
+   For example, a shell that does not run JupyterLab:
 
    .. code:: yaml
 
       services:
-        jupyter: {}
+        jupyter:
+          enabled: false
 
    See :ref:`shell-services`.
 

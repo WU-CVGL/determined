@@ -10,13 +10,18 @@ import (
 	"encoding/hex"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 )
 
 // The releases of code-server in the tests: the one that the task pins and another one, which a
@@ -183,20 +188,30 @@ func codeServerTarball(t *testing.T, version, arch, script string) []byte {
 	return buf.Bytes()
 }
 
+// sharedCodeServerCache is the cache that an administrator mounts for the tasks of all users.
+const sharedCodeServerCache = "/var/cache/determined/code-server"
+
 // vscodeTask is a task with the vscode service, under the supervisor, with the real unit: its home,
-// a directory on the PATH for stand-ins, and code-server pinned to codeServerPinned.
+// a directory on the PATH for stand-ins, the path that stands in for sharedCodeServerCache, which
+// does not exist until a test creates it, and code-server pinned to codeServerPinned.
 type vscodeTask struct {
 	*supervisorRun
-	home string
-	bin  string
+	home   string
+	bin    string
+	shared string
 }
 
 func newVSCodeTask(t *testing.T, services, home string) *vscodeTask {
 	t.Helper()
 	s := newSupervisorRun(t, services)
-	task := &vscodeTask{supervisorRun: s, home: home, bin: filepath.Join(s.dir, "bin")}
+	task := &vscodeTask{
+		supervisorRun: s, home: home, bin: filepath.Join(s.dir, "bin"),
+		shared: filepath.Join(s.dir, "shared-cache"),
+	}
 	require.NoError(t, os.Mkdir(task.bin, 0o700))
-	s.staticUnit("vscode", staticScript(t, VSCodeServiceResource))
+	unit := staticScript(t, VSCodeServiceResource)
+	require.Contains(t, unit, sharedCodeServerCache)
+	s.staticUnit("vscode", strings.ReplaceAll(unit, sharedCodeServerCache, task.shared))
 	s.env = slices.DeleteFunc(s.env, func(kv string) bool {
 		for _, name := range []string{"HOME=", "PATH=", "HASHED_PASSWORD=", "DET_CODE_SERVER_"} {
 			if strings.HasPrefix(kv, name) {
@@ -215,10 +230,64 @@ func newVSCodeTask(t *testing.T, services, home string) *vscodeTask {
 	return task
 }
 
-// cacheDir is the cache's directory of the release version for this machine.
+// setWaitSeconds makes the unit wait n seconds for another task's install instead of 600.
+func (v *vscodeTask) setWaitSeconds(n int) {
+	v.t.Helper()
+	unit := strings.ReplaceAll(staticScript(v.t, VSCodeServiceResource), sharedCodeServerCache, v.shared)
+	const wait = "\nvscode_wait_seconds=600\n"
+	require.Contains(v.t, unit, wait)
+	v.staticUnit("vscode", strings.Replace(unit, wait, "\nvscode_wait_seconds="+strconv.Itoa(n)+"\n", 1))
+}
+
+// pathWithoutPrograms is a PATH of one directory, dir, with links to the programs of this PATH
+// except programs.
+func pathWithoutPrograms(t *testing.T, dir string, programs ...string) string {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	for _, from := range filepath.SplitList(os.Getenv("PATH")) {
+		entries, err := os.ReadDir(from)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			link := filepath.Join(dir, e.Name())
+			if slices.Contains(programs, e.Name()) {
+				continue
+			}
+			if _, err := os.Lstat(link); err == nil {
+				continue
+			}
+			require.NoError(t, os.Symlink(filepath.Join(from, e.Name()), link))
+		}
+	}
+	return dir
+}
+
+// cacheDir is the home cache's directory of the release version for this machine.
 func (v *vscodeTask) cacheDir(version string) string {
-	return filepath.Join(v.home, ".cache", "determined", "code-server", version,
-		"linux-"+codeServerArch(v.t))
+	return releaseDir(v.t, filepath.Join(v.home, ".cache", "determined", "code-server"), version)
+}
+
+// releaseDir is the directory of the release version for this machine in the cache cache.
+func releaseDir(t *testing.T, cache, version string) string {
+	return filepath.Join(cache, version, "linux-"+codeServerArch(t))
+}
+
+// cacheLine is the unit's line that names the cache that it took code-server from.
+var cacheLine = regexp.MustCompile(`(?m)^vscode service: (installed|reused) `)
+
+// requireCacheLine checks that the unit logged that it installed or reused (how) code-server in
+// the release directory dir, with the suffix why.
+func (v *vscodeTask) requireCacheLine(how, dir, why string) {
+	v.t.Helper()
+	verb := map[string]string{
+		"installed": "installed code-server " + codeServerPinned + " into ",
+		"reused":    "reused code-server " + codeServerPinned + " in ",
+		"waited":    "reused code-server " + codeServerPinned + ", after waiting for its install, in ",
+	}[how]
+	require.NotEmpty(v.t, verb, how)
+	require.Contains(v.t, v.stderr.String(), "\nvscode service: "+verb+dir+why+"\n")
+	require.Len(v.t, cacheLine.FindAllString(v.stderr.String(), -1), 1, v.stderr.String())
 }
 
 // addOrder appends a line to the order file, which the stand-ins wait for.
@@ -301,6 +370,37 @@ func writeCodeServer(t *testing.T, dir, version, tag string) {
 	writeScript(t, filepath.Join(dir, "bin", "code-server"), codeServerStandIn(version, tag))
 }
 
+// writeCachedCodeServer writes the stand-in code-server of version, tagged tag, as a complete
+// release in a cache's directory dir.
+func writeCachedCodeServer(t *testing.T, dir, version, tag string) {
+	t.Helper()
+	writeCodeServer(t, dir, version, tag)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, codeServerMarker), nil, 0o600))
+}
+
+// codeServerMarker is the file that marks a complete release in a cache.
+const codeServerMarker = ".det-complete"
+
+// readOnly makes the directory tree root read-only until the test ends.
+func readOnly(t *testing.T, root string) {
+	t.Helper()
+	var dirs []string
+	require.NoError(t, filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err == nil && d.IsDir() {
+			dirs = append(dirs, path)
+		}
+		return err
+	}))
+	for _, dir := range dirs {
+		require.NoError(t, os.Chmod(dir, 0o555)) //nolint:gosec
+	}
+	t.Cleanup(func() {
+		for _, dir := range dirs {
+			_ = os.Chmod(dir, 0o755) //nolint:gosec
+		}
+	})
+}
+
 // lockWaiter returns whether a flock process runs for one of the tasks with the order files orders.
 // The holder of the lock leaves flock as soon as it has the lock.
 func lockWaiter(orders ...string) bool {
@@ -324,8 +424,9 @@ func lockWaiter(orders ...string) bool {
 	return false
 }
 
-// requireNoInstallLeft checks that no install left a temporary directory in the cache.
-func requireNoInstallLeft(t *testing.T, dir string) {
+// requireNoInstallLeft checks that no install left a temporary directory in the cache, except
+// the ones named kept, which were there before.
+func requireNoInstallLeft(t *testing.T, dir string, kept ...string) {
 	t.Helper()
 	entries, err := os.ReadDir(filepath.Dir(dir))
 	if os.IsNotExist(err) {
@@ -333,7 +434,12 @@ func requireNoInstallLeft(t *testing.T, dir string) {
 	}
 	require.NoError(t, err)
 	for _, e := range entries {
-		require.NotContains(t, e.Name(), ".tmp", "left in the cache")
+		if !slices.Contains(kept, filepath.Join(filepath.Dir(dir), e.Name())) {
+			require.NotContains(t, e.Name(), ".tmp", "left in the cache")
+		}
+	}
+	for _, path := range kept {
+		require.DirExists(t, path)
 	}
 }
 
@@ -381,7 +487,7 @@ func TestVSCodeUnitResolveOrder(t *testing.T) {
 				writeScript(t, filepath.Join(v.bin, "code-server"), codeServerStandIn(tc.path, "path"))
 			}
 			if tc.cache {
-				writeCodeServer(t, v.cacheDir(codeServerPinned), codeServerPinned, "cache")
+				writeCachedCodeServer(t, v.cacheDir(codeServerPinned), codeServerPinned, "cache")
 			}
 			// The master has the pinned release and the one it is configured with.
 			v.master.serveCodeServerRelease(t, codeServerPinned, "download", false)
@@ -397,22 +503,28 @@ func TestVSCodeUnitResolveOrder(t *testing.T) {
 				require.NotContains(t, v.stderr.String(), "skipping")
 			}
 			name := "code-server-" + codeServerPinned + "-linux-" + codeServerArch(t) + ".tar.gz"
+			if tc.want == "cache" {
+				v.requireCacheLine("reused", v.cacheDir(codeServerPinned), "")
+			}
 			if tc.want != "download" {
 				require.Empty(t, v.master.codeServerRequests())
 				return
 			}
+			v.requireCacheLine("installed", v.cacheDir(codeServerPinned), "")
 			require.Equal(t, []string{
 				codeServerPinned + "/" + name + ".sha256", codeServerPinned + "/" + name,
 			}, v.master.codeServerRequests())
 			dir := v.cacheDir(codeServerPinned)
 			require.FileExists(t, filepath.Join(dir, "bin", "code-server"))
 			require.FileExists(t, filepath.Join(dir, "lib", "node"))
+			require.FileExists(t, filepath.Join(dir, codeServerMarker))
 			requireNoInstallLeft(t, dir)
 
 			// The next task of the user finds the release in the cache.
 			next := newVSCodeTask(t, "vscode", home)
 			next.env = append(next.env, "DET_MASTER="+v.master.srv.URL)
 			next.runVSCode("download")
+			next.requireCacheLine("reused", dir, "")
 			require.Len(t, v.master.codeServerRequests(), 2)
 		})
 	}
@@ -480,6 +592,451 @@ func TestVSCodeUnitConcurrentInstall(t *testing.T) {
 	dir := first.cacheDir(codeServerPinned)
 	require.FileExists(t, filepath.Join(dir, "bin", "code-server"))
 	requireNoInstallLeft(t, dir)
+	installer, waiter := first, second
+	if !strings.Contains(first.stderr.String(), "vscode service: installed ") {
+		installer, waiter = second, first
+	}
+	installer.requireCacheLine("installed", dir, "")
+	waiter.requireCacheLine("waited", dir, "")
+}
+
+// The unit prefers the cache that an administrator mounts for all users,
+// /var/cache/determined/code-server, when it exists: it reuses a complete release there, also from
+// a read-only mount, and installs one into it. When the release is not there and cannot be
+// installed there, the unit installs it into the home cache and says why. DET_CODE_SERVER_CACHE_DIR
+// names the cache instead of both. A release without the marker of a complete install is installed
+// again. A task that cannot open or take the lock, that waited 600 s for it, or that has no flock,
+// installs without it. The release directory has the cache's mode. A full cache counts as one that
+// cannot be written to. A task leaves the temporary directories of other installs alone.
+func TestVSCodeUnitSharedCache(t *testing.T) {
+	requireReporterPython(t)
+	if os.Geteuid() == 0 {
+		t.Skip("root writes to read-only directories")
+	}
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, v *vscodeTask)
+		// override is the directory, below the task's, that DET_CODE_SERVER_CACHE_DIR names.
+		override string
+		// cache is the cache that the unit takes code-server from: "shared", "home" or "override".
+		cache, how, why string
+		tag             string
+		// check, when set, checks the task after it ran.
+		check func(t *testing.T, v *vscodeTask)
+		// downloads is how many times the task downloaded the release, when not once.
+		downloads int
+		// otherLock is whether the task leaves the lock file of the install alone: it was there
+		// before the task, or the task takes no lock.
+		otherLock bool
+	}{
+		{
+			name:  "installs into the shared cache",
+			setup: func(t *testing.T, v *vscodeTask) { require.NoError(t, os.Mkdir(v.shared, 0o777)) }, //nolint:gosec
+			cache: "shared", how: "installed", tag: "download",
+		},
+		{
+			name: "the release directory has the cache's mode",
+			setup: func(t *testing.T, v *vscodeTask) {
+				require.NoError(t, os.Mkdir(v.shared, 0o700))
+				require.NoError(t, os.Chmod(v.shared, 0o777|os.ModeSticky)) //nolint:gosec
+			},
+			cache: "shared", how: "installed", tag: "download",
+			check: func(t *testing.T, v *vscodeTask) {
+				info, err := os.Stat(filepath.Join(v.shared, codeServerPinned))
+				require.NoError(t, err)
+				require.Equal(t, 0o777|os.ModeSticky, info.Mode()&(os.ModePerm|os.ModeSticky))
+			},
+		},
+		{
+			// A lock file that the user can neither write nor read, like another user's on NFSv4,
+			// which locks files open for writing only.
+			name: "installs without a lock file that it cannot open",
+			setup: func(t *testing.T, v *vscodeTask) {
+				require.NoError(t, os.MkdirAll(filepath.Join(v.shared, codeServerPinned), 0o700))
+				require.NoError(t, os.WriteFile(releaseDir(t, v.shared, codeServerPinned)+".lock", nil,
+					0o000))
+			},
+			cache: "shared", how: "installed", tag: "download", otherLock: true,
+		},
+		{
+			name: "installs without a lock that it cannot take",
+			setup: func(t *testing.T, v *vscodeTask) {
+				require.NoError(t, os.Mkdir(v.shared, 0o700))
+				standInFlock(t, v, 65)
+			},
+			cache: "shared", how: "installed", tag: "download",
+			check: func(t *testing.T, v *vscodeTask) {
+				require.Equal(t, []string{"-n"}, flockCalls(t, v))
+			},
+		},
+		{
+			name: "installs without the lock after waiting 600 s for it",
+			setup: func(t *testing.T, v *vscodeTask) {
+				require.NoError(t, os.Mkdir(v.shared, 0o700))
+				standInFlock(t, v, 1)
+			},
+			cache: "shared", how: "installed", tag: "download",
+			check: func(t *testing.T, v *vscodeTask) {
+				require.Equal(t, []string{"-n", "-w 600"}, flockCalls(t, v))
+			},
+		},
+		{
+			name: "installs without flock and says so",
+			setup: func(t *testing.T, v *vscodeTask) {
+				require.NoError(t, os.Mkdir(v.shared, 0o700))
+				v.env = append(v.env, "PATH="+v.bin+":"+pathWithoutPrograms(t,
+					filepath.Join(v.dir, "path"), "flock", "code-server"))
+			},
+			cache: "shared", how: "installed", tag: "download", otherLock: true,
+			why: " (without a lock: flock is not installed)",
+			check: func(t *testing.T, v *vscodeTask) {
+				require.NoFileExists(t, releaseDir(t, v.shared, codeServerPinned)+".lock")
+			},
+		},
+		{
+			// Another task's install, which may still run, next to a complete release.
+			name: "leaves another install's temporary directory alone",
+			setup: func(t *testing.T, v *vscodeTask) {
+				dir := releaseDir(t, v.shared, codeServerPinned)
+				writeCachedCodeServer(t, dir, codeServerPinned, "shared")
+				writeCodeServer(t, dir+".tmp.other", codeServerPinned, "partial")
+			},
+			cache: "shared", how: "reused", tag: "shared",
+			check: func(t *testing.T, v *vscodeTask) {
+				dir := releaseDir(t, v.shared, codeServerPinned)
+				requireNoInstallLeft(t, dir, dir+".tmp.other")
+			},
+		},
+		{
+			name: "falls back to the home from a full shared cache",
+			setup: func(t *testing.T, v *vscodeTask) {
+				require.NoError(t, os.Mkdir(v.shared, 0o700))
+				tar, err := exec.LookPath("tar")
+				require.NoError(t, err)
+				writeScript(t, filepath.Join(v.bin, "tar"), `
+if [[ $* == *`+v.shared+`* ]]; then
+    echo "tar: code-server/lib/node: Cannot write: No space left on device" >&2
+    echo "tar: Exiting with failure status due to previous errors" >&2
+    exit 2
+fi
+exec `+tar+` "$@"
+`)
+			},
+			cache: "home", how: "installed", tag: "download",
+			why: " (extracting code-server-" + codeServerPinned + "-linux-" + runtime.GOARCH +
+				".tar.gz failed: tar: code-server/lib/node: Cannot write: No space left on device)",
+			downloads: 2,
+		},
+		{
+			name: "reuses a read-only shared cache",
+			setup: func(t *testing.T, v *vscodeTask) {
+				writeCachedCodeServer(t, releaseDir(t, v.shared, codeServerPinned), codeServerPinned,
+					"shared")
+				readOnly(t, v.shared)
+			},
+			cache: "shared", how: "reused", tag: "shared",
+		},
+		{
+			name: "reinstalls an incomplete release",
+			setup: func(t *testing.T, v *vscodeTask) {
+				writeCodeServer(t, releaseDir(t, v.shared, codeServerPinned), codeServerPinned, "partial")
+			},
+			cache: "shared", how: "installed", tag: "download",
+		},
+		{
+			name: "falls back to the home from a read-only shared cache",
+			setup: func(t *testing.T, v *vscodeTask) {
+				require.NoError(t, os.Mkdir(v.shared, 0o700))
+				readOnly(t, v.shared)
+			},
+			cache: "home", how: "installed", tag: "download",
+			why: " (cannot write to /shared/" + codeServerPinned + ")",
+		},
+		{
+			// Another user's release directory and lock, without the release.
+			name: "falls back to the home from another user's release directory",
+			setup: func(t *testing.T, v *vscodeTask) {
+				dir := filepath.Join(v.shared, codeServerPinned)
+				require.NoError(t, os.MkdirAll(dir, 0o700))
+				require.NoError(t, os.WriteFile(releaseDir(t, v.shared, codeServerPinned)+".lock", nil,
+					0o400))
+				readOnly(t, dir)
+			},
+			cache: "home", how: "installed", tag: "download",
+			why: " (cannot write to /shared/" + codeServerPinned + ")",
+		},
+		{
+			name: "the override wins",
+			setup: func(t *testing.T, v *vscodeTask) {
+				writeCachedCodeServer(t, releaseDir(t, v.shared, codeServerPinned), codeServerPinned,
+					"shared")
+				writeCachedCodeServer(t, v.cacheDir(codeServerPinned), codeServerPinned, "home")
+			},
+			override: "mine", cache: "override", how: "installed", tag: "download",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			v := newVSCodeTask(t, "vscode", home)
+			v.master.serveCodeServerRelease(t, codeServerPinned, "download", false)
+			tc.setup(t, v)
+			if tc.override != "" {
+				v.env = append(v.env, "DET_CODE_SERVER_CACHE_DIR="+filepath.Join(v.dir, tc.override))
+			}
+			// The files that the unit installs are readable by every user, whatever the umask.
+			umask := unix.Umask(0o077)
+			v.start()
+			unix.Umask(umask)
+			v.waitForLog("[vscode] ready")
+			v.addOrder("stop code-server")
+			require.Equal(t, 0, v.wait(), v.stderr.String())
+			v.requireServed(tc.tag)
+
+			dir := map[string]string{
+				"shared":   releaseDir(t, v.shared, codeServerPinned),
+				"home":     v.cacheDir(codeServerPinned),
+				"override": releaseDir(t, filepath.Join(v.dir, tc.override), codeServerPinned),
+			}[tc.cache]
+			v.requireCacheLine(tc.how, dir, strings.ReplaceAll(tc.why, "/shared", v.shared))
+			if tc.check != nil {
+				tc.check(t, v)
+			}
+			if tc.how == "reused" {
+				require.Empty(t, v.master.codeServerRequests())
+				return
+			}
+			require.Len(t, v.master.codeServerRequests(), 2*max(tc.downloads, 1))
+			paths := []string{filepath.Join(dir, "bin", "code-server"), filepath.Join(dir, codeServerMarker)}
+			if !tc.otherLock {
+				paths = append(paths, dir+".lock")
+			}
+			for _, path := range paths {
+				info, err := os.Stat(path)
+				require.NoError(t, err)
+				require.Equal(t, os.FileMode(0o004), info.Mode().Perm()&0o004, path)
+			}
+			requireNoInstallLeft(t, dir)
+		})
+	}
+}
+
+// Two tasks that share a cache install the same release at once, one without the lock and one
+// with it, while a third install's temporary directory is there: each uses only its own temporary
+// directory, the first rename wins, and the other task uses the winner's release. Both start
+// code-server, and the third install's directory stays.
+func TestVSCodeUnitOverlappingInstalls(t *testing.T) {
+	requireReporterPython(t)
+	home := t.TempDir()
+	lockless := newVSCodeTask(t, "vscode", home)
+	locked := newVSCodeTask(t, "vscode", home)
+	master := lockless.master
+	locked.env = append(locked.env, "DET_MASTER="+master.srv.URL)
+	master.serveCodeServerRelease(t, codeServerPinned, "download", false)
+	gate := make(chan struct{})
+	master.mu.Lock()
+	master.codeServerGate = gate
+	master.mu.Unlock()
+	standInFlock(t, lockless, 65)
+	dir := lockless.cacheDir(codeServerPinned)
+	other := dir + ".tmp.other"
+	writeCodeServer(t, other, codeServerPinned, "partial")
+	name := codeServerPinned + "/code-server-" + codeServerPinned + "-linux-" + codeServerArch(t) +
+		".tar.gz"
+	tarballs := func() int {
+		n := 0
+		for _, path := range master.codeServerRequests() {
+			if path == name {
+				n++
+			}
+		}
+		return n
+	}
+	temporary := func() []string {
+		dirs, err := filepath.Glob(dir + ".tmp.*")
+		require.NoError(t, err)
+		return slices.DeleteFunc(dirs, func(d string) bool { return d == other })
+	}
+
+	// The lockless task's install is under way, with its temporary directory, when the locked one
+	// starts its own.
+	lockless.start()
+	waitFor(t, "the lockless task's tarball request", func() bool { return tarballs() == 1 })
+	require.Len(t, temporary(), 1)
+	locked.start()
+	waitFor(t, "the locked task's tarball request", func() bool { return tarballs() == 2 })
+	require.Len(t, temporary(), 2)
+	close(gate)
+
+	lockless.waitForLog("[vscode] ready")
+	locked.waitForLog("[vscode] ready")
+	lockless.addOrder("stop code-server")
+	locked.addOrder("stop code-server")
+	<-lockless.done
+	<-locked.done
+	require.Equal(t, 0, lockless.wait(), lockless.stderr.String())
+	require.Equal(t, 0, locked.wait(), locked.stderr.String())
+	lockless.requireServed("download")
+	locked.requireServed("download")
+	require.Equal(t, []string{"-n"}, flockCalls(t, lockless))
+	require.FileExists(t, filepath.Join(dir, codeServerMarker))
+	requireNoInstallLeft(t, dir, other)
+	installer, reuser := lockless, locked
+	if !strings.Contains(lockless.stderr.String(), "vscode service: installed ") {
+		installer, reuser = locked, lockless
+	}
+	installer.requireCacheLine("installed", dir, "")
+	reuser.requireCacheLine("reused", dir, "")
+}
+
+// A task without the lock does not replace a release without the marker, which only a holder of
+// the lock does: after waiting for that, it runs code-server from its own temporary directory and
+// removes it when it exits, also when code-server exits with an error or a stop of the shell ends
+// it, before the supervisor's own cleanup of the service.
+func TestVSCodeUnitIncompleteWithoutLock(t *testing.T) {
+	requireReporterPython(t)
+	for _, status := range []int{0, 3} {
+		t.Run("exit "+strconv.Itoa(status), func(t *testing.T) {
+			testVSCodeUnitIncompleteWithoutLock(t, status, false)
+		})
+	}
+	t.Run("stop", func(t *testing.T) { testVSCodeUnitIncompleteWithoutLock(t, 0, true) })
+}
+
+// testVSCodeUnitIncompleteWithoutLock runs code-server, which exits with status, from the task's
+// own temporary directory; with stop set, a stop of the shell ends it instead.
+func testVSCodeUnitIncompleteWithoutLock(t *testing.T, status int, stop bool) {
+	v := newVSCodeTask(t, "vscode", t.TempDir())
+	arch := codeServerArch(t)
+	script := codeServerStandIn(codeServerPinned, "download")
+	require.True(t, strings.HasSuffix(script, "\nexit 0\n"))
+	script = strings.TrimSuffix(script, "exit 0\n") + "exit " + strconv.Itoa(status) + "\n"
+	name := "code-server-" + codeServerPinned + "-linux-" + arch + ".tar.gz"
+	tarball := codeServerTarball(t, codeServerPinned, arch, script)
+	sum := sha256.Sum256(tarball)
+	v.master.codeServer = map[string][]byte{
+		codeServerPinned + "/" + name:             tarball,
+		codeServerPinned + "/" + name + ".sha256": []byte(hex.EncodeToString(sum[:]) + "  " + name + "\n"),
+	}
+	v.setWaitSeconds(1)
+	standInFlock(t, v, 65)
+	dir := v.cacheDir(codeServerPinned)
+	writeCodeServer(t, dir, codeServerPinned, "partial")
+	v.start()
+	v.waitForLog("[vscode] ready")
+	exited := status
+	if stop {
+		// The stop signals the service's group, whose members die at once.
+		v.killedGroups = true
+		v.signal(syscall.SIGTERM)
+		exited = 128 + int(syscall.SIGTERM)
+		require.Equal(t, exited, v.wait(), v.stderr.String())
+	} else {
+		v.addOrder("stop code-server")
+		require.Equal(t, status, v.wait(), v.stderr.String())
+	}
+	v.requireServed("download")
+	require.Equal(t, []string{
+		"[vscode] start", "[vscode] ready", "[vscode] exited " + strconv.Itoa(exited),
+	}, v.logLines())
+
+	line := regexp.MustCompile(`(?m)^vscode service: installed code-server ` + codeServerPinned +
+		` into (` + regexp.QuoteMeta(dir) + `\.tmp\.[^/]+)/code-server-` + codeServerPinned +
+		`-linux-` + codeServerArch(t) + ` \(` + regexp.QuoteMeta(dir) + ` is incomplete\)$`)
+	match := line.FindStringSubmatch(v.stderr.String())
+	require.NotNil(t, match, v.stderr.String())
+	require.NoDirExists(t, match[1])
+	requireNoInstallLeft(t, dir)
+	require.FileExists(t, filepath.Join(dir, "bin", "code-server"))
+	require.NoFileExists(t, filepath.Join(dir, codeServerMarker))
+}
+
+// A stop of the shell ends an install of code-server, also while it waits for another task's lock
+// or for the install of a release without the marker, before the supervisor kills it: the unit
+// exits with the stop and leaves no temporary directory in the cache.
+func TestVSCodeUnitStopDuringInstall(t *testing.T) {
+	requireReporterPython(t)
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, v *vscodeTask, dir string) (ready func() bool)
+		// served is whether the master serves the tarball; else it holds it back.
+		served bool
+	}{
+		{
+			name: "waiting for the lock",
+			setup: func(t *testing.T, v *vscodeTask, dir string) func() bool {
+				require.NoError(t, os.MkdirAll(filepath.Dir(dir), 0o700))
+				lock, err := os.OpenFile(dir+".lock", os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec
+				require.NoError(t, err)
+				t.Cleanup(func() { _ = lock.Close() })
+				require.NoError(t, unix.Flock(int(lock.Fd()), unix.LOCK_EX))
+				return func() bool { return lockWaiter(v.order) }
+			},
+		},
+		{
+			name: "downloading without the lock",
+			setup: func(t *testing.T, v *vscodeTask, dir string) func() bool {
+				standInFlock(t, v, 65)
+				name := codeServerPinned + "/code-server-" + codeServerPinned + "-linux-" +
+					codeServerArch(t) + ".tar.gz"
+				return func() bool { return slices.Contains(v.master.codeServerRequests(), name) }
+			},
+		},
+		{
+			name: "waiting for the install of an incomplete release",
+			setup: func(t *testing.T, v *vscodeTask, dir string) func() bool {
+				standInFlock(t, v, 65)
+				writeCodeServer(t, dir, codeServerPinned, "partial")
+				return func() bool {
+					done, err := filepath.Glob(dir + ".tmp.*/*/" + codeServerMarker)
+					require.NoError(t, err)
+					return len(done) == 1
+				}
+			},
+			served: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := newVSCodeTask(t, "vscode", t.TempDir())
+			v.master.serveCodeServerRelease(t, codeServerPinned, "download", false)
+			gate := make(chan struct{})
+			v.master.mu.Lock()
+			v.master.codeServerGate = gate
+			v.master.mu.Unlock()
+			dir := v.cacheDir(codeServerPinned)
+			ready := tc.setup(t, v, dir)
+			if tc.served {
+				close(gate)
+			}
+			// The stop signals the service's group, whose members die at once.
+			v.killedGroups = true
+			v.start()
+			waitFor(t, "the install "+tc.name, ready)
+			v.signal(syscall.SIGTERM)
+			require.Equal(t, 128+int(syscall.SIGTERM), v.wait(), v.stderr.String())
+			require.Equal(t, []string{"[vscode] start", "[vscode] exited 143"}, v.logLines(),
+				v.stderr.String())
+			requireNoInstallLeft(t, dir)
+			require.NoFileExists(t, filepath.Join(dir, codeServerMarker))
+		})
+	}
+}
+
+// standInFlock puts a flock on the task's PATH that fails with the status rc and records its
+// options.
+func standInFlock(t *testing.T, v *vscodeTask, rc int) {
+	t.Helper()
+	writeScript(t, filepath.Join(v.bin, "flock"), `
+args=("${@:1:$#-1}")
+printf '%s\n' "${args[*]}" >>"$ORDER_FILE.flock"
+exit `+strconv.Itoa(rc)+"\n")
+}
+
+// flockCalls returns the options of the stand-in flock's calls.
+func flockCalls(t *testing.T, v *vscodeTask) []string {
+	t.Helper()
+	calls, err := os.ReadFile(v.order + ".flock")
+	require.NoError(t, err)
+	return strings.Split(strings.TrimSuffix(string(calls), "\n"), "\n")
 }
 
 // When the unit cannot have code-server, it says why in one line and exits 127, and the vscode
@@ -506,7 +1063,7 @@ func TestVSCodeUnitUnavailable(t *testing.T) {
 		},
 		{
 			name: "not a release",
-			line: "vscode service: " + name + " has no bin/code-server",
+			line: "vscode service: extracting " + name + " failed: gzip: stdin: not in gzip format",
 			setup: func(v *vscodeTask) {
 				body := []byte("not a tarball")
 				sum := sha256.Sum256(body)
@@ -537,7 +1094,7 @@ func TestVSCodeUnitUnavailable(t *testing.T) {
 			name: "cache not writable",
 			line: "vscode service: cannot write to /proc/no-cache/" + codeServerPinned,
 			setup: func(v *vscodeTask) {
-				v.env = append(v.env, "DET_CODE_SERVER_CACHE=/proc/no-cache")
+				v.env = append(v.env, "DET_CODE_SERVER_CACHE_DIR=/proc/no-cache")
 				v.master.serveCodeServerRelease(t, codeServerPinned, "download", false)
 			},
 		},

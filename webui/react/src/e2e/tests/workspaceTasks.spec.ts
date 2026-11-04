@@ -16,8 +16,8 @@ test.describe('Workspace Tasks', () => {
 
       await workspaceDetails.taskDashboard.shellButton.pwLocator.click();
       await launchModal.pwLocator.waitFor();
+      // The master runs jupyter by default; the form checks it once the master's preview arrives.
       const jupyter = launchModal.service('jupyter');
-      await jupyter.pwLocator.check();
       await expect(jupyter.input.pwLocator).toBeChecked();
       const openPages = context.pages().length;
       await launchModal.footer.submit.pwLocator.click();

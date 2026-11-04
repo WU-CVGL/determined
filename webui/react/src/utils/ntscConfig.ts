@@ -7,15 +7,24 @@ export const SHELL_SERVICES = ['jupyter', 'vscode'] as const;
 
 export type ShellService = (typeof SHELL_SERVICES)[number];
 
-const isShellService = (name: unknown): name is ShellService =>
-  (SHELL_SERVICES as readonly unknown[]).includes(name);
+/** The display name of each service of SHELL_SERVICES, as the launch form labels its checkbox. */
+export const SHELL_SERVICE_LABELS: Record<ShellService, string> = {
+  jupyter: 'JupyterLab',
+  vscode: 'VS Code',
+};
+
+/**
+ * Per service of SHELL_SERVICES, whether it runs: true sends an entry that runs it, false one that
+ * sets `enabled: false`. A service without a key gets no entry.
+ */
+export type ShellServiceChoices = Partial<Record<ShellService, boolean>>;
 
 /** The simple launch form's fields, as the launch helpers take them. */
 export interface NtscLaunchOptions {
   name?: string;
   pool?: string;
-  /** The services of SHELL_SERVICES to run. */
-  services?: string[];
+  /** The services to send. Undefined or empty sends no services: the master runs its defaults. */
+  services?: ShellServiceChoices;
   slots?: number;
   template?: string;
   workspaceId?: number;
@@ -24,8 +33,10 @@ export interface NtscLaunchOptions {
 export interface LaunchFormFields {
   name?: string;
   pool?: string;
-  /** The services of SHELL_SERVICES to run; undefined leaves a config's services as they are. */
-  services?: string[];
+  /**
+   * The services of a config, or to set in one; a service without a key keeps the config's entry.
+   */
+  services?: ShellServiceChoices;
   slots?: number;
 }
 
@@ -42,15 +53,38 @@ const SECRET_ENV_NAME = /TOKEN|SECRET|PASSW|KEY|AUTH|CRED/i;
 const asObject = (value: unknown): RawJson | undefined =>
   isPlainObject(value) ? (value as RawJson) : undefined;
 
+/**
+ * Whether a config's entry for a service runs it: a service runs unless its entry sets
+ * `enabled: false`. A null entry is the master's empty one. A service without an entry does not
+ * run: the master's defaults are already in the configs it returns.
+ */
+const serviceRuns = (entry: unknown): boolean =>
+  entry !== undefined && asObject(entry)?.enabled !== false;
+
+/** Sets a service's entry to run the service or not, keeping its other options. */
+const serviceEntry = (entry: unknown, runs: boolean): RawJson => {
+  const options = { ...asObject(entry) };
+  if (runs) delete options.enabled;
+  else options.enabled = false;
+  return options;
+};
+
 export const isAutoDescription = (description: unknown): boolean =>
   typeof description === 'string' && AUTO_DESCRIPTION.test(description);
 
+/** The services of SHELL_SERVICES that have a choice, with it. */
+const serviceChoices = (choices: ShellServiceChoices = {}): [ShellService, boolean][] =>
+  SHELL_SERVICES.flatMap((name) => {
+    const runs = choices[name];
+    return runs === undefined ? [] : [[name, runs]];
+  });
+
 /**
- * The config the simple form sends: a description, the resources and, when any is picked, the
- * services, each with no options (`services.<name>: {}`).
+ * The config the simple form sends: a description, the resources and an entry per service with a
+ * choice: `{}` for one to run, `{enabled: false}` for one not to.
  */
 export const simpleLaunchConfig = (options: NtscLaunchOptions): RawJson => {
-  const services = (options.services ?? []).filter(isShellService);
+  const services = serviceChoices(options.services);
   return {
     description: options.name === '' ? undefined : options.name,
     resources: {
@@ -59,7 +93,11 @@ export const simpleLaunchConfig = (options: NtscLaunchOptions): RawJson => {
     },
     ...(services.length === 0
       ? {}
-      : { services: Object.fromEntries(services.map((name) => [name, {}])) }),
+      : {
+          services: Object.fromEntries(
+            services.map(([name, runs]) => [name, serviceEntry(undefined, runs)]),
+          ),
+        }),
   };
 };
 
@@ -150,6 +188,10 @@ export const minimalDiff = (config: RawJson, defaults: RawJson): RawJson => {
  * is one of those settings. The defaults are required: without them there is
  * no telling an unset setting from a cleared one.
  *
+ * A service's entry with `enabled: false` is kept even where the defaults do
+ * not run the service, so that the template still turns it off if the cluster
+ * runs it later: a missing entry follows the defaults.
+ *
  * The resource pool and slots are always kept: the master ignores template
  * resources for shells, and the launch form copies them into its fields when
  * the template is picked.
@@ -170,7 +212,7 @@ export const templateFromConfig = (config: RawJson, defaults: RawJson): RawJson 
   return out;
 };
 
-/** Reads the simple form's fields out of a config. */
+/** Reads the simple form's fields out of a config: whether each service with an entry runs. */
 export const formFieldsFromConfig = (config: RawJson): LaunchFormFields => {
   const resources = asObject(config.resources);
   const description = config.description;
@@ -178,7 +220,12 @@ export const formFieldsFromConfig = (config: RawJson): LaunchFormFields => {
   return {
     name: typeof description === 'string' && !isAutoDescription(description) ? description : '',
     pool: typeof resources?.resource_pool === 'string' ? resources.resource_pool : undefined,
-    services: SHELL_SERVICES.filter((name) => !isNil(services?.[name])),
+    services: Object.fromEntries(
+      SHELL_SERVICES.filter((name) => services?.[name] !== undefined).map((name) => [
+        name,
+        serviceRuns(services?.[name]),
+      ]),
+    ),
     slots: typeof resources?.slots === 'number' ? resources.slots : undefined,
   };
 };
@@ -196,15 +243,14 @@ export const configFromForm = (base: RawJson, fields: LaunchFormFields): RawJson
   else delete resources.slots;
   out.resources = resources;
 
-  // The known services follow the form; another name and a picked service's options are kept.
-  if (fields.services !== undefined) {
+  // The services with a choice follow the form, each keeping its other options; the others stay.
+  const choices = serviceChoices(fields.services);
+  if (choices.length !== 0) {
     const services: RawJson = { ...asObject(out.services) };
-    SHELL_SERVICES.forEach((name) => {
-      if (!fields.services?.includes(name)) delete services[name];
-      else if (isNil(services[name])) services[name] = {};
+    choices.forEach(([name, runs]) => {
+      services[name] = serviceEntry(services[name], runs);
     });
-    if (Object.keys(services).length !== 0) out.services = services;
-    else delete out.services;
+    out.services = services;
   }
   return out;
 };

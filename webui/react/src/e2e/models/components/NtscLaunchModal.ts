@@ -3,6 +3,9 @@ import { BaseComponent } from 'playwright-page-model-base/BaseComponent';
 import { Modal } from 'e2e/models/common/hew/Modal';
 import { Select } from 'e2e/models/common/hew/Select';
 
+/** The form's label of each service's checkbox, by the service's config key. */
+const SERVICE_LABELS = { jupyter: 'JupyterLab', vscode: 'VS Code' } as const;
+
 /**
  * Represents the shell launch form in src/components/NtscLaunchModal.tsx, which Launch Interactive
  * Task and Launch Again open.
@@ -25,11 +28,11 @@ export class NtscLaunchModal extends Modal {
     parent: this,
     selector: '.ant-form-item:has(label[title="Slots"]) input',
   });
-  /** The checkbox of a service the shell runs besides sshd, such as jupyter, by its name. */
-  readonly service = (name: string): ServiceCheckbox =>
+  /** The checkbox of a service the shell runs besides sshd, such as jupyter, by its config key. */
+  readonly service = (name: keyof typeof SERVICE_LABELS): ServiceCheckbox =>
     new ServiceCheckbox({
       parent: this,
-      selector: `label.ant-checkbox-wrapper:has(span:text-is("${name}"))`,
+      selector: `.ant-form-item:has(label[title="Services"]) label.ant-checkbox-wrapper:has(span:text-is("${SERVICE_LABELS[name]}"))`,
     });
 }
 

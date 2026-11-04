@@ -1,6 +1,7 @@
 import Alert from 'hew/Alert';
 import Button from 'hew/Button';
 import CodeSample from 'hew/CodeSample';
+import Column from 'hew/Column';
 import { Modal } from 'hew/Modal';
 import Row from 'hew/Row';
 import { Body, Label } from 'hew/Typography';
@@ -40,23 +41,23 @@ const ShellLaunchedModalComponent: React.FC<Props> = ({ response, services }: Pr
         {command.name} ({command.id}) is starting. You can connect once its state is Running.
       </Body>
       {/* The launching user owns the task, and the task page's panes wait until it runs. */}
-      <Row wrap>
+      <Column>
         {terminalEnabled && (
-          <Button size="large" type="primary" onClick={openTab(InteractiveTaskTab.Terminal)}>
+          <Button block size="large" type="primary" onClick={openTab(InteractiveTaskTab.Terminal)}>
             Open Terminal
           </Button>
         )}
         {canOpenTaskService(services, 'jupyter') && (
-          <Button size="large" onClick={openTab(InteractiveTaskTab.JupyterLab)}>
+          <Button block size="large" onClick={openTab(InteractiveTaskTab.JupyterLab)}>
             Open JupyterLab
           </Button>
         )}
         {canOpenTaskService(services, 'vscode') && (
-          <Button size="large" onClick={openTab(InteractiveTaskTab.VSCode)}>
+          <Button block size="large" onClick={openTab(InteractiveTaskTab.VSCode)}>
             Open VS Code
           </Button>
         )}
-      </Row>
+      </Column>
       <Label>Start an interactive SSH session in the terminal:</Label>
       <CodeSample text={`det shell open ${command.id}`} />
       <Row>

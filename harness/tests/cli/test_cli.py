@@ -209,6 +209,28 @@ def test_shell_start_services(requests_mock: requests_mock.Mocker) -> None:
     cli.main(["shell", "start", "-d", "--service", "jupyter", "--service", "ssh"])
     assert launch.last_request.json()["config"] == {"services": {"jupyter": {}, "ssh": {}}}
 
+    # --no-service disables a service; for one name, the last flag wins.
+    cli.main(["shell", "start", "-d", "--no-service", "jupyter"])
+    assert launch.last_request.json()["config"] == {"services": {"jupyter": {"enabled": False}}}
+    cli.main(["shell", "start", "-d", "--service", "vscode", "--no-service", "vscode"])
+    assert launch.last_request.json()["config"] == {"services": {"vscode": {"enabled": False}}}
+    cli.main(["shell", "start", "-d", "--no-service", "vscode", "--service", "vscode"])
+    assert launch.last_request.json()["config"] == {"services": {"vscode": {}}}
+    cli.main(
+        [
+            "shell",
+            "start",
+            "-d",
+            "--no-service",
+            "jupyter",
+            "--service",
+            "vscode",
+            "--service",
+            "jupyter",
+        ]
+    )
+    assert launch.last_request.json()["config"] == {"services": {"jupyter": {}, "vscode": {}}}
+
     cli.main(
         [
             "shell",
@@ -225,6 +247,24 @@ def test_shell_start_services(requests_mock: requests_mock.Mocker) -> None:
     assert launch.last_request.json()["config"] == {
         "services": {"ssh": {}, "jupyter": {}},
         "resources": {"slots": 1},
+    }
+
+    # The flags change the entry of --config, keeping its other options.
+    cli.main(
+        [
+            "shell",
+            "start",
+            "-d",
+            "--config",
+            "services={jupyter: {enabled: false}, vscode: {opt: 1}}",
+            "--service",
+            "jupyter",
+            "--no-service",
+            "vscode",
+        ]
+    )
+    assert launch.last_request.json()["config"] == {
+        "services": {"jupyter": {}, "vscode": {"opt": 1, "enabled": False}},
     }
 
     cli.main(["shell", "start", "-d"])

@@ -73,7 +73,7 @@ class ShellTerminalPane extends BaseReactFragment {
 class TaskServicePane extends BaseReactFragment {
   readonly frame: BaseComponent;
   readonly message = new Message({ parent: this });
-  readonly retry = new BaseComponent({ parent: this, selector: 'button:has-text("Retry")' });
+  readonly retry = new BaseComponent({ parent: this, selector: 'button:has-text("Reconnect")' });
 
   constructor({ label, parent }: { label: string; parent: ComponentContainer }) {
     super({ parent });

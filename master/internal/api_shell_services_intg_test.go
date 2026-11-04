@@ -230,15 +230,14 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 		10*time.Second, 50*time.Millisecond)
 }
 
-// Without extra services a shell is launched as before: sshd only, at the bare task ID, without a
-// notebook session or JupyterLab's environment and files. Listing ssh or an empty map changes
-// nothing.
-func TestLaunchShellWithoutExtraServices(t *testing.T) {
+// A shell runs jupyter unless its config disables it: a config without services, with an empty
+// map or with ssh alone runs sshd and JupyterLab, and the launched config records jupyter. With
+// code-server on the master, vscode too, after jupyter.
+func TestLaunchShellDefaultServices(t *testing.T) {
 	api, _, ctx := setupAPITest(t, nil)
 	cs, err := command.NewService(api.m.db, api.m.rm)
 	require.NoError(t, err)
 	command.SetDefaultService(cs)
-	rm := api.m.rm.(*mocks.ResourceManager)
 
 	for name, config := range map[string]*structpb.Struct{
 		"unset":     nil,
@@ -249,8 +248,74 @@ func TestLaunchShellWithoutExtraServices(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			resp, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{Config: config})
 			require.NoError(t, err)
+			spec := launchedSpec(t, resp.Shell.Id)
+			services := resp.Config.AsMap()["services"].(map[string]any)
+			require.Equal(t, map[string]any{}, services["jupyter"])
+			require.NotContains(t, services, "vscode")
+			require.Len(t, spec.Services, 2)
+			require.Equal(t, model.ServiceSSH, spec.Services[0].Name)
+			require.Equal(t, model.ServiceJupyter, spec.Services[1].Name)
+			require.Equal(t, "ssh,jupyter", spec.Base.ExtraEnvVars["DET_SERVICES"])
+			require.NotEmpty(t, spec.Base.ExtraEnvVars["NOTEBOOK_PORT"])
+			require.Contains(t, containerFilePaths(spec), jupyterDir)
+		})
+	}
+
+	withCodeServer(t, api, "4.96.4")
+	resp, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{})
+	require.NoError(t, err)
+	spec := launchedSpec(t, resp.Shell.Id)
+	require.Equal(t, map[string]any{"jupyter": map[string]any{}, "vscode": map[string]any{}},
+		resp.Config.AsMap()["services"])
+	require.Len(t, spec.Services, 3)
+	require.Equal(t, model.ServiceVSCode, spec.Services[2].Name)
+	require.Equal(t, "ssh,jupyter,vscode", spec.Base.ExtraEnvVars["DET_SERVICES"])
+	require.NotNil(t, spec.Metadata.CodeServerPassword)
+}
+
+// A shell whose config disables jupyter, and vscode where the master serves code-server, runs
+// sshd only, at the bare task ID, without a notebook session or JupyterLab's environment and
+// files; the disabled services stay in its config. Listing ssh changes nothing, and a disabled
+// vscode needs no code-server.
+func TestLaunchShellWithServicesDisabled(t *testing.T) {
+	api, _, ctx := setupAPITest(t, nil)
+	cs, err := command.NewService(api.m.db, api.m.rm)
+	require.NoError(t, err)
+	command.SetDefaultService(cs)
+	rm := api.m.rm.(*mocks.ResourceManager)
+	off := map[string]any{"enabled": false}
+
+	for name, tc := range map[string]struct {
+		services   map[string]any
+		codeServer bool
+	}{
+		"jupyter off": {services: map[string]any{"jupyter": off}},
+		"jupyter off, ssh": {
+			services: map[string]any{"jupyter": off, "ssh": map[string]any{}},
+		},
+		"jupyter off, ssh null": {services: map[string]any{"jupyter": off, "ssh": nil}},
+		"jupyter and vscode off": {
+			services: map[string]any{"jupyter": off, "vscode": off}, codeServer: true,
+		},
+		"vscode off without code-server": {services: map[string]any{"jupyter": off, "vscode": off}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if tc.codeServer {
+				withCodeServer(t, api, "4.96.4")
+			}
+			resp, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
+				Config: servicesConfig(t, tc.services),
+			})
+			require.NoError(t, err)
 			taskID := resp.Shell.Id
 			spec := launchedSpec(t, taskID)
+			services := resp.Config.AsMap()["services"].(map[string]any)
+			require.Equal(t, off, services["jupyter"])
+			if _, ok := tc.services["vscode"]; ok {
+				require.Equal(t, off, services["vscode"])
+			} else {
+				require.NotContains(t, services, "vscode")
+			}
 
 			require.Len(t, spec.Services, 1)
 			port := spec.Services[0].Port
@@ -278,13 +343,15 @@ func TestLaunchShellWithoutExtraServices(t *testing.T) {
 			requireOncePerPath(t, paths)
 			require.NotContains(t, paths, jupyterDir)
 			require.NotContains(t, paths, jupyterCertPath)
+			require.NotContains(t, paths, codeServerRunDir)
+			require.Nil(t, spec.Metadata.CodeServerPassword)
 		})
 	}
 }
 
 // A shell with an idle timeout is watched through its task's activity record, with or without
-// extra services; with jupyter, JupyterLab's idle check reports there with the timeout and the
-// idle type, activity unless the template or the config sets another.
+// jupyter; with jupyter, JupyterLab's idle check reports there with the timeout and the idle type,
+// activity unless the template or the config sets another.
 func TestLaunchShellIdleTimeout(t *testing.T) {
 	api, _, ctx := setupAPITest(t, nil)
 	cs, err := command.NewService(api.m.db, api.m.rm)
@@ -299,7 +366,7 @@ func TestLaunchShellIdleTimeout(t *testing.T) {
 		template     string
 		wantIdleType string
 	}{
-		"ssh":     {},
+		"ssh":     {services: map[string]any{"jupyter": map[string]any{"enabled": false}}},
 		"jupyter": {services: jupyter, wantIdleType: model.NotebookIdleTypeActivity},
 		"jupyter configured": {
 			services:     jupyter,
@@ -348,7 +415,7 @@ func TestLaunchShellIdleTimeout(t *testing.T) {
 			require.False(t, spec.WatchProxyIdleTimeout)
 
 			env := spec.Base.ExtraEnvVars
-			if tc.services == nil {
+			if tc.wantIdleType == "" {
 				require.NotContains(t, env, tasks.NotebookIdleTypeEnvVar)
 				require.NotContains(t, env, tasks.IdleTimeoutSecondsEnvVar)
 				return
@@ -371,12 +438,11 @@ func TestLaunchShellIdleTimeoutMinimum(t *testing.T) {
 	command.SetDefaultService(cs)
 	rm := api.m.rm.(*mocks.ResourceManager)
 
-	for _, services := range []map[string]any{nil, {"jupyter": map[string]any{}}} {
+	for _, services := range []map[string]any{
+		{"jupyter": map[string]any{"enabled": false}}, {"jupyter": map[string]any{}},
+	} {
 		launch := func(timeout string) (*apiv1.LaunchShellResponse, error) {
-			config := map[string]any{"idle_timeout": timeout}
-			if services != nil {
-				config["services"] = services
-			}
+			config := map[string]any{"idle_timeout": timeout, "services": services}
 			raw, err := structpb.NewStruct(config)
 			require.NoError(t, err)
 			return api.LaunchShell(ctx, &apiv1.LaunchShellRequest{Config: raw})
@@ -455,8 +521,9 @@ func TestLaunchShellServicePortsExhausted(t *testing.T) {
 			"services: jupyter: no free port in 2900-3199",
 		},
 		"vscode": {
-			shellConfig(t, map[string]any{"vscode": map[string]any{}},
-				portsExcept(minServicePort, maxServicePort)...),
+			shellConfig(t, map[string]any{
+				"jupyter": map[string]any{"enabled": false}, "vscode": map[string]any{},
+			}, portsExcept(minServicePort, maxServicePort)...),
 			"services: vscode: no free port in 2900-3199",
 		},
 	} {
@@ -466,14 +533,17 @@ func TestLaunchShellServicePortsExhausted(t *testing.T) {
 		require.ErrorContains(t, err, tc.msg, name)
 	}
 
-	// Without jupyter, the services' range is free to declare.
+	// With jupyter and vscode disabled, the services' range is free to declare.
 	_, err = api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
-		Config: shellConfig(t, nil, portsExcept(minServicePort, maxServicePort)...),
+		Config: shellConfig(t, map[string]any{
+			"jupyter": map[string]any{"enabled": false}, "vscode": map[string]any{"enabled": false},
+		}, portsExcept(minServicePort, maxServicePort)...),
 	})
 	require.NoError(t, err)
 }
 
-// Only shells take services, and only the ones the supervisor has units for, with no options.
+// Only shells take services, and only the ones the supervisor has units for, with enabled as their
+// only option. Every shell runs ssh.
 func TestLaunchRejectsServices(t *testing.T) {
 	api, _, ctx := setupAPITest(t, nil)
 	cs, err := command.NewService(api.m.db, api.m.rm)
@@ -509,6 +579,14 @@ func TestLaunchRejectsServices(t *testing.T) {
 			map[string]any{"jupyter": map[string]any{"port": 8888.0}}, `unknown field "port"`,
 		},
 		"a list": {[]any{"jupyter"}, "services"},
+		"ssh disabled": {
+			map[string]any{"ssh": map[string]any{"enabled": false}},
+			"services: ssh cannot be disabled",
+		},
+		"unknown, disabled": {
+			map[string]any{"emacs": map[string]any{"enabled": false}},
+			`services: unknown service "emacs"`,
+		},
 	} {
 		_, err = api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
 			Config: servicesConfig(t, tc.services),
@@ -641,8 +719,8 @@ func TestLaunchShellWithVSCodeService(t *testing.T) {
 	require.Equal(t, "4.96.4", launchedSpec(t, taskID).Base.ExtraEnvVars["DET_CODE_SERVER_VERSION"])
 }
 
-// The vscode service needs the master to serve code-server; without interactive.code_server a
-// shell that declares it is refused, and other shells launch as before.
+// The vscode service needs the master to serve code-server; without interactive.code_server it is
+// not a default, a shell that declares it is refused, and other shells launch as before.
 func TestLaunchShellVSCodeNeedsCodeServer(t *testing.T) {
 	api, _, ctx := setupAPITest(t, nil)
 	cs, err := command.NewService(api.m.db, api.m.rm)
@@ -662,4 +740,10 @@ func TestLaunchShellVSCodeNeedsCodeServer(t *testing.T) {
 		Config: servicesConfig(t, map[string]any{"jupyter": map[string]any{}}),
 	})
 	require.NoError(t, err)
+	// A disabled vscode is not run, so it needs no code-server.
+	resp, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
+		Config: servicesConfig(t, map[string]any{"vscode": map[string]any{"enabled": false}}),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "ssh,jupyter", launchedSpec(t, resp.Shell.Id).Base.ExtraEnvVars["DET_SERVICES"])
 }

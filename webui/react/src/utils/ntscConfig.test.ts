@@ -8,6 +8,7 @@ import {
   redactSensitiveEnv,
   sanitizeConfig,
   sensitiveEnvNames,
+  ShellServiceChoices,
   simpleLaunchConfig,
   stableStringify,
   templateFromConfig,
@@ -128,6 +129,34 @@ describe('ntscConfig', () => {
       });
     });
 
+    it('keeps a service turned off, also where the defaults do not run it', () => {
+      const config = { services: { jupyter: {}, vscode: { enabled: false } } };
+      // The cluster may run it later: the template keeps it off.
+      expect(templateFromConfig(config, { services: { jupyter: {} } })).toEqual({
+        services: { vscode: { enabled: false } },
+      });
+      expect(templateFromConfig(config, { services: { jupyter: {}, vscode: {} } })).toEqual({
+        services: { vscode: { enabled: false } },
+      });
+      expect(templateFromConfig(config, { services: { jupyter: {}, vscode: null } })).toEqual({
+        services: { vscode: { enabled: false } },
+      });
+      expect(templateFromConfig(config, {})).toEqual({
+        services: { jupyter: {}, vscode: { enabled: false } },
+      });
+      // A service with other options keeps them.
+      expect(
+        templateFromConfig(
+          { services: { vscode: { enabled: false, opt: 1 } } },
+          { services: { jupyter: {} } },
+        ),
+      ).toEqual({ services: { vscode: { enabled: false, opt: 1 } } });
+      // A service that runs as the defaults run it is not a setting.
+      expect(
+        templateFromConfig({ services: { jupyter: {} } }, { services: { jupyter: {} } }),
+      ).toEqual({});
+    });
+
     it('keeps a null work_dir that clears the default one', () => {
       const defaults = { ...mergedShellConfig, work_dir: '/cluster/default-dir' };
       expect(templateFromConfig(mergedShellConfig, defaults)).toEqual({
@@ -177,43 +206,80 @@ describe('ntscConfig', () => {
       expect(formFieldsFromConfig(mergedShellConfig)).toEqual({
         name: '',
         pool: 'gpu',
-        services: [],
+        services: {},
         slots: 2,
       });
       expect(formFieldsFromConfig({ description: 'mine' }).name).toBe('mine');
-      // The known services besides ssh, which every shell runs.
+      // The known services besides ssh, which every shell runs, that have an entry: whether the
+      // entry runs them. The master's empty entry can be null.
       expect(
         formFieldsFromConfig({ services: { jupyter: {}, other: {}, ssh: {}, vscode: null } })
           .services,
-      ).toEqual(['jupyter']);
+      ).toEqual({ jupyter: true, vscode: true });
+      expect(
+        formFieldsFromConfig({
+          services: { jupyter: { enabled: false }, vscode: { enabled: true, opt: 1 } },
+        }).services,
+      ).toEqual({ jupyter: false, vscode: true });
+      expect(formFieldsFromConfig({ services: { vscode: {} } }).services).toEqual({
+        vscode: true,
+      });
     });
 
-    it('sends the picked services with no options, and no services key without one', () => {
-      expect(simpleLaunchConfig({ services: ['vscode', 'jupyter'], slots: 1 })).toEqual({
+    it('sends the known services with a choice, and no services key without them', () => {
+      expect(simpleLaunchConfig({ services: { jupyter: true, vscode: true }, slots: 1 })).toEqual({
         description: undefined,
         resources: { resource_pool: undefined, slots: 1 },
         services: { jupyter: {}, vscode: {} },
       });
-      expect(simpleLaunchConfig({ services: [] })).not.toHaveProperty('services');
+      expect(simpleLaunchConfig({ services: { jupyter: true, vscode: false } }).services).toEqual({
+        jupyter: {},
+        vscode: { enabled: false },
+      });
+      // A service without a choice gets no entry.
+      expect(simpleLaunchConfig({ services: { jupyter: false } }).services).toEqual({
+        jupyter: { enabled: false },
+      });
+      expect(
+        simpleLaunchConfig({ services: { other: true, ssh: false } as ShellServiceChoices }),
+      ).not.toHaveProperty('services');
+      expect(simpleLaunchConfig({ services: {} })).not.toHaveProperty('services');
       expect(simpleLaunchConfig({})).not.toHaveProperty('services');
-      expect(simpleLaunchConfig({ services: ['ssh', 'other'] })).not.toHaveProperty('services');
     });
 
     it('applies the services on top of a base config, keeping the others and their options', () => {
-      const base = { services: { jupyter: { opt: 1 }, other: {} } };
-      expect(configFromForm(base, { services: ['jupyter', 'vscode'] }).services).toEqual({
+      const base = { services: { jupyter: { enabled: false, opt: 1 }, other: {} } };
+      expect(configFromForm(base, { services: { jupyter: true, vscode: true } }).services).toEqual({
         jupyter: { opt: 1 },
         other: {},
         vscode: {},
       });
-      expect(configFromForm(base, { services: [] }).services).toEqual({ other: {} });
-      expect(configFromForm({ services: { jupyter: {} } }, { services: [] })).not.toHaveProperty(
-        'services',
-      );
+      expect(
+        configFromForm(base, { services: { jupyter: false, vscode: false } }).services,
+      ).toEqual({
+        jupyter: { enabled: false, opt: 1 },
+        other: {},
+        vscode: { enabled: false },
+      });
+      expect(
+        configFromForm(
+          { services: { jupyter: {}, vscode: { opt: 2 } } },
+          { services: { jupyter: false, vscode: false } },
+        ).services,
+      ).toEqual({ jupyter: { enabled: false }, vscode: { enabled: false, opt: 2 } });
+      // A service without a choice keeps the config's entry, or has none.
+      expect(configFromForm({}, { services: { jupyter: true } }).services).toEqual({
+        jupyter: {},
+      });
+      expect(configFromForm(base, { services: { vscode: true } }).services).toEqual({
+        ...base.services,
+        vscode: {},
+      });
       // Without services in the fields, the config's services stay as they are.
       expect(configFromForm(base, {}).services).toEqual(base.services);
+      expect(configFromForm({}, { services: {} })).not.toHaveProperty('services');
       // The input is not changed.
-      expect(base.services).toEqual({ jupyter: { opt: 1 }, other: {} });
+      expect(base.services).toEqual({ jupyter: { enabled: false, opt: 1 }, other: {} });
     });
 
     it('applies the form on top of a base config without touching other keys', () => {
