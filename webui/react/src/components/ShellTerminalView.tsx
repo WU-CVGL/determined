@@ -10,6 +10,8 @@ import { openTerminalLink, ShellTerminalSize } from 'services/shellTerminal';
 import css from './ShellTerminalView.module.scss';
 
 export interface ShellTerminalViewHandle {
+  /** Fits the terminal to its container, e.g. once the container is shown again. */
+  fit: () => void;
   focus: () => void;
   reset: () => void;
   size: () => ShellTerminalSize;
@@ -118,6 +120,13 @@ const ShellTerminalView = forwardRef<ShellTerminalViewHandle, Props>(
     useImperativeHandle(
       ref,
       () => ({
+        fit: () => {
+          try {
+            fitRef.current?.fit();
+          } catch {
+            // The container is hidden or not laid out yet.
+          }
+        },
         focus: () => terminalRef.current?.focus(),
         reset: () => terminalRef.current?.reset(),
         size: () => ({
