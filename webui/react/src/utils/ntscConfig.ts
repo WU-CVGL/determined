@@ -7,6 +7,12 @@ export const SHELL_SERVICES = ['jupyter', 'vscode'] as const;
 
 export type ShellService = (typeof SHELL_SERVICES)[number];
 
+/** The display name of each service of SHELL_SERVICES, as the launch form labels its checkbox. */
+export const SHELL_SERVICE_LABELS: Record<ShellService, string> = {
+  jupyter: 'JupyterLab',
+  vscode: 'VS Code',
+};
+
 /**
  * Per service of SHELL_SERVICES, whether it runs: true sends an entry that runs it, false one that
  * sets `enabled: false`. A service without a key gets no entry.

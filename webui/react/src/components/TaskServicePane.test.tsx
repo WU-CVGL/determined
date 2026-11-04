@@ -47,26 +47,26 @@ describe('TaskServicePane', () => {
     rerender(<Pane state={V1TaskServiceState.READY} />);
     expect(taskServiceUrl).toHaveBeenCalledTimes(1);
     expect(screen.queryByTitle('JupyterLab')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reconnect' })).toBeInTheDocument();
   });
 
-  it('tries once more on Retry, and shows a second failure with Retry again', async () => {
+  it('tries once more on Reconnect, and shows a second failure with Reconnect again', async () => {
     vi.mocked(taskServiceUrl).mockRejectedValueOnce(new Error('jupyter: login failed'));
     vi.mocked(taskServiceUrl).mockRejectedValueOnce(new Error('jupyter: EXITED'));
     vi.mocked(taskServiceUrl).mockResolvedValueOnce('https://det.example.org/proxy/task-1:2900/');
     render(<Pane state={V1TaskServiceState.READY} />);
     expect(await screen.findByText('jupyter: login failed')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
     expect(await screen.findByText('jupyter: EXITED')).toBeInTheDocument();
     expect(taskServiceUrl).toHaveBeenCalledTimes(2);
     expect(screen.queryByText('jupyter: login failed')).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
     const frame = await screen.findByTitle('JupyterLab');
     expect(frame).toHaveAttribute('src', 'https://det.example.org/proxy/task-1:2900/');
     expect(taskServiceUrl).toHaveBeenCalledTimes(3);
-    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reconnect' })).not.toBeInTheDocument();
   });
 
   it('reads the state of a service that has exited or cannot run', async () => {

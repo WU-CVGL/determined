@@ -22,8 +22,8 @@ interface Props {
  * An HTTP service of a task, such as JupyterLab or VS Code, in an iframe. The service's credential
  * is read once, when the pane is shown and the service's state has settled: the browser is logged
  * in to the service and the iframe loads it. A failure stays, as the service's own text, with
- * Retry for one more attempt: nothing is tried again on its own, since code-server limits failed
- * logins.
+ * Reconnect, which reads the credential and loads the service once more (the service's process is
+ * left as it is): nothing is tried again on its own, since code-server limits failed logins.
  */
 const TaskServicePane: React.FC<Props> = ({ label, service, state, taskId }: Props) => {
   const [src, setSrc] = useState<string>();
@@ -39,7 +39,7 @@ const TaskServicePane: React.FC<Props> = ({ label, service, state, taskId }: Pro
       .catch((e) => setError(errorText(e)));
   }, [attempt, service, state, taskId]);
 
-  const retry = useCallback(() => {
+  const reconnect = useCallback(() => {
     started.current = false;
     setError(undefined);
     setAttempt((a) => a + 1);
@@ -48,7 +48,7 @@ const TaskServicePane: React.FC<Props> = ({ label, service, state, taskId }: Pro
   if (error) {
     return (
       <div className={css.message}>
-        <Message action={<Button onClick={retry}>Retry</Button>} title={error} />
+        <Message action={<Button onClick={reconnect}>Reconnect</Button>} title={error} />
       </div>
     );
   }
