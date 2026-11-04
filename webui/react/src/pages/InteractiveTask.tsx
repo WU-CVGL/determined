@@ -113,6 +113,8 @@ export const InteractiveTask: React.FC = () => {
   const [task, setTask] = useState<TaskItem>();
   const [taskServices, setTaskServices] = useState<TaskServices>();
   const [command, setCommand] = useState<CommandTask>();
+  // Whether the lookup of the task's name and pool has answered, with or without a record.
+  const [lookedUp, setLookedUp] = useState(false);
   const [error, setError] = useState<string>();
 
   const requestedTab = searchParams.get('tab');
@@ -207,6 +209,9 @@ export const InteractiveTask: React.FC = () => {
       })
       .catch((e) => {
         if (!cancelled) handleError(e, { publicMessage: 'Unable to load the task.', silent: true });
+      })
+      .finally(() => {
+        if (!cancelled) setLookedUp(true);
       });
     return () => {
       cancelled = true;
@@ -291,7 +296,8 @@ export const InteractiveTask: React.FC = () => {
         <Message title={error} />
       </div>
     );
-  } else if (!task || !taskServices) {
+  } else if (!task || !taskServices || !lookedUp) {
+    // Also the lookup: a TensorBoard's tab comes from it.
     content = <Spinner center spinning />;
   } else {
     content = <Pivot activeKey={activeKey} items={items} onChange={selectTab} />;
