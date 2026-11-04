@@ -141,8 +141,8 @@ which every shell runs unless its configuration turns it off:
    the container.
 
 -  A shell whose configuration sets ``idle_timeout`` is terminated once it has been idle that long,
-   to release resources. JupyterLab activity, as the ``notebook_idle_type`` option in the :ref:`task
-   configuration <command-notebook-configuration>` defines it, counts as activity.
+   to release resources. JupyterLab activity, as the ``services.jupyter.idle_type`` option in the
+   :ref:`task configuration <job-configuration-reference>` defines it, counts as activity.
 
 .. note::
 

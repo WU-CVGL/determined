@@ -1,5 +1,3 @@
-.. _command-notebook-configuration:
-
 .. _job-configuration-reference:
 
 #############################
@@ -169,33 +167,34 @@ The following configuration settings are supported:
       terminal, SSH connection through the master or WebSocket connection to the shell is open.
       Activity is a browser terminal, an SSH connection through the master, a request to any of the
       shell's services through the master, an open WebSocket connection to one of them, and, for the
-      ``jupyter`` service, JupyterLab activity as ``notebook_idle_type`` defines it; by default a
-      kernel that is executing. An SSH session or a browser page kept open on the shell can
-      therefore delay its termination. Processes that run in the shell are not activity.
+      ``jupyter`` service, JupyterLab activity as ``services.jupyter.idle_type`` defines it; by
+      default a kernel that is executing. An SSH session or a browser page kept open on the shell
+      can therefore delay its termination. Processes that run in the shell are not activity.
 
    -  TensorBoard: The default is the master's ``tensorboard_timeout``, ``5m`` (5 minutes) unless
       the master sets another. A TensorBoard instance is considered to be idle if it does not
       receive any HTTP traffic.
 
--  ``notebook_idle_type``: Specifies how to decide whether the ``jupyter`` service of a shell with
-   ``idle_timeout`` is idle or active. The default is ``activity``. Valid values are:
-
-   -  ``kernels_or_terminals``: JupyterLab is considered active if any kernels or terminals are
-      running.
-
-   -  ``kernel_connections``: JupyterLab is considered active if there are any open connections from
-      any web connections to any kernels. (JupyterLab does not report connections to terminals, so
-      they cannot be counted.)
-
-   -  ``activity``: JupyterLab is considered active if any kernel is executing a command or any
-      terminal that is currently being viewed in JupyterLab is inputting or outputting any data. (A
-      terminal that is running a command but not being viewed or running a command with no output is
-      treated as idle, since JupyterLab does not provide activity information for those case.)
-
 -  ``services``: Shells only. The services that the shell runs in its container besides its SSH
-   server, as a map from the name of each service to an object with one option:
+   server, as a map from the name of each service to an object of its options:
 
    -  ``enabled``: Whether the shell runs the service. The default is ``true``.
+
+   -  ``idle_type``: ``jupyter`` only. Specifies how to decide whether JupyterLab is idle or active
+      in a shell with ``idle_timeout``. The default is ``activity``. Valid values are:
+
+      -  ``kernels_or_terminals``: JupyterLab is considered active if any kernels or terminals are
+         running.
+
+      -  ``kernel_connections``: JupyterLab is considered active if there are any open connections
+         from any web connections to any kernels. (JupyterLab does not report connections to
+         terminals, so they cannot be counted.)
+
+      -  ``activity``: JupyterLab is considered active if any kernel is executing a command or any
+         terminal that is currently being viewed in JupyterLab is inputting or outputting any data.
+         (A terminal that is running a command but not being viewed or running a command with no
+         output is treated as idle, since JupyterLab does not provide activity information for those
+         case.)
 
    The services are:
 

@@ -465,8 +465,8 @@ scope.
 ==========
 
 The ``Viewer`` role supersedes the ``ModelRegistryViewer`` role and includes permissions to see
-workspaces, projects, notebooks, TensorBoards, shells, commands (NTSC), and experiments, as well as
-experiment metadata and artifacts within its scope.
+workspaces, projects, TensorBoards, shells, commands (NTSC), and experiments, as well as experiment
+metadata and artifacts within its scope.
 
 ``EditorRestricted``
 ====================
@@ -487,10 +487,10 @@ The ``EditorProjectRestricted`` role supersedes the ``Viewer`` role and precedes
 role. Assign the ``EditorProjectRestricted`` to users who need ``Editor`` permissions without the
 ability to create or update projects. More specifically:
 
--  ``EditorProjectRestricted`` users can create, edit, or delete experiments and notebook,
-   TensorBoard, shell, or Command (NTSC) type workloads within their designated scope, just like
-   those with the ``Editor`` role. However, ``EditorProjectRestricted`` users lack the permissions
-   to create or update projects.
+-  ``EditorProjectRestricted`` users can create, edit, or delete experiments and TensorBoard, shell,
+   or Command (NTSC) type workloads within their designated scope, just like those with the
+   ``Editor`` role. However, ``EditorProjectRestricted`` users lack the permissions to create or
+   update projects.
 
 ``Editor``
 ==========

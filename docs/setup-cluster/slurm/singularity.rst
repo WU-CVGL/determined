@@ -283,7 +283,7 @@ To start a shell and access your copied files:
    Remember that your initial working directory will be your home directory, not where the files
    were copied. Always navigate to the correct directory to find your copied files.
 
-For more information on shell configuration options, refer to :ref:`command-notebook-configuration`.
+For more information on shell configuration options, refer to :ref:`job-configuration-reference`.
 
 File Locations
 ==============
