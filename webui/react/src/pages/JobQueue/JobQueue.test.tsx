@@ -467,7 +467,7 @@ describe('JobQueue', () => {
     expect(await screen.findByText('Launch form for shell-1 (shell)')).toBeInTheDocument();
     const fetches = vi.mocked(getJobQ).mock.calls.length;
     await userEvent.click(screen.getByRole('button', { name: 'Launch' }));
-    expect(await screen.findByText('Shell Launched')).toBeInTheDocument();
+    expect(await screen.findByText('Interactive Task Launched')).toBeInTheDocument();
     // The list is fetched again, so the new shell shows up.
     await waitFor(() => expect(vi.mocked(getJobQ).mock.calls.length).toBeGreaterThan(fetches));
   });

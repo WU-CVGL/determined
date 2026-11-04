@@ -27,6 +27,7 @@ vi.mock('services/api', () => ({
   getResourcePools: () => Promise.resolve([]),
   getShellConfig: mocks.getShellConfig,
   getShells: () => Promise.resolve([]),
+  getTaskServices: () => Promise.resolve({ services: [] }),
   getTaskTemplates: () => Promise.resolve([]),
   getUsers: () => Promise.resolve({ users: [] }),
   getUserSetting: () => Promise.resolve({ settings: [] }),
@@ -109,7 +110,7 @@ const launchedShell = {
   warnings: [],
 };
 
-/** The entry points: Launch Shell and Launch Again. */
+/** The entry points: Launch Interactive Task and Launch Again. */
 const Entries: React.FC = () => {
   const { launchFormModals, openLaunchForm } = useLaunchForm({
     onShellLaunched: mocks.onShellLaunched,
@@ -176,11 +177,11 @@ describe('useLaunchForm', () => {
   it('"Open Shell" opens the shell launch form and shows the shell’s launch result', async () => {
     const user = setup();
     await open(user, 'Open Shell');
-    expect(screen.getByText('Launch Shell')).toBeInTheDocument();
+    expect(screen.getByText('Launch Interactive Task')).toBeInTheDocument();
     expect(screen.queryByRole('radio')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Launch' }));
 
-    expect(await screen.findByText('Shell Launched')).toBeInTheDocument();
+    expect(await screen.findByText('Interactive Task Launched')).toBeInTheDocument();
     expect(screen.getByText('det shell open shell-new')).toBeInTheDocument();
     expect(mocks.launchShell).toHaveBeenCalled();
     expect(mocks.openCommandResponse).not.toHaveBeenCalled();
@@ -191,14 +192,14 @@ describe('useLaunchForm', () => {
     it('loads a shell’s config and launches it again', async () => {
       const user = setup();
       await open(user, 'Again shell-old');
-      expect(screen.getByText('Launch Shell')).toBeInTheDocument();
+      expect(screen.getByText('Launch Interactive Task')).toBeInTheDocument();
       await waitFor(() =>
         expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('old shell'),
       );
       expect(mocks.getShellConfig).toHaveBeenCalledWith({ commandId: 'shell-old' });
       await user.click(screen.getByRole('button', { name: 'Launch' }));
 
-      expect(await screen.findByText('Shell Launched')).toBeInTheDocument();
+      expect(await screen.findByText('Interactive Task Launched')).toBeInTheDocument();
       expect(mocks.launchShell).toHaveBeenCalledWith({
         config: { description: 'old shell', resources: { resource_pool: 'gpu', slots: 1 } },
         workspaceId: WORKSPACE.id,

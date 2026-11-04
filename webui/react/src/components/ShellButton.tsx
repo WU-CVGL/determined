@@ -20,13 +20,15 @@ const ShellButton: React.FC<Props> = ({ enabled, workspace }: Props) => {
     <div data-testid="shell-button">
       {enabled ? (
         <>
-          <Button onClick={handleClick}>Launch Shell</Button>
+          <Button onClick={handleClick}>Launch Interactive Task</Button>
           {launchFormModals}
         </>
       ) : (
-        <Tooltip content="You do not have permission to launch a shell" placement="leftBottom">
+        <Tooltip
+          content="You do not have permission to launch an interactive task"
+          placement="leftBottom">
           <div>
-            <Button disabled>Launch Shell</Button>
+            <Button disabled>Launch Interactive Task</Button>
           </div>
         </Tooltip>
       )}

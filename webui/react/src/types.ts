@@ -1027,7 +1027,9 @@ export const TaskAction = {
   Kill: 'Kill',
   LaunchAgain: 'Launch Again',
   ManageJob: 'Manage Job',
+  OpenJupyterLab: 'Open JupyterLab',
   OpenTerminal: 'Open Terminal',
+  OpenVSCode: 'Open Visual Studio Code',
   ViewLogs: 'View Logs',
   ViewResources: 'View Resources',
 } as const;

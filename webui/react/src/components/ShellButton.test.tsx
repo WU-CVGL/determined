@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({ launchShell: vi.fn(), openCommandResponse: vi.
 vi.mock('services/api', () => ({
   getAvailableResourcePools: () => Promise.resolve([]),
   getShells: () => Promise.resolve([]),
+  getTaskServices: () => Promise.resolve({ services: [] }),
   getTaskTemplates: () => Promise.resolve([]),
   getWorkspaces: () => Promise.resolve({ workspaces: [] }),
   launchShell: mocks.launchShell,
@@ -55,7 +56,7 @@ const setup = (enabled: boolean) => {
 describe('ShellButton', () => {
   it('shows a disabled button without permission', () => {
     setup(false);
-    expect(screen.getByRole('button', { name: 'Launch Shell' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Launch Interactive Task' })).toBeDisabled();
   });
 
   it('opens the shell launch form, launches a shell and shows how to connect to it', async () => {
@@ -76,12 +77,12 @@ describe('ShellButton', () => {
     const user = userEvent.setup();
     setup(true);
 
-    await user.click(screen.getByRole('button', { name: 'Launch Shell' }));
+    await user.click(screen.getByRole('button', { name: 'Launch Interactive Task' }));
     await screen.findByText('Start from');
     expect(screen.queryByRole('radio')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Launch' }));
 
-    expect(await screen.findByText('Shell Launched')).toBeInTheDocument();
+    expect(await screen.findByText('Interactive Task Launched')).toBeInTheDocument();
     expect(screen.getByText('det shell open shell-123')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open Terminal' })).toBeInTheDocument();
     expect(screen.getByText('View Logs').closest('a')).toHaveAttribute(

@@ -12,7 +12,7 @@ interface Return {
 
 /**
  * "Launch Again" for task lists: the launch form that the task action menu's Launch Again opens
- * (the same form as Launch Shell), and the result shown after a shell launch.
+ * (the same form as Launch Interactive Task), and the result shown after a shell launch.
  */
 export const useLaunchAgain = ({
   onLaunched,

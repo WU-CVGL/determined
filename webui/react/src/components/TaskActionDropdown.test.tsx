@@ -155,8 +155,8 @@ describe('TaskActionDropdown', () => {
     'offers only View Logs, View Resources and Copy Task ID on %s notebook record',
     async (_, state) => {
       resources.enabled = true;
-      // A notebook record's one service is JupyterLab: nothing to connect to.
-      services.list = [{ mayConnect: true, name: 'jupyter' }];
+      // A notebook record's one service is JupyterLab, which the master lets no one open.
+      services.list = [{ mayConnect: false, name: 'jupyter' }];
       const onLaunchAgain = await openLaunchAgainMenu({ ...notebook, state }, owner);
       await screen.findByText('View Logs');
       if (state === CommandState.Running) {
@@ -273,6 +273,98 @@ describe('TaskActionDropdown', () => {
       await openMenu(101, runningShell);
       await waitFor(() => expect(screen.getByText('Connect via CLI')).toBeInTheDocument());
       expect(screen.queryByText('Open Terminal')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Open JupyterLab and Open Visual Studio Code', () => {
+    const allServices = [
+      { mayConnect: true, name: 'ssh' },
+      { mayConnect: true, name: 'jupyter' },
+      { mayConnect: true, name: 'vscode' },
+    ];
+
+    beforeEach(() => {
+      feature.on = true;
+      setCurrentUser(101);
+    });
+
+    it('follow Open Terminal, one per service of the task', async () => {
+      services.list = allServices;
+      await openMenu(101, runningShell);
+      await screen.findByText('Open Visual Studio Code');
+      expect(menuLabels()).toEqual([
+        'View Logs',
+        'Copy Task ID',
+        'Connect via CLI',
+        'Open Terminal',
+        'Open JupyterLab',
+        'Open Visual Studio Code',
+        'Kill',
+      ]);
+    });
+
+    it.each([
+      ['Open JupyterLab', 'jupyter'],
+      ['Open Visual Studio Code', 'vscode'],
+    ])(
+      '"%s" opens the %s tab of the task page in a tab named after the task',
+      async (label, tab) => {
+        const open = vi.spyOn(window, 'open').mockReturnValue(null);
+        services.list = allServices;
+        await openMenu(101, runningShell);
+        await userEvent.click(await screen.findByText(label));
+        expect(open).toHaveBeenCalledWith(`/tasks/task-1/interactive?tab=${tab}`, 'task-1', '');
+        open.mockRestore();
+      },
+    );
+
+    it('are in the context menu, too', async () => {
+      services.list = allServices;
+      openContextMenu(101, runningShell);
+      expect(await screen.findByText('Open JupyterLab')).toBeInTheDocument();
+      expect(screen.getByText('Open Visual Studio Code')).toBeInTheDocument();
+    });
+
+    it('are offered without the terminal when the master turns it off', async () => {
+      feature.on = false;
+      services.list = allServices;
+      await openMenu(101, runningShell);
+      await screen.findByText('Open Visual Studio Code');
+      expect(menuLabels()).toEqual([
+        'View Logs',
+        'Copy Task ID',
+        'Connect via CLI',
+        'Open JupyterLab',
+        'Open Visual Studio Code',
+        'Kill',
+      ]);
+    });
+
+    it('are offered one at a time, for the service the task runs', async () => {
+      services.list = [
+        { mayConnect: true, name: 'ssh' },
+        { mayConnect: true, name: 'vscode' },
+      ];
+      await openMenu(101, runningShell);
+      await screen.findByText('Open Visual Studio Code');
+      expect(menuLabels()).not.toContain('Open JupyterLab');
+    });
+
+    it('are hidden for a shell the master does not let the user connect to', async () => {
+      services.list = allServices.map((service) => ({ ...service, mayConnect: false }));
+      await openMenu(102, runningShell);
+      await waitFor(() => expect(getTaskServices).toHaveBeenCalledTimes(1));
+      expect(screen.queryByText('Open JupyterLab')).not.toBeInTheDocument();
+      expect(screen.queryByText('Open Visual Studio Code')).not.toBeInTheDocument();
+    });
+
+    it('are hidden for shells that have ended', async () => {
+      services.list = allServices;
+      await openMenu(101, { ...runningShell, state: CommandState.Terminated });
+      await screen.findByText('View Logs');
+      expect(screen.queryByText('Open JupyterLab')).not.toBeInTheDocument();
+      expect(screen.queryByText('Open Visual Studio Code')).not.toBeInTheDocument();
+      expect(getTaskServices).not.toHaveBeenCalled();
     });
   });
 

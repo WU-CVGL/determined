@@ -1,10 +1,11 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Button from 'hew/Button';
 import { useModal } from 'hew/Modal';
 import UIProvider, { DefaultTheme } from 'hew/Theme';
 import { BrowserRouter } from 'react-router-dom';
 
+import { getTaskServices } from 'services/api';
 import { V1LaunchWarning } from 'services/api-ts-sdk';
 import { CommandResponse, CommandState, CommandType } from 'types';
 
@@ -16,6 +17,12 @@ vi.mock('hooks/useFeature', () => ({
   default: () => ({ isOn: (feature: string) => feature === 'shell_terminal' && flags.terminal }),
 }));
 vi.mock('hooks/useTaskResourcesEnabled', () => ({ default: () => flags.resources }));
+
+/** The launched task's services as the master reports them: a shell's SSH alone by default. */
+const services = vi.hoisted(() => ({ list: [{ mayConnect: true, name: 'ssh' }] }));
+vi.mock('services/api', () => ({
+  getTaskServices: vi.fn(() => Promise.resolve({ services: services.list })),
+}));
 
 const RESPONSE: CommandResponse = {
   command: {
@@ -50,13 +57,15 @@ const setup = async (response: CommandResponse = RESPONSE) => {
     </BrowserRouter>,
   );
   await userEvent.click(screen.getByRole('button', { name: 'Open' }));
-  await screen.findByText('Shell Launched');
+  await screen.findByText('Interactive Task Launched');
 };
 
 describe('ShellLaunchedModal', () => {
   beforeEach(() => {
     flags.resources = true;
     flags.terminal = true;
+    services.list = [{ mayConnect: true, name: 'ssh' }];
+    vi.mocked(getTaskServices).mockClear();
   });
 
   it('offers Open Terminal before the CLI command and opens the shell’s terminal tab', async () => {
@@ -77,6 +86,74 @@ describe('ShellLaunchedModal', () => {
       '',
     );
     open.mockRestore();
+  });
+
+  it('offers Open JupyterLab and Open Visual Studio Code for the services of the task', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    services.list = [
+      { mayConnect: true, name: 'ssh' },
+      { mayConnect: true, name: 'jupyter' },
+      { mayConnect: true, name: 'vscode' },
+    ];
+    await setup();
+    expect(getTaskServices).toHaveBeenCalledWith({ taskId: 'shell-123' });
+    const jupyter = await screen.findByRole('button', { name: 'Open JupyterLab' });
+    const vscode = screen.getByRole('button', { name: 'Open Visual Studio Code' });
+    const terminal = screen.getByRole('button', { name: 'Open Terminal' });
+    expect(
+      terminal.compareDocumentPosition(jupyter) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(jupyter.compareDocumentPosition(vscode) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(terminal).toHaveClass('ant-btn-primary');
+    expect(jupyter).not.toHaveClass('ant-btn-primary');
+
+    await userEvent.click(jupyter);
+    expect(open).toHaveBeenLastCalledWith(
+      expect.stringContaining('/tasks/shell-123/interactive?tab=jupyter'),
+      'shell-123',
+      '',
+    );
+    await userEvent.click(vscode);
+    expect(open).toHaveBeenLastCalledWith(
+      expect.stringContaining('/tasks/shell-123/interactive?tab=vscode'),
+      'shell-123',
+      '',
+    );
+    open.mockRestore();
+  });
+
+  it('offers the service buttons without the terminal when the master turns it off', async () => {
+    flags.terminal = false;
+    services.list = [
+      { mayConnect: true, name: 'ssh' },
+      { mayConnect: true, name: 'vscode' },
+    ];
+    await setup();
+    expect(await screen.findByRole('button', { name: 'Open Visual Studio Code' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Open Terminal' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open JupyterLab' })).not.toBeInTheDocument();
+  });
+
+  it('shows no service buttons for a shell with SSH alone', async () => {
+    await setup();
+    await waitFor(() => expect(getTaskServices).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: 'Open Terminal' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open JupyterLab' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Open Visual Studio Code' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows no service buttons when the services cannot be read', async () => {
+    vi.mocked(getTaskServices).mockRejectedValue(new Error('services unavailable'));
+    await setup();
+    await waitFor(() => expect(getTaskServices).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: 'Open Terminal' })).toBeInTheDocument();
+    expect(screen.getByText('det shell open shell-123')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open JupyterLab' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Open Visual Studio Code' }),
+    ).not.toBeInTheDocument();
   });
 
   it('links View Resources next to View Logs', async () => {
