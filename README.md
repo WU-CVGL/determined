@@ -5,92 +5,56 @@
 > [deployment guide](docs/maintenance/distribution.md), and
 > [release notes](docs/release-notes.rst).
 
-Determined is an all-in-one deep learning platform, compatible with PyTorch and TensorFlow.
+Determined is an open-source deep learning platform for teams that share GPU clusters. A master
+schedules work onto the agents of its resource pools, tracks experiments, checkpoints and logs,
+and serves a WebUI, a REST API and the `det` CLI. One cluster runs interactive development and
+batch training side by side, with PyTorch, TensorFlow, DeepSpeed or any program in a container.
 
-It takes care of:
+# Interactive
 
-- Distributed training for faster results.
-- Hyperparameter tuning for obtaining the best models.
-- Resource management for cutting cloud GPU costs.
-- Experiment tracking for analysis and reproducibility.
+One shell task runs an SSH server, JupyterLab and VS Code in the browser (code-server served by
+the master) in the same container, with the same user, files and GPUs. Start it with **Launch
+Interactive Task** on the **Jobs** page and work on its task page, in the **Terminal**,
+**JupyterLab**, **VS Code**, **Logs** and **Resources** tabs. A shell runs until it is killed,
+or until it has been idle for the `idle_timeout` its configuration sets.
 
-<br/>
+![The task page of a shell with its Terminal, JupyterLab, VS Code, Logs and Resources tabs, JupyterLab open](docs/assets/readme_images/interactive-task-page.png)
 
-<p align="center">
-<img alt="Features gif" src="./docs/assets/readme_images/features.gif">
-</p>
-
-# How Determined Works
-
-The main components of Determined are the Python library, the command line interface (CLI), and the Web UI.
-
-## Python Library
-
-Use the Python library to make your existing PyTorch or Tensorflow code compatible with Determined.
-
-You can do this by organizing your code into one of the class-based APIs:
-
-```python
-from determined.pytorch import PyTorchTrial
-
-class YourExperiment(PyTorchTrial):
-  def __init__(self, context):
-    ...
-```
-
-Or by using just the functions you want, via the Core API:
-
-```python
-import determined as det
-
-with det.core.init() as core_context:
-    ...
-```
-
-## Command Line Interface (CLI)
-
-You can use the CLI to:
-
-- Start a Determined cluster locally:
-
-```
-det deploy local cluster-up
-```
-
-- Launch Determined on cloud services, such as Amazon Web Services (AWS) or Google Cloud Platform (GCP):
-
-```
-det deploy aws up
-```
-
-- Train your models:
+![The Launch Interactive Task form with a resource pool, slots, and the jupyter and vscode services checked](docs/assets/readme_images/launch-interactive-task.png)
 
 ```bash
-det experiment create gpt.yaml .
+det shell start                    # an SSH session; JupyterLab and VS Code run with it
+det task services <shell id>       # the shell's services and their states
+det task open <shell id> vscode    # VS Code in the browser
 ```
 
-Configure everything from distributed training to hyperparameter tuning using YAML files:
+# Batch
+
+- **Experiments** with hyperparameter search and distributed training, with metrics,
+  checkpoints and a model registry.
+- **Commands and TensorBoards** for one-off programs and for viewing training metrics.
+- **GPU groups**: `resources.gpu_groups` places named groups of GPUs of exact models on one agent.
+- **Resource-pool access control**: pools are public until an administrator restricts them to
+  the users granted access.
+- **GPU topology placement**: tasks get NUMA-packed or best-connected GPUs, and a pool's topology
+  view outlines the GPUs each job holds.
+- **Task resource charts**: the CPU, memory and GPU use of each task, read from Prometheus.
+
+![A resource pool's topology view with one job's GPUs outlined, above its Active tab listing each job's GPUs](docs/assets/readme_images/resource-pool-topology.png)
+
+![The Resources tab of a task with CPU, memory, GPU utilization and allocation lifecycle charts](docs/assets/readme_images/task-resources.png)
 
 ```yaml
 resources:
-  slots_per_trial: 8
-  priority: 1
-hyperparameters:
-  learning_rate:
-    type: double
-    minval: .0001
-    maxval: 1.0
-searcher:
-  name: adaptive_asha
-  metric: validation_loss
-  smaller_is_better: true
+  slots_per_trial: 2
+  gpu_groups:
+    - {name: simulation, count: 1, models: ["NVIDIA GeForce RTX 4090"]}
+    - {name: learner, count: 1, models: ["NVIDIA H100 PCIe"]}
 ```
 
-## Web UI
-
-Use the Web UI to view loss curves, hyperparameter plots, code and configuration snapshots, model registries, cluster utilization, debugging logs, performance profiling reports, and more.
-
-![Web UI](docs/assets/readme_images/webui.png)
+```bash
+det experiment create experiment.yaml .
+```
 
 # Installation
 
@@ -112,34 +76,11 @@ images and the [fork distribution guide](docs/maintenance/distribution.md).
 earlier default to upstream `determinedai`: pass `--image-repo-prefix ghcr.io/wu-cvgl`);
 installing the fork CLI alone does not upgrade a cluster.
 
-# Examples
-Get familiar with Determined by exploring the 30+ examples in the [examples folder](https://github.com/determined-ai/determined/tree/main/examples) and the [determined-examples repo](https://github.com/determined-ai/determined-examples).
-
 # Documentation
 
-- [Documentation](https://docs.determined.ai)
-- [Quick Start Guide](https://docs.determined.ai/latest/getting-started.html)
-- Tutorials:
-  - [PyTorch MNIST Tutorial](https://docs.determined.ai/latest/tutorials/pytorch-mnist-tutorial.html)
-  - [TensorFlow Keras MNIST Tutorial](https://docs.determined.ai/latest/tutorials/tf-mnist-tutorial.html)
-- User Guides:
-  - [Core API](https://docs.determined.ai/latest/model-dev-guide/apis-howto/api-core-ug.html)
-  - [PyTorch API](https://docs.determined.ai/latest/model-dev-guide/apis-howto/api-pytorch-ug.html)
-  - [Keras API](https://docs.determined.ai/latest/model-dev-guide/apis-howto/api-keras-ug.html)
-  - [DeepSpeed API](https://docs.determined.ai/latest/model-dev-guide/apis-howto/deepspeed/overview.html)
-
-# Community
-
-If you need help, want to file a bug report, or just want to keep up-to-date
-with the latest news about Determined, please join the Determined community!
-
-- [Slack](https://determined-community.slack.com) is the best place to
-  ask questions about Determined and get support. [Click here to join our Slack](https://determined-community.slack.com).
-- You can also follow us on [YouTube](https://www.youtube.com/@DeterminedAI) and [Twitter](https://www.twitter.com/DeterminedAI).
-- You can also join the [community mailing list](https://groups.google.com/a/determined.ai/forum/#!forum/community)
-  to ask questions about the project and receive announcements.
-- To report a bug, [open an issue](https://github.com/determined-ai/determined/issues) on GitHub.
-- To report a security issue, email [`security@determined.ai`](mailto:security@determined.ai).
+A master serves the documentation of its version at `/docs` and the REST API reference at
+`/docs/rest-api`, for example `http://<master>:8080/docs`. The sources are in [docs/](docs/), and
+the [examples folder](examples/) has example models and configurations.
 
 # Contributing
 
