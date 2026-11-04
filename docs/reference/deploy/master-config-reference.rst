@@ -1879,9 +1879,9 @@ for the ``vscode`` service of shells (see :ref:`vscode-browser`). ``<file>`` is
 ``code-server-<version>-linux-<arch>.tar.gz`` or that name followed by ``.sha256``, for the
 architectures ``amd64`` and ``arm64``. Requests need the session of any user, sent as a bearer token
 or in the session cookie; a task may instead send its allocation token, ``DET_SESSION_TOKEN``, as a
-bearer token. Without this section, the master serves no code-server files. With it, every shell
-runs the ``vscode`` service unless its configuration sets ``enabled: false`` (see
-:ref:`shell-services`).
+bearer token. Without this section, the master serves no code-server files. With it, a new shell
+runs the ``vscode`` service by default unless its configuration or template sets ``enabled: false``
+(see :ref:`shell-services`).
 
 On the first request for a tarball of ``version`` that is not in ``dir``, the master downloads it
 from ``url_template``, checks it against ``sha256``, and stores it in ``dir`` together with a
