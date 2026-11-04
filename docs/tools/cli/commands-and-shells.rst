@@ -109,8 +109,10 @@ To leave one out, set its ``enabled`` to ``false`` there, or pass ``--no-service
 
 This is the same as ``det shell start --config "services={jupyter: {enabled: false}}"``.
 ``--service`` turns a service on again, for example one that a template turns off; for a service
-named by both, the last flag wins. The WebUI's **Launch Interactive Task** form has **JupyterLab**
-and **VS Code** boxes under **Services**, checked for the services the shell would run.
+named by both, the last flag wins. TensorBoard runs only when the configuration asks for it, with a
+log directory (see :ref:`tensorboard-service`). The WebUI's **Launch Interactive Task** form has
+**JupyterLab**, **VS Code** and **TensorBoard** boxes under **Services**, checked for the services
+the shell would run.
 
 A task restored after a master restart keeps the services it was started with. The default does not
 install JupyterLab into the image: without it, the ``jupyter`` service is ``UNAVAILABLE`` and the
@@ -139,6 +141,12 @@ To open VS Code in the browser, the ``vscode`` service (see :ref:`vscode-browser
 .. code::
 
    det task open <shell id> vscode
+
+To open TensorBoard, the ``tensorboard`` service:
+
+.. code::
+
+   det task open <shell id> tensorboard
 
 In the WebUI, the shell's page has a tab for each of its services (see :ref:`shell-web-terminal`). A
 service's tab opens the service once it is ``READY``; a service that cannot be opened shows its
@@ -212,6 +220,52 @@ a checkpoint every 120 seconds in an ``.ipynb_checkpoints`` directory next to th
 ``autosaveInterval`` of the **Document Manager** in **Settings** > **Advanced Settings Editor** to
 set another interval.
 
+.. _tensorboard-service:
+
+TensorBoard
+-----------
+
+The ``tensorboard`` service runs `TensorBoard <https://www.tensorflow.org/tensorboard>`__ in the
+shell's container on a directory of the container, ``services.tensorboard.logdir``. It is not a
+default service: a shell runs it when its configuration sets the directory:
+
+.. code::
+
+   det shell start --config services.tensorboard.logdir=runs
+   det task open <shell id> tensorboard
+
+The same entry as a map is ``--config "services={tensorboard: {logdir: runs}}"``. ``--service
+tensorboard`` alone is refused, since the service needs a ``logdir``; it turns on a service whose
+``logdir`` a template sets.
+
+A relative ``logdir`` is resolved against the shell's working directory. The service creates the
+directory when it is missing, so that a training run in the shell can write its event files there
+later; until then TensorBoard shows its empty page. The service is ``READY`` once TensorBoard
+answers.
+
+``services.tensorboard.args`` adds TensorBoard arguments after the service's own: ``--logdir``,
+``--port``, ``--path_prefix``, ``--bind_all`` for TensorBoard 2 and later (``--host 0.0.0.0``
+before), and ``--load_fast=false`` for TensorBoard 2.5 and later. An argument that sets one of them
+again can keep TensorBoard from starting, for example ``--host`` next to ``--bind_all``. One
+argument is a list of one; an argument with a comma goes in quotes inside a list:
+
+.. code::
+
+   det shell start --config services.tensorboard.logdir=runs \
+      --config services.tensorboard.args=--reload_interval=5
+   det shell start --config services.tensorboard.logdir=runs \
+      --config "services.tensorboard.args=['--samples_per_plugin=scalars=500,images=10']"
+
+The service runs the TensorBoard of the image, the ``tensorboard`` program on the ``PATH`` or else
+the ``tensorboard`` package of ``python3`` or ``python``, and installs nothing; without it, the
+service is ``UNAVAILABLE`` and the task log says why. TensorBoard has no login of its own: as for
+the other services, only the user who started the shell and administrators can open it, through the
+master. When TensorBoard stops, the shell and its other services keep running.
+
+In the WebUI, check **TensorBoard** under **Services** of the **Launch Interactive Task** form and
+enter the directory as **Log directory in the task** under **Data source**. The shell's page then
+has a **TensorBoard** tab, and its action menu has **Open TensorBoard**.
+
 .. _shell-image-requirements:
 
 Image Requirements
@@ -226,6 +280,8 @@ A shell's image needs:
 -  glibc 2.28 or later and a writable home directory, for the ``vscode`` service, and ``tar``,
    ``mktemp`` and GNU ``mv`` to install code-server from the master (see :ref:`vscode-browser`).
 -  Optionally ``flock``, so that shells that share a code-server cache download a release once.
+-  TensorBoard, for the ``tensorboard`` service: the ``tensorboard`` program on the ``PATH``, or the
+   ``tensorboard`` package of ``python3`` or ``python``.
 
 The default images provide them. When one is missing, the task log names it.
 

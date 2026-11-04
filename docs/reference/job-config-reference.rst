@@ -181,8 +181,7 @@ The following configuration settings are supported:
    -  ``enabled``: Whether the shell runs the service. The default is ``true``.
 
    -  ``idle_type``: ``jupyter`` only. Specifies how to decide whether JupyterLab is idle or active
-      in a shell with ``idle_timeout``. The default is ``activity``. A ``jupyter`` entry in the
-      launch configuration that does not set ``idle_type`` keeps the template's. Valid values are:
+      in a shell with ``idle_timeout``. The default is ``activity``. Valid values are:
 
       -  ``kernels_or_terminals``: JupyterLab is considered active if any kernels or terminals are
          running.
@@ -197,23 +196,37 @@ The following configuration settings are supported:
          output is treated as idle, since JupyterLab does not provide activity information for those
          case.)
 
+   -  ``logdir``: ``tensorboard`` only, and required when it runs. The directory that TensorBoard
+      reads, a path in the container; a relative one is resolved against the working directory, and
+      a missing one is created.
+
+   -  ``args``: ``tensorboard`` only. A list of more TensorBoard arguments, after the service's own.
+
+   A service's entry in the launch configuration keeps the template's ``idle_type``, ``logdir`` and
+   ``args`` when it does not set them, and runs the service unless it sets ``enabled`` to ``false``;
+   an empty ``args`` list clears the template's.
+
    The services are:
 
    -  ``jupyter``: JupyterLab.
    -  ``ssh``: The SSH server, which every shell runs; it cannot be disabled.
+   -  ``tensorboard``: TensorBoard on ``logdir``. See :ref:`tensorboard-service`.
    -  ``vscode``: VS Code in the browser, code-server. See :ref:`vscode-browser`.
 
    By default a shell runs ``jupyter``, and ``vscode`` when the master serves code-server (see
    :ref:`master-config-interactive`): the launch adds each of them to the map unless the map, or the
    template's, has it. A service's port is chosen outside the ports of ``environment.proxy_ports``.
 
-   For example, a shell that does not run JupyterLab:
+   For example, a shell that does not run JupyterLab and runs TensorBoard on ``runs`` in its working
+   directory:
 
    .. code:: yaml
 
       services:
         jupyter:
           enabled: false
+        tensorboard:
+          logdir: runs
 
    See :ref:`shell-services`.
 
