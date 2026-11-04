@@ -109,8 +109,8 @@ To leave one out, set its ``enabled`` to ``false`` there, or pass ``--no-service
 
 This is the same as ``det shell start --config "services={jupyter: {enabled: false}}"``.
 ``--service`` turns a service on again, for example one that a template turns off; for a service
-named by both, the last flag wins. The WebUI's **Launch Interactive Task** form has a checkbox for
-**jupyter** and **vscode**, checked for the services the shell would run.
+named by both, the last flag wins. The WebUI's **Launch Interactive Task** form has **JupyterLab**
+and **VS Code** boxes under **Services**, checked for the services the shell would run.
 
 A task restored after a master restart keeps the services it was started with. The default does not
 install JupyterLab into the image: without it, the ``jupyter`` service is ``UNAVAILABLE`` and the
@@ -142,8 +142,8 @@ To open VS Code in the browser, the ``vscode`` service (see :ref:`vscode-browser
 
 In the WebUI, the shell's page has a tab for each of its services (see :ref:`shell-web-terminal`). A
 service's tab opens the service once it is ``READY``; a service that cannot be opened shows its
-state in its tab with **Retry**. Only the user who started the shell and administrators can open its
-services.
+state in its tab with **Reconnect**. Only the user who started the shell and administrators can open
+its services.
 
 A shell is not terminated for being idle unless its configuration sets :ref:`idle_timeout
 <job-configuration-reference>`. With it, open SSH sessions and browser terminals and browser
@@ -165,8 +165,9 @@ shell runs it unless its configuration turns it off:
    det task open <shell id> jupyter
 
 In the WebUI, select **Launch Interactive Task** on the **Jobs** page or a workspace's **Jobs** tab,
-with **jupyter** checked, then open it from the **JupyterLab** tab of the shell's page (click the
-shell's name, or choose **Open JupyterLab** from its action menu) or with ``det task open``.
+with **JupyterLab** checked under **Services**, then open it from the **JupyterLab** tab of the
+shell's page (click the shell's name, or choose **Open JupyterLab** from its action menu) or with
+``det task open``.
 
 Opening a notebook in JupyterLab starts a kernel, which runs until you shut it down in JupyterLab.
 

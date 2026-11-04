@@ -43,8 +43,8 @@ which runs in the shell's container.
 A shell runs VS Code in the browser, `code-server <https://github.com/coder/code-server>`__, as its
 ``vscode`` service, next to its SSH server, when the master serves code-server releases (see
 :ref:`master-config-interactive`). It runs with the same user, files and environment as the SSH
-sessions. In the WebUI's **Launch Interactive Task** form, **vscode** is then checked; uncheck it,
-or pass ``--no-service vscode`` to ``det shell start``, to leave it out.
+sessions. In the WebUI's **Launch Interactive Task** form, **VS Code** under **Services** is then
+checked; uncheck it, or pass ``--no-service vscode`` to ``det shell start``, to leave it out.
 
 #. Start a shell:
 

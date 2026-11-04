@@ -13,5 +13,5 @@
 
 -  CLI: ``det shell start --no-service <name>`` leaves a service out of the shell; ``--service
    <name>`` turns one on that a template turns off.
--  WebUI: The service checkboxes of **Launch Interactive Task** are checked for the services the
-   shell would run.
+-  WebUI: The **JupyterLab** and **VS Code** boxes under **Services** in **Launch Interactive Task**
+   are checked for the services the shell would run.
