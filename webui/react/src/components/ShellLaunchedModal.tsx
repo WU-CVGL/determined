@@ -35,20 +35,15 @@ const ShellLaunchedModalComponent: React.FC<Props> = ({ response }: Props) => {
       <Body>
         {command.name} ({command.id}) is starting. You can connect once its state is Running.
       </Body>
-      {/* The launching user owns the shell, and the terminal page waits until it is running. */}
+      {/* The launching user owns the shell, and the task page's terminal waits until it runs. */}
       {terminalEnabled && (
-        <>
-          <Button
-            block
-            size="large"
-            type="primary"
-            onClick={() => openInteractiveTask(command.id, { tab: InteractiveTaskTab.Terminal })}>
-            Open Terminal
-          </Button>
-          <Body inactive>
-            The terminal opens in a new tab and waits until the shell is running.
-          </Body>
-        </>
+        <Button
+          block
+          size="large"
+          type="primary"
+          onClick={() => openInteractiveTask(command.id, { tab: InteractiveTaskTab.Terminal })}>
+          Open Terminal
+        </Button>
       )}
       <Label>Start an interactive SSH session in the terminal:</Label>
       <CodeSample text={`det shell open ${command.id}`} />

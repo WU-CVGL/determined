@@ -68,7 +68,7 @@ describe('ShellLaunchedModal', () => {
       button.compareDocumentPosition(cliLabel) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(button.closest('button')).toHaveClass('ant-btn-primary');
-    expect(screen.getByText(/waits until the shell is running/)).toBeInTheDocument();
+    expect(screen.queryByText(/waits until the shell is running/)).not.toBeInTheDocument();
 
     await userEvent.click(button);
     expect(open).toHaveBeenCalledWith(
