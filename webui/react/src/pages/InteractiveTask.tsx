@@ -359,9 +359,11 @@ export const InteractiveTask: React.FC = () => {
 
   const state = task?.allocations[0]?.state;
   const title = ui.isPageHidden ? getTitleState(state, name) : name;
-  // The state for the task bar's Kill: ended by the phase, else the allocation's, queued without one.
+  // The state for the task bar's Kill: ended by the phase, else the allocation's, queued without
+  // one or while it waits (a live state, as the task tables show it).
   let killState: CommandState | undefined;
-  if (task) killState = phase === 'ended' ? CommandState.Terminated : state ?? CommandState.Queued;
+  if (task && phase === 'ended') killState = CommandState.Terminated;
+  else if (task) killState = state && state !== CommandState.Waiting ? state : CommandState.Queued;
 
   let content: React.ReactNode;
   if (error) {

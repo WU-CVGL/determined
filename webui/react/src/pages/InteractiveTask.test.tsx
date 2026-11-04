@@ -469,6 +469,15 @@ describe('InteractiveTask', () => {
     expect(isDisabledMenuItem('Kill')).toBe(true);
   });
 
+  it('offers Kill for a task whose allocation waits', async () => {
+    vi.mocked(getTask).mockResolvedValue(taskWith(true, V1TaskType.SHELL, CommandState.Waiting));
+    setup();
+    await screen.findByTestId('terminal-pane');
+    await userEvent.click(screen.getByTestId('task-action-dropdown-trigger'));
+    await screen.findByText('Kill');
+    expect(isDisabledMenuItem('Kill')).toBe(false);
+  });
+
   it('shows why the task cannot be shown', async () => {
     vi.mocked(getTask).mockResolvedValue(undefined);
     setup();
