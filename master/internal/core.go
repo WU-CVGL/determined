@@ -103,7 +103,22 @@ var (
 
 	// Other static files should only be cached for a short period of time.
 	cacheFileShortTerm = regexp.MustCompile(`.(antd.\S+(.css)|ico|png|jpe*g|gif|svg)$`)
+
+	apiPathRegex = regexp.MustCompile(`^/api/.+$`)
 )
+
+// gzipSkipper picks the responses the master does not compress: it compresses the API's and the
+// static files'. A proxied response is the task's own, which may be compressed already (TensorBoard
+// serves its icons gzipped): compressing it again would leave the client one layer of gzip.
+func gzipSkipper(c echo.Context) bool {
+	reqPath := c.Request().URL.Path
+	if strings.HasPrefix(reqPath, "/proxy/") {
+		return true
+	}
+	return !cacheFileLongTerm.MatchString(reqPath) &&
+		!cacheFileShortTerm.MatchString(reqPath) &&
+		!apiPathRegex.MatchString(reqPath)
+}
 
 // Master manages the Determined master state.
 type Master struct {
@@ -1333,18 +1348,7 @@ func (m *Master) Run(ctx context.Context, gRPCLogInitDone chan struct{}) error {
 	m.echo = echo.New()
 	m.echo.Use(middleware.Recover())
 
-	// API endpoints
-	apiRegex := regexp.MustCompile(`^/api/.+$`)
-
-	gzipConfig := middleware.GzipConfig{
-		Skipper: func(c echo.Context) bool {
-			reqPath := c.Request().URL.Path
-			return !cacheFileLongTerm.MatchString(reqPath) &&
-				!cacheFileShortTerm.MatchString(reqPath) &&
-				!apiRegex.MatchString(reqPath)
-		},
-	}
-	m.echo.Use(middleware.GzipWithConfig(gzipConfig))
+	m.echo.Use(middleware.GzipWithConfig(middleware.GzipConfig{Skipper: gzipSkipper}))
 
 	m.echo.Use(middleware.AddTrailingSlashWithConfig(middleware.TrailingSlashConfig{
 		Skipper: func(c echo.Context) bool {
