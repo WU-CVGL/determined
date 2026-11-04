@@ -129,29 +129,32 @@ describe('ntscConfig', () => {
       });
     });
 
-    it('drops a service turned off that the defaults do not run', () => {
+    it('keeps a service turned off, also where the defaults do not run it', () => {
       const config = { services: { jupyter: {}, vscode: { enabled: false } } };
-      expect(templateFromConfig(config, { services: { jupyter: {} } })).toEqual({});
-      expect(
-        templateFromConfig(
-          { services: { jupyter: { enabled: false }, vscode: { enabled: false } } },
-          { services: { jupyter: {} } },
-        ),
-      ).toEqual({ services: { jupyter: { enabled: false } } });
-      // Where the defaults run it, turning it off is a setting.
+      // The cluster may run it later: the template keeps it off.
+      expect(templateFromConfig(config, { services: { jupyter: {} } })).toEqual({
+        services: { vscode: { enabled: false } },
+      });
       expect(templateFromConfig(config, { services: { jupyter: {}, vscode: {} } })).toEqual({
         services: { vscode: { enabled: false } },
       });
       expect(templateFromConfig(config, { services: { jupyter: {}, vscode: null } })).toEqual({
         services: { vscode: { enabled: false } },
       });
-      // A service with other options is kept.
+      expect(templateFromConfig(config, {})).toEqual({
+        services: { jupyter: {}, vscode: { enabled: false } },
+      });
+      // A service with other options keeps them.
       expect(
         templateFromConfig(
           { services: { vscode: { enabled: false, opt: 1 } } },
           { services: { jupyter: {} } },
         ),
       ).toEqual({ services: { vscode: { enabled: false, opt: 1 } } });
+      // A service that runs as the defaults run it is not a setting.
+      expect(
+        templateFromConfig({ services: { jupyter: {} } }, { services: { jupyter: {} } }),
+      ).toEqual({});
     });
 
     it('keeps a null work_dir that clears the default one', () => {

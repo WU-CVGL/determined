@@ -1383,6 +1383,22 @@ describe('NtscLaunchModal', () => {
       expect(editorText()).not.toContain('services');
     });
 
+    it('keeps a service turned off that the cluster does not run now', async () => {
+      mocks.codeServer = false;
+      mocks.getShellConfig.mockResolvedValue({
+        ...clusterShellConfig,
+        services: { jupyter: {}, vscode: { enabled: false } },
+      });
+      const { user } = await setup({ initialTask: task(CommandType.Shell) });
+      await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+      await waitFor(() => expect(editorText()).toContain('enabled: false'));
+
+      await user.click(screen.getByRole('button', { name: 'Save as Template' }));
+      expect(await screen.findByText('New Template')).toBeInTheDocument();
+      expect(yaml.load(editorText())).toMatchObject({ services: { vscode: { enabled: false } } });
+      expect(yaml.load(editorText())).not.toHaveProperty('services.jupyter');
+    });
+
     it('opens no template when the cluster defaults fail to load, and keeps a null work_dir on retry', async () => {
       // A task launched with work_dir: null, which clears the cluster default.
       mocks.getShellConfig.mockResolvedValue({ ...clusterShellConfig, work_dir: null });
