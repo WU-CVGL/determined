@@ -49,6 +49,8 @@ func startOpenSSH(t *testing.T, hostKeyPEM, authorizedKey []byte) (addr string) 
 	shipped, err := os.ReadFile("../../static/srv/sshd_config")
 	require.NoError(t, err)
 	require.Regexp(t, `(?m)^ClientAliveInterval 30$`, string(shipped))
+	// sshd runs as the current user, who may not write the default pid file.
+	require.Regexp(t, `(?m)^PidFile none$`, string(shipped))
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -57,7 +59,7 @@ func startOpenSSH(t *testing.T, hostKeyPEM, authorizedKey []byte) (addr string) 
 
 	cfg := string(shipped)
 	for pattern, repl := range map[string]string{
-		`(?m)^Port .*$`:                fmt.Sprintf("Port %d\nListenAddress 127.0.0.1\nPidFile none", port),
+		`(?m)^Port .*$`:                fmt.Sprintf("Port %d\nListenAddress 127.0.0.1", port),
 		`(?m)^HostKey .*$`:             "HostKey " + hostKey,
 		`(?m)^AuthorizedKeysFile.*$`:   "AuthorizedKeysFile " + authKeys,
 		`(?m)^StrictModes .*$`:         "StrictModes no",
