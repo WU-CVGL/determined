@@ -18,9 +18,9 @@ Interactive Task** on the **Jobs** page and work on its task page, in the **Term
 **JupyterLab**, **VS Code**, **Logs** and **Resources** tabs. A shell runs until it is killed,
 or until it has been idle for the `idle_timeout` its configuration sets.
 
-![The task page of a shell with its Terminal, JupyterLab, VS Code, Logs and Resources tabs, JupyterLab open](docs/assets/readme_images/interactive-task-page.png)
+![The task page of a shell with its Terminal, JupyterLab, VS Code, Logs and Resources tabs, JupyterLab open](docs/assets/images/interactive-task-page.png)
 
-![The Launch Interactive Task form with a resource pool, slots, and the jupyter and vscode services checked](docs/assets/readme_images/launch-interactive-task.png)
+![The Launch Interactive Task form with a resource pool, slots, and the jupyter and vscode services checked](docs/assets/images/launch-interactive-task.png)
 
 ```bash
 det shell start                    # an SSH session; JupyterLab and VS Code run with it
@@ -40,9 +40,9 @@ det task open <shell id> vscode    # VS Code in the browser
   view outlines the GPUs each job holds.
 - **Task resource charts**: the CPU, memory and GPU use of each task, read from Prometheus.
 
-![A resource pool's topology view: two nodes, their NUMA groups, and each GPU's state and health](docs/assets/readme_images/resource-pool-topology.png)
+![A resource pool's topology view: two nodes, their NUMA groups, and each GPU's state and health](docs/assets/images/resource-pool-topology.png)
 
-![The Resources tab of a task with its CPU and memory charts over the run](docs/assets/readme_images/task-resources.png)
+![The Resources tab of a task with its CPU and memory charts over the run](docs/assets/images/task-resources.png)
 
 ```yaml
 resources:
