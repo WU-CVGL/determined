@@ -7,18 +7,18 @@ export const SHELL_SERVICES = ['jupyter', 'vscode'] as const;
 
 export type ShellService = (typeof SHELL_SERVICES)[number];
 
-const isShellService = (name: unknown): name is ShellService =>
-  (SHELL_SERVICES as readonly unknown[]).includes(name);
+/**
+ * Per service of SHELL_SERVICES, whether it runs: true sends an entry that runs it, false one that
+ * sets `enabled: false`. A service without a key gets no entry.
+ */
+export type ShellServiceChoices = Partial<Record<ShellService, boolean>>;
 
 /** The simple launch form's fields, as the launch helpers take them. */
 export interface NtscLaunchOptions {
   name?: string;
   pool?: string;
-  /**
-   * The services of SHELL_SERVICES to run; the others of SHELL_SERVICES are disabled. Undefined
-   * sends no services, and the master runs its defaults.
-   */
-  services?: string[];
+  /** The services to send. Undefined or empty sends no services: the master runs its defaults. */
+  services?: ShellServiceChoices;
   slots?: number;
   template?: string;
   workspaceId?: number;
@@ -28,10 +28,9 @@ export interface LaunchFormFields {
   name?: string;
   pool?: string;
   /**
-   * The services of SHELL_SERVICES to run; the others of SHELL_SERVICES are disabled. Undefined
-   * leaves a config's services as they are.
+   * The services of a config, or to set in one; a service without a key keeps the config's entry.
    */
-  services?: string[];
+  services?: ShellServiceChoices;
   slots?: number;
 }
 
@@ -67,24 +66,30 @@ const serviceEntry = (entry: unknown, runs: boolean): RawJson => {
 export const isAutoDescription = (description: unknown): boolean =>
   typeof description === 'string' && AUTO_DESCRIPTION.test(description);
 
+/** The services of SHELL_SERVICES that have a choice, with it. */
+const serviceChoices = (choices: ShellServiceChoices = {}): [ShellService, boolean][] =>
+  SHELL_SERVICES.flatMap((name) => {
+    const runs = choices[name];
+    return runs === undefined ? [] : [[name, runs]];
+  });
+
 /**
- * The config the simple form sends: a description, the resources and, when the services are
- * given, an entry per service of SHELL_SERVICES: `{}` for one to run, `{enabled: false}` for the
- * others.
+ * The config the simple form sends: a description, the resources and an entry per service with a
+ * choice: `{}` for one to run, `{enabled: false}` for one not to.
  */
 export const simpleLaunchConfig = (options: NtscLaunchOptions): RawJson => {
-  const services = options.services?.filter(isShellService);
+  const services = serviceChoices(options.services);
   return {
     description: options.name === '' ? undefined : options.name,
     resources: {
       resource_pool: options.pool === '' ? undefined : options.pool,
       slots: options.slots,
     },
-    ...(services === undefined
+    ...(services.length === 0
       ? {}
       : {
           services: Object.fromEntries(
-            SHELL_SERVICES.map((name) => [name, serviceEntry(undefined, services.includes(name))]),
+            services.map(([name, runs]) => [name, serviceEntry(undefined, runs)]),
           ),
         }),
   };
@@ -187,6 +192,17 @@ export const templateFromConfig = (config: RawJson, defaults: RawJson): RawJson 
   const cleanDefaults = sanitizeConfig(defaults);
   delete cleanDefaults.description;
   const out = minimalDiff(clean, cleanDefaults);
+  // A service turned off that the defaults do not run either is not a setting.
+  const services = asObject(out.services);
+  if (services) {
+    const defaultServices = asObject(cleanDefaults.services);
+    Object.entries(services).forEach(([name, entry]) => {
+      if (defaultServices?.[name] === undefined && isEqual(entry, { enabled: false })) {
+        delete services[name];
+      }
+    });
+    if (Object.keys(services).length === 0) delete out.services;
+  }
   const resources = asObject(clean.resources);
   if (resources) {
     const kept: RawJson = {};
@@ -197,7 +213,7 @@ export const templateFromConfig = (config: RawJson, defaults: RawJson): RawJson 
   return out;
 };
 
-/** Reads the simple form's fields out of a config: the services are the ones that run. */
+/** Reads the simple form's fields out of a config: whether each service with an entry runs. */
 export const formFieldsFromConfig = (config: RawJson): LaunchFormFields => {
   const resources = asObject(config.resources);
   const description = config.description;
@@ -205,7 +221,12 @@ export const formFieldsFromConfig = (config: RawJson): LaunchFormFields => {
   return {
     name: typeof description === 'string' && !isAutoDescription(description) ? description : '',
     pool: typeof resources?.resource_pool === 'string' ? resources.resource_pool : undefined,
-    services: SHELL_SERVICES.filter((name) => serviceRuns(services?.[name])),
+    services: Object.fromEntries(
+      SHELL_SERVICES.filter((name) => services?.[name] !== undefined).map((name) => [
+        name,
+        serviceRuns(services?.[name]),
+      ]),
+    ),
     slots: typeof resources?.slots === 'number' ? resources.slots : undefined,
   };
 };
@@ -223,11 +244,12 @@ export const configFromForm = (base: RawJson, fields: LaunchFormFields): RawJson
   else delete resources.slots;
   out.resources = resources;
 
-  // The known services follow the form, each keeping its other options; another name is kept.
-  if (fields.services !== undefined) {
+  // The services with a choice follow the form, each keeping its other options; the others stay.
+  const choices = serviceChoices(fields.services);
+  if (choices.length !== 0) {
     const services: RawJson = { ...asObject(out.services) };
-    SHELL_SERVICES.forEach((name) => {
-      services[name] = serviceEntry(services[name], fields.services?.includes(name) ?? false);
+    choices.forEach(([name, runs]) => {
+      services[name] = serviceEntry(services[name], runs);
     });
     out.services = services;
   }

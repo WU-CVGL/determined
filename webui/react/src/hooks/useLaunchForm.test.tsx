@@ -199,6 +199,7 @@ describe('useLaunchForm', () => {
         expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('old shell'),
       );
       expect(mocks.getShellConfig).toHaveBeenCalledWith({ commandId: 'shell-old' });
+      await waitFor(() => expect(screen.getByRole('checkbox', { name: 'jupyter' })).toBeChecked());
       await user.click(screen.getByRole('button', { name: 'Launch' }));
 
       expect(await screen.findByText('Interactive Task Launched')).toBeInTheDocument();
@@ -206,7 +207,7 @@ describe('useLaunchForm', () => {
         config: {
           description: 'old shell',
           resources: { resource_pool: 'gpu', slots: 1 },
-          services: { jupyter: {}, vscode: { enabled: false } },
+          services: { jupyter: {} },
         },
         workspaceId: WORKSPACE.id,
       });

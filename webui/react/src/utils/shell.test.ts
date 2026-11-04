@@ -51,7 +51,7 @@ describe('shell', () => {
         shellRequest({
           name: 'lab',
           pool: 'gpu',
-          services: ['jupyter'],
+          services: { jupyter: true, vscode: false },
           slots: 2,
           template: 'tpl',
           workspaceId: 3,
@@ -75,7 +75,7 @@ describe('shell', () => {
         description: 'JupyterLab (kindly-quick-heron)',
         services: { vscode: {} },
       };
-      expect(shellRequest({ config, services: ['jupyter'], template: 'tpl' })).toEqual({
+      expect(shellRequest({ config, services: { jupyter: true }, template: 'tpl' })).toEqual({
         config: { services: { vscode: {} } },
         templateName: undefined,
         workspaceId: undefined,
@@ -84,7 +84,12 @@ describe('shell', () => {
   });
 
   it('previews and launches the same request for the same options', async () => {
-    const options = { name: 'lab', services: ['jupyter', 'vscode'], slots: 1, workspaceId: 3 };
+    const options = {
+      name: 'lab',
+      services: { jupyter: true, vscode: true },
+      slots: 1,
+      workspaceId: 3,
+    };
     expect(await previewShell(options)).toEqual({ notebook_idle_type: 'activity' });
     await launchShell(options);
     expect(vi.mocked(apiPreviewShell).mock.calls[0][0]).toEqual(shellRequest(options));

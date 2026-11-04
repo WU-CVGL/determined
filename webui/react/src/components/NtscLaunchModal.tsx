@@ -33,6 +33,8 @@ import {
   NtscLaunchOptions,
   sanitizeConfig,
   SHELL_SERVICES,
+  ShellService,
+  ShellServiceChoices,
   templateFromConfig,
   templateResources,
 } from 'utils/ntscConfig';
@@ -55,14 +57,30 @@ interface LaunchFormValues extends LaunchFormSettings {
   source?: string;
 }
 
-/** The checked services, or undefined while the checkboxes are unset: the master then decides. */
-const checkedServices = (values: LaunchFormValues): string[] | undefined =>
-  values.services === undefined
-    ? undefined
-    : SHELL_SERVICES.filter((name) => values.services?.[name]);
+/**
+ * The services to send: a checked one runs, an unchecked one that the master offered is turned
+ * off, and one it did not offer is left out. Undefined while the checkboxes are unset: the master
+ * then decides.
+ */
+const checkedServices = (
+  values: LaunchFormValues,
+  offered: readonly ShellService[],
+): ShellServiceChoices | undefined => {
+  if (values.services === undefined) return undefined;
+  const choices: ShellServiceChoices = {};
+  SHELL_SERVICES.forEach((name) => {
+    if (values.services?.[name]) choices[name] = true;
+    else if (offered.includes(name)) choices[name] = false;
+  });
+  return choices;
+};
 
-const serviceChecks = (services: string[] = []): Record<string, boolean> =>
-  Object.fromEntries(SHELL_SERVICES.map((name) => [name, services.includes(name)]));
+const serviceChecks = (choices: ShellServiceChoices = {}): Record<string, boolean> =>
+  Object.fromEntries(SHELL_SERVICES.map((name) => [name, choices[name] ?? false]));
+
+/** The services that a config has an entry for: the ones the master offers for it. */
+const offeredServices = (choices: ShellServiceChoices = {}): ShellService[] =>
+  SHELL_SERVICES.filter((name) => choices[name] !== undefined);
 
 /** The user's last-used form values, kept on the server. */
 const settingsConfig: SettingsConfig<LaunchFormSettings> = {
@@ -183,18 +201,24 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     saveDefaults(settingsFromForm(fields));
   }, [form, saveDefaults]);
 
+  // The services that the start-from's config or preview has an entry for.
+  const offered = useRef<ShellService[]>([]);
+
   /** The launch or preview options for the simple form's current values. */
   const simpleOptions = useCallback(
     (fields: LaunchFormValues) =>
       baseConfig
         ? {
-            config: configFromForm(baseConfig, { ...fields, services: checkedServices(fields) }),
+            config: configFromForm(baseConfig, {
+              ...fields,
+              services: checkedServices(fields, offered.current),
+            }),
             workspaceId: fields.workspaceId,
           }
         : {
             name: fields.name,
             pool: fields.pool,
-            services: checkedServices(fields),
+            services: checkedServices(fields, offered.current),
             slots: fields.slots,
             template: templateNameFromStartFrom(fields.source),
             workspaceId: fields.workspaceId,
@@ -204,28 +228,66 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
 
   // The services that the start-from runs, previewed through the master without the checkboxes
   // each time the start-from changes, once the simple form shows it: the master's defaults, and
-  // what a template or a config turns off. The checkboxes follow the latest preview; a refused
-  // preview leaves them, and the full config shows the refusal. Showing the simple form again
-  // after the full config previews nothing, so that the checkboxes keep their changes.
+  // what a template or a config turns off. The checkboxes follow the latest preview, except a box
+  // changed while it was on its way. A refused preview leaves them, and the full config shows the
+  // refusal; it is sent again when the pool or the workspace changes. Showing the simple form
+  // again after the full config previews nothing, so that the checkboxes keep their changes.
   const [simpleFormShown, setSimpleFormShown] = useState(false);
   const source = Form.useWatch('source', form);
-  const servicesPreview = useRef<{ baseConfig?: RawJson; seq: number; source?: string }>({
-    seq: 0,
-  });
+  const pool = Form.useWatch('pool', form);
+  const workspaceId = Form.useWatch('workspaceId', form);
+  const servicesPreview = useRef<{
+    baseConfig?: RawJson;
+    failed?: boolean;
+    seq: number;
+    source?: string;
+  }>({ seq: 0 });
   useEffect(() => {
     if (!simpleFormShown || startFromLoading) return;
     const last = servicesPreview.current;
-    if (last.seq !== 0 && last.source === source && last.baseConfig === baseConfig) return;
+    if (
+      !last.failed &&
+      last.seq !== 0 &&
+      last.source === source &&
+      last.baseConfig === baseConfig
+    ) {
+      return;
+    }
     const seq = last.seq + 1;
     servicesPreview.current = { baseConfig, seq, source };
     const fields: LaunchFormValues = form.getFieldsValue(true);
+    const sent = fields.services;
     previewShell(simpleOptions({ ...fields, services: undefined, source }))
       .then((previewed) => {
         if (seq !== servicesPreview.current.seq) return;
-        form.setFieldsValue({ services: serviceChecks(formFieldsFromConfig(previewed).services) });
+        const choices = formFieldsFromConfig(previewed).services;
+        offered.current = offeredServices(choices);
+        const checks = serviceChecks(choices);
+        const current: LaunchFormValues['services'] = form.getFieldValue('services');
+        form.setFieldsValue({
+          services: Object.fromEntries(
+            SHELL_SERVICES.map((name) => [
+              name,
+              current?.[name] === sent?.[name] ? checks[name] : current?.[name],
+            ]),
+          ),
+        });
       })
-      .catch(() => undefined);
-  }, [baseConfig, form, simpleFormShown, simpleOptions, source, startFromLoading]);
+      .catch(() => {
+        if (seq === servicesPreview.current.seq) {
+          servicesPreview.current = { ...servicesPreview.current, failed: true };
+        }
+      });
+  }, [
+    baseConfig,
+    form,
+    pool,
+    simpleFormShown,
+    simpleOptions,
+    source,
+    startFromLoading,
+    workspaceId,
+  ]);
 
   // Previewed each time the full config opens.
   const fetchConfig = useCallback(async () => {
@@ -292,6 +354,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
         const fields = formFieldsFromConfig(base);
         setBaseConfig(base);
         setRedactedEnv(start.redactedEnv);
+        offered.current = offeredServices(fields.services);
         form.setFieldsValue({
           name: fields.name,
           pool: fields.pool,

@@ -977,7 +977,7 @@ describe('NtscLaunchModal', () => {
       });
     });
 
-    it('leaves vscode unchecked without code-server on the master, and sends it disabled', async () => {
+    it('leaves vscode unchecked and out of the request without code-server on the master', async () => {
       mocks.codeServer = false;
       const { onLaunched, user } = await setup();
       expect(serviceBox('jupyter')).toBeChecked();
@@ -985,9 +985,52 @@ describe('NtscLaunchModal', () => {
 
       await launch(user);
       await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell.mock.calls[0][0].config.services).toEqual({ jupyter: {} });
+    });
+
+    it('keeps a box checked while the preview on open is on its way', async () => {
+      mocks.codeServer = false;
+      const pending = deferred<void>();
+      mocks.previewShell.mockImplementationOnce((params: { config?: RawJson }) =>
+        pending.promise.then(() => previewFor(params)),
+      );
+      const { onLaunched, user } = await setup({}, { settled: false });
+      await waitFor(() => expect(mocks.previewShell).toHaveBeenCalledTimes(1));
+      await user.click(serviceBox('vscode'));
+      pending.resolve();
+
+      await waitFor(() => expect(serviceBox('jupyter')).toBeChecked());
+      expect(serviceBox('vscode')).toBeChecked();
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
       expect(mocks.launchShell.mock.calls[0][0].config.services).toEqual({
         jupyter: {},
-        vscode: { enabled: false },
+        vscode: {},
+      });
+    });
+
+    it('keeps a box unchecked while the preview of a picked config is on its way', async () => {
+      mocks.getShellConfig.mockResolvedValue({ ...clusterShellConfig, services: { jupyter: {} } });
+      const pending = deferred<void>();
+      mocks.previewShell.mockImplementationOnce((params: { config?: RawJson }) =>
+        pending.promise.then(() => previewFor(params)),
+      );
+      const { onLaunched, user } = await setup(
+        { initialTask: task(CommandType.Shell) },
+        { settled: false },
+      );
+      await waitFor(() => expect(serviceBox('jupyter')).toBeChecked());
+      await waitFor(() => expect(mocks.previewShell).toHaveBeenCalledTimes(1));
+      await user.click(serviceBox('jupyter'));
+      pending.resolve();
+
+      await waitFor(() => expect(serviceBox('vscode')).toBeChecked());
+      expect(serviceBox('jupyter')).not.toBeChecked();
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell.mock.calls[0][0].config.services).toEqual({
+        jupyter: { enabled: false },
+        vscode: {},
       });
     });
 
@@ -1094,17 +1137,47 @@ describe('NtscLaunchModal', () => {
       });
     });
 
-    it('sends no services while the start-from preview fails, so the master runs its defaults', async () => {
-      mocks.previewShell.mockImplementation(async () => {
-        throw await masterRefusal(503, 'master is restarting');
+    it('previews the start-from again after a refusal when the pool changes', async () => {
+      const pool = { auxContainerCapacityPerAgent: 1, slotsAvailable: 0, slotsPerAgent: 0 };
+      mocks.pools = [
+        { ...pool, name: 'a-pool', usable: true },
+        { ...pool, name: 'b-pool', usable: true },
+      ];
+      mocks.availablePools = ['a-pool', 'b-pool'];
+      clusterStore.fetchResourcePools();
+      await waitFor(() =>
+        expect(Loadable.getOrElse([], clusterStore.resourcePools.get())).toHaveLength(2),
+      );
+      let refuse = true;
+      mocks.previewShell.mockImplementation(async (params: { config?: RawJson }) => {
+        if (refuse) throw await masterRefusal(403, 'user may not use the resource pool a-pool');
+        return previewFor(params);
       });
-      const { onLaunched, user } = await setup({}, { settled: false });
-      expect(serviceBox('jupyter')).not.toBeChecked();
-      expect(serviceBox('vscode')).not.toBeChecked();
+      try {
+        const { onLaunched, user } = await setup({}, { settled: false });
+        const picker = screen.getByRole('combobox', { name: 'Resource Pool' });
+        await waitFor(() => expect(picker.closest('.ant-select')).toHaveTextContent('a-pool'));
+        await waitFor(() => expect(mocks.previewShell).toHaveBeenCalled());
+        expect(serviceBox('jupyter')).not.toBeChecked();
+        expect(serviceBox('vscode')).not.toBeChecked();
 
-      await launch(user);
-      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
-      expect(mocks.launchShell.mock.calls[0][0].config).not.toHaveProperty('services');
+        refuse = false;
+        await user.click(picker);
+        await user.click(await screen.findByTitle('b-pool'));
+        await waitFor(() => expect(serviceBox('jupyter')).toBeChecked());
+        expect(serviceBox('vscode')).toBeChecked();
+
+        await launch(user);
+        await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+        expect(mocks.launchShell.mock.calls[0][0].config.services).toEqual(DEFAULT_SERVICES);
+      } finally {
+        mocks.pools = [];
+        mocks.availablePools = [];
+        clusterStore.fetchResourcePools();
+        await waitFor(() =>
+          expect(Loadable.getOrElse([], clusterStore.resourcePools.get())).toHaveLength(0),
+        );
+      }
     });
   });
 
@@ -1222,6 +1295,17 @@ describe('NtscLaunchModal', () => {
         }),
       );
       expect(mocks.updateTaskTemplate).not.toHaveBeenCalled();
+    });
+
+    it('keeps no services without code-server on the master', async () => {
+      mocks.codeServer = false;
+      const { user } = await setup();
+      await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+      await waitFor(() => expect(editorText()).toContain('default:1'));
+
+      await user.click(screen.getByRole('button', { name: 'Save as Template' }));
+      expect(await screen.findByText('New Template')).toBeInTheDocument();
+      expect(editorText()).not.toContain('services');
     });
 
     it('opens no template when the cluster defaults fail to load, and keeps a null work_dir on retry', async () => {
