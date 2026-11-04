@@ -7,6 +7,92 @@
 ###############
 
 **************
+ Version 0.43
+**************
+
+Version 0.43.0
+==============
+
+**Release Date:** November 5, 2026
+
+**Breaking Changes**
+
+-  CLI, API, WebUI: Remove notebooks, with ``det notebook``, ``/api/v1/notebooks``, the WebUI's
+   JupyterLab launch, the ``NOTEBOOK`` task and job types and the ``notebooks`` count of ``GET
+   /api/v1/tasks/count``; JupyterLab runs in shells instead.
+
+-  Master: Remove ``notebook_timeout``, the Helm chart's ``notebookTimeout`` and ``det deploy aws
+   --notebook-timeout``; a master configuration that sets ``notebook_timeout`` does not start.
+
+-  Shell: Rename ``notebook_idle_type`` to ``services.jupyter.idle_type``, which JupyterLab's idle
+   check reads from ``DET_JUPYTER_IDLE_TYPE``, and refuse the old key, also in a file that an
+   earlier master returned. The WebUI's recent launches start empty.
+
+-  Shell: Run JupyterLab in a new shell by default, and VS Code when the master serves code-server,
+   unless its configuration or template turns the service off; shells start slower and use more
+   memory.
+
+**New Features**
+
+-  Shell: Run services next to a shell's SSH server in its container, declared under ``services`` in
+   its configuration: ``jupyter`` for JupyterLab and ``vscode`` for VS Code in the browser.
+
+-  CLI, API: List a task's services and their states with ``det task services``, and open one with
+   ``det task open``, for the task's owner or an administrator.
+
+-  WebUI: Show a shell's **Terminal**, **JupyterLab** and **VS Code**, or a TensorBoard, as tabs
+   next to **Logs** and **Resources** on one task page, to which the old interactive and terminal
+   pages redirect.
+
+-  Shell: End a shell that sets ``idle_timeout`` after that long without SSH sessions, browser
+   terminals, requests to its services through the master, or JupyterLab activity as
+   ``services.jupyter.idle_type`` defines it, by default an executing kernel.
+
+-  Shell: Keep code-server for the ``vscode`` service in the directory that
+   ``DET_CODE_SERVER_CACHE_DIR`` names, or in a directory mounted at
+   ``/var/cache/determined/code-server``, one copy for all users.
+
+**Improvements**
+
+-  CLI: Leave a service out of a new shell with ``det shell start --no-service <name>``, or turn on
+   one that a template turns off with ``--service <name>``.
+-  WebUI: Rename **Launch Shell** to **Launch Interactive Task** and its dialog to **Interactive
+   Task Launched**, and add **Open JupyterLab** and **Open VS Code** to a shell's menu.
+-  WebUI: Check the **JupyterLab** and **VS Code** boxes under **Services** in **Launch Interactive
+   Task** for the services the new shell would run.
+-  CLI, API: Return the configuration that a shell would start with, without starting it, with ``det
+   shell start --preview`` or ``POST /api/v1/shells/preview``.
+-  Shell: Mark the ``jupyter`` service ``UNAVAILABLE`` and keep the shell running when the image has
+   no JupyterLab, and keep a restored task's services after a master restart.
+-  Shell: Log when each service starts, becomes ready and exits, and end a shell's services cleanly
+   when the shell stops.
+
+**Bug Fixes**
+
+-  API: Return the error when killing a shell fails instead of failing the request with an internal
+   error.
+-  Master: Log one error instead of two when a proxied WebSocket cannot complete TLS with the task's
+   HTTPS service.
+
+**Upgrade Notes**
+
+-  Master: End notebooks and back up the database before upgrading; the upgrade deletes the notebook
+   records with their logs and moves ``notebook_idle_type`` to ``services.jupyter.idle_type`` in
+   stored configurations and templates.
+
+-  Master: Roll back to 0.42.5 by restoring that backup, not by a binary swap, and remove the
+   ``interactive`` section from the master configuration, which a 0.42.5 master refuses.
+
+-  Master: Set the optional ``interactive.code_server`` section to serve code-server for the
+   ``vscode`` service, and mount a shared cache at ``/var/cache/determined/code-server`` with
+   ``task_container_defaults.bind_mounts``.
+
+-  Agent: Agents can stay on 0.42.2, since the agent did not change after that release.
+
+Reload open WebUI tabs after the upgrade. See :ref:`shell services <shell-services>`,
+:ref:`JupyterLab <jupyter-service>`, and :ref:`VS Code in the browser <vscode-browser>`.
+
+**************
  Version 0.42
 **************
 
