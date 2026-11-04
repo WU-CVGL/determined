@@ -274,10 +274,10 @@ func setShellSSHD(spec *tasks.GenericCommandSpec, port int) {
 }
 
 // prepareShellLaunch prepares the launch of a shell, without side effects: the preparation of every
-// NTSC launch with the shell's services, the launch authorization, the services and the config,
-// checked as the launch runs them. LaunchShell and PreviewShell share it, so that a preview refuses
-// what a launch refuses and returns the config that a launch runs, but for what the launch chooses
-// afterwards: the description, the entrypoint and the services' ports.
+// NTSC launch with the shell's services, the launch authorization, the default services, and the
+// services and the config, checked as the launch runs them. LaunchShell and PreviewShell share it,
+// so that a preview refuses what a launch refuses and returns the config that a launch runs, but
+// for what the launch chooses afterwards: the description, the entrypoint and the services' ports.
 func (a *apiServer) prepareShellLaunch(
 	ctx context.Context, req *apiv1.LaunchShellRequest, user *model.User,
 ) (*command.CreateGeneric, []pkgCommand.LaunchWarning, error) {
@@ -296,6 +296,7 @@ func (a *apiServer) prepareShellLaunch(
 	if err = a.isNTSCPermittedToLaunch(ctx, launchReq.Spec, user); err != nil {
 		return nil, nil, err
 	}
+	a.addDefaultShellServices(&launchReq.Spec.Config)
 	if err = validateShellConfig(launchReq.Spec.Config); err != nil {
 		return nil, nil, err
 	}
@@ -303,6 +304,20 @@ func (a *apiServer) prepareShellLaunch(
 		return nil, nil, err
 	}
 	return launchReq, launchWarnings, nil
+}
+
+// addDefaultShellServices adds the services that a shell runs by default, jupyter and, when the
+// master serves code-server, vscode, to a config that does not mention them. A template's or the
+// request's entry for one of them, enabled or not, is kept.
+func (a *apiServer) addDefaultShellServices(config *model.CommandConfig) {
+	if config.Services == nil {
+		config.Services = map[string]model.ServiceConfig{}
+	}
+	for _, name := range model.DefaultShellServices(a.m.config.Interactive.CodeServer.Enabled()) {
+		if _, ok := config.Services[name]; !ok {
+			config.Services[name] = model.ServiceConfig{}
+		}
+	}
 }
 
 // validateShellConfig checks a shell's config as its launch runs it: with the supervisor as its
@@ -319,9 +334,10 @@ func validateShellConfig(config model.CommandConfig) error {
 	return nil
 }
 
-// validateShellServices checks that the master can run a shell's services: that it knows each,
-// that it serves code-server for vscode, and that each gets a port of its range outside the spec's
-// other ports, as the launch assigns them, on a copy of the spec's services.
+// validateShellServices checks that the master can run a shell's declared services, the ones that
+// run: that it knows each, that it serves code-server for vscode, and that each gets a port of its
+// range outside the spec's other ports, as the launch assigns them, on a copy of the spec's
+// services.
 func (a *apiServer) validateShellServices(spec *tasks.GenericCommandSpec) error {
 	scratch := *spec
 	scratch.Services = slices.Clone(spec.Services)
@@ -435,7 +451,8 @@ func (a *apiServer) LaunchShell(
 		),
 	}
 	// The declared services after ssh, the primary one, in sorted order, which Command.Start
-	// passes on to the supervisor from their records. prepareShellLaunch checked them.
+	// passes on to the supervisor from their records. prepareShellLaunch checked them; a disabled
+	// service stays in the config and gets no record.
 	for _, name := range model.DeclaredServices(launchReq.Spec.Config.Services) {
 		files, err := a.addShellService(launchReq.Spec, name)
 		if err != nil {

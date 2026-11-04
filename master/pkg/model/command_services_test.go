@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/determined-ai/determined/master/pkg/check"
+	"github.com/determined-ai/determined/master/pkg/ptrs"
 )
 
 // decodeCommandConfig decodes text over the default config strictly, as the command API decodes a
@@ -62,13 +63,68 @@ func TestCommandConfigServices(t *testing.T) {
 		require.ErrorContains(t, err, `services: unknown service "`+name+`"`)
 	}
 
-	// A service's value is an object of options, and it has none yet.
-	for _, value := range []string{`1`, `"on"`, `true`, `[]`, `{"port": 8888}`} {
+	// A service's value is an object of options: "enabled", and no other.
+	for _, value := range []string{
+		`1`, `"on"`, `true`, `[]`, `{"port": 8888}`, `{"enabled": 1}`, `{"enabled": "no"}`,
+	} {
 		_, err := decodeCommandConfig(`{"services": {"jupyter": ` + value + `}}`)
 		require.Error(t, err, value)
 	}
 	_, err := decodeCommandConfig(`{"services": ["jupyter"]}`)
 	require.Error(t, err)
+}
+
+// A service runs unless its config sets enabled to false; its entry stays in the config either
+// way, and a disabled one is not declared.
+func TestServiceConfigEnabled(t *testing.T) {
+	require.True(t, ServiceConfig{}.Runs())
+	require.True(t, ServiceConfig{Enabled: ptrs.Ptr(true)}.Runs())
+	require.False(t, ServiceConfig{Enabled: ptrs.Ptr(false)}.Runs())
+
+	config, err := decodeCommandConfig(
+		`{"services": {"jupyter": {"enabled": false}, "vscode": {"enabled": true}, "ssh": {}}}`)
+	require.NoError(t, err)
+	require.NoError(t, check.Validate(config))
+	require.Equal(t, []string{"ssh", "vscode"}, DeclaredServices(config.Services))
+	require.Equal(t, []string{"jupyter", "ssh", "vscode"}, configuredServices(config.Services))
+	require.Len(t, config.Services, 3)
+	require.False(t, config.Services["jupyter"].Runs())
+
+	// The entry round-trips: enabled is written only when set.
+	raw, err := json.Marshal(config.Services)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"jupyter": {"enabled": false}, "vscode": {"enabled": true}, "ssh": {}}`,
+		string(raw))
+
+	require.Empty(t, DeclaredServices(nil))
+	require.Empty(t, DeclaredServices(map[string]ServiceConfig{
+		"jupyter": {Enabled: ptrs.Ptr(false)},
+	}))
+}
+
+// Every shell runs its SSH server: ssh cannot be disabled. An unknown service is refused whether
+// it is enabled or not.
+func TestCommandConfigServicesRefusals(t *testing.T) {
+	config, err := decodeCommandConfig(`{"services": {"ssh": {"enabled": false}}}`)
+	require.NoError(t, err)
+	err = check.Validate(config)
+	require.ErrorContains(t, err, "services: ssh cannot be disabled")
+	config, err = decodeCommandConfig(`{"services": {"ssh": {"enabled": true}}}`)
+	require.NoError(t, err)
+	require.NoError(t, check.Validate(config))
+
+	for _, value := range []string{`{}`, `{"enabled": false}`, `{"enabled": true}`} {
+		config, err := decodeCommandConfig(`{"services": {"emacs": ` + value + `}}`)
+		require.NoError(t, err, value)
+		err = check.Validate(config)
+		require.ErrorContains(t, err, `services: unknown service "emacs"`, value)
+	}
+}
+
+// The default services of a shell: jupyter, and vscode when the master serves code-server.
+func TestDefaultShellServices(t *testing.T) {
+	require.Equal(t, []string{ServiceJupyter}, DefaultShellServices(false))
+	require.Equal(t, []string{ServiceJupyter, ServiceVSCode}, DefaultShellServices(true))
 }
 
 // An idle_timeout can be unset, and is positive when set.

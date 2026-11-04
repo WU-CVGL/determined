@@ -6,6 +6,7 @@ package internal
 import (
 	"context"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -216,8 +217,110 @@ func TestPreviewShellTemplateServices(t *testing.T) {
 	require.Equal(t, model.ServiceVSCode, spec.Services[2].Name)
 }
 
+// A shell's preview fills the services that the launch runs by default: jupyter, and vscode only
+// when the master serves code-server. A request's or a template's entry is kept, enabled or not:
+// a disabled service shows in the config and runs nowhere, and a template's enabled false wins
+// over the default, which the request's own entry overrides in turn.
+func TestPreviewShellDefaultServices(t *testing.T) {
+	api, _, ctx := setupPreviewTest(t)
+	off := map[string]any{"enabled": false}
+	templateName := "shell-no-jupyter-" + uuid.NewString()
+	_, err := db.Bun().NewRaw(
+		"INSERT INTO templates (name, config, workspace_id) VALUES (?, ?::jsonb, 1)",
+		templateName, `{"services": {"jupyter": {"enabled": false}}}`).Exec(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = db.Bun().NewDelete().Table("templates").Where("name = ?", templateName).
+			Exec(context.Background())
+	})
+
+	for name, tc := range map[string]struct {
+		config   *structpb.Struct
+		template string
+		noCode   bool
+		want     map[string]any
+		run      []string
+	}{
+		"no config": {
+			want: map[string]any{"jupyter": map[string]any{}, "vscode": map[string]any{}},
+			run:  []string{model.ServiceSSH, model.ServiceJupyter, model.ServiceVSCode},
+		},
+		"empty services": {
+			config: servicesConfig(t, map[string]any{}),
+			want:   map[string]any{"jupyter": map[string]any{}, "vscode": map[string]any{}},
+			run:    []string{model.ServiceSSH, model.ServiceJupyter, model.ServiceVSCode},
+		},
+		"without code-server": {
+			noCode: true,
+			want:   map[string]any{"jupyter": map[string]any{}},
+			run:    []string{model.ServiceSSH, model.ServiceJupyter},
+		},
+		"jupyter disabled": {
+			config: servicesConfig(t, map[string]any{"jupyter": off}),
+			want:   map[string]any{"jupyter": off, "vscode": map[string]any{}},
+			run:    []string{model.ServiceSSH, model.ServiceVSCode},
+		},
+		"both disabled": {
+			config: servicesConfig(t, map[string]any{"jupyter": off, "vscode": off}),
+			want:   map[string]any{"jupyter": off, "vscode": off},
+			run:    []string{model.ServiceSSH},
+		},
+		"vscode disabled without code-server": {
+			config: servicesConfig(t, map[string]any{"vscode": off}),
+			noCode: true,
+			want:   map[string]any{"jupyter": map[string]any{}, "vscode": off},
+			run:    []string{model.ServiceSSH, model.ServiceJupyter},
+		},
+		"enabled set": {
+			config: servicesConfig(t, map[string]any{"jupyter": map[string]any{"enabled": true}}),
+			want: map[string]any{
+				"jupyter": map[string]any{"enabled": true}, "vscode": map[string]any{},
+			},
+			run: []string{model.ServiceSSH, model.ServiceJupyter, model.ServiceVSCode},
+		},
+		"template disables jupyter": {
+			template: templateName,
+			want:     map[string]any{"jupyter": off, "vscode": map[string]any{}},
+			run:      []string{model.ServiceSSH, model.ServiceVSCode},
+		},
+		"request enables over the template": {
+			config:   servicesConfig(t, map[string]any{"jupyter": map[string]any{}}),
+			template: templateName,
+			want:     map[string]any{"jupyter": map[string]any{}, "vscode": map[string]any{}},
+			run:      []string{model.ServiceSSH, model.ServiceJupyter, model.ServiceVSCode},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if tc.noCode {
+				prev := api.m.config.Interactive.CodeServer
+				api.m.config.Interactive.CodeServer = config.DefaultCodeServerConfig()
+				t.Cleanup(func() { api.m.config.Interactive.CodeServer = prev })
+			}
+			preview, err := api.PreviewShell(ctx, &apiv1.PreviewShellRequest{
+				Config: tc.config, TemplateName: tc.template,
+			})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, preview.Config.AsMap()["services"])
+
+			launch, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
+				Config: tc.config, TemplateName: tc.template,
+			})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, launch.Config.AsMap()["services"])
+			spec := launchedSpec(t, launch.Shell.Id)
+			var names []string
+			for _, s := range spec.Services {
+				names = append(names, s.Name)
+			}
+			require.Equal(t, tc.run, names)
+			require.Equal(t, strings.Join(tc.run, ","), spec.Base.ExtraEnvVars["DET_SERVICES"])
+		})
+	}
+}
+
 // A shell's preview refuses what its launch refuses, with the same code and message: an unknown
-// service, vscode while the master serves no code-server, services without a free port, an invalid
+// service, ssh disabled, vscode while the master serves no code-server, services without a free
+// port, an invalid
 // notebook_idle_type, an idle_timeout that is not positive or shorter than the minimum, and a config
 // that does not decode.
 func TestPreviewShellRefusesAsLaunch(t *testing.T) {
@@ -231,6 +334,10 @@ func TestPreviewShellRefusesAsLaunch(t *testing.T) {
 		"unknown service": {
 			config: servicesConfig(t, map[string]any{"emacs": map[string]any{}}),
 			msg:    `services: unknown service "emacs"`,
+		},
+		"ssh disabled": {
+			config: servicesConfig(t, map[string]any{"ssh": map[string]any{"enabled": false}}),
+			msg:    "services: ssh cannot be disabled",
 		},
 		"vscode without code-server": {
 			config: servicesConfig(t, map[string]any{"vscode": map[string]any{}}),

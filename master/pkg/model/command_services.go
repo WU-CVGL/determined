@@ -22,24 +22,58 @@ const (
 // InteractiveServices lists every service of ServiceSSH, ServiceJupyter, ... in sorted order.
 var InteractiveServices = []string{ServiceJupyter, ServiceSSH, ServiceVSCode}
 
-// ServiceConfig holds the options of one service in CommandConfig.Services. A service has no
-// options yet; an object leaves room for them without changing the type of the config.
-type ServiceConfig struct{}
+// ServiceConfig holds the options of one service in CommandConfig.Services.
+type ServiceConfig struct {
+	// Enabled is whether the shell runs the service; unset means yes. A disabled service stays in
+	// the config, so that the config shows the choice.
+	Enabled *bool `json:"enabled,omitempty"`
+}
 
-// DeclaredServices returns the names in services, sorted.
+// Runs returns whether the service runs: it is enabled unless the config says otherwise.
+func (c ServiceConfig) Runs() bool {
+	return c.Enabled == nil || *c.Enabled
+}
+
+// DefaultShellServices returns the services that a shell runs unless its config disables them:
+// jupyter, and vscode when the master serves code-server.
+func DefaultShellServices(codeServer bool) []string {
+	services := []string{ServiceJupyter}
+	if codeServer {
+		services = append(services, ServiceVSCode)
+	}
+	return services
+}
+
+// DeclaredServices returns the names in services that run, sorted: a disabled service is not
+// declared.
 func DeclaredServices(services map[string]ServiceConfig) []string {
+	var names []string
+	for name, service := range services {
+		if service.Runs() {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
+// configuredServices returns every name in services, disabled ones included, sorted.
+func configuredServices(services map[string]ServiceConfig) []string {
 	names := maps.Keys(services)
 	slices.Sort(names)
 	return names
 }
 
-// validateServices returns an error for each name in services that is not a known service.
+// validateServices returns an error for each name in services that is not a known service, and
+// one for ssh disabled: every shell runs its SSH server.
 func validateServices(services map[string]ServiceConfig) []error {
 	var errs []error
-	for _, name := range DeclaredServices(services) {
+	for _, name := range configuredServices(services) {
 		if !slices.Contains(InteractiveServices, name) {
 			errs = append(errs, fmt.Errorf("services: unknown service %q; known services: %s",
 				name, strings.Join(InteractiveServices, ", ")))
+		} else if name == ServiceSSH && !services[name].Runs() {
+			errs = append(errs, fmt.Errorf("services: ssh cannot be disabled"))
 		}
 	}
 	return errs

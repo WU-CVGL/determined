@@ -40,8 +40,8 @@ func requireArchivePath(t *testing.T, spec tasks.GenericCommandSpec, path string
 	require.Failf(t, "missing file", "%s is not in the task's files", path)
 }
 
-// Shells run the supervisor with their service; the task's other extra environment variables stay,
-// and the entrypoint wrapper still ships.
+// Shells run the supervisor with their services, sshd and the default jupyter; the task's other
+// extra environment variables stay, and the entrypoint wrapper still ships.
 func TestInteractiveLaunchersUseSupervisor(t *testing.T) {
 	api, _, ctx := setupAPITest(t, nil)
 	cs, err := command.NewService(api.m.db, api.m.rm)
@@ -55,7 +55,7 @@ func TestInteractiveLaunchersUseSupervisor(t *testing.T) {
 	require.Equal(t, []string{
 		interactiveSupervisorScript, "-f", shellSSHDConfigFile, "-p", port, "-D", "-e",
 	}, spec.Config.Entrypoint)
-	require.Equal(t, "ssh", spec.Base.ExtraEnvVars["DET_SERVICES"])
+	require.Equal(t, "ssh,jupyter", spec.Base.ExtraEnvVars["DET_SERVICES"])
 	require.Equal(t, string(model.TaskTypeShell), spec.Base.ExtraEnvVars["DET_TASK_TYPE"])
 	requireInteractiveSupervisorFiles(t, spec.AdditionalFiles, 0, 0)
 	requireArchivePath(t, spec, shellEntrypointScript)
