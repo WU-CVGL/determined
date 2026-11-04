@@ -54,6 +54,7 @@ the command container.
 
 _CONFIG_PATHS_COERCE_TO_LIST = {
     "bind_mounts",
+    "services.tensorboard.args",
 }
 
 TASK_ID_REGEX = re.compile(
