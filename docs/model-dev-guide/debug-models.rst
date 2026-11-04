@@ -62,12 +62,11 @@ Determined cluster instead of locally.
       det shell start --context my_model_dir
       # Your terminal should automatically connect to the shell.
 
-   If you prefer JupyterLab, add the ``jupyter`` service, and open it once ``det task services
-   <shell id>`` shows it ``READY``:
+   If you prefer JupyterLab, which the shell also runs, open it once ``det task services <shell
+   id>`` shows it ``READY``:
 
    .. code:: bash
 
-      det shell start --context my_model_dir --service jupyter
       det task open <shell id> jupyter
 
    Note that changes made to the ``--context`` directory while inside the shell do not affect the

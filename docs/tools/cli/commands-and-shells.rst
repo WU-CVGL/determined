@@ -91,22 +91,27 @@ defaults, without starting it, add ``--preview``:
 
 .. code::
 
-   det shell start --preview --service jupyter
+   det shell start --preview --no-service jupyter
 
 .. _shell-services:
 
 Services
 ========
 
-A shell can run more services than its SSH server. Declare them in the shell's configuration with
-:ref:`services <job-configuration-reference>`, or with ``--service``, for example JupyterLab:
+A shell runs more services than its SSH server: JupyterLab, and VS Code in the browser when the
+master serves code-server, each in the shell's container with the same user, files and environment
+as the SSH sessions. The shell's configuration lists them under :ref:`services
+<job-configuration-reference>`. To leave one out, set its ``enabled`` to ``false`` there, or pass
+``--no-service``:
 
 .. code::
 
-   det shell start --service jupyter
+   det shell start --no-service jupyter
 
-This is the same as ``det shell start --config "services={jupyter: {}}"``. Each service runs in the
-shell's container, with the same user, files and environment as the SSH sessions.
+This is the same as ``det shell start --config "services={jupyter: {enabled: false}}"``.
+``--service`` turns a service on again, for example one that a template turns off; for a service
+named by both, the last flag wins. The configuration form of the WebUI has a checkbox per service,
+checked for the services the shell would run.
 
 To list a shell's services with their states and addresses:
 
@@ -126,12 +131,10 @@ To open JupyterLab in the browser once it is ``READY``:
 
    det task open <shell id> jupyter
 
-To start a shell with VS Code in the browser, the ``vscode`` service, and open it (see
-:ref:`vscode-browser`):
+To open VS Code in the browser, the ``vscode`` service (see :ref:`vscode-browser`):
 
 .. code::
 
-   det shell start --service vscode
    det task open <shell id> vscode
 
 In the WebUI, the shell's page has a tab for each of its services (see :ref:`shell-web-terminal`). A
@@ -150,16 +153,17 @@ browser page kept open on the shell can therefore delay its termination.
 JupyterLab
 ----------
 
-The ``jupyter`` service runs `JupyterLab <https://jupyter.org/>`__ in the shell's container:
+The ``jupyter`` service runs `JupyterLab <https://jupyter.org/>`__ in the shell's container. Every
+shell runs it unless its configuration turns it off:
 
 .. code::
 
-   det shell start --service jupyter
+   det shell start
    det task open <shell id> jupyter
 
-In the WebUI, check **jupyter** in **Launch Interactive Task** on the **Jobs** page or a workspace's
-**Jobs** tab, then open it from the **JupyterLab** tab of the shell's page (click the shell's name,
-or choose **Open JupyterLab** from its action menu) or with ``det task open``.
+In the WebUI, select **Launch Interactive Task** on the **Jobs** page or a workspace's **Jobs** tab,
+with **jupyter** checked, then open it from the **JupyterLab** tab of the shell's page (click the
+shell's name, or choose **Open JupyterLab** from its action menu) or with ``det task open``.
 
 Opening a notebook in JupyterLab starts a kernel, which runs until you shut it down in JupyterLab.
 
@@ -168,7 +172,7 @@ A shell is assigned one GPU by default. For JupyterLab without GPUs, set ``resou
 
 .. code::
 
-   det shell start --service jupyter --config resources.slots=0
+   det shell start --config resources.slots=0
 
 The :ref:`Determined CLI <cli-ug>` is installed in the shell's container, so a notebook cell can run
 it, for example ``!det experiment list``.
@@ -189,7 +193,7 @@ For example, a user ``jimmy`` with a shared home directory at ``/shared/home/jim
      - host_path: /shared/home/jimmy
        container_path: /shared/home/jimmy
    EOL
-   $ det shell start --service jupyter --config-file config.yaml
+   $ det shell start --config-file config.yaml
 
 A cluster deployed with ``det deploy gcp up``, ``det deploy aws --deployment-type efs`` or ``det
 deploy aws --deployment-type fsx`` has a network filesystem that all agents share, mounted into task

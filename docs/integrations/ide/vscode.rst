@@ -40,15 +40,17 @@ which runs in the shell's container.
  VS Code in the Browser
 ************************
 
-A shell can run VS Code in the browser, `code-server <https://github.com/coder/code-server>`__, as
-its ``vscode`` service, next to its SSH server. It runs with the same user, files and environment as
-the SSH sessions. The master must serve code-server releases (see :ref:`master-config-interactive`).
+A shell runs VS Code in the browser, `code-server <https://github.com/coder/code-server>`__, as its
+``vscode`` service, next to its SSH server, when the master serves code-server releases (see
+:ref:`master-config-interactive`). It runs with the same user, files and environment as the SSH
+sessions. In the WebUI's **Launch Interactive Task** form, **vscode** is then checked; uncheck it,
+or pass ``--no-service vscode`` to ``det shell start``, to leave it out.
 
-#. Start a shell with the service:
+#. Start a shell:
 
    .. code::
 
-      det shell start --service vscode
+      det shell start
 
 #. Once the service is ``READY``, which ``det task services <shell id>`` shows, open the editor:
 

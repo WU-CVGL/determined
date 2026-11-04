@@ -56,4 +56,4 @@ Create and Manage Experiments
 =============================
 
 #. Once the cluster is ready, select **Open**.
-#. To run JupyterLab, select **Launch Interactive Task** and check **jupyter**.
+#. To run JupyterLab, select **Launch Interactive Task**; **jupyter** is checked.
