@@ -60,12 +60,14 @@ describe('shell', () => {
         config: {
           description: 'lab',
           resources: { resource_pool: 'gpu', slots: 2 },
-          services: { jupyter: {} },
+          services: { jupyter: {}, vscode: { enabled: false } },
         },
         templateName: 'tpl',
         workspaceId: 3,
       });
       expect(shellRequest({ template: '' }).templateName).toBeUndefined();
+      // Without services, the master runs its defaults.
+      expect(shellRequest({ template: 'tpl' }).config).not.toHaveProperty('services');
     });
 
     it('sends a full config as it is, without a template or a notebook’s generated name', () => {

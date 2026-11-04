@@ -22,6 +22,7 @@ import { processApiError } from 'utils/service';
 const mocks = vi.hoisted(() => ({
   availablePools: [] as string[],
   canCreateTemplateWorkspace: true,
+  codeServer: true,
   createTaskTemplate: vi.fn(),
   getShellConfig: vi.fn(),
   getShells: vi.fn(),
@@ -177,14 +178,27 @@ const GPU_TEMPLATE = {
   workspaceId: WORKSPACE.id,
 };
 
+const NO_JUPYTER_TEMPLATE = {
+  config: { services: { jupyter: { enabled: false } } },
+  name: 'no-jupyter',
+  workspaceId: WORKSPACE.id,
+};
+
+/** The services that the master runs by default: jupyter, and vscode when it serves code-server. */
+const DEFAULT_SERVICES = { jupyter: {}, vscode: {} };
+
 /**
  * What the master's shell preview returns for a request config: no description, entrypoint or
- * idle_timeout of its own.
+ * idle_timeout of its own, and the services it runs: its defaults, under the template's entries,
+ * under the request's.
  */
 const previewFor = (params: { config?: RawJson; templateName?: string }) => {
   const config = params.config ?? {};
   const resources = config.resources ?? {};
   const custom = config.description === 'tpl source';
+  const template = [GPU_TEMPLATE, NO_JUPYTER_TEMPLATE].find(
+    (item) => item.name === params.templateName,
+  )?.config as RawJson | undefined;
   return Promise.resolve({
     ...(config.description === undefined ? {} : { description: config.description }),
     environment: { image: { cuda: custom ? 'custom:2' : 'default:1' } },
@@ -195,7 +209,12 @@ const previewFor = (params: { config?: RawJson; templateName?: string }) => {
       resource_pool: resources.resource_pool ?? 'default',
       slots: resources.slots ?? 1,
     },
-    ...(config.services === undefined ? {} : { services: config.services }),
+    services: {
+      jupyter: {},
+      ...(mocks.codeServer ? { vscode: {} } : {}),
+      ...template?.services,
+      ...config.services,
+    },
   });
 };
 
@@ -236,7 +255,11 @@ const ModalTrigger: React.FC<Props> = (props) => {
   );
 };
 
-const setup = async (props: Partial<Props> = {}) => {
+/**
+ * Renders and opens the form. Unless `settled` is false, waits for the master's preview of the
+ * start-from to check jupyter, which the master runs by default.
+ */
+const setup = async (props: Partial<Props> = {}, { settled = true } = {}) => {
   const user = userEvent.setup();
   const onLaunched = vi.fn();
   render(
@@ -250,6 +273,7 @@ const setup = async (props: Partial<Props> = {}) => {
   );
   await user.click(await screen.findByRole('button', { name: 'Open' }));
   await screen.findByText('Start from');
+  if (settled) await waitFor(() => expect(serviceBox('jupyter')).toBeChecked());
   return { onLaunched, user };
 };
 
@@ -308,6 +332,7 @@ describe('NtscLaunchModal', () => {
     vi.restoreAllMocks();
     window.localStorage.clear();
     mocks.canCreateTemplateWorkspace = true;
+    mocks.codeServer = true;
     mocks.taskTemplatesOn = true;
     mocks.createTaskTemplate.mockReset().mockResolvedValue({});
     mocks.updateTaskTemplate.mockReset();
@@ -340,7 +365,11 @@ describe('NtscLaunchModal', () => {
 
       await waitFor(() => expect(onLaunched).toHaveBeenCalledWith(launchedShell));
       expect(mocks.launchShell).toHaveBeenCalledWith({
-        config: { description: 'debug box', resources: { resource_pool: undefined, slots: 1 } },
+        config: {
+          description: 'debug box',
+          resources: { resource_pool: undefined, slots: 1 },
+          services: DEFAULT_SERVICES,
+        },
         templateName: undefined,
         workspaceId: WORKSPACE.id,
       });
@@ -366,8 +395,19 @@ describe('NtscLaunchModal', () => {
       await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
 
       await waitFor(() => expect(editorText()).toContain('resource_pool: default'));
-      expect(mocks.previewShell).toHaveBeenCalledWith({
+      // The start-from was previewed on open without services; the full config with the
+      // checkboxes.
+      expect(mocks.previewShell).toHaveBeenNthCalledWith(1, {
         config: { description: undefined, resources: { resource_pool: undefined, slots: 1 } },
+        templateName: undefined,
+        workspaceId: WORKSPACE.id,
+      });
+      expect(mocks.previewShell).toHaveBeenLastCalledWith({
+        config: {
+          description: undefined,
+          resources: { resource_pool: undefined, slots: 1 },
+          services: DEFAULT_SERVICES,
+        },
         templateName: undefined,
         workspaceId: WORKSPACE.id,
       });
@@ -384,6 +424,7 @@ describe('NtscLaunchModal', () => {
           environment: { image: { cuda: 'default:1' } },
           notebook_idle_type: 'activity',
           resources: { priority: 42, resource_pool: 'default', slots: 1 },
+          services: DEFAULT_SERVICES,
         },
         templateName: undefined,
         workspaceId: WORKSPACE.id,
@@ -486,6 +527,7 @@ describe('NtscLaunchModal', () => {
           environment: { image: { cuda: 'custom:1' } },
           idle_timeout: null,
           resources: { resource_pool: 'gpu', slots: 2 },
+          services: DEFAULT_SERVICES,
         },
         workspaceId: WORKSPACE.id,
       });
@@ -541,6 +583,7 @@ describe('NtscLaunchModal', () => {
           description: 'from browser',
           environment: { environment_variables: ['LANG=C.UTF-8'] },
           resources: { resource_pool: 'cpu', slots: 0 },
+          services: DEFAULT_SERVICES,
         },
         workspaceId: WORKSPACE.id,
       });
@@ -586,7 +629,11 @@ describe('NtscLaunchModal', () => {
 
       await waitFor(() => expect(onLaunched).toHaveBeenCalled());
       expect(mocks.launchShell).toHaveBeenCalledWith({
-        config: { description: undefined, resources: { resource_pool: 'gpu', slots: 4 } },
+        config: {
+          description: undefined,
+          resources: { resource_pool: 'gpu', slots: 4 },
+          services: DEFAULT_SERVICES,
+        },
         templateName: 'gpu-template',
         workspaceId: WORKSPACE.id,
       });
@@ -645,6 +692,7 @@ describe('NtscLaunchModal', () => {
       description: 'config b',
       environment: { image: { cuda: 'image-b:1' } },
       resources: { resource_pool: 'pool-b', slots: 4 },
+      services: DEFAULT_SERVICES,
     };
     const taskA = task(CommandType.Shell, { id: 'shell-a', name: 'task a' });
     const taskB = task(CommandType.Shell, { id: 'shell-b', name: 'task b' });
@@ -657,7 +705,7 @@ describe('NtscLaunchModal', () => {
     it('keeps Launch and the full config disabled for "Launch Again" until the config arrives', async () => {
       const config = deferred<RawJson>();
       mocks.getShellConfig.mockReturnValue(config.promise);
-      const { user } = await setup({ initialTask: task(CommandType.Shell) });
+      const { user } = await setup({ initialTask: task(CommandType.Shell) }, { settled: false });
 
       await waitFor(() =>
         expect(mocks.getShellConfig).toHaveBeenCalledWith({ commandId: 'shell-old' }),
@@ -721,7 +769,11 @@ describe('NtscLaunchModal', () => {
 
       await waitFor(() => expect(onLaunched).toHaveBeenCalled());
       expect(mocks.launchShell).toHaveBeenCalledWith({
-        config: { description: undefined, resources: { resource_pool: undefined, slots: 2 } },
+        config: {
+          description: undefined,
+          resources: { resource_pool: undefined, slots: 2 },
+          services: DEFAULT_SERVICES,
+        },
         templateName: 'gpu-template',
         workspaceId: WORKSPACE.id,
       });
@@ -855,7 +907,6 @@ describe('NtscLaunchModal', () => {
         await waitFor(() =>
           expect(savedSettings('shell-launch')).toEqual({
             name: 'launched',
-            services: [],
             slots: 2,
             workspaceId: WORKSPACE.id,
           }),
@@ -876,7 +927,6 @@ describe('NtscLaunchModal', () => {
         await waitFor(() =>
           expect(savedSettings('shell-launch')).toEqual({
             name: 'draft',
-            services: [],
             slots: 2,
             workspaceId: WORKSPACE.id,
           }),
@@ -885,7 +935,7 @@ describe('NtscLaunchModal', () => {
       });
     });
 
-    it('opens with the last services checked and saves the checked ones', async () => {
+    it('ignores the services of older saved values: the checkboxes follow the master', async () => {
       mocks.getUserSetting.mockResolvedValue(
         userSettingsResponse({
           'shell-launch': { ...SEEDED['shell-launch'], services: ['vscode'] },
@@ -894,16 +944,16 @@ describe('NtscLaunchModal', () => {
       await withLoadedSettings(async () => {
         const { user } = await setup();
         expect(serviceBox('vscode')).toBeChecked();
-        expect(serviceBox('jupyter')).not.toBeChecked();
+        expect(serviceBox('jupyter')).toBeChecked();
 
         await user.click(serviceBox('jupyter'));
         await launch(user);
 
         await waitFor(() =>
-          expect(savedSettings('shell-launch')).toMatchObject({ services: ['jupyter', 'vscode'] }),
+          expect(savedSettings('shell-launch')).toMatchObject({ name: 'shell-name', slots: 2 }),
         );
         expect(mocks.launchShell.mock.calls[0][0].config.services).toEqual({
-          jupyter: {},
+          jupyter: { enabled: false },
           vscode: {},
         });
       });
@@ -911,93 +961,150 @@ describe('NtscLaunchModal', () => {
   });
 
   describe('services', () => {
-    it('offers a checkbox per service besides ssh, none checked by default', async () => {
+    it('checks the services the master runs by default: jupyter, and vscode with code-server', async () => {
       await setup();
       expect(
         screen.getAllByRole('checkbox').map((box) => box.closest('label')?.textContent),
       ).toEqual(['jupyter', 'vscode']);
-      expect(serviceBox('jupyter')).not.toBeChecked();
-      expect(serviceBox('vscode')).not.toBeChecked();
+      expect(serviceBox('jupyter')).toBeChecked();
+      expect(serviceBox('vscode')).toBeChecked();
+      // The start-from is previewed without services, so that the master fills its defaults.
+      expect(mocks.previewShell).toHaveBeenCalledTimes(1);
+      expect(mocks.previewShell).toHaveBeenCalledWith({
+        config: { description: undefined, resources: { resource_pool: undefined, slots: 1 } },
+        templateName: undefined,
+        workspaceId: WORKSPACE.id,
+      });
     });
 
-    it('previews and launches exactly the same request, with the checked services', async () => {
+    it('leaves vscode unchecked without code-server on the master, and sends it disabled', async () => {
+      mocks.codeServer = false;
+      const { onLaunched, user } = await setup();
+      expect(serviceBox('jupyter')).toBeChecked();
+      expect(serviceBox('vscode')).not.toBeChecked();
+
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell.mock.calls[0][0].config.services).toEqual({
+        jupyter: {},
+        vscode: { enabled: false },
+      });
+    });
+
+    it('previews and launches exactly the same request, with an unchecked service disabled', async () => {
       const { onLaunched, user } = await setup();
       await user.type(screen.getByPlaceholderText('Name (optional)'), 'lab');
       await user.click(serviceBox('jupyter'));
+      expect(serviceBox('jupyter')).not.toBeChecked();
       await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
 
-      await waitFor(() => expect(editorText()).toContain('jupyter: {}'));
+      await waitFor(() => expect(editorText()).toContain('enabled: false'));
       const request = {
         config: {
           description: 'lab',
           resources: { resource_pool: undefined, slots: 1 },
-          services: { jupyter: {} },
+          services: { jupyter: { enabled: false }, vscode: {} },
         },
         templateName: undefined,
         workspaceId: WORKSPACE.id,
       };
-      expect(mocks.previewShell).toHaveBeenCalledWith(request);
-      expect(yaml.load(editorText())).toMatchObject({ services: { jupyter: {} } });
+      expect(mocks.previewShell).toHaveBeenLastCalledWith(request);
+      expect(yaml.load(editorText())).toMatchObject({
+        services: { jupyter: { enabled: false }, vscode: {} },
+      });
 
       await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
-      expect(serviceBox('jupyter')).toBeChecked();
+      expect(serviceBox('jupyter')).not.toBeChecked();
+      expect(serviceBox('vscode')).toBeChecked();
       await launch(user);
       await waitFor(() => expect(onLaunched).toHaveBeenCalled());
       expect(mocks.launchShell).toHaveBeenCalledWith(request);
-      expect(mocks.launchShell.mock.calls[0][0]).toEqual(mocks.previewShell.mock.calls[0][0]);
+      expect(mocks.launchShell.mock.calls[0][0]).toEqual(mocks.previewShell.mock.lastCall?.[0]);
     });
 
-    it('launches the services of the full config’s YAML', async () => {
+    it('launches the services of the full config’s YAML, where enabled: false round-trips', async () => {
       const { onLaunched, user } = await setup();
       await user.click(serviceBox('vscode'));
       await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
-      await waitFor(() => expect(editorText()).toContain('vscode: {}'));
-      editConfig((config) => ({ ...config, services: { jupyter: {}, vscode: {} } }));
+      await waitFor(() => expect(editorText()).toContain('enabled: false'));
+      expect(yaml.load(editorText())).toMatchObject({
+        services: { jupyter: {}, vscode: { enabled: false } },
+      });
+      editConfig((config) => ({
+        ...config,
+        services: { jupyter: { enabled: false }, vscode: {} },
+      }));
       await launch(user);
 
       await waitFor(() => expect(onLaunched).toHaveBeenCalled());
       expect(mocks.launchShell.mock.calls[0][0].config.services).toEqual({
-        jupyter: {},
+        jupyter: { enabled: false },
         vscode: {},
       });
     });
 
-    it('checks the services of a recent shell, and an unchecked one is left out', async () => {
+    it('checks the services of a recent shell as the master runs them, and sends an unchecked one disabled', async () => {
       mocks.getShells.mockResolvedValue([task(CommandType.Shell)]);
       mocks.getShellConfig.mockResolvedValue({
         ...clusterShellConfig,
-        services: { jupyter: {}, vscode: {} },
+        services: { jupyter: { enabled: false }, vscode: {} },
       });
       const { onLaunched, user } = await setup();
       await openStartFrom(user);
       await user.click(await screen.findByText(/^Shell · cluster task ·/));
-      await waitFor(() => expect(serviceBox('jupyter')).toBeChecked());
+      await waitFor(() => expect(serviceBox('jupyter')).not.toBeChecked());
       expect(serviceBox('vscode')).toBeChecked();
+      // The picked config is previewed with its services as they are.
+      expect(mocks.previewShell).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({
+            services: { jupyter: { enabled: false }, vscode: {} },
+          }),
+        }),
+      );
 
       await user.click(serviceBox('vscode'));
       await launch(user);
       await waitFor(() => expect(onLaunched).toHaveBeenCalled());
-      expect(mocks.launchShell.mock.calls[0][0].config.services).toEqual({ jupyter: {} });
+      expect(mocks.launchShell.mock.calls[0][0].config.services).toEqual({
+        jupyter: { enabled: false },
+        vscode: { enabled: false },
+      });
     });
 
-    it('keeps the services on a template and lets the master merge its own', async () => {
+    it('follows a template that turns a service off, and sends the checkboxes with the template', async () => {
+      mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, NO_JUPYTER_TEMPLATE]);
       const { onLaunched, user } = await setup();
-      await user.click(serviceBox('jupyter'));
       await openStartFrom(user);
-      await user.click(await screen.findByText('gpu-template'));
-      expect(serviceBox('jupyter')).toBeChecked();
-      await launch(user);
+      await user.click(await screen.findByText('no-jupyter'));
+      await waitFor(() => expect(serviceBox('jupyter')).not.toBeChecked());
+      expect(serviceBox('vscode')).toBeChecked();
 
+      await user.click(serviceBox('jupyter'));
+      await launch(user);
       await waitFor(() => expect(onLaunched).toHaveBeenCalled());
       expect(mocks.launchShell).toHaveBeenCalledWith({
         config: {
           description: undefined,
-          resources: { resource_pool: 'gpu', slots: 4 },
-          services: { jupyter: {} },
+          resources: { resource_pool: undefined, slots: 1 },
+          services: DEFAULT_SERVICES,
         },
-        templateName: 'gpu-template',
+        templateName: 'no-jupyter',
         workspaceId: WORKSPACE.id,
       });
+    });
+
+    it('sends no services while the start-from preview fails, so the master runs its defaults', async () => {
+      mocks.previewShell.mockImplementation(async () => {
+        throw await masterRefusal(503, 'master is restarting');
+      });
+      const { onLaunched, user } = await setup({}, { settled: false });
+      expect(serviceBox('jupyter')).not.toBeChecked();
+      expect(serviceBox('vscode')).not.toBeChecked();
+
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell.mock.calls[0][0].config).not.toHaveProperty('services');
     });
   });
 
@@ -1009,7 +1116,7 @@ describe('NtscLaunchModal', () => {
       mocks.previewShell.mockImplementation(async () => {
         throw await masterRefusal(status, message);
       });
-      const { user } = await setup();
+      const { user } = await setup({}, { settled: false });
       await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
       expect(await screen.findByText(message)).toBeInTheDocument();
       expect(screen.queryByText('Unable to fetch shell config.')).not.toBeInTheDocument();
@@ -1019,7 +1126,7 @@ describe('NtscLaunchModal', () => {
       mocks.previewShell.mockImplementation(async () => {
         throw await masterRefusal(503, 'master is restarting');
       });
-      const { user } = await setup();
+      const { user } = await setup({}, { settled: false });
       await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
       expect(await screen.findByText('Unable to fetch shell config.')).toBeInTheDocument();
       expect(screen.queryByText('master is restarting')).not.toBeInTheDocument();
@@ -1027,10 +1134,12 @@ describe('NtscLaunchModal', () => {
 
     it('drops the refusal when the next preview succeeds', async () => {
       const message = 'user may not use the resource pool gpu';
-      mocks.previewShell.mockImplementationOnce(async () => {
+      // The preview on open, then the full config's.
+      const refuse = async () => {
         throw await masterRefusal(403, message);
-      });
-      const { user } = await setup();
+      };
+      mocks.previewShell.mockImplementationOnce(refuse).mockImplementationOnce(refuse);
+      const { user } = await setup({}, { settled: false });
       await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
       expect(await screen.findByText(message)).toBeInTheDocument();
 
@@ -1052,7 +1161,7 @@ describe('NtscLaunchModal', () => {
       ).not.toBeInTheDocument();
     });
 
-    it('launches the edited full config, previewed once, and lets the master name the shell', async () => {
+    it('launches the edited full config, previewed once more, and lets the master name the shell', async () => {
       const { onLaunched, user } = await setup();
       await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
       await waitFor(() => expect(editorText()).toContain('default:1'));
@@ -1068,7 +1177,8 @@ describe('NtscLaunchModal', () => {
       await launch(user);
 
       await waitFor(() => expect(onLaunched).toHaveBeenCalled());
-      expect(mocks.previewShell).toHaveBeenCalledTimes(1);
+      // Once for the start-from on open, once for the full config.
+      expect(mocks.previewShell).toHaveBeenCalledTimes(2);
       const { config } = mocks.launchShell.mock.calls[0][0];
       expect(config).not.toHaveProperty('description');
       expect(config.environment).toEqual({
@@ -1096,6 +1206,8 @@ describe('NtscLaunchModal', () => {
       expect(draft).not.toContain('tpl source');
       expect(draft).not.toContain('idle_timeout');
       expect(draft).not.toContain('priority');
+      // The master's default services are not a template's setting.
+      expect(draft).not.toContain('services');
 
       await user.type(screen.getByLabelText('Name'), 'my-template');
       await user.click(screen.getByRole('button', { name: 'Create Template' }));

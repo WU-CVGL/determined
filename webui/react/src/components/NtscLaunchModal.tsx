@@ -9,10 +9,10 @@ import Row from 'hew/Row';
 import Select, { Option, SelectValue } from 'hew/Select';
 import Spinner from 'hew/Spinner';
 import { Loadable, Loaded, NotLoaded } from 'hew/utils/loadable';
-import { array, number, string, undefined as undefinedType, union } from 'io-ts';
+import { number, string, undefined as undefinedType, union } from 'io-ts';
 import yaml from 'js-yaml';
 import { isPlainObject } from 'lodash';
-import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import Link from 'components/Link';
 import { resourcePoolOption } from 'components/ResourcePoolOption';
@@ -42,23 +42,30 @@ import { launchShell, PREVIEW_ERROR, previewShell } from 'utils/shell';
 const DEFAULT_SLOT_COUNT = 1;
 const BASE_FORM_ID = 'ntsc-launch-form';
 
+/** The user's last-used form values. The services are not among them: the master's defaults are. */
+type LaunchFormSettings = Omit<NtscLaunchOptions, 'services'>;
+
 /**
  * The simple form's values. `source` is the "Start from" picker's value; `services` holds a
- * checkbox per service of SHELL_SERVICES.
+ * checkbox per service of SHELL_SERVICES, unset until the master's preview of the start-from
+ * fills them with what it would run.
  */
-interface LaunchFormValues extends Omit<NtscLaunchOptions, 'services'> {
+interface LaunchFormValues extends LaunchFormSettings {
   services?: Partial<Record<string, boolean>>;
   source?: string;
 }
 
-const checkedServices = (values: LaunchFormValues): string[] =>
-  SHELL_SERVICES.filter((name) => values.services?.[name]);
+/** The checked services, or undefined while the checkboxes are unset: the master then decides. */
+const checkedServices = (values: LaunchFormValues): string[] | undefined =>
+  values.services === undefined
+    ? undefined
+    : SHELL_SERVICES.filter((name) => values.services?.[name]);
 
 const serviceChecks = (services: string[] = []): Record<string, boolean> =>
   Object.fromEntries(SHELL_SERVICES.map((name) => [name, services.includes(name)]));
 
 /** The user's last-used form values, kept on the server. */
-const settingsConfig: SettingsConfig<NtscLaunchOptions> = {
+const settingsConfig: SettingsConfig<LaunchFormSettings> = {
   settings: {
     name: {
       defaultValue: '',
@@ -71,12 +78,6 @@ const settingsConfig: SettingsConfig<NtscLaunchOptions> = {
       skipUrlEncoding: true,
       storageKey: 'pool',
       type: union([string, undefinedType]),
-    },
-    services: {
-      defaultValue: [],
-      skipUrlEncoding: true,
-      storageKey: 'services',
-      type: union([array(string), undefinedType]),
     },
     slots: {
       defaultValue: DEFAULT_SLOT_COUNT,
@@ -106,10 +107,9 @@ const copy = {
   title: 'Launch Interactive Task',
 };
 
-const settingsFromForm = (values: LaunchFormValues): NtscLaunchOptions => ({
+const settingsFromForm = (values: LaunchFormValues): LaunchFormSettings => ({
   name: values.name,
   pool: values.pool,
-  services: checkedServices(values),
   slots: values.slots,
   template: templateNameFromStartFrom(values.source),
   workspaceId: values.workspaceId,
@@ -176,7 +176,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   }, [currentWorkspace, fullConfigForm]);
 
   const { settings: defaults, updateSettings: saveDefaults } =
-    useSettings<NtscLaunchOptions>(settingsConfig);
+    useSettings<LaunchFormSettings>(settingsConfig);
 
   const handleModalClose = useCallback(() => {
     const fields: LaunchFormValues = form.getFieldsValue(true);
@@ -201,6 +201,31 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
           },
     [baseConfig],
   );
+
+  // The services that the start-from runs, previewed through the master without the checkboxes
+  // each time the start-from changes, once the simple form shows it: the master's defaults, and
+  // what a template or a config turns off. The checkboxes follow the latest preview; a refused
+  // preview leaves them, and the full config shows the refusal. Showing the simple form again
+  // after the full config previews nothing, so that the checkboxes keep their changes.
+  const [simpleFormShown, setSimpleFormShown] = useState(false);
+  const source = Form.useWatch('source', form);
+  const servicesPreview = useRef<{ baseConfig?: RawJson; seq: number; source?: string }>({
+    seq: 0,
+  });
+  useEffect(() => {
+    if (!simpleFormShown || startFromLoading) return;
+    const last = servicesPreview.current;
+    if (last.seq !== 0 && last.source === source && last.baseConfig === baseConfig) return;
+    const seq = last.seq + 1;
+    servicesPreview.current = { baseConfig, seq, source };
+    const fields: LaunchFormValues = form.getFieldsValue(true);
+    previewShell(simpleOptions({ ...fields, services: undefined, source }))
+      .then((previewed) => {
+        if (seq !== servicesPreview.current.seq) return;
+        form.setFieldsValue({ services: serviceChecks(formFieldsFromConfig(previewed).services) });
+      })
+      .catch(() => undefined);
+  }, [baseConfig, form, simpleFormShown, simpleOptions, source, startFromLoading]);
 
   // Previewed each time the full config opens.
   const fetchConfig = useCallback(async () => {
@@ -401,6 +426,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
           setWorkspace={setCurrentWorkspace}
           startFromLoadingTask={startFromLoadingTask}
           workspaces={workspaces}
+          onShown={setSimpleFormShown}
           onStartFrom={handleStartFrom}
           onStartFromAutoSelected={handleStartFromAutoSelected}
           onStartFromLoadingTask={setStartFromLoadingTask}
@@ -558,11 +584,13 @@ const FullConfig: React.FC<FullConfigProps> = ({
 interface LaunchFormProps {
   autoSelectStartFrom: boolean;
   currentWorkspace?: Workspace;
-  defaults: NtscLaunchOptions;
+  defaults: LaunchFormSettings;
   form: FormInstance<LaunchFormValues>;
   formId: string;
   initialTask?: CommandTask;
   lockedWorkspace: boolean;
+  /** Called with true once the form shows, and with false when it is replaced. */
+  onShown: (shown: boolean) => void;
   onStartFrom: (start: StartFrom) => void;
   onStartFromAutoSelected: () => void;
   onStartFromLoadingTask: (taskId?: string) => void;
@@ -579,6 +607,7 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
   formId,
   initialTask,
   lockedWorkspace,
+  onShown,
   onStartFrom,
   onStartFromAutoSelected,
   onStartFromLoadingTask,
@@ -588,6 +617,11 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
 }: LaunchFormProps) => {
   const selectedWorkspaceId = Form.useWatch('workspaceId', form);
   const templatesOn = useFeature().isOn('task_templates');
+
+  useEffect(() => {
+    onShown(true);
+    return () => onShown(false);
+  }, [onShown]);
 
   const resourcePools = useObservable(clusterStore.resourcePools);
   const boundResourcePoolsMap = useObservable(workspaceStore.boundResourcePoolsMap());
@@ -710,12 +744,7 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
       <Form.Item>
         <Row>
           {SHELL_SERVICES.map((name) => (
-            <Form.Item
-              initialValue={defaults?.services?.includes(name) ?? false}
-              key={name}
-              name={['services', name]}
-              noStyle
-              valuePropName="checked">
+            <Form.Item key={name} name={['services', name]} noStyle valuePropName="checked">
               <Checkbox>{name}</Checkbox>
             </Form.Item>
           ))}
