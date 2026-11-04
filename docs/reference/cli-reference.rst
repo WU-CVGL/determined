@@ -37,14 +37,13 @@ help documentation. For example, to learn more about individual experiment comma
        job (j)                manage job
        master (m)             manage master
        model (m)              manage models
-       notebook               manage notebooks
        oauth                  manage OAuth
        preview-search         preview search
        resources (res)        query historical resource allocation
        shell                  manage shells
        slot (s)               manage slots
-       task                   manage tasks (commands, experiments, notebooks,
-                              shells, tensorboards)
+       task                   manage tasks (commands, experiments, shells,
+                              tensorboards)
        template (tpl)         manage config templates
        config-policies (cp)   manage config policies
        tensorboard            manage TensorBoard instances
