@@ -21,7 +21,7 @@ or until it has been idle for the `idle_timeout` its configuration sets.
 
 ![The task page of a shell with its Terminal, JupyterLab, VS Code, Logs and Resources tabs, JupyterLab open](docs/assets/images/interactive-task-page.png)
 
-![The Launch Interactive Task form with a resource pool, slots, and the jupyter and vscode services checked](docs/assets/images/launch-interactive-task.png)
+![The Launch Interactive Task form with a resource pool, slots, and the JupyterLab and VS Code services checked under Services](docs/assets/images/launch-interactive-task.png)
 
 ```bash
 det shell start                    # an SSH session; JupyterLab and VS Code run with it
