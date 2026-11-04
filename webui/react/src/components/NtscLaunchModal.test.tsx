@@ -1023,6 +1023,21 @@ describe('NtscLaunchModal', () => {
       expect(await screen.findByText('Unable to fetch shell config.')).toBeInTheDocument();
       expect(screen.queryByText('master is restarting')).not.toBeInTheDocument();
     });
+
+    it('drops the refusal when the next preview succeeds', async () => {
+      const message = 'user may not use the resource pool gpu';
+      mocks.previewShell.mockImplementationOnce(async () => {
+        throw await masterRefusal(403, message);
+      });
+      const { user } = await setup();
+      await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+      expect(await screen.findByText(message)).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
+      await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+      await waitFor(() => expect(editorText()).toContain('resource_pool: default'));
+      expect(screen.queryByText(message)).not.toBeInTheDocument();
+    });
   });
 
   describe('browser history and the full config', () => {

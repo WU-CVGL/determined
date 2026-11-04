@@ -205,6 +205,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   // Previewed each time the full config opens.
   const fetchConfig = useCallback(async () => {
     setConfig(NotLoaded);
+    setConfigError(undefined);
 
     const fields: LaunchFormValues = form.getFieldsValue(true);
     try {
