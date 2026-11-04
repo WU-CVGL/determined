@@ -74,10 +74,10 @@ adds one XID query of its own, at most every 30 seconds per master, with a 5-sec
 Reading the Charts
 ==================
 
-The **Resources** tab of a shell:
+The **Resources** tab of a trial:
 
 .. image:: /assets/images/task-resources.png
-   :alt: The Resources tab of a task with CPU, memory, GPU utilization and allocation lifecycle charts
+   :alt: The Resources tab of a trial with its CPU and memory charts over the run
 
 |
 

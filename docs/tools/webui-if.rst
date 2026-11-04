@@ -116,10 +116,10 @@ these steps:
    The topology visualization shows the state of each slot. The pool's **Active** tab lists the GPUs
    each job holds; click a job's GPUs to outline them in the topology visualization.
 
-A resource pool's topology with one job's GPUs outlined:
+A resource pool's topology, two nodes with their NUMA groups and each GPU's state and health:
 
 .. image:: /assets/images/resource-pool-topology.png
-   :alt: A resource pool's topology view with one job's GPUs outlined, above its Active tab listing each job's GPUs
+   :alt: A resource pool's topology view with two nodes, their NUMA groups and each GPU's state and health
 
 |
 

@@ -40,9 +40,9 @@ det task open <shell id> vscode    # VS Code in the browser
   view outlines the GPUs each job holds.
 - **Task resource charts**: the CPU, memory and GPU use of each task, read from Prometheus.
 
-![A resource pool's topology view with one job's GPUs outlined, above its Active tab listing each job's GPUs](docs/assets/readme_images/resource-pool-topology.png)
+![A resource pool's topology view: two nodes, their NUMA groups, and each GPU's state and health](docs/assets/readme_images/resource-pool-topology.png)
 
-![The Resources tab of a task with CPU, memory, GPU utilization and allocation lifecycle charts](docs/assets/readme_images/task-resources.png)
+![The Resources tab of a task with its CPU and memory charts over the run](docs/assets/readme_images/task-resources.png)
 
 ```yaml
 resources:
