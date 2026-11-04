@@ -12,8 +12,8 @@ enum Type {
   TYPE_UNSPECIFIED = 0;
   // Experiement Job.
   TYPE_EXPERIMENT = 1;
-  // Jupyter Notebook Job.
-  TYPE_NOTEBOOK = 2;
+  reserved 2;
+  reserved "TYPE_NOTEBOOK";
   // TensorBoard Job.
   TYPE_TENSORBOARD = 3;
   // Shell Job.
