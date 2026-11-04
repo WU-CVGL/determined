@@ -36,7 +36,7 @@
          <div class="tile-container">
              <a class="tile" href="interface/job-config-reference.html">
                  <h2 class="tile-title">Job Configuration Reference</h2>
-                 <p class="tile-description">Configuration reference information for interactive jobs such as TensorBoards, commands, and shells.</p>
+                 <p class="tile-description">Configuration reference information for shells, commands, and TensorBoards.</p>
              </a>
          </div>
          <div class="tile-container">

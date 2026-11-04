@@ -27,15 +27,15 @@ override user-submitted configurations.
 -  Apply policies using the WebUI or the CLI.
 -  Define limits and non-overridable defaults for resource usage, environment settings, and more.
 -  Enforce policies at both cluster and workspace levels.
--  Set different priority and slot request limits for experiments and NTSC (TensorBoards, shells,
-   and commands) tasks.
+-  Set different priority and slot request limits for experiments and for TensorBoards, shells and
+   commands.
 -  Enforce strict adherence to configured priority limits.
 
 .. warning::
 
    To avoid unpredictable behavior, do not set both constraints and invariant configs for the same
    field within the same workload type and scope. Additionally, clearly specify whether the
-   constraints apply to **experiments** or **NTSC** tasks.
+   constraints apply to **experiments** or to **TensorBoards, shells and commands**.
 
 .. important::
 
@@ -143,14 +143,15 @@ Limiting Resources
 ==================
 
 Administrators can set constraints on resource usage, allowing them to manage how users allocate
-resources for workloads such as experiments and NTSC tasks. The configurable constraints are:
+resources for workloads such as experiments, TensorBoards, shells and commands. The configurable
+constraints are:
 
 -  ``constraints.resources.max_slots``: Limits the maximum number of slots (GPUs or CPUs) that can
-   be used by submitted workloads. Specify whether this applies to experiment workloads or NTSC
-   tasks.
+   be used by submitted workloads. Specify whether this applies to experiment workloads or to
+   TensorBoards, shells and commands.
 
 -  ``constraints.priority_limit``: Sets the priority limit for tasks. This value also needs to
-   specify whether it applies to experiments or NTSC tasks.
+   specify whether it applies to experiments or to TensorBoards, shells and commands.
 
 For Kubernetes resource managers, higher priority values indicate higher priority. For Agent
 resource managers, lower priority values indicate higher priority.
@@ -174,9 +175,9 @@ In this example:
 -  Any workload that exceeds these limits will be rejected, ensuring adherence to the configured
    constraints.
 
-**Example: Limiting GPU/CPU Slots for NTSC Tasks**
+**Example: Limiting GPU/CPU Slots for TensorBoards, Shells and Commands**
 
-To apply similar constraints to NTSC tasks:
+To apply similar constraints to TensorBoards, shells and commands:
 
 .. code:: yaml
 
@@ -187,16 +188,16 @@ To apply similar constraints to NTSC tasks:
 
 In this case:
 
--  Users cannot set ``resources.max_slots`` greater than 4 for NTSC tasks.
--  Users cannot set a priority higher than 10 for NTSC tasks in Kubernetes environments, and no
-   lower than 10 for Agent environments.
+-  Users cannot set ``resources.max_slots`` greater than 4 for TensorBoards, shells and commands.
+-  Users cannot set a priority higher than 10 for TensorBoards, shells and commands in Kubernetes
+   environments, and no lower than 10 for Agent environments.
 
 **Example: Interaction between Global and Workspace Constraints**
 
 This example demonstrates how global and workspace constraints interact and which constraints are
 ultimately enforced.
 
-Global NTSC constraints:
+Global constraints for TensorBoards, shells and commands:
 
 .. code:: yaml
 
@@ -204,7 +205,7 @@ Global NTSC constraints:
      resources:
        max_slots: 4
 
-Workspace NTSC constraints:
+Workspace constraints for TensorBoards, shells and commands:
 
 .. code:: yaml
 
@@ -226,9 +227,10 @@ In this scenario:
 
 -  The global ``max_slots`` constraint of 4 overrides the workspace ``max_slots`` constraint of 8.
 -  The workspace ``priority_limit`` of 20 is enforced because no global priority constraint was set.
--  Users in this workspace cannot set ``resources.max_slots`` greater than 4 for NTSC tasks.
--  Users in this workspace cannot set a priority higher than 20 for NTSC tasks in Kubernetes
-   environments, and no lower than 20 for Agent environments.
+-  Users in this workspace cannot set ``resources.max_slots`` greater than 4 for TensorBoards,
+   shells and commands.
+-  Users in this workspace cannot set a priority higher than 20 for TensorBoards, shells and
+   commands in Kubernetes environments, and no lower than 20 for Agent environments.
 
 This example illustrates that global constraints take precedence over workspace constraints when
 both are set for the same field. When a constraint is only set at the workspace level, it is
@@ -249,7 +251,7 @@ the Config Policies > Experiments tab.
 Priority Limits
 ===============
 
-You can set a different priority limit for experiments and NTSC tasks.
+You can set a different priority limit for experiments and for TensorBoards, shells and commands.
 
 **Example: Setting Priority Limits for Experiments**
 
@@ -260,7 +262,7 @@ The following policy is configured in the Config Policies > Experiments tab.
    constraints:
      priority_limit: <experiment limit>
 
-**Example: Setting Priority Limits for NTSC Tasks**
+**Example: Setting Priority Limits for TensorBoards, Shells and Commands**
 
 The following policy is configured in the Config Policies > Tasks tab.
 
@@ -314,8 +316,8 @@ user's settings.
 
 -  Start with cluster-wide policies for broad governance.
 -  Use workspace-level policies for more granular control of the projects in a workspace.
--  Set different priority limits for experiments and NTSC tasks to better manage resource
-   allocation.
+-  Set different priority limits for experiments and for TensorBoards, shells and commands to better
+   manage resource allocation.
 -  Regularly review and update policies as organizational needs evolve.
 -  Communicate configuration policies to users to ensure smooth adoption.
 -  Use the SetJobPriority API cautiously, ensuring that priority changes do not violate existing

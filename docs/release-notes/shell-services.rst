@@ -2,5 +2,5 @@
 
 **Improvements**
 
--  Shell: A shell's configuration can declare services. The ``jupyter`` service runs JupyterLab in
-   the shell's container, next to its SSH server.
+-  Shell: A shell's configuration can declare services; the ``jupyter`` service runs JupyterLab next
+   to the shell's SSH server.

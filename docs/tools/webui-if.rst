@@ -95,8 +95,8 @@ You can use the WebUI to view :ref:`historical-cluster-usage-data`.
  Viewing Cluster Topology
 **************************
 
-To view a resource pool's node and GPU distribution, and find out how many GPUs are currently in
-use, follow these steps:
+To view a resource pool's node and GPU distribution, and find out how many GPUs are in use, follow
+these steps:
 
 #. Navigate to Resource Pools.
 
@@ -115,6 +115,17 @@ use, follow these steps:
 
    The topology visualization shows the state of each slot. The pool's **Active** tab lists the GPUs
    each job holds; click a job's GPUs to outline them in the topology visualization.
+
+A resource pool's topology, two nodes with their NUMA groups and each GPU's state and health:
+
+.. image:: /assets/images/resource-pool-topology.png
+   :alt: A resource pool's topology view with two nodes, their NUMA groups and each GPU's state and health
+
+|
+
+The topology view needs no monitoring service; the GPU health view, which marks a GPU with a
+:ref:`recent critical XID <agent-gpu-xids>` as in error, needs the :ref:`task resources integration
+<native-task-resources>`.
 
 ***********************************
  Managing User Accounts and Groups
@@ -151,6 +162,15 @@ To revert to default settings:
 -  Select **I know what I'm doing**.
 -  Select **Reset to Default**.
 -  Confirm you want to reset all user settings to their default values.
+
+******************
+ Choosing a Theme
+******************
+
+The WebUI has a light and a dark theme, and follows your system's setting unless you pick one. To
+pick one, select your profile name in the upper left corner and click the theme entry, which shows
+the current choice and switches between **Day Theme**, **Night Theme** and **System Theme**. The
+**Theme Mode** setting in the Preferences section of your user settings makes the same choice.
 
 ****************************************
  Selecting a Table Density (Row Height)
@@ -231,16 +251,34 @@ restarts.
 
 To find out how to view and modify the Job Queue in the WebUI, start with :ref:`job-queue`.
 
-*********************
- Starting JupyterLab
-*********************
+*******************************
+ Launching an Interactive Task
+*******************************
 
-A shell runs JupyterLab by default. To start one, select **Launch Interactive Task** on the **Jobs**
-page or a workspace's **Jobs** tab; under **Services**, **JupyterLab** and, when the master serves
-code-server, **VS Code** are checked, and unchecking a service leaves it out. Open JupyterLab from
-the **JupyterLab** tab of the shell's page, which opens when you click the shell's name or choose
-**Open JupyterLab** from its action menu, or with ``det task open <shell id> jupyter``; see
-:ref:`jupyter-service`.
+An interactive task is a shell, which runs JupyterLab by default. To start one, select **Launch
+Interactive Task** on the **Jobs** page or a workspace's **Jobs** tab; under **Services**,
+**JupyterLab** and, when the master serves code-server, **VS Code** are checked, and unchecking a
+service leaves it out.
+
+.. image:: /assets/images/launch-interactive-task.png
+   :alt: The Launch Interactive Task form with a resource pool, slots, and the JupyterLab and VS Code services checked under Services
+
+|
+
+The shell's page opens when you click its name or choose **Open Terminal**, **Open JupyterLab** or
+**Open VS Code** from its action menu. It has a tab for each of the shell's services, then its
+**Logs** and **Resources**; ``det task open <shell id> jupyter`` opens JupyterLab from the CLI. See
+:ref:`shell-services`.
+
+.. image:: /assets/images/interactive-task-page-dark.png
+   :class: only-dark
+   :alt: The page of a shell with its Terminal, JupyterLab, VS Code, Logs and Resources tabs, JupyterLab open, in dark mode
+
+.. image:: /assets/images/interactive-task-page.png
+   :class: only-light
+   :alt: The page of a shell with its Terminal, JupyterLab, VS Code, Logs and Resources tabs, JupyterLab open, in light mode
+
+|
 
 ***********************
  Launching TensorBoard
