@@ -136,6 +136,9 @@ func (a *apiServer) GetTaskServiceCredential(
 		// code-server's login form is at <url>login.
 		resp.Password = ptrs.Ptr(cred.Password)
 		resp.Url = ptrs.Ptr(serviceURL(cred.Service.ServiceID(model.TaskID(req.TaskId)), false))
+	case model.ServiceTensorBoard:
+		// After the owner check, as for the other services: nothing was read.
+		return nil, status.Error(codes.FailedPrecondition, "services: tensorboard has no credential")
 	}
 	logCredentialRead(*curUser, req.Service+" credential", req.TaskId, ownerID)
 	return resp, nil

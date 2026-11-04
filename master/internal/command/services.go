@@ -207,9 +207,8 @@ func (c *Command) serviceCredential(name string) (TaskServiceCredential, error) 
 		}
 		cred.Password = *c.Metadata.CodeServerPassword
 	case model.ServiceTensorBoard:
-		// TensorBoard has no login: the master's proxy authenticates its requests.
-		return TaskServiceCredential{}, status.Error(codes.FailedPrecondition,
-			"services: tensorboard has no credential")
+		// TensorBoard has no login: the master's proxy authenticates its requests. The caller
+		// checks the owner before it answers that there is no credential.
 	default:
 		return TaskServiceCredential{}, notFound
 	}

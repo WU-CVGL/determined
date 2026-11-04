@@ -807,7 +807,7 @@ func TestLaunchShellVSCodeNeedsCodeServer(t *testing.T) {
 // "<task>:<port>", with a port of its own from the services' range, over plain HTTP behind a
 // master login and the owner rule, under its own prefix, which the proxy keeps. The container gets
 // the port, the log directory as the config gives it, the arguments as a JSON array and the
-// prefix, which is the service's URL. TensorBoard has no credential.
+// prefix, which is the service's URL. TensorBoard has no credential; another user is refused first.
 func TestLaunchShellWithTensorBoardService(t *testing.T) {
 	api, _, ctx := setupAPITest(t, nil)
 	cs, err := command.NewService(api.m.db, api.m.rm)
@@ -876,6 +876,12 @@ func TestLaunchShellWithTensorBoardService(t *testing.T) {
 	})
 	require.Equal(t, codes.FailedPrecondition, status.Code(err), err)
 	require.Equal(t, "services: tensorboard has no credential", status.Convert(err).Message())
+	// Another user meets the owner rule first, as for the other services.
+	stranger := db.RequireMockUser(t, api.m.db)
+	_, err = api.GetTaskServiceCredential(ntscUserCtx(t, stranger), &apiv1.GetTaskServiceCredentialRequest{
+		TaskId: taskID, Service: model.ServiceTensorBoard,
+	})
+	require.Equal(t, codes.PermissionDenied, status.Code(err), err)
 
 	// Without args, the container gets an empty array.
 	other, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
