@@ -83,10 +83,11 @@ service takes from the first of:
 
 -  The master: the service downloads the release for the container's architecture, checks its
    SHA-256, and installs it into the cache. Shells that share a cache install a release once, also
-   when they start at the same time, except for shells of different users on NFSv4, which may each
-   download it; one copy is kept. When the release is not in ``/var/cache/determined/code-server``
-   and cannot be installed there, the service installs it into ``~/.cache/determined/code-server``.
-   A line of the task log that starts with ``vscode service:`` names the directory.
+   when they start at the same time, except for shells that cannot take the install's lock (shells
+   of different users on NFSv4, or an image without ``flock``), which may each download it; one copy
+   is kept. When the release is not in ``/var/cache/determined/code-server`` and cannot be installed
+   there, the service installs it into ``~/.cache/determined/code-server``. A line of the task log
+   that starts with ``vscode service:`` names the directory.
 
 An administrator can override this release for every task: mount a directory that holds an extracted
 release into the containers read-only, for example with ``bind_mounts`` in
@@ -121,6 +122,10 @@ directory writable by an administrator only, who installs each release from a sh
 the other shells use it, or their home cache while the release is missing. A user can name a cache
 of their own, for example on shared storage that their shells mount, with
 ``DET_CODE_SERVER_CACHE_DIR`` in ``environment.environment_variables``.
+
+A shell installs a release in a temporary directory ``<version>/linux-<arch>.tmp.<suffix>`` next to
+it and removes only its own. A shell killed during an install can leave one behind; remove it while
+no shell installs that release.
 
 The editor keeps its extensions and settings in ``~/.local/share/code-server``, which goes away with
 the shell unless it is on shared storage. ``~`` is ``/root`` in a shell that runs as root. In a
