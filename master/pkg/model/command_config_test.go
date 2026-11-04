@@ -13,12 +13,12 @@ import (
 
 func TestConfigValidate(t *testing.T) {
 	type fields struct {
-		Description      string
-		BindMounts       []BindMount
-		Environment      Environment
-		Resources        ResourcesConfig
-		Entrypoint       []string
-		NotebookIdleType string
+		Description string
+		BindMounts  []BindMount
+		Environment Environment
+		Resources   ResourcesConfig
+		Entrypoint  []string
+		Services    map[string]ServiceConfig
 	}
 	type testCase struct {
 		name    string
@@ -40,7 +40,9 @@ func TestConfigValidate(t *testing.T) {
 				Entrypoint: []string{
 					"test",
 				},
-				NotebookIdleType: NotebookIdleTypeActivity,
+				Services: map[string]ServiceConfig{
+					ServiceJupyter: {IdleType: JupyterIdleTypeKernelConnections},
+				},
 			},
 		},
 		{
@@ -52,14 +54,16 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "invalid-notebook-idle-type",
+			name: "invalid-jupyter-idle-type",
 			fields: fields{
 				Resources:   resources,
 				Environment: environment,
 				Entrypoint: []string{
 					"test",
 				},
-				NotebookIdleType: NotebookIdleTypeActivity + "x",
+				Services: map[string]ServiceConfig{
+					ServiceJupyter: {IdleType: JupyterIdleTypeActivity + "x"},
+				},
 			},
 			wantErr: true,
 		},
@@ -67,12 +71,12 @@ func TestConfigValidate(t *testing.T) {
 	runTestCase := func(t *testing.T, tc testCase) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := &CommandConfig{
-				Description:      tc.fields.Description,
-				BindMounts:       tc.fields.BindMounts,
-				Environment:      tc.fields.Environment,
-				Resources:        tc.fields.Resources,
-				Entrypoint:       tc.fields.Entrypoint,
-				NotebookIdleType: tc.fields.NotebookIdleType,
+				Description: tc.fields.Description,
+				BindMounts:  tc.fields.BindMounts,
+				Environment: tc.fields.Environment,
+				Resources:   tc.fields.Resources,
+				Entrypoint:  tc.fields.Entrypoint,
+				Services:    tc.fields.Services,
 			}
 			if err := check.Validate(c); (err != nil) != tc.wantErr {
 				t.Errorf("config.Validate() error = %v, wantErr %v", err, tc.wantErr)
@@ -83,14 +87,6 @@ func TestConfigValidate(t *testing.T) {
 	for _, tc := range tests {
 		runTestCase(t, tc)
 	}
-}
-
-// The default notebook_idle_type is activity, which a shell's JupyterLab reports, with or without
-// task container defaults.
-func TestDefaultConfigNotebookIdleType(t *testing.T) {
-	require.Equal(t, NotebookIdleTypeActivity, DefaultConfig(nil).NotebookIdleType)
-	require.Equal(t, NotebookIdleTypeActivity,
-		DefaultConfig(&TaskContainerDefaultsConfig{}).NotebookIdleType)
 }
 
 func TestCommandConfigPreferGPUTopology(t *testing.T) {

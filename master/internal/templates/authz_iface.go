@@ -35,5 +35,5 @@ type TemplateAuthZ interface {
 	) (permErr error, err error)
 }
 
-// AuthZProvider is the authz registry for Notebooks, Shells, and Commands.
+// AuthZProvider is the authz registry for Shells and Commands.
 var AuthZProvider authz.AuthZProviderType[TemplateAuthZ]

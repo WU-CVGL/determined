@@ -109,8 +109,8 @@ func configWithoutLaunchTail(cfg *structpb.Struct, describedByRequest bool) map[
 // A shell's preview returns the config that a launch of the same request runs, but for what the
 // launch chooses afterwards: the launch's config adds its entrypoint, the supervisor with sshd's
 // port, and a description when the request sets none; the services' ports are in the launched
-// spec, not in the config. idle_timeout is unset unless the request or a template sets it, and
-// notebook_idle_type is activity unless the config sets another.
+// spec, not in the config. idle_timeout and services.jupyter.idle_type are unset unless the request
+// or a template sets them.
 func TestPreviewShellIsTheLaunchConfig(t *testing.T) {
 	api, _, ctx := setupPreviewTest(t)
 
@@ -119,25 +119,25 @@ func TestPreviewShellIsTheLaunchConfig(t *testing.T) {
 		idleTimeout bool
 		idleType    string
 	}{
-		"ssh": {fields: map[string]any{}, idleType: model.NotebookIdleTypeActivity},
+		"ssh": {fields: map[string]any{}},
 		"described, jupyter": {
 			fields: map[string]any{
 				"description": "mine",
 				"services":    map[string]any{"jupyter": map[string]any{}},
 			},
-			idleType: model.NotebookIdleTypeActivity,
 		},
 		"idle, every service": {
 			fields: map[string]any{
 				"services": map[string]any{
-					"ssh": map[string]any{}, "jupyter": map[string]any{}, "vscode": map[string]any{},
+					"ssh":     map[string]any{},
+					"jupyter": map[string]any{"idle_type": model.JupyterIdleTypeKernelConnections},
+					"vscode":  map[string]any{},
 				},
-				"idle_timeout":       "45m",
-				"notebook_idle_type": model.NotebookIdleTypeKernelConnections,
-				"resources":          map[string]any{"slots": 0.0},
+				"idle_timeout": "45m",
+				"resources":    map[string]any{"slots": 0.0},
 			},
 			idleTimeout: true,
-			idleType:    model.NotebookIdleTypeKernelConnections,
+			idleType:    model.JupyterIdleTypeKernelConnections,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -151,7 +151,11 @@ func TestPreviewShellIsTheLaunchConfig(t *testing.T) {
 			} else {
 				require.Nil(t, previewed["idle_timeout"])
 			}
-			require.Equal(t, tc.idleType, previewed["notebook_idle_type"])
+			services, _ := previewed["services"].(map[string]any)
+			jupyter, _ := services["jupyter"].(map[string]any)
+			idleType, _ := jupyter["idle_type"].(string)
+			require.Equal(t, tc.idleType, idleType)
+			require.NotContains(t, previewed, "notebook_idle_type")
 			require.Empty(t, preview.Warnings)
 
 			launch, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{Config: cfg})
@@ -215,6 +219,35 @@ func TestPreviewShellTemplateServices(t *testing.T) {
 	spec := launchedSpec(t, launch.Shell.Id)
 	require.Len(t, spec.Services, 3)
 	require.Equal(t, model.ServiceVSCode, spec.Services[2].Name)
+}
+
+// A request's service entry keeps the template's idle_type, in the preview as in the launch.
+func TestPreviewShellTemplateIdleType(t *testing.T) {
+	api, _, ctx := setupPreviewTest(t)
+	templateName := "shell-idle-type-" + uuid.NewString()
+	_, err := db.Bun().NewRaw(
+		"INSERT INTO templates (name, config, workspace_id) VALUES (?, ?::jsonb, 1)",
+		templateName, `{"services": {"jupyter": {"idle_type": "kernels_or_terminals"}}}`).
+		Exec(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = db.Bun().NewDelete().Table("templates").Where("name = ?", templateName).
+			Exec(context.Background())
+	})
+	cfg := servicesConfig(t, map[string]any{"jupyter": map[string]any{}})
+	want := map[string]any{"idle_type": model.JupyterIdleTypeKernelsOrTerminals}
+
+	preview, err := api.PreviewShell(ctx, &apiv1.PreviewShellRequest{
+		Config: cfg, TemplateName: templateName,
+	})
+	require.NoError(t, err)
+	require.Equal(t, want, preview.Config.AsMap()["services"].(map[string]any)["jupyter"])
+
+	launch, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
+		Config: cfg, TemplateName: templateName,
+	})
+	require.NoError(t, err)
+	require.Equal(t, want, launch.Config.AsMap()["services"].(map[string]any)["jupyter"])
 }
 
 // A shell's preview fills the services that the launch runs by default: jupyter, and vscode only
@@ -320,7 +353,7 @@ func TestPreviewShellDefaultServices(t *testing.T) {
 
 // A shell's preview refuses what its launch refuses, with the same code and message: an unknown
 // service, ssh disabled, vscode while the master serves no code-server, services without a free
-// port, an invalid
+// port, an invalid services.jupyter.idle_type or one on another service, the key that it replaces,
 // notebook_idle_type, an idle_timeout that is not positive or shorter than the minimum, and a config
 // that does not decode.
 func TestPreviewShellRefusesAsLaunch(t *testing.T) {
@@ -353,9 +386,17 @@ func TestPreviewShellRefusesAsLaunch(t *testing.T) {
 				portsExcept(minServicePort, maxServicePort, minServicePort)...),
 			msg: "services: vscode: no free port in 2900-3199",
 		},
+		"jupyter idle_type": {
+			config: servicesConfig(t, map[string]any{"jupyter": map[string]any{"idle_type": "sometimes"}}),
+			msg:    `services: jupyter: unknown idle_type "sometimes"`,
+		},
+		"vscode idle_type": {
+			config: servicesConfig(t, map[string]any{"vscode": map[string]any{"idle_type": "activity"}}),
+			msg:    "services: vscode: only jupyter takes idle_type",
+		},
 		"notebook_idle_type": {
-			config: previewConfig(t, map[string]any{"notebook_idle_type": "sometimes"}),
-			msg:    "invalid notebook idle type",
+			config: previewConfig(t, map[string]any{"notebook_idle_type": "activity"}),
+			msg:    "notebook_idle_type: use services.jupyter.idle_type",
 		},
 		"idle_timeout zero": {
 			config: previewConfig(t, map[string]any{"idle_timeout": "0s"}),

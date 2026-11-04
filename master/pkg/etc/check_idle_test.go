@@ -323,7 +323,7 @@ func startCheckIdleWith(
 		"DET_NOTEBOOK_TOKEN=" + checkIdleNotebookToken,
 		"NOTEBOOK_PORT=" + jupyterURL.Port(),
 		"NOTEBOOK_BASE_URL=" + jupyter.baseURL,
-		"NOTEBOOK_IDLE_TYPE=kernels_or_terminals",
+		"DET_JUPYTER_IDLE_TYPE=kernels_or_terminals",
 	}, env...)
 	stderr := &syncBuffer{}
 	cmd.Stderr = stderr
@@ -387,7 +387,7 @@ func TestCheckIdleReportsTaskActivity(t *testing.T) {
 // with the report interval it ships with.
 func TestCheckIdleReportsWithinIdleTimeout(t *testing.T) {
 	run := startCheckIdle(t, &checkIdleJupyter{baseURL: "/proxy/task-1:2900/", after: "busy"}, "",
-		"NOTEBOOK_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=4")
+		"DET_JUPYTER_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=4")
 
 	const (
 		observe = 4 * time.Second
@@ -424,7 +424,7 @@ func TestCheckIdleSlowJupyterShortestTimeout(t *testing.T) {
 		delay    = 2 * time.Second
 	)
 	run := startCheckIdle(t, &checkIdleJupyter{after: "busy", delay: delay}, "",
-		"NOTEBOOK_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=10")
+		"DET_JUPYTER_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=10")
 
 	var arrivals []time.Time
 	deadline := time.Now().Add(60 * time.Second)
@@ -454,7 +454,7 @@ func TestCheckIdleSlowJupyterShortestTimeout(t *testing.T) {
 func TestCheckIdleSlowMaster(t *testing.T) {
 	run := startCheckIdleWith(t, &checkIdleJupyter{after: "busy"},
 		&checkIdleMaster{delay: 4 * time.Second}, "",
-		"NOTEBOOK_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=10")
+		"DET_JUPYTER_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=10")
 	run.waitRounds(t, 4)
 
 	starts := run.jupyter.roundStarts()
@@ -469,7 +469,8 @@ func TestCheckIdleSlowMaster(t *testing.T) {
 
 // check_idle.py reads what the idle type needs and reports as soon as it knows: a busy kernel in
 // activity mode, and a kernel in kernels_or_terminals mode, after the kernels alone;
-// kernel_connections reads only the kernels; the sessions are never read.
+// kernel_connections reads only the kernels; the sessions are never read. An unknown idle type is
+// activity.
 func TestCheckIdleQueriesByIdleType(t *testing.T) {
 	kernels := []string{checkIdleKernelsPath}
 	kernelsTerminals := []string{checkIdleKernelsPath, checkIdleTerminalsPath}
@@ -484,10 +485,13 @@ func TestCheckIdleQueriesByIdleType(t *testing.T) {
 		"kernel_connections, idle":      {"kernel_connections", "idle", kernels, false},
 		"kernels_or_terminals, kernel":  {"kernels_or_terminals", "busy", kernels, true},
 		"kernels_or_terminals, idle":    {"kernels_or_terminals", "idle", kernelsTerminals, false},
+		// An unknown idle type is activity.
+		"unknown, busy": {"sometimes", "busy", kernels, true},
+		"unknown, idle": {"sometimes", "idle", kernelsTerminals, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			run := startCheckIdle(t, &checkIdleJupyter{after: tc.state}, checkIdleReportInterval,
-				"NOTEBOOK_IDLE_TYPE="+tc.idleType)
+				"DET_JUPYTER_IDLE_TYPE="+tc.idleType)
 			run.waitRounds(t, 5)
 
 			// The rounds before the last, which may still be under way.
@@ -517,7 +521,7 @@ func TestCheckIdleQueriesByIdleType(t *testing.T) {
 // it is not reported, and the rounds start 2.5 s apart.
 func TestCheckIdleJupyterTimeoutFollowsInterval(t *testing.T) {
 	run := startCheckIdle(t, &checkIdleJupyter{after: "busy", delay: 4 * time.Second}, "",
-		"NOTEBOOK_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=10")
+		"DET_JUPYTER_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=10")
 	run.waitRounds(t, 3)
 
 	starts := run.jupyter.roundStarts()
@@ -544,7 +548,7 @@ func TestCheckIdleJupyterTimeoutBoundsWholeRequest(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			run := startCheckIdle(t, &checkIdleJupyter{
 				after: "busy", delay: tc.delay, handshakeDelay: tc.delay,
-			}, "", "NOTEBOOK_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=10")
+			}, "", "DET_JUPYTER_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=10")
 			// The third round starts once the second has sent its report, if any.
 			run.waitRounds(t, 3)
 			reports, _ := run.master.received()

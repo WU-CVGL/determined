@@ -191,7 +191,7 @@ Example of configuring resource pool default pod spec in ``values.yaml``.
 In addition to default pod specs, it is also possible to configure custom pod specs for individual
 tasks. Pod specs for individual tasks can be configured under the ``environment`` field in the
 :ref:`experiment config <exp-environment>` (for experiments) or the :ref:`task configuration
-<command-notebook-configuration>` (for other tasks).
+<job-configuration-reference>` (for other tasks).
 
 Example of configuring a pod spec for an individual task:
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 # The jupyter service: JupyterLab, with its idle check in the background when set, under the
-# base URL that the master sets, NOTEBOOK_BASE_URL; tasks saved before the master set it are at
-# their task ID. The supervisor sources this file before the init, to set SHELL, and after it.
+# base URL that the master sets, NOTEBOOK_BASE_URL. The supervisor sources this file before the
+# init, to set SHELL, and after it.
 
 if [[ ${supervisor_phase-} == pre-init ]]; then
     # Use user's preferred SHELL in JupyterLab terminals, unless a startup hook sets another one.
@@ -21,7 +21,7 @@ fi
 
 # The idle check reports a busy JupyterLab to its task's activity record. The master sets the idle
 # type only where the idle time is watched.
-if [[ -n ${NOTEBOOK_IDLE_TYPE+set} ]]; then
+if [[ -n ${DET_JUPYTER_IDLE_TYPE+set} ]]; then
     "$DET_PYTHON_EXECUTABLE" /run/determined/jupyter/check_idle.py &
 fi
 
@@ -48,7 +48,7 @@ jupyter_ready_check() {
     jupyter lab --ServerApp.port=${NOTEBOOK_PORT} \
         --ServerApp.port_retries=0 \
         --ServerApp.allow_origin="*" \
-        --ServerApp.base_url="${NOTEBOOK_BASE_URL:-/proxy/${DET_TASK_ID}/}" \
+        --ServerApp.base_url="${NOTEBOOK_BASE_URL}" \
         --ServerApp.allow_root=True \
         --ServerApp.certfile=/run/determined/jupyter/jupyterCert.pem \
         --ServerApp.keyfile=/run/determined/jupyter/jupyterKey.key \

@@ -278,7 +278,7 @@ func TestGetTaskContextDirectoryExperiment(t *testing.T) {
 
 func TestGetTaskContextDirectoryTask(t *testing.T) {
 	api, _, ctx := setupAPITest(t, nil)
-	task := &model.Task{TaskType: model.TaskTypeNotebook, TaskID: model.NewTaskID()}
+	task := &model.Task{TaskType: model.TaskTypeShell, TaskID: model.NewTaskID()}
 	require.NoError(t, db.AddTask(ctx, task))
 
 	expectedContextDirectory := []byte("expectedContextDirectory")

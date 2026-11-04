@@ -84,17 +84,17 @@ func TestHasSSHD(t *testing.T) {
 
 	// Another task needs keys and a recorded sshd port; a default TCP proxy port is not one.
 	withPort := func(s *tasks.GenericCommandSpec) { s.SSHDPort = 2222 }
-	require.True(t, cmd(model.TaskTypeNotebook, withPort).hasSSHD())
 	require.True(t, cmd(model.TaskTypeCommand, withPort).hasSSHD())
-	require.False(t, cmd(model.TaskTypeNotebook, nil).hasSSHD())
-	require.False(t, cmd(model.TaskTypeNotebook, func(s *tasks.GenericCommandSpec) {
+	require.True(t, cmd(model.TaskTypeTensorboard, withPort).hasSSHD())
+	require.False(t, cmd(model.TaskTypeCommand, nil).hasSSHD())
+	require.False(t, cmd(model.TaskTypeCommand, func(s *tasks.GenericCommandSpec) {
 		s.Base.ExtraProxyPorts = sshdPort
 	}).hasSSHD())
-	require.False(t, cmd(model.TaskTypeNotebook, func(s *tasks.GenericCommandSpec) {
+	require.False(t, cmd(model.TaskTypeCommand, func(s *tasks.GenericCommandSpec) {
 		withPort(s)
 		s.Keys = nil
 	}).hasSSHD())
-	require.False(t, cmd(model.TaskTypeNotebook, func(s *tasks.GenericCommandSpec) {
+	require.False(t, cmd(model.TaskTypeCommand, func(s *tasks.GenericCommandSpec) {
 		withPort(s)
 		s.Metadata.PublicKey = nil
 	}).hasSSHD())

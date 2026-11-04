@@ -4534,7 +4534,7 @@ Version 0.13.9
 **Improvements**
 
 -  Commands: Support configuring ``shmSize`` for commands (e.g., notebooks, shells, TensorBoards) in
-   :ref:`command configurations <command-notebook-configuration>`.
+   :ref:`command configurations <job-configuration-reference>`.
 
 **Bug Fixes**
 

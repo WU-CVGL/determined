@@ -394,7 +394,6 @@ const settingsConfig = (scope: DashboardScope, experiments: boolean): SettingsCo
           union([
             literal(RunKind.Experiment),
             literal(RunKind.GenericTask),
-            literal(RunKind.JupyterLab),
             literal(RunKind.Shell),
             literal(RunKind.Command),
             literal(RunKind.TensorBoard),

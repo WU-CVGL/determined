@@ -28,7 +28,6 @@ export const RunKind = {
   Command: CommandType.Command,
   Experiment: 'experiment',
   GenericTask: 'generic-task',
-  JupyterLab: CommandType.JupyterLab,
   Shell: CommandType.Shell,
   TensorBoard: CommandType.TensorBoard,
 } as const;
@@ -37,20 +36,14 @@ export type RunKind = ValueOf<typeof RunKind>;
 
 /**
  * The order of the kinds: the Kind filter's and sort's, and of runs that started at the same time.
- * JupyterLab is the label of ended notebook records: a URL's `type=jupyter-lab` still decodes, but
- * no dashboard lists or offers it (LISTED_KINDS).
  */
 export const RUN_KINDS: RunKind[] = [
   RunKind.Experiment,
   RunKind.GenericTask,
-  RunKind.JupyterLab,
   RunKind.Shell,
   RunKind.Command,
   RunKind.TensorBoard,
 ];
-
-/** The kinds a dashboard lists and its Kind filter offers. */
-export const LISTED_KINDS: RunKind[] = RUN_KINDS.filter((kind) => kind !== RunKind.JupyterLab);
 
 /** Shells, commands and TensorBoards: the kinds the master lists whole, from memory. */
 export const COMMAND_KINDS = [RunKind.Shell, RunKind.Command, RunKind.TensorBoard] as const;
@@ -58,13 +51,12 @@ export const COMMAND_KINDS = [RunKind.Shell, RunKind.Command, RunKind.TensorBoar
 export type ListedCommandKind = (typeof COMMAND_KINDS)[number];
 
 export const isCommandKind = (kind: RunKind): kind is CommandType =>
-  kind === RunKind.JupyterLab || (COMMAND_KINDS as readonly RunKind[]).includes(kind);
+  (COMMAND_KINDS as readonly RunKind[]).includes(kind);
 
 export const runKindLabel: Record<RunKind, string> = {
   [RunKind.Command]: 'Command',
   [RunKind.Experiment]: 'Experiment',
   [RunKind.GenericTask]: 'Generic Task',
-  [RunKind.JupyterLab]: 'JupyterLab',
   [RunKind.Shell]: 'Shell',
   [RunKind.TensorBoard]: 'TensorBoard',
 };
@@ -73,7 +65,6 @@ export const runKindPluralLabel: Record<RunKind, string> = {
   [RunKind.Command]: 'commands',
   [RunKind.Experiment]: 'experiments',
   [RunKind.GenericTask]: 'generic tasks',
-  [RunKind.JupyterLab]: 'JupyterLabs',
   [RunKind.Shell]: 'shells',
   [RunKind.TensorBoard]: 'TensorBoards',
 };
@@ -91,7 +82,7 @@ export type DashboardScope =
  */
 export const kindsOf = (scope: DashboardScope, experiments: boolean): RunKind[] => {
   if (scope.type === 'project') return [RunKind.Experiment, RunKind.GenericTask];
-  return experiments ? LISTED_KINDS : LISTED_KINDS.filter((kind) => kind !== RunKind.Experiment);
+  return experiments ? RUN_KINDS : RUN_KINDS.filter((kind) => kind !== RunKind.Experiment);
 };
 
 /* State */
@@ -162,7 +153,7 @@ export const experimentStates = (groups?: StateGroup[]): `STATE_${RunState}`[] =
     .flatMap((group) => experimentStatesByGroup[group])
     .map((state) => `STATE_${state}` as const);
 
-/** A notebook, shell, command or TensorBoard is active until it is terminated; it never pauses. */
+/** A shell, command or TensorBoard is active until it is terminated; it never pauses. */
 export const commandStateGroup = (state: CommandState): StateGroup =>
   state === CommandState.Terminated ? StateGroup.Ended : StateGroup.Active;
 
@@ -498,7 +489,7 @@ export const runComparator =
     return compareTies(a, b);
   };
 
-/** Sorts the notebooks, shells, commands and TensorBoards, which the master lists unsorted. */
+/** Sorts the shells, commands and TensorBoards, which the master lists unsorted. */
 export const sortCommandRows = (rows: CommandRunRow[], sort?: RunSort): CommandRunRow[] =>
   [...rows].sort(runComparator(sort));
 
@@ -576,7 +567,7 @@ export const genericTaskApiSort = (
   sortBy: genericTaskSortBy[sort.key],
 });
 
-/* Filters run in the browser, for notebooks, shells, commands and TensorBoards */
+/* Filters run in the browser, for shells, commands and TensorBoards */
 
 export const matchesSearch = (row: Pick<RunRow, 'id' | 'name'>, search?: string): boolean => {
   const term = search?.trim().toLowerCase();

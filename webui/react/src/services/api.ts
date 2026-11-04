@@ -1056,9 +1056,6 @@ export const killTask = async (task: Pick<Type.CommandTask, 'id' | 'type'>): Pro
   switch (task.type) {
     case Type.CommandType.Command:
       return await killCommand({ commandId: task.id });
-    case Type.CommandType.JupyterLab:
-      // The label of ended notebook records: the master has no API to kill one.
-      throw new Error(`Unable to kill ${task.id}.`);
     case Type.CommandType.Shell:
       return await killShell({ commandId: task.id });
     case Type.CommandType.TensorBoard:

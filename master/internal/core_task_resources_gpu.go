@@ -32,7 +32,7 @@ type taskResourceGPUKey struct {
 }
 
 // queryTaskResourceGPUSets reads the GPU lists the task's containers recorded for the given
-// allocations, with each allocation's slots. Only trials, notebooks and shells record them.
+// allocations, with each allocation's slots. Only trials and shells record them.
 func queryTaskResourceGPUSets(
 	ctx context.Context, taskID string, allocationIDs []string,
 ) ([]taskResourceGPUSet, error) {

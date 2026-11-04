@@ -381,7 +381,7 @@ def delete_workspace(args: argparse.Namespace) -> None:
     if args.yes or render.yes_or_no(
         'Deleting workspace "' + args.workspace_name + '" will result \n'
         "in the unrecoverable deletion of all associated projects, experiments,\n"
-        "Notebooks, shells, commands, Tensorboards, and Templates.\n"
+        "shells, commands, Tensorboards, and Templates.\n"
         "For a recoverable alternative, see the 'archive' command. Do you still \n"
         "wish to proceed?"
     ):

@@ -9,7 +9,7 @@ import (
 	"github.com/determined-ai/determined/master/pkg/model"
 )
 
-// NSCAuthZ describes authz methods for Notebooks, Shells, and Commands.
+// NSCAuthZ describes authz methods for Shells and Commands.
 type NSCAuthZ interface {
 	// NSC functions
 	// GET /api/v1/NSCs/:nsc_id
@@ -70,5 +70,5 @@ type NSCAuthZ interface {
 	) error
 }
 
-// AuthZProvider is the authz registry for Notebooks, Shells, and Commands.
+// AuthZProvider is the authz registry for Shells and Commands.
 var AuthZProvider authz.AuthZProviderType[NSCAuthZ]

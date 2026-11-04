@@ -5,7 +5,7 @@
 #######################
 
 Config Policies enable administrators to control how users define workloads, such as experiments,
-notebooks, TensorBoards, shells, and commands. Administrators can include any parameter from the
+TensorBoards, shells, and commands. Administrators can include any parameter from the
 :ref:`experiment configuration reference <experiment-config-reference>` to set up experiment
 invariant configurations.
 
@@ -27,8 +27,8 @@ override user-submitted configurations.
 -  Apply policies using the WebUI or the CLI.
 -  Define limits and non-overridable defaults for resource usage, environment settings, and more.
 -  Enforce policies at both cluster and workspace levels.
--  Set different priority and slot request limits for experiments and NTSC (notebooks, TensorBoards,
-   shells, and commands) tasks.
+-  Set different priority and slot request limits for experiments and NTSC (TensorBoards, shells,
+   and commands) tasks.
 -  Enforce strict adherence to configured priority limits.
 
 .. warning::

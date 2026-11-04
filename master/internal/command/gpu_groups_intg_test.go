@@ -21,7 +21,7 @@ var testGPUGroups = expconf.GPUGroupsConfig{
 	{RawName: "learner", RawCount: 1, RawModels: []string{"NVIDIA RTX 6000 Ada Generation"}},
 }
 
-// Commands, notebooks, shells and TensorBoards pass their gpu_groups to the resource manager.
+// Commands, shells and TensorBoards pass their gpu_groups to the resource manager.
 func TestNTSCCarriesGPUGroups(t *testing.T) {
 	pgDB := setupTest(t)
 	starts := &captureStarts{}
@@ -34,7 +34,6 @@ func TestNTSCCarriesGPUGroups(t *testing.T) {
 		job  model.JobType
 	}{
 		{model.TaskTypeCommand, model.JobTypeCommand},
-		{model.TaskTypeNotebook, model.JobTypeNotebook},
 		{model.TaskTypeShell, model.JobTypeShell},
 		{model.TaskTypeTensorboard, model.JobTypeTensorboard},
 	} {

@@ -11,10 +11,6 @@
    start, so remove it before upgrading. The Helm chart's ``notebookTimeout`` and ``det deploy aws
    --notebook-timeout`` are removed with it.
 
--  Master: A notebook still running when the master is upgraded is ended when the master starts,
-   with a line in its task log. End notebooks before upgrading. Ended notebooks stay readable by
-   task ID, for example with ``det task logs <task id>``.
-
 **Improvements**
 
 -  Shell: ``det shell start --preview`` prints the configuration that the shell would start with,

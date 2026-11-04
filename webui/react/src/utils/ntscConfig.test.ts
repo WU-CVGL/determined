@@ -1,7 +1,6 @@
 import { cloneDeep } from 'lodash';
 
 import {
-  configForShellLaunch,
   configFromForm,
   formFieldsFromConfig,
   minimalDiff,
@@ -26,7 +25,6 @@ const mergedShellConfig = {
     registry_auth: { password: 'hunter2', username: 'me' },
   },
   idle_timeout: null,
-  notebook_idle_type: 'kernels_or_terminals',
   resources: { priority: 42, resource_pool: 'gpu', slots: 2 },
   work_dir: null,
 };
@@ -74,35 +72,12 @@ describe('ntscConfig', () => {
 
     it('keeps a description the user chose', () => {
       expect(sanitizeConfig({ description: 'my shell' }).description).toBe('my shell');
-      expect(sanitizeConfig({ description: 'JupyterLab (a-b-c)' })).not.toHaveProperty(
-        'description',
-      );
     });
 
     it('does not change its input', () => {
       const input = cloneDeep(mergedShellConfig);
       sanitizeConfig(input);
       expect(input).toEqual(mergedShellConfig);
-    });
-  });
-
-  describe('configForShellLaunch', () => {
-    it('drops the name the master generated for a notebook', () => {
-      const notebook = { description: 'JupyterLab (kindly-quick-heron)', idle_timeout: '30m' };
-      expect(configForShellLaunch(notebook)).toEqual({ idle_timeout: '30m' });
-      // The input is not changed.
-      expect(notebook.description).toBe('JupyterLab (kindly-quick-heron)');
-    });
-
-    it('keeps a shell’s name, any name given by the user and everything else', () => {
-      const shell = { description: 'Shell (lively-calm-fox)' };
-      expect(configForShellLaunch(shell)).toBe(shell);
-      const settings = { idle_timeout: '8h', notebook_idle_type: 'activity' };
-      expect(configForShellLaunch(settings)).toBe(settings);
-      expect(configForShellLaunch({ description: 'debug box' })).toEqual({
-        description: 'debug box',
-      });
-      expect(configForShellLaunch({})).toEqual({});
     });
   });
 

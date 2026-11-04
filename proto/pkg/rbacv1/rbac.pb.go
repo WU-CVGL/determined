@@ -46,11 +46,11 @@ const (
 	PermissionType_PERMISSION_TYPE_UPDATE_EXPERIMENT_METADATA PermissionType = 2005
 	// Ability to delete experiment.
 	PermissionType_PERMISSION_TYPE_DELETE_EXPERIMENT PermissionType = 2006
-	// Ability to create Notebooks, Shells, and Commands.
+	// Ability to create Shells and Commands.
 	PermissionType_PERMISSION_TYPE_CREATE_NSC PermissionType = 3001
-	// Ability to view Notebooks, Shells, and Commands.
+	// Ability to view Shells and Commands.
 	PermissionType_PERMISSION_TYPE_VIEW_NSC PermissionType = 3002
-	// Ability to terminate Notebooks, Shells, and Commands.
+	// Ability to terminate Shells and Commands.
 	PermissionType_PERMISSION_TYPE_UPDATE_NSC PermissionType = 3003
 	// Ability to create, update, and add / remove users from groups.
 	PermissionType_PERMISSION_TYPE_UPDATE_GROUP PermissionType = 93001

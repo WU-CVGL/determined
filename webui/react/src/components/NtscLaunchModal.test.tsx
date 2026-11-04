@@ -203,7 +203,6 @@ const previewFor = (params: { config?: RawJson; templateName?: string }) => {
     ...(config.description === undefined ? {} : { description: config.description }),
     environment: { image: { cuda: custom ? 'custom:2' : 'default:1' } },
     ...(config.idle_timeout === undefined ? {} : { idle_timeout: config.idle_timeout }),
-    notebook_idle_type: config.notebook_idle_type ?? 'activity',
     resources: {
       priority: 42,
       resource_pool: resources.resource_pool ?? 'default',
@@ -419,7 +418,7 @@ describe('NtscLaunchModal', () => {
         workspaceId: WORKSPACE.id,
       });
       const yamlText = editorText();
-      expect(yamlText).toContain('notebook_idle_type: activity');
+      expect(yamlText).toContain('jupyter: {}');
       // The master names the shell at launch; the preview has no name of its own.
       expect(yamlText).not.toContain('description');
       expect(yamlText).not.toContain('idle_timeout');
@@ -429,24 +428,12 @@ describe('NtscLaunchModal', () => {
       expect(mocks.launchShell).toHaveBeenCalledWith({
         config: {
           environment: { image: { cuda: 'default:1' } },
-          notebook_idle_type: 'activity',
           resources: { priority: 42, resource_pool: 'default', slots: 1 },
           services: DEFAULT_SERVICES,
         },
         templateName: undefined,
         workspaceId: WORKSPACE.id,
       });
-    });
-
-    it('drops a notebook’s generated name from an edited full config at launch', async () => {
-      const { onLaunched, user } = await setup();
-      await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
-      await waitFor(() => expect(editorText()).toContain('resource_pool: default'));
-      editConfig((config) => ({ ...config, description: 'JupyterLab (kindly-quick-heron)' }));
-      await launch(user);
-
-      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
-      expect(mocks.launchShell.mock.calls[0][0].config).not.toHaveProperty('description');
     });
 
     it('lists recent tasks on the cluster, this browser’s history and templates', async () => {
@@ -457,19 +444,6 @@ describe('NtscLaunchModal', () => {
         workspaceId: WORKSPACE.id,
       });
       now.mockRestore();
-      // A notebook launch's history is not listed.
-      window.localStorage.setItem(
-        `u:${USER_ID}/launch-history/jupyter-lab`,
-        JSON.stringify([
-          {
-            config: { description: 'a notebook' },
-            id: 'nb',
-            savedAt: Date.parse('2026-01-01T09:30:00Z'),
-            v: 1,
-            workspaceId: WORKSPACE.id,
-          },
-        ]),
-      );
       mocks.getShells.mockResolvedValue([
         task(CommandType.Shell),
         task(CommandType.Shell, {
@@ -498,7 +472,6 @@ describe('NtscLaunchModal', () => {
       const older = screen.getByText(/^Shell · cluster task · Terminated ·/);
       expect(recent.compareDocumentPosition(older) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(screen.getByText(/^Shell · from browser · cpu, 0 slots ·/)).toBeInTheDocument();
-      expect(screen.queryByText(/a notebook/)).not.toBeInTheDocument();
       expect(screen.getByText('gpu-template')).toBeInTheDocument();
       // A config is only fetched once an item is picked.
       expect(mocks.getShellConfig).not.toHaveBeenCalled();
@@ -899,7 +872,6 @@ describe('NtscLaunchModal', () => {
 
   describe('last-used values', () => {
     const SEEDED = {
-      'jupyter-lab': { name: 'nb-name', slots: 3 },
       'shell-launch': { name: 'shell-name', slots: 2 },
     };
 
@@ -924,8 +896,6 @@ describe('NtscLaunchModal', () => {
             workspaceId: WORKSPACE.id,
           }),
         );
-        // A notebook launch's last values are left as they are.
-        expect(savedSettings('jupyter-lab')).toEqual(SEEDED['jupyter-lab']);
       });
     });
 
