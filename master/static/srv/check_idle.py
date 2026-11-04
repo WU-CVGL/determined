@@ -115,12 +115,15 @@ def is_idle(
     def get(path: str):
         if path not in answers:
             try:
-                answers[path] = requests.get(
+                response = requests.get(
                     f"{request_address}{path}",
                     headers=auth_header,
                     verify=False,
                     timeout=None if timeout is None else Timeout(total=timeout),
-                ).json()
+                )
+                # An error body is not a list of kernels.
+                response.raise_for_status()
+                answers[path] = response.json()
             except Exception as e:
                 raise Unreadable(path) from e
         return answers[path]
