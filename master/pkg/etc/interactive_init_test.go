@@ -63,6 +63,7 @@ func TestInteractiveSupervisorSourcesInitOnce(t *testing.T) {
 
 	for _, name := range []string{
 		NotebookEntrypointResource, ShellEntrypointResource, SSHServiceResource, JupyterServiceResource,
+		VSCodeServiceResource,
 	} {
 		script := staticScript(t, name)
 		require.False(t, initSource.MatchString(script), "%s does not source the init", name)

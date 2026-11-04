@@ -17,6 +17,7 @@ import (
 	apiPkg "github.com/determined-ai/determined/master/internal/api"
 	authz2 "github.com/determined-ai/determined/master/internal/authz"
 	"github.com/determined-ai/determined/master/internal/command"
+	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/mocks"
 	"github.com/determined-ai/determined/master/internal/rm/rmevents"
@@ -359,4 +360,59 @@ func TestGetTaskServiceCredential(t *testing.T) {
 	_, err = s.api.GetTaskServiceCredential(ntscUserCtx(t, commandOwner),
 		&apiv1.GetTaskServiceCredentialRequest{TaskId: commandID, Service: model.ServiceSSH})
 	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// The vscode service is listed over HTTP at its URL, and its credential, the password of
+// code-server's login form and the URL whose "login" path takes it, goes to the owner and admins,
+// an admin's read logged; other users are refused.
+func TestGetTaskServiceCredentialVSCode(t *testing.T) {
+	s, adminCtx := setupServicesTest(t)
+	audits := credentialReadLogs(t)
+	req := mockGenericReq(t, s.api.m.db)
+	req.Spec.Metadata.WorkspaceID = model.DefaultWorkspaceID
+	setShellSSHD(req.Spec, minSshdPort)
+	_, err := addShellVSCode(req.Spec, config.CodeServerConfig{Version: "4.96.4", Dir: t.TempDir()})
+	require.NoError(t, err)
+	ownerRecord, err := user.ByID(context.TODO(), req.Spec.Base.Owner.ID)
+	require.NoError(t, err)
+	owner := ownerRecord.ToUser()
+	cmd, err := command.DefaultCmdService.LaunchShellCommand(req, req.Spec.Base.Owner)
+	require.NoError(t, err)
+	taskID := cmd.ToV1Shell().Id
+	spec := launchedSpec(t, taskID)
+	require.NotNil(t, spec.Metadata.CodeServerPassword)
+	password := *spec.Metadata.CodeServerPassword
+	vscodeID := taskID + ":" + strconv.Itoa(spec.Services[1].Port)
+	other := db.RequireMockUser(t, s.api.m.db)
+
+	listed := s.services(ntscUserCtx(t, owner), t, taskID).Services
+	require.Len(t, listed, 2)
+	require.Equal(t, &taskv1.TaskService{
+		Name: model.ServiceVSCode, ServiceId: vscodeID, Protocol: taskv1.TaskService_PROTOCOL_HTTP,
+		Url: "/proxy/" + vscodeID + "/", MayConnect: true,
+	}, listed[1])
+
+	for name, ctx := range map[string]context.Context{
+		"owner": ntscUserCtx(t, owner), "admin": adminCtx,
+	} {
+		resp, err := s.api.GetTaskServiceCredential(ctx, &apiv1.GetTaskServiceCredentialRequest{
+			TaskId: taskID, Service: model.ServiceVSCode,
+		})
+		require.NoError(t, err, name)
+		require.Equal(t, &apiv1.GetTaskServiceCredentialResponse{
+			Password: ptrs.Ptr(password),
+			Url:      ptrs.Ptr("/proxy/" + vscodeID + "/"),
+		}, resp, name)
+	}
+	entries := audits()
+	require.Len(t, entries, 1)
+	requireCredentialReadLog(t, entries, s.admin, "vscode credential", taskID, int32(owner.ID))
+
+	_, err = s.api.GetTaskServiceCredential(ntscUserCtx(t, other),
+		&apiv1.GetTaskServiceCredentialRequest{TaskId: taskID, Service: model.ServiceVSCode})
+	require.Equal(t, codes.PermissionDenied, status.Code(err))
+	_, err = s.api.GetTaskServiceCredential(ntscUserCtx(t, s.denied),
+		&apiv1.GetTaskServiceCredentialRequest{TaskId: taskID, Service: model.ServiceVSCode})
+	require.Equal(t, apiPkg.NotFoundErrs("task", taskID, true), err)
+	require.Len(t, audits(), 1)
 }

@@ -19,7 +19,8 @@ fi
 #
 # Not all variables should be overwritten this way; the HOME variable should be
 # set by ssh, and the TERM, LANG, and LC_* variables should be passed in from
-# the client.
+# the client. HASHED_PASSWORD, the hash that logs in to the vscode service, is
+# for code-server only.
 #
 # Normal mechanisms like a ~/.bashrc will override these variables.
 #
@@ -50,7 +51,7 @@ options="$(
         val="${kvp/#+([^=])=/}"
 
         # Filter names we shouldn't forward
-        if [[ $var =~ ^(_|HOME|TERM|LANG|LC_.*)$ ]]; then
+        if [[ $var =~ ^(_|HOME|TERM|LANG|LC_.*|HASHED_PASSWORD)$ ]]; then
             continue
         fi
 

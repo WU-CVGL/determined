@@ -6718,6 +6718,7 @@ class v1GetTaskServiceCredentialResponse(Printable):
     """Response to GetTaskServiceCredentialRequest: the fields of the service's
     credential.
     """
+    password: "typing.Optional[str]" = None
     privateKey: "typing.Optional[str]" = None
     publicKey: "typing.Optional[str]" = None
     token: "typing.Optional[str]" = None
@@ -6727,12 +6728,15 @@ class v1GetTaskServiceCredentialResponse(Printable):
     def __init__(
         self,
         *,
+        password: "typing.Union[str, None, Unset]" = _unset,
         privateKey: "typing.Union[str, None, Unset]" = _unset,
         publicKey: "typing.Union[str, None, Unset]" = _unset,
         token: "typing.Union[str, None, Unset]" = _unset,
         url: "typing.Union[str, None, Unset]" = _unset,
         user: "typing.Union[str, None, Unset]" = _unset,
     ):
+        if not isinstance(password, Unset):
+            self.password = password
         if not isinstance(privateKey, Unset):
             self.privateKey = privateKey
         if not isinstance(publicKey, Unset):
@@ -6748,6 +6752,8 @@ class v1GetTaskServiceCredentialResponse(Printable):
     def from_json(cls, obj: Json) -> "v1GetTaskServiceCredentialResponse":
         kwargs: "typing.Dict[str, typing.Any]" = {
         }
+        if "password" in obj:
+            kwargs["password"] = obj["password"]
         if "privateKey" in obj:
             kwargs["privateKey"] = obj["privateKey"]
         if "publicKey" in obj:
@@ -6763,6 +6769,8 @@ class v1GetTaskServiceCredentialResponse(Printable):
     def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
         out: "typing.Dict[str, typing.Any]" = {
         }
+        if not omit_unset or "password" in vars(self):
+            out["password"] = self.password
         if not omit_unset or "privateKey" in vars(self):
             out["privateKey"] = self.privateKey
         if not omit_unset or "publicKey" in vars(self):

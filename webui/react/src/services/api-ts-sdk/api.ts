@@ -5124,11 +5124,17 @@ export interface V1GetTaskServiceCredentialResponse {
      */
     token?: string;
     /**
-     * The jupyter service: the path under the master that opens JupyterLab with the token, "/proxy/<service ID>/?token=<token>".
+     * The jupyter service: the path under the master that opens JupyterLab with the token, "/proxy/<service ID>/?token=<token>". The vscode service: the path under the master at which code-server serves, "/proxy/<service ID>/", whose login form "<url>login" takes the password.
      * @type {string}
      * @memberof V1GetTaskServiceCredentialResponse
      */
     url?: string;
+    /**
+     * The vscode service: the password of code-server's login form.
+     * @type {string}
+     * @memberof V1GetTaskServiceCredentialResponse
+     */
+    password?: string;
 }
 /**
  * Response to GetTaskServicesRequest.

@@ -22,6 +22,8 @@ const (
 	interactiveServiceSSH = model.ServiceSSH
 	// interactiveServiceJupyter runs JupyterLab.
 	interactiveServiceJupyter = model.ServiceJupyter
+	// interactiveServiceVSCode runs code-server.
+	interactiveServiceVSCode = model.ServiceVSCode
 )
 
 // interactiveServiceUnits maps each service of the supervisor to the static resource of its unit.
@@ -29,6 +31,7 @@ const (
 var interactiveServiceUnits = map[string]string{
 	interactiveServiceSSH:     etc.SSHServiceResource,
 	interactiveServiceJupyter: etc.JupyterServiceResource,
+	interactiveServiceVSCode:  etc.VSCodeServiceResource,
 }
 
 // interactiveSupervisorEntrypoint is the entrypoint of a notebook or shell task: the supervisor,
