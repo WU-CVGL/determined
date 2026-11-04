@@ -17,10 +17,12 @@ const (
 	ServiceJupyter = "jupyter"
 	// ServiceVSCode runs VS Code in the browser, coder/code-server.
 	ServiceVSCode = "vscode"
+	// ServiceTensorBoard runs TensorBoard on a log directory in the container.
+	ServiceTensorBoard = "tensorboard"
 )
 
 // InteractiveServices lists every service of ServiceSSH, ServiceJupyter, ... in sorted order.
-var InteractiveServices = []string{ServiceJupyter, ServiceSSH, ServiceVSCode}
+var InteractiveServices = []string{ServiceJupyter, ServiceSSH, ServiceTensorBoard, ServiceVSCode}
 
 // The idle types of the jupyter service: what JupyterLab's idle check counts as activity.
 const (
@@ -46,6 +48,48 @@ type ServiceConfig struct {
 	// IdleType is what the jupyter service's idle check counts as activity, one of
 	// JupyterIdleTypes; unset means JupyterIdleTypeActivity. Only the jupyter service takes it.
 	IdleType string `json:"idle_type,omitempty"`
+	// LogDir is the directory that the tensorboard service reads, a path in the container; a
+	// relative one is resolved against the task's work directory when the service starts. An
+	// enabled tensorboard service requires it, and only the tensorboard service takes it.
+	LogDir string `json:"logdir,omitempty"`
+	// Args are more arguments of TensorBoard, after the ones that the service sets. Only the
+	// tensorboard service takes them.
+	Args []string `json:"args,omitempty"`
+}
+
+// MergeServiceConfig returns a request's entry for a service over a template's: the request's
+// enabled wins, unset meaning enabled, so that an explicit enabled: false is kept and an entry
+// without it runs the service; each other option that the request leaves unset is the template's.
+// An explicit empty args list clears the template's.
+func MergeServiceConfig(template, request ServiceConfig) ServiceConfig {
+	merged := request
+	if merged.IdleType == "" {
+		merged.IdleType = template.IdleType
+	}
+	if merged.LogDir == "" {
+		merged.LogDir = template.LogDir
+	}
+	if merged.Args == nil {
+		merged.Args = slices.Clone(template.Args)
+	}
+	return merged
+}
+
+// MergeServices returns the services of a config whose request's entries replace the
+// template's: each entry of the request merged over the template's entry for the same service
+// with MergeServiceConfig, and the template's other entries as they are. Either may be nil.
+func MergeServices(template, request map[string]ServiceConfig) map[string]ServiceConfig {
+	if template == nil && request == nil {
+		return nil
+	}
+	merged := maps.Clone(template)
+	if merged == nil {
+		merged = map[string]ServiceConfig{}
+	}
+	for name, service := range request {
+		merged[name] = MergeServiceConfig(template[name], service)
+	}
+	return merged
 }
 
 // Runs returns whether the service runs: it is enabled unless the config says otherwise.
@@ -92,12 +136,16 @@ func configuredServiceNames(services map[string]ServiceConfig) []string {
 }
 
 // validateServices returns an error for each name in services that is not a known service, one
-// for ssh disabled: every shell runs its SSH server, and one for each idle_type that is not on the
-// jupyter service or not one of JupyterIdleTypes.
+// for ssh disabled: every shell runs its SSH server, one for each idle_type that is not on the
+// jupyter service or not one of JupyterIdleTypes, one for each logdir or args that is not on the
+// tensorboard service, and one for an enabled tensorboard service without a logdir.
 func validateServices(services map[string]ServiceConfig) []error {
 	var errs []error
 	for _, name := range configuredServiceNames(services) {
 		service := services[name]
+		if slices.Contains(InteractiveServices, name) {
+			errs = append(errs, validateTensorBoardOptions(name, service)...)
+		}
 		switch {
 		case !slices.Contains(InteractiveServices, name):
 			errs = append(errs, fmt.Errorf("services: unknown service %q; known services: %s",
@@ -110,6 +158,36 @@ func validateServices(services map[string]ServiceConfig) []error {
 		case !slices.Contains(JupyterIdleTypes, service.IdleType):
 			errs = append(errs, fmt.Errorf("services: jupyter: unknown idle_type %q; idle types: %s",
 				service.IdleType, strings.Join(JupyterIdleTypes, ", ")))
+		}
+	}
+	return errs
+}
+
+// validateTensorBoardOptions returns an error for a logdir or args on a service other than
+// tensorboard, and, on the tensorboard service, for a missing logdir when it runs and for a NUL
+// character, which the container's environment cannot hold, in the logdir or an argument.
+func validateTensorBoardOptions(name string, service ServiceConfig) []error {
+	if name != ServiceTensorBoard {
+		var errs []error
+		if service.LogDir != "" {
+			errs = append(errs, fmt.Errorf("services: %s: only tensorboard takes logdir", name))
+		}
+		if service.Args != nil {
+			errs = append(errs, fmt.Errorf("services: %s: only tensorboard takes args", name))
+		}
+		return errs
+	}
+	var errs []error
+	if service.Runs() && service.LogDir == "" {
+		errs = append(errs, fmt.Errorf("services: tensorboard: logdir is required"))
+	}
+	if strings.ContainsRune(service.LogDir, 0) {
+		errs = append(errs, fmt.Errorf("services: tensorboard: logdir contains a NUL character"))
+	}
+	for _, arg := range service.Args {
+		if strings.ContainsRune(arg, 0) {
+			errs = append(errs, fmt.Errorf("services: tensorboard: args contain a NUL character"))
+			break
 		}
 	}
 	return errs

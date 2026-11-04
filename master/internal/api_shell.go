@@ -344,7 +344,7 @@ func (a *apiServer) validateShellServices(spec *tasks.GenericCommandSpec) error 
 	for _, name := range append([]string{interactiveServiceSSH},
 		model.EnabledServiceNames(spec.Config.Services)...) {
 		switch name {
-		case interactiveServiceSSH, interactiveServiceJupyter:
+		case interactiveServiceSSH, interactiveServiceJupyter, interactiveServiceTensorBoard:
 		case interactiveServiceVSCode:
 			if !a.m.config.Interactive.CodeServer.Enabled() {
 				return status.Error(codes.InvalidArgument,
@@ -509,6 +509,8 @@ func (a *apiServer) addShellService(
 		return addShellJupyter(spec)
 	case interactiveServiceVSCode:
 		return addShellVSCode(spec, a.m.config.Interactive.CodeServer)
+	case interactiveServiceTensorBoard:
+		return addShellTensorBoard(spec)
 	default:
 		return nil, nil
 	}

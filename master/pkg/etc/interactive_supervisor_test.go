@@ -1039,9 +1039,10 @@ exit 0
 // jupyter unit SHELL.
 func TestSupervisorUnitsPreInit(t *testing.T) {
 	for unit, want := range map[string]string{
-		SSHServiceResource:     "returned \n",
-		JupyterServiceResource: "returned /",
-		VSCodeServiceResource:  "returned \n",
+		SSHServiceResource:         "returned \n",
+		JupyterServiceResource:     "returned /",
+		VSCodeServiceResource:      "returned \n",
+		TensorBoardServiceResource: "returned \n",
 	} {
 		t.Run(unit, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "unit.sh")

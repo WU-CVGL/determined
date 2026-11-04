@@ -20,14 +20,17 @@ const (
 	interactiveServiceJupyter = model.ServiceJupyter
 	// interactiveServiceVSCode runs code-server.
 	interactiveServiceVSCode = model.ServiceVSCode
+	// interactiveServiceTensorBoard runs TensorBoard.
+	interactiveServiceTensorBoard = model.ServiceTensorBoard
 )
 
 // interactiveServiceUnits maps each service of the supervisor to the static resource of its unit.
 // Its names are model.InteractiveServices, which a config's services are checked against.
 var interactiveServiceUnits = map[string]string{
-	interactiveServiceSSH:     etc.SSHServiceResource,
-	interactiveServiceJupyter: etc.JupyterServiceResource,
-	interactiveServiceVSCode:  etc.VSCodeServiceResource,
+	interactiveServiceSSH:         etc.SSHServiceResource,
+	interactiveServiceJupyter:     etc.JupyterServiceResource,
+	interactiveServiceTensorBoard: etc.TensorBoardServiceResource,
+	interactiveServiceVSCode:      etc.VSCodeServiceResource,
 }
 
 // interactiveSupervisorEntrypoint is the entrypoint of a shell task: the supervisor, which passes
