@@ -162,6 +162,10 @@ export const minimalDiff = (config: RawJson, defaults: RawJson): RawJson => {
  * is one of those settings. The defaults are required: without them there is
  * no telling an unset setting from a cleared one.
  *
+ * A service's entry with `enabled: false` is kept even where the defaults do
+ * not run the service, so that the template still turns it off if the cluster
+ * runs it later: a missing entry follows the defaults.
+ *
  * The resource pool and slots are always kept: the master ignores template
  * resources for shells, and the launch form copies them into its fields when
  * the template is picked.
@@ -172,17 +176,6 @@ export const templateFromConfig = (config: RawJson, defaults: RawJson): RawJson 
   const cleanDefaults = sanitizeConfig(defaults);
   delete cleanDefaults.description;
   const out = minimalDiff(clean, cleanDefaults);
-  // A service turned off that the defaults do not run either is not a setting.
-  const services = asObject(out.services);
-  if (services) {
-    const defaultServices = asObject(cleanDefaults.services);
-    Object.entries(services).forEach(([name, entry]) => {
-      if (defaultServices?.[name] === undefined && isEqual(entry, { enabled: false })) {
-        delete services[name];
-      }
-    });
-    if (Object.keys(services).length === 0) delete out.services;
-  }
   const resources = asObject(clean.resources);
   if (resources) {
     const kept: RawJson = {};

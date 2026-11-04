@@ -71,9 +71,9 @@ func DefaultShellServices(codeServer bool) []string {
 	return services
 }
 
-// DeclaredServices returns the names in services that run, sorted: a disabled service is not
-// declared.
-func DeclaredServices(services map[string]ServiceConfig) []string {
+// EnabledServiceNames returns the names in services that run, sorted: a disabled service is left
+// out.
+func EnabledServiceNames(services map[string]ServiceConfig) []string {
 	var names []string
 	for name, service := range services {
 		if service.Runs() {
@@ -84,8 +84,8 @@ func DeclaredServices(services map[string]ServiceConfig) []string {
 	return names
 }
 
-// configuredServices returns every name in services, disabled ones included, sorted.
-func configuredServices(services map[string]ServiceConfig) []string {
+// configuredServiceNames returns every name in services, disabled ones included, sorted.
+func configuredServiceNames(services map[string]ServiceConfig) []string {
 	names := maps.Keys(services)
 	slices.Sort(names)
 	return names
@@ -96,7 +96,7 @@ func configuredServices(services map[string]ServiceConfig) []string {
 // jupyter service or not one of JupyterIdleTypes.
 func validateServices(services map[string]ServiceConfig) []error {
 	var errs []error
-	for _, name := range configuredServices(services) {
+	for _, name := range configuredServiceNames(services) {
 		service := services[name]
 		switch {
 		case !slices.Contains(InteractiveServices, name):

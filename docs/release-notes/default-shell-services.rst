@@ -2,9 +2,12 @@
 
 **Breaking Changes**
 
--  Shell: Every shell now runs JupyterLab, and VS Code in the browser where the master serves
+-  Shell: A new shell runs JupyterLab by default, and VS Code in the browser when the master serves
    code-server, unless its configuration or template sets the service's ``enabled`` to ``false``
-   (``det shell start --no-service <name>``). Shells start a little slower and use more memory.
+   (``det shell start --no-service <name>``). A task restored after a master restart keeps the
+   services it was started with. The default does not install JupyterLab into the image: without it,
+   the ``jupyter`` service is ``UNAVAILABLE`` and the shell runs on. Shells start a little slower
+   and use more memory.
 
 **Improvements**
 

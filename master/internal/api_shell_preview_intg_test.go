@@ -169,14 +169,14 @@ func TestPreviewShellIsTheLaunchConfig(t *testing.T) {
 			}
 
 			// The tail: the supervisor runs sshd at the port of the ssh service, the first one,
-			// and each declared service has its record.
+			// and each enabled service has its record.
 			spec := launchedSpec(t, launch.Shell.Id)
 			require.Equal(t, []string{
 				interactiveSupervisorScript, "-f", shellSSHDConfigFile,
 				"-p", strconv.Itoa(spec.SSHDPort), "-D", "-e",
 			}, spec.Config.Entrypoint)
 			names := []string{model.ServiceSSH}
-			for _, s := range model.DeclaredServices(spec.Config.Services) {
+			for _, s := range model.EnabledServiceNames(spec.Config.Services) {
 				if s != model.ServiceSSH {
 					names = append(names, s)
 				}

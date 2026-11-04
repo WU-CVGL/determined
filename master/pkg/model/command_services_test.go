@@ -50,7 +50,7 @@ func TestCommandConfigServices(t *testing.T) {
 			if tc.want == nil {
 				require.Empty(t, config.Services)
 			} else {
-				require.Equal(t, tc.want, DeclaredServices(config.Services))
+				require.Equal(t, tc.want, EnabledServiceNames(config.Services))
 			}
 		})
 	}
@@ -76,7 +76,7 @@ func TestCommandConfigServices(t *testing.T) {
 }
 
 // A service runs unless its config sets enabled to false; its entry stays in the config either
-// way, and a disabled one is not declared.
+// way, and a disabled one is not among the enabled names.
 func TestServiceConfigEnabled(t *testing.T) {
 	require.True(t, ServiceConfig{}.Runs())
 	require.True(t, ServiceConfig{Enabled: ptrs.Ptr(true)}.Runs())
@@ -86,8 +86,8 @@ func TestServiceConfigEnabled(t *testing.T) {
 		`{"services": {"jupyter": {"enabled": false}, "vscode": {"enabled": true}, "ssh": {}}}`)
 	require.NoError(t, err)
 	require.NoError(t, check.Validate(config))
-	require.Equal(t, []string{"ssh", "vscode"}, DeclaredServices(config.Services))
-	require.Equal(t, []string{"jupyter", "ssh", "vscode"}, configuredServices(config.Services))
+	require.Equal(t, []string{"ssh", "vscode"}, EnabledServiceNames(config.Services))
+	require.Equal(t, []string{"jupyter", "ssh", "vscode"}, configuredServiceNames(config.Services))
 	require.Len(t, config.Services, 3)
 	require.False(t, config.Services["jupyter"].Runs())
 
@@ -97,8 +97,8 @@ func TestServiceConfigEnabled(t *testing.T) {
 	require.JSONEq(t, `{"jupyter": {"enabled": false}, "vscode": {"enabled": true}, "ssh": {}}`,
 		string(raw))
 
-	require.Empty(t, DeclaredServices(nil))
-	require.Empty(t, DeclaredServices(map[string]ServiceConfig{
+	require.Empty(t, EnabledServiceNames(nil))
+	require.Empty(t, EnabledServiceNames(map[string]ServiceConfig{
 		"jupyter": {Enabled: ptrs.Ptr(false)},
 	}))
 }
