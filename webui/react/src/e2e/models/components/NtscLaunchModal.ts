@@ -4,8 +4,8 @@ import { Modal } from 'e2e/models/common/hew/Modal';
 import { Select } from 'e2e/models/common/hew/Select';
 
 /**
- * Represents the launch form for JupyterLab and shells in src/components/NtscLaunchModal.tsx,
- * which Launch JupyterLab, Launch Shell and Launch Again open with a task type selected.
+ * Represents the shell launch form in src/components/NtscLaunchModal.tsx, which Launch Shell and
+ * Launch Again open.
  */
 export class NtscLaunchModal extends Modal {
   readonly startFrom = new Select({
@@ -25,16 +25,17 @@ export class NtscLaunchModal extends Modal {
     parent: this,
     selector: '.ant-form-item:has(label[title="Slots"]) input',
   });
-  readonly typeSelect = new LaunchTypeSelect({
-    parent: this,
-    selector: '[data-test-component="launch-type-select"]',
-  });
+  /** The checkbox of a service the shell runs besides sshd, such as jupyter, by its name. */
+  readonly service = (name: string): ServiceCheckbox =>
+    new ServiceCheckbox({
+      parent: this,
+      selector: `label.ant-checkbox-wrapper:has(span:text-is("${name}"))`,
+    });
 }
 
 /**
- * The task type selector at the top of the launch form.
+ * A service's checkbox: its label, which a click toggles, and its input.
  */
-class LaunchTypeSelect extends BaseComponent {
-  readonly jupyterLab = new BaseComponent({ parent: this, selector: 'label:first-of-type' });
-  readonly shell = new BaseComponent({ parent: this, selector: 'label:last-of-type' });
+class ServiceCheckbox extends BaseComponent {
+  readonly input = new BaseComponent({ parent: this, selector: 'input[type="checkbox"]' });
 }

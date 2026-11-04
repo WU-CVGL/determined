@@ -5,24 +5,26 @@ import { TaskLogs } from 'e2e/models/pages/TaskLogs';
 import { WorkspaceDetails } from 'e2e/models/pages/WorkspaceDetails';
 
 test.describe('Workspace Tasks', () => {
-  test('JupyterLab', async ({ authedPage, newWorkspace, context }) => {
+  test('Shell with JupyterLab', async ({ authedPage, newWorkspace, context }) => {
     const workspaceDetails = new WorkspaceDetails(authedPage);
+    const { launchModal, shellLaunchedModal } = workspaceDetails.taskDashboard;
     const firstRow = workspaceDetails.taskDashboard.table.table.rows.nth(0);
 
     await test.step('Start task', async () => {
       await workspaceDetails.gotoWorkspace(newWorkspace.response.workspace.id);
       await workspaceDetails.jobsTab.pwLocator.click();
 
-      await workspaceDetails.taskDashboard.jupyterLabButton.pwLocator.click();
-      await workspaceDetails.taskDashboard.launchModal.pwLocator.waitFor();
-      await expect(
-        workspaceDetails.taskDashboard.launchModal.typeSelect.jupyterLab.pwLocator,
-      ).toHaveClass(/ant-radio-button-wrapper-checked/);
-      await workspaceDetails.taskDashboard.launchModal.footer.submit.pwLocator.click();
-      await workspaceDetails.taskDashboard.launchModal.pwLocator.waitFor({ state: 'hidden' });
+      await workspaceDetails.taskDashboard.shellButton.pwLocator.click();
+      await launchModal.pwLocator.waitFor();
+      const jupyter = launchModal.service('jupyter');
+      await jupyter.pwLocator.click();
+      await expect(jupyter.input.pwLocator).toBeChecked();
+      await launchModal.footer.submit.pwLocator.click();
 
-      const jupyterLabPage = await context.waitForEvent('page', { timeout: 10_000 });
-      await jupyterLabPage.close();
+      // The launch result shows how to connect; nothing opens in a new tab.
+      await shellLaunchedModal.pwLocator.waitFor();
+      expect(context.pages()).toHaveLength(1);
+      await shellLaunchedModal.close();
 
       await firstRow.pwLocator.waitFor({ timeout: 10_000 });
     });

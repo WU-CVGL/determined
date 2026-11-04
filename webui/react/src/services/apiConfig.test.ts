@@ -63,6 +63,23 @@ describe('apiConfig', () => {
     });
   });
 
+  describe('previewShell', () => {
+    it('returns only the merged config, posted to the shell preview', async () => {
+      const config = { notebook_idle_type: 'activity', services: { jupyter: {} } };
+      const spy = vi
+        .spyOn(utils.detApi.Shells, 'previewShell')
+        .mockResolvedValue({ config, warnings: [V1LaunchWarning.CURRENTSLOTSEXCEEDED] });
+      const params = { config: { services: { jupyter: {} } }, workspaceId: 2 };
+      expect(await generateDetApi(utils.previewShell)(params)).toEqual(config);
+      expect(spy).toHaveBeenCalledWith(params);
+      spy.mockRestore();
+    });
+
+    it('returns an empty config when the response has none', () => {
+      expect(utils.previewShell.postProcess({ config: undefined, warnings: [] })).toEqual({});
+    });
+  });
+
   describe('config getters', () => {
     it('getShellConfig returns only the config of a shell response', () => {
       const response = shellResponse();
