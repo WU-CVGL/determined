@@ -48,7 +48,11 @@ const ShellLaunchedModalComponent: React.FC<Props> = ({ response, services }: Pr
           </Button>
         )}
         {canOpenTaskService(services, 'jupyter') && (
-          <Button block size="large" type="primary" onClick={openTab(InteractiveTaskTab.JupyterLab)}>
+          <Button
+            block
+            size="large"
+            type="primary"
+            onClick={openTab(InteractiveTaskTab.JupyterLab)}>
             Open JupyterLab
           </Button>
         )}
