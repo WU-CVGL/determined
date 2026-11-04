@@ -1330,6 +1330,8 @@ describe('NtscLaunchModal', () => {
       const { onLaunched, user } = await setup({}, { settled: false });
       expect(await screen.findByText(message)).toBeInTheDocument();
       expect(serviceBox('jupyter')).not.toBeChecked();
+      expect(launchButton()).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Show Full Config' })).toBeDisabled();
 
       await user.click(screen.getByRole('button', { name: 'Retry' }));
       await waitFor(() => expect(mocks.previewShell).toHaveBeenCalledTimes(2));
@@ -1373,6 +1375,58 @@ describe('NtscLaunchModal', () => {
       expect(launchButton()).toBeEnabled();
     });
 
+    it('sends nothing after a refused preview of a picked template, until a retry succeeds', async () => {
+      mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, NO_JUPYTER_TEMPLATE]);
+      let refuse = true;
+      mocks.previewShell.mockImplementation(
+        async (params: { config?: RawJson; templateName?: string }) => {
+          if (params.templateName === 'no-jupyter' && refuse) {
+            throw await masterRefusal(503, 'master is restarting');
+          }
+          return previewFor(params);
+        },
+      );
+      const { onLaunched, user } = await setup();
+      await openStartFrom(user);
+      await user.click(await screen.findByText('no-jupyter'));
+      await screen.findByRole('button', { name: 'Retry' });
+      const previews = mocks.previewShell.mock.calls.length;
+
+      // The template's preview failed, so vscode is not one that the master offered for it.
+      await user.click(serviceBox('vscode'));
+      await user.click(serviceBox('vscode'));
+      expect(serviceBox('vscode')).not.toBeChecked();
+      expect(launchButton()).toBeDisabled();
+      const fullConfigButton = screen.getByRole('button', { name: 'Show Full Config' });
+      expect(fullConfigButton).toBeDisabled();
+      fireEvent.click(launchButton());
+      fireEvent.click(fullConfigButton);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mocks.launchShell).not.toHaveBeenCalled();
+      expect(mocks.previewShell).toHaveBeenCalledTimes(previews);
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+
+      refuse = false;
+      await user.click(screen.getByRole('button', { name: 'Retry' }));
+      await waitFor(() => expect(launchButton()).toBeEnabled());
+      expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+      expect(serviceBox('jupyter')).not.toBeChecked();
+      expect(serviceBox('vscode')).toBeChecked();
+      await user.click(serviceBox('vscode'));
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell).toHaveBeenCalledTimes(1);
+      expect(mocks.launchShell).toHaveBeenCalledWith({
+        config: {
+          description: undefined,
+          resources: { resource_pool: undefined, slots: 1 },
+          services: { jupyter: { enabled: false }, vscode: { enabled: false } },
+        },
+        templateName: 'no-jupyter',
+        workspaceId: WORKSPACE.id,
+      });
+    });
+
     it('previews the start-from again after a refusal when the pool changes', async () => {
       const pool = { auxContainerCapacityPerAgent: 1, slotsAvailable: 0, slotsPerAgent: 0 };
       mocks.pools = [
@@ -1393,9 +1447,10 @@ describe('NtscLaunchModal', () => {
         const { onLaunched, user } = await setup({}, { settled: false });
         const picker = screen.getByRole('combobox', { name: 'Resource Pool' });
         await waitFor(() => expect(picker.closest('.ant-select')).toHaveTextContent('a-pool'));
-        await waitFor(() => expect(mocks.previewShell).toHaveBeenCalled());
+        await screen.findByRole('button', { name: 'Retry' });
         expect(serviceBox('jupyter')).not.toBeChecked();
         expect(serviceBox('vscode')).not.toBeChecked();
+        expect(launchButton()).toBeDisabled();
 
         refuse = false;
         await user.click(picker);
@@ -1418,38 +1473,53 @@ describe('NtscLaunchModal', () => {
   });
 
   describe('a refused preview', () => {
+    /**
+     * Opens the form, whose preview on open is refused with status and message: Launch and the full
+     * config stay disabled until Retry succeeds. Then opens the full config, whose preview is
+     * refused the same way.
+     */
+    const openRefusedFullConfig = async (status: number, message: string) => {
+      const refuse = async () => {
+        throw await masterRefusal(status, message);
+      };
+      // The preview on open, the retry, then the full config's.
+      mocks.previewShell
+        .mockImplementationOnce(refuse)
+        .mockImplementationOnce(previewFor)
+        .mockImplementationOnce(refuse);
+      const { user } = await setup({}, { settled: false });
+      const retry = await screen.findByRole('button', { name: 'Retry' });
+      expect(launchButton()).toBeDisabled();
+      const fullConfigButton = screen.getByRole('button', { name: 'Show Full Config' });
+      expect(fullConfigButton).toBeDisabled();
+      fireEvent.click(fullConfigButton);
+      expect(mocks.previewShell).toHaveBeenCalledTimes(1);
+
+      await user.click(retry);
+      await waitFor(() => expect(fullConfigButton).toBeEnabled());
+      await user.click(fullConfigButton);
+      await waitFor(() => expect(mocks.previewShell).toHaveBeenCalledTimes(3));
+      return { user };
+    };
+
     it.each([
       [400, 'services: unknown service "x"; known services: jupyter, ssh, vscode'],
       [403, 'user may not use the resource pool gpu'],
     ])('shows the master’s message for a %s', async (status, message) => {
-      mocks.previewShell.mockImplementation(async () => {
-        throw await masterRefusal(status, message);
-      });
-      const { user } = await setup({}, { settled: false });
-      await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+      await openRefusedFullConfig(status, message);
       expect(await screen.findByText(message)).toBeInTheDocument();
       expect(screen.queryByText('Unable to fetch shell config.')).not.toBeInTheDocument();
     });
 
     it('shows the generic message for another failure', async () => {
-      mocks.previewShell.mockImplementation(async () => {
-        throw await masterRefusal(503, 'master is restarting');
-      });
-      const { user } = await setup({}, { settled: false });
-      await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+      await openRefusedFullConfig(503, 'master is restarting');
       expect(await screen.findByText('Unable to fetch shell config.')).toBeInTheDocument();
       expect(screen.queryByText('master is restarting')).not.toBeInTheDocument();
     });
 
     it('drops the refusal when the next preview succeeds', async () => {
       const message = 'user may not use the resource pool gpu';
-      // The preview on open, then the full config's.
-      const refuse = async () => {
-        throw await masterRefusal(403, message);
-      };
-      mocks.previewShell.mockImplementationOnce(refuse).mockImplementationOnce(refuse);
-      const { user } = await setup({}, { settled: false });
-      await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+      const { user } = await openRefusedFullConfig(403, message);
       expect(await screen.findByText(message)).toBeInTheDocument();
 
       await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));

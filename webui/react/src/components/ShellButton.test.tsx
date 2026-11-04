@@ -17,6 +17,7 @@ vi.mock('services/api', () => ({
   getTaskTemplates: () => Promise.resolve([]),
   getWorkspaces: () => Promise.resolve({ workspaces: [] }),
   launchShell: mocks.launchShell,
+  previewShell: () => Promise.resolve({ services: { jupyter: {} } }),
   updateUserSetting: () => Promise.resolve(),
 }));
 
@@ -80,6 +81,8 @@ describe('ShellButton', () => {
     await user.click(screen.getByRole('button', { name: 'Launch Interactive Task' }));
     await screen.findByText('Start from');
     expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    // Launch waits for the master's preview of the services.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Launch' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Launch' }));
 
     expect(await screen.findByText('Interactive Task Launched')).toBeInTheDocument();
