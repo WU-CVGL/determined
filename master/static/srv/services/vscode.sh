@@ -17,7 +17,9 @@
 #   holds a lock on <version>/linux-<arch>.lock, extracts into a temporary directory, adds the
 #   marker file .det-complete and renames the directory into place, and a task that gets the lock
 #   after another task installed the release uses that copy. A release without the marker is
-#   incomplete and is installed again.
+#   incomplete and is installed again. A task that cannot take the lock, or waits for it longer
+#   than 600 s, installs without it, and the first rename wins. A cache that is full or read-only
+#   counts as one that cannot be installed into.
 #
 # The unit logs which cache it took code-server from and whether it installed it there.
 #
@@ -97,14 +99,59 @@ vscode_complete() {
     [[ -x $1/bin/code-server && -e $1/$vscode_marker ]]
 }
 
+# vscode_lock opens the lock file of the install of vscode_home, which is read-only to a user who
+# did not create it, on the descriptor vscode_lock_fd and takes the lock. With $1 set, it waits up
+# to 600 s for another task that holds the lock, and sets vscode_waited when it did. It returns 1
+# when it cannot open or take the lock, also when the file system cannot lock a file open only for
+# reading, as NFSv4 cannot.
+vscode_lock() {
+    local rc
+    vscode_waited=
+    if ! { exec {vscode_lock_fd}>>"$vscode_home.lock"; } 2>/dev/null &&
+        ! { exec {vscode_lock_fd}<"$vscode_home.lock"; } 2>/dev/null; then
+        vscode_lock_fd=
+        return 1
+    fi
+    flock -n "$vscode_lock_fd" 2>/dev/null && return 0
+    rc=$?
+    # flock exits 1 when another task holds the lock, and with another status on an error.
+    if [[ -n ${1-} ]] && ((rc == 1)) && flock -w 600 "$vscode_lock_fd" 2>/dev/null; then
+        vscode_waited=1
+        return 0
+    fi
+    vscode_unlock
+    return 1
+}
+
+# vscode_unlock closes the lock, so that code-server does not inherit it.
+vscode_unlock() {
+    if [[ -n ${vscode_lock_fd-} ]]; then
+        exec {vscode_lock_fd}>&-
+        vscode_lock_fd=
+    fi
+}
+
+# vscode_clean removes, with the lock held, the temporary directories of installs of the complete
+# release vscode_home that ended before their rename. In a cache with the sticky bit, another
+# user's stay.
+vscode_clean() {
+    rm -rf "$vscode_home".tmp.* 2>/dev/null || true
+}
+
+# vscode_write_error returns whether the error message $1 says that the file system is full or
+# read-only.
+vscode_write_error() {
+    [[ $1 == *"No space left on device"* || $1 == *"Disk quota exceeded"* ||
+        $1 == *"Read-only file system"* ]]
+}
+
 # vscode_install installs the release for the architecture $1 into vscode_home, in the cache
 # vscode_cache, unless another task has, and sets vscode_bin, and vscode_how to installed, reused
 # or waited (reused after waiting for another task's install). On a failure it sets
 # vscode_reason and returns 2 when it cannot write to the cache, else 1. The files that it creates
-# are readable by every user, for a cache that users share. It closes the lock before it returns,
-# so that code-server does not inherit it.
+# are readable by every user, for a cache that users share.
 vscode_install() {
-    local arch=$1 dir lock umask_was rc
+    local arch=$1 dir mode umask_was rc
     dir=$vscode_cache/$vscode_version
     if ! command -v tar >/dev/null; then
         vscode_reason="tar is not installed"
@@ -116,82 +163,94 @@ vscode_install() {
     fi
     umask_was=$(umask)
     umask 022
-    # The release directory takes the cache's mode, such as 1777 for a cache that users share, so
-    # that other users can install other architectures there.
-    if [[ ! -d $dir ]] && mkdir -p "$dir" 2>/dev/null; then
-        chmod --reference="$vscode_cache" "$dir" 2>/dev/null || true
+    # The release directory has the cache's mode, such as 1777 for a cache that users share, so
+    # that other users can install other architectures there. It has it from its creation on, so
+    # that another user who finds it can create a lock file in it.
+    if [[ ! -d $dir ]]; then
+        mkdir -p "$vscode_cache" 2>/dev/null
+        if mode=$(stat -c %a "$vscode_cache" 2>/dev/null); then
+            (umask 0 && mkdir -m "$mode" "$dir") 2>/dev/null
+        fi
     fi
-    # Another user's lock file is read-only to this one, which can still lock it.
-    if { exec {lock}>>"$vscode_home.lock"; } 2>/dev/null ||
-        { exec {lock}<"$vscode_home.lock"; } 2>/dev/null; then
-        vscode_install_locked "$arch" "$dir" "$lock"
+    if vscode_lock wait; then
+        vscode_install_locked "$arch" "$dir"
         rc=$?
-        exec {lock}>&-
+        vscode_unlock
     else
-        vscode_reason="cannot write to $dir"
-        rc=2
+        # Without the lock, the rename decides which task's install the release is.
+        vscode_install_release "$arch" "$dir" ""
+        rc=$?
     fi
     umask "$umask_was"
     return "$rc"
 }
 
-# vscode_install_locked is vscode_install for the release directory $2 with the lock file open on
-# the descriptor $3.
+# vscode_install_locked is vscode_install for the release directory $2 with the lock held.
 vscode_install_locked() {
-    local arch=$1 dir=$2 lock=$3 tmp file top err
-    file=code-server-$vscode_version-linux-$arch.tar.gz
-    top=code-server-$vscode_version-linux-$arch
-    vscode_how=reused
-    if ! flock -n "$lock" 2>/dev/null; then
-        vscode_how=waited
-        if ! flock "$lock" 2>/dev/null; then
-            vscode_reason="cannot lock $vscode_home.lock"
-            return 2
-        fi
-    fi
+    local arch=$1 dir=$2
     # Another task has installed the release while this one waited.
     if vscode_complete "$vscode_home"; then
+        vscode_clean
         vscode_bin=$vscode_home/bin/code-server
+        vscode_how=reused
+        [[ -z $vscode_waited ]] || vscode_how=waited
         return 0
     fi
+    vscode_install_release "$arch" "$dir" locked
+}
+
+# vscode_install_release downloads and extracts the release for the architecture $1 into
+# vscode_home in the release directory $2. With $3 set, the lock is held: then it first removes
+# what installs that ended before they finished left there. It returns as vscode_install does,
+# and when the install fails while another task installs the release, it uses that copy.
+vscode_install_release() {
+    local arch=$1 dir=$2 locked=$3 tmp= file top err= rc
+    file=code-server-$vscode_version-linux-$arch.tar.gz
+    top=code-server-$vscode_version-linux-$arch
     if [[ ! -w $dir ]]; then
         vscode_reason="cannot write to $dir"
         return 2
     fi
-    # Only the holder of the lock writes these: what is left is from a task that ended while it
-    # installed. In a cache with the sticky bit, another user's stay.
-    rm -rf "$vscode_home" "$vscode_home".tmp.* 2>/dev/null || true
+    if [[ -n $locked ]]; then
+        rm -rf "$vscode_home" "$vscode_home".tmp.* 2>/dev/null || true
+    fi
+    rc=0
     if [[ -e $vscode_home ]] || ! tmp=$(mktemp -d "$vscode_home.tmp.XXXXXX" 2>/dev/null); then
         vscode_reason="cannot write to $dir"
-        return 2
-    fi
-    if ! err=$("$DET_PYTHON_EXECUTABLE" -c "$vscode_fetch" \
+        rc=2
+    elif ! err=$("$DET_PYTHON_EXECUTABLE" -c "$vscode_fetch" \
         "/det/code-server/$vscode_version/$file" "$tmp/$file" 2>&1); then
-        rm -rf "$tmp"
         vscode_reason="downloading $file from the master failed: ${err##*$'\n'}"
-        return 1
-    fi
-    if ! tar -xzf "$tmp/$file" -C "$tmp" >/dev/null 2>&1 || [[ ! -x $tmp/$top/bin/code-server ]]; then
-        rm -rf "$tmp"
+        rc=1
+    elif ! err=$(tar -xzf "$tmp/$file" -C "$tmp" 2>&1 >/dev/null); then
+        # gzip starts its message with an empty line.
+        err=${err#"${err%%[!$'\n']*}"}
+        vscode_reason="extracting $file failed: ${err%%$'\n'*}"
+        rc=1
+    elif [[ ! -x $tmp/$top/bin/code-server ]]; then
         vscode_reason="$file has no bin/code-server"
-        return 1
-    fi
+        rc=1
     # The rename is the last step, and -T keeps it from moving the release into a directory that
     # took its place: another task's, which then has the release.
-    if ! : >"$tmp/$top/$vscode_marker" 2>/dev/null ||
+    elif ! : >"$tmp/$top/$vscode_marker" 2>/dev/null ||
         ! mv -T "$tmp/$top" "$vscode_home" 2>/dev/null; then
-        rm -rf "$tmp"
-        if vscode_complete "$vscode_home"; then
-            vscode_bin=$vscode_home/bin/code-server
-            vscode_how=reused
-            return 0
-        fi
         vscode_reason="cannot write to $dir"
-        return 2
+        rc=2
     fi
-    rm -rf "$tmp"
+    # A cache that is full or read-only is one that cannot be written to.
+    if ((rc == 1)) && vscode_write_error "$err"; then
+        rc=2
+    fi
+    [[ -z $tmp ]] || rm -rf "$tmp"
+    if ((rc != 0)); then
+        if ! vscode_complete "$vscode_home"; then
+            return "$rc"
+        fi
+        vscode_how=reused
+    else
+        vscode_how=installed
+    fi
     vscode_bin=$vscode_home/bin/code-server
-    vscode_how=installed
 }
 
 # vscode_use_cache takes code-server from the cache $1, or installs it there. It returns as
@@ -200,6 +259,10 @@ vscode_use_cache() {
     vscode_cache=$1
     vscode_home=$vscode_cache/$vscode_version/linux-$vscode_arch
     if vscode_complete "$vscode_home"; then
+        if compgen -G "$vscode_home.tmp.*" >/dev/null && vscode_lock; then
+            vscode_clean
+            vscode_unlock
+        fi
         vscode_bin=$vscode_home/bin/code-server
         vscode_how=reused
         return 0

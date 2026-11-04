@@ -10,10 +10,12 @@ import (
 	"encoding/hex"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -563,7 +565,9 @@ func TestVSCodeUnitConcurrentInstall(t *testing.T) {
 // a read-only mount, and installs one into it. When the release is not there and cannot be
 // installed there, the unit installs it into the home cache and says why. DET_CODE_SERVER_CACHE_DIR
 // names the cache instead of both. A release without the marker of a complete install is installed
-// again.
+// again. A task that cannot open or take the lock, or that waited 600 s for it, installs without
+// it. The release directory has the cache's mode. A full cache counts as one that cannot be
+// written to. The temporary directories of ended installs of a complete release are removed.
 func TestVSCodeUnitSharedCache(t *testing.T) {
 	requireReporterPython(t)
 	if os.Geteuid() == 0 {
@@ -577,11 +581,95 @@ func TestVSCodeUnitSharedCache(t *testing.T) {
 		// cache is the cache that the unit takes code-server from: "shared", "home" or "override".
 		cache, how, why string
 		tag             string
+		// check, when set, checks the task after it ran.
+		check func(t *testing.T, v *vscodeTask)
+		// downloads is how many times the task downloaded the release, when not once.
+		downloads int
+		// otherLock is whether the lock file of the install was there before the task.
+		otherLock bool
 	}{
 		{
 			name:  "installs into the shared cache",
 			setup: func(t *testing.T, v *vscodeTask) { require.NoError(t, os.Mkdir(v.shared, 0o777)) }, //nolint:gosec
 			cache: "shared", how: "installed", tag: "download",
+		},
+		{
+			name: "the release directory has the cache's mode",
+			setup: func(t *testing.T, v *vscodeTask) {
+				require.NoError(t, os.Mkdir(v.shared, 0o700))
+				require.NoError(t, os.Chmod(v.shared, 0o777|os.ModeSticky)) //nolint:gosec
+			},
+			cache: "shared", how: "installed", tag: "download",
+			check: func(t *testing.T, v *vscodeTask) {
+				info, err := os.Stat(filepath.Join(v.shared, codeServerPinned))
+				require.NoError(t, err)
+				require.Equal(t, 0o777|os.ModeSticky, info.Mode()&(os.ModePerm|os.ModeSticky))
+			},
+		},
+		{
+			// A lock file that the user can neither write nor read, like another user's on NFSv4,
+			// which locks files open for writing only.
+			name: "installs without a lock file that it cannot open",
+			setup: func(t *testing.T, v *vscodeTask) {
+				require.NoError(t, os.MkdirAll(filepath.Join(v.shared, codeServerPinned), 0o700))
+				require.NoError(t, os.WriteFile(releaseDir(t, v.shared, codeServerPinned)+".lock", nil,
+					0o000))
+			},
+			cache: "shared", how: "installed", tag: "download", otherLock: true,
+		},
+		{
+			name: "installs without a lock that it cannot take",
+			setup: func(t *testing.T, v *vscodeTask) {
+				require.NoError(t, os.Mkdir(v.shared, 0o700))
+				standInFlock(t, v, 65)
+			},
+			cache: "shared", how: "installed", tag: "download",
+			check: func(t *testing.T, v *vscodeTask) {
+				require.Equal(t, []string{"-n"}, flockCalls(t, v))
+			},
+		},
+		{
+			name: "installs without the lock after waiting 600 s for it",
+			setup: func(t *testing.T, v *vscodeTask) {
+				require.NoError(t, os.Mkdir(v.shared, 0o700))
+				standInFlock(t, v, 1)
+			},
+			cache: "shared", how: "installed", tag: "download",
+			check: func(t *testing.T, v *vscodeTask) {
+				require.Equal(t, []string{"-n", "-w 600"}, flockCalls(t, v))
+			},
+		},
+		{
+			name: "removes ended installs of a complete release",
+			setup: func(t *testing.T, v *vscodeTask) {
+				dir := releaseDir(t, v.shared, codeServerPinned)
+				writeCachedCodeServer(t, dir, codeServerPinned, "shared")
+				writeCodeServer(t, dir+".tmp.ended", codeServerPinned, "partial")
+			},
+			cache: "shared", how: "reused", tag: "shared",
+			check: func(t *testing.T, v *vscodeTask) {
+				requireNoInstallLeft(t, releaseDir(t, v.shared, codeServerPinned))
+			},
+		},
+		{
+			name: "falls back to the home from a full shared cache",
+			setup: func(t *testing.T, v *vscodeTask) {
+				require.NoError(t, os.Mkdir(v.shared, 0o700))
+				tar, err := exec.LookPath("tar")
+				require.NoError(t, err)
+				writeScript(t, filepath.Join(v.bin, "tar"), `
+if [[ $* == *`+v.shared+`* ]]; then
+    echo "tar: code-server/lib/node: Cannot write: No space left on device" >&2
+    echo "tar: Exiting with failure status due to previous errors" >&2
+    exit 2
+fi
+exec `+tar+` "$@"
+`)
+			},
+			cache: "home", how: "installed", tag: "download",
+			why: " (extracting code-server-" + codeServerPinned + "-linux-" + runtime.GOARCH +
+				".tar.gz failed: tar: code-server/lib/node: Cannot write: No space left on device)",
+			downloads: 2,
 		},
 		{
 			name: "reuses a read-only shared cache",
@@ -654,15 +742,19 @@ func TestVSCodeUnitSharedCache(t *testing.T) {
 				"override": releaseDir(t, filepath.Join(v.dir, tc.override), codeServerPinned),
 			}[tc.cache]
 			v.requireCacheLine(tc.how, dir, strings.ReplaceAll(tc.why, "/shared", v.shared))
+			if tc.check != nil {
+				tc.check(t, v)
+			}
 			if tc.how == "reused" {
 				require.Empty(t, v.master.codeServerRequests())
 				return
 			}
-			require.Len(t, v.master.codeServerRequests(), 2)
-			for _, path := range []string{
-				filepath.Join(dir, "bin", "code-server"), filepath.Join(dir, codeServerMarker),
-				dir + ".lock",
-			} {
+			require.Len(t, v.master.codeServerRequests(), 2*max(tc.downloads, 1))
+			paths := []string{filepath.Join(dir, "bin", "code-server"), filepath.Join(dir, codeServerMarker)}
+			if !tc.otherLock {
+				paths = append(paths, dir+".lock")
+			}
+			for _, path := range paths {
 				info, err := os.Stat(path)
 				require.NoError(t, err)
 				require.Equal(t, os.FileMode(0o004), info.Mode().Perm()&0o004, path)
@@ -670,6 +762,24 @@ func TestVSCodeUnitSharedCache(t *testing.T) {
 			requireNoInstallLeft(t, dir)
 		})
 	}
+}
+
+// standInFlock puts a flock on the task's PATH that fails with the status rc and records its
+// options.
+func standInFlock(t *testing.T, v *vscodeTask, rc int) {
+	t.Helper()
+	writeScript(t, filepath.Join(v.bin, "flock"), `
+args=("${@:1:$#-1}")
+printf '%s\n' "${args[*]}" >>"$ORDER_FILE.flock"
+exit `+strconv.Itoa(rc)+"\n")
+}
+
+// flockCalls returns the options of the stand-in flock's calls.
+func flockCalls(t *testing.T, v *vscodeTask) []string {
+	t.Helper()
+	calls, err := os.ReadFile(v.order + ".flock")
+	require.NoError(t, err)
+	return strings.Split(strings.TrimSuffix(string(calls), "\n"), "\n")
 }
 
 // When the unit cannot have code-server, it says why in one line and exits 127, and the vscode
@@ -696,7 +806,7 @@ func TestVSCodeUnitUnavailable(t *testing.T) {
 		},
 		{
 			name: "not a release",
-			line: "vscode service: " + name + " has no bin/code-server",
+			line: "vscode service: extracting " + name + " failed: gzip: stdin: not in gzip format",
 			setup: func(v *vscodeTask) {
 				body := []byte("not a tarball")
 				sum := sha256.Sum256(body)
