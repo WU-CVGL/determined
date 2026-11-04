@@ -1,33 +1,54 @@
 import { Loadable } from 'hew/utils/loadable';
 
-import { launchShell as apiLaunchShell } from 'services/api';
+import { launchShell as apiLaunchShell, previewShell as apiPreviewShell } from 'services/api';
+import { LaunchShellParams } from 'services/types';
 import userStore from 'stores/users';
-import { CommandResponse, CommandType, RawJson } from 'types';
-import { JupyterLabLaunchOptions, previewJupyterLab } from 'utils/jupyter';
+import { CommandResponse, RawJson } from 'types';
+import { isDetError } from 'utils/error';
 import { recordLaunch } from 'utils/launchHistory';
-import { configForLaunchType, NtscLaunchOptions, simpleLaunchConfig } from 'utils/ntscConfig';
+import { configForShellLaunch, NtscLaunchOptions, simpleLaunchConfig } from 'utils/ntscConfig';
+import { getResponseStatus } from 'utils/service';
 
 export interface ShellLaunchOptions extends NtscLaunchOptions {
-  /** A full config. When given, name, pool, slots and template are ignored. */
+  /** A full config. When given, name, pool, slots, services and template are ignored. */
   config?: RawJson;
 }
+
+/** The request a launch and a preview send for these options: the same for both. */
+export const shellRequest = (options: ShellLaunchOptions): LaunchShellParams => ({
+  config: options.config ? configForShellLaunch(options.config) : simpleLaunchConfig(options),
+  templateName: options.config || options.template === '' ? undefined : options.template,
+  workspaceId: options.workspaceId,
+});
+
+/** The statuses of the master's refusals that the user can act on: InvalidArgument, PermissionDenied. */
+const ACTIONABLE_STATUSES = [400, 403];
+
+/**
+ * The master's message for a refused request that the user can act on, such as an unknown service
+ * or a resource pool the user may not use; undefined for any other error.
+ */
+export const actionableErrorMessage = (e: unknown): string | undefined => {
+  if (!isDetError(e)) return undefined;
+  const status = getResponseStatus(e.sourceErr);
+  if (status === undefined || !ACTIONABLE_STATUSES.includes(status)) return undefined;
+  return e.publicMessage || undefined;
+};
+
+export const PREVIEW_ERROR = 'Unable to fetch shell config.';
 
 /**
  * Launches a shell and returns the new task. The services wrapper has already
  * dropped the shell's SSH key from the response, so nothing here can keep it.
  * Errors are thrown so the launch modal can stay open and show them.
  *
- * A shell cannot be opened like a JupyterLab (utils/wait only opens notebooks
- * and TensorBoards); callers show how to connect instead.
+ * A shell cannot be opened like a TensorBoard (utils/wait); callers show how to
+ * connect instead.
  */
 export const launchShell = async (options: ShellLaunchOptions = {}): Promise<CommandResponse> => {
-  const response = await apiLaunchShell({
-    config: options.config || simpleLaunchConfig(options),
-    templateName: options.config || options.template === '' ? undefined : options.template,
-    workspaceId: options.workspaceId,
-  });
+  const response = await apiLaunchShell(shellRequest(options));
   const currentUser = Loadable.getOrElse(undefined, userStore.currentUser.get());
-  recordLaunch(currentUser?.id, CommandType.Shell, {
+  recordLaunch(currentUser?.id, {
     config: response.config,
     workspaceId: response.command.workspaceId,
   });
@@ -35,21 +56,14 @@ export const launchShell = async (options: ShellLaunchOptions = {}): Promise<Com
 };
 
 /**
- * The master's LaunchShell has no preview mode, so the full shell config is
- * previewed through the JupyterLab preview, which merges the cluster defaults,
- * the template and the form fields exactly as a shell launch does
- * (getCommandLaunchParams). No task is created.
- *
- * The config is kept whole, including the notebook settings idle_timeout and
- * notebook_idle_type: the launch form keeps this one config when the type is
- * switched back to JupyterLab, and a shell ignores them. Only the preview's
- * generated "JupyterLab (<pet name>)" name is left out, as configForLaunchType
- * leaves it out of a shell launch; the master names the shell.
+ * Previews the merged config of a shell launch with these options, through the master's shell
+ * preview, which checks it as a launch does. No task is created. A refusal the user can act on
+ * is thrown with the master's message, anything else with PREVIEW_ERROR.
  */
-export const previewShell = async (options: JupyterLabLaunchOptions = {}): Promise<RawJson> => {
+export const previewShell = async (options: ShellLaunchOptions = {}): Promise<RawJson> => {
   try {
-    return configForLaunchType(await previewJupyterLab(options), CommandType.Shell);
+    return await apiPreviewShell(shellRequest(options));
   } catch (e) {
-    throw new Error('Unable to load shell config.');
+    throw new Error(actionableErrorMessage(e) ?? PREVIEW_ERROR);
   }
 };

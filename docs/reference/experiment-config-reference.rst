@@ -1248,8 +1248,8 @@ information.
 
 Optional. When true, all the requested slots for the tasks are forced to be scheduled in a single
 container on a single node, or in a single pod. When false, it may be split across different nodes
-or pods. Defaults to false for experiments. This field is set to true for notebooks, tensorboards,
-shells, and commands, and cannot be modified.
+or pods. Defaults to false for experiments. This field is set to true for tensorboards, shells, and
+commands, and cannot be modified.
 
 .. note::
 
@@ -1399,10 +1399,10 @@ A master without this option, after a rollback, treats a config that sets it, al
 follows. Experiments that are not terminal move to ERROR when it starts, and their trials are
 killed; continuing or editing any experiment that sets it fails. New experiments and tasks that set
 it are refused, and so are creating an experiment from a template that sets it and saving a
-workspace config policy while the global policy sets it. The option is ignored in command, notebook,
-shell and TensorBoard templates, in invariant config policies, and in the commands and generic tasks
-that the master restores or resumes. Before rolling back, end the experiments that set it and remove
-it from templates and config policies.
+workspace config policy while the global policy sets it. The option is ignored in command, shell and
+TensorBoard templates, in invariant config policies, and in the commands and generic tasks that the
+master restores or resumes. Before rolling back, end the experiments that set it and remove it from
+templates and config policies.
 
 .. _exp-config-resources-gpu-groups:
 

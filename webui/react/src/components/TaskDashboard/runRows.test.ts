@@ -200,11 +200,22 @@ describe('runRows', () => {
   describe('kinds', () => {
     it('lists every kind on the Jobs pages, no experiments in the tasks-only view', () => {
       expect(kindsOf({ type: 'global' }, true)).toContain(RunKind.Experiment);
-      expect(kindsOf({ type: 'global' }, true)).toHaveLength(6);
+      expect(kindsOf({ type: 'global' }, true)).toHaveLength(5);
       expect(kindsOf({ type: 'workspace', workspaceId: 2 }, false)).not.toContain(
         RunKind.Experiment,
       );
-      expect(kindsOf({ type: 'workspace', workspaceId: 2 }, false)).toHaveLength(5);
+      expect(kindsOf({ type: 'workspace', workspaceId: 2 }, false)).toHaveLength(4);
+    });
+
+    it('lists and offers no JupyterLab, the kind of ended notebook records', () => {
+      for (const scope of [
+        { type: 'global' as const },
+        { type: 'workspace' as const, workspaceId: 2 },
+        { projectId: 1, type: 'project' as const },
+      ]) {
+        expect(kindsOf(scope, true)).not.toContain(RunKind.JupyterLab);
+        expect(kindsOf(scope, false)).not.toContain(RunKind.JupyterLab);
+      }
     });
 
     it('lists only experiments and generic tasks in a project', () => {

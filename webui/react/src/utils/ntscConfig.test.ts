@@ -1,16 +1,14 @@
 import { cloneDeep } from 'lodash';
 
-import { CommandType } from 'types';
-
 import {
-  configForLaunchType,
+  configForShellLaunch,
   configFromForm,
   formFieldsFromConfig,
-  isNtscLaunchType,
   minimalDiff,
   redactSensitiveEnv,
   sanitizeConfig,
   sensitiveEnvNames,
+  simpleLaunchConfig,
   stableStringify,
   templateFromConfig,
   templateResources,
@@ -87,39 +85,24 @@ describe('ntscConfig', () => {
     });
   });
 
-  describe('configForLaunchType', () => {
-    it('drops the name the master generated for the other type', () => {
+  describe('configForShellLaunch', () => {
+    it('drops the name the master generated for a notebook', () => {
       const notebook = { description: 'JupyterLab (kindly-quick-heron)', idle_timeout: '30m' };
-      expect(configForLaunchType(notebook, CommandType.Shell)).toEqual({ idle_timeout: '30m' });
-      expect(
-        configForLaunchType({ description: 'Shell (lively-calm-fox)' }, CommandType.JupyterLab),
-      ).toEqual({});
+      expect(configForShellLaunch(notebook)).toEqual({ idle_timeout: '30m' });
       // The input is not changed.
       expect(notebook.description).toBe('JupyterLab (kindly-quick-heron)');
     });
 
-    it('keeps the notebook settings for a shell, which ignores them', () => {
-      const notebook = { idle_timeout: '8h', notebook_idle_type: 'activity' };
-      expect(configForLaunchType(notebook, CommandType.Shell)).toEqual(notebook);
-    });
-
-    it('keeps the name of the same type and any name given by the user', () => {
+    it('keeps a shell’s name, any name given by the user and everything else', () => {
       const shell = { description: 'Shell (lively-calm-fox)' };
-      expect(configForLaunchType(shell, CommandType.Shell)).toBe(shell);
-      const notebook = { description: 'JupyterLab (kindly-quick-heron)' };
-      expect(configForLaunchType(notebook, CommandType.JupyterLab)).toBe(notebook);
-      expect(configForLaunchType({ description: 'debug box' }, CommandType.Shell)).toEqual({
+      expect(configForShellLaunch(shell)).toBe(shell);
+      const settings = { idle_timeout: '8h', notebook_idle_type: 'activity' };
+      expect(configForShellLaunch(settings)).toBe(settings);
+      expect(configForShellLaunch({ description: 'debug box' })).toEqual({
         description: 'debug box',
       });
-      expect(configForLaunchType({}, CommandType.JupyterLab)).toEqual({});
+      expect(configForShellLaunch({})).toEqual({});
     });
-  });
-
-  it('tells the launch form’s task types from the others', () => {
-    expect(isNtscLaunchType(CommandType.JupyterLab)).toBe(true);
-    expect(isNtscLaunchType(CommandType.Shell)).toBe(true);
-    expect(isNtscLaunchType(CommandType.Command)).toBe(false);
-    expect(isNtscLaunchType(CommandType.TensorBoard)).toBe(false);
   });
 
   describe('templateFromConfig', () => {
@@ -190,13 +173,47 @@ describe('ntscConfig', () => {
   });
 
   describe('form fields', () => {
-    it('reads name, pool and slots, ignoring a generated name', () => {
+    it('reads name, pool, slots and services, ignoring a generated name', () => {
       expect(formFieldsFromConfig(mergedShellConfig)).toEqual({
         name: '',
         pool: 'gpu',
+        services: [],
         slots: 2,
       });
       expect(formFieldsFromConfig({ description: 'mine' }).name).toBe('mine');
+      // The known services besides ssh, which every shell runs.
+      expect(
+        formFieldsFromConfig({ services: { jupyter: {}, other: {}, ssh: {}, vscode: null } })
+          .services,
+      ).toEqual(['jupyter']);
+    });
+
+    it('sends the picked services with no options, and no services key without one', () => {
+      expect(simpleLaunchConfig({ services: ['vscode', 'jupyter'], slots: 1 })).toEqual({
+        description: undefined,
+        resources: { resource_pool: undefined, slots: 1 },
+        services: { jupyter: {}, vscode: {} },
+      });
+      expect(simpleLaunchConfig({ services: [] })).not.toHaveProperty('services');
+      expect(simpleLaunchConfig({})).not.toHaveProperty('services');
+      expect(simpleLaunchConfig({ services: ['ssh', 'other'] })).not.toHaveProperty('services');
+    });
+
+    it('applies the services on top of a base config, keeping the others and their options', () => {
+      const base = { services: { jupyter: { opt: 1 }, other: {} } };
+      expect(configFromForm(base, { services: ['jupyter', 'vscode'] }).services).toEqual({
+        jupyter: { opt: 1 },
+        other: {},
+        vscode: {},
+      });
+      expect(configFromForm(base, { services: [] }).services).toEqual({ other: {} });
+      expect(configFromForm({ services: { jupyter: {} } }, { services: [] })).not.toHaveProperty(
+        'services',
+      );
+      // Without services in the fields, the config's services stay as they are.
+      expect(configFromForm(base, {}).services).toEqual(base.services);
+      // The input is not changed.
+      expect(base.services).toEqual({ jupyter: { opt: 1 }, other: {} });
     });
 
     it('applies the form on top of a base config without touching other keys', () => {

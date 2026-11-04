@@ -8,8 +8,8 @@
    :description: Discover how to create and monitor experiment progress, track experiments, evaluate model performance, and organize your experiments into projects and workspaces using the Determined WebUI.
 
 You can use the WebUI to create and monitor experiment progress, track experiments, evaluate model
-performance, organize your experiments into projects and workspaces, start a Jupyter Notebook, and
-more.
+performance, organize your experiments into projects and workspaces, start a shell with JupyterLab,
+and more.
 
 *****************
  Getting Started
@@ -184,9 +184,9 @@ To find what kind of anonymous information the WebUI collects, visit
  The Jobs Page
 ***************
 
-The Jobs page lists experiments, generic tasks, JupyterLabs, shells, commands, and TensorBoards
-together, newest first. A workspace's and a project's **Jobs** tabs list theirs, and **Tasks** lists
-all but experiments. Each keeps its own sort and filters for each user.
+The Jobs page lists experiments, generic tasks, shells, commands, and TensorBoards together, newest
+first. A workspace's and a project's **Jobs** tabs list theirs, and **Tasks** lists all but
+experiments. Each keeps its own sort and filters for each user.
 
 **Sorting.** Select a column title to sort by it, and again to reverse the sort. The first select
 sorts Name, Owner, and Resource Pool A to Z, Kind with experiments first, State with active runs
@@ -205,9 +205,9 @@ none lists everything. **Clear Filters** shows while a filter is on and clears t
 box finds a name or an ID.
 
 -  **State** has three groups. Paused is a paused experiment or generic task. Ended is completed,
-   canceled, errored, or, for an experiment, failed to delete; a JupyterLab, shell, command, or
-   TensorBoard has ended once it is terminated. Every other state is Active, including queued,
-   pulling, starting, running, and stopping.
+   canceled, errored, or, for an experiment, failed to delete; a shell, command, or TensorBoard has
+   ended once it is terminated. Every other state is Active, including queued, pulling, starting,
+   running, and stopping.
 
 -  **Slots** is the number of slots a run asks for, per trial for an experiment (1 when its
    configuration does not say). 0 is a CPU-only run. The filter lists 0 to the most slots of any
@@ -222,8 +222,8 @@ view, which is then saved as yours; ``/jobs`` alone opens your saved view. In a 
 filter is no filter, a missing ``sortKey`` sorts by Started, and a missing ``sortDesc`` sorts
 descending.
 
-JupyterLabs, shells, commands, and TensorBoards are listed for 24 hours after they end, and not
-after the master restarts.
+Shells, commands, and TensorBoards are listed for 24 hours after they end, and not after the master
+restarts.
 
 ************************************
  Viewing and Managing the Job Queue
@@ -231,11 +231,13 @@ after the master restarts.
 
 To find out how to view and modify the Job Queue in the WebUI, start with :ref:`job-queue`.
 
-*****************************
- Starting a Jupyter Notebook
-*****************************
+*********************
+ Starting JupyterLab
+*********************
 
-You can start :ref:`notebooks` from the WebUI.
+To start a shell that runs JupyterLab, select **Launch Shell** on the **Jobs** page or a workspace's
+**Jobs** tab and check **jupyter**. Open it with ``det task open <shell id> jupyter``; see
+:ref:`jupyter-service`.
 
 ***********************
  Launching TensorBoard

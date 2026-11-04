@@ -70,13 +70,13 @@ an ended task. Running tasks refresh every 30 seconds while the page is visible.
 Drag across a chart to zoom the shared timeline. Empty periods remain gaps rather than zeros.
 If a refresh fails, retained charts are explicitly marked as the last successful response.
 
-Trials, notebooks, and shells record the GPUs each container sees when it starts, in the order of
-``nvidia-smi`` inside the container. A GPU legend shows a GPU's position in that list (``GPU 0``,
-``GPU 1``, ...) only when the lists of the allocation's containers together name as many GPUs as
-the allocation has slots, since a list can miss GPUs that ``nvidia-smi`` failed to report.
-Otherwise, and for commands, generic tasks, and TensorBoards, which record no GPUs, the legend
-shows the start of the GPU UUID. Hover over a legend entry for the GPU UUID, host, allocation, PCI
-bus ID, GPU index on the host, and model.
+Trials and shells record the GPUs each container sees when it starts, in the order of ``nvidia-smi``
+inside the container. A GPU legend shows a GPU's position in that list (``GPU 0``, ``GPU 1``, ...)
+only when the lists of the allocation's containers together name as many GPUs as the allocation has
+slots, since a list can miss GPUs that ``nvidia-smi`` failed to report. Otherwise, and for commands,
+generic tasks, and TensorBoards, which record no GPUs, the legend shows the start of the GPU UUID.
+Hover over a legend entry for the GPU UUID, host, allocation, PCI bus ID, GPU index on the host, and
+model.
 
 GPU values describe the entire assigned device and may include other processes. Shared-device
 ownership conflicts are omitted by the recording rules. Child tasks are not aggregated. An

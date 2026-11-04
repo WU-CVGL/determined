@@ -5,11 +5,8 @@ package command
 
 import (
 	"context"
-	"regexp"
 	"testing"
 	"time"
-
-	"github.com/determined-ai/determined/master/internal/user"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
@@ -28,7 +25,6 @@ import (
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 	"github.com/determined-ai/determined/proto/pkg/commandv1"
-	"github.com/determined-ai/determined/proto/pkg/notebookv1"
 	"github.com/determined-ai/determined/proto/pkg/shellv1"
 	"github.com/determined-ai/determined/proto/pkg/taskv1"
 	"github.com/determined-ai/determined/proto/pkg/tensorboardv1"
@@ -64,63 +60,6 @@ func TestCommandManagerLifecycle(t *testing.T) {
 
 	// Set command priority.
 	resp4, err := DefaultCmdService.SetNTSCPriority(cmd1.Id, 0, model.TaskTypeCommand)
-	require.NotNil(t, resp4)
-	require.NoError(t, err)
-}
-
-func TestNotebookManagerLifecycle(t *testing.T) {
-	db := setupTest(t)
-	user.InitService(db, &model.ExternalSessions{})
-	// Launch a Notebook.
-	cmd1 := launchNotebook(t, db)
-
-	// Get Notebook.
-	resp1, err := DefaultCmdService.GetNotebook(&apiv1.GetNotebookRequest{NotebookId: cmd1.Id})
-	require.NotNil(t, resp1)
-	require.NoError(t, err)
-
-	// Launch another Notebook.
-	cmd2 := launchNotebook(t, db)
-	// Get Notebooks.
-	resp2, err := DefaultCmdService.GetNotebooks(&apiv1.GetNotebooksRequest{})
-	require.NotNil(t, resp2)
-	require.NoError(t, err)
-	require.Len(t, resp2.Notebooks, 2)
-
-	// Summaries never carry the Jupyter token; it is read separately after an ownership check,
-	// and it is a valid notebook token for its own task.
-	require.Equal(t, "/proxy/"+cmd1.Id+"/", resp1.Notebook.ServiceAddress)
-	for _, resp := range resp2.Notebooks {
-		re := regexp.MustCompile(`^/proxy/([^/?]+)/$`)
-		addrMatches := re.FindStringSubmatch(resp.ServiceAddress)
-		require.Len(t, addrMatches, 2, resp.ServiceAddress)
-		taskID := addrMatches[1]
-
-		token, err := DefaultCmdService.GetNotebookToken(resp.Id)
-		require.NoError(t, err)
-		require.NotEmpty(t, token)
-		require.Equal(t, "/proxy/"+taskID+"/?token="+token,
-			NotebookServiceAddress(resp.ServiceAddress, token))
-
-		usr, notebookSession, err := user.GetService().UserAndNotebookSessionFromToken(token)
-		require.NoError(t, err)
-		require.Equal(t, resp.UserId, int32(usr.ID))
-		require.Equal(t, taskID, string(notebookSession.TaskID))
-	}
-	_, err = DefaultCmdService.GetNotebookToken(launchCommand(t, db).Id)
-	require.Equal(t, codes.NotFound, status.Code(err))
-
-	// Kill 1 Notebook.
-	resp3, err := DefaultCmdService.KillNTSC(cmd2.Id, model.TaskTypeNotebook)
-	require.NotNil(t, resp3)
-	require.NoError(t, err)
-
-	nb3 := resp3.ToV1Notebook()
-	require.Equal(t, taskv1.State_STATE_TERMINATED, nb3.State)
-	require.NotContains(t, nb3.ServiceAddress, "token")
-
-	// Set Notebook priority.
-	resp4, err := DefaultCmdService.SetNTSCPriority(cmd1.Id, 0, model.TaskTypeNotebook)
 	require.NotNil(t, resp4)
 	require.NoError(t, err)
 }
@@ -228,8 +167,8 @@ func TestTensorboardManagerLifecycle(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// The lists of notebooks, shells, commands and TensorBoards report the slot count each one
-// requests, also when it requests none.
+// The lists of shells, commands and TensorBoards report the slot count each one requests, also
+// when it requests none.
 func TestNTSCListsReportSlots(t *testing.T) {
 	db := setupTest(t)
 
@@ -254,17 +193,6 @@ func TestNTSCListsReportSlots(t *testing.T) {
 		}
 		require.Contains(t, listed, commandID, "command with %d slots", slots)
 		require.Equal(t, int32(slots), listed[commandID], "command with %d slots", slots)
-
-		req := request()
-		notebook, err := DefaultCmdService.LaunchNotebookCommand(req, req.Spec.Base.Owner)
-		require.NoError(t, err)
-		notebooks, err := DefaultCmdService.GetNotebooks(&apiv1.GetNotebooksRequest{})
-		require.NoError(t, err)
-		for _, n := range notebooks.Notebooks {
-			listed[n.Id] = n.Slots
-		}
-		require.Contains(t, listed, notebook.stringID(), "notebook with %d slots", slots)
-		require.Equal(t, int32(slots), listed[notebook.stringID()], "notebook with %d slots", slots)
 
 		shellID := launch(model.TaskTypeShell, model.JobTypeShell)
 		shells, err := DefaultCmdService.GetShells(&apiv1.GetShellsRequest{})
@@ -349,19 +277,6 @@ func launchCommand(t *testing.T, db *db.PgDB) *commandv1.Command {
 	require.NotNil(t, cmd)
 	require.NotNil(t, DefaultCmdService.commands[model.TaskID(v1cmd.Id)])
 	return v1cmd
-}
-
-func launchNotebook(t *testing.T, db *db.PgDB) *notebookv1.Notebook {
-	mockReq := CreateMockGenericReq(t, db)
-	cmd, err := DefaultCmdService.LaunchNotebookCommand(
-		mockReq,
-		mockReq.Spec.Base.Owner,
-	)
-	v1nb := cmd.ToV1Notebook()
-	require.NoError(t, err)
-	require.NotNil(t, v1nb)
-	require.NotNil(t, DefaultCmdService.commands[model.TaskID(v1nb.Id)])
-	return v1nb
 }
 
 func launchShell(t *testing.T, db *db.PgDB) *shellv1.Shell {

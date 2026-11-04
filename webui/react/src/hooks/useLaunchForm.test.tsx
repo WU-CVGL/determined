@@ -15,9 +15,7 @@ import userStore from 'stores/users';
 import { CommandState, CommandTask, CommandType, WorkspaceState } from 'types';
 
 const mocks = vi.hoisted(() => ({
-  getJupyterLabConfig: vi.fn(),
   getShellConfig: vi.fn(),
-  launchJupyterLab: vi.fn(),
   launchShell: vi.fn(),
   onShellLaunched: vi.fn(),
   openCommandResponse: vi.fn(),
@@ -26,8 +24,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock('services/api', () => ({
   getAvailableResourcePools: () => Promise.resolve([]),
   getCurrentUser: () => Promise.resolve({ id: 1, isActive: true, isAdmin: false, username: 'me' }),
-  getJupyterLabConfig: mocks.getJupyterLabConfig,
-  getJupyterLabs: () => Promise.resolve([]),
   getResourcePools: () => Promise.resolve([]),
   getShellConfig: mocks.getShellConfig,
   getShells: () => Promise.resolve([]),
@@ -35,9 +31,8 @@ vi.mock('services/api', () => ({
   getUsers: () => Promise.resolve({ users: [] }),
   getUserSetting: () => Promise.resolve({ settings: [] }),
   getWorkspaces: () => Promise.resolve({ workspaces: [] }),
-  launchJupyterLab: mocks.launchJupyterLab,
   launchShell: mocks.launchShell,
-  previewJupyterLab: () => Promise.resolve({}),
+  previewShell: () => Promise.resolve({}),
   updateUserSetting: () => Promise.resolve(),
 }));
 
@@ -113,13 +108,7 @@ const launchedShell = {
   warnings: [],
 };
 
-const launchedNotebook = {
-  command: task(CommandType.JupyterLab, 'nb-new'),
-  config: { description: 'JupyterLab (kindly-quick-heron)' },
-  warnings: [],
-};
-
-/** The entry points: Launch JupyterLab, Launch Shell and Launch Again. */
+/** The entry points: Launch Shell and Launch Again. */
 const Entries: React.FC = () => {
   const { launchFormModals, openLaunchForm } = useLaunchForm({
     onShellLaunched: mocks.onShellLaunched,
@@ -138,8 +127,7 @@ const Entries: React.FC = () => {
   return (
     <SettingsProvider>
       <>
-        <Button onClick={() => openLaunchForm(CommandType.JupyterLab)}>Open JupyterLab</Button>
-        <Button onClick={() => openLaunchForm(CommandType.Shell)}>Open Shell</Button>
+        <Button onClick={() => openLaunchForm()}>Open Shell</Button>
         {[NOTEBOOK, SHELL, COMMAND].map((item) => (
           <Button key={item.id} onClick={() => launchAgain(item)}>
             Again {item.id}
@@ -171,108 +159,57 @@ const open = async (user: ReturnType<typeof userEvent.setup>, entry: string) => 
   await screen.findByText('Start from');
 };
 
-const typeRadio = (label: 'JupyterLab' | 'Shell') => screen.getByRole('radio', { name: label });
-
 describe('useLaunchForm', () => {
   beforeEach(() => {
     window.localStorage.clear();
-    mocks.getJupyterLabConfig.mockReset().mockResolvedValue({
-      description: 'old notebook',
-      resources: { resource_pool: 'gpu', slots: 2 },
-    });
     mocks.getShellConfig.mockReset().mockResolvedValue({
       description: 'old shell',
       resources: { resource_pool: 'gpu', slots: 1 },
     });
-    mocks.launchJupyterLab.mockReset().mockResolvedValue(launchedNotebook);
     mocks.launchShell.mockReset().mockResolvedValue(launchedShell);
     mocks.onShellLaunched.mockReset();
     mocks.openCommandResponse.mockReset();
     userStore.updateCurrentUser({ id: USER_ID, isActive: true, isAdmin: false, username: 'me' });
   });
 
-  it.each([
-    ['Open JupyterLab', 'Launch JupyterLab', 'JupyterLab'],
-    ['Open Shell', 'Launch Shell', 'Shell'],
-  ] as const)('"%s" opens the form with its type selected', async (entry, title, selected) => {
+  it('"Open Shell" opens the shell launch form and shows the shell’s launch result', async () => {
     const user = setup();
-    await open(user, entry);
-    expect(screen.getByText(title)).toBeInTheDocument();
-    expect(typeRadio(selected)).toBeChecked();
-  });
-
-  it('shows the shell’s launch result after switching a JupyterLab entry to Shell', async () => {
-    const user = setup();
-    await open(user, 'Open JupyterLab');
-    await user.click(typeRadio('Shell'));
+    await open(user, 'Open Shell');
+    expect(screen.getByText('Launch Shell')).toBeInTheDocument();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Launch' }));
 
     expect(await screen.findByText('Shell Launched')).toBeInTheDocument();
     expect(screen.getByText('det shell open shell-new')).toBeInTheDocument();
     expect(mocks.launchShell).toHaveBeenCalled();
-    expect(mocks.launchJupyterLab).not.toHaveBeenCalled();
     expect(mocks.openCommandResponse).not.toHaveBeenCalled();
     expect(mocks.onShellLaunched).toHaveBeenCalledTimes(1);
   });
 
-  it('opens the notebook’s wait page after switching a Shell entry to JupyterLab', async () => {
-    const user = setup();
-    await open(user, 'Open Shell');
-    await user.click(typeRadio('JupyterLab'));
-    await user.click(screen.getByRole('button', { name: 'Launch' }));
-
-    await waitFor(() => expect(mocks.openCommandResponse).toHaveBeenCalled());
-    expect(mocks.launchJupyterLab).toHaveBeenCalled();
-    expect(mocks.launchShell).not.toHaveBeenCalled();
-    expect(mocks.onShellLaunched).not.toHaveBeenCalled();
-    expect(screen.queryByText('Shell Launched')).not.toBeInTheDocument();
-  });
-
   describe('Launch Again', () => {
-    it.each([
-      ['Again nb-old', 'Launch JupyterLab', 'JupyterLab', 'old notebook'],
-      ['Again shell-old', 'Launch Shell', 'Shell', 'old shell'],
-    ] as const)(
-      '"%s" selects the task’s type and loads its config',
-      async (entry, title, selected, name) => {
-        const user = setup();
-        await open(user, entry);
-        expect(screen.getByText(title)).toBeInTheDocument();
-        expect(typeRadio(selected)).toBeChecked();
-        await waitFor(() =>
-          expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue(name),
-        );
-        if (selected === 'Shell') {
-          expect(mocks.getShellConfig).toHaveBeenCalledWith({ commandId: 'shell-old' });
-          expect(mocks.getJupyterLabConfig).not.toHaveBeenCalled();
-        } else {
-          expect(mocks.getJupyterLabConfig).toHaveBeenCalledWith({ commandId: 'nb-old' });
-          expect(mocks.getShellConfig).not.toHaveBeenCalled();
-        }
-      },
-    );
-
-    it('launches the notebook again as a shell when the type is switched', async () => {
+    it('loads a shell’s config and launches it again', async () => {
       const user = setup();
-      await open(user, 'Again nb-old');
+      await open(user, 'Again shell-old');
+      expect(screen.getByText('Launch Shell')).toBeInTheDocument();
       await waitFor(() =>
-        expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('old notebook'),
+        expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('old shell'),
       );
-      await user.click(typeRadio('Shell'));
+      expect(mocks.getShellConfig).toHaveBeenCalledWith({ commandId: 'shell-old' });
       await user.click(screen.getByRole('button', { name: 'Launch' }));
 
       expect(await screen.findByText('Shell Launched')).toBeInTheDocument();
       expect(mocks.launchShell).toHaveBeenCalledWith({
-        config: { description: 'old notebook', resources: { resource_pool: 'gpu', slots: 2 } },
+        config: { description: 'old shell', resources: { resource_pool: 'gpu', slots: 1 } },
         workspaceId: WORKSPACE.id,
       });
       expect(mocks.onShellLaunched).toHaveBeenCalledTimes(1);
     });
 
-    it('opens nothing for other task types', async () => {
+    it.each(['Again nb-old', 'Again cmd-old'])('"%s" opens nothing', async (entry) => {
       const user = setup();
-      await user.click(screen.getByRole('button', { name: 'Again cmd-old' }));
+      await user.click(screen.getByRole('button', { name: entry }));
       expect(screen.queryByText('Start from')).not.toBeInTheDocument();
+      expect(mocks.getShellConfig).not.toHaveBeenCalled();
     });
   });
 });

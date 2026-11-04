@@ -21,17 +21,17 @@ func TestInteractiveSupervisorEntrypoint(t *testing.T) {
 		interactiveSupervisorEntrypoint("-p", "3200", "-D"))
 }
 
-// The services join the task's other extra environment variables.
-func TestSetInteractiveServicesKeepsExtraEnvVars(t *testing.T) {
+// Added variables join the task's other extra environment variables, replacing those of the same
+// name.
+func TestAddExtraEnvVarsKeepsOthers(t *testing.T) {
 	var spec tasks.GenericCommandSpec
-	setInteractiveServices(&spec, interactiveServiceSSH)
-	require.Equal(t, map[string]string{"DET_SERVICES": "ssh"}, spec.Base.ExtraEnvVars)
+	addExtraEnvVars(&spec, map[string]string{"DET_TASK_TYPE": "SHELL"})
+	require.Equal(t, map[string]string{"DET_TASK_TYPE": "SHELL"}, spec.Base.ExtraEnvVars)
 
-	spec.Base.ExtraEnvVars = map[string]string{"DET_TASK_TYPE": "NOTEBOOK", "DET_SERVICES": "old"}
-	setInteractiveServices(&spec, interactiveServiceJupyter, interactiveServiceSSH)
-	addExtraEnvVars(&spec, map[string]string{"NOTEBOOK_PORT": "2900"})
+	spec.Base.ExtraEnvVars = map[string]string{"DET_TASK_TYPE": "SHELL", "NOTEBOOK_PORT": "old"}
+	addExtraEnvVars(&spec, map[string]string{"NOTEBOOK_PORT": "2900", "DET_CODE_SERVER_PORT": "2901"})
 	require.Equal(t, map[string]string{
-		"DET_TASK_TYPE": "NOTEBOOK", "DET_SERVICES": "jupyter,ssh", "NOTEBOOK_PORT": "2900",
+		"DET_TASK_TYPE": "SHELL", "NOTEBOOK_PORT": "2900", "DET_CODE_SERVER_PORT": "2901",
 	}, spec.Base.ExtraEnvVars)
 }
 

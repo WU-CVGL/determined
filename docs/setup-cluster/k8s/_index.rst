@@ -30,13 +30,12 @@ Determined master and a Postgres database in the Kubernetes cluster.
 
 |
 
-Once the master is running, you can launch :ref:`experiments <experiments>`, :ref:`notebooks
-<notebooks>`, :ref:`TensorBoards <tensorboards>`, :ref:`commands <commands-and-shells>`, and
-:ref:`shells <commands-and-shells>`. When new workloads are submitted to the Determined master, the
-master launches jobs and config maps on the Kubernetes cluster to execute those workloads. Users do
-not need to interact with Kubernetes directly after installation, as Determined handles all the
-necessary interaction with the Kubernetes cluster. Kubernetes creates and cleans up pods for all
-jobs requested by Determined.
+Once the master is running, you can launch :ref:`experiments <experiments>`, :ref:`TensorBoards
+<tensorboards>`, :ref:`commands <commands-and-shells>`, and :ref:`shells <commands-and-shells>`.
+When new workloads are submitted to the Determined master, the master launches jobs and config maps
+on the Kubernetes cluster to execute those workloads. Users do not need to interact with Kubernetes
+directly after installation, as Determined handles all the necessary interaction with the Kubernetes
+cluster. Kubernetes creates and cleans up pods for all jobs requested by Determined.
 
 .. note::
 

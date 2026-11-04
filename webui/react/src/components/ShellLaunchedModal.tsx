@@ -18,10 +18,7 @@ interface Props {
   response: CommandResponse;
 }
 
-/**
- * Shown after a shell launch: how to connect and where to follow the task.
- * Shells cannot use the JupyterLab "open in a new tab" flow (utils/wait).
- */
+/** Shown after a shell launch: how to connect and where to follow the task. */
 const ShellLaunchedModalComponent: React.FC<Props> = ({ response }: Props) => {
   const { command, warnings = [] } = response;
   const terminalEnabled = useFeature().isOn('shell_terminal');

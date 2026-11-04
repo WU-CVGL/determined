@@ -3,18 +3,18 @@ import Tooltip from 'hew/Tooltip';
 import React, { useCallback } from 'react';
 
 import { useLaunchForm } from 'hooks/useLaunchForm';
-import { CommandType, Workspace } from 'types';
+import { Workspace } from 'types';
 
 interface Props {
   enabled?: boolean;
   workspace?: Workspace;
 }
 
-/** Opens the launch form with Shell selected. */
+/** Opens the shell launch form. */
 const ShellButton: React.FC<Props> = ({ enabled, workspace }: Props) => {
   const { launchFormModals, openLaunchForm } = useLaunchForm({ workspace });
 
-  const handleClick = useCallback(() => openLaunchForm(CommandType.Shell), [openLaunchForm]);
+  const handleClick = useCallback(() => openLaunchForm(), [openLaunchForm]);
 
   return (
     <div data-testid="shell-button">

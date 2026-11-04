@@ -1,4 +1,4 @@
-"""Shared CLI interface for NTSCs (notebooks, tensorboards, shells, and commands)."""
+"""Shared CLI interface for NTSCs (tensorboards, shells, and commands)."""
 
 import argparse
 import base64
@@ -86,48 +86,41 @@ TensorboardTableHeader = collections.OrderedDict(
     ]
 )
 
-TaskTypeNotebook = "notebook"
 TaskTypeCommand = "command cmd"
 TaskTypeShell = "shell"
 TaskTypeTensorBoard = "tensorboard"
 
 RemoteTaskName = {
-    TaskTypeNotebook: "notebook",
     TaskTypeCommand: "command",
     TaskTypeShell: "shell",
     TaskTypeTensorBoard: "tensorboard",
 }
 
 RemoteTaskLogName = {
-    TaskTypeNotebook: "Notebook",
     TaskTypeCommand: "Command",
     TaskTypeShell: "Shell",
     TaskTypeTensorBoard: "TensorBoard",
 }
 
 RemoteTaskNewAPIs = {
-    TaskTypeNotebook: "notebooks",
     TaskTypeCommand: "commands",
     TaskTypeShell: "shells",
     TaskTypeTensorBoard: "tensorboards",
 }
 
 RemoteTaskOldAPIs = {
-    TaskTypeNotebook: "notebooks",
     TaskTypeCommand: "commands",
     TaskTypeShell: "shells",
     TaskTypeTensorBoard: "tensorboard",
 }
 
 RemoteTaskListTableHeaders: Dict[str, Dict[str, str]] = {
-    "notebook": CommandTableHeader,
     "command cmd": CommandTableHeader,
     "shell": CommandTableHeader,
     "tensorboard": TensorboardTableHeader,
 }
 
 RemoteTaskGetIDsFunc = {
-    "notebook": lambda args: args.notebook_id,
     "command cmd": lambda args: args.command_id,
     "shell": lambda args: args.shell_id,
     "tensorboard": lambda args: args.tensorboard_id,
@@ -429,7 +422,6 @@ def launch_command(
     includes: Iterable[pathlib.Path] = (),
     data: Optional[Dict[str, Any]] = None,
     workspace_id: Optional[int] = None,
-    preview: Optional[bool] = False,
     default_body: Optional[Dict[str, Any]] = None,
 ) -> Any:
     user_files = context.read_legacy_context(context_path, includes)
@@ -451,9 +443,6 @@ def launch_command(
         base64_bytes = base64.b64encode(message_bytes)
         body["data"] = base64_bytes
 
-    if preview:
-        body["preview"] = preview
-
     if workspace_id is not None:
         body["workspaceId"] = workspace_id
 
@@ -470,23 +459,16 @@ def make_interactive_task_url(
     service_address: str,
     description: str,
     resource_pool: str,
-    task_type: str,
     currentSlotsExceeded: bool,
 ) -> str:
-    wait_path = (
-        "/jupyter-lab/{}/events".format(task_id)
-        if task_type == "jupyter-lab"
-        else "/tensorboard/{}/events?tail=1".format(task_id)
-    )
-    wait_path_url = service_address + wait_path
+    wait_path_url = service_address + "/tensorboard/{}/events?tail=1".format(task_id)
     public_url = os.environ.get("PUBLIC_URL", "/det")
-    wait_page_url = "{}/wait/{}/{}?eventUrl={}&serviceAddr={}".format(
-        public_url, task_type, task_id, wait_path_url, service_address
+    wait_page_url = "{}/wait/tensorboard/{}?eventUrl={}&serviceAddr={}".format(
+        public_url, task_id, wait_path_url, service_address
     )
-    task_web_url = "{}/interactive/{}/{}/{}/{}/{}?{}".format(
+    task_web_url = "{}/interactive/{}/tensorboard/{}/{}/{}?{}".format(
         public_url,
         task_id,
-        task_type,
         urllib.parse.quote(description),
         resource_pool,
         urllib.parse.quote_plus(wait_page_url),

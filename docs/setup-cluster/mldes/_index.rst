@@ -56,4 +56,4 @@ Create and Manage Experiments
 =============================
 
 #. Once the cluster is ready, select **Open**.
-#. To open a Jupyter notebook, **Launch JupyterLab**.
+#. To run JupyterLab, select **Launch Shell** and check **jupyter**.

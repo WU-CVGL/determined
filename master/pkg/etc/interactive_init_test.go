@@ -62,8 +62,7 @@ func TestInteractiveSupervisorSourcesInitOnce(t *testing.T) {
 	require.NotContains(t, script, "STARTUP_HOOK")
 
 	for _, name := range []string{
-		NotebookEntrypointResource, ShellEntrypointResource, SSHServiceResource, JupyterServiceResource,
-		VSCodeServiceResource,
+		ShellEntrypointResource, SSHServiceResource, JupyterServiceResource, VSCodeServiceResource,
 	} {
 		script := staticScript(t, name)
 		require.False(t, initSource.MatchString(script), "%s does not source the init", name)
@@ -73,12 +72,9 @@ func TestInteractiveSupervisorSourcesInitOnce(t *testing.T) {
 	}
 }
 
-// The notebook and shell entrypoints are wrappers that run the supervisor with their one service
-// and their arguments.
+// The shell entrypoint is a wrapper that runs the supervisor with its service and its arguments.
 func TestInteractiveEntrypointsRunSupervisor(t *testing.T) {
-	for entrypoint, service := range map[string]string{
-		NotebookEntrypointResource: "jupyter", ShellEntrypointResource: "ssh",
-	} {
+	for entrypoint, service := range map[string]string{ShellEntrypointResource: "ssh"} {
 		script := staticScript(t, entrypoint)
 		require.Regexp(t, `(?m)^DET_SERVICES=`+service+` exec /run/determined/`+
 			regexp.QuoteMeta(InteractiveSupervisorResource)+` "\$@"$`, script, entrypoint)

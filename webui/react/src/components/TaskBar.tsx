@@ -1,13 +1,13 @@
 import Dropdown, { MenuItem } from 'hew/Dropdown';
 import Icon from 'hew/Icon';
 import useConfirm from 'hew/useConfirm';
-import { Loadable } from 'hew/utils/loadable';
+import { Failed, Loadable } from 'hew/utils/loadable';
 import React, { useCallback, useMemo } from 'react';
 
 import { useAsync } from 'hooks/useAsync';
 import usePermissions from 'hooks/usePermissions';
 import { paths } from 'routes/utils';
-import { getCommand, getJupyterLab, getShell, getTensorBoard, killTask } from 'services/api';
+import { getCommand, getShell, getTensorBoard, killTask } from 'services/api';
 import { CommandTask, CommandType } from 'types';
 import handleError from 'utils/error';
 import { routeToReactUrl } from 'utils/routes';
@@ -21,6 +21,13 @@ interface Props {
   resourcePool: string;
   type: CommandType;
 }
+
+/** The task types the master can look up; a notebook, the label of ended records, has none. */
+const taskGetters: Partial<Record<CommandType, typeof getCommand>> = {
+  [CommandType.Command]: getCommand,
+  [CommandType.Shell]: getShell,
+  [CommandType.TensorBoard]: getTensorBoard,
+};
 
 const MenuKey = {
   Kill: 'kill',
@@ -37,14 +44,10 @@ export const TaskBar: React.FC<Props> = ({
   const { canModifyWorkspaceNSC } = usePermissions();
   const confirm = useConfirm();
 
-  const task = useAsync(() => {
-    const call = {
-      'command': getCommand,
-      'jupyter-lab': getJupyterLab,
-      'shell': getShell,
-      'tensor-board': getTensorBoard,
-    }[type];
-    return call({ commandId: id });
+  const task = useAsync<CommandTask>(async () => {
+    const call = taskGetters[type];
+    if (!call) return Failed(new Error(`${type} ${id} not found`));
+    return await call({ commandId: id });
   }, [type, id]);
 
   const deleteTask = useCallback(

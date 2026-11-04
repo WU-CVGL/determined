@@ -18,6 +18,10 @@ import { DetError } from 'utils/error';
 import { CURRENT_PASSWORD_LABEL, OK_BUTTON_LABEL } from './UsernameChangeModal';
 import UserSettings from './UserSettings';
 
+const settingsApi = vi.hoisted(() => ({
+  getUserSetting: vi.fn(() => Promise.resolve({ settings: [] as unknown[] })),
+}));
+
 vi.mock('services/api', () => ({
   getUsers: () =>
     Promise.resolve({
@@ -31,6 +35,7 @@ vi.mock('services/api', () => ({
         },
       ],
     }),
+  getUserSetting: settingsApi.getUserSetting,
   patchUser: vi.fn((params: PatchUserParams) =>
     Promise.resolve({
       displayName: params.userParams.displayName,
@@ -106,6 +111,29 @@ const cancelPasswordPrompt = () =>
 describe('UserSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('lists the shortcuts without JupyterLab, also with one stored for it', async () => {
+    const shortcut = { alt: false, ctrl: false, key: 'L', meta: true, shift: true };
+    settingsApi.getUserSetting.mockResolvedValue({
+      settings: [
+        { key: 'jupyterLab', storagePath: 'shortcuts', value: JSON.stringify(shortcut) },
+        {
+          key: 'omnibar',
+          storagePath: 'shortcuts',
+          value: JSON.stringify({ ...shortcut, key: 'K' }),
+        },
+      ],
+    });
+    try {
+      setup();
+      expect(await screen.findByText('Open Omnibar')).toBeInTheDocument();
+      expect(screen.getByText('Toggle Sidebar')).toBeInTheDocument();
+      expect(screen.queryByText('Launch JupyterLab Notebook')).not.toBeInTheDocument();
+      expect(settingsApi.getUserSetting).toHaveBeenCalled();
+    } finally {
+      settingsApi.getUserSetting.mockResolvedValue({ settings: [] });
+    }
   });
 
   it('should render with correct values', async () => {

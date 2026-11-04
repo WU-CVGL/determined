@@ -27,7 +27,6 @@ from determined.cli import (
     job,
     master,
     model,
-    notebook,
     oauth,
     project,
     rbac,
@@ -132,7 +131,6 @@ all_args_description: cli.ArgsDescription = (
     + master.args_description
     + model.args_description
     + agent.args_description
-    + notebook.args_description
     + job.args_description
     + resources.args_description
     + resource_pool.args_description

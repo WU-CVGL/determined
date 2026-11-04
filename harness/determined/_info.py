@@ -232,7 +232,6 @@ class ClusterInfo:
 
         #: The type of task.  Currently one of the following string literals:
         #:    - ``"TRIAL"``
-        #:    - ``"NOTEBOOK"``
         #:    - ``"SHELL"``
         #:    - ``"COMMAND"``
         #:    - ``"TENSORBOARD"``

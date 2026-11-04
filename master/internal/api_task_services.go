@@ -20,7 +20,7 @@ import (
 )
 
 // canViewTaskServices returns the current user and the task's metadata if the user may see the
-// NTSC task taskID, by the rule of GetShell, GetNotebook and the proxy: the workspace's NSC view
+// NTSC task taskID, by the rule of GetShell and the proxy: the workspace's NSC view
 // permission, or for a TensorBoard the TensorBoard's. Anyone else gets NotFound, as for a task
 // that does not exist.
 func canViewTaskServices(
@@ -114,7 +114,7 @@ func (a *apiServer) GetTaskServiceCredential(
 	if err != nil {
 		return nil, err
 	}
-	// A credential acts as the task's owner inside the task, as a shell's key and a notebook's
+	// A credential acts as the task's owner inside the task, as a shell's key and its jupyter
 	// token do.
 	ownerID := int32(cred.OwnerID)
 	if !canReadTaskCredential(*curUser, ownerID) {
@@ -130,7 +130,7 @@ func (a *apiServer) GetTaskServiceCredential(
 		resp.User = ptrs.Ptr(cred.User)
 	case model.ServiceJupyter:
 		resp.Token = ptrs.Ptr(cred.Token)
-		resp.Url = ptrs.Ptr(command.NotebookServiceAddress(
+		resp.Url = ptrs.Ptr(jupyterServiceAddress(
 			serviceURL(cred.Service.ServiceID(model.TaskID(req.TaskId)), false), cred.Token))
 	case model.ServiceVSCode:
 		// code-server's login form is at <url>login.

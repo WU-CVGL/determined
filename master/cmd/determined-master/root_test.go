@@ -368,3 +368,14 @@ resource_pools: []
 `)
 	assert.ErrorContains(t, err, "you must specify at least one resource pool")
 }
+
+// A master configuration that sets notebook_timeout, which the master does not take, fails to load
+// and names the key; tensorboard_timeout loads.
+func TestGetConfigRefusesNotebookTimeout(t *testing.T) {
+	_, err := getConfig(map[string]interface{}{"notebook_timeout": 1800})
+	assert.ErrorContains(t, err, `unknown field "notebook_timeout"`)
+
+	conf, err := getConfig(map[string]interface{}{"tensorboard_timeout": 1800})
+	assert.NilError(t, err)
+	assert.Equal(t, 1800, conf.TensorBoardTimeout)
+}

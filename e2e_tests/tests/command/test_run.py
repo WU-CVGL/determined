@@ -425,7 +425,7 @@ def test_log_wait_timeout(tmp_path: pathlib.Path, secrets: Dict[str, str]) -> No
     assert "after 20" not in stdout, stdout
 
 
-@pytest.mark.parametrize("task_type", ["notebook", "command", "shell", "tensorboard"])
+@pytest.mark.parametrize("task_type", ["command", "shell", "tensorboard"])
 @pytest.mark.e2e_cpu
 def test_log_argument(task_type: str) -> None:
     sess = api_utils.user_session()

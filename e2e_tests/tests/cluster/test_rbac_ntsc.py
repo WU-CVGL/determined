@@ -14,32 +14,32 @@ DEFAULT_WID = 1  # default workspace ID
 
 
 @contextlib.contextmanager
-def setup_notebooks(
-    session: api.Session, notebooks: List[bindings.v1LaunchNotebookRequest]
-) -> Generator[List[bindings.v1Notebook], None, None]:
-    created: List[bindings.v1Notebook] = []
+def setup_shells(
+    session: api.Session, shells: List[bindings.v1LaunchShellRequest]
+) -> Generator[List[bindings.v1Shell], None, None]:
+    created: List[bindings.v1Shell] = []
     try:
-        for nb_req in notebooks:
-            r = bindings.post_LaunchNotebook(session, body=nb_req)
-            created.append(r.notebook)
+        for sh_req in shells:
+            r = bindings.post_LaunchShell(session, body=sh_req)
+            created.append(r.shell)
         yield created
 
     finally:
-        for nb in created:
-            bindings.post_KillNotebook(session, notebookId=nb.id)
+        for sh in created:
+            bindings.post_KillShell(session, shellId=sh.id)
 
 
 def filter_out_ntsc(
-    base: Sequence[bindings.v1Notebook], target: Sequence[bindings.v1Notebook]
-) -> List[bindings.v1Notebook]:
-    """throw out target notebooks that are not in the base list"""
-    accepted_ids = {nb.id for nb in base}
-    return list(filter(lambda nb: nb.id in accepted_ids, target))
+    base: Sequence[bindings.v1Shell], target: Sequence[bindings.v1Shell]
+) -> List[bindings.v1Shell]:
+    """throw out target shells that are not in the base list"""
+    accepted_ids = {sh.id for sh in base}
+    return list(filter(lambda sh: sh.id in accepted_ids, target))
 
 
 @pytest.mark.e2e_cpu_rbac
 @api_utils.skipif_rbac_not_enabled()
-def test_notebook() -> None:
+def test_shell() -> None:
     u_viewer_ws0, _ = api_utils.create_test_user()
     u_editor_ws0, _ = api_utils.create_test_user()
     admin = api_utils.admin_session()
@@ -58,33 +58,31 @@ def test_notebook() -> None:
             workspace=workspaces[1].name,
         )
 
-        nb_reqs = [
-            bindings.v1LaunchNotebookRequest(workspaceId=workspaces[0].id),
-            bindings.v1LaunchNotebookRequest(workspaceId=workspaces[1].id),
-            bindings.v1LaunchNotebookRequest(),
+        sh_reqs = [
+            bindings.v1LaunchShellRequest(workspaceId=workspaces[0].id),
+            bindings.v1LaunchShellRequest(workspaceId=workspaces[1].id),
+            bindings.v1LaunchShellRequest(),
         ]
-        with setup_notebooks(admin, nb_reqs) as notebooks:
-            r = bindings.get_GetNotebooks(admin)
-            assert len(filter_out_ntsc(notebooks, r.notebooks)) == 3
-            r = bindings.get_GetNotebooks(admin, workspaceId=workspaces[0].id)
-            assert len(filter_out_ntsc(notebooks, r.notebooks)) == 1
-            r = bindings.get_GetNotebooks(admin, workspaceId=workspaces[1].id)
-            assert len(filter_out_ntsc(notebooks, r.notebooks)) == 1
-            r = bindings.get_GetNotebooks(admin, workspaceId=DEFAULT_WID)
-            assert len(filter_out_ntsc(notebooks, r.notebooks)) == 1
+        with setup_shells(admin, sh_reqs) as shells:
+            r = bindings.get_GetShells(admin)
+            assert len(filter_out_ntsc(shells, r.shells)) == 3
+            r = bindings.get_GetShells(admin, workspaceId=workspaces[0].id)
+            assert len(filter_out_ntsc(shells, r.shells)) == 1
+            r = bindings.get_GetShells(admin, workspaceId=workspaces[1].id)
+            assert len(filter_out_ntsc(shells, r.shells)) == 1
+            r = bindings.get_GetShells(admin, workspaceId=DEFAULT_WID)
+            assert len(filter_out_ntsc(shells, r.shells)) == 1
 
-            r = bindings.get_GetNotebooks(u_viewer_ws0)
-            assert len(r.notebooks) == 1
-            r = bindings.get_GetNotebooks(u_viewer_ws0, workspaceId=workspaces[0].id)
-            assert len(r.notebooks) == 1
+            r = bindings.get_GetShells(u_viewer_ws0)
+            assert len(r.shells) == 1
+            r = bindings.get_GetShells(u_viewer_ws0, workspaceId=workspaces[0].id)
+            assert len(r.shells) == 1
             with pytest.raises(errors.APIException) as e:
-                r = bindings.get_GetNotebooks(u_viewer_ws0, workspaceId=workspaces[1].id)
+                r = bindings.get_GetShells(u_viewer_ws0, workspaceId=workspaces[1].id)
                 assert e.value.status_code == 404
 
             # User with only view role on first workspace
-            json_out = detproc.check_json(
-                u_viewer_ws0, ["det", "notebook", "ls", "--all", "--json"]
-            )
+            json_out = detproc.check_json(u_viewer_ws0, ["det", "shell", "ls", "--all", "--json"])
             assert len(json_out) == 1
 
 
@@ -225,7 +223,6 @@ def test_ntsc_iface_access() -> None:
                         pytest.fail(f"should not be able to see {typ} {r.id} in the list results")
                 with pytest.raises(errors.APIException) as e:
                     api_utils.list_ntsc(cred, typ, workspace_id=workspaces[2].id)
-                # FIXME only notebooks return the correct 404.
                 assert e.value.status_code == 404, f"{typ} should fail with 404"
                 with pytest.raises(errors.APIException) as e:
                     api_utils.list_ntsc(cred, typ, workspace_id=12532459)
@@ -297,6 +294,47 @@ def test_ntsc_proxy() -> None:
 
             # kill the ntsc
             api_utils.kill_ntsc(creds[0], typ, created_id)
+
+
+@pytest.mark.e2e_cpu_rbac
+@api_utils.skipif_rbac_not_enabled()
+def test_shell_jupyter_proxy() -> None:
+    # The jupyter service runs code as the shell's owner: only the owner and admins reach it.
+    with test_rbac.create_workspaces_with_users(
+        [
+            [
+                (0, ["Viewer", "Editor"]),
+                (1, ["Viewer"]),
+            ],
+            [
+                (2, ["Viewer"]),
+            ],
+        ]
+    ) as (workspaces, creds):
+        created_id = api_utils.launch_shell_with_jupyter(creds[0], workspaces[0].id).id
+        try:
+            service = api_utils.wait_for_service_ready(creds[0], created_id, "jupyter")
+            assert "JupyterLab" in api_utils.get_jupyter_page(creds[0], created_id)
+
+            # user 1 sees the shell and its services but neither the token nor the service.
+            bindings.get_GetTaskServices(creds[1], taskId=created_id)
+            with pytest.raises(errors.ForbiddenException):
+                bindings.get_GetTaskServiceCredential(
+                    creds[1], taskId=created_id, service="jupyter"
+                )
+            with pytest.raises(errors.APIException) as e:
+                creds[1].get(service.url.lstrip("/"))
+            assert e.value.status_code == 404, "user 1 should not reach the jupyter service"
+
+            # user 2 does not see the shell.
+            with pytest.raises(errors.APIException) as e:
+                bindings.get_GetTaskServices(creds[2], taskId=created_id)
+            assert e.value.status_code == 404
+            with pytest.raises(errors.APIException) as e:
+                creds[2].get(service.url.lstrip("/"))
+            assert e.value.status_code == 404, "user 2 should not reach the jupyter service"
+        finally:
+            api_utils.kill_ntsc(creds[0], api.NTSC_Kind.shell, created_id)
 
 
 @pytest.mark.e2e_cpu_rbac

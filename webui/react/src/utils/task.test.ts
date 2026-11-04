@@ -108,22 +108,20 @@ describe('generic task actions', () => {
 describe('canConnectToTask', () => {
   const owner = { id: 5, isAdmin: false };
 
-  it.each([CommandType.JupyterLab, CommandType.Shell])(
-    'allows the owner and admins to connect to a running %s',
-    (type) => {
-      const task = { state: CommandState.Running, type, userId: 5 };
-      expect(canConnectToTask(task, owner)).toBe(true);
-      expect(canConnectToTask(task, { id: 1, isAdmin: true })).toBe(true);
-      expect(canConnectToTask(task, { id: 6, isAdmin: false })).toBe(false);
-      expect(canConnectToTask(task, undefined)).toBe(false);
-    },
-  );
+  it('allows the owner and admins to connect to a running shell', () => {
+    const task = { state: CommandState.Running, type: CommandType.Shell, userId: 5 };
+    expect(canConnectToTask(task, owner)).toBe(true);
+    expect(canConnectToTask(task, { id: 1, isAdmin: true })).toBe(true);
+    expect(canConnectToTask(task, { id: 6, isAdmin: false })).toBe(false);
+    expect(canConnectToTask(task, undefined)).toBe(false);
+  });
 
-  it('only offers running JupyterLabs and shells', () => {
+  it('only offers running shells', () => {
     const shell = { state: CommandState.Running, type: CommandType.Shell, userId: 5 };
     expect(canConnectToTask({ ...shell, state: CommandState.Queued }, owner)).toBe(false);
     expect(canConnectToTask({ ...shell, state: CommandState.Terminated }, owner)).toBe(false);
     expect(canConnectToTask({ ...shell, type: CommandType.Command }, owner)).toBe(false);
+    expect(canConnectToTask({ ...shell, type: CommandType.JupyterLab }, owner)).toBe(false);
     expect(canConnectToTask({ ...shell, type: CommandType.TensorBoard }, owner)).toBe(false);
   });
 });

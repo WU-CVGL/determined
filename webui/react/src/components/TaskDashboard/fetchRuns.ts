@@ -2,11 +2,10 @@ import {
   getCommands,
   getExperiments,
   getGenericTasks,
-  getJupyterLabs,
   getShells,
   getTensorBoards,
 } from 'services/api';
-import { CommandTask, CommandType, ExperimentPagination, GenericTaskPagination } from 'types';
+import { CommandTask, ExperimentPagination, GenericTaskPagination } from 'types';
 
 import {
   COMMAND_KINDS,
@@ -22,6 +21,7 @@ import {
   genericTaskApiSort,
   genericTaskRow,
   genericTaskStates,
+  ListedCommandKind,
   pageOfRuns,
   RunKind,
   RunRow,
@@ -56,9 +56,8 @@ export interface RunPage {
   total: number;
 }
 
-const commandListers: Record<CommandType, typeof getCommands> = {
+const commandListers: Record<ListedCommandKind, typeof getCommands> = {
   [RunKind.Command]: getCommands,
-  [RunKind.JupyterLab]: getJupyterLabs,
   [RunKind.Shell]: getShells,
   [RunKind.TensorBoard]: getTensorBoards,
 };
@@ -67,8 +66,8 @@ const commandListers: Record<CommandType, typeof getCommands> = {
  * Fetches one page of the dashboard, of the kinds asked for only.
  * - Experiments and generic tasks are sorted, filtered and paged by the master: each is fetched
  *   with offset 0 and limit offset + limit.
- * - Notebooks, shells, commands and TensorBoards are listed whole by the master, and filtered and
- *   sorted here in the same order.
+ * - Shells, commands and TensorBoards are listed whole by the master, and filtered and sorted here
+ *   in the same order.
  * - The sorted lists are merged and the page's rows cut out; the total is the sum of the three.
  * Each list that fails is left out and reported in `errors`.
  */
@@ -141,7 +140,7 @@ export const fetchRunPage = async (query: RunQuery, signal?: AbortSignal): Promi
   const errors: RunPage['errors'] = {};
   let total = 0;
 
-  // Notebooks, shells, commands and TensorBoards.
+  // Shells, commands and TensorBoards.
   const commandTasks: CommandTask[] = [];
   commandResults.forEach((result, i) => {
     if (result.status === 'rejected') errors[commandKinds[i]] = result.reason;

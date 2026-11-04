@@ -46,7 +46,7 @@ import (
 )
 
 const (
-	// Agent ports 2600 - 3500 are split between TensorBoards, Notebooks, and Shells.
+	// Agent ports 2600 - 3500 are split between TensorBoards, services, and sshd.
 	minTensorBoardPort        = 2600
 	maxTensorBoardPort        = minTensorBoardPort + 299
 	tensorboardEntrypointFile = "/run/determined/tensorboard/tensorboard-entrypoint.sh"
@@ -240,7 +240,7 @@ func (a *apiServer) LaunchTensorboard(
 		return nil, status.Errorf(codes.Internal, "failed to get the user: %s", err)
 	}
 
-	launchReq, launchWarnings, err := a.getCommandLaunchParams(ctx, &protoCommandParams{
+	launchReq, launchWarnings, err := a.prepareCommandLaunch(ctx, &protoCommandParams{
 		TemplateName: req.TemplateName,
 		WorkspaceID:  req.WorkspaceId,
 		Config:       req.Config,
@@ -483,6 +483,9 @@ func (a *apiServer) LaunchTensorboard(
 
 	if err = check.Validate(req.Config); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid TensorBoard config: %s", err.Error())
+	}
+	if err = startTaskSession(ctx, user, launchReq.Spec); err != nil {
+		return nil, err
 	}
 
 	// Launch a TensorBoard.

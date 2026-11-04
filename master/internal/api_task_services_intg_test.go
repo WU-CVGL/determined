@@ -138,7 +138,8 @@ func TestGetTaskServicesShellWithJupyter(t *testing.T) {
 }
 
 // Tasks saved without service records list the service of their type: a shell its sshd at the
-// task ID, a notebook JupyterLab at the task ID; a command has no services.
+// task ID, a notebook record JupyterLab at the task ID, with its token as the credential; a command
+// has no services.
 func TestGetTaskServicesWithoutRecords(t *testing.T) {
 	s, adminCtx := setupServicesTest(t)
 
@@ -158,12 +159,14 @@ func TestGetTaskServicesWithoutRecords(t *testing.T) {
 
 	notebookReq := mockGenericReq(t, s.api.m.db)
 	notebookReq.Spec.Base.ExtraProxyPorts = expconf.ProxyPortsConfig{{
-		RawProxyPort: minNotebookPort, RawDefaultServiceID: ptrs.Ptr(true),
+		RawProxyPort: minServicePort, RawDefaultServiceID: ptrs.Ptr(true),
 	}}
-	notebook, err := command.DefaultCmdService.LaunchNotebookCommand(
-		notebookReq, notebookReq.Spec.Base.Owner)
+	notebookReq.Spec.Base.ExtraEnvVars = map[string]string{model.NotebookSessionEnvVar: "tok"}
+	// A notebook, as the master saved them, with the token that its launch gave it.
+	notebook, err := command.DefaultCmdService.LaunchGenericCommand(
+		model.TaskTypeNotebook, model.JobTypeNotebook, notebookReq)
 	require.NoError(t, err)
-	notebookID := notebook.ToV1Notebook().Id
+	notebookID := notebook.ToV1Command().Id
 	resp := s.services(adminCtx, t, notebookID)
 	require.Equal(t, model.ServiceJupyter, resp.Primary)
 	require.Equal(t, []*taskv1.TaskService{{
@@ -171,6 +174,14 @@ func TestGetTaskServicesWithoutRecords(t *testing.T) {
 		Protocol: taskv1.TaskService_PROTOCOL_HTTP, Url: "/proxy/" + notebookID + "/",
 		MayConnect: true,
 	}}, resp.Services)
+	// Its JupyterLab's credential is its token.
+	cred, err := s.api.GetTaskServiceCredential(adminCtx, &apiv1.GetTaskServiceCredentialRequest{
+		TaskId: notebookID, Service: model.ServiceJupyter,
+	})
+	require.NoError(t, err)
+	require.Equal(t, &apiv1.GetTaskServiceCredentialResponse{
+		Token: ptrs.Ptr("tok"), Url: ptrs.Ptr("/proxy/" + notebookID + "/?token=tok"),
+	}, cred)
 
 	_, _, commandID := launchOwnedCommand(t, s.api)
 	resp = s.services(adminCtx, t, commandID)

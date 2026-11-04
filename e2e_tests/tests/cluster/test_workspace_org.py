@@ -484,7 +484,7 @@ TERMINATING_STATES = [
 
 # tag: no-cli
 @pytest.mark.e2e_cpu
-def test_workspace_delete_notebook() -> None:
+def test_workspace_delete_shell() -> None:
     admin_session = api_utils.admin_session()
 
     # create a workspace using bindings
@@ -496,59 +496,53 @@ def test_workspace_delete_notebook() -> None:
         ),
     )
 
-    # create a notebook inside the workspace
-    created_resp = bindings.post_LaunchNotebook(
+    # create a shell inside the workspace
+    created_resp = bindings.post_LaunchShell(
         admin_session,
-        body=bindings.v1LaunchNotebookRequest(workspaceId=workspace_resp.workspace.id),
+        body=bindings.v1LaunchShellRequest(workspaceId=workspace_resp.workspace.id),
     )
 
-    # check that the notebook exists
-    notebook_resp = bindings.get_GetNotebook(admin_session, notebookId=created_resp.notebook.id)
-    assert notebook_resp.notebook.state not in TERMINATING_STATES
+    # check that the shell exists
+    shell_resp = bindings.get_GetShell(admin_session, shellId=created_resp.shell.id)
+    assert shell_resp.shell.state not in TERMINATING_STATES
 
-    # check that the notebook is returned in the list of notebooks
-    notebooks_resp = bindings.get_GetNotebooks(
-        admin_session, workspaceId=workspace_resp.workspace.id
-    )
-    nb = next((nb for nb in notebooks_resp.notebooks if nb.id == created_resp.notebook.id), None)
-    assert nb is not None
+    # check that the shell is returned in the list of shells
+    shells_resp = bindings.get_GetShells(admin_session, workspaceId=workspace_resp.workspace.id)
+    sh = next((sh for sh in shells_resp.shells if sh.id == created_resp.shell.id), None)
+    assert sh is not None
 
     with setup_workspaces(admin_session) as [workspace2]:
-        # create a notebook inside another workspace
-        outside_notebook = bindings.post_LaunchNotebook(
+        # create a shell inside another workspace
+        outside_shell = bindings.post_LaunchShell(
             admin_session,
-            body=bindings.v1LaunchNotebookRequest(workspaceId=workspace2.id),
-        ).notebook
+            body=bindings.v1LaunchShellRequest(workspaceId=workspace2.id),
+        ).shell
 
         # delete the workspace
         bindings.delete_DeleteWorkspace(admin_session, id=workspace_resp.workspace.id)
 
-        # check that the other notebook is not terminated
-        outside_notebook = bindings.get_GetNotebook(
-            admin_session, notebookId=outside_notebook.id
-        ).notebook
-        assert outside_notebook.state not in TERMINATING_STATES
+        # check that the other shell is not terminated
+        outside_shell = bindings.get_GetShell(admin_session, shellId=outside_shell.id).shell
+        assert outside_shell.state not in TERMINATING_STATES
 
-    # check that notebook is terminated or terminating.
+    # check that shell is terminated or terminating.
     api.wait_for_ntsc_state(
         admin_session,
-        api.NTSC_Kind.notebook,
-        ntsc_id=created_resp.notebook.id,
+        api.NTSC_Kind.shell,
+        ntsc_id=created_resp.shell.id,
         predicate=lambda state: state in TERMINATING_STATES,
     )
-    notebook_resp = bindings.get_GetNotebook(admin_session, notebookId=created_resp.notebook.id)
-    assert notebook_resp.notebook.state in TERMINATING_STATES
+    shell_resp = bindings.get_GetShell(admin_session, shellId=created_resp.shell.id)
+    assert shell_resp.shell.state in TERMINATING_STATES
 
-    # check that the notebook is not returned in the list of notebooks by default.
-    notebooks_resp = bindings.get_GetNotebooks(admin_session)
-    nb = next((nb for nb in notebooks_resp.notebooks if nb.id == created_resp.notebook.id), None)
-    assert nb is None
+    # check that the shell is not returned in the list of shells by default.
+    shells_resp = bindings.get_GetShells(admin_session)
+    sh = next((sh for sh in shells_resp.shells if sh.id == created_resp.shell.id), None)
+    assert sh is None
 
     # the api returns a 404
     with pytest.raises(errors.NotFoundException):
-        notebooks_resp = bindings.get_GetNotebooks(
-            admin_session, workspaceId=workspace_resp.workspace.id
-        )
+        shells_resp = bindings.get_GetShells(admin_session, workspaceId=workspace_resp.workspace.id)
 
 
 # tag: no_cli
@@ -563,11 +557,11 @@ def test_launch_in_archived() -> None:
             id=workspace.id,
         )
 
-        # create a notebook inside the workspace
+        # create a shell inside the workspace
         with pytest.raises(errors.NotFoundException):
-            bindings.post_LaunchNotebook(
+            bindings.post_LaunchShell(
                 admin_session,
-                body=bindings.v1LaunchNotebookRequest(workspaceId=workspace.id),
+                body=bindings.v1LaunchShellRequest(workspaceId=workspace.id),
             )
 
 

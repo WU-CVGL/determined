@@ -23,7 +23,7 @@ Please refer to the sections below to see the configuration changes and controll
    -  Implementing IP whitelisting
    -  Configuring Kubernetes Network Policies
    -  Employing other security measures as needed
-   -  Some tasks including JupyterLab notebooks and shells already have secure transport built-in.
+   -  Shells and their JupyterLab already have secure transport built-in.
    -  Since TensorBoards do not use TLS, you should consider a tunneling solution.
 
 Limitations:

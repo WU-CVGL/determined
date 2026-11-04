@@ -30,7 +30,6 @@ import (
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 	"github.com/determined-ai/determined/proto/pkg/commandv1"
-	"github.com/determined-ai/determined/proto/pkg/notebookv1"
 	"github.com/determined-ai/determined/proto/pkg/shellv1"
 	"github.com/determined-ai/determined/proto/pkg/taskv1"
 	"github.com/determined-ai/determined/proto/pkg/tensorboardv1"
@@ -47,7 +46,7 @@ var queueStates = []model.AllocationState{
 }
 
 // Command is executed in a containerized environment on a Determined cluster.
-// Locking in: Start, OnExit, DeleteIfInWorkspace, ToV1Command/Shell/Notebook/Tensorboard.
+// Locking in: Start, OnExit, DeleteIfInWorkspace, ToV1Command/Shell/Tensorboard, v1State.
 type Command struct {
 	mu sync.Mutex
 
@@ -258,7 +257,7 @@ func (c *Command) OnExit(ae *task.AllocationExited) {
 		c.syslog.WithError(err).Errorf(
 			"failure to delete user session for task: %v", c.taskID)
 	}
-	// Notebooks and shells that run JupyterLab have a notebook session for its token.
+	// Shells that run JupyterLab, and notebooks, have a notebook session for its token.
 	if c.Base.ExtraEnvVars[model.NotebookSessionEnvVar] != "" {
 		if err := internaldb.DeleteNotebookSessionByTask(context.TODO(), c.taskID); err != nil {
 			c.syslog.WithError(err).Errorf(
@@ -359,46 +358,6 @@ func (c *Command) ToV1Command() *commandv1.Command {
 	}
 }
 
-// ToV1Notebook takes a *Command from the command service registry & returns a *notebookv1.Notebook.
-// Its service address never includes the notebook's Jupyter token; see NotebookToken.
-func (c *Command) ToV1Notebook() *notebookv1.Notebook {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	allo := c.refreshAllocationState()
-	return &notebookv1.Notebook{
-		Id:             c.stringID(),
-		State:          enrichState(allo.State),
-		Description:    c.Config.Description,
-		Container:      allo.SingleContainer().ToProto(),
-		ServiceAddress: c.serviceAddress(),
-		StartTime:      protoutils.ToTimestamp(c.registeredTime),
-		Username:       c.Base.Owner.Username,
-		UserId:         int32(c.Base.Owner.ID),
-		DisplayName:    c.Base.Owner.DisplayName.ValueOrZero(),
-		ResourcePool:   c.Config.Resources.ResourcePool,
-		ExitStatus:     c.exitStatus.String(),
-		EndTime:        c.endTimeProto(),
-		JobId:          c.jobID.String(),
-		WorkspaceId:    int32(c.GenericCommandSpec.Metadata.WorkspaceID),
-		Slots:          int32(c.Config.Resources.Slots),
-	}
-}
-
-// NotebookToken returns the token that the notebook's Jupyter server accepts as a login. It runs
-// code as the notebook's user, so callers may hand it only to the notebook's owner or an admin.
-func (c *Command) NotebookToken() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	return c.Base.ExtraEnvVars[model.NotebookSessionEnvVar]
-}
-
-// NotebookServiceAddress returns the address that opens a notebook in JupyterLab: its proxied
-// service address with the Jupyter token.
-func NotebookServiceAddress(serviceAddress, token string) string {
-	return fmt.Sprintf("%s?token=%s", serviceAddress, token)
-}
-
 // ToV1Shell takes a *Command from the command service registry & returns a *shellv1.Shell.
 // The shell's private key is never included; see ShellPrivateKey.
 func (c *Command) ToV1Shell() *shellv1.Shell {
@@ -467,7 +426,16 @@ func (c *Command) ToV1Tensorboard() *tensorboardv1.Tensorboard {
 	}
 }
 
-// ToV1Command(), ToV1Notebook(), ToV1Shell(), ToV1Tensorboard() helper functions:
+// v1State returns the state of the command, as ToV1Command, ToV1Shell and ToV1Tensorboard report
+// it.
+func (c *Command) v1State() taskv1.State {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return enrichState(c.refreshAllocationState().State)
+}
+
+// ToV1Command(), ToV1Shell(), ToV1Tensorboard() helper functions:
 // refreshAllocationState, enrichState, toProto, endTimeProto, serviceAddress, stringID
 
 // Refresh our view of the allocation state. If the allocation has sent us an exit status,
@@ -552,8 +520,8 @@ func proxyPortConfigs(spec tasks.GenericCommandSpec, taskID model.TaskID) []*spr
 }
 
 // idleTimeoutConfig returns how the task's idle time is watched, if its config sets an idle
-// timeout: a shell's through its task's activity record, a notebook's and a TensorBoard's through
-// their proxy and runner state, as their launches chose. Other tasks are not watched.
+// timeout: a shell's through its task's activity record, a TensorBoard's and a restored notebook's
+// through the last request to its proxy, as their launches chose. Other tasks are not watched.
 func idleTimeoutConfig(spec tasks.GenericCommandSpec, taskID model.TaskID) *sproto.IdleTimeoutConfig {
 	if spec.Config.IdleTimeout == nil {
 		return nil
@@ -566,8 +534,8 @@ func idleTimeoutConfig(spec tasks.GenericCommandSpec, taskID model.TaskID) *spro
 	switch {
 	case spec.WatchTaskActivity:
 		cfg.UseTaskActivity, cfg.TaskID = true, taskID
-	case spec.WatchProxyIdleTimeout || spec.WatchRunnerIdleTimeout:
-		cfg.UseProxyState, cfg.UseRunnerState = spec.WatchProxyIdleTimeout, spec.WatchRunnerIdleTimeout
+	case spec.WatchProxyIdleTimeout:
+		cfg.UseProxyState = true
 	default:
 		return nil
 	}

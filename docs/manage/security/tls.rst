@@ -9,8 +9,8 @@ data being transmitted from being modified or read while it is in transit and al
 verify the identity of the server (in this case, the Determined master). Determined can be
 configured to use TLS for all connections made to the master. That means that all CLI and WebUI
 connections will be secured by TLS, as well as connections from agents and tasks to the master. By
-default, proxied connections between the master and :ref:`notebooks <notebooks>` use TLS, while
-those with :ref:`shells <shells>` use SSH.
+default, proxied connections between the master and the :ref:`JupyterLab <jupyter-service>` of a
+shell use TLS, while those with the SSH server of :ref:`shells <shells>` use SSH.
 
 .. note::
 
@@ -18,8 +18,8 @@ those with :ref:`shells <shells>` use SSH.
    TLS, and neither do proxied connections from the master to :ref:`TensorBoards <tensorboards>`.
 
 After the master and agent are configured to use TLS, no additional configuration is needed for
-tasks run in the cluster. In shells and notebooks, the Determined Python libraries automatically
-make connections to the master using TLS with the appropriate certificate.
+tasks run in the cluster. In shells, the Determined Python libraries automatically make connections
+to the master using TLS with the appropriate certificate.
 
 .. note::
 

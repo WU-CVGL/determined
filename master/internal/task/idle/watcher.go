@@ -3,7 +3,6 @@ package idle
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -35,9 +34,7 @@ type Watcher struct {
 	action TimeoutFn
 
 	// Mutable internal state.
-	mu                   sync.Mutex
-	wg                   waitgroupx.Group // TODO(mar): consistent pointer usage.
-	lastExplicitActivity *time.Time
+	wg waitgroupx.Group // TODO(mar): consistent pointer usage.
 }
 
 // New creates a new idle timeout watcher. The action can be triggered until Close is called.
@@ -52,13 +49,6 @@ func New(cfg sproto.IdleTimeoutConfig, action TimeoutFn) *Watcher {
 	w.wg.Go(w.run)
 
 	return w
-}
-
-// RecordActivity notes the activity to delay idle timeout.
-func (w *Watcher) RecordActivity(instant time.Time) {
-	w.mu.Lock()
-	w.lastExplicitActivity = &instant
-	w.mu.Unlock()
 }
 
 // Close closes the idle timeout watcher.
@@ -102,15 +92,6 @@ func (w *Watcher) tick(ctx context.Context) (done bool) {
 		if t != nil && (lastActivity == nil || t.After(*lastActivity)) {
 			lastActivity = t
 		}
-	}
-
-	if w.cfg.UseRunnerState {
-		w.mu.Lock()
-		if lastActivity == nil ||
-			w.lastExplicitActivity != nil && w.lastExplicitActivity.After(*lastActivity) {
-			lastActivity = w.lastExplicitActivity
-		}
-		w.mu.Unlock()
 	}
 
 	if lastActivity != nil {

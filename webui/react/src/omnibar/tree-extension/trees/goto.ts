@@ -2,12 +2,7 @@ import { terminalCommandStates } from 'constants/states';
 import { alertAction, parseIds, visitAction } from 'omnibar/tree-extension/trees/actions';
 import { Children, TreeNode } from 'omnibar/tree-extension/types';
 import { paths } from 'routes/utils';
-import {
-  getExperimentDetails,
-  getJupyterLabs,
-  getTensorBoards,
-  getTrialDetails,
-} from 'services/api';
+import { getExperimentDetails, getTensorBoards, getTrialDetails } from 'services/api';
 import { openCommand } from 'utils/wait';
 
 const locations: TreeNode[] = [
@@ -55,7 +50,7 @@ const locations: TreeNode[] = [
     title: 'trial',
   },
   {
-    aliases: ['jupyterLabs', 'tensorBoards', 'commands', 'shells'],
+    aliases: ['tensorBoards', 'commands', 'shells'],
     onAction: visitAction(paths.taskList()),
     title: 'tasks',
   },
@@ -70,18 +65,6 @@ const locations: TreeNode[] = [
         }));
     },
     title: 'tensorBoard',
-  },
-  {
-    options: async (): Promise<Children> => {
-      const nbs = await getJupyterLabs({});
-      return nbs
-        .filter((nb) => !terminalCommandStates.has(nb.state))
-        .map((nb) => ({
-          onAction: () => openCommand(nb),
-          title: nb.name,
-        }));
-    },
-    title: 'jupyterLab',
   },
   {
     onAction: visitAction(paths.clusterLogs()),

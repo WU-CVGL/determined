@@ -1,8 +1,6 @@
 package idle
 
 import (
-	"time"
-
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/pkg/syncx/mapx"
 )
@@ -31,14 +29,4 @@ func Unregister(id string) {
 	if iw.cfg.UseTaskActivity {
 		stopActivity(iw.cfg.TaskID)
 	}
-}
-
-// RecordActivity records activity for a idler.
-// ID must be a globally unique identifier for the idler.
-func RecordActivity(id string) {
-	iw, ok := idlers.Load(id)
-	if !ok {
-		return
-	}
-	iw.RecordActivity(time.Now())
 }

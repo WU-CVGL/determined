@@ -14,7 +14,7 @@ fi
 # options to inject the entire docker environment into the eventual ssh
 # session via an options in the authorized keys file.  See syntax described in
 # `man 8 sshd`.  The purpose of this is to honor the environment variable
-# settings as they are set for experiment or notebook configs, while still
+# settings as they are set for experiment or shell configs, while still
 # allowing customizations via normal ssh mechanisms.
 #
 # Not all variables should be overwritten this way; the HOME variable should be

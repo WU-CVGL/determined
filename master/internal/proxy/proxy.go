@@ -296,7 +296,7 @@ var masterTokenHeaders = []string{
 //     may be its own credential.
 //
 // Other Authorization schemes are kept, such as the "token" scheme that JupyterLab uses for its
-// notebook token.
+// jupyter token.
 func stripMasterCredentials(header http.Header, authenticated bool, isMasterToken IsMasterToken) {
 	stripCookies(header, masterAuthCookies)
 	for _, name := range masterTokenHeaders {

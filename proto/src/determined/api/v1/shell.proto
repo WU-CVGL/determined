@@ -120,3 +120,27 @@ message LaunchShellResponse {
   // List of any related warnings.
   repeated LaunchWarning warnings = 3;
 }
+
+// Request to preview the config of a shell.
+message PreviewShellRequest {
+  // Shell config (JSON).
+  google.protobuf.Struct config = 1;
+  // Template name.
+  string template_name = 2;
+  // The files to run with the command.
+  repeated determined.util.v1.File files = 3;
+  // Workspace ID. Defaults to 'Uncategorized' workspace if not specified.
+  int32 workspace_id = 4;
+}
+// Response to PreviewShellRequest.
+message PreviewShellResponse {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: { required: [ "config" ] }
+  };
+  // The config that a shell launched with the request runs, but for what the
+  // launch chooses: the entrypoint and, when the config sets none, the
+  // description.
+  google.protobuf.Struct config = 1;
+  // List of any related warnings.
+  repeated LaunchWarning warnings = 2;
+}

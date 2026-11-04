@@ -44,7 +44,7 @@ var (
 	taskReadyCheckLogs = "/run/determined/check_ready_logs.py"
 	// interactiveInitScript is where the interactive task supervisor sources the container init.
 	interactiveInitScript = "/run/determined/interactive-init.sh"
-	// interactiveSupervisorScript is the process of notebook and shell tasks.
+	// interactiveSupervisorScript is the process of shell tasks.
 	interactiveSupervisorScript = "/run/determined/interactive-supervisor.sh"
 	// interactiveServicesDir holds the supervisor's service units, <service>.sh.
 	interactiveServicesDir = "/run/determined/services"
@@ -744,16 +744,10 @@ func (a *apiServer) GetActiveTasksCount(
 		return nil, status.Error(codes.PermissionDenied, err.Error())
 	}
 
-	finalResp := &apiv1.GetActiveTasksCountResponse{}
-
-	resp1, err := command.DefaultCmdService.GetNotebooks(&apiv1.GetNotebooksRequest{})
-	if err != nil {
-		return nil, err
-	}
-	for _, n := range resp1.Notebooks {
-		if n.State == taskv1.State_STATE_RUNNING {
-			finalResp.Notebooks++
-		}
+	finalResp := &apiv1.GetActiveTasksCountResponse{
+		// Notebook records from an older master that are still running; this master ends the
+		// notebooks it restores.
+		Notebooks: command.DefaultCmdService.CountRunning(model.TaskTypeNotebook),
 	}
 
 	resp2, err := command.DefaultCmdService.GetTensorboards(&apiv1.GetTensorboardsRequest{})

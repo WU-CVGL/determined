@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# The container init of notebook and shell tasks. interactive-supervisor.sh sources this file once,
+# The container init of shell tasks. interactive-supervisor.sh sources this file once,
 # without arguments, after task-setup.sh and "set -e", so that the startup hooks run in the
 # supervisor's own shell and what they set reaches the services it starts.
 

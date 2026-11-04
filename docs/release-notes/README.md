@@ -50,7 +50,6 @@ classifying the release note according to one of the following categories:
      Begin each title with a prefix for the applicable component:
 
      * `WebUI`
-     * `Notebook`
      * `TensorBoard`
      * `Command`
      * `Shell`

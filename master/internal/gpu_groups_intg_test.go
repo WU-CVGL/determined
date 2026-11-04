@@ -154,7 +154,7 @@ resources:
 		ResourcePool: checks[len(checks)-1].ResourcePool, Slots: 2, GPUGroups: wantGroups,
 	}, checks[len(checks)-1])
 
-	// Commands, notebooks, shells and TensorBoards, from their config or a template.
+	// Commands, shells, their previews and TensorBoards, from their config or a template.
 	userCtx := ntscUserCtx(t, curUser)
 	ntscConfig := func(slots int, groups string) *structpb.Struct {
 		var list []any
@@ -171,7 +171,7 @@ resources:
 	requireInvalidArgument(t, err, "resources.gpu_groups counts must add up to resources.slots (3)")
 	_, err = api.LaunchCommand(userCtx, &apiv1.LaunchCommandRequest{Config: ntscConfig(2, gpuGroupsConfig(h100))})
 	requireInvalidArgument(t, err, impossible)
-	_, err = api.LaunchNotebook(userCtx, &apiv1.LaunchNotebookRequest{Config: ntscConfig(1, gpuGroupsConfig(ada6000))})
+	_, err = api.PreviewShell(userCtx, &apiv1.PreviewShellRequest{Config: ntscConfig(1, gpuGroupsConfig(ada6000))})
 	requireInvalidArgument(t, err, "resources.gpu_groups counts must add up to resources.slots (1)")
 	_, err = api.LaunchShell(userCtx, &apiv1.LaunchShellRequest{Config: ntscConfig(4, gpuGroupsConfig(ada6000))})
 	requireInvalidArgument(t, err, "resources.gpu_groups counts must add up to resources.slots (4)")

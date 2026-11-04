@@ -105,20 +105,17 @@ def test_experiment_capture() -> None:
 
 
 @pytest.mark.e2e_cpu
-def test_notebook_capture() -> None:
+def test_shell_capture() -> None:
     sess = api_utils.admin_session()
     # Avoid any rounding or inclusion errors.
     start_time = timestamp_with_offset(-2)
 
     task_id = None
-    with cmd.interactive_command(sess, ["notebook", "start"]) as notebook:
-        task_id = notebook.task_id
-
-        for line in notebook.stdout:
-            if re.search("Jupyter Notebook .*is running at", line) is not None:
-                break
-
-    assert task_id is not None
+    with cmd.interactive_command(sess, ["shell", "start", "--detach"]) as shell:
+        task_id = shell.task_id
+        assert task_id is not None
+        cluster_utils.wait_for_task_state(sess, "shell", task_id, "RUNNING")
+    cluster_utils.wait_for_task_state(sess, "shell", task_id, "TERMINATED")
 
     # Avoid any rounding or inclusion errors.
     end_time = timestamp_with_offset(+2)
@@ -128,12 +125,12 @@ def test_notebook_capture() -> None:
     r = sess.get(url)
     assert r.status_code == requests.codes.ok, r.text
 
-    if re.search(f"{task_id}.*,NOTEBOOK", r.text) is None:
+    if re.search(f"{task_id}.*,SHELL", r.text) is None:
         msg = f"did not find task_id={task_id} @ {url} in output:\n{r.text}"
         print(msg, file=sys.stderr)
         raise ValueError(msg)
 
-    workspace = cluster_utils.get_task_info(sess, "notebook", task_id).get("workspaceName", None)
+    workspace = cluster_utils.get_task_info(sess, "shell", task_id).get("workspaceName", None)
     assert workspace is not None
     assert re.search(f"{workspace},,", r.text) is not None
 

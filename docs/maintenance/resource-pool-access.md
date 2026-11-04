@@ -39,8 +39,8 @@ is the default pool for this workspace or the cluster)
 Access is checked as the user who makes the request, whenever work enters a
 pool:
 
-- Launching a command, shell, notebook, or TensorBoard, including the preview
-  of a notebook launch.
+- Launching a command, shell, or TensorBoard, including the preview of a shell
+  launch.
 - Creating a generic task, including a fork and a child task, and unpausing a
   generic task.
 - Creating an experiment, including a fork, a clone, `validate_only`, and a
@@ -63,8 +63,8 @@ or, for a continued experiment, the experiment's owner.
 
 Work that a pool has accepted keeps its access:
 
-- Experiments, trials, commands, notebooks, shells, TensorBoards, and generic
-  tasks that the master restores after a restart.
+- Experiments, trials, commands, shells, TensorBoards, and generic tasks that
+  the master restores after a restart.
 - Trials of an accepted experiment, including the trials that its searcher
   creates, and restarts after a failure or preemption.
 - The resumption of a generic task tree that an earlier unpause already saved,
@@ -96,7 +96,7 @@ master before 0.42.1 leaves `usable` out, and the WebUI takes a pool without it
 as usable.
 
 The WebUI stripes such a pool and tags it **Restricted** on its card and on
-its page. The pool pickers, of the notebook and shell launch form, of the
+its page. The pool pickers, of the shell launch form, of the
 hyperparameter search dialog, and of a job-queue move, list it but do not let
 it be picked, and the launch form picks the first pool that the user may use.
 The hyperparameter search dialog of an experiment whose pool the user may not
@@ -152,8 +152,8 @@ that user's grants. Kill the task as well as deactivating the user.
 A submission that omits `resources.resource_pool` runs in the workspace's
 default pool, or in the cluster's default pool when the workspace sets none:
 the default compute pool for work with slots, and the default aux pool for work
-without slots, such as TensorBoards, CPU commands, notebooks and shells, and CPU
-generic tasks.
+without slots, such as TensorBoards, CPU commands and shells, and CPU generic
+tasks.
 
 Administrators may restrict a default pool. Every submission that omits its
 pool and would run there is then refused for users without a grant, while

@@ -51,7 +51,6 @@ def start_tensorboard(args: argparse.Namespace) -> None:
         service_address=tsb.serviceAddress,
         description=tsb.description,
         resource_pool=tsb.resourcePool,
-        task_type="tensorboard",
         currentSlotsExceeded=currentSlotsExceeded,
     )
     url = f"{args.master}/{tb_path}"
@@ -74,7 +73,6 @@ def open_tensorboard(args: argparse.Namespace) -> None:
         service_address=tsb.serviceAddress,
         description=tsb.description,
         resource_pool=tsb.resourcePool,
-        task_type="tensorboard",
         currentSlotsExceeded=False,
     )
     webbrowser.open(f"{args.master}/{tb_path}")

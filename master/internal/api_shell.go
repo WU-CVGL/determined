@@ -5,9 +5,9 @@ import (
 	"context"
 	cryptorand "crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"math/rand"
+	"slices"
 	"strconv"
 	"time"
 
@@ -25,7 +25,6 @@ import (
 	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
-	"github.com/determined-ai/determined/master/internal/proxy"
 	"github.com/determined-ai/determined/master/internal/rbac/audit"
 	"github.com/determined-ai/determined/master/pkg/archive"
 	"github.com/determined-ai/determined/master/pkg/check"
@@ -43,7 +42,7 @@ import (
 const (
 	shellSSHDConfigFile   = "/run/determined/ssh/sshd_config"
 	shellEntrypointScript = "/run/determined/ssh/shell-entrypoint.sh"
-	// Agent ports 2600 - 3500 are split between TensorBoards, Notebooks, and Shells.
+	// Agent ports 2600 - 3500 are split between TensorBoards, services, and sshd.
 	minSshdPort = 3200
 	maxSshdPort = minSshdPort + 299
 	// minShellIdleTimeout is the shortest idle_timeout a shell takes: JupyterLab's idle check
@@ -274,6 +273,120 @@ func setShellSSHD(spec *tasks.GenericCommandSpec, port int) {
 	)
 }
 
+// prepareShellLaunch prepares the launch of a shell, without side effects: the preparation of every
+// NTSC launch with the shell's services, the launch authorization, the services and the config,
+// checked as the launch runs them. LaunchShell and PreviewShell share it, so that a preview refuses
+// what a launch refuses and returns the config that a launch runs, but for what the launch chooses
+// afterwards: the description, the entrypoint and the services' ports.
+func (a *apiServer) prepareShellLaunch(
+	ctx context.Context, req *apiv1.LaunchShellRequest, user *model.User,
+) (*command.CreateGeneric, []pkgCommand.LaunchWarning, error) {
+	launchReq, launchWarnings, err := a.prepareCommandLaunch(ctx, &protoCommandParams{
+		TemplateName:  req.TemplateName,
+		WorkspaceID:   req.WorkspaceId,
+		Config:        req.Config,
+		Files:         req.Files,
+		AllowServices: true,
+	}, user)
+	if err != nil {
+		return nil, nil, api.WrapWithFallbackCode(err, codes.InvalidArgument,
+			"failed to prepare launch params")
+	}
+
+	if err = a.isNTSCPermittedToLaunch(ctx, launchReq.Spec, user); err != nil {
+		return nil, nil, err
+	}
+	if err = validateShellConfig(launchReq.Spec.Config); err != nil {
+		return nil, nil, err
+	}
+	if err = a.validateShellServices(launchReq.Spec); err != nil {
+		return nil, nil, err
+	}
+	return launchReq, launchWarnings, nil
+}
+
+// validateShellConfig checks a shell's config as its launch runs it: with the supervisor as its
+// entrypoint, which the launch sets, and an idle_timeout of at least minShellIdleTimeout.
+func validateShellConfig(config model.CommandConfig) error {
+	config.Entrypoint = interactiveSupervisorEntrypoint()
+	if err := check.Validate(config); err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
+	if t := config.IdleTimeout; t != nil && time.Duration(*t) < minShellIdleTimeout {
+		return status.Errorf(codes.InvalidArgument,
+			"idle_timeout must be at least %s", minShellIdleTimeout)
+	}
+	return nil
+}
+
+// validateShellServices checks that the master can run a shell's services: that it knows each,
+// that it serves code-server for vscode, and that each gets a port of its range outside the spec's
+// other ports, as the launch assigns them, on a copy of the spec's services.
+func (a *apiServer) validateShellServices(spec *tasks.GenericCommandSpec) error {
+	scratch := *spec
+	scratch.Services = slices.Clone(spec.Services)
+	for _, name := range append([]string{interactiveServiceSSH},
+		model.DeclaredServices(spec.Config.Services)...) {
+		switch name {
+		case interactiveServiceSSH, interactiveServiceJupyter:
+		case interactiveServiceVSCode:
+			if !a.m.config.Interactive.CodeServer.Enabled() {
+				return status.Error(codes.InvalidArgument,
+					"services: vscode: the master serves no code-server")
+			}
+		default:
+			return status.Errorf(codes.InvalidArgument, "services: unknown service %q", name)
+		}
+		if _, ok := scratch.Service(name); ok {
+			continue
+		}
+		lo, hi := servicePortRange(name)
+		port, err := freeServicePort(&scratch, name, lo, hi)
+		if err != nil {
+			return err
+		}
+		scratch.AddService(tasks.InteractiveService{Name: name, Port: port})
+	}
+	return nil
+}
+
+// servicePortRange returns the range of the container ports of a shell's service: sshd's own range,
+// and the services' range for the others.
+func servicePortRange(name string) (lo, hi int) {
+	if name == interactiveServiceSSH {
+		return minSshdPort, maxSshdPort
+	}
+	return minServicePort, maxServicePort
+}
+
+// PreviewShell returns the config that a shell launched with the request runs, but for what the
+// launch chooses (see prepareShellLaunch), and the launch's warnings. It launches nothing: it
+// starts no session and creates no task, keys, secrets or ports.
+func (a *apiServer) PreviewShell(
+	ctx context.Context, req *apiv1.PreviewShellRequest,
+) (*apiv1.PreviewShellResponse, error) {
+	user, _, err := grpcutil.GetUser(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get the user: %s", err)
+	}
+	launchReq, launchWarnings, err := a.prepareShellLaunch(ctx, &apiv1.LaunchShellRequest{
+		Config:       req.Config,
+		TemplateName: req.TemplateName,
+		Files:        req.Files,
+		WorkspaceId:  req.WorkspaceId,
+	}, user)
+	if err != nil {
+		return nil, err
+	}
+	return &apiv1.PreviewShellResponse{
+		Config:   protoutils.ToStruct(launchReq.Spec.Config),
+		Warnings: pkgCommand.LaunchWarningToProto(launchWarnings),
+	}, nil
+}
+
+// LaunchShell launches a shell: the preparation that PreviewShell shares, then, in order, the
+// description, sshd's port and the supervisor, the idle watch, the files and environment of each
+// service, the SSH keys, the task's session and the launch itself.
 func (a *apiServer) LaunchShell(
 	ctx context.Context, req *apiv1.LaunchShellRequest,
 ) (*apiv1.LaunchShellResponse, error) {
@@ -282,21 +395,8 @@ func (a *apiServer) LaunchShell(
 		return nil, status.Errorf(codes.Internal, "failed to get the user: %s", err)
 	}
 
-	launchReq, launchWarnings, err := a.getCommandLaunchParams(ctx, &protoCommandParams{
-		TemplateName:  req.TemplateName,
-		WorkspaceID:   req.WorkspaceId,
-		Config:        req.Config,
-		Files:         req.Files,
-		AllowServices: true,
-		// A shell's JupyterLab is active while a kernel executes, unless its config says otherwise.
-		NotebookIdleType: model.NotebookIdleTypeActivity,
-	}, user)
+	launchReq, launchWarnings, err := a.prepareShellLaunch(ctx, req, user)
 	if err != nil {
-		return nil, api.WrapWithFallbackCode(err, codes.InvalidArgument,
-			"failed to prepare launch params")
-	}
-
-	if err = a.isNTSCPermittedToLaunch(ctx, launchReq.Spec, user); err != nil {
 		return nil, err
 	}
 
@@ -310,21 +410,14 @@ func (a *apiServer) LaunchShell(
 
 	// Selecting a random port mitigates the risk of multiple processes binding
 	// the same port on an agent in host mode.
-	sshdPort, err := freeServicePort(launchReq.Spec, interactiveServiceSSH, minSshdPort, maxSshdPort)
+	lo, hi := servicePortRange(interactiveServiceSSH)
+	sshdPort, err := freeServicePort(launchReq.Spec, interactiveServiceSSH, lo, hi)
 	if err != nil {
 		return nil, err
 	}
 	setShellSSHD(launchReq.Spec, sshdPort)
 	// A shell's idle time is watched only when its config sets idle_timeout.
 	launchReq.Spec.WatchTaskActivity = true
-
-	if err = check.Validate(launchReq.Spec.Config); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-	if t := launchReq.Spec.Config.IdleTimeout; t != nil && time.Duration(*t) < minShellIdleTimeout {
-		return nil, status.Errorf(codes.InvalidArgument,
-			"idle_timeout must be at least %s", minShellIdleTimeout)
-	}
 
 	launchReq.Spec.AdditionalFiles = archive.Archive{
 		// A wrapper that runs the supervisor with this task's service, for whatever names it.
@@ -342,26 +435,13 @@ func (a *apiServer) LaunchShell(
 		),
 	}
 	// The declared services after ssh, the primary one, in sorted order, which Command.Start
-	// passes on to the supervisor from their records.
+	// passes on to the supervisor from their records. prepareShellLaunch checked them.
 	for _, name := range model.DeclaredServices(launchReq.Spec.Config.Services) {
-		switch name {
-		case interactiveServiceSSH:
-			// Every shell runs it.
-		case interactiveServiceJupyter:
-			files, err := addShellJupyter(launchReq.Spec)
-			if err != nil {
-				return nil, err
-			}
-			launchReq.Spec.AdditionalFiles = append(launchReq.Spec.AdditionalFiles, files...)
-		case interactiveServiceVSCode:
-			files, err := addShellVSCode(launchReq.Spec, a.m.config.Interactive.CodeServer)
-			if err != nil {
-				return nil, err
-			}
-			launchReq.Spec.AdditionalFiles = append(launchReq.Spec.AdditionalFiles, files...)
-		default:
-			return nil, status.Errorf(codes.InvalidArgument, "services: unknown service %q", name)
+		files, err := a.addShellService(launchReq.Spec, name)
+		if err != nil {
+			return nil, err
 		}
+		launchReq.Spec.AdditionalFiles = append(launchReq.Spec.AdditionalFiles, files...)
 	}
 	launchReq.Spec.AdditionalFiles = append(launchReq.Spec.AdditionalFiles,
 		interactiveSupervisorFiles(launchReq.Spec.Base.AgentUserGroup)...)
@@ -381,6 +461,9 @@ func (a *apiServer) LaunchShell(
 	launchReq.Spec.Metadata.PrivateKey = ptrs.Ptr(string(keys.PrivateKey))
 	launchReq.Spec.Metadata.PublicKey = ptrs.Ptr(string(keys.PublicKey))
 	launchReq.Spec.Keys = &keys
+	if err = startTaskSession(ctx, user, launchReq.Spec); err != nil {
+		return nil, err
+	}
 
 	// Launch a Shell.
 	cmd, err := command.DefaultCmdService.LaunchShellCommand(launchReq, user)
@@ -399,49 +482,19 @@ func (a *apiServer) LaunchShell(
 	}, nil
 }
 
-// jupyterService is the jupyter service of a shell: at "<task>:<port>", reached over HTTPS, since
-// JupyterLab serves the master-signed cert, by the task's owner and admins only, since it runs
-// code as the owner. JupyterLab serves under its base URL, so the proxy keeps the path.
-func jupyterService(port int) tasks.InteractiveService {
-	return tasks.InteractiveService{
-		Name: interactiveServiceJupyter,
-		Port: port,
-		TLS:  true,
-		Exec: true,
+// addShellService adds a declared service other than ssh, which every shell runs, to a shell
+// spec, and returns its files.
+func (a *apiServer) addShellService(
+	spec *tasks.GenericCommandSpec, name string,
+) (archive.Archive, error) {
+	switch name {
+	case interactiveServiceJupyter:
+		return addShellJupyter(spec)
+	case interactiveServiceVSCode:
+		return addShellVSCode(spec, a.m.config.Interactive.CodeServer)
+	default:
+		return nil, nil
 	}
-}
-
-// addShellJupyter adds the jupyter service to a shell spec: JupyterLab's port, from the notebooks'
-// range, which does not overlap sshd's, outside the spec's other ports, its environment and its
-// files, which it returns. The command service adds its token, and Command.Start its base URL.
-// When the shell's idle time is watched, JupyterLab's idle check reports to the task's activity
-// record, more often than the idle timeout.
-func addShellJupyter(spec *tasks.GenericCommandSpec) (archive.Archive, error) {
-	key, cert, err := proxy.GenSignedCert()
-	if err != nil {
-		return nil, err
-	}
-	configBytes, err := json.Marshal(spec.Config)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "cannot marshal shell config: %s", err)
-	}
-	port, err := freeServicePort(spec, interactiveServiceJupyter, minNotebookPort, maxNotebookPort)
-	if err != nil {
-		return nil, err
-	}
-	spec.AddService(jupyterService(port))
-	env := map[string]string{
-		"NOTEBOOK_PORT":   strconv.Itoa(port),
-		"NOTEBOOK_CONFIG": string(configBytes),
-	}
-	if spec.Config.IdleTimeout != nil {
-		env[tasks.NotebookIdleTypeEnvVar] = spec.Config.NotebookIdleType
-		env[tasks.ActivityReportEnvVar] = tasks.ActivityReportTask
-		env[tasks.IdleTimeoutSecondsEnvVar] = strconv.FormatFloat(
-			time.Duration(*spec.Config.IdleTimeout).Seconds(), 'f', -1, 64)
-	}
-	addExtraEnvVars(spec, env)
-	return jupyterFiles(spec.Base.AgentUserGroup, key, cert), nil
 }
 
 const (
@@ -499,7 +552,7 @@ func codeServerPasswordHash(password string) (string, error) {
 		base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(key)), nil
 }
 
-// addShellVSCode adds the vscode service to a shell spec: a port from the notebooks' range,
+// addShellVSCode adds the vscode service to a shell spec: a port from the services' range,
 // outside the spec's other ports, and a new password, which the spec keeps in its metadata, as it
 // keeps the private key. The container gets the password's hash, the release that conf serves now,
 // which the shell keeps, and the port, in its environment, and the run directory, which
@@ -509,7 +562,8 @@ func addShellVSCode(spec *tasks.GenericCommandSpec, conf config.CodeServerConfig
 		return nil, status.Error(codes.InvalidArgument,
 			"services: vscode: the master serves no code-server")
 	}
-	port, err := freeServicePort(spec, interactiveServiceVSCode, minNotebookPort, maxNotebookPort)
+	lo, hi := servicePortRange(interactiveServiceVSCode)
+	port, err := freeServicePort(spec, interactiveServiceVSCode, lo, hi)
 	if err != nil {
 		return nil, err
 	}

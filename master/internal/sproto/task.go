@@ -54,9 +54,9 @@ type (
 
 	// IdleTimeoutConfig configures how idle timeouts should behave.
 	IdleTimeoutConfig struct {
-		ServiceID      string
-		UseProxyState  bool
-		UseRunnerState bool
+		ServiceID string
+		// UseProxyState watches the last request to the proxy service ServiceID.
+		UseProxyState bool
 		// UseTaskActivity watches the activity record of the task TaskID (see the idle package),
 		// which the watcher keeps while it is registered.
 		UseTaskActivity bool

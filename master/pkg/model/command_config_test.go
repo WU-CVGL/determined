@@ -85,6 +85,14 @@ func TestConfigValidate(t *testing.T) {
 	}
 }
 
+// The default notebook_idle_type is activity, which a shell's JupyterLab reports, with or without
+// task container defaults.
+func TestDefaultConfigNotebookIdleType(t *testing.T) {
+	require.Equal(t, NotebookIdleTypeActivity, DefaultConfig(nil).NotebookIdleType)
+	require.Equal(t, NotebookIdleTypeActivity,
+		DefaultConfig(&TaskContainerDefaultsConfig{}).NotebookIdleType)
+}
+
 func TestCommandConfigPreferGPUTopology(t *testing.T) {
 	decode := func(config *CommandConfig, text string) error {
 		dec := json.NewDecoder(strings.NewReader(text))

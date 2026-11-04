@@ -334,18 +334,6 @@ export interface LaunchTensorBoardParams {
   filters?: Api.V1BulkExperimentFilters;
 }
 
-export interface LaunchJupyterLabParams {
-  config?: {
-    description?: string;
-    resources?: {
-      resource_pool?: string;
-      slots?: number;
-    };
-  };
-  preview?: boolean;
-  templateName?: string;
-  workspaceId?: number;
-}
 export interface LaunchShellParams {
   config?: RawJson;
   templateName?: string;
@@ -356,12 +344,6 @@ export interface GetResourcePoolsParams extends PaginationParams {
 }
 
 export interface GetCommandsParams extends FetchOptions, PaginationParams {
-  sortBy?: 'SORT_BY_UNSPECIFIED' | 'SORT_BY_ID' | 'SORT_BY_DESCRIPTION' | 'SORT_BY_START_TIME';
-  users?: string[];
-  workspaceId?: number;
-}
-
-export interface GetJupyterLabsParams extends FetchOptions, PaginationParams {
   sortBy?: 'SORT_BY_UNSPECIFIED' | 'SORT_BY_ID' | 'SORT_BY_DESCRIPTION' | 'SORT_BY_START_TIME';
   users?: string[];
   workspaceId?: number;

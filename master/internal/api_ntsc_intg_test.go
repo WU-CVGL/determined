@@ -87,22 +87,9 @@ func TestCanGetNTSC(t *testing.T) {
 
 	// check permission errors are returned with not found status and follow the same pattern.
 	authz.On("CanGetNSC", mock.Anything, curUser, mock.Anything, mock.Anything).Return(
-		authz2.PermissionDeniedError{}).Times(3)
+		authz2.PermissionDeniedError{}).Times(2)
 
 	invalidID := "non-existing"
-
-	// Notebooks.
-	genericNb, _ := command.DefaultCmdService.LaunchGenericCommand(
-		model.TaskTypeNotebook,
-		model.JobTypeNotebook,
-		mockGenericReq(t, api.m.db))
-	nb := genericNb.ToV1Notebook()
-
-	_, err = api.GetNotebook(ctx, &apiv1.GetNotebookRequest{NotebookId: invalidID})
-	require.Equal(t, apiPkg.NotFoundErrs("notebook", invalidID, true), err)
-
-	_, err = api.GetNotebook(ctx, &apiv1.GetNotebookRequest{NotebookId: nb.Id})
-	require.Equal(t, apiPkg.NotFoundErrs("notebook", nb.Id, true), err)
 
 	// Commands.
 	genericCmd, _ := command.DefaultCmdService.LaunchGenericCommand(
@@ -149,12 +136,7 @@ func TestCanGetNTSC(t *testing.T) {
 	// check other errors are not returned with permission denied status.
 	authz.On("CanGetNSC", mock.Anything, curUser, mock.Anything, mock.Anything).Return(
 		fmt.Errorf("other error"),
-	).Times(3)
-	_, err = api.GetNotebook(ctx, &apiv1.GetNotebookRequest{NotebookId: nb.Id})
-	require.Error(t, err)
-	require.NotEqual(t, codes.PermissionDenied, status.Code(err))
-	require.NotEqual(t, codes.NotFound, status.Code(err))
-
+	).Times(2)
 	_, err = api.GetCommand(ctx, &apiv1.GetCommandRequest{CommandId: cmd.Id})
 	require.Error(t, err)
 	require.NotEqual(t, codes.PermissionDenied, status.Code(err))
@@ -186,17 +168,7 @@ func TestAuthZCanTerminateNSC(t *testing.T) {
 	// check permission errors are returned with permission denied status.
 	authz.On("CanTerminateNSC", mock.Anything, curUser, mock.Anything).Return(
 		authz2.PermissionDeniedError{},
-	).Times(3)
-
-	// Notebooks.
-	genericNb, _ := command.DefaultCmdService.LaunchGenericCommand(
-		model.TaskTypeNotebook,
-		model.JobTypeNotebook,
-		mockGenericReq(t, api.m.db))
-	nb := genericNb.ToV1Notebook()
-
-	_, err = api.KillNotebook(ctx, &apiv1.KillNotebookRequest{NotebookId: nb.Id})
-	require.Equal(t, codes.PermissionDenied, status.Code(err))
+	).Times(2)
 
 	// Commands.
 	genericCmd, _ := command.DefaultCmdService.LaunchGenericCommand(
@@ -229,11 +201,7 @@ func TestAuthZCanTerminateNSC(t *testing.T) {
 	// check other errors are not returned with permission denied status.
 	authz.On("CanTerminateNSC", mock.Anything, curUser, mock.Anything).Return(
 		fmt.Errorf("other error"),
-	).Times(3)
-
-	_, err = api.KillNotebook(ctx, &apiv1.KillNotebookRequest{NotebookId: nb.Id})
-	require.Error(t, err)
-	require.NotEqual(t, codes.PermissionDenied, status.Code(err))
+	).Times(2)
 
 	_, err = api.KillCommand(ctx, &apiv1.KillCommandRequest{CommandId: cmd.Id})
 	require.Error(t, err)
@@ -287,7 +255,7 @@ func TestNSCControlChecksOwnerBeforeMutation(t *testing.T) {
 	authz.On("CanSetNSCsPriority", mock.Anything, curUser, mock.Anything,
 		mock.Anything).Return(nil)
 	authz.On("CanControlGenericTask", mock.Anything, curUser, mock.Anything,
-		mock.Anything).Return(authz2.PermissionDeniedError{}).Times(9)
+		mock.Anything).Return(authz2.PermissionDeniedError{}).Times(6)
 
 	launch := func(taskType model.TaskType, jobType model.JobType) *command.Command {
 		t.Helper()
@@ -296,24 +264,20 @@ func TestNSCControlChecksOwnerBeforeMutation(t *testing.T) {
 		require.NoError(t, err)
 		return cmd
 	}
-	notebook := launch(model.TaskTypeNotebook, model.JobTypeNotebook)
 	cmd := launch(model.TaskTypeCommand, model.JobTypeCommand)
 	shell := launch(model.TaskTypeShell, model.JobTypeShell)
 	tensorboard := launch(model.TaskTypeTensorboard, model.JobTypeTensorboard)
 
-	nbID, cmdID := notebook.ToV1Notebook().Id, cmd.ToV1Command().Id
+	cmdID := cmd.ToV1Command().Id
 	shellID, tbID := shell.ToV1Shell().Id, tensorboard.ToV1Tensorboard().Id
-	states := []interface{}{notebook.ToV1Notebook().State, cmd.ToV1Command().State,
-		shell.ToV1Shell().State, tensorboard.ToV1Tensorboard().State}
-	_, err := api.KillNotebook(ctx, &apiv1.KillNotebookRequest{NotebookId: nbID})
-	require.Equal(t, codes.PermissionDenied, status.Code(err))
-	_, err = api.KillCommand(ctx, &apiv1.KillCommandRequest{CommandId: cmdID})
+	states := []interface{}{
+		cmd.ToV1Command().State, shell.ToV1Shell().State, tensorboard.ToV1Tensorboard().State,
+	}
+	_, err := api.KillCommand(ctx, &apiv1.KillCommandRequest{CommandId: cmdID})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 	_, err = api.KillShell(ctx, &apiv1.KillShellRequest{ShellId: shellID})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 	_, err = api.KillTensorboard(ctx, &apiv1.KillTensorboardRequest{TensorboardId: tbID})
-	require.Equal(t, codes.PermissionDenied, status.Code(err))
-	_, err = api.SetNotebookPriority(ctx, &apiv1.SetNotebookPriorityRequest{NotebookId: nbID})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 	_, err = api.SetCommandPriority(ctx, &apiv1.SetCommandPriorityRequest{CommandId: cmdID})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
@@ -322,10 +286,9 @@ func TestNSCControlChecksOwnerBeforeMutation(t *testing.T) {
 	_, err = api.SetTensorboardPriority(ctx,
 		&apiv1.SetTensorboardPriorityRequest{TensorboardId: tbID})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
-	_, err = api.IdleNotebook(ctx, &apiv1.IdleNotebookRequest{NotebookId: nbID})
-	require.Equal(t, codes.PermissionDenied, status.Code(err))
-	require.Equal(t, states, []interface{}{notebook.ToV1Notebook().State,
-		cmd.ToV1Command().State, shell.ToV1Shell().State, tensorboard.ToV1Tensorboard().State})
+	require.Equal(t, []interface{}{
+		cmd.ToV1Command().State, shell.ToV1Shell().State, tensorboard.ToV1Tensorboard().State,
+	}, states)
 	authz.AssertExpectations(t)
 }
 
@@ -432,70 +395,6 @@ func TestShellPrivateKeyOnlyForOwnerOrAdmin(t *testing.T) {
 	killed, err := api.KillShell(adminCtx, &apiv1.KillShellRequest{ShellId: shellID})
 	require.NoError(t, err)
 	require.Empty(t, killed.Shell.PrivateKey)
-	require.Len(t, audits(), 1)
-}
-
-func TestNotebookTokenOnlyForOwnerOrAdmin(t *testing.T) {
-	api, authz, admin, adminCtx := setupNTSCAuthzTest(t)
-	audits := credentialReadLogs(t)
-	// Allow every workspace-level check, as RBAC does for a workspace member with UPDATE_NSC.
-	// The token must still reach only the owner and admins.
-	authz.On("CanGetNSC", mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	authz.On("AccessibleScopes", mock.Anything, mock.Anything, mock.Anything).
-		Return(model.AccessScopeSet{model.DefaultWorkspaceID: true}, nil)
-	authz.On("CanTerminateNSC", mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	authz.On("CanSetNSCsPriority", mock.Anything, mock.Anything, mock.Anything,
-		mock.Anything).Return(nil)
-	authz.On("CanControlGenericTask", mock.Anything, mock.Anything, mock.Anything,
-		mock.Anything).Return(nil)
-	api.m.rm.(*mocks.ResourceManager).On("Release", mock.Anything).Return()
-
-	req := mockGenericReq(t, api.m.db)
-	req.Spec.Metadata.WorkspaceID = model.DefaultWorkspaceID
-	req.Spec.Base.ExtraEnvVars = map[string]string{}
-	owner, err := user.ByID(context.TODO(), req.Spec.Base.Owner.ID)
-	require.NoError(t, err)
-	ownerCtx := ntscUserCtx(t, owner.ToUser())
-	otherCtx := ntscUserCtx(t, db.RequireMockUser(t, api.m.db))
-
-	launched, err := command.DefaultCmdService.LaunchNotebookCommand(req, req.Spec.Base.Owner)
-	require.NoError(t, err)
-	notebookID := launched.ToV1Notebook().Id
-	token := launched.NotebookToken()
-	require.NotEmpty(t, token)
-	address := "/proxy/" + notebookID + "/"
-
-	for name, ctx := range map[string]context.Context{
-		"owner": ownerCtx, "admin": adminCtx, nonOwnerCase: otherCtx,
-	} {
-		notebooks, err := api.GetNotebooks(ctx, &apiv1.GetNotebooksRequest{})
-		require.NoError(t, err, name)
-		require.Len(t, notebooks.Notebooks, 1, name)
-		require.Equal(t, address, notebooks.Notebooks[0].ServiceAddress,
-			"GetNotebooks returned a token to %s", name)
-
-		notebook, err := api.GetNotebook(ctx, &apiv1.GetNotebookRequest{NotebookId: notebookID})
-		require.NoError(t, err, name)
-		if name == nonOwnerCase {
-			require.Equal(t, address, notebook.Notebook.ServiceAddress,
-				"GetNotebook returned a token to a non-owner")
-		} else {
-			require.Equal(t, address+"?token="+token, notebook.Notebook.ServiceAddress, name)
-		}
-	}
-	requireCredentialReadLog(t, audits(), admin, "notebook token", notebookID,
-		launched.ToV1Notebook().UserId)
-
-	// Control calls never return the token, and an admin's control calls are not token reads.
-	prio, err := api.SetNotebookPriority(otherCtx,
-		&apiv1.SetNotebookPriorityRequest{NotebookId: notebookID, Priority: 10})
-	require.NoError(t, err)
-	require.Equal(t, address, prio.Notebook.ServiceAddress)
-	_, err = api.IdleNotebook(adminCtx, &apiv1.IdleNotebookRequest{NotebookId: notebookID})
-	require.NoError(t, err)
-	killed, err := api.KillNotebook(adminCtx, &apiv1.KillNotebookRequest{NotebookId: notebookID})
-	require.NoError(t, err)
-	require.Equal(t, address, killed.Notebook.ServiceAddress)
 	require.Len(t, audits(), 1)
 }
 
@@ -864,16 +763,7 @@ func TestAuthZCanSetNSCsPriority(t *testing.T) {
 	// check permission errors are returned with permission denied status.
 	authz.On("CanSetNSCsPriority", mock.Anything, curUser, mock.Anything, mock.Anything).Return(
 		authz2.PermissionDeniedError{},
-	).Times(4)
-
-	// Notebooks.
-	genericNb, _ := command.DefaultCmdService.LaunchGenericCommand(
-		model.TaskTypeNotebook,
-		model.JobTypeNotebook,
-		mockGenericReq(t, api.m.db))
-	nb := genericNb.ToV1Notebook()
-	_, err = api.SetNotebookPriority(ctx, &apiv1.SetNotebookPriorityRequest{NotebookId: nb.Id})
-	require.Equal(t, codes.PermissionDenied, status.Code(err))
+	).Times(3)
 
 	// Commands.
 	genericCmd, _ := command.DefaultCmdService.LaunchGenericCommand(
@@ -903,11 +793,7 @@ func TestAuthZCanSetNSCsPriority(t *testing.T) {
 	// check other errors are not returned with permission denied status.
 	authz.On("CanSetNSCsPriority", mock.Anything, curUser, mock.Anything, mock.Anything).Return(
 		fmt.Errorf("other error"),
-	).Times(4)
-	_, err = api.SetNotebookPriority(ctx, &apiv1.SetNotebookPriorityRequest{NotebookId: nb.Id})
-	require.Error(t, err)
-	require.NotEqual(t, codes.PermissionDenied, status.Code(err))
-
+	).Times(3)
 	_, err = api.SetCommandPriority(ctx, &apiv1.SetCommandPriorityRequest{CommandId: cmd.Id})
 	require.Error(t, err)
 	require.NotEqual(t, codes.PermissionDenied, status.Code(err))
@@ -939,7 +825,9 @@ func TestAuthZCanCreateNSC(t *testing.T) {
 	mockRM := MockRM()
 	mockRM.On("SmallerValueIsHigherPriority", mock.Anything).Return(true, nil)
 	api.m.rm = mockRM
-	_, err = api.LaunchNotebook(ctx, &apiv1.LaunchNotebookRequest{})
+	sessions := countUserSessions(ctx, t, curUser.ID)
+	// A shell's preview is refused as its launch is.
+	_, err = api.PreviewShell(ctx, &apiv1.PreviewShellRequest{})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 	_, err = api.LaunchCommand(ctx, &apiv1.LaunchCommandRequest{})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
@@ -952,7 +840,7 @@ func TestAuthZCanCreateNSC(t *testing.T) {
 	).Times(3)
 	workspaceAuthZ.On("CanGetWorkspace", mock.Anything, mock.Anything, mock.Anything).
 		Return(nil).Times(3)
-	_, err = api.LaunchNotebook(ctx, &apiv1.LaunchNotebookRequest{})
+	_, err = api.PreviewShell(ctx, &apiv1.PreviewShellRequest{})
 	require.Error(t, err)
 	require.NotEqual(t, codes.PermissionDenied, status.Code(err))
 	_, err = api.LaunchCommand(ctx, &apiv1.LaunchCommandRequest{})
@@ -961,6 +849,8 @@ func TestAuthZCanCreateNSC(t *testing.T) {
 	_, err = api.LaunchShell(ctx, &apiv1.LaunchShellRequest{})
 	require.Error(t, err)
 	require.NotEqual(t, codes.PermissionDenied, status.Code(err))
+	require.Equal(t, sessions, countUserSessions(ctx, t, curUser.ID),
+		"a launch refused by the authorization must not start a task session")
 }
 
 // HACK: duplicated from command package.

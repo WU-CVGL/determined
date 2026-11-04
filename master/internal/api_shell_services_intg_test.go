@@ -164,8 +164,8 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 	require.Equal(t, model.ServiceJupyter, jupyter.Name)
 	require.GreaterOrEqual(t, ssh.Port, minSshdPort)
 	require.LessOrEqual(t, ssh.Port, maxSshdPort)
-	require.GreaterOrEqual(t, jupyter.Port, minNotebookPort)
-	require.LessOrEqual(t, jupyter.Port, maxNotebookPort)
+	require.GreaterOrEqual(t, jupyter.Port, minServicePort)
+	require.LessOrEqual(t, jupyter.Port, maxServicePort)
 	require.NotEqual(t, ssh.Port, jupyter.Port)
 	require.Equal(t, ssh.Port, spec.SSHDPort)
 	require.Equal(t, []string{
@@ -189,7 +189,6 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 	require.Nil(t, alloc.IdleTimeout)
 	require.True(t, spec.WatchTaskActivity)
 	require.False(t, spec.WatchProxyIdleTimeout)
-	require.False(t, spec.WatchRunnerIdleTimeout)
 
 	// The environment of both services, merged with the others.
 	env := spec.Base.ExtraEnvVars
@@ -202,8 +201,8 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 	require.Equal(t, spec.Config.Description, notebookConfig.Description)
 	// Nor does JupyterLab's idle check run.
 	require.NotContains(t, env, tasks.NotebookIdleTypeEnvVar)
-	require.NotContains(t, env, tasks.ActivityReportEnvVar)
 	require.NotContains(t, env, tasks.IdleTimeoutSecondsEnvVar)
+	require.NotContains(t, env, "DET_ACTIVITY_REPORT")
 
 	// JupyterLab's token is a notebook session of the owner.
 	require.NotEmpty(t, env[model.NotebookSessionEnvVar])
@@ -219,11 +218,10 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 		"/run/determined/services/ssh.sh", "/run/determined/services/jupyter.sh",
 		"/run/determined/ssh/authorized_keys_unmodified", "/run/determined/ssh/sshd_config",
 		jupyterDir, jupyterConfigDir, jupyterDataDir, jupyterRuntimeDir, jupyterIdleCheck,
-		notebookDefaultPage, jupyterKeyPath, jupyterCertPath,
+		jupyterDefaultPage, jupyterKeyPath, jupyterCertPath,
 	} {
 		require.Contains(t, paths, path)
 	}
-	require.NotContains(t, paths, jupyterEntrypoint)
 
 	// The shell's notebook session ends with it.
 	_, err = api.KillShell(ctx, &apiv1.KillShellRequest{ShellId: taskID})
@@ -270,8 +268,7 @@ func TestLaunchShellWithoutExtraServices(t *testing.T) {
 			require.Equal(t, "ssh", env["DET_SERVICES"])
 			for _, key := range []string{
 				model.NotebookSessionEnvVar, "NOTEBOOK_PORT", "NOTEBOOK_CONFIG", "NOTEBOOK_BASE_URL",
-				tasks.NotebookIdleTypeEnvVar, tasks.ActivityReportEnvVar,
-				tasks.IdleTimeoutSecondsEnvVar,
+				tasks.NotebookIdleTypeEnvVar, tasks.IdleTimeoutSecondsEnvVar,
 			} {
 				require.NotContains(t, env, key)
 			}
@@ -287,8 +284,7 @@ func TestLaunchShellWithoutExtraServices(t *testing.T) {
 
 // A shell with an idle timeout is watched through its task's activity record, with or without
 // extra services; with jupyter, JupyterLab's idle check reports there with the timeout and the
-// idle type, activity unless the template or the config sets another. A notebook's default idle
-// type is TestLaunchNotebookProxiesUnchanged's.
+// idle type, activity unless the template or the config sets another.
 func TestLaunchShellIdleTimeout(t *testing.T) {
 	api, _, ctx := setupAPITest(t, nil)
 	cs, err := command.NewService(api.m.db, api.m.rm)
@@ -350,18 +346,17 @@ func TestLaunchShellIdleTimeout(t *testing.T) {
 				TimeoutDuration: 45 * time.Minute,
 			}, allocateRequest(t, rm, taskID).IdleTimeout)
 			require.False(t, spec.WatchProxyIdleTimeout)
-			require.False(t, spec.WatchRunnerIdleTimeout)
 
 			env := spec.Base.ExtraEnvVars
 			if tc.services == nil {
 				require.NotContains(t, env, tasks.NotebookIdleTypeEnvVar)
-				require.NotContains(t, env, tasks.ActivityReportEnvVar)
 				require.NotContains(t, env, tasks.IdleTimeoutSecondsEnvVar)
 				return
 			}
 			require.Equal(t, tc.wantIdleType, env[tasks.NotebookIdleTypeEnvVar])
 			require.Equal(t, tc.wantIdleType, spec.Config.NotebookIdleType)
-			require.Equal(t, tasks.ActivityReportTask, env[tasks.ActivityReportEnvVar])
+			// The idle check has one mode, the task's activity record.
+			require.NotContains(t, env, "DET_ACTIVITY_REPORT")
 			require.Equal(t, "2700", env[tasks.IdleTimeoutSecondsEnvVar])
 		})
 	}
@@ -407,9 +402,9 @@ func TestLaunchShellServicePortsAvoidProxyPorts(t *testing.T) {
 	command.SetDefaultService(cs)
 	rm := api.m.rm.(*mocks.ResourceManager)
 
-	sshPort, jupyterPort := minSshdPort+42, minNotebookPort+137
+	sshPort, jupyterPort := minSshdPort+42, minServicePort+137
 	declared := append(portsExcept(minSshdPort, maxSshdPort, sshPort),
-		portsExcept(minNotebookPort, maxNotebookPort, jupyterPort)...)
+		portsExcept(minServicePort, maxServicePort, jupyterPort)...)
 	resp, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
 		Config: shellConfig(t, map[string]any{"jupyter": map[string]any{}}, declared...),
 	})
@@ -456,12 +451,12 @@ func TestLaunchShellServicePortsExhausted(t *testing.T) {
 			"services: ssh: no free port in 3200-3499",
 		},
 		"jupyter": {
-			shellConfig(t, jupyter, portsExcept(minNotebookPort, maxNotebookPort)...),
+			shellConfig(t, jupyter, portsExcept(minServicePort, maxServicePort)...),
 			"services: jupyter: no free port in 2900-3199",
 		},
 		"vscode": {
 			shellConfig(t, map[string]any{"vscode": map[string]any{}},
-				portsExcept(minNotebookPort, maxNotebookPort)...),
+				portsExcept(minServicePort, maxServicePort)...),
 			"services: vscode: no free port in 2900-3199",
 		},
 	} {
@@ -471,84 +466,11 @@ func TestLaunchShellServicePortsExhausted(t *testing.T) {
 		require.ErrorContains(t, err, tc.msg, name)
 	}
 
-	// Without jupyter, the notebooks' range is free to declare.
+	// Without jupyter, the services' range is free to declare.
 	_, err = api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
-		Config: shellConfig(t, nil, portsExcept(minNotebookPort, maxNotebookPort)...),
+		Config: shellConfig(t, nil, portsExcept(minServicePort, maxServicePort)...),
 	})
 	require.NoError(t, err)
-}
-
-// A notebook keeps its launch: JupyterLab at the bare task ID, every port over HTTPS, no service
-// records, and the idle check's environment; its base URL is the one JupyterLab had.
-func TestLaunchNotebookProxiesUnchanged(t *testing.T) {
-	api, _, ctx := setupAPITest(t, nil)
-	cs, err := command.NewService(api.m.db, api.m.rm)
-	require.NoError(t, err)
-	command.SetDefaultService(cs)
-	rm := api.m.rm.(*mocks.ResourceManager)
-
-	resp, err := api.LaunchNotebook(ctx, &apiv1.LaunchNotebookRequest{})
-	require.NoError(t, err)
-	taskID := resp.Notebook.Id
-	spec := launchedSpec(t, taskID)
-	require.Empty(t, spec.Services)
-	require.Len(t, spec.Base.ExtraProxyPorts, 1)
-	port := spec.Base.ExtraProxyPorts[0].ProxyPort()
-	alloc := allocateRequest(t, rm, taskID)
-	require.Equal(t, []*sproto.ProxyPortConfig{{ServiceID: taskID, Port: port, TLS: true}},
-		alloc.ProxyPorts)
-	require.True(t, spec.WatchProxyIdleTimeout)
-	require.True(t, spec.WatchRunnerIdleTimeout)
-	require.False(t, spec.WatchTaskActivity)
-	// The master sets no notebook_timeout here, so the notebook has no idle timeout.
-	require.Nil(t, alloc.IdleTimeout)
-
-	env := spec.Base.ExtraEnvVars
-	require.Equal(t, "jupyter", env["DET_SERVICES"])
-	require.Equal(t, "/proxy/"+taskID+"/", env["NOTEBOOK_BASE_URL"])
-	require.Equal(t, model.NotebookIdleTypeKernelsOrTerminals, env["NOTEBOOK_IDLE_TYPE"])
-	require.NotContains(t, env, tasks.ActivityReportEnvVar)
-	require.NotContains(t, env, tasks.IdleTimeoutSecondsEnvVar)
-	require.Len(t, notebookSessions(t, taskID), 1)
-	paths := containerFilePaths(spec)
-	requireOncePerPath(t, paths)
-	require.Contains(t, paths, jupyterEntrypoint)
-	require.NotContains(t, paths, "/run/determined/ssh/authorized_keys_unmodified")
-
-	// With an idle timeout, the notebook's watcher reads its proxy and its idle reports, as before.
-	raw, err := structpb.NewStruct(map[string]any{"idle_timeout": "45m"})
-	require.NoError(t, err)
-	resp, err = api.LaunchNotebook(ctx, &apiv1.LaunchNotebookRequest{Config: raw})
-	require.NoError(t, err)
-	require.Equal(t, &sproto.IdleTimeoutConfig{
-		ServiceID: resp.Notebook.Id, UseProxyState: true, UseRunnerState: true,
-		TimeoutDuration: 45 * time.Minute,
-	}, allocateRequest(t, rm, resp.Notebook.Id).IdleTimeout)
-}
-
-// A notebook takes the master's notebook_timeout as its idle timeout, and none from a
-// notebook_timeout that is not positive.
-func TestLaunchNotebookMasterTimeout(t *testing.T) {
-	api, _, ctx := setupAPITest(t, nil)
-	cs, err := command.NewService(api.m.db, api.m.rm)
-	require.NoError(t, err)
-	command.SetDefaultService(cs)
-	rm := api.m.rm.(*mocks.ResourceManager)
-	defer func(t *int) { api.m.config.NotebookTimeout = t }(api.m.config.NotebookTimeout)
-
-	for timeout, want := range map[int]*sproto.IdleTimeoutConfig{
-		0:  nil,
-		-1: nil,
-		90: {UseProxyState: true, UseRunnerState: true, TimeoutDuration: 90 * time.Second},
-	} {
-		api.m.config.NotebookTimeout = &timeout
-		resp, err := api.LaunchNotebook(ctx, &apiv1.LaunchNotebookRequest{})
-		require.NoError(t, err, timeout)
-		if want != nil {
-			want.ServiceID = resp.Notebook.Id
-		}
-		require.Equal(t, want, allocateRequest(t, rm, resp.Notebook.Id).IdleTimeout, timeout)
-	}
 }
 
 // Only shells take services, and only the ones the supervisor has units for, with no options.
@@ -568,12 +490,6 @@ func TestLaunchRejectsServices(t *testing.T) {
 		require.ErrorContains(t, err, msg, what)
 	}
 	const onlyShells = "services: only shells run services"
-	_, err = api.LaunchNotebook(ctx, &apiv1.LaunchNotebookRequest{Config: servicesConfig(t, jupyter)})
-	requireInvalid(err, "notebook", onlyShells)
-	_, err = api.LaunchNotebook(ctx, &apiv1.LaunchNotebookRequest{
-		Config: servicesConfig(t, jupyter), Preview: true,
-	})
-	requireInvalid(err, "notebook preview", onlyShells)
 	_, err = api.LaunchCommand(ctx, &apiv1.LaunchCommandRequest{Config: servicesConfig(t, jupyter)})
 	requireInvalid(err, "command", onlyShells)
 	_, err = api.LaunchTensorboard(ctx, &apiv1.LaunchTensorboardRequest{
@@ -641,7 +557,7 @@ func requireCodeServerHash(t *testing.T, hash, password string) {
 }
 
 // A shell with the vscode service runs code-server next to sshd and JupyterLab: at
-// "<task>:<port>", with a port of its own from the notebooks' range, over plain HTTP behind a
+// "<task>:<port>", with a port of its own from the services' range, over plain HTTP behind a
 // master login and the owner rule, with its prefix stripped. The master pins the release it
 // serves and mints a password, which the spec keeps in its metadata: the container gets only its
 // argon2id hash, in neither its environment nor its files the password itself.
@@ -665,8 +581,8 @@ func TestLaunchShellWithVSCodeService(t *testing.T) {
 	ssh, jupyter, vscode := spec.Services[0], spec.Services[1], spec.Services[2]
 	require.Equal(t, model.ServiceSSH, ssh.Name)
 	require.Equal(t, model.ServiceJupyter, jupyter.Name)
-	require.GreaterOrEqual(t, vscode.Port, minNotebookPort)
-	require.LessOrEqual(t, vscode.Port, maxNotebookPort)
+	require.GreaterOrEqual(t, vscode.Port, minServicePort)
+	require.LessOrEqual(t, vscode.Port, maxServicePort)
 	require.NotEqual(t, jupyter.Port, vscode.Port)
 	require.Equal(t, tasks.InteractiveService{
 		Name: model.ServiceVSCode, Port: vscode.Port, Exec: true, StripPrefix: true,

@@ -1,5 +1,5 @@
 // Package etc provides configuration files for setting up common
-// system programs like ssh, sshd, bash, notebooks, and tensorboard.
+// system programs like ssh, sshd, bash, JupyterLab, and tensorboard.
 package etc
 
 import (
@@ -23,17 +23,16 @@ const (
 	ShellEntrypointResource = "shell-entrypoint.sh"
 	// GCCheckpointsEntrypointResource is the script to run checkpoint GC.
 	GCCheckpointsEntrypointResource = "gc-checkpoints-entrypoint.sh"
-	// NotebookTemplateResource is the template notebook config file.
+	// NotebookTemplateResource is the default page of the jupyter service, a notebook.
 	NotebookTemplateResource = "notebook-template.ipynb"
-	// NotebookEntrypointResource is the script to set up a notebook.
-	NotebookEntrypointResource = "notebook-entrypoint.sh"
-	// NotebookIdleCheckResource is the script to check if a notebook is idle.
+	// NotebookIdleCheckResource is the jupyter service's idle check, which reports a busy
+	// JupyterLab.
 	NotebookIdleCheckResource = "check_idle.py"
 	// InteractiveInitScriptResource is the container init that the interactive task supervisor
 	// sources.
 	InteractiveInitScriptResource = "interactive-init.sh"
-	// InteractiveSupervisorResource is the process of notebook and shell tasks: it runs the init,
-	// then the services in DET_SERVICES.
+	// InteractiveSupervisorResource is the process of shell tasks: it runs the init, then the
+	// services in DET_SERVICES.
 	InteractiveSupervisorResource = "interactive-supervisor.sh"
 	// SSHServiceResource is the supervisor's unit for sshd.
 	SSHServiceResource = "services/ssh.sh"

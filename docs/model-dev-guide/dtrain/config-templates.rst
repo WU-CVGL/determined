@@ -110,7 +110,7 @@ To create a configuration template:
 -  Go to the **Templates** pane and then select **Add New Template**.
 
 Alternatively, you can create templates from the **Templates** tab in your Workspace or when
-launching JupyterLab.
+launching a shell.
 
 Provide the following information:
 
@@ -127,7 +127,7 @@ To view, edit, or delete a configuration template:
 -  Choose an action from the actions menu.
 
 Alternatively, you can manage templates from the **Templates** tab in your Workspace or when
-launching JupyterLab.
+launching a shell.
 
 ************************************
  Managing Templates through the CLI

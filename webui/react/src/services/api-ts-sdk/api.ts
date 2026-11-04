@@ -4715,57 +4715,6 @@ export interface V1GetModelVersionsResponse {
     pagination: V1Pagination;
 }
 /**
- * Response to GetNotebookRequest.
- * @export
- * @interface V1GetNotebookResponse
- */
-export interface V1GetNotebookResponse {
-    /**
-     * The requested notebook.
-     * @type {V1Notebook}
-     * @memberof V1GetNotebookResponse
-     */
-    notebook: V1Notebook;
-    /**
-     * The notebook config.
-     * @type {any}
-     * @memberof V1GetNotebookResponse
-     */
-    config: any;
-}
-/**
- * Sorts notebooks by the given field.   - SORT_BY_UNSPECIFIED: Returns notebooks in an unsorted list.  - SORT_BY_ID: Returns notebooks sorted by id.  - SORT_BY_DESCRIPTION: Returns notebooks sorted by description.  - SORT_BY_START_TIME: Return notebooks sorted by start time.  - SORT_BY_WORKSPACE_ID: Return notebooks sorted by workspace_id
- * @export
- * @enum {string}
- */
-export const V1GetNotebooksRequestSortBy = {
-    UNSPECIFIED: 'SORT_BY_UNSPECIFIED',
-    ID: 'SORT_BY_ID',
-    DESCRIPTION: 'SORT_BY_DESCRIPTION',
-    STARTTIME: 'SORT_BY_START_TIME',
-    WORKSPACEID: 'SORT_BY_WORKSPACE_ID',
-} as const
-export type V1GetNotebooksRequestSortBy = ValueOf<typeof V1GetNotebooksRequestSortBy>
-/**
- * Response to GetNotebooksRequest.
- * @export
- * @interface V1GetNotebooksResponse
- */
-export interface V1GetNotebooksResponse {
-    /**
-     * The list of returned notebooks.
-     * @type {Array<V1Notebook>}
-     * @memberof V1GetNotebooksResponse
-     */
-    notebooks: Array<V1Notebook>;
-    /**
-     * Pagination information of the full dataset.
-     * @type {V1Pagination}
-     * @memberof V1GetNotebooksResponse
-     */
-    pagination?: V1Pagination;
-}
-/**
  * Response to GetPermissionsSummaryRequest.
  * @export
  * @interface V1GetPermissionsSummaryResponse
@@ -6030,32 +5979,6 @@ export interface V1GroupSearchResult {
     numMembers: number;
 }
 /**
- * Kill the requested notebook if idle.
- * @export
- * @interface V1IdleNotebookRequest
- */
-export interface V1IdleNotebookRequest {
-    /**
-     * The id of the notebook.
-     * @type {string}
-     * @memberof V1IdleNotebookRequest
-     */
-    notebookId?: string;
-    /**
-     * The value of idle timeout
-     * @type {boolean}
-     * @memberof V1IdleNotebookRequest
-     */
-    idle?: boolean;
-}
-/**
- * Response to IdleNotebookRequest.
- * @export
- * @interface V1IdleNotebookResponse
- */
-export interface V1IdleNotebookResponse {
-}
-/**
  * Int32 filters.
  * @export
  * @interface V1Int32FieldFilter
@@ -6355,19 +6278,6 @@ export interface V1KillGenericTaskRequest {
 export interface V1KillGenericTaskResponse {
 }
 /**
- * Response to KillNotebookRequest.
- * @export
- * @interface V1KillNotebookResponse
- */
-export interface V1KillNotebookResponse {
-    /**
-     * The requested notebook.
-     * @type {V1Notebook}
-     * @memberof V1KillNotebookResponse
-     */
-    notebook?: V1Notebook;
-}
-/**
  * Kill runs.
  * @export
  * @interface V1KillRunsRequest
@@ -6497,68 +6407,6 @@ export interface V1LaunchCommandResponse {
      * If the requested slots exceeded the current max available.
      * @type {Array<V1LaunchWarning>}
      * @memberof V1LaunchCommandResponse
-     */
-    warnings?: Array<V1LaunchWarning>;
-}
-/**
- * Request to launch a notebook.
- * @export
- * @interface V1LaunchNotebookRequest
- */
-export interface V1LaunchNotebookRequest {
-    /**
-     * Notebook config (JSON).
-     * @type {any}
-     * @memberof V1LaunchNotebookRequest
-     */
-    config?: any;
-    /**
-     * Template name.
-     * @type {string}
-     * @memberof V1LaunchNotebookRequest
-     */
-    templateName?: string;
-    /**
-     * The files to run with the command.
-     * @type {Array<V1File>}
-     * @memberof V1LaunchNotebookRequest
-     */
-    files?: Array<V1File>;
-    /**
-     * Preview a launching request without actually creating a Notebook.
-     * @type {boolean}
-     * @memberof V1LaunchNotebookRequest
-     */
-    preview?: boolean;
-    /**
-     * Workspace ID. Defaults to 'Uncategorized' workspace if not specified.
-     * @type {number}
-     * @memberof V1LaunchNotebookRequest
-     */
-    workspaceId?: number;
-}
-/**
- * Response to LaunchNotebookRequest.
- * @export
- * @interface V1LaunchNotebookResponse
- */
-export interface V1LaunchNotebookResponse {
-    /**
-     * The requested notebook.
-     * @type {V1Notebook}
-     * @memberof V1LaunchNotebookResponse
-     */
-    notebook: V1Notebook;
-    /**
-     * The config;
-     * @type {any}
-     * @memberof V1LaunchNotebookResponse
-     */
-    config: any;
-    /**
-     * List of any related warnings.
-     * @type {Array<V1LaunchWarning>}
-     * @memberof V1LaunchNotebookResponse
      */
     warnings?: Array<V1LaunchWarning>;
 }
@@ -7576,109 +7424,6 @@ export interface V1Note {
      * @memberof V1Note
      */
     contents: string;
-}
-/**
- * Notebook is a Jupyter notebook in a containerized environment.
- * @export
- * @interface V1Notebook
- */
-export interface V1Notebook {
-    /**
-     * The id of the notebook.
-     * @type {string}
-     * @memberof V1Notebook
-     */
-    id: string;
-    /**
-     * The description of the notebook.
-     * @type {string}
-     * @memberof V1Notebook
-     */
-    description: string;
-    /**
-     * The state of the notebook.
-     * @type {Taskv1State}
-     * @memberof V1Notebook
-     */
-    state: Taskv1State;
-    /**
-     * The time the notebook was submitted (registered with the master).
-     * @type {Date | DateString}
-     * @memberof V1Notebook
-     */
-    startTime: Date | DateString;
-    /**
-     * The container running the notebook.
-     * @type {V1Container}
-     * @memberof V1Notebook
-     */
-    container?: V1Container;
-    /**
-     * The display name of the user that created the notebook.
-     * @type {string}
-     * @memberof V1Notebook
-     */
-    displayName?: string;
-    /**
-     * The id of the user that created the notebook.
-     * @type {number}
-     * @memberof V1Notebook
-     */
-    userId?: number;
-    /**
-     * The username of the user that created the notebook.
-     * @type {string}
-     * @memberof V1Notebook
-     */
-    username: string;
-    /**
-     * The service address.
-     * @type {string}
-     * @memberof V1Notebook
-     */
-    serviceAddress?: string;
-    /**
-     * The name of the resource pool the Notebook was created in.
-     * @type {string}
-     * @memberof V1Notebook
-     */
-    resourcePool: string;
-    /**
-     * The exit status.
-     * @type {string}
-     * @memberof V1Notebook
-     */
-    exitStatus?: string;
-    /**
-     * The associated job id.
-     * @type {string}
-     * @memberof V1Notebook
-     */
-    jobId: string;
-    /**
-     * Workspace ID.
-     * @type {number}
-     * @memberof V1Notebook
-     */
-    workspaceId: number;
-    /**
-     * The slot count the notebook requests (resources.slots), 0 when it requests none.
-     * @type {number}
-     * @memberof V1Notebook
-     */
-    slots?: number;
-    /**
-     * The time the notebook ended; unset while it runs.
-     * @type {Date | DateString}
-     * @memberof V1Notebook
-     */
-    endTime?: Date | DateString;
-    /**
-     * First resource assignment time, provided by the list API; unset if never assigned. Available only in Agent-only clusters; omitted on other or mixed backends.
-     * @type {Date | DateString}
-     * @memberof V1Notebook
-     */
-    allocationStartTime?: Date | DateString;
 }
 /**
  * Arguments to a notify container running.
@@ -9258,6 +9003,56 @@ export interface V1PreviewHPSearchResponse {
      * @memberof V1PreviewHPSearchResponse
      */
     summary?: V1SearchSummary;
+}
+/**
+ * Request to preview the config of a shell.
+ * @export
+ * @interface V1PreviewShellRequest
+ */
+export interface V1PreviewShellRequest {
+    /**
+     * Shell config (JSON).
+     * @type {any}
+     * @memberof V1PreviewShellRequest
+     */
+    config?: any;
+    /**
+     * Template name.
+     * @type {string}
+     * @memberof V1PreviewShellRequest
+     */
+    templateName?: string;
+    /**
+     * The files to run with the command.
+     * @type {Array<V1File>}
+     * @memberof V1PreviewShellRequest
+     */
+    files?: Array<V1File>;
+    /**
+     * Workspace ID. Defaults to 'Uncategorized' workspace if not specified.
+     * @type {number}
+     * @memberof V1PreviewShellRequest
+     */
+    workspaceId?: number;
+}
+/**
+ * Response to PreviewShellRequest.
+ * @export
+ * @interface V1PreviewShellResponse
+ */
+export interface V1PreviewShellResponse {
+    /**
+     * The config that a shell launched with the request runs, but for what the launch chooses: the entrypoint and, when the config sets none, the description.
+     * @type {any}
+     * @memberof V1PreviewShellResponse
+     */
+    config: any;
+    /**
+     * List of any related warnings.
+     * @type {Array<V1LaunchWarning>}
+     * @memberof V1PreviewShellResponse
+     */
+    warnings?: Array<V1LaunchWarning>;
 }
 /**
  * Project is a named collection of experiments.
@@ -11325,38 +11120,6 @@ export interface V1SetCommandPriorityResponse {
      * @memberof V1SetCommandPriorityResponse
      */
     command?: V1Command;
-}
-/**
- * Set the priority of the requested notebook.
- * @export
- * @interface V1SetNotebookPriorityRequest
- */
-export interface V1SetNotebookPriorityRequest {
-    /**
-     * The id of the notebook.
-     * @type {string}
-     * @memberof V1SetNotebookPriorityRequest
-     */
-    notebookId?: string;
-    /**
-     * The new priority.
-     * @type {number}
-     * @memberof V1SetNotebookPriorityRequest
-     */
-    priority?: number;
-}
-/**
- * Response to SetNotebookPriorityRequest.
- * @export
- * @interface V1SetNotebookPriorityResponse
- */
-export interface V1SetNotebookPriorityResponse {
-    /**
-     * The requested notebook.
-     * @type {V1Notebook}
-     * @memberof V1SetNotebookPriorityResponse
-     */
-    notebook?: V1Notebook;
 }
 /**
  * Request to set a resource quota on a workspace (for a specific cluster).
@@ -22106,50 +21869,6 @@ export const InternalApiFetchParamCreator = function (configuration?: Configurat
         },
         /**
          * 
-         * @summary Send notebook idle data to master
-         * @param {string} notebookId The id of the notebook.
-         * @param {V1IdleNotebookRequest} body
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        idleNotebook(notebookId: string, body: V1IdleNotebookRequest, options: any = {}): FetchArgs {
-            // verify required parameter 'notebookId' is not null or undefined
-            if (notebookId === null || notebookId === undefined) {
-                throw new RequiredError('notebookId','Required parameter notebookId was null or undefined when calling idleNotebook.');
-            }
-            // verify required parameter 'body' is not null or undefined
-            if (body === null || body === undefined) {
-                throw new RequiredError('body','Required parameter body was null or undefined when calling idleNotebook.');
-            }
-            const localVarPath = `/api/v1/notebooks/{notebookId}/report_idle`
-                .replace(`{${"notebookId"}}`, encodeURIComponent(String(notebookId)));
-            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
-            const localVarRequestOptions = { method: 'PUT', ...options };
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-            
-            // authentication BearerToken required
-            if (configuration && configuration.apiKey) {
-                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
-                    ? configuration.apiKey("Authorization")
-                    : configuration.apiKey;
-                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
-            }
-            
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            
-            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
-            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
-            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
-            localVarRequestOptions.body = JSON.stringify(body)
-            
-            return {
-                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * 
          * @summary Kill runs.
          * @param {V1KillRunsRequest} body
          * @param {*} [options] Override http request option.
@@ -24670,26 +24389,6 @@ export const InternalApiFp = function (configuration?: Configuration) {
         },
         /**
          * 
-         * @summary Send notebook idle data to master
-         * @param {string} notebookId The id of the notebook.
-         * @param {V1IdleNotebookRequest} body
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        idleNotebook(notebookId: string, body: V1IdleNotebookRequest, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1IdleNotebookResponse> {
-            const localVarFetchArgs = InternalApiFetchParamCreator(configuration).idleNotebook(notebookId, body, options);
-            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
-                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-                    if (response.status >= 200 && response.status < 300) {
-                        return response.json();
-                    } else {
-                        throw response;
-                    }
-                });
-            };
-        },
-        /**
-         * 
          * @summary Kill runs.
          * @param {V1KillRunsRequest} body
          * @param {*} [options] Override http request option.
@@ -25914,17 +25613,6 @@ export const InternalApiFactory = function (configuration?: Configuration, fetch
         },
         /**
          * 
-         * @summary Send notebook idle data to master
-         * @param {string} notebookId The id of the notebook.
-         * @param {V1IdleNotebookRequest} body
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        idleNotebook(notebookId: string, body: V1IdleNotebookRequest, options?: any) {
-            return InternalApiFp(configuration).idleNotebook(notebookId, body, options)(fetch, basePath);
-        },
-        /**
-         * 
          * @summary Kill runs.
          * @param {V1KillRunsRequest} body
          * @param {*} [options] Override http request option.
@@ -26862,19 +26550,6 @@ export class InternalApi extends BaseAPI {
      */
     public getTrialWorkloads(trialId: number, orderBy?: V1OrderBy, offset?: number, limit?: number, sortKey?: string, filter?: GetTrialWorkloadsRequestFilterOption, includeBatchMetrics?: boolean, metricType?: V1MetricType, group?: string, removeDeletedCheckpoints?: boolean, options?: any) {
         return InternalApiFp(this.configuration).getTrialWorkloads(trialId, orderBy, offset, limit, sortKey, filter, includeBatchMetrics, metricType, group, removeDeletedCheckpoints, options)(this.fetch, this.basePath)
-    }
-    
-    /**
-     * 
-     * @summary Send notebook idle data to master
-     * @param {string} notebookId The id of the notebook.
-     * @param {V1IdleNotebookRequest} body
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     * @memberof InternalApi
-     */
-    public idleNotebook(notebookId: string, body: V1IdleNotebookRequest, options?: any) {
-        return InternalApiFp(this.configuration).idleNotebook(notebookId, body, options)(this.fetch, this.basePath)
     }
     
     /**
@@ -29020,487 +28695,6 @@ export class ModelsApi extends BaseAPI {
      */
     public unarchiveModel(modelName: string, options?: any) {
         return ModelsApiFp(this.configuration).unarchiveModel(modelName, options)(this.fetch, this.basePath)
-    }
-    
-}
-
-/**
- * NotebooksApi - fetch parameter creator
- * @export
- */
-export const NotebooksApiFetchParamCreator = function (configuration?: Configuration) {
-    return {
-        /**
-         * 
-         * @summary Get the requested notebook.
-         * @param {string} notebookId The id of the notebook.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        getNotebook(notebookId: string, options: any = {}): FetchArgs {
-            // verify required parameter 'notebookId' is not null or undefined
-            if (notebookId === null || notebookId === undefined) {
-                throw new RequiredError('notebookId','Required parameter notebookId was null or undefined when calling getNotebook.');
-            }
-            const localVarPath = `/api/v1/notebooks/{notebookId}`
-                .replace(`{${"notebookId"}}`, encodeURIComponent(String(notebookId)));
-            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
-            const localVarRequestOptions = { method: 'GET', ...options };
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-            
-            // authentication BearerToken required
-            if (configuration && configuration.apiKey) {
-                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
-                    ? configuration.apiKey("Authorization")
-                    : configuration.apiKey;
-                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
-            }
-            
-            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
-            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
-            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
-            
-            return {
-                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * 
-         * @summary Get a list of notebooks.
-         * @param {V1GetTensorboardsRequestSortBy} [sortBy] Sort notebooks by the given field.   - SORT_BY_UNSPECIFIED: Returns notebooks in an unsorted list.  - SORT_BY_ID: Returns notebooks sorted by id.  - SORT_BY_DESCRIPTION: Returns notebooks sorted by description.  - SORT_BY_START_TIME: Return notebooks sorted by start time.  - SORT_BY_WORKSPACE_ID: Return notebooks sorted by workspace_id
-         * @param {V1OrderBy} [orderBy] Order notebooks in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
-         * @param {number} [offset] Skip the number of notebooks before returning results. Negative values denote number of notebooks to skip from the end before returning results.
-         * @param {number} [limit] Limit the number of notebooks. A value of 0 denotes no limit.
-         * @param {Array<string>} [users] Limit notebooks to those that are owned by users with the specified usernames.
-         * @param {Array<number>} [userIds] Limit notebooks to those that are owned by users with the specified userIds.
-         * @param {number} [workspaceId] Limit to those within a specified workspace, or 0 for all accessible workspaces.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        getNotebooks(sortBy?: V1GetTensorboardsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options: any = {}): FetchArgs {
-            const localVarPath = `/api/v1/notebooks`;
-            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
-            const localVarRequestOptions = { method: 'GET', ...options };
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-            
-            // authentication BearerToken required
-            if (configuration && configuration.apiKey) {
-                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
-                    ? configuration.apiKey("Authorization")
-                    : configuration.apiKey;
-                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
-            }
-            
-            if (sortBy !== undefined) {
-                localVarQueryParameter['sortBy'] = sortBy
-            }
-            
-            if (orderBy !== undefined) {
-                localVarQueryParameter['orderBy'] = orderBy
-            }
-            
-            if (offset !== undefined) {
-                localVarQueryParameter['offset'] = offset
-            }
-            
-            if (limit !== undefined) {
-                localVarQueryParameter['limit'] = limit
-            }
-            
-            if (users) {
-                localVarQueryParameter['users'] = users
-            }
-            
-            if (userIds) {
-                localVarQueryParameter['userIds'] = userIds
-            }
-            
-            if (workspaceId !== undefined) {
-                localVarQueryParameter['workspaceId'] = workspaceId
-            }
-            
-            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
-            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
-            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
-            
-            return {
-                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * 
-         * @summary Kill the requested notebook.
-         * @param {string} notebookId The id of the notebook.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        killNotebook(notebookId: string, options: any = {}): FetchArgs {
-            // verify required parameter 'notebookId' is not null or undefined
-            if (notebookId === null || notebookId === undefined) {
-                throw new RequiredError('notebookId','Required parameter notebookId was null or undefined when calling killNotebook.');
-            }
-            const localVarPath = `/api/v1/notebooks/{notebookId}/kill`
-                .replace(`{${"notebookId"}}`, encodeURIComponent(String(notebookId)));
-            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
-            const localVarRequestOptions = { method: 'POST', ...options };
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-            
-            // authentication BearerToken required
-            if (configuration && configuration.apiKey) {
-                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
-                    ? configuration.apiKey("Authorization")
-                    : configuration.apiKey;
-                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
-            }
-            
-            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
-            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
-            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
-            
-            return {
-                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * 
-         * @summary Launch a notebook.
-         * @param {V1LaunchNotebookRequest} body
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        launchNotebook(body: V1LaunchNotebookRequest, options: any = {}): FetchArgs {
-            // verify required parameter 'body' is not null or undefined
-            if (body === null || body === undefined) {
-                throw new RequiredError('body','Required parameter body was null or undefined when calling launchNotebook.');
-            }
-            const localVarPath = `/api/v1/notebooks`;
-            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
-            const localVarRequestOptions = { method: 'POST', ...options };
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-            
-            // authentication BearerToken required
-            if (configuration && configuration.apiKey) {
-                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
-                    ? configuration.apiKey("Authorization")
-                    : configuration.apiKey;
-                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
-            }
-            
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            
-            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
-            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
-            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
-            localVarRequestOptions.body = JSON.stringify(body)
-            
-            return {
-                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * 
-         * @summary Set the priority of the requested notebook.
-         * @param {string} notebookId The id of the notebook.
-         * @param {V1SetNotebookPriorityRequest} body
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        setNotebookPriority(notebookId: string, body: V1SetNotebookPriorityRequest, options: any = {}): FetchArgs {
-            // verify required parameter 'notebookId' is not null or undefined
-            if (notebookId === null || notebookId === undefined) {
-                throw new RequiredError('notebookId','Required parameter notebookId was null or undefined when calling setNotebookPriority.');
-            }
-            // verify required parameter 'body' is not null or undefined
-            if (body === null || body === undefined) {
-                throw new RequiredError('body','Required parameter body was null or undefined when calling setNotebookPriority.');
-            }
-            const localVarPath = `/api/v1/notebooks/{notebookId}/set_priority`
-                .replace(`{${"notebookId"}}`, encodeURIComponent(String(notebookId)));
-            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
-            const localVarRequestOptions = { method: 'POST', ...options };
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-            
-            // authentication BearerToken required
-            if (configuration && configuration.apiKey) {
-                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
-                    ? configuration.apiKey("Authorization")
-                    : configuration.apiKey;
-                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
-            }
-            
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            
-            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
-            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
-            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
-            localVarRequestOptions.body = JSON.stringify(body)
-            
-            return {
-                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
-                options: localVarRequestOptions,
-            };
-        },
-    }
-};
-
-/**
- * NotebooksApi - functional programming interface
- * @export
- */
-export const NotebooksApiFp = function (configuration?: Configuration) {
-    return {
-        /**
-         * 
-         * @summary Get the requested notebook.
-         * @param {string} notebookId The id of the notebook.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        getNotebook(notebookId: string, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetNotebookResponse> {
-            const localVarFetchArgs = NotebooksApiFetchParamCreator(configuration).getNotebook(notebookId, options);
-            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
-                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-                    if (response.status >= 200 && response.status < 300) {
-                        return response.json();
-                    } else {
-                        throw response;
-                    }
-                });
-            };
-        },
-        /**
-         * 
-         * @summary Get a list of notebooks.
-         * @param {V1GetTensorboardsRequestSortBy} [sortBy] Sort notebooks by the given field.   - SORT_BY_UNSPECIFIED: Returns notebooks in an unsorted list.  - SORT_BY_ID: Returns notebooks sorted by id.  - SORT_BY_DESCRIPTION: Returns notebooks sorted by description.  - SORT_BY_START_TIME: Return notebooks sorted by start time.  - SORT_BY_WORKSPACE_ID: Return notebooks sorted by workspace_id
-         * @param {V1OrderBy} [orderBy] Order notebooks in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
-         * @param {number} [offset] Skip the number of notebooks before returning results. Negative values denote number of notebooks to skip from the end before returning results.
-         * @param {number} [limit] Limit the number of notebooks. A value of 0 denotes no limit.
-         * @param {Array<string>} [users] Limit notebooks to those that are owned by users with the specified usernames.
-         * @param {Array<number>} [userIds] Limit notebooks to those that are owned by users with the specified userIds.
-         * @param {number} [workspaceId] Limit to those within a specified workspace, or 0 for all accessible workspaces.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        getNotebooks(sortBy?: V1GetTensorboardsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetNotebooksResponse> {
-            const localVarFetchArgs = NotebooksApiFetchParamCreator(configuration).getNotebooks(sortBy, orderBy, offset, limit, users, userIds, workspaceId, options);
-            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
-                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-                    if (response.status >= 200 && response.status < 300) {
-                        return response.json();
-                    } else {
-                        throw response;
-                    }
-                });
-            };
-        },
-        /**
-         * 
-         * @summary Kill the requested notebook.
-         * @param {string} notebookId The id of the notebook.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        killNotebook(notebookId: string, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1KillNotebookResponse> {
-            const localVarFetchArgs = NotebooksApiFetchParamCreator(configuration).killNotebook(notebookId, options);
-            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
-                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-                    if (response.status >= 200 && response.status < 300) {
-                        return response.json();
-                    } else {
-                        throw response;
-                    }
-                });
-            };
-        },
-        /**
-         * 
-         * @summary Launch a notebook.
-         * @param {V1LaunchNotebookRequest} body
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        launchNotebook(body: V1LaunchNotebookRequest, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1LaunchNotebookResponse> {
-            const localVarFetchArgs = NotebooksApiFetchParamCreator(configuration).launchNotebook(body, options);
-            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
-                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-                    if (response.status >= 200 && response.status < 300) {
-                        return response.json();
-                    } else {
-                        throw response;
-                    }
-                });
-            };
-        },
-        /**
-         * 
-         * @summary Set the priority of the requested notebook.
-         * @param {string} notebookId The id of the notebook.
-         * @param {V1SetNotebookPriorityRequest} body
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        setNotebookPriority(notebookId: string, body: V1SetNotebookPriorityRequest, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1SetNotebookPriorityResponse> {
-            const localVarFetchArgs = NotebooksApiFetchParamCreator(configuration).setNotebookPriority(notebookId, body, options);
-            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
-                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-                    if (response.status >= 200 && response.status < 300) {
-                        return response.json();
-                    } else {
-                        throw response;
-                    }
-                });
-            };
-        },
-    }
-};
-
-/**
- * NotebooksApi - factory interface
- * @export
- */
-export const NotebooksApiFactory = function (configuration?: Configuration, fetch?: FetchAPI, basePath?: string) {
-    return {
-        /**
-         * 
-         * @summary Get the requested notebook.
-         * @param {string} notebookId The id of the notebook.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        getNotebook(notebookId: string, options?: any) {
-            return NotebooksApiFp(configuration).getNotebook(notebookId, options)(fetch, basePath);
-        },
-        /**
-         * 
-         * @summary Get a list of notebooks.
-         * @param {V1GetTensorboardsRequestSortBy} [sortBy] Sort notebooks by the given field.   - SORT_BY_UNSPECIFIED: Returns notebooks in an unsorted list.  - SORT_BY_ID: Returns notebooks sorted by id.  - SORT_BY_DESCRIPTION: Returns notebooks sorted by description.  - SORT_BY_START_TIME: Return notebooks sorted by start time.  - SORT_BY_WORKSPACE_ID: Return notebooks sorted by workspace_id
-         * @param {V1OrderBy} [orderBy] Order notebooks in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
-         * @param {number} [offset] Skip the number of notebooks before returning results. Negative values denote number of notebooks to skip from the end before returning results.
-         * @param {number} [limit] Limit the number of notebooks. A value of 0 denotes no limit.
-         * @param {Array<string>} [users] Limit notebooks to those that are owned by users with the specified usernames.
-         * @param {Array<number>} [userIds] Limit notebooks to those that are owned by users with the specified userIds.
-         * @param {number} [workspaceId] Limit to those within a specified workspace, or 0 for all accessible workspaces.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        getNotebooks(sortBy?: V1GetTensorboardsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options?: any) {
-            return NotebooksApiFp(configuration).getNotebooks(sortBy, orderBy, offset, limit, users, userIds, workspaceId, options)(fetch, basePath);
-        },
-        /**
-         * 
-         * @summary Kill the requested notebook.
-         * @param {string} notebookId The id of the notebook.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        killNotebook(notebookId: string, options?: any) {
-            return NotebooksApiFp(configuration).killNotebook(notebookId, options)(fetch, basePath);
-        },
-        /**
-         * 
-         * @summary Launch a notebook.
-         * @param {V1LaunchNotebookRequest} body
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        launchNotebook(body: V1LaunchNotebookRequest, options?: any) {
-            return NotebooksApiFp(configuration).launchNotebook(body, options)(fetch, basePath);
-        },
-        /**
-         * 
-         * @summary Set the priority of the requested notebook.
-         * @param {string} notebookId The id of the notebook.
-         * @param {V1SetNotebookPriorityRequest} body
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        setNotebookPriority(notebookId: string, body: V1SetNotebookPriorityRequest, options?: any) {
-            return NotebooksApiFp(configuration).setNotebookPriority(notebookId, body, options)(fetch, basePath);
-        },
-    }
-};
-
-/**
- * NotebooksApi - object-oriented interface
- * @export
- * @class
- * @extends {BaseAPI}
- */
-export class NotebooksApi extends BaseAPI {
-    /**
-     * 
-     * @summary Get the requested notebook.
-     * @param {string} notebookId The id of the notebook.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     * @memberof NotebooksApi
-     */
-    public getNotebook(notebookId: string, options?: any) {
-        return NotebooksApiFp(this.configuration).getNotebook(notebookId, options)(this.fetch, this.basePath)
-    }
-    
-    /**
-     * 
-     * @summary Get a list of notebooks.
-     * @param {V1GetTensorboardsRequestSortBy} [sortBy] Sort notebooks by the given field.   - SORT_BY_UNSPECIFIED: Returns notebooks in an unsorted list.  - SORT_BY_ID: Returns notebooks sorted by id.  - SORT_BY_DESCRIPTION: Returns notebooks sorted by description.  - SORT_BY_START_TIME: Return notebooks sorted by start time.  - SORT_BY_WORKSPACE_ID: Return notebooks sorted by workspace_id
-     * @param {V1OrderBy} [orderBy] Order notebooks in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
-     * @param {number} [offset] Skip the number of notebooks before returning results. Negative values denote number of notebooks to skip from the end before returning results.
-     * @param {number} [limit] Limit the number of notebooks. A value of 0 denotes no limit.
-     * @param {Array<string>} [users] Limit notebooks to those that are owned by users with the specified usernames.
-     * @param {Array<number>} [userIds] Limit notebooks to those that are owned by users with the specified userIds.
-     * @param {number} [workspaceId] Limit to those within a specified workspace, or 0 for all accessible workspaces.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     * @memberof NotebooksApi
-     */
-    public getNotebooks(sortBy?: V1GetTensorboardsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options?: any) {
-        return NotebooksApiFp(this.configuration).getNotebooks(sortBy, orderBy, offset, limit, users, userIds, workspaceId, options)(this.fetch, this.basePath)
-    }
-    
-    /**
-     * 
-     * @summary Kill the requested notebook.
-     * @param {string} notebookId The id of the notebook.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     * @memberof NotebooksApi
-     */
-    public killNotebook(notebookId: string, options?: any) {
-        return NotebooksApiFp(this.configuration).killNotebook(notebookId, options)(this.fetch, this.basePath)
-    }
-    
-    /**
-     * 
-     * @summary Launch a notebook.
-     * @param {V1LaunchNotebookRequest} body
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     * @memberof NotebooksApi
-     */
-    public launchNotebook(body: V1LaunchNotebookRequest, options?: any) {
-        return NotebooksApiFp(this.configuration).launchNotebook(body, options)(this.fetch, this.basePath)
-    }
-    
-    /**
-     * 
-     * @summary Set the priority of the requested notebook.
-     * @param {string} notebookId The id of the notebook.
-     * @param {V1SetNotebookPriorityRequest} body
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     * @memberof NotebooksApi
-     */
-    public setNotebookPriority(notebookId: string, body: V1SetNotebookPriorityRequest, options?: any) {
-        return NotebooksApiFp(this.configuration).setNotebookPriority(notebookId, body, options)(this.fetch, this.basePath)
     }
     
 }
@@ -31763,6 +30957,44 @@ export const ShellsApiFetchParamCreator = function (configuration?: Configuratio
         },
         /**
          * 
+         * @summary Preview the config of a shell: the merge of the master's defaults, the template and the request, checked as a launch checks it, with the launch's warnings, without launching the shell. The config differs from the one a launch of the same request returns in what the launch chooses: its entrypoint and, when the config sets none, its description; the services' ports are not part of the config. idle_timeout appears only when the master's defaults, the template or the request set it.
+         * @param {V1PreviewShellRequest} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        previewShell(body: V1PreviewShellRequest, options: any = {}): FetchArgs {
+            // verify required parameter 'body' is not null or undefined
+            if (body === null || body === undefined) {
+                throw new RequiredError('body','Required parameter body was null or undefined when calling previewShell.');
+            }
+            const localVarPath = `/api/v1/shells/preview`;
+            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
+            const localVarRequestOptions = { method: 'POST', ...options };
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+            
+            // authentication BearerToken required
+            if (configuration && configuration.apiKey) {
+                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
+                    ? configuration.apiKey("Authorization")
+                    : configuration.apiKey;
+                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
+            }
+            
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            
+            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
+            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
+            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
+            localVarRequestOptions.body = JSON.stringify(body)
+            
+            return {
+                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @summary Set the priority of the requested shell.
          * @param {string} shellId The id of the shell.
          * @param {V1SetShellPriorityRequest} body
@@ -31898,6 +31130,25 @@ export const ShellsApiFp = function (configuration?: Configuration) {
         },
         /**
          * 
+         * @summary Preview the config of a shell: the merge of the master's defaults, the template and the request, checked as a launch checks it, with the launch's warnings, without launching the shell. The config differs from the one a launch of the same request returns in what the launch chooses: its entrypoint and, when the config sets none, its description; the services' ports are not part of the config. idle_timeout appears only when the master's defaults, the template or the request set it.
+         * @param {V1PreviewShellRequest} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        previewShell(body: V1PreviewShellRequest, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1PreviewShellResponse> {
+            const localVarFetchArgs = ShellsApiFetchParamCreator(configuration).previewShell(body, options);
+            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
+                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                        return response.json();
+                    } else {
+                        throw response;
+                    }
+                });
+            };
+        },
+        /**
+         * 
          * @summary Set the priority of the requested shell.
          * @param {string} shellId The id of the shell.
          * @param {V1SetShellPriorityRequest} body
@@ -31973,6 +31224,16 @@ export const ShellsApiFactory = function (configuration?: Configuration, fetch?:
         },
         /**
          * 
+         * @summary Preview the config of a shell: the merge of the master's defaults, the template and the request, checked as a launch checks it, with the launch's warnings, without launching the shell. The config differs from the one a launch of the same request returns in what the launch chooses: its entrypoint and, when the config sets none, its description; the services' ports are not part of the config. idle_timeout appears only when the master's defaults, the template or the request set it.
+         * @param {V1PreviewShellRequest} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        previewShell(body: V1PreviewShellRequest, options?: any) {
+            return ShellsApiFp(configuration).previewShell(body, options)(fetch, basePath);
+        },
+        /**
+         * 
          * @summary Set the priority of the requested shell.
          * @param {string} shellId The id of the shell.
          * @param {V1SetShellPriorityRequest} body
@@ -32044,6 +31305,18 @@ export class ShellsApi extends BaseAPI {
      */
     public launchShell(body: V1LaunchShellRequest, options?: any) {
         return ShellsApiFp(this.configuration).launchShell(body, options)(this.fetch, this.basePath)
+    }
+    
+    /**
+     * 
+     * @summary Preview the config of a shell: the merge of the master's defaults, the template and the request, checked as a launch checks it, with the launch's warnings, without launching the shell. The config differs from the one a launch of the same request returns in what the launch chooses: its entrypoint and, when the config sets none, its description; the services' ports are not part of the config. idle_timeout appears only when the master's defaults, the template or the request set it.
+     * @param {V1PreviewShellRequest} body
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof ShellsApi
+     */
+    public previewShell(body: V1PreviewShellRequest, options?: any) {
+        return ShellsApiFp(this.configuration).previewShell(body, options)(this.fetch, this.basePath)
     }
     
     /**

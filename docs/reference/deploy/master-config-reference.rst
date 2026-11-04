@@ -246,17 +246,6 @@ Specifies the duration in seconds before idle TensorBoard instances are automati
 TensorBoard instance is considered to be idle if it does not receive any HTTP traffic. The default
 timeout is ``300`` (5 minutes).
 
-.. _master-config-notebook-timeout:
-
-**********************
- ``notebook_timeout``
-**********************
-
-Specifies the duration in seconds before idle notebook instances are automatically terminated. A
-notebook instance is considered to be idle if it is not receiving any HTTP traffic and it is not
-otherwise active (as defined by the ``notebook_idle_type`` option in the :ref:`task configuration
-<command-notebook-configuration>`). Defaults to ``null``, i.e. disabled.
-
 .. _master-config-resource-manager:
 
 **********************
@@ -317,7 +306,7 @@ entirely. For more on scheduling behavior in Determined, see :ref:`scheduling`.
 ^^^^^^^^
 
    The scheduling policy to use when allocating resources between different tasks (experiments,
-   notebooks, etc.). Defaults to ``priority``.
+   shells, etc.). Defaults to ``priority``.
 
    -  ``fair_share``: (deprecated) Tasks receive a proportional amount of the available resources
       depending on the resource they require and their weight.
@@ -325,7 +314,7 @@ entirely. For more on scheduling behavior in Determined, see :ref:`scheduling`.
    -  ``priority``: Tasks are scheduled based on their priority, which can range from the values 1
       to 99 inclusive. Lower priority numbers indicate higher-priority tasks. A lower-priority task
       will never be scheduled while a higher-priority task is pending. Zero-slot tasks (e.g.,
-      CPU-only notebooks, TensorBoards) are prioritized separately from tasks requiring slots (e.g.,
+      CPU-only shells, TensorBoards) are prioritized separately from tasks requiring slots (e.g.,
       experiments running on GPUs). Task priority can be assigned using the ``resources.priority``
       field. If a task does not specify a priority it is assigned the ``default_priority``.
 
@@ -902,8 +891,8 @@ pool keeps:
 ``type``
 --------
 
-The scheduling policy to use when allocating resources between different tasks (experiments,
-Notebooks, etc.). Defaults to ``priority``.
+The scheduling policy to use when allocating resources between different tasks (experiments, shells,
+etc.). Defaults to ``priority``.
 
 ``fair_share``
 ^^^^^^^^^^^^^^
@@ -916,7 +905,7 @@ Notebooks, etc.). Defaults to ``priority``.
 
    Tasks are scheduled based on their priority, which can range from the values 1 to 99 inclusive.
    Lower priority numbers indicate higher-priority tasks. A lower-priority task will never be
-   scheduled while a higher-priority task is pending. Zero-slot tasks (e.g., CPU-only notebooks,
+   scheduled while a higher-priority task is pending. Zero-slot tasks (e.g., CPU-only shells,
    TensorBoards) are prioritized separately from tasks requiring slots (e.g., experiments running on
    GPUs). Task priority can be assigned using the ``resources.priority`` field. If a task does not
    specify a priority it is assigned the ``default_priority``.
@@ -1336,8 +1325,8 @@ those partitions/queues.
 **********************************
 
 Cluster administrators for Kubernetes installations can define additional resource managers for
-connecting the Determined master service with remote clusters. Support for notebooks and other
-workloads that require proxying on remote clusters is under development.
+connecting the Determined master service with remote clusters. Workloads that require proxying, such
+as shells and TensorBoards, are not supported on remote clusters.
 
 To define a single resource manager or designate the default resource manager, do not define it
 under ``additional_resource_manager``; instead, use the primary ``resource_manager`` key.
@@ -1851,10 +1840,10 @@ Deployment notes:
    reach the master's port.
 
 -  The origin check stops other sites, but not pages that the master itself serves. Task services
-   under ``/proxy/``, such as notebooks, TensorBoards and ``proxy_ports`` of commands and generic
-   tasks, run on the master's origin. A page there that a user opens can act with that user's
-   session, including opening terminals in the user's shells, and, for an administrator, in other
-   users' shells. Open task services only from users you trust, and consider setting
+   under ``/proxy/``, such as shell services, TensorBoards and ``proxy_ports`` of commands and
+   generic tasks, run on the master's origin. A page there that a user opens can act with that
+   user's session, including opening terminals in the user's shells, and, for an administrator, in
+   other users' shells. Open task services only from users you trust, and consider setting
    ``allow_admin`` to ``false``.
 
 .. _master-config-resource-pool-access:

@@ -39,7 +39,9 @@ import (
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
+	"github.com/determined-ai/determined/proto/pkg/rbacv1"
 	"github.com/determined-ai/determined/proto/pkg/utilv1"
+	"github.com/determined-ai/determined/proto/pkg/workspacev1"
 )
 
 const (
@@ -64,7 +66,12 @@ type protoCommandParams struct {
 	NotebookIdleType string
 }
 
-func (a *apiServer) getCommandLaunchParams(ctx context.Context, req *protoCommandParams,
+// prepareCommandLaunch prepares the launch of an NTSC task from a request, without side effects:
+// the merged config of the defaults, the template and the request, the resolved pool, the base task
+// spec and the context directory, checked against pool access, the GPU topology and the config
+// policies. It starts no task session; the launch does, just before it starts the task (see
+// startTaskSession).
+func (a *apiServer) prepareCommandLaunch(ctx context.Context, req *protoCommandParams,
 	aUser *model.User) (
 	*command.CreateGeneric, []pkgCommand.LaunchWarning, error,
 ) {
@@ -186,12 +193,6 @@ func (a *apiServer) getCommandLaunchParams(ctx context.Context, req *protoComman
 		return nil, nil, status.Errorf(codes.InvalidArgument, "failed constraint check: %v", err)
 	}
 
-	token, err := getTaskSessionToken(ctx, userModel)
-	if err != nil {
-		return nil, nil, err
-	}
-	taskSpec.UserSessionToken = token
-
 	cmdSpec.Base = taskSpec
 	cmdSpec.Config = config
 
@@ -199,6 +200,66 @@ func (a *apiServer) getCommandLaunchParams(ctx context.Context, req *protoComman
 		Spec:             &cmdSpec,
 		ContextDirectory: contextDirectory,
 	}, launchWarnings, nil
+}
+
+// startTaskSession starts the session of the request's user that a launched task acts with, and
+// adds its token to the task's spec. A launch calls it after its last check, just before it starts
+// the task, so that a refused launch or a preview starts none.
+func startTaskSession(ctx context.Context, user *model.User, spec *tasks.GenericCommandSpec) error {
+	token, err := getTaskSessionToken(ctx, user)
+	if err != nil {
+		return err
+	}
+	spec.Base.UserSessionToken = token
+	return nil
+}
+
+// isNTSCPermittedToLaunch checks authorization to launch in a given
+// workspace.
+func (a *apiServer) isNTSCPermittedToLaunch(
+	ctx context.Context, spec *tasks.GenericCommandSpec, user *model.User,
+) error {
+	workspaceID := spec.Metadata.WorkspaceID
+	if workspaceID == 0 {
+		return status.Errorf(codes.InvalidArgument, "workspace_id is required")
+	}
+
+	w := &workspacev1.Workspace{}
+	notFoundErr := api.NotFoundErrs("workspace", strconv.Itoa(int(workspaceID)), true)
+	if err := a.m.db.QueryProto(
+		"get_workspace", w, workspaceID, user.ID,
+	); errors.Is(err, db.ErrNotFound) {
+		return notFoundErr
+	} else if err != nil {
+		return errors.Wrapf(err, "error fetching workspace (%d) from database", workspaceID)
+	}
+	if w.Archived {
+		return notFoundErr
+	}
+
+	if spec.TaskType == model.TaskTypeTensorboard {
+		if err := command.AuthZProvider.Get().CanGetTensorboard(
+			ctx, *user, workspaceID, spec.Metadata.ExperimentIDs, spec.Metadata.TrialIDs,
+		); err != nil {
+			var pdErr authz.PermissionDeniedError
+			if errors.As(err, &pdErr) {
+				for _, perm := range pdErr.RequiredPermissions {
+					if perm == rbacv1.PermissionType_PERMISSION_TYPE_VIEW_WORKSPACE {
+						return apiutils.ErrNotFound
+					}
+				}
+			}
+
+			return apiutils.MapAndFilterErrors(err, nil, nil)
+		}
+	} else {
+		if err := command.AuthZProvider.Get().CanCreateNSC(
+			ctx, *user, workspaceID); err != nil {
+			return apiutils.MapAndFilterErrors(err, nil, nil)
+		}
+	}
+
+	return nil
 }
 
 func (a *apiServer) GetCommands(
@@ -384,7 +445,7 @@ func (a *apiServer) LaunchCommand(
 		return nil, status.Errorf(codes.Internal, "failed to get the user: %s", err)
 	}
 
-	launchReq, launchWarnings, err := a.getCommandLaunchParams(ctx, &protoCommandParams{
+	launchReq, launchWarnings, err := a.prepareCommandLaunch(ctx, &protoCommandParams{
 		TemplateName: req.TemplateName,
 		WorkspaceID:  req.WorkspaceId,
 		Config:       req.Config,
@@ -436,6 +497,9 @@ func (a *apiServer) LaunchCommand(
 		return nil, err
 	}
 	maps.Copy(launchReq.Spec.Base.ExtraEnvVars, oidcPachydermEnvVars)
+	if err = startTaskSession(ctx, user, launchReq.Spec); err != nil {
+		return nil, err
+	}
 
 	// Launch a command.
 	cmd, err := command.DefaultCmdService.LaunchGenericCommand(

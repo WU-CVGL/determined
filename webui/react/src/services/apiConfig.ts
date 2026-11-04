@@ -39,7 +39,6 @@ const generateApiConfig = (apiConfig?: Api.ConfigurationParameters) => {
     Experiments: api(Api.ExperimentsApi),
     Internal: api(Api.InternalApi),
     Models: api(Api.ModelsApi),
-    Notebooks: api(Api.NotebooksApi),
     Projects: api(Api.ProjectsApi),
     RBAC: api(Api.RBACApi),
     Shells: api(Api.ShellsApi),
@@ -70,13 +69,6 @@ export const saltAndHashPassword = (password?: string): string => {
   if (!password) return '';
   const passwordSalt = 'GubPEmmotfiK9TMD6Zdw';
   return sha512(passwordSalt + password);
-};
-
-export const commandToEndpoint: Record<Type.CommandType, string> = {
-  [Type.CommandType.Command]: '/commands',
-  [Type.CommandType.JupyterLab]: '/notebooks',
-  [Type.CommandType.TensorBoard]: '/tensorboard',
-  [Type.CommandType.Shell]: '/shells',
 };
 
 export const getUserIds = (users: string[] = []): number[] | undefined => {
@@ -2121,27 +2113,6 @@ export const getCommands: DetApi<
     ),
 };
 
-export const getJupyterLabs: DetApi<
-  Service.GetJupyterLabsParams,
-  Api.V1GetNotebooksResponse,
-  Type.CommandTask[]
-> = {
-  name: 'getJupyterLabs',
-  postProcess: (response) =>
-    (response.notebooks || []).map((jupyterLab) => decoder.mapV1Notebook(jupyterLab)),
-  request: (params: Service.GetJupyterLabsParams, options) =>
-    detApi.Notebooks.getNotebooks(
-      params.sortBy,
-      params.orderBy,
-      params.offset,
-      params.limit ?? TASK_LIMIT,
-      undefined,
-      getUserIds(params.users),
-      params.workspaceId,
-      options ?? { signal: params.signal },
-    ),
-};
-
 export const getShells: DetApi<
   Service.GetShellsParams,
   Api.V1GetShellsResponse,
@@ -2189,12 +2160,6 @@ export const killCommand: DetApi<Service.CommandIdParams, Api.V1KillCommandRespo
   request: (params: Service.CommandIdParams) => detApi.Commands.killCommand(params.commandId),
 };
 
-export const killJupyterLab: DetApi<Service.CommandIdParams, Api.V1KillNotebookResponse, void> = {
-  name: 'killJupyterLab',
-  postProcess: noOp,
-  request: (params: Service.CommandIdParams) => detApi.Notebooks.killNotebook(params.commandId),
-};
-
 export const killShell: DetApi<Service.CommandIdParams, Api.V1KillShellResponse, void> = {
   name: 'killShell',
   postProcess: noOp,
@@ -2209,34 +2174,10 @@ export const killTensorBoard: DetApi<Service.CommandIdParams, Api.V1KillTensorbo
       detApi.TensorBoards.killTensorboard(params.commandId),
   };
 
-export const getJupyterLab: DetApi<
-  Service.CommandIdParams,
-  Api.V1GetNotebookResponse,
-  Type.CommandTask
-> = {
-  name: 'getJupyterLab',
-  postProcess: (response) => decoder.mapV1Notebook(response.notebook),
-  request: (params: Service.CommandIdParams) => detApi.Notebooks.getNotebook(params.commandId),
-};
-
 export const getShell: DetApi<Service.CommandIdParams, Api.V1GetShellResponse, Type.CommandTask> = {
   name: 'getShell',
   postProcess: (response) => decoder.mapV1Shell(response.shell),
   request: (params: Service.CommandIdParams) => detApi.Shells.getShell(params.commandId),
-};
-
-/**
- * Returns only the merged config of a JupyterLab. The rest of the response
- * (including the notebook's service token) is dropped.
- */
-export const getJupyterLabConfig: DetApi<
-  Service.CommandIdParams,
-  Api.V1GetNotebookResponse,
-  RawJson
-> = {
-  name: 'getJupyterLabConfig',
-  postProcess: (response) => response.config ?? {},
-  request: (params: Service.CommandIdParams) => detApi.Notebooks.getNotebook(params.commandId),
 };
 
 /**
@@ -2323,31 +2264,16 @@ export const deleteTaskTemplate: DetApi<
     detApi.Templates.deleteTemplate(params.name, params),
 };
 
-export const launchJupyterLab: DetApi<
-  Service.LaunchJupyterLabParams,
-  Api.V1LaunchNotebookResponse,
-  Type.CommandResponse
-> = {
-  name: 'launchJupyterLab',
-  postProcess: (response) => {
-    return {
-      command: decoder.mapV1Notebook(response.notebook),
-      config: response.config,
-      warnings: response.warnings || [],
-    };
-  },
-  request: (params: Service.LaunchJupyterLabParams) => detApi.Notebooks.launchNotebook(params),
-};
-
-export const previewJupyterLab: DetApi<
-  Service.LaunchJupyterLabParams,
-  Api.V1LaunchNotebookResponse,
-  RawJson
-> = {
-  name: 'previewJupyterLab',
-  postProcess: (response) => response.config,
-  request: (params: Service.LaunchJupyterLabParams) => detApi.Notebooks.launchNotebook(params),
-};
+/**
+ * Previews a shell's merged config: the master's defaults, the template and the request, checked
+ * as a launch checks them. No task is created.
+ */
+export const previewShell: DetApi<Service.LaunchShellParams, Api.V1PreviewShellResponse, RawJson> =
+  {
+    name: 'previewShell',
+    postProcess: (response) => response.config ?? {},
+    request: (params: Service.LaunchShellParams) => detApi.Shells.previewShell(params),
+  };
 
 /**
  * Launches a shell. The master's response includes the shell's SSH private

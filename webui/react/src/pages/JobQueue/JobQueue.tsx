@@ -178,8 +178,8 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState, onHighlight 
    * loaded before.
    *
    * The lookup reads the task's record (GET /api/v1/tasks/{id}), which has no credentials. The
-   * shell and notebook APIs return the shell's private key and the notebook's token to its owner
-   * or an admin, and log an admin's read, so they are not polled for a menu.
+   * shell API returns the shell's private key to its owner or an admin, and logs an admin's read,
+   * so it is not polled for a menu.
    */
   const refreshCommandTasks = useCallback((jobs: Job[]) => {
     const lookups = jobs.flatMap((job) => {

@@ -24,8 +24,8 @@ import (
 
 // checkIdleDetermined is the part of the determined package that check_idle.py uses: the task
 // session sends JSON with the allocation token, as the real one does, and raises on an HTTP error;
-// it refuses a shell's report that would be retried, and it bounds a report by the total time of a
-// urllib3 timeout.
+// it refuses a report that would be retried, and it bounds a report by the total time of a urllib3
+// timeout.
 var checkIdleDetermined = map[string]string{
 	"determined/__init__.py":        "",
 	"determined/common/__init__.py": "",
@@ -64,11 +64,9 @@ class TaskSession:
 
     def post(self, path, json=None, timeout=None):
         if self.max_retries != 0:
-            raise RuntimeError("a shell's report is not retried")
+            raise RuntimeError("the report is not retried")
         self._send("POST", path, json, timeout)
 
-    def put(self, path, json=None, timeout=None):
-        self._send("PUT", path, json, timeout)
 `,
 	"determined/common/api/authentication.py": `import os
 
@@ -91,7 +89,6 @@ const (
 	checkIdleRoundsToObserve = 8
 	checkIdleKernelsPath     = "/api/kernels"
 	checkIdleTerminalsPath   = "/api/terminals"
-	checkIdleSessionsPath    = "/api/sessions"
 )
 
 // checkIdleRounds is what the stand-in JupyterLab answers in each round of checks, one per report:
@@ -259,9 +256,10 @@ type checkIdleRun struct {
 }
 
 // startCheckIdle starts check_idle.py under the system python3 with the stand-in determined
-// package, against a stand-in JupyterLab at baseURL, which answers as jupyter's states and after
-// say, with the extra environment env, until the test ends. With interval set, the script's report
-// interval is replaced by it; otherwise the script runs as the master ships it.
+// package, against a stand-in JupyterLab at its base URL, which the master sets for the jupyter
+// service, and which answers as jupyter's states and after say, with the extra environment env,
+// until the test ends. With interval set, the script's report interval is replaced by it;
+// otherwise the script runs as the master ships it.
 func startCheckIdle(
 	t *testing.T, jupyter *checkIdleJupyter, interval string, env ...string,
 ) *checkIdleRun {
@@ -295,7 +293,7 @@ func startCheckIdleWith(
 	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o600))
 
 	if jupyter.baseURL == "" {
-		jupyter.baseURL = "/proxy/task-1/"
+		jupyter.baseURL = "/proxy/task-1:2900/"
 	}
 	jupyterSrv := httptest.NewUnstartedServer(http.HandlerFunc(jupyter.serve))
 	// check_idle.py first waits for the port with a plain connection, which ends without TLS.
@@ -324,6 +322,7 @@ func startCheckIdleWith(
 		"DET_TASK_ID=task-1",
 		"DET_NOTEBOOK_TOKEN=" + checkIdleNotebookToken,
 		"NOTEBOOK_PORT=" + jupyterURL.Port(),
+		"NOTEBOOK_BASE_URL=" + jupyter.baseURL,
 		"NOTEBOOK_IDLE_TYPE=kernels_or_terminals",
 	}, env...)
 	stderr := &syncBuffer{}
@@ -370,11 +369,10 @@ func runCheckIdle(t *testing.T, baseURL string, env ...string) []checkIdleReport
 	return append([]checkIdleReport{}, run.master.reports...)
 }
 
-// On a shell, check_idle.py checks JupyterLab under its base URL and reports a busy JupyterLab to
-// the task's activity endpoint; an idle or unreadable one is not reported.
+// check_idle.py checks JupyterLab under its base URL and reports a busy JupyterLab to the task's
+// activity endpoint; an idle or unreadable one is not reported.
 func TestCheckIdleReportsTaskActivity(t *testing.T) {
-	reports := runCheckIdle(t, "/proxy/task-1:2900/",
-		"NOTEBOOK_BASE_URL=/proxy/task-1:2900/", "DET_ACTIVITY_REPORT=task")
+	reports := runCheckIdle(t, "/proxy/task-1:2900/")
 	activity := checkIdleReport{
 		Method: http.MethodPost,
 		Path:   "/api/v1/allocations/" + checkIdleAllocationID + "/activity",
@@ -383,34 +381,12 @@ func TestCheckIdleReportsTaskActivity(t *testing.T) {
 	require.Equal(t, []checkIdleReport{activity, activity}, reports)
 }
 
-// On a notebook, check_idle.py reports every check to the notebook API as before, an unreadable
-// JupyterLab as active; tasks saved before the master set the base URL are at their task ID.
-func TestCheckIdleReportsNotebookIdle(t *testing.T) {
-	for name, env := range map[string][]string{
-		"base URL":    {"NOTEBOOK_BASE_URL=/proxy/task-1/"},
-		"no base URL": nil,
-	} {
-		t.Run(name, func(t *testing.T) {
-			reports := runCheckIdle(t, "", env...)
-			require.GreaterOrEqual(t, len(reports), checkIdleRoundsToObserve)
-			var idle []any
-			for _, r := range reports[:checkIdleRoundsToObserve] {
-				require.Equal(t, http.MethodPut, r.Method)
-				require.Equal(t, "/api/v1/notebooks/task-1/report_idle", r.Path)
-				idle = append(idle, r.Body["idle"])
-			}
-			require.Equal(t, []any{true, true, true, false, false, false, false, false}, idle)
-		})
-	}
-}
-
-// On a shell, check_idle.py reports a busy JupyterLab at a quarter of the task's idle timeout, at
-// least every second, counted from the start of each round: with a timeout of 4 s, the reports
-// reach the master about a second apart, so that its record is touched more often than the
-// timeout. The script runs with the report interval it ships with.
+// check_idle.py reports a busy JupyterLab at a quarter of the task's idle timeout, at least every
+// second, counted from the start of each round: with a timeout of 4 s, the reports reach the master
+// about a second apart, so that its record is touched more often than the timeout. The script runs
+// with the report interval it ships with.
 func TestCheckIdleReportsWithinIdleTimeout(t *testing.T) {
 	run := startCheckIdle(t, &checkIdleJupyter{baseURL: "/proxy/task-1:2900/", after: "busy"}, "",
-		"NOTEBOOK_BASE_URL=/proxy/task-1:2900/", "DET_ACTIVITY_REPORT=task",
 		"NOTEBOOK_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=4")
 
 	const (
@@ -438,7 +414,7 @@ func TestCheckIdleReportsWithinIdleTimeout(t *testing.T) {
 	require.Less(t, span, time.Duration(len(arrivals)-1)*meanGap, "%d reports", len(arrivals))
 }
 
-// At a shell's shortest idle timeout, 10 s, a busy kernel keeps the shell alive although every
+// At the shortest idle timeout, 10 s, a busy kernel keeps the shell alive although every
 // JupyterLab answer takes 2 s: the rounds start 2.5 s apart and check_idle.py reads only the
 // kernels before it reports, so the reports reach the master at most the interval and one answer
 // apart.
@@ -448,7 +424,7 @@ func TestCheckIdleSlowJupyterShortestTimeout(t *testing.T) {
 		delay    = 2 * time.Second
 	)
 	run := startCheckIdle(t, &checkIdleJupyter{after: "busy", delay: delay}, "",
-		"DET_ACTIVITY_REPORT=task", "NOTEBOOK_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=10")
+		"NOTEBOOK_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=10")
 
 	var arrivals []time.Time
 	deadline := time.Now().Add(60 * time.Second)
@@ -472,13 +448,13 @@ func TestCheckIdleSlowJupyterShortestTimeout(t *testing.T) {
 	}
 }
 
-// On a shell, the activity report gives up after a quarter of the idle timeout when that is
+// The activity report gives up after a quarter of the idle timeout when that is
 // shorter than 10 s: with a timeout of 10 s, a master that answers after 4 s still receives every
 // report, and the next round starts 2.5 s after the report was sent.
 func TestCheckIdleSlowMaster(t *testing.T) {
 	run := startCheckIdleWith(t, &checkIdleJupyter{after: "busy"},
 		&checkIdleMaster{delay: 4 * time.Second}, "",
-		"DET_ACTIVITY_REPORT=task", "NOTEBOOK_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=10")
+		"NOTEBOOK_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=10")
 	run.waitRounds(t, 4)
 
 	starts := run.jupyter.roundStarts()
@@ -491,40 +467,27 @@ func TestCheckIdleSlowMaster(t *testing.T) {
 	}
 }
 
-// On a shell, check_idle.py reads what the idle type needs and reports as soon as it knows:
-// a busy kernel in activity mode, and a kernel in kernels_or_terminals mode, after the kernels
-// alone; kernel_connections reads only the kernels; the sessions are never read. A notebook reads
-// the kernels, the terminals and the sessions in every round, as before.
+// check_idle.py reads what the idle type needs and reports as soon as it knows: a busy kernel in
+// activity mode, and a kernel in kernels_or_terminals mode, after the kernels alone;
+// kernel_connections reads only the kernels; the sessions are never read.
 func TestCheckIdleQueriesByIdleType(t *testing.T) {
 	kernels := []string{checkIdleKernelsPath}
 	kernelsTerminals := []string{checkIdleKernelsPath, checkIdleTerminalsPath}
-	all := []string{checkIdleKernelsPath, checkIdleTerminalsPath, checkIdleSessionsPath}
-	shell := "DET_ACTIVITY_REPORT=task"
 	for name, tc := range map[string]struct {
 		idleType, state string
-		notebook        bool
 		wantPaths       []string
 		wantReports     bool
 	}{
-		"activity, busy":                {"activity", "busy", false, kernels, true},
-		"activity, idle":                {"activity", "idle", false, kernelsTerminals, false},
-		"kernel_connections, connected": {"kernel_connections", "busy", false, kernels, true},
-		"kernel_connections, idle":      {"kernel_connections", "idle", false, kernels, false},
-		"kernels_or_terminals, kernel":  {"kernels_or_terminals", "busy", false, kernels, true},
-		"kernels_or_terminals, idle": {
-			"kernels_or_terminals", "idle", false, kernelsTerminals, false,
-		},
-		"notebook, activity, busy":             {"activity", "busy", true, all, true},
-		"notebook, kernel_connections, idle":   {"kernel_connections", "idle", true, all, true},
-		"notebook, kernels_or_terminals, idle": {"kernels_or_terminals", "idle", true, all, true},
+		"activity, busy":                {"activity", "busy", kernels, true},
+		"activity, idle":                {"activity", "idle", kernelsTerminals, false},
+		"kernel_connections, connected": {"kernel_connections", "busy", kernels, true},
+		"kernel_connections, idle":      {"kernel_connections", "idle", kernels, false},
+		"kernels_or_terminals, kernel":  {"kernels_or_terminals", "busy", kernels, true},
+		"kernels_or_terminals, idle":    {"kernels_or_terminals", "idle", kernelsTerminals, false},
 	} {
 		t.Run(name, func(t *testing.T) {
-			env := []string{"NOTEBOOK_IDLE_TYPE=" + tc.idleType}
-			if !tc.notebook {
-				env = append(env, shell)
-			}
 			run := startCheckIdle(t, &checkIdleJupyter{after: tc.state}, checkIdleReportInterval,
-				env...)
+				"NOTEBOOK_IDLE_TYPE="+tc.idleType)
 			run.waitRounds(t, 5)
 
 			// The rounds before the last, which may still be under way.
@@ -549,12 +512,12 @@ func TestCheckIdleQueriesByIdleType(t *testing.T) {
 	}
 }
 
-// On a shell, a JupyterLab request times out after a quarter of the idle timeout when that is
+// A JupyterLab request times out after a quarter of the idle timeout when that is
 // shorter than 3 s: with a timeout of 10 s, a JupyterLab that answers after 4 s is unreadable, so
 // it is not reported, and the rounds start 2.5 s apart.
 func TestCheckIdleJupyterTimeoutFollowsInterval(t *testing.T) {
 	run := startCheckIdle(t, &checkIdleJupyter{after: "busy", delay: 4 * time.Second}, "",
-		"DET_ACTIVITY_REPORT=task", "NOTEBOOK_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=10")
+		"NOTEBOOK_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=10")
 	run.waitRounds(t, 3)
 
 	starts := run.jupyter.roundStarts()
@@ -567,7 +530,7 @@ func TestCheckIdleJupyterTimeoutFollowsInterval(t *testing.T) {
 	require.Empty(t, reports)
 }
 
-// On a shell, a JupyterLab request's timeout bounds it from connecting to the answer: with a
+// A JupyterLab request's timeout bounds it from connecting to the answer: with a
 // timeout of 10 s, a JupyterLab that delays its TLS handshake and its answer by 1.5 s each is
 // unreadable, so it is not reported, and one that delays each by 1 s is reported.
 func TestCheckIdleJupyterTimeoutBoundsWholeRequest(t *testing.T) {
@@ -581,8 +544,7 @@ func TestCheckIdleJupyterTimeoutBoundsWholeRequest(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			run := startCheckIdle(t, &checkIdleJupyter{
 				after: "busy", delay: tc.delay, handshakeDelay: tc.delay,
-			}, "", "DET_ACTIVITY_REPORT=task", "NOTEBOOK_IDLE_TYPE=activity",
-				"DET_IDLE_TIMEOUT_SECONDS=10")
+			}, "", "NOTEBOOK_IDLE_TYPE=activity", "DET_IDLE_TIMEOUT_SECONDS=10")
 			// The third round starts once the second has sent its report, if any.
 			run.waitRounds(t, 3)
 			reports, _ := run.master.received()
@@ -595,43 +557,19 @@ func TestCheckIdleJupyterTimeoutBoundsWholeRequest(t *testing.T) {
 	}
 }
 
-// A JupyterLab request past check_idle.py's 3 s request timeout is unreadable on a shell, so it is
-// not reported, and the next round starts on schedule: at once, since the round overran its
-// interval. A notebook waits for the answer as before: an idle notebook is reported idle, not
-// active.
+// A JupyterLab request past check_idle.py's 3 s request timeout is unreadable, so it is not
+// reported, however busy, and the next round starts on schedule: at once, since the round overran
+// its interval.
 func TestCheckIdleSlowJupyter(t *testing.T) {
 	const delay = 3500 * time.Millisecond
-	for name, tc := range map[string]struct {
-		after string
-		env   []string
-		want  []checkIdleReport
-	}{
-		"shell": {
-			after: "busy",
-			env:   []string{"DET_ACTIVITY_REPORT=task", "DET_IDLE_TIMEOUT_SECONDS=30"},
-		},
-		"notebook": {
-			after: "idle",
-			want: []checkIdleReport{{
-				Method: http.MethodPut,
-				Path:   "/api/v1/notebooks/task-1/report_idle",
-				Body:   map[string]any{"idle": true},
-			}},
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			run := startCheckIdle(t, &checkIdleJupyter{after: tc.after, delay: delay},
-				checkIdleReportInterval, tc.env...)
-			// The second round starts once the first has ended and its report, if any, is sent.
-			run.waitRounds(t, 2)
-			reports, _ := run.master.received()
-			require.Equal(t, tc.want, reports)
-			if tc.want == nil {
-				starts := run.jupyter.roundStarts()
-				gap := starts[1].Sub(starts[0])
-				require.GreaterOrEqual(t, gap, 3*time.Second)
-				require.Less(t, gap, delay)
-			}
-		})
-	}
+	run := startCheckIdle(t, &checkIdleJupyter{after: "busy", delay: delay},
+		checkIdleReportInterval, "DET_IDLE_TIMEOUT_SECONDS=30")
+	// The second round starts once the first has ended and its report, if any, is sent.
+	run.waitRounds(t, 2)
+	reports, _ := run.master.received()
+	require.Empty(t, reports)
+	starts := run.jupyter.roundStarts()
+	gap := starts[1].Sub(starts[0])
+	require.GreaterOrEqual(t, gap, 3*time.Second)
+	require.Less(t, gap, delay)
 }

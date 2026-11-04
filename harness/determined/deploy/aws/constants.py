@@ -75,7 +75,6 @@ class cloudformation:
     AGENT_IMAGE_NAME = "AgentImageName"
     DOCKER_USER = "DockerUser"
     DOCKER_PASS = "DockerPass"
-    NOTEBOOK_TIMEOUT = "NotebookTimeout"
     GENAI_VERSION = "GenAIVersion"
     GENAI_SHARED_FS_MOUNT_PATH = "GenAISharedFSMountPath"
     INITIAL_USER_PASSWORD = "InitialUserPassword"

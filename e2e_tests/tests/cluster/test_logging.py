@@ -84,9 +84,6 @@ def _test_task_logs(task_type: str, task_config: Dict[str, Any], log_regex: re.P
         assert exp_ref.wait(interval=0.01) == client.ExperimentState.COMPLETED
         treq = bindings.v1LaunchTensorboardRequest(config=task_config, experimentIds=[exp_ref.id])
         task_id = bindings.post_LaunchTensorboard(sess, body=treq).tensorboard.id
-    elif task_type == "notebook":
-        nreq = bindings.v1LaunchNotebookRequest(config=task_config)
-        task_id = bindings.post_LaunchNotebook(sess, body=nreq).notebook.id
     elif task_type == "command":
         creq = bindings.v1LaunchCommandRequest(config=task_config)
         task_id = bindings.post_LaunchCommand(sess, body=creq).command.id
@@ -135,8 +132,6 @@ def _test_task_logs(task_type: str, task_config: Dict[str, Any], log_regex: re.P
     finally:
         if task_type == "tensorboard":
             bindings.post_KillTensorboard(sess, tensorboardId=task_id)
-        elif task_type == "notebook":
-            bindings.post_KillNotebook(sess, notebookId=task_id)
         elif task_type == "command":
             bindings.post_KillCommand(sess, commandId=task_id)
         elif task_type == "shell":
@@ -147,7 +142,7 @@ def _test_task_logs(task_type: str, task_config: Dict[str, Any], log_regex: re.P
 @api_utils.skipif_missing_startup_hook()
 @pytest.mark.parametrize(
     "task_type",
-    ["command", "notebook", "shell", "tensorboard"],
+    ["command", "shell", "tensorboard"],
 )
 def test_tcd_startup_hook_task_combined(task_type: str) -> None:
     _test_task_logs(task_type, {}, re.compile("^.*hello from rp tcd startup hook.*$"))
@@ -158,7 +153,7 @@ def test_tcd_startup_hook_task_combined(task_type: str) -> None:
 @api_utils.skipif_missing_startup_hook()
 @pytest.mark.parametrize(
     "task_type",
-    ["command", "notebook", "shell", "tensorboard"],
+    ["command", "shell", "tensorboard"],
 )
 def test_tcd_startup_hook_task_master(task_type: str) -> None:
     _test_task_logs(task_type, {}, re.compile("^.*hello from master tcd startup hook.*$"))
@@ -174,8 +169,12 @@ def test_tcd_startup_hook_task_master(task_type: str) -> None:
     "task_type,task_config,log_regex",
     [
         ("command", {"entrypoint": ["echo", "hello"]}, re.compile("^.*hello.*$")),
-        ("notebook", {}, re.compile("^.*Jupyter Server .* is running.*$")),
         ("shell", {}, re.compile("^.*Server listening on.*$")),
+        (
+            "shell",
+            {"services": {"jupyter": {}}},
+            re.compile("^.*Jupyter Server .* is running.*$"),
+        ),
         ("tensorboard", {}, re.compile("^.*TensorBoard .* at .*$")),
     ],
 )

@@ -37,6 +37,27 @@ class TaskActionDropdown extends DropdownMenu {
   readonly connect = this.menuItem(TaskAction.Connect);
 }
 
+/**
+ * Represents ShellLaunchedModal in src/components/ShellLaunchedModal.tsx, shown after a launch.
+ */
+class ShellLaunchedModal extends BaseOverlay {
+  constructor(args: OverlayArgs) {
+    super({
+      ...args,
+      selector: '.ant-modal-content:has(.ant-modal-title:text-is("Shell Launched"))',
+    });
+  }
+  readonly closeButton = new BaseComponent({ parent: this, selector: '.ant-modal-close' });
+
+  /**
+   * Closes the modal with its close button.
+   */
+  async close(): Promise<void> {
+    await this.closeButton.pwLocator.click();
+    await this.pwLocator.waitFor({ state: 'hidden' });
+  }
+}
+
 class TaskKillModal extends Modal {
   readonly killButton = new BaseComponent({
     parent: this,
@@ -82,16 +103,15 @@ class ChecklistFilter extends BaseOverlay {
  * the tasks-only view at /tasks, and the Jobs tabs of workspaces and projects.
  */
 export class TaskDashboard extends BaseReactFragment {
-  readonly jupyterLabButton = new BaseComponent({
-    parent: this,
-    selector: '[data-testid="jupyter-lab-button"]',
-  });
   readonly launchModal = new NtscLaunchModal({
     root: this.root,
   });
   readonly shellButton = new BaseComponent({
     parent: this,
     selector: '[data-testid="shell-button"]',
+  });
+  readonly shellLaunchedModal = new ShellLaunchedModal({
+    root: this.root,
   });
   readonly search = new BaseComponent({
     parent: this,

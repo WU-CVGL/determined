@@ -103,7 +103,7 @@ func registryAuthReadLogs(entries []*logrus.Entry) []*logrus.Entry {
 	return out
 }
 
-// ntscReqWithRegistryAuth is a notebook, TensorBoard, shell or command request of owner whose
+// ntscReqWithRegistryAuth is a TensorBoard, shell or command request of owner whose
 // config sets registry_auth.
 func ntscReqWithRegistryAuth(owner model.User) *command.CreateGeneric {
 	key := "pass"
@@ -168,27 +168,6 @@ func TestNTSCConfigRegistryAuthOnlyForOwnerOrAdmin(t *testing.T) {
 			},
 			kill: func(ctx context.Context, id string) error {
 				_, err := api.KillCommand(ctx, &apiv1.KillCommandRequest{CommandId: id})
-				return err
-			},
-		},
-		{
-			name: "notebook",
-			launch: func(req *command.CreateGeneric) (string, error) {
-				c, err := command.DefaultCmdService.LaunchNotebookCommand(req, req.Spec.Base.Owner)
-				if err != nil {
-					return "", err
-				}
-				return c.ToV1Notebook().Id, nil
-			},
-			get: func(ctx context.Context, id string) (*structpb.Struct, error) {
-				resp, err := api.GetNotebook(ctx, &apiv1.GetNotebookRequest{NotebookId: id})
-				if err != nil {
-					return nil, err
-				}
-				return resp.Config, nil
-			},
-			kill: func(ctx context.Context, id string) error {
-				_, err := api.KillNotebook(ctx, &apiv1.KillNotebookRequest{NotebookId: id})
 				return err
 			},
 		},

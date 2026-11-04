@@ -571,7 +571,7 @@ def _check_web_url(sess: api.Session, path: str, name: str) -> None:
         pytest.fail(f"{name} {url} got error codes: {error_msg}")
 
 
-def _check_notebook_url(sess: api.Session, path: str) -> None:
+def _check_jupyter_url(sess: api.Session, path: str) -> None:
     return _check_web_url(sess, path, "JupyterLab")
 
 
@@ -581,39 +581,43 @@ def _check_tb_url(sess: api.Session, path: str) -> None:
 
 @pytest.mark.managed_devcluster
 @pytest.mark.parametrize("downtime", [5])
-def test_master_restart_notebook(
+def test_master_restart_shell_jupyter(
     restartable_managed_cluster: managed_cluster.ManagedCluster, downtime: int
 ) -> None:
-    return _test_master_restart_notebook(restartable_managed_cluster, downtime)
+    return _test_master_restart_shell_jupyter(restartable_managed_cluster, downtime)
 
 
 @pytest.mark.e2e_k8s
 @pytest.mark.parametrize("downtime", [5])
-def test_master_restart_notebook_k8s(
+def test_master_restart_shell_jupyter_k8s(
     k8s_managed_cluster: managed_cluster_k8s.ManagedK8sCluster, downtime: int
 ) -> None:
-    return _test_master_restart_notebook(k8s_managed_cluster, downtime)
+    return _test_master_restart_shell_jupyter(k8s_managed_cluster, downtime)
 
 
-def _test_master_restart_notebook(managed_cluster: abstract_cluster.Cluster, downtime: int) -> None:
+def _test_master_restart_shell_jupyter(
+    managed_cluster: abstract_cluster.Cluster, downtime: int
+) -> None:
     sess = api_utils.user_session()
-    with cmd.interactive_command(sess, ["notebook", "start", "--detach"]) as notebook_cmd:
-        task_id = notebook_cmd.task_id
+    with cmd.interactive_command(
+        sess, ["shell", "start", "--detach", "--service", "jupyter"]
+    ) as shell_cmd:
+        task_id = shell_cmd.task_id
         assert task_id is not None
-        utils.wait_for_task_state(sess, "notebook", task_id, "RUNNING")
-        notebook = bindings.get_GetNotebook(session=sess, notebookId=task_id).notebook
-        assert notebook and notebook.serviceAddress
-        notebook_path = notebook.serviceAddress.lstrip("/")
-        _check_notebook_url(sess, notebook_path)
+        utils.wait_for_task_state(sess, "shell", task_id, "RUNNING")
+        assert "JupyterLab" in api_utils.get_jupyter_page(sess, task_id)
+        cred = bindings.get_GetTaskServiceCredential(sess, taskId=task_id, service="jupyter")
+        assert cred.url
 
         if downtime >= 0:
             managed_cluster.kill_master()
             time.sleep(downtime)
             managed_cluster.restart_master()
 
-        _check_notebook_url(sess, notebook_path)
+        # The service keeps its port and token, so its URL outlives the master.
+        _check_jupyter_url(sess, cred.url)
 
-        print("notebook ok")
+        print("shell jupyter ok")
 
 
 @pytest.mark.managed_devcluster

@@ -6,7 +6,7 @@ import { useToast } from 'hew/Toast';
 import useConfirm from 'hew/useConfirm';
 import { Loadable } from 'hew/utils/loadable';
 import { useObservable } from 'micro-observables';
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import css from 'components/ActionDropdown/ActionDropdown.module.scss';
@@ -14,7 +14,7 @@ import TaskConnectModalComponent, { TaskConnectField } from 'components/TaskConn
 import useFeature from 'hooks/useFeature';
 import usePermissions from 'hooks/usePermissions';
 import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
-import { paths, serverAddress } from 'routes/utils';
+import { paths } from 'routes/utils';
 import { killTask } from 'services/api';
 import { openShellTerminalTab } from 'services/shellTerminal';
 import userStore from 'stores/users';
@@ -23,19 +23,16 @@ import { copyToClipboard } from 'utils/dom';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import { capitalize } from 'utils/string';
 import { canConnectToTask, canOpenShellTerminal, isTaskKillable } from 'utils/task';
-import { getJupyterLabAddress, NOTEBOOK_ACCESS_DENIED } from 'utils/wait';
 
 interface Props {
   children?: React.ReactNode;
   onComplete?: (action?: Action) => void;
-  /** Offers "Launch Again" on the user's own shells and JupyterLabs when given. */
+  /** Offers "Launch Again" on the user's own shells when given. */
   onLaunchAgain?: (task: CommandTask) => void;
   /** Offers "Manage Job" (the job queue's priority, weight and pool) when given. */
   onManageJob?: () => void;
   task: CommandTask;
 }
-
-const relaunchableTaskTypes: CommandType[] = [CommandType.JupyterLab, CommandType.Shell];
 
 const TaskActionDropdown: React.FC<Props> = ({
   task,
@@ -51,20 +48,11 @@ const TaskActionDropdown: React.FC<Props> = ({
   const currentUser = Loadable.getOrElse(undefined, useObservable(userStore.currentUser));
   const { openToast } = useToast();
   const TaskConnectModal = useModal(TaskConnectModalComponent);
-  // Listings never include a notebook's Jupyter token, so it is fetched when connecting.
-  const [jupyterLabAddress, setJupyterLabAddress] = useState<string>();
 
   const confirm = useConfirm();
 
   const taskConnectFields: TaskConnectField[] = useMemo(() => {
     switch (task.type) {
-      case CommandType.JupyterLab:
-        return [
-          {
-            label: 'Connect to notebook in VSCode using the remote Jupyter server address:',
-            value: `${serverAddress()}${jupyterLabAddress ?? task.serviceAddress}`,
-          },
-        ];
       case CommandType.Shell:
         return [
           {
@@ -75,7 +63,7 @@ const TaskActionDropdown: React.FC<Props> = ({
       default:
         return [];
     }
-  }, [task, jupyterLabAddress]);
+  }, [task]);
 
   // One order everywhere the menu appears: viewing first, then connecting, then launching and
   // managing, with the destructive Kill last. Items that do not apply are left out.
@@ -83,12 +71,9 @@ const TaskActionDropdown: React.FC<Props> = ({
     const items: MenuItem[] = [{ key: Action.ViewLogs, label: 'View Logs' }];
     if (resourcesEnabled) items.push({ key: Action.ViewResources, label: 'View Resources' });
     items.push({ key: Action.CopyTaskID, label: 'Copy Task ID' });
-    // Only the owner or an admin gets the notebook's token or the shell's key from the master.
+    // Only the owner or an admin gets the shell's key from the master.
     if (canConnectToTask(task, currentUser)) {
-      items.push({
-        key: Action.Connect,
-        label: task.type === CommandType.Shell ? 'Connect via CLI' : 'Connect',
-      });
+      items.push({ key: Action.Connect, label: 'Connect via CLI' });
     }
     if (terminalEnabled && canOpenShellTerminal(task, currentUser)) {
       items.push({ key: Action.OpenTerminal, label: 'Open Terminal' });
@@ -96,7 +81,7 @@ const TaskActionDropdown: React.FC<Props> = ({
     // A UI rule only: the API lets anyone who can view a task read its config.
     if (
       onLaunchAgain &&
-      relaunchableTaskTypes.includes(task.type) &&
+      task.type === CommandType.Shell &&
       !!currentUser &&
       (currentUser.id === task.userId || currentUser.isAdmin) &&
       canCreateWorkspaceNSC({ workspace: { id: task.workspaceId } })
@@ -104,7 +89,9 @@ const TaskActionDropdown: React.FC<Props> = ({
       items.push({ key: Action.LaunchAgain, label: 'Launch Again' });
     }
     if (onManageJob) items.push({ key: Action.ManageJob, label: 'Manage Job' });
+    // The master has no API to kill a notebook, the label of ended records.
     if (
+      task.type !== CommandType.JupyterLab &&
       isTaskKillable(
         task,
         canModifyWorkspaceNSC({ userId: task.userId, workspace: { id: task.workspaceId } }),
@@ -130,14 +117,6 @@ const TaskActionDropdown: React.FC<Props> = ({
     try {
       switch (key) {
         case Action.Connect:
-          if (task.type === CommandType.JupyterLab) {
-            const address = await getJupyterLabAddress(task.id);
-            if (!address) {
-              openToast({ severity: 'Error', title: NOTEBOOK_ACCESS_DENIED });
-              break;
-            }
-            setJupyterLabAddress(address);
-          }
           TaskConnectModal.open();
           break;
         case Action.OpenTerminal:

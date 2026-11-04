@@ -35,7 +35,11 @@ export const RunKind = {
 
 export type RunKind = ValueOf<typeof RunKind>;
 
-/** The order of the kinds: the Kind filter's and sort's, and of runs that started at the same time. */
+/**
+ * The order of the kinds: the Kind filter's and sort's, and of runs that started at the same time.
+ * JupyterLab is the label of ended notebook records: a URL's `type=jupyter-lab` still decodes, but
+ * no dashboard lists or offers it (LISTED_KINDS).
+ */
 export const RUN_KINDS: RunKind[] = [
   RunKind.Experiment,
   RunKind.GenericTask,
@@ -45,16 +49,16 @@ export const RUN_KINDS: RunKind[] = [
   RunKind.TensorBoard,
 ];
 
-/** Notebooks, shells, commands and TensorBoards: the kinds the master lists whole, from memory. */
-export const COMMAND_KINDS: CommandType[] = [
-  RunKind.JupyterLab,
-  RunKind.Shell,
-  RunKind.Command,
-  RunKind.TensorBoard,
-];
+/** The kinds a dashboard lists and its Kind filter offers. */
+export const LISTED_KINDS: RunKind[] = RUN_KINDS.filter((kind) => kind !== RunKind.JupyterLab);
+
+/** Shells, commands and TensorBoards: the kinds the master lists whole, from memory. */
+export const COMMAND_KINDS = [RunKind.Shell, RunKind.Command, RunKind.TensorBoard] as const;
+
+export type ListedCommandKind = (typeof COMMAND_KINDS)[number];
 
 export const isCommandKind = (kind: RunKind): kind is CommandType =>
-  (COMMAND_KINDS as RunKind[]).includes(kind);
+  kind === RunKind.JupyterLab || (COMMAND_KINDS as readonly RunKind[]).includes(kind);
 
 export const runKindLabel: Record<RunKind, string> = {
   [RunKind.Command]: 'Command',
@@ -81,13 +85,13 @@ export type DashboardScope =
   | { type: 'project'; projectId: number };
 
 /**
- * The kinds a dashboard lists. A project has only experiments and generic tasks, since notebooks,
- * shells, commands and TensorBoards belong to a workspace and not to a project. The tasks-only view
- * leaves experiments out.
+ * The kinds a dashboard lists. A project has only experiments and generic tasks, since shells,
+ * commands and TensorBoards belong to a workspace and not to a project. The tasks-only view leaves
+ * experiments out.
  */
 export const kindsOf = (scope: DashboardScope, experiments: boolean): RunKind[] => {
   if (scope.type === 'project') return [RunKind.Experiment, RunKind.GenericTask];
-  return experiments ? RUN_KINDS : RUN_KINDS.filter((kind) => kind !== RunKind.Experiment);
+  return experiments ? LISTED_KINDS : LISTED_KINDS.filter((kind) => kind !== RunKind.Experiment);
 };
 
 /* State */

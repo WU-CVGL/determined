@@ -19,9 +19,9 @@ class IdleType(enum.Enum):
 
 
 REPORT_IDLE_INTERVAL = 30
-# A shell's task reports at a quarter of its idle timeout, but not more often than this.
+# The check reports at a quarter of the task's idle timeout, but not more often than this.
 MIN_REPORT_INTERVAL = 1
-# A shell's task gives up on a JupyterLab request after at most this long; a notebook waits for it.
+# The check gives up on a JupyterLab request after at most this long.
 JUPYTER_TIMEOUT_SECONDS = 3
 MASTER_TIMEOUT_SECONDS = 10
 
@@ -56,7 +56,7 @@ class Timing:
     def __init__(
         self,
         interval: float = REPORT_IDLE_INTERVAL,
-        jupyter: Optional[float] = JUPYTER_TIMEOUT_SECONDS,
+        jupyter: float = JUPYTER_TIMEOUT_SECONDS,
         master: float = MASTER_TIMEOUT_SECONDS,
     ):
         self.interval = interval
@@ -66,15 +66,15 @@ class Timing:
 
 def report_timing(idle_timeout: Optional[str]) -> Timing:
     """
-    A shell's timing for its idle timeout T in seconds: a round of checks starts every T/4, at least
-    every second and at most every 30 s; a JupyterLab request times out after T/4, at most 3 s, and
-    the report to the master, which is not retried, after T/4, at most 10 s. Each of these timeouts
-    bounds its request from connecting to the answer, not each phase of it. A round starts at most
-    an interval after the previous report, since a report takes at most an interval, and it reports
-    a busy or running kernel after one request: two such reports are at most interval + request +
-    report <= 3T/4 apart, for any T of at least 4 s. Activity found in the terminals takes a second
-    request, so at most T. At a shell's shortest timeout, 10 s, each of these is 2.5 s, so a
-    JupyterLab that answers within 2 s is reported in time.
+    The timing for the task's idle timeout T in seconds: a round of checks starts every T/4, at
+    least every second and at most every 30 s; a JupyterLab request times out after T/4, at most
+    3 s, and the report to the master, which is not retried, after T/4, at most 10 s. Each of these
+    timeouts bounds its request from connecting to the answer, not each phase of it. A round starts
+    at most an interval after the previous report, since a report takes at most an interval, and it
+    reports a busy or running kernel after one request: two such reports are at most interval +
+    request + report <= 3T/4 apart, for any T of at least 4 s. Activity found in the terminals
+    takes a second request, so at most T. At the shortest timeout, 10 s, each of these is 2.5 s, so
+    a JupyterLab that answers within 2 s is reported in time.
     """
     timing = Timing()
     if idle_timeout is None:
@@ -98,16 +98,11 @@ class Unreadable(Exception):
 
 
 def is_idle(
-    request_address: str,
-    token: str,
-    mode: IdleType,
-    timeout: Optional[float],
-    read_all: bool,
+    request_address: str, token: str, mode: IdleType, timeout: float
 ) -> Optional[bool]:
     """
-    Whether JupyterLab is idle, or None when its state cannot be read within timeout. With read_all,
-    as for a notebook, it reads the kernels, the terminals and the sessions before it decides;
-    otherwise it reads only what the mode needs and decides as soon as it can.
+    Whether JupyterLab is idle, or None when its state cannot be read within timeout. It reads only
+    what the mode needs and decides as soon as it can.
     """
     auth_header = {"Authorization": f"token {token}"}
     answers = {}
@@ -119,7 +114,7 @@ def is_idle(
                     f"{request_address}{path}",
                     headers=auth_header,
                     verify=False,
-                    timeout=None if timeout is None else Timeout(total=timeout),
+                    timeout=Timeout(total=timeout),
                 )
                 # An error body is not a list of kernels.
                 response.raise_for_status()
@@ -129,15 +124,9 @@ def is_idle(
         return answers[path]
 
     try:
-        if read_all:
-            for path in ("/api/kernels", "/api/terminals", "/api/sessions"):
-                get(path)
-
         if mode == IdleType.KERNELS_OR_TERMINALS:
-            if get("/api/kernels") or get("/api/terminals"):
-                return False
-            # A session has a kernel, so only a notebook reads them.
-            return not (read_all and get("/api/sessions"))
+            # A session has a kernel, so the sessions are not read.
+            return not (get("/api/kernels") or get("/api/terminals"))
         elif mode == IdleType.KERNEL_CONNECTIONS:
             # Unfortunately, the terminals API doesn't return a connection count.
             return all(k["connections"] == 0 for k in get("/api/kernels"))
@@ -146,7 +135,7 @@ def is_idle(
 
             kernels = get("/api/kernels")
             no_busy_kernels = all(k["execution_state"] != "busy" for k in kernels)
-            if not no_busy_kernels and not read_all:
+            if not no_busy_kernels:
                 return False
             terminals = get("/api/terminals")
             old_last_activity = last_activity
@@ -162,24 +151,15 @@ def is_idle(
 def main():
     requests.packages.urllib3.disable_warnings()
     port = os.environ["NOTEBOOK_PORT"]
-    task_id = os.environ["DET_TASK_ID"]
     token = os.environ["DET_NOTEBOOK_TOKEN"]
-    # JupyterLab serves under the base URL that the jupyter unit gives it.
-    base_url = os.environ.get("NOTEBOOK_BASE_URL") or f"/proxy/{task_id}/"
+    # JupyterLab serves under the base URL that the master sets for the jupyter service.
+    base_url = os.environ["NOTEBOOK_BASE_URL"]
     notebook_server = f"https://127.0.0.1:{port}{base_url.rstrip('/')}"
-    # A shell reports to its task's activity record, a notebook to the notebook API.
-    report_task = os.environ.get("DET_ACTIVITY_REPORT") == "task"
-    # A notebook reads all of JupyterLab's state in every round, as before.
-    read_all = not report_task
-    timing = Timing(jupyter=None)
-    if report_task:
-        timing = report_timing(os.environ.get("DET_IDLE_TIMEOUT_SECONDS"))
+    timing = report_timing(os.environ.get("DET_IDLE_TIMEOUT_SECONDS"))
     master_url = api.canonicalize_master_url(os.environ["DET_MASTER"])
     cert = certs.default_load(master_url)
-    sess = authentication.login_from_task(master_url, cert=cert)
-    if report_task:
-        # A retried report would come later than its timeout; the next round reports again.
-        sess = sess.with_retry(0)
+    # A retried report would come later than its timeout; the next round reports again.
+    sess = authentication.login_from_task(master_url, cert=cert).with_retry(0)
     try:
         idle_type = IdleType[os.environ["NOTEBOOK_IDLE_TYPE"].upper()]
     except KeyError:
@@ -195,20 +175,14 @@ def main():
         # The interval counts from the start of the round, so that its requests take part of it.
         start = time.monotonic()
         try:
-            idle = is_idle(notebook_server, token, idle_type, timing.jupyter, read_all)
-            if report_task:
-                # Only a busy JupyterLab is reported: an unreadable one is not activity.
-                if idle is False:
-                    sess.post(
-                        f"/api/v1/allocations/{os.environ['DET_ALLOCATION_ID']}/activity",
-                        json={"active": True},
-                        timeout=Timeout(total=timing.master),
-                    )
-            else:
-                sess.put(
-                    f"/api/v1/notebooks/{task_id}/report_idle",
-                    json={"idle": bool(idle)},
-                    timeout=timing.master,
+            idle = is_idle(notebook_server, token, idle_type, timing.jupyter)
+            # Only a busy JupyterLab is reported to the task's activity record: an unreadable one
+            # is not activity.
+            if idle is False:
+                sess.post(
+                    f"/api/v1/allocations/{os.environ['DET_ALLOCATION_ID']}/activity",
+                    json={"active": True},
+                    timeout=Timeout(total=timing.master),
                 )
         except Exception:
             logging.warning("ignoring error communicating with master", exc_info=True)

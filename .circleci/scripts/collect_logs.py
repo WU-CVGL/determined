@@ -10,7 +10,7 @@ from determined.common import api
 from determined.common.api import bindings as b
 from determined.common.api import certs
 
-Task = Union[b.v1Command, b.v1Notebook, b.v1Shell, b.v1Tensorboard]
+Task = Union[b.v1Command, b.v1Shell, b.v1Tensorboard]
 
 
 def obtain_token(username: str, password: str, master_address: str) -> str:
@@ -83,7 +83,6 @@ class Cli(CliBase):
     def get_tasks(self) -> List[Task]:
         tasks: List[Task] = []
         tasks.extend(b.get_GetCommands(self.session).commands)
-        tasks.extend(b.get_GetNotebooks(self.session).notebooks)
         tasks.extend(b.get_GetShells(self.session).shells)
         tasks.extend(b.get_GetTensorboards(self.session).tensorboards)
         return tasks

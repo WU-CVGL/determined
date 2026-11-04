@@ -6,10 +6,10 @@
  Job Configuration Reference
 #############################
 
-The behavior of interactive jobs, such as :ref:`TensorBoards <tensorboards>`, :ref:`notebooks
-<notebooks>`, :ref:`commands, and shells <commands-and-shells>`, can be influenced by setting a
-variety of configuration variables. These configuration variables are similar but not identical to
-the configuration options supported by :ref:`experiments <experiment-config-reference>`.
+The behavior of interactive jobs, such as :ref:`TensorBoards <tensorboards>`, :ref:`commands, and
+shells <commands-and-shells>`, can be influenced by setting a variety of configuration variables.
+These configuration variables are similar but not identical to the configuration options supported
+by :ref:`experiments <experiment-config-reference>`.
 
 Configuration settings can be specified by passing a YAML configuration file when launching the
 workload via the Determined CLI:
@@ -17,7 +17,6 @@ workload via the Determined CLI:
 .. code::
 
    $ det tensorboard start experiment_id --config-file=my_config.yaml
-   $ det notebook start --config-file=my_config.yaml
    $ det cmd run --config-file=my_config.yaml ...
    $ det shell start --config-file=my_config.yaml
 
@@ -26,7 +25,6 @@ except a TensorBoard, is launched:
 
 .. code::
 
-   $ det notebook start --config resources.slots=2
    $ det cmd run --config description="determined_command" ...
    $ det shell start --config resources.priority=1
 
@@ -164,7 +162,7 @@ The following configuration settings are supported:
 -  ``idle_timeout``: Specifies the duration before an idle instance is automatically terminated.
    This string is a sequence of decimal numbers, each with optional fraction and a unit suffix, such
    as "30s", "1h", or "1m30s". Valid time units are "s", "m", "h". The duration must be positive.
-   This is only used by shells, notebooks and TensorBoard instances:
+   This is only used by shells and TensorBoard instances:
 
    -  Shells: There is no default, and the shortest value is ``10s``; a shell is only terminated for
       being idle when this is set. The idle time counts from the last activity, once no browser
@@ -175,27 +173,21 @@ The following configuration settings are supported:
       kernel that is executing. An SSH session or a browser page kept open on the shell can
       therefore delay its termination. Processes that run in the shell are not activity.
 
-   -  Notebooks: The default is the master's :ref:`notebook_timeout
-      <master-config-notebook-timeout>`. A notebook instance is considered to be idle if it is not
-      receiving any HTTP traffic and it is not otherwise active (as defined by the
-      ``notebook_idle_type`` option).
-
    -  TensorBoard: The default is the master's ``tensorboard_timeout``, ``5m`` (5 minutes) unless
       the master sets another. A TensorBoard instance is considered to be idle if it does not
       receive any HTTP traffic.
 
--  ``notebook_idle_type``: Specifies how to decide whether a notebook, or the ``jupyter`` service of
-   a shell with ``idle_timeout``, is idle or active. The default is ``kernels_or_terminals`` for
-   notebooks and ``activity`` for the ``jupyter`` service of a shell. Valid values are:
+-  ``notebook_idle_type``: Specifies how to decide whether the ``jupyter`` service of a shell with
+   ``idle_timeout`` is idle or active. The default is ``activity``. Valid values are:
 
-   -  ``kernels_or_terminals``: The notebook is considered active if any kernels or terminals are
+   -  ``kernels_or_terminals``: JupyterLab is considered active if any kernels or terminals are
       running.
 
-   -  ``kernel_connections``: The notebook is considered active if there are any open connections
-      from any web connections to any kernels. (JupyterLab does not report connections to terminals,
-      so they cannot be counted.)
+   -  ``kernel_connections``: JupyterLab is considered active if there are any open connections from
+      any web connections to any kernels. (JupyterLab does not report connections to terminals, so
+      they cannot be counted.)
 
-   -  ``activity``: The notebook is considered active if any kernel is executing a command or any
+   -  ``activity``: JupyterLab is considered active if any kernel is executing a command or any
       terminal that is currently being viewed in JupyterLab is inputting or outputting any data. (A
       terminal that is running a command but not being viewed or running a command with no output is
       treated as idle, since JupyterLab does not provide activity information for those case.)

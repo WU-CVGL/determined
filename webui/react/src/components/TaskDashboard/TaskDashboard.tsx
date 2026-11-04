@@ -17,7 +17,6 @@ import FilterCounter from 'components/FilterCounter';
 import GenericTaskActionDropdown from 'components/GenericTaskActionDropdown';
 import GenericTaskIdLink from 'components/GenericTaskIdLink';
 import GenericTaskStateBadge from 'components/GenericTaskStateBadge';
-import JupyterLabButton from 'components/JupyterLabButton';
 import Link from 'components/Link';
 import ShellButton from 'components/ShellButton';
 import InteractiveTable, {
@@ -107,9 +106,9 @@ import settingsConfig, {
 interface Props {
   /** A project's dashboard: its experiments and generic tasks. */
   projectId?: number;
-  /** The tasks-only view: notebooks, shells, commands, TensorBoards and generic tasks. */
+  /** The tasks-only view: shells, commands, TensorBoards and generic tasks. */
   tasksOnly?: boolean;
-  /** A workspace's dashboard, which launches notebooks and shells in it. */
+  /** A workspace's dashboard, which launches shells in it. */
   workspace?: Workspace;
 }
 
@@ -984,7 +983,6 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         </div>
         {showLaunch && (
           <div className={css.launch}>
-            <JupyterLabButton enabled={launchEnabled} workspace={workspace} />
             <ShellButton enabled={launchEnabled} workspace={workspace} />
           </div>
         )}

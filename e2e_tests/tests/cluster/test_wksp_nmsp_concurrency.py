@@ -33,13 +33,13 @@ def test_wksp_running_task_check_namespace(namespaces_created: Tuple[str, str]) 
     body.clusterNamespaceMeta = {cluster_name: wksp_namespace_meta}
     resp = bindings.post_PostWorkspace(sess, body=body)
     wksp_id = resp.workspace.id
-    notebook_id = bindings.post_LaunchNotebook(
+    shell_id = bindings.post_LaunchShell(
         sess,
-        body=bindings.v1LaunchNotebookRequest(workspaceId=wksp_id),
-    ).notebook.id
+        body=bindings.v1LaunchShellRequest(workspaceId=wksp_id),
+    ).shell.id
 
-    # Wait for the notebook to start or run.
-    task.wait_for_task_start(sess, notebook_id, start_or_run=True)
+    # Wait for the shell to start or run.
+    task.wait_for_task_start(sess, shell_id, start_or_run=True)
 
     # Set a workspace-namespace binding using the same auto-created namespace.
     content = bindings.v1SetWorkspaceNamespaceBindingsRequest(workspaceId=wksp_id)

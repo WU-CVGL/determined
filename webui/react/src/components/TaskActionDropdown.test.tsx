@@ -7,11 +7,10 @@ import { MemoryRouter } from 'react-router-dom';
 import userStore from 'stores/users';
 import { CommandState, CommandTask, CommandType, DetailedUser } from 'types';
 import { isDangerMenuItem, menuLabels } from 'utils/tests/menu';
-import { NOTEBOOK_ACCESS_DENIED } from 'utils/wait';
 
 import TaskActionDropdown from './TaskActionDropdown';
 
-const mocks = vi.hoisted(() => ({ canCreateWorkspaceNSC: true, getJupyterLab: vi.fn() }));
+const mocks = vi.hoisted(() => ({ canCreateWorkspaceNSC: true }));
 
 const resources = vi.hoisted(() => ({ enabled: false }));
 vi.mock('hooks/useTaskResourcesEnabled', () => ({ default: () => resources.enabled }));
@@ -29,7 +28,7 @@ vi.mock('routes/utils', () => ({
   },
   serverAddress: () => 'http://localhost',
 }));
-vi.mock('services/api', () => ({ getJupyterLab: mocks.getJupyterLab, killTask: vi.fn() }));
+vi.mock('services/api', () => ({ killTask: vi.fn() }));
 const feature = vi.hoisted(() => ({ on: true }));
 vi.mock('hooks/useFeature', () => ({ default: () => ({ isOn: () => feature.on }) }));
 
@@ -96,9 +95,10 @@ const openLaunchAgainMenu = async (
   return onLaunchAgain;
 };
 
+/** An ended notebook record: the master keeps its label, logs and resources, and nothing else. */
 const notebook: Partial<CommandTask> = {
   id: 'nb-1',
-  serviceAddress: '/proxy/nb-1/',
+  state: CommandState.Terminated,
   type: CommandType.JupyterLab,
 };
 
@@ -139,65 +139,45 @@ describe('TaskActionDropdown', () => {
     expect(screen.getByText('Kill')).toBeInTheDocument();
   });
 
-  it('connects to a notebook with the token that the master returns to its owner', async () => {
-    mocks.getJupyterLab.mockResolvedValue({ serviceAddress: '/proxy/nb-1/?token=tok' });
-    await openMenu(101, notebook);
-    await userEvent.click(screen.getByText('Connect'));
-    expect(await screen.findByText('http://localhost/proxy/nb-1/?token=tok')).toBeInTheDocument();
-    expect(mocks.getJupyterLab).toHaveBeenCalledWith({ commandId: 'nb-1' });
-  });
-
-  it('refuses to connect to a notebook when the master returns no token', async () => {
-    // An admin is offered Connect on any notebook; the master decides whether to add the token.
-    setCurrentUser(1, true);
-    mocks.getJupyterLab.mockResolvedValue({ serviceAddress: '/proxy/nb-1/' });
-    await openMenu(102, notebook);
-    await userEvent.click(screen.getByText('Connect'));
-    expect(await screen.findByText(NOTEBOOK_ACCESS_DENIED)).toBeInTheDocument();
-    expect(screen.queryByText('http://localhost/proxy/nb-1/')).not.toBeInTheDocument();
-  });
+  it.each([
+    ['an ended', CommandState.Terminated],
+    ['a running', CommandState.Running],
+  ])(
+    'offers only View Logs, View Resources and Copy Task ID on %s notebook record',
+    async (_, state) => {
+      resources.enabled = true;
+      const onLaunchAgain = await openLaunchAgainMenu({ ...notebook, state }, owner);
+      await screen.findByText('View Logs');
+      expect(menuLabels()).toEqual(['View Logs', 'View Resources', 'Copy Task ID']);
+      expect(onLaunchAgain).not.toHaveBeenCalled();
+    },
+  );
 
   describe('Connect', () => {
-    const notebookLabel = 'Connect';
     const shellLabel = 'Connect via CLI';
     const exactly = (label: string) => screen.queryByText(label, { exact: true });
 
-    it.each([
-      [CommandType.Shell, shellLabel],
-      [CommandType.JupyterLab, notebookLabel],
-    ])('is offered on the user’s own running %s', async (type, label) => {
-      await openMenu(101, { state: CommandState.Running, type });
-      expect(exactly(label)).toBeInTheDocument();
+    it('is offered on the user’s own running shell', async () => {
+      await openMenu(101, runningShell);
+      expect(exactly(shellLabel)).toBeInTheDocument();
     });
 
-    it.each([
-      [CommandType.Shell, shellLabel],
-      [CommandType.JupyterLab, notebookLabel],
-    ])('is not offered on another user’s running %s', async (type, label) => {
-      await openMenu(102, { state: CommandState.Running, type });
+    it('is not offered on another user’s running shell', async () => {
+      await openMenu(102, runningShell);
       await screen.findByText('View Logs');
-      expect(exactly(label)).not.toBeInTheDocument();
+      expect(exactly(shellLabel)).not.toBeInTheDocument();
     });
 
-    it.each([
-      [CommandType.Shell, shellLabel],
-      [CommandType.JupyterLab, notebookLabel],
-    ])(
-      'is not offered on another user’s running %s in the right-click menu',
-      async (type, label) => {
-        openContextMenu(102, { state: CommandState.Running, type });
-        await screen.findByText('View Logs');
-        expect(exactly(label)).not.toBeInTheDocument();
-      },
-    );
+    it('is not offered on another user’s running shell in the right-click menu', async () => {
+      openContextMenu(102, runningShell);
+      await screen.findByText('View Logs');
+      expect(exactly(shellLabel)).not.toBeInTheDocument();
+    });
 
-    it.each([
-      [CommandType.Shell, shellLabel],
-      [CommandType.JupyterLab, notebookLabel],
-    ])('is offered to an admin on another user’s running %s', async (type, label) => {
+    it('is offered to an admin on another user’s running shell', async () => {
       setCurrentUser(1, true);
-      await openMenu(102, { state: CommandState.Running, type });
-      expect(exactly(label)).toBeInTheDocument();
+      await openMenu(102, runningShell);
+      expect(exactly(shellLabel)).toBeInTheDocument();
     });
 
     it('is not offered on a task that is not running', async () => {
@@ -208,9 +188,9 @@ describe('TaskActionDropdown', () => {
 
     it('is not offered before the current user is known', async () => {
       userStore.reset();
-      await openMenu(101, notebook);
+      await openMenu(101, runningShell);
       await screen.findByText('View Logs');
-      expect(exactly(notebookLabel)).not.toBeInTheDocument();
+      expect(exactly(shellLabel)).not.toBeInTheDocument();
     });
   });
 
@@ -267,8 +247,6 @@ describe('TaskActionDropdown', () => {
     it.each([
       [CommandType.Shell, CommandState.Running],
       [CommandType.Shell, CommandState.Terminated],
-      [CommandType.JupyterLab, CommandState.Running],
-      [CommandType.JupyterLab, CommandState.Terminated],
     ])('is offered on the user’s own %s (%s) and passes the task on', async (type, state) => {
       const onLaunchAgain = await openLaunchAgainMenu({ state, type }, owner);
       await userEvent.click(await screen.findByText('Launch Again'));
@@ -396,19 +374,6 @@ describe('TaskActionDropdown', () => {
       await openLaunchAgainMenu(runningShell, owner, true);
       await screen.findByText('Launch Again');
       expect(menuLabels()).toEqual(FULL_SHELL_MENU);
-    });
-
-    it('puts a notebook’s Connect where the shell has Connect via CLI', async () => {
-      await openLaunchAgainMenu({ ...notebook, state: CommandState.Running }, owner);
-      await screen.findByText('Launch Again');
-      expect(menuLabels()).toEqual([
-        'View Logs',
-        'View Resources',
-        'Copy Task ID',
-        'Connect',
-        'Launch Again',
-        'Kill',
-      ]);
     });
 
     it('leaves out what does not apply and keeps the order of the rest', async () => {

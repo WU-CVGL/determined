@@ -9,7 +9,7 @@ import { ColumnLayout, withColumn } from 'components/Table/columnLayout';
 import { ColumnDef } from 'components/Table/InteractiveTable';
 import { createOmitableRenderer, relativeTimeRenderer } from 'components/Table/Table';
 import { paths } from 'routes/utils';
-import { getJupyterLabs, getTensorBoards } from 'services/api';
+import { getTensorBoards } from 'services/api';
 import { CommandTask, FullJob, Job, JobType } from 'types';
 import {
   genericJobLabel,
@@ -36,9 +36,6 @@ const routeToTask = async (taskId: string, jobType: JobType): Promise<void> => {
     case JobType.TENSORBOARD:
       cmds = await getTensorBoards({});
       break;
-    case JobType.NOTEBOOK:
-      cmds = await getJupyterLabs({});
-      break;
     default:
       throw new Error(`Unsupported job type: ${jobType}`);
   }
@@ -58,7 +55,6 @@ const linkToEntityPage = (job: Job, label: ReactNode): ReactNode => {
       return <Link path={paths.experimentDetails(job.entityId)}>{label}</Link>;
     case JobType.GENERIC:
       return <Link path={paths.genericTaskDetails(job.entityId)}>{label}</Link>;
-    case JobType.NOTEBOOK:
     case JobType.TENSORBOARD:
       return (
         <Link

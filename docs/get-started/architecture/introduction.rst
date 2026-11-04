@@ -19,13 +19,15 @@ It takes care of:
  Features
 **********
 
+.. _interactive-job-configuration:
+
 Configurable Interactive Jobs
 =============================
 
-The behavior of interactive jobs, such as :ref:`TensorBoards <tensorboards>`, :ref:`notebooks
-<notebooks>`, :ref:`commands, and shells <commands-and-shells>`, can be influenced by setting a
-variety of configuration variables. These configuration variables are similar but not identical to
-the configuration options supported by :ref:`experiments <experiment-config-reference>`.
+The behavior of interactive jobs, such as :ref:`TensorBoards <tensorboards>`, :ref:`commands, and
+shells <commands-and-shells>`, can be influenced by setting a variety of configuration variables.
+These configuration variables are similar but not identical to the configuration options supported
+by :ref:`experiments <experiment-config-reference>`.
 
 Configuration settings can be specified by passing a YAML configuration file when launching the
 workload via the Determined CLI.
@@ -51,9 +53,9 @@ of the tasks you can perform with the Determined CLI:
 -  Queue management: The CLI enables users to manage their job queues, monitor the progress of
    ongoing tasks, and even prioritize or cancel jobs as needed.
 
--  Notebook management: Jupyter notebooks are an essential tool for data scientists and machine
-   learning engineers. The CLI simplifies the process of creating, launching, and managing Jupyter
-   notebooks within the platform.
+-  Shell management: Shells give interactive access to the cluster over SSH, and can also run
+   JupyterLab and VS Code in the browser. The CLI starts, opens, and manages shells and their
+   services.
 
 -  TensorBoard integration: TensorBoard is a popular visualization tool for TensorFlow projects. The
    CLI allows users to easily launch and manage TensorBoard instances, making it simple to visualize
@@ -126,33 +128,28 @@ information.
 
 For more information about how to use the model registry, visit :ref:`organizing-models`.
 
-Notebooks
-=========
+JupyterLab
+==========
 
-`Jupyter Notebooks <https://jupyter.org/>`__ are a convenient way to develop and debug machine
-learning models, visualize the behavior of trained models, or even manage the training lifecycle of
-a model manually. Determined makes it easy to launch and manage notebooks.
+`JupyterLab <https://jupyter.org/>`__ is a convenient way to develop and debug machine learning
+models, visualize the behavior of trained models, or even manage the training lifecycle of a model
+manually. In Determined, JupyterLab runs as the :ref:`jupyter service <jupyter-service>` of a shell:
 
-Determined Notebooks have the following benefits:
+-  JupyterLab runs in a containerized environment on the cluster, so dependencies are managed with
+   images and virtual environments. Its HTTP requests pass through the master's proxy to and from
+   the container.
 
--  Jupyter Notebooks run in containerized environments on the cluster. We can easily manage
-   dependencies using images and virtual environments. The HTTP requests are passed through the
-   master proxy from and to the container.
-
--  Jupyter Notebooks are automatically terminated if they are idle for a configurable duration to
-   release resources. A notebook instance is considered to be idle if it is not receiving any HTTP
-   traffic and it is not otherwise active (as defined by the ``notebook_idle_type`` option in the
-   :ref:`task configuration <command-notebook-configuration>`).
+-  A shell whose configuration sets ``idle_timeout`` is terminated once it has been idle that long,
+   to release resources. JupyterLab activity, as the ``notebook_idle_type`` option in the :ref:`task
+   configuration <command-notebook-configuration>` defines it, counts as activity.
 
 .. note::
 
-   -  Once a notebook is terminated, it is not possible to restore the files that are not stored in
-      the persistent directories. **You need to ensure that the cluster is configured to mount
-      persistent directories into the container and save files in the persistent directories in the
-      container.** See :ref:`notebook-state` for more information.
+   -  Once a shell is terminated, the files that are not stored in persistent directories cannot be
+      restored. **Mount persistent directories into the container and save files in them.** See
+      :ref:`jupyter-state` for more information.
 
-   -  If you open a notebook tab in JupyterLab, it will automatically open a kernel that will not be
-      shut down automatically so you need to manually terminate the kernels.
+   -  Opening a notebook in JupyterLab starts a kernel, which runs until you shut it down.
 
 TensorBoards
 ============
@@ -192,9 +189,9 @@ following benefits:
 |                                                | automatically parallelized across the accelerators in the |
 |                                                | cluster. See :ref:`hyperparameter-tuning`.                |
 +------------------------------------------------+-----------------------------------------------------------+
-| Cluster-backed notebooks, commands, and shells | Leverage your shared cluster computing devices in a more  |
-|                                                | versatile environment. See :ref:`notebooks` and           |
-|                                                | :ref:`commands-and-shells`.                               |
+| Cluster-backed commands and shells             | Leverage your shared cluster computing devices in a more  |
+|                                                | versatile environment, with JupyterLab and VS Code in     |
+|                                                | shells. See :ref:`commands-and-shells`.                   |
 +------------------------------------------------+-----------------------------------------------------------+
 | Cluster management                             | Automatically manage ML accelerators, such as GPUs,       |
 |                                                | on-premise or in cloud VMs using your own environment,    |
@@ -307,11 +304,11 @@ hyperparameters will be set. More information can be found at :ref:`hyperparamet
 Resource Pools
 ==============
 
-To run tasks such as experiments or notebooks, Determined needs to have resources (CPUs, GPUs) on
-which to run the tasks. However, different tasks have different resource requirements and, given the
-cost of GPU resources, it is important to choose the right resources for specific goals so that you
-get the most value out of your money. For example, you may want to run your training on beefy V100
-GPU machines, while you want your TensorBoards to run on cheap CPU machines with minimal resources.
+To run tasks such as experiments or shells, Determined needs to have resources (CPUs, GPUs) on which
+to run the tasks. However, different tasks have different resource requirements and, given the cost
+of GPU resources, it is important to choose the right resources for specific goals so that you get
+the most value out of your money. For example, you may want to run your training on beefy V100 GPU
+machines, while you want your TensorBoards to run on cheap CPU machines with minimal resources.
 
 Determined has the concept of a *resource pool*, which is a collection of identical resources that
 are located physically close to each other. Determined allows you to configure your cluster to have
@@ -322,7 +319,7 @@ provisioning independently.
 When you configure a cluster, you set which pool is the default for auxiliary tasks and which pool
 is the default for compute tasks. CPU-only tasks such as TensorBoards will run on the default
 auxiliary pool unless you specify that they should run in a different pool when launching the task.
-Tasks that require a slot, such as experiments or GPU notebooks, will use the default compute pool
+Tasks that require a slot, such as experiments or GPU shells, will use the default compute pool
 unless otherwise specified. For this reason it is recommended that you always create a cluster with
 at least two pools, one with low-cost CPU instances for auxiliary tasks and one with GPU instances
 for compute tasks. This is the default setup when launching a cluster on AWS or GCP using ``det
@@ -481,10 +478,10 @@ When creating a task, the job configuration file has a section called "resources
 
 If this field is not set, the task will be launched into one of the two default pools defined in the
 :ref:`master configuration <master-config-reference>`. Experiments will be launched into the default
-compute pool. TensorBoards will be launched into the default auxiliary pool. Commands, shells, and
-notebooks that request a slot (which is the default behavior if the ``resources.slots`` field is not
-set) will be launched into the default compute pool. Commands, shells, and notebooks that explicitly
-request 0 slots (for example the "Launch CPU-only Notebook" button in the WebUI) will use the
+compute pool. TensorBoards will be launched into the default auxiliary pool. Commands and shells
+that request a slot (which is the default behavior if the ``resources.slots`` field is not set) will
+be launched into the default compute pool. Commands and shells that explicitly request 0 slots (for
+example a shell launched with **Slots** set to 0 in the WebUI's **Launch Shell** form) will use the
 auxiliary pool.
 
 .. _scheduling:
@@ -513,10 +510,9 @@ scheduling behavior of an individual task is influenced by several task configur
 
 .. note::
 
-   Zero-slot tasks (e.g., CPU-only notebooks, TensorBoards) are scheduled independently of tasks
-   that require slots (e.g., experiments, GPU notebooks). The fair-share scheduler schedules
-   zero-slot tasks on a FIFO basis. The priority scheduler schedules zero-slot tasks based on
-   priority.
+   Zero-slot tasks (e.g., CPU-only shells, TensorBoards) are scheduled independently of tasks that
+   require slots (e.g., experiments, GPU shells). The fair-share scheduler schedules zero-slot tasks
+   on a FIFO basis. The priority scheduler schedules zero-slot tasks based on priority.
 
 Fair-Share Scheduler
 ^^^^^^^^^^^^^^^^^^^^
@@ -557,8 +553,8 @@ resources can be reallocated to high priority tasks more promptly and backfilled
 use of the idle resources; however, preemption can also result in additional overhead due to
 checkpointing low priority tasks, which might be expensive for some models.
 
-Notebooks, TensorBoards, shells, and commands are not preemptible. These tasks will continue to
-occupy cluster resources until they complete or are terminated.
+TensorBoards, shells, and commands are not preemptible. These tasks will continue to occupy cluster
+resources until they complete or are terminated.
 
 The priority of any task can be changed after it is created using one of the following commands:
 
@@ -566,7 +562,6 @@ The priority of any task can be changed after it is created using one of the fol
 
    det experiment set priority <ID> <priority>
    det command set priority <ID> <priority>
-   det notebook set priority <ID> <priority>
    det shell set priority <ID> <priority>
    det tensorboard set priority <ID> <priority>
 
@@ -584,21 +579,21 @@ An example of priority scheduler behavior with preemption enabled:
    enabled, the new experiment would not get scheduled until the ASHA experiment GPU demand becomes
    <= 4.
 
-#. User starts a priority 3 notebook with resources.slots 1. The notebook has a lower priority than
-   the two active experiments, so it will run as soon as the two active experiments collectively
-   need <= 7 GPUs.
+#. User starts a priority 3 shell with resources.slots 1. The shell has a lower priority than the
+   two active experiments, so it will run as soon as the two active experiments collectively need <=
+   7 GPUs.
 
-#. ASHA and the distributed training experiment both complete, and the notebook task with priority 3
+#. ASHA and the distributed training experiment both complete, and the shell task with priority 3
    will run.
 
 #. User submits a priority 1 distributed training experiment with slots_per_trial 8. Although this
-   workload has a higher priority than the active notebook task, it cannot be scheduled because it
-   requires 8 slots, notebooks are not preemptible, and therefore only 7 slots are available.
+   workload has a higher priority than the active shell task, it cannot be scheduled because it
+   requires 8 slots, shells are not preemptible, and therefore only 7 slots are available.
 
 #. User submits a priority 2 distributed training experiment with slots_per_trial 4. One trial will
    be scheduled to make use of the idle 7 slots.
 
-#. The notebook is killed. The priority 2 distributed training experiment is preempted. And then the
+#. The shell is killed. The priority 2 distributed training experiment is preempted. And then the
    priority 1 distributed training experiment starts running. Once that experiment is complete,
    distributed training experiment with priority 2 restarts.
 
@@ -610,7 +605,7 @@ scheduling decisions.
 Scheduling with Kubernetes
 --------------------------
 
-When using Determined on Kubernetes, Determined workloads, such as experiments, notebooks, and
+When using Determined on Kubernetes, Determined workloads, such as experiments, commands, and
 shells, are started by launching Kubernetes pods. The scheduling behavior that applies to those
 workloads depends on how the Kubernetes scheduler has been configured.
 
@@ -705,8 +700,8 @@ YAML Configuration
 ==================
 
 `YAML <https://yaml.org/>`__ is a markup language often used for configuration. Determined uses YAML
-for configuring tasks such as :ref:`experiments <experiment-config-reference>` and :ref:`notebooks
-<notebook-configuration>`, as well as configuring the Determined :ref:`cluster as a whole
+for configuring tasks such as :ref:`experiments <experiment-config-reference>` and :ref:`shells
+<job-configuration-reference>`, as well as configuring the Determined :ref:`cluster as a whole
 <cluster-configuration>`. This guide describes a subset of YAML that is recommended for use with
 Determined. This is not a full description of YAML; see the `specification
 <https://yaml.org/spec/1.2/spec.html>`__ or other online guides for more details.

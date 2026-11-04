@@ -117,7 +117,6 @@ const getloadTests = (
     test("get telemetry", getRequest("/api/v1/master/telemetry")),
     test("get tensorboards", getRequest("/api/v1/tensorboards")),
     test("get shells", getRequest("/api/v1/shells")),
-    test("get notebooks", getRequest("/api/v1/notebooks")),
     test("get commands", getRequest("/api/v1/commands")),
     test("get job queue stats", getRequest("/api/v1/job-queues/stats")),
     test(
@@ -142,13 +141,6 @@ const getloadTests = (
       "get workspace shells",
       getRequest(
         `/api/v1/shells?sortBy=SORT_BY_UNSPECIFIED&orderBy=ORDER_BY_UNSPECIFIED&workspaceId=${sD?.workspace.id}`,
-      ),
-      !!sD?.workspace.id,
-    ),
-    test(
-      "get workspace notebooks",
-      getRequest(
-        `/api/v1/notebooks?limit=1000&workspaceId=${sD?.workspace.id}`,
       ),
       !!sD?.workspace.id,
     ),

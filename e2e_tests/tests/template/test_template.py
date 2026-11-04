@@ -25,20 +25,6 @@ def test_set_template() -> None:
 @pytest.mark.slow
 @pytest.mark.e2e_cpu
 @pytest.mark.e2e_cpu_cross_version
-def test_start_notebook_with_template() -> None:
-    sess = api_utils.user_session()
-    template_name = "test_start_notebook_with_template"
-    tpl.set_template(sess, template_name, conf.fixtures_path("templates/ntsc.yaml"))
-
-    with cmd.interactive_command(
-        sess, ["notebook", "start", "--template", template_name, "--detach"]
-    ) as nb:
-        assert "SHOULDBE=SET" in cmd.get_command_config(sess, "notebook", str(nb.task_id))
-
-
-@pytest.mark.slow
-@pytest.mark.e2e_cpu
-@pytest.mark.e2e_cpu_cross_version
 def test_start_command_with_template() -> None:
     sess = api_utils.user_session()
     template_name = "test_start_command_with_template"

@@ -173,65 +173,6 @@ def test_shell_without_key_fails_clearly(
     assert "only the user who started it or an administrator" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("with_token", [True, False])
-def test_notebook_open_needs_token(
-    requests_mock: requests_mock.Mocker, capsys: pytest.CaptureFixture[str], with_token: bool
-) -> None:
-    # The master returns a notebook's Jupyter token only to its owner or an administrator.
-    nb_id = str(uuid.uuid4())
-    address = f"/proxy/{nb_id}/" + ("?token=tok" if with_token else "")
-    requests_mock.get("/info", status_code=200, json={"version": "1.0"})
-    requests_mock.get(
-        "/api/v1/me", status_code=200, json={"username": constants.DEFAULT_DETERMINED_USER}
-    )
-    fake_user = {"username": "fakeuser", "admin": False, "active": True}
-    requests_mock.post(
-        "/api/v1/auth/login", status_code=200, json={"token": "fake-token", "user": fake_user}
-    )
-    requests_mock.get(
-        f"/api/v1/tasks/{nb_id}",
-        status_code=requests.codes.ok,
-        json={
-            "task": {
-                "allocations": [],
-                "startTime": "2026-01-01T00:00:00Z",
-                "taskId": nb_id,
-                "taskType": "TASK_TYPE_NOTEBOOK",
-            }
-        },
-    )
-    requests_mock.get(
-        f"/api/v1/notebooks/{nb_id}",
-        status_code=requests.codes.ok,
-        json={
-            "config": {},
-            "notebook": {
-                "description": "nb",
-                "id": nb_id,
-                "jobId": "j",
-                "resourcePool": "default",
-                "startTime": "2026-01-01T00:00:00Z",
-                "state": "STATE_RUNNING",
-                "username": "owner",
-                "workspaceId": 1,
-                "serviceAddress": address,
-            },
-        },
-    )
-
-    with mock.patch("webbrowser.open") as browser_open:
-        if with_token:
-            cli.main(["notebook", "open", nb_id])
-            browser_open.assert_called_once()
-            assert "token%3Dtok" in browser_open.call_args[0][0]
-        else:
-            with pytest.raises(SystemExit) as e:
-                cli.main(["notebook", "open", nb_id])
-            browser_open.assert_not_called()
-            assert e.value.code == 1
-            assert "only the user who started it or an administrator" in capsys.readouterr().err
-
-
 def mock_cli_login(requests_mock: requests_mock.Mocker) -> None:
     requests_mock.get("/info", status_code=200, json={"version": "1.0"})
     requests_mock.get(
@@ -292,6 +233,32 @@ def test_shell_start_services(requests_mock: requests_mock.Mocker) -> None:
     # A services value that is not a map goes to the master as it is.
     cli.main(["shell", "start", "-d", "--config", "services=[]", "--service", "jupyter"])
     assert launch.last_request.json()["config"] == {"services": []}
+
+
+def test_shell_start_preview(
+    requests_mock: requests_mock.Mocker, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # --preview prints the config the master merges for the request and launches nothing.
+    mock_cli_login(requests_mock)
+    launch = requests_mock.post("/api/v1/shells", status_code=requests.codes.ok, json={})
+    merged = {
+        "description": "shell",
+        "resources": {"slots": 1},
+        "services": {"jupyter": {}},
+    }
+    preview = requests_mock.post(
+        "/api/v1/shells/preview",
+        status_code=requests.codes.ok,
+        json={"config": merged, "warnings": []},
+    )
+
+    cli.main(["shell", "start", "--preview", "--service", "jupyter", "--template", "tpl"])
+    assert preview.call_count == 1
+    body = preview.last_request.json()
+    assert body["config"] == {"services": {"jupyter": {}}}
+    assert body["templateName"] == "tpl"
+    assert capsys.readouterr().out == render.format_object_as_yaml(merged) + "\n"
+    assert launch.call_count == 0
 
 
 def mock_task_services(
@@ -635,7 +602,6 @@ def test_cli_args_exist() -> None:
         "m",
         "model",
         "m",
-        "notebook",
         "oauth",
         "resources",
         "res",

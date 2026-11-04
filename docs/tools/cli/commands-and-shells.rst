@@ -86,6 +86,13 @@ and forwards a port from the local machine to the container:
 
 To stop the SSH server container and free cluster resources, run ``det shell kill <UUID>``.
 
+To print the configuration that a shell would start with, merged with its template and the cluster's
+defaults, without starting it, add ``--preview``:
+
+.. code::
+
+   det shell start --preview --service jupyter
+
 .. _shell-services:
 
 Services
@@ -134,6 +141,64 @@ A shell is not terminated for being idle unless its configuration sets :ref:`idl
 sessions of its services such as JupyterLab count as activity, as does JupyterLab activity as
 ``notebook_idle_type`` defines it; by default a kernel that is executing. An SSH session or a
 browser page kept open on the shell can therefore delay its termination.
+
+.. _jupyter-service:
+
+JupyterLab
+----------
+
+The ``jupyter`` service runs `JupyterLab <https://jupyter.org/>`__ in the shell's container:
+
+.. code::
+
+   det shell start --service jupyter
+   det task open <shell id> jupyter
+
+In the WebUI, check **jupyter** in **Launch Shell** on the **Jobs** page or a workspace's **Jobs**
+tab, then open it with ``det task open``.
+
+Opening a notebook in JupyterLab starts a kernel, which runs until you shut it down in JupyterLab.
+
+A shell is assigned one GPU by default. For JupyterLab without GPUs, set ``resources.slots`` to
+``0``:
+
+.. code::
+
+   det shell start --service jupyter --config resources.slots=0
+
+The :ref:`Determined CLI <cli-ug>` is installed in the shell's container, so a notebook cell can run
+it, for example ``!det experiment list``.
+
+.. _jupyter-state:
+
+Saving JupyterLab State
+-----------------------
+
+Files that are not in a persistent directory are lost when the shell ends. Bind-mount a directory of
+a shared filesystem that all agents mount into the shell's container, and keep your notebooks in it.
+For example, a user ``jimmy`` with a shared home directory at ``/shared/home/jimmy``:
+
+.. code::
+
+   $ cat > config.yaml << EOL
+   bind_mounts:
+     - host_path: /shared/home/jimmy
+       container_path: /shared/home/jimmy
+   EOL
+   $ det shell start --service jupyter --config-file config.yaml
+
+A cluster deployed with ``det deploy gcp up``, ``det deploy aws --deployment-type efs`` or ``det
+deploy aws --deployment-type fsx`` has a network filesystem that all agents share, mounted into task
+containers at ``/run/determined/workdir/shared_fs/``. Set ``work_dir`` to that directory in the
+shell's configuration to work there; a :ref:`configuration template <config-template>` can set it
+for every launch. A cluster started with ``det deploy local cluster-up --auto-work-dir <directory>``
+makes that directory available to task containers as ``./shared_fs``.
+
+A notebook kept on the shared filesystem can be opened again in the JupyterLab of another shell. To
+restore its last saved state, use JupyterLab's **File** > **Revert to Checkpoint**. JupyterLab saves
+a checkpoint every 120 seconds in an ``.ipynb_checkpoints`` directory next to the notebook; change
+``autosaveInterval`` of the **Document Manager** in **Settings** > **Advanced Settings Editor** to
+set another interval.
 
 .. _shell-image-requirements:
 

@@ -72,13 +72,6 @@ describe('Wait Page Utilities', () => {
       vi.mocked(global.open).mockRestore();
     });
 
-    it('should open window for JupyterLab task', () => {
-      expect(windowOpen).not.toHaveBeenCalled();
-      utils.openCommand(COMMAND_TASK[CommandType.JupyterLab]);
-      // TODO: Expand this to use `toHaveBeenCalledWith`.
-      expect(windowOpen).toHaveBeenCalled();
-    });
-
     it('should open window for TensorBoard task', () => {
       expect(windowOpen).not.toHaveBeenCalled();
       utils.openCommand(COMMAND_TASK[CommandType.TensorBoard]);
@@ -86,33 +79,30 @@ describe('Wait Page Utilities', () => {
       expect(windowOpen).toHaveBeenCalled();
     });
 
-    it('should throw error for tasks that are not JupyterLabs or TensorBoards', () => {
-      expect(() => {
-        utils.openCommand(COMMAND_TASK[CommandType.Shell]);
-      }).toThrow(utils.CANNOT_OPEN_COMMAND_ERROR);
-    });
+    it.each([CommandType.JupyterLab, CommandType.Shell])(
+      'should throw error for a %s task, which is not a TensorBoard',
+      (type) => {
+        expect(() => {
+          utils.openCommand(COMMAND_TASK[type]);
+        }).toThrow(utils.CANNOT_OPEN_COMMAND_ERROR);
+      },
+    );
   });
 
   describe('waitPageUrl', () => {
-    const REGEX: Record<RecordKey, RegExp> = {
-      [CommandType.JupyterLab]: new RegExp(`wait/${CommandType.JupyterLab}/${UUID_REGEX}`, 'i'),
-      [CommandType.TensorBoard]: new RegExp(`wait/${CommandType.TensorBoard}/${UUID_REGEX}`, 'i'),
-    };
-
     it('should convert task to wait page url', () => {
-      expect(utils.waitPageUrl(COMMAND_TASK[CommandType.JupyterLab])).toMatch(
-        REGEX[CommandType.JupyterLab],
-      );
-
       expect(utils.waitPageUrl(COMMAND_TASK[CommandType.TensorBoard])).toMatch(
-        REGEX[CommandType.TensorBoard],
+        new RegExp(`wait/${CommandType.TensorBoard}/${UUID_REGEX}`, 'i'),
       );
     });
 
-    it('should throw error for tasks that are not JupyterLabs or TensorBoards', () => {
-      expect(() => {
-        utils.waitPageUrl(COMMAND_TASK[CommandType.Shell]);
-      }).toThrow(utils.CANNOT_OPEN_COMMAND_ERROR);
-    });
+    it.each([CommandType.JupyterLab, CommandType.Shell])(
+      'should throw error for a %s task, which is not a TensorBoard',
+      (type) => {
+        expect(() => {
+          utils.waitPageUrl(COMMAND_TASK[type]);
+        }).toThrow(utils.CANNOT_OPEN_COMMAND_ERROR);
+      },
+    );
   });
 });

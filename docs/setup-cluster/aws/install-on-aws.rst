@@ -328,9 +328,9 @@ Example workflow:
 
 #. Customize the template as you see fit by editing it in any text editor. For example, let's say a
    user wants to utilize (default) ``g4dn.metal`` 8-GPU instances for the :ref:`default compute pool
-   <resource-pools>`, but they also often run single-GPU notebook jobs, for which a single
-   ``g4dn.xlarge`` instance would be perfect. So, you want to add a third pool ``compute-pool-solo``
-   with a customized instance type.
+   <resource-pools>`, but they also often run single-GPU shells, for which a single ``g4dn.xlarge``
+   instance would be perfect. So, you want to add a third pool ``compute-pool-solo`` with a
+   customized instance type.
 
    Start with the default template, and find the ``resource_pools`` section:
 
