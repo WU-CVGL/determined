@@ -161,19 +161,35 @@ The following configuration settings are supported:
 -  ``tensorboard_args``: Lists optional arguments for launching TensorBoard. Each element of the
    list should be a string of the form ``NAME=VALUE``.
 
--  ``idle_timeout``: Specifies the duration before idle instances are automatically terminated. This
-   string is a sequence of decimal numbers, each with optional fraction and a unit suffix, such as
-   "30s", "1h", or "1m30s". Valid time units are "s", "m", "h". The default value is ``20m``. This
-   is only used by TensorBoard and notebook instances. A TensorBoard instance is considered to be
-   idle if it does not receive any HTTP traffic. A notebook instance is considered to be idle if it
-   is not receiving any HTTP traffic and it is not otherwise active (as defined by the
-   ``notebook_idle_type`` option). The default timeout for TensorBoard is ``5m`` (5 minutes).
+-  ``idle_timeout``: Specifies the duration before an idle instance is automatically terminated.
+   This string is a sequence of decimal numbers, each with optional fraction and a unit suffix, such
+   as "30s", "1h", or "1m30s". Valid time units are "s", "m", "h". The duration must be positive.
+   This is only used by shells, notebooks and TensorBoard instances:
 
--  ``notebook_idle_type``: Specifies how to decide whether a notebook is idle or active. Valid
-   values are:
+   -  Shells: There is no default, and the shortest value is ``10s``; a shell is only terminated for
+      being idle when this is set. The idle time counts from the last activity, once no browser
+      terminal, SSH connection through the master or WebSocket connection to the shell is open.
+      Activity is a browser terminal, an SSH connection through the master, a request to any of the
+      shell's services through the master, an open WebSocket connection to one of them, and, for the
+      ``jupyter`` service, JupyterLab activity as ``notebook_idle_type`` defines it; by default a
+      kernel that is executing. An SSH session or a browser page kept open on the shell can
+      therefore delay its termination. Processes that run in the shell are not activity.
 
-   -  ``kernels_or_terminals`` (default): The notebook is considered active if any kernels or
-      terminals are running.
+   -  Notebooks: The default is the master's :ref:`notebook_timeout
+      <master-config-notebook-timeout>`. A notebook instance is considered to be idle if it is not
+      receiving any HTTP traffic and it is not otherwise active (as defined by the
+      ``notebook_idle_type`` option).
+
+   -  TensorBoard: The default is the master's ``tensorboard_timeout``, ``5m`` (5 minutes) unless
+      the master sets another. A TensorBoard instance is considered to be idle if it does not
+      receive any HTTP traffic.
+
+-  ``notebook_idle_type``: Specifies how to decide whether a notebook, or the ``jupyter`` service of
+   a shell with ``idle_timeout``, is idle or active. The default is ``kernels_or_terminals`` for
+   notebooks and ``activity`` for the ``jupyter`` service of a shell. Valid values are:
+
+   -  ``kernels_or_terminals``: The notebook is considered active if any kernels or terminals are
+      running.
 
    -  ``kernel_connections``: The notebook is considered active if there are any open connections
       from any web connections to any kernels. (JupyterLab does not report connections to terminals,

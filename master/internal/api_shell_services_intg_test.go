@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/argon2"
@@ -184,8 +185,9 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 		{ServiceID: jupyterID, Port: jupyter.Port, TLS: true, Exec: true},
 		{ServiceID: taskID + ":8080", Port: 8080},
 	}, alloc.ProxyPorts)
-	// Idle is not watched on shells.
+	// Without an idle timeout, the shell's idle time is not watched.
 	require.Nil(t, alloc.IdleTimeout)
+	require.True(t, spec.WatchTaskActivity)
 	require.False(t, spec.WatchProxyIdleTimeout)
 	require.False(t, spec.WatchRunnerIdleTimeout)
 
@@ -198,8 +200,10 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 	var notebookConfig model.CommandConfig
 	require.NoError(t, json.Unmarshal([]byte(env["NOTEBOOK_CONFIG"]), &notebookConfig))
 	require.Equal(t, spec.Config.Description, notebookConfig.Description)
-	// The idle check reports to the notebook API, which takes notebooks only.
-	require.NotContains(t, env, "NOTEBOOK_IDLE_TYPE")
+	// Nor does JupyterLab's idle check run.
+	require.NotContains(t, env, tasks.NotebookIdleTypeEnvVar)
+	require.NotContains(t, env, tasks.ActivityReportEnvVar)
+	require.NotContains(t, env, tasks.IdleTimeoutSecondsEnvVar)
 
 	// JupyterLab's token is a notebook session of the owner.
 	require.NotEmpty(t, env[model.NotebookSessionEnvVar])
@@ -255,15 +259,19 @@ func TestLaunchShellWithoutExtraServices(t *testing.T) {
 			require.Equal(t, sshService(port), spec.Services[0])
 			require.Equal(t, port, spec.SSHDPort)
 			require.Empty(t, spec.Base.ExtraProxyPorts)
+			alloc := allocateRequest(t, rm, taskID)
 			require.Equal(t, []*sproto.ProxyPortConfig{
 				{ServiceID: taskID, Port: port, ProxyTCP: true, Unauthenticated: true},
-			}, allocateRequest(t, rm, taskID).ProxyPorts)
+			}, alloc.ProxyPorts)
+			// No idle timeout, no reaping.
+			require.Nil(t, alloc.IdleTimeout)
 
 			env := spec.Base.ExtraEnvVars
 			require.Equal(t, "ssh", env["DET_SERVICES"])
 			for _, key := range []string{
 				model.NotebookSessionEnvVar, "NOTEBOOK_PORT", "NOTEBOOK_CONFIG", "NOTEBOOK_BASE_URL",
-				"NOTEBOOK_IDLE_TYPE",
+				tasks.NotebookIdleTypeEnvVar, tasks.ActivityReportEnvVar,
+				tasks.IdleTimeoutSecondsEnvVar,
 			} {
 				require.NotContains(t, env, key)
 			}
@@ -274,6 +282,119 @@ func TestLaunchShellWithoutExtraServices(t *testing.T) {
 			require.NotContains(t, paths, jupyterDir)
 			require.NotContains(t, paths, jupyterCertPath)
 		})
+	}
+}
+
+// A shell with an idle timeout is watched through its task's activity record, with or without
+// extra services; with jupyter, JupyterLab's idle check reports there with the timeout and the
+// idle type, activity unless the template or the config sets another. A notebook's default idle
+// type is TestLaunchNotebookProxiesUnchanged's.
+func TestLaunchShellIdleTimeout(t *testing.T) {
+	api, _, ctx := setupAPITest(t, nil)
+	cs, err := command.NewService(api.m.db, api.m.rm)
+	require.NoError(t, err)
+	command.SetDefaultService(cs)
+	rm := api.m.rm.(*mocks.ResourceManager)
+	jupyter := map[string]any{"jupyter": map[string]any{}}
+
+	for name, tc := range map[string]struct {
+		services     map[string]any
+		idleType     string
+		template     string
+		wantIdleType string
+	}{
+		"ssh":     {},
+		"jupyter": {services: jupyter, wantIdleType: model.NotebookIdleTypeActivity},
+		"jupyter configured": {
+			services:     jupyter,
+			idleType:     model.NotebookIdleTypeKernelConnections,
+			wantIdleType: model.NotebookIdleTypeKernelConnections,
+		},
+		"jupyter template": {
+			services:     jupyter,
+			template:     `{"notebook_idle_type": "kernels_or_terminals"}`,
+			wantIdleType: model.NotebookIdleTypeKernelsOrTerminals,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var templateName string
+			if tc.template != "" {
+				templateName = "shell-idle-" + uuid.NewString()
+				_, err := db.Bun().NewRaw(
+					"INSERT INTO templates (name, config, workspace_id) VALUES (?, ?::jsonb, 1)",
+					templateName, tc.template).Exec(context.Background())
+				require.NoError(t, err)
+				t.Cleanup(func() {
+					_, _ = db.Bun().NewDelete().Table("templates").Where("name = ?", templateName).
+						Exec(context.Background())
+				})
+			}
+			config := map[string]any{"idle_timeout": "45m"}
+			if tc.services != nil {
+				config["services"] = tc.services
+			}
+			if tc.idleType != "" {
+				config["notebook_idle_type"] = tc.idleType
+			}
+			raw, err := structpb.NewStruct(config)
+			require.NoError(t, err)
+			resp, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
+				Config: raw, TemplateName: templateName,
+			})
+			require.NoError(t, err)
+			taskID := resp.Shell.Id
+			spec := launchedSpec(t, taskID)
+
+			require.Equal(t, &sproto.IdleTimeoutConfig{
+				ServiceID: taskID, TaskID: model.TaskID(taskID), UseTaskActivity: true,
+				TimeoutDuration: 45 * time.Minute,
+			}, allocateRequest(t, rm, taskID).IdleTimeout)
+			require.False(t, spec.WatchProxyIdleTimeout)
+			require.False(t, spec.WatchRunnerIdleTimeout)
+
+			env := spec.Base.ExtraEnvVars
+			if tc.services == nil {
+				require.NotContains(t, env, tasks.NotebookIdleTypeEnvVar)
+				require.NotContains(t, env, tasks.ActivityReportEnvVar)
+				require.NotContains(t, env, tasks.IdleTimeoutSecondsEnvVar)
+				return
+			}
+			require.Equal(t, tc.wantIdleType, env[tasks.NotebookIdleTypeEnvVar])
+			require.Equal(t, tc.wantIdleType, spec.Config.NotebookIdleType)
+			require.Equal(t, tasks.ActivityReportTask, env[tasks.ActivityReportEnvVar])
+			require.Equal(t, "2700", env[tasks.IdleTimeoutSecondsEnvVar])
+		})
+	}
+}
+
+// A shell refuses an idle_timeout shorter than 10s, with or without jupyter, and takes one of
+// exactly that length.
+func TestLaunchShellIdleTimeoutMinimum(t *testing.T) {
+	api, _, ctx := setupAPITest(t, nil)
+	cs, err := command.NewService(api.m.db, api.m.rm)
+	require.NoError(t, err)
+	command.SetDefaultService(cs)
+	rm := api.m.rm.(*mocks.ResourceManager)
+
+	for _, services := range []map[string]any{nil, {"jupyter": map[string]any{}}} {
+		launch := func(timeout string) (*apiv1.LaunchShellResponse, error) {
+			config := map[string]any{"idle_timeout": timeout}
+			if services != nil {
+				config["services"] = services
+			}
+			raw, err := structpb.NewStruct(config)
+			require.NoError(t, err)
+			return api.LaunchShell(ctx, &apiv1.LaunchShellRequest{Config: raw})
+		}
+		for _, timeout := range []string{"1ns", "1s", "5s", "9.9s"} {
+			_, err := launch(timeout)
+			require.Equal(t, codes.InvalidArgument, status.Code(err), "%s: %v", timeout, err)
+			require.ErrorContains(t, err, "idle_timeout must be at least 10s", timeout)
+		}
+		resp, err := launch("10s")
+		require.NoError(t, err)
+		require.Equal(t, 10*time.Second,
+			allocateRequest(t, rm, resp.Shell.Id).IdleTimeout.TimeoutDuration)
 	}
 }
 
@@ -378,16 +499,56 @@ func TestLaunchNotebookProxiesUnchanged(t *testing.T) {
 		alloc.ProxyPorts)
 	require.True(t, spec.WatchProxyIdleTimeout)
 	require.True(t, spec.WatchRunnerIdleTimeout)
+	require.False(t, spec.WatchTaskActivity)
+	// The master sets no notebook_timeout here, so the notebook has no idle timeout.
+	require.Nil(t, alloc.IdleTimeout)
 
 	env := spec.Base.ExtraEnvVars
 	require.Equal(t, "jupyter", env["DET_SERVICES"])
 	require.Equal(t, "/proxy/"+taskID+"/", env["NOTEBOOK_BASE_URL"])
 	require.Equal(t, model.NotebookIdleTypeKernelsOrTerminals, env["NOTEBOOK_IDLE_TYPE"])
+	require.NotContains(t, env, tasks.ActivityReportEnvVar)
+	require.NotContains(t, env, tasks.IdleTimeoutSecondsEnvVar)
 	require.Len(t, notebookSessions(t, taskID), 1)
 	paths := containerFilePaths(spec)
 	requireOncePerPath(t, paths)
 	require.Contains(t, paths, jupyterEntrypoint)
 	require.NotContains(t, paths, "/run/determined/ssh/authorized_keys_unmodified")
+
+	// With an idle timeout, the notebook's watcher reads its proxy and its idle reports, as before.
+	raw, err := structpb.NewStruct(map[string]any{"idle_timeout": "45m"})
+	require.NoError(t, err)
+	resp, err = api.LaunchNotebook(ctx, &apiv1.LaunchNotebookRequest{Config: raw})
+	require.NoError(t, err)
+	require.Equal(t, &sproto.IdleTimeoutConfig{
+		ServiceID: resp.Notebook.Id, UseProxyState: true, UseRunnerState: true,
+		TimeoutDuration: 45 * time.Minute,
+	}, allocateRequest(t, rm, resp.Notebook.Id).IdleTimeout)
+}
+
+// A notebook takes the master's notebook_timeout as its idle timeout, and none from a
+// notebook_timeout that is not positive.
+func TestLaunchNotebookMasterTimeout(t *testing.T) {
+	api, _, ctx := setupAPITest(t, nil)
+	cs, err := command.NewService(api.m.db, api.m.rm)
+	require.NoError(t, err)
+	command.SetDefaultService(cs)
+	rm := api.m.rm.(*mocks.ResourceManager)
+	defer func(t *int) { api.m.config.NotebookTimeout = t }(api.m.config.NotebookTimeout)
+
+	for timeout, want := range map[int]*sproto.IdleTimeoutConfig{
+		0:  nil,
+		-1: nil,
+		90: {UseProxyState: true, UseRunnerState: true, TimeoutDuration: 90 * time.Second},
+	} {
+		api.m.config.NotebookTimeout = &timeout
+		resp, err := api.LaunchNotebook(ctx, &apiv1.LaunchNotebookRequest{})
+		require.NoError(t, err, timeout)
+		if want != nil {
+			want.ServiceID = resp.Notebook.Id
+		}
+		require.Equal(t, want, allocateRequest(t, rm, resp.Notebook.Id).IdleTimeout, timeout)
+	}
 }
 
 // Only shells take services, and only the ones the supervisor has units for, with no options.

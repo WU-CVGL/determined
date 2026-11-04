@@ -403,3 +403,32 @@ func TestRestoreQueuedTaskKeepsProxyPorts(t *testing.T) {
 		})
 	}
 }
+
+// A restored shell with an idle timeout is watched again through its task's activity record, from
+// its persisted spec; a shell saved before the master watched shells is not.
+func TestRestoreQueuedShellKeepsIdleWatcher(t *testing.T) {
+	for name, watch := range map[string]bool{"watched": true, "saved before": false} {
+		t.Run(name, func(t *testing.T) {
+			restored, restartedRM, _ := restartWithQueuedShell(t, time.Now().UTC().Add(-time.Hour),
+				func(req *CreateGeneric) {
+					req.Spec.Config.IdleTimeout = ptrs.Ptr(model.Duration(45 * time.Minute))
+					req.Spec.WatchTaskActivity = watch
+				})
+			var want *sproto.IdleTimeoutConfig
+			if watch {
+				want = &sproto.IdleTimeoutConfig{
+					ServiceID: string(restored.taskID), TaskID: restored.taskID, UseTaskActivity: true,
+					TimeoutDuration: 45 * time.Minute,
+				}
+			}
+			calls := 0
+			for _, call := range restartedRM.Calls {
+				if call.Method == "Allocate" {
+					calls++
+					require.Equal(t, want, call.Arguments.Get(0).(sproto.AllocateRequest).IdleTimeout)
+				}
+			}
+			require.Equal(t, 1, calls)
+		})
+	}
+}

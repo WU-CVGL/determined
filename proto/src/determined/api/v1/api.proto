@@ -928,6 +928,18 @@ service Determined {
       tags: "Internal"
     };
   }
+  // Report the activity of a service of the allocation's task, for its idle
+  // timeout.
+  rpc ReportTaskActivity(ReportTaskActivityRequest)
+      returns (ReportTaskActivityResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/allocations/{allocation_id}/activity"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
+      tags: "Internal"
+    };
+  }
   // Report the state of every service of an interactive task. The task's
   // container posts the complete snapshot of its services' states whenever one
   // changes and again periodically; the master replaces the task's states with

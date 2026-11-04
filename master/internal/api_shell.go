@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
+	"time"
 
 	petname "github.com/dustinkirkland/golang-petname"
 	"github.com/pkg/errors"
@@ -45,6 +46,11 @@ const (
 	// Agent ports 2600 - 3500 are split between TensorBoards, Notebooks, and Shells.
 	minSshdPort = 3200
 	maxSshdPort = minSshdPort + 299
+	// minShellIdleTimeout is the shortest idle_timeout a shell takes: JupyterLab's idle check
+	// reports every quarter of the timeout and gives each request as long in all, 2.5 s at this
+	// minimum, so that a JupyterLab that answers within 2 s still reaches the task's record more
+	// often than the timeout. It is also longer than the idle watcher's tick.
+	minShellIdleTimeout = 10 * time.Second
 )
 
 func (a *apiServer) GetShells(
@@ -282,6 +288,8 @@ func (a *apiServer) LaunchShell(
 		Config:        req.Config,
 		Files:         req.Files,
 		AllowServices: true,
+		// A shell's JupyterLab is active while a kernel executes, unless its config says otherwise.
+		NotebookIdleType: model.NotebookIdleTypeActivity,
 	}, user)
 	if err != nil {
 		return nil, api.WrapWithFallbackCode(err, codes.InvalidArgument,
@@ -307,9 +315,15 @@ func (a *apiServer) LaunchShell(
 		return nil, err
 	}
 	setShellSSHD(launchReq.Spec, sshdPort)
+	// A shell's idle time is watched only when its config sets idle_timeout.
+	launchReq.Spec.WatchTaskActivity = true
 
 	if err = check.Validate(launchReq.Spec.Config); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	if t := launchReq.Spec.Config.IdleTimeout; t != nil && time.Duration(*t) < minShellIdleTimeout {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"idle_timeout must be at least %s", minShellIdleTimeout)
 	}
 
 	launchReq.Spec.AdditionalFiles = archive.Archive{
@@ -400,6 +414,8 @@ func jupyterService(port int) tasks.InteractiveService {
 // addShellJupyter adds the jupyter service to a shell spec: JupyterLab's port, from the notebooks'
 // range, which does not overlap sshd's, outside the spec's other ports, its environment and its
 // files, which it returns. The command service adds its token, and Command.Start its base URL.
+// When the shell's idle time is watched, JupyterLab's idle check reports to the task's activity
+// record, more often than the idle timeout.
 func addShellJupyter(spec *tasks.GenericCommandSpec) (archive.Archive, error) {
 	key, cert, err := proxy.GenSignedCert()
 	if err != nil {
@@ -414,10 +430,17 @@ func addShellJupyter(spec *tasks.GenericCommandSpec) (archive.Archive, error) {
 		return nil, err
 	}
 	spec.AddService(jupyterService(port))
-	addExtraEnvVars(spec, map[string]string{
+	env := map[string]string{
 		"NOTEBOOK_PORT":   strconv.Itoa(port),
 		"NOTEBOOK_CONFIG": string(configBytes),
-	})
+	}
+	if spec.Config.IdleTimeout != nil {
+		env[tasks.NotebookIdleTypeEnvVar] = spec.Config.NotebookIdleType
+		env[tasks.ActivityReportEnvVar] = tasks.ActivityReportTask
+		env[tasks.IdleTimeoutSecondsEnvVar] = strconv.FormatFloat(
+			time.Duration(*spec.Config.IdleTimeout).Seconds(), 'f', -1, 64)
+	}
+	addExtraEnvVars(spec, env)
 	return jupyterFiles(spec.Base.AgentUserGroup, key, cert), nil
 }
 

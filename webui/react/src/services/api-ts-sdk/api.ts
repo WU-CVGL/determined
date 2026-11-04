@@ -9845,6 +9845,32 @@ export interface V1RendezvousInfo {
 export interface V1ReportCheckpointResponse {
 }
 /**
+ * Report the activity of a service of a task.
+ * @export
+ * @interface V1ReportTaskActivityRequest
+ */
+export interface V1ReportTaskActivityRequest {
+    /**
+     * The id of the allocation.
+     * @type {string}
+     * @memberof V1ReportTaskActivityRequest
+     */
+    allocationId?: string;
+    /**
+     * Whether the service is active now.
+     * @type {boolean}
+     * @memberof V1ReportTaskActivityRequest
+     */
+    active?: boolean;
+}
+/**
+ * Response to ReportTaskActivityRequest.
+ * @export
+ * @interface V1ReportTaskActivityResponse
+ */
+export interface V1ReportTaskActivityResponse {
+}
+/**
  * Report the states of the services of an interactive task: the complete snapshot, with every service of the task exactly once.
  * @export
  * @interface V1ReportTaskServicesRequest
@@ -23020,6 +23046,50 @@ export const InternalApiFetchParamCreator = function (configuration?: Configurat
         },
         /**
          * 
+         * @summary Report the activity of a service of the allocation's task, for its idle timeout.
+         * @param {string} allocationId The id of the allocation.
+         * @param {V1ReportTaskActivityRequest} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        reportTaskActivity(allocationId: string, body: V1ReportTaskActivityRequest, options: any = {}): FetchArgs {
+            // verify required parameter 'allocationId' is not null or undefined
+            if (allocationId === null || allocationId === undefined) {
+                throw new RequiredError('allocationId','Required parameter allocationId was null or undefined when calling reportTaskActivity.');
+            }
+            // verify required parameter 'body' is not null or undefined
+            if (body === null || body === undefined) {
+                throw new RequiredError('body','Required parameter body was null or undefined when calling reportTaskActivity.');
+            }
+            const localVarPath = `/api/v1/allocations/{allocationId}/activity`
+                .replace(`{${"allocationId"}}`, encodeURIComponent(String(allocationId)));
+            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
+            const localVarRequestOptions = { method: 'POST', ...options };
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+            
+            // authentication BearerToken required
+            if (configuration && configuration.apiKey) {
+                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
+                    ? configuration.apiKey("Authorization")
+                    : configuration.apiKey;
+                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
+            }
+            
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            
+            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
+            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
+            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
+            localVarRequestOptions.body = JSON.stringify(body)
+            
+            return {
+                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @summary Report the state of every service of an interactive task. The task's container posts the complete snapshot of its services' states whenever one changes and again periodically; the master replaces the task's states with each snapshot it accepts. Only the task's own container, its owner and admins may report it.
          * @param {string} allocationId The id of the allocation.
          * @param {V1ReportTaskServicesRequest} body
@@ -25037,6 +25107,26 @@ export const InternalApiFp = function (configuration?: Configuration) {
         },
         /**
          * 
+         * @summary Report the activity of a service of the allocation's task, for its idle timeout.
+         * @param {string} allocationId The id of the allocation.
+         * @param {V1ReportTaskActivityRequest} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        reportTaskActivity(allocationId: string, body: V1ReportTaskActivityRequest, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1ReportTaskActivityResponse> {
+            const localVarFetchArgs = InternalApiFetchParamCreator(configuration).reportTaskActivity(allocationId, body, options);
+            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
+                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                        return response.json();
+                    } else {
+                        throw response;
+                    }
+                });
+            };
+        },
+        /**
+         * 
          * @summary Report the state of every service of an interactive task. The task's container posts the complete snapshot of its services' states whenever one changes and again periodically; the master replaces the task's states with each snapshot it accepts. Only the task's own container, its owner and admins may report it.
          * @param {string} allocationId The id of the allocation.
          * @param {V1ReportTaskServicesRequest} body
@@ -26063,6 +26153,17 @@ export const InternalApiFactory = function (configuration?: Configuration, fetch
         },
         /**
          * 
+         * @summary Report the activity of a service of the allocation's task, for its idle timeout.
+         * @param {string} allocationId The id of the allocation.
+         * @param {V1ReportTaskActivityRequest} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        reportTaskActivity(allocationId: string, body: V1ReportTaskActivityRequest, options?: any) {
+            return InternalApiFp(configuration).reportTaskActivity(allocationId, body, options)(fetch, basePath);
+        },
+        /**
+         * 
          * @summary Report the state of every service of an interactive task. The task's container posts the complete snapshot of its services' states whenever one changes and again periodically; the master replaces the task's states with each snapshot it accepts. Only the task's own container, its owner and admins may report it.
          * @param {string} allocationId The id of the allocation.
          * @param {V1ReportTaskServicesRequest} body
@@ -27044,6 +27145,19 @@ export class InternalApi extends BaseAPI {
      */
     public reportCheckpoint(body: V1Checkpoint, options?: any) {
         return InternalApiFp(this.configuration).reportCheckpoint(body, options)(this.fetch, this.basePath)
+    }
+    
+    /**
+     * 
+     * @summary Report the activity of a service of the allocation's task, for its idle timeout.
+     * @param {string} allocationId The id of the allocation.
+     * @param {V1ReportTaskActivityRequest} body
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof InternalApi
+     */
+    public reportTaskActivity(allocationId: string, body: V1ReportTaskActivityRequest, options?: any) {
+        return InternalApiFp(this.configuration).reportTaskActivity(allocationId, body, options)(this.fetch, this.basePath)
     }
     
     /**

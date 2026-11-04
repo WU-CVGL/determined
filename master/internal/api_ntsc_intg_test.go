@@ -32,7 +32,9 @@ import (
 	"github.com/determined-ai/determined/master/internal/job/jobservice"
 	"github.com/determined-ai/determined/master/internal/mocks"
 	"github.com/determined-ai/determined/master/internal/proxy"
+	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/internal/task"
+	"github.com/determined-ai/determined/master/internal/task/idle"
 	"github.com/determined-ai/determined/master/internal/user"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
@@ -547,6 +549,11 @@ func TestAllocationMutationsRequireOwnSessionOwnerOrAdmin(t *testing.T) {
 			_, err := api.AllocationWaiting(ctx, &apiv1.AllocationWaitingRequest{AllocationId: id})
 			return err
 		}},
+		{"ReportTaskActivity", func(ctx context.Context) error {
+			_, err := api.ReportTaskActivity(ctx,
+				&apiv1.ReportTaskActivityRequest{AllocationId: id, Active: true})
+			return err
+		}},
 		{"AllocationAllGather", func(ctx context.Context) error {
 			_, err := api.AllocationAllGather(ctx, &apiv1.AllocationAllGatherRequest{
 				AllocationId: id, RequestUuid: uuid.NewString(), NumPeers: 1,
@@ -625,6 +632,49 @@ func TestAllocationMutationsRequireOwnSessionOwnerOrAdmin(t *testing.T) {
 		}
 	}
 	require.NoError(t, last.call(ownSession))
+}
+
+// A busy service's report from the task's container touches the task's activity record; an idle
+// report does not. Another owner's user session and another owner's allocation token are refused;
+// a token of the same owner's other allocation follows canControlAllocation, as AllocationReady
+// does, and is not covered here.
+func TestReportTaskActivity(t *testing.T) {
+	api, authz, _, _ := setupNTSCAuthzTest(t)
+	authz.On("CanGetNSC", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	owner, allocationID, taskID := launchOwnedCommand(t, api)
+	other, otherAllocationID, _ := launchOwnedCommand(t, api)
+	idle.Register(sproto.IdleTimeoutConfig{
+		ServiceID: taskID, TaskID: model.TaskID(taskID), UseTaskActivity: true,
+		TimeoutDuration: time.Hour,
+	}, func(context.Context, error) {})
+	defer idle.Unregister(taskID)
+	report := func(ctx context.Context, active bool) error {
+		_, err := api.ReportTaskActivity(ctx, &apiv1.ReportTaskActivityRequest{
+			AllocationId: string(allocationID), Active: active,
+		})
+		return err
+	}
+	lastActivity := func() time.Time {
+		a, ok := idle.ActivityOf(model.TaskID(taskID))
+		require.True(t, ok)
+		return a.LastActivity
+	}
+
+	for name, ctx := range map[string]context.Context{
+		"other owner's user session":     ntscUserCtx(t, other),
+		"other owner's allocation token": allocationSessionCtx(t, otherAllocationID, other),
+	} {
+		require.Equal(t, codes.PermissionDenied, status.Code(report(ctx, true)), name)
+	}
+	ownSession := allocationSessionCtx(t, allocationID, owner)
+	require.NoError(t, report(ownSession, false))
+	require.True(t, lastActivity().IsZero(), "refused and idle reports are not activity")
+
+	before := time.Now()
+	require.NoError(t, report(ownSession, true))
+	require.False(t, lastActivity().Before(before))
+	a, _ := idle.ActivityOf(model.TaskID(taskID))
+	require.Zero(t, a.Holds, "a report never holds the task")
 }
 
 func TestPostAllocationProxyAddressOwnerOrAdmin(t *testing.T) {

@@ -71,6 +71,22 @@ func TestCommandConfigServices(t *testing.T) {
 	require.Error(t, err)
 }
 
+// An idle_timeout can be unset, and is positive when set.
+func TestCommandConfigIdleTimeout(t *testing.T) {
+	for _, text := range []string{
+		`{}`, `{"idle_timeout": null}`, `{"idle_timeout": "1ns"}`, `{"idle_timeout": "45m"}`,
+	} {
+		config, err := decodeCommandConfig(text)
+		require.NoError(t, err, text)
+		require.NoError(t, check.Validate(config), text)
+	}
+	for _, value := range []string{"0s", "0", "-1s", "-1h30m"} {
+		config, err := decodeCommandConfig(`{"idle_timeout": "` + value + `"}`)
+		require.NoError(t, err, value)
+		require.ErrorContains(t, check.Validate(config), "idle_timeout must be positive", value)
+	}
+}
+
 // An unset or empty map is not stored, so configs without services marshal as before.
 func TestCommandConfigServicesMarshal(t *testing.T) {
 	for _, services := range []map[string]ServiceConfig{nil, {}} {
