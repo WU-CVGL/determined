@@ -316,8 +316,8 @@ user's settings.
 
 -  Start with cluster-wide policies for broad governance.
 -  Use workspace-level policies for more granular control of the projects in a workspace.
--  Set different priority limits for experiments and for TensorBoards, shells and commands to
-   better manage resource allocation.
+-  Set different priority limits for experiments and for TensorBoards, shells and commands to better
+   manage resource allocation.
 -  Regularly review and update policies as organizational needs evolve.
 -  Communicate configuration policies to users to ensure smooth adoption.
 -  Use the SetJobPriority API cautiously, ensuring that priority changes do not violate existing
