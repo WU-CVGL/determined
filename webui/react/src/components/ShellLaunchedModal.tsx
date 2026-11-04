@@ -10,21 +10,25 @@ import Link from 'components/Link';
 import useFeature from 'hooks/useFeature';
 import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
 import { paths } from 'routes/utils';
-import { V1LaunchWarning } from 'services/api-ts-sdk';
-import { openShellTerminalTab } from 'services/shellTerminal';
-import { CommandResponse } from 'types';
+import { V1LaunchWarning, V1TaskService } from 'services/api-ts-sdk';
+import { CommandResponse, InteractiveTaskTab } from 'types';
+import { canOpenTaskService } from 'utils/task';
+import { openInteractiveTask } from 'utils/wait';
 
 interface Props {
   response: CommandResponse;
+  /** The launched task's services, read by the launching hook; a button per service it offers. */
+  services: V1TaskService[];
 }
 
 /** Shown after a shell launch: how to connect and where to follow the task. */
-const ShellLaunchedModalComponent: React.FC<Props> = ({ response }: Props) => {
+const ShellLaunchedModalComponent: React.FC<Props> = ({ response, services }: Props) => {
   const { command, warnings = [] } = response;
   const terminalEnabled = useFeature().isOn('shell_terminal');
   const resourcesEnabled = useTaskResourcesEnabled();
+  const openTab = (tab: InteractiveTaskTab) => () => openInteractiveTask(command.id, { tab });
   return (
-    <Modal size="medium" title="Shell Launched">
+    <Modal size="medium" title="Interactive Task Launched">
       {warnings.includes(V1LaunchWarning.CURRENTSLOTSEXCEEDED) && (
         <Alert
           message="The shell asks for more slots than are free right now, so it may wait in the queue."
@@ -35,21 +39,24 @@ const ShellLaunchedModalComponent: React.FC<Props> = ({ response }: Props) => {
       <Body>
         {command.name} ({command.id}) is starting. You can connect once its state is Running.
       </Body>
-      {/* The launching user owns the shell, and the terminal page waits until it is running. */}
-      {terminalEnabled && (
-        <>
-          <Button
-            block
-            size="large"
-            type="primary"
-            onClick={() => openShellTerminalTab(command.id)}>
+      {/* The launching user owns the task, and the task page's panes wait until it runs. */}
+      <Row wrap>
+        {terminalEnabled && (
+          <Button size="large" type="primary" onClick={openTab(InteractiveTaskTab.Terminal)}>
             Open Terminal
           </Button>
-          <Body inactive>
-            The terminal opens in a new tab and waits until the shell is running.
-          </Body>
-        </>
-      )}
+        )}
+        {canOpenTaskService(services, 'jupyter') && (
+          <Button size="large" onClick={openTab(InteractiveTaskTab.JupyterLab)}>
+            Open JupyterLab
+          </Button>
+        )}
+        {canOpenTaskService(services, 'vscode') && (
+          <Button size="large" onClick={openTab(InteractiveTaskTab.VSCode)}>
+            Open VS Code
+          </Button>
+        )}
+      </Row>
       <Label>Start an interactive SSH session in the terminal:</Label>
       <CodeSample text={`det shell open ${command.id}`} />
       <Row>

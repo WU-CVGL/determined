@@ -144,6 +144,15 @@ vi.mock('services/api', () => ({
   getExperiments: vi.fn(),
   getGenericTasks: vi.fn(),
   getShells: vi.fn(),
+  getTaskServices: vi.fn(() =>
+    Promise.resolve({
+      primary: 'ssh',
+      services: [{ mayConnect: true, name: 'ssh' }],
+      taskId: '',
+      userId: 0,
+      workspaceId: 0,
+    }),
+  ),
   getTensorBoards: vi.fn(() => Promise.resolve([])),
   getUsers: vi.fn(() => Promise.resolve({ users: [] })),
   getUserSetting: vi.fn(() => Promise.resolve({ settings: [] })),

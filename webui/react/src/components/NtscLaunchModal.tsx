@@ -103,7 +103,7 @@ const settingsConfig: SettingsConfig<NtscLaunchOptions> = {
 const copy = {
   configRequired: 'Shell config required',
   docsLabel: 'Read about shell settings',
-  title: 'Launch Shell',
+  title: 'Launch Interactive Task',
 };
 
 const settingsFromForm = (values: LaunchFormValues): NtscLaunchOptions => ({

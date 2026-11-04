@@ -11,7 +11,15 @@ import { BrowserRouter } from 'react-router-dom';
 import { ThemeProvider } from 'components/ThemeProvider';
 import { SettingsProvider } from 'hooks/useSettingsProvider';
 import { DateString } from 'ioTypes';
-import { getJobQ, getShell, getShells, getTask, getUsers, updateUserSetting } from 'services/api';
+import {
+  getJobQ,
+  getShell,
+  getShells,
+  getTask,
+  getTaskServices,
+  getUsers,
+  updateUserSetting,
+} from 'services/api';
 import * as Api from 'services/api-ts-sdk';
 import userStore from 'stores/users';
 import userSettings from 'stores/userSettings';
@@ -101,6 +109,8 @@ const mocks = vi.hoisted(() => ({
   jobs: [] as unknown[],
 }));
 const permissions = vi.hoisted(() => ({ canModify: true }));
+/** Whether the master lets the user connect to a task's SSH service, as the task menu reads it. */
+const services = vi.hoisted(() => ({ mayConnect: true }));
 const launched = vi.hoisted(() => ({ response: undefined as CommandResponse | undefined }));
 const features = vi.hoisted(() => ({ flatRuns: true }));
 
@@ -121,7 +131,9 @@ vi.mock('services/api', () => ({
   getShell: vi.fn(),
   getShells: vi.fn(() => Promise.resolve([])),
   getTask: vi.fn(),
-  getTensorBoards: vi.fn(() => Promise.resolve([])),
+  getTaskServices: vi.fn(() =>
+    Promise.resolve({ services: [{ mayConnect: services.mayConnect, name: 'ssh' }] }),
+  ),
   getUsers: vi.fn(() => Promise.resolve({ pagination: {}, users: [] })),
   killExperiment: vi.fn(),
   killGenericTask: vi.fn(),
@@ -347,6 +359,7 @@ describe('JobQueue', () => {
     mocks.jobs = [shellJob];
     mocks.hold = undefined;
     permissions.canModify = true;
+    services.mayConnect = true;
     features.flatRuns = true;
     launched.response = {
       command: { ...runningShell, id: 'shell-2', state: CommandState.Queued },
@@ -393,21 +406,46 @@ describe('JobQueue', () => {
     expect(screen.queryByText('Shell shell')).not.toBeInTheDocument();
   });
 
+  it('opens the task page of a task job by its ID from its name', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    try {
+      mocks.jobs = [
+        shellJob,
+        {
+          ...shellJob,
+          entityId: 'tb-1',
+          jobId: 'job-3',
+          name: 'TensorBoard',
+          type: JobType.TENSORBOARD,
+        },
+      ];
+      setup();
+      await waitForShells();
+      await userEvent.click(await screen.findByText('Shell (lively-calm-fox) (shell)'));
+      expect(open).toHaveBeenCalledWith('/tasks/shell-1/interactive', 'shell-1', '');
+      await userEvent.click(screen.getByText('TensorBoard (tb)'));
+      expect(open).toHaveBeenCalledWith('/tasks/tb-1/interactive', 'tb-1', '');
+    } finally {
+      open.mockRestore();
+    }
+  });
+
   it('gives an active shell the full task menu, in the Tasks page order', async () => {
     setup();
     await waitForShells();
     await openRowMenu('Shell (lively-calm-fox) (shell)');
-    await screen.findByText('Copy Task ID');
-    expect(menuLabels()).toEqual([
-      'View Logs',
-      'View Resources',
-      'Copy Task ID',
-      'Connect via CLI',
-      'Open Terminal',
-      'Launch Again',
-      'Manage Job',
-      'Kill',
-    ]);
+    await waitFor(() =>
+      expect(menuLabels()).toEqual([
+        'View Logs',
+        'View Resources',
+        'Copy Task ID',
+        'Connect via CLI',
+        'Open Terminal',
+        'Launch Again',
+        'Manage Job',
+        'Kill',
+      ]),
+    );
     expect(isDangerMenuItem('Kill')).toBe(true);
     expect(isDangerMenuItem('Manage Job')).toBe(false);
   });
@@ -423,11 +461,13 @@ describe('JobQueue', () => {
 
   it('leaves out Connect via CLI, Manage Job and Kill on another user’s task', async () => {
     permissions.canModify = false;
+    services.mayConnect = false;
     mocks.jobs = [{ ...shellJob, userId: OWNER_ID + 1 }];
     setup();
     await waitForShells();
     await openRowMenu('Shell (lively-calm-fox) (shell)');
     await screen.findByText('Copy Task ID');
+    await waitFor(() => expect(getTaskServices).toHaveBeenCalledWith({ taskId: 'shell-1' }));
     expect(menuLabels()).toEqual(['View Logs', 'View Resources', 'Copy Task ID']);
   });
 
@@ -450,7 +490,7 @@ describe('JobQueue', () => {
     expect(await screen.findByText('Launch form for shell-1 (shell)')).toBeInTheDocument();
     const fetches = vi.mocked(getJobQ).mock.calls.length;
     await userEvent.click(screen.getByRole('button', { name: 'Launch' }));
-    expect(await screen.findByText('Shell Launched')).toBeInTheDocument();
+    expect(await screen.findByText('Interactive Task Launched')).toBeInTheDocument();
     // The list is fetched again, so the new shell shows up.
     await waitFor(() => expect(vi.mocked(getJobQ).mock.calls.length).toBeGreaterThan(fetches));
   });
@@ -492,35 +532,40 @@ describe('JobQueue', () => {
       await openRowMenu('Shell (lively-calm-fox) (shell)');
       await screen.findByText('Copy Task ID');
       expect(getTask).toHaveBeenCalledWith({ taskId: 'shell-1' });
-      expect(menuLabels()).toEqual([
-        'View Logs',
-        'View Resources',
-        'Copy Task ID',
-        'Connect via CLI',
-        'Open Terminal',
-        'Launch Again',
-        'Manage Job',
-        'Kill',
-      ]);
+      await waitFor(() =>
+        expect(menuLabels()).toEqual([
+          'View Logs',
+          'View Resources',
+          'Copy Task ID',
+          'Connect via CLI',
+          'Open Terminal',
+          'Launch Again',
+          'Manage Job',
+          'Kill',
+        ]),
+      );
       // Neither the list nor the shell API, which returns the owner's key.
       expect(getShells).not.toHaveBeenCalled();
       expect(getShell).not.toHaveBeenCalled();
     });
 
-    it('takes the task state from its record: no Connect via CLI before the shell runs', async () => {
-      vi.mocked(getTask).mockResolvedValue(taskRecord('shell-1', CommandState.Pulling));
+    it('takes the task state from its record: no Connect via CLI once the shell has ended', async () => {
+      vi.mocked(getTask).mockResolvedValue(taskRecord('shell-1', CommandState.Terminated));
       setup();
       await waitForShells();
       await openRowMenu('Shell (lively-calm-fox) (shell)');
       await screen.findByText('Copy Task ID');
-      expect(menuLabels()).toEqual([
-        'View Logs',
-        'View Resources',
-        'Copy Task ID',
-        'Launch Again',
-        'Manage Job',
-        'Kill',
-      ]);
+      expect(menuLabels()).not.toContain('Connect via CLI');
+      expect(menuLabels()).not.toContain('Open Terminal');
+      expect(getTaskServices).not.toHaveBeenCalled();
+    });
+
+    it('offers Connect via CLI before the shell runs, which the CLI waits for', async () => {
+      vi.mocked(getTask).mockResolvedValue(taskRecord('shell-1', CommandState.Pulling));
+      setup();
+      await waitForShells();
+      await openRowMenu('Shell (lively-calm-fox) (shell)');
+      await waitFor(() => expect(menuLabels()).toContain('Connect via CLI'));
     });
 
     it('shows the jobs while the lookup runs, with the job menu until it is done', async () => {
@@ -556,8 +601,7 @@ describe('JobQueue', () => {
       expect(getTask).toHaveBeenCalledWith({ taskId: 'shell-2' });
 
       await openRowMenu('Shell (lively-calm-fox) (shell)');
-      await screen.findByText('Copy Task ID');
-      expect(menuLabels()).toContain('Connect via CLI');
+      await waitFor(() => expect(menuLabels()).toContain('Connect via CLI'));
 
       // The failed row keeps the job menu, which opens as a second menu.
       await openRowMenu('Shell (quiet-brave-owl) (shell)');

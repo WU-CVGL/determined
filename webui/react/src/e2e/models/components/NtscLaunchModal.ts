@@ -4,8 +4,8 @@ import { Modal } from 'e2e/models/common/hew/Modal';
 import { Select } from 'e2e/models/common/hew/Select';
 
 /**
- * Represents the shell launch form in src/components/NtscLaunchModal.tsx, which Launch Shell and
- * Launch Again open.
+ * Represents the shell launch form in src/components/NtscLaunchModal.tsx, which Launch Interactive
+ * Task and Launch Again open.
  */
 export class NtscLaunchModal extends Modal {
   readonly startFrom = new Select({

@@ -88,6 +88,7 @@ vi.mock('stores/cluster', async (importOriginal) => {
 vi.mock('utils/wait', () => ({
   openCommand: () => null,
   openCommandResponse: mocks.openCommandResponse,
+  openInteractiveTask: () => null,
   waitPageUrl: () => '',
 }));
 
@@ -323,7 +324,7 @@ describe('NtscLaunchModal', () => {
 
   it('renders the shell form, without a task type to choose', async () => {
     await setup();
-    expect(screen.getByText('Launch Shell')).toBeInTheDocument();
+    expect(screen.getByText('Launch Interactive Task')).toBeInTheDocument();
     expect(screen.queryByRole('radio')).not.toBeInTheDocument();
     expect(screen.queryByText('JupyterLab')).not.toBeInTheDocument();
     expect(screen.getByText('Start from')).toBeInTheDocument();
@@ -357,7 +358,7 @@ describe('NtscLaunchModal', () => {
         ),
       );
       expect(onLaunched).not.toHaveBeenCalled();
-      expect(screen.getByText('Launch Shell')).toBeInTheDocument();
+      expect(screen.getByText('Launch Interactive Task')).toBeInTheDocument();
     });
 
     it('previews the full config through the shell preview and launches the YAML', async () => {
@@ -1138,7 +1139,7 @@ describe('NtscLaunchModal', () => {
         ),
       );
       expect(screen.queryByText('New Template')).not.toBeInTheDocument();
-      expect(screen.getByText('Launch Shell')).toBeInTheDocument();
+      expect(screen.getByText('Launch Interactive Task')).toBeInTheDocument();
       expect(screen.getAllByTestId('code-editor')).toHaveLength(1);
       expect(editorText()).toBe(loadedConfig);
 

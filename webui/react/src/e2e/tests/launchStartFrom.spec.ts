@@ -56,7 +56,7 @@ test.describe('Launch form Start from', () => {
       const workspaceDetails = new WorkspaceDetails(authedPage);
       const launchModal = workspaceDetails.taskDashboard.launchModal;
 
-      await test.step('Open Launch Shell with the last template selected', async () => {
+      await test.step('Open Launch Interactive Task with the last template selected', async () => {
         await workspaceDetails.gotoWorkspace(workspaceId);
         await workspaceDetails.jobsTab.pwLocator.click();
         await workspaceDetails.taskDashboard.shellButton.pwLocator.click();

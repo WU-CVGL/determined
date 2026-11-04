@@ -10,6 +10,7 @@ const ExperimentDetails = React.lazy(() => import('pages/ExperimentDetails'));
 const ExperimentResources = React.lazy(() => import('pages/ExperimentResources'));
 const GenericTaskDetails = React.lazy(() => import('pages/GenericTaskDetails'));
 const InteractiveTask = React.lazy(() => import('pages/InteractiveTask'));
+const InteractiveTaskRedirect = React.lazy(() => import('pages/InteractiveTaskRedirect'));
 const JobsPage = React.lazy(() => import('pages/JobsPage'));
 const ModelDetails = React.lazy(() => import('pages/ModelDetails'));
 const ModelRegistryPage = React.lazy(() => import('pages/ModelRegistryPage'));
@@ -18,7 +19,6 @@ const ProjectDetails = React.lazy(() => import('pages/ProjectDetails'));
 const Reload = React.lazy(() => import('pages/Reload'));
 const ResourcepoolDetail = React.lazy(() => import('pages/ResourcePool/ResourcepoolDetail'));
 const SearchDetails = React.lazy(() => import('pages/SearchDetails'));
-const ShellTerminal = React.lazy(() => import('pages/ShellTerminal'));
 import SignIn from 'pages/SignIn'; // no React.lazy to avoid e2e ci error
 import SignOut from 'pages/SignOut';
 const TaskResources = React.lazy(() => import('pages/TaskResources'));
@@ -33,7 +33,7 @@ const Webhooks = React.lazy(() => import('pages/WebhookList'));
 const WorkspaceDetails = React.lazy(() => import('pages/WorkspaceDetails'));
 const WorkspaceList = React.lazy(() => import('pages/WorkspaceList'));
 const ConfigPoliciesPage = React.lazy(() => import('pages/ConfigPoliciesPage'));
-import { RouteConfig } from 'types';
+import { InteractiveTaskTab, RouteConfig } from 'types';
 
 import Routes from './routes';
 
@@ -49,7 +49,8 @@ const routeComponentMap: Record<string, React.ReactNode> = {
   experimentDetails: <ExperimentDetails />,
   experimentResources: <ExperimentResources />,
   genericTaskDetails: <GenericTaskDetails />,
-  interactive: <InteractiveTask />,
+  interactive: <InteractiveTaskRedirect />,
+  interactiveTask: <InteractiveTask />,
   jobs: <JobsPage key="jobs" />,
   modelDetails: <ModelDetails />,
   models: <ModelRegistryPage />,
@@ -58,7 +59,7 @@ const routeComponentMap: Record<string, React.ReactNode> = {
   reload: <Reload />,
   resourcepool: <ResourcepoolDetail />,
   searchDetails: <SearchDetails />,
-  shellTerminal: <ShellTerminal />,
+  shellTerminal: <InteractiveTaskRedirect tab={InteractiveTaskTab.Terminal} />,
   signIn: <SignIn />,
   signOut: <SignOut />,
   taskList: <JobsPage key="tasks" tasksOnly />,

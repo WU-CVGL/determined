@@ -1,6 +1,7 @@
 import { MaybeMocked } from '@vitest/spy';
 
-import { CommandState, CommandTask, CommandType, RecordKey } from 'types';
+import { V1LaunchWarning } from 'services/api-ts-sdk';
+import { CommandState, CommandTask, CommandType, InteractiveTaskTab, RecordKey } from 'types';
 import { generateUUID } from 'utils/string';
 
 import * as utils from './wait';
@@ -72,21 +73,48 @@ describe('Wait Page Utilities', () => {
       vi.mocked(global.open).mockRestore();
     });
 
-    it('should open window for TensorBoard task', () => {
-      expect(windowOpen).not.toHaveBeenCalled();
-      utils.openCommand(COMMAND_TASK[CommandType.TensorBoard]);
-      // TODO: Expand this to use `toHaveBeenCalledWith`.
-      expect(windowOpen).toHaveBeenCalled();
-    });
-
-    it.each([CommandType.JupyterLab, CommandType.Shell])(
-      'should throw error for a %s task, which is not a TensorBoard',
+    it.each([CommandType.JupyterLab, CommandType.Shell, CommandType.TensorBoard])(
+      'opens the task page of a %s task in a tab named after the task',
       (type) => {
-        expect(() => {
-          utils.openCommand(COMMAND_TASK[type]);
-        }).toThrow(utils.CANNOT_OPEN_COMMAND_ERROR);
+        const task = COMMAND_TASK[type];
+        utils.openCommand(task);
+        expect(windowOpen).toHaveBeenCalledWith(
+          expect.stringMatching(new RegExp(`/tasks/${task.id}/interactive$`)),
+          task.id,
+          '',
+        );
       },
     );
+
+    it('carries the launch warning about the free slots', () => {
+      const task = COMMAND_TASK[CommandType.Shell];
+      utils.openCommandResponse({
+        command: task,
+        warnings: [V1LaunchWarning.CURRENTSLOTSEXCEEDED],
+      });
+      expect(windowOpen).toHaveBeenCalledWith(
+        expect.stringMatching(
+          new RegExp(`/tasks/${task.id}/interactive\\?currentSlotsExceeded=true$`),
+        ),
+        task.id,
+        '',
+      );
+      utils.openCommandResponse({ command: task, warnings: [] });
+      expect(windowOpen).toHaveBeenLastCalledWith(
+        expect.stringMatching(new RegExp(`/tasks/${task.id}/interactive$`)),
+        task.id,
+        '',
+      );
+    });
+
+    it('opens a tab of the task page', () => {
+      utils.openInteractiveTask('task-1', { tab: InteractiveTaskTab.Terminal });
+      expect(windowOpen).toHaveBeenCalledWith(
+        expect.stringMatching(/\/tasks\/task-1\/interactive\?tab=terminal$/),
+        'task-1',
+        '',
+      );
+    });
   });
 
   describe('waitPageUrl', () => {

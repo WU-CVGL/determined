@@ -6,6 +6,7 @@ import {
   killableRunStates,
   terminalCommandStates,
 } from 'constants/states';
+import { V1TaskService, V1TaskServiceState, V1TaskType } from 'services/api-ts-sdk';
 import { LaunchTensorBoardParams } from 'services/types';
 import * as Type from 'types';
 import { CommandState, RunState, State } from 'types';
@@ -13,37 +14,72 @@ import { CommandState, RunState, State } from 'types';
 import { runStateSortValues } from './experiment';
 
 /**
- * Whether to offer a browser terminal for a task: a running shell of the user's own, or any
- * running shell for an admin. The master enforces the same rule.
+ * Whether to offer the named service of a task: the task has it and the master lets the user
+ * connect to it (the task's owner, or an admin), which is also who may read its credential. The
+ * master enforces the same rule.
  */
-export const canOpenShellTerminal = (
-  task: Pick<Type.CommandTask, 'state' | 'type' | 'userId'>,
-  user?: Pick<Type.DetailedUser, 'id' | 'isAdmin'>,
+export const canOpenTaskService = (
+  services: Pick<V1TaskService, 'mayConnect' | 'name'>[],
+  name: string,
 ): boolean => {
-  if (!user || task.type !== Type.CommandType.Shell || task.state !== CommandState.Running) {
-    return false;
-  }
-  return user.isAdmin || user.id === task.userId;
+  return services.some((s) => s.name === name && s.mayConnect);
+};
+
+/** Whether to offer a browser terminal in a task: its SSH service, by the rule of every service. */
+export const canOpenShellTerminal = (
+  services: Pick<V1TaskService, 'mayConnect' | 'name'>[],
+): boolean => {
+  return canOpenTaskService(services, 'ssh');
 };
 
 /**
- * Whether to offer Connect via CLI (a shell's `det shell open`) for a task: a running shell of the
- * user's own, or of anyone for an admin. The master gives a shell's key only to them.
+ * Whether to offer Connect via CLI (`det shell open`) for a task: the same rule as the terminal,
+ * since the master gives the SSH service's key to the same users.
  */
 export const canConnectToTask = (
-  task: Pick<Type.CommandTask, 'state' | 'type' | 'userId'>,
-  user?: Pick<Type.DetailedUser, 'id' | 'isAdmin'>,
+  services: Pick<V1TaskService, 'mayConnect' | 'name'>[],
 ): boolean => {
-  if (!user || task.type !== Type.CommandType.Shell || task.state !== CommandState.Running) {
-    return false;
-  }
-  return user.isAdmin || user.id === task.userId;
+  return canOpenShellTerminal(services);
 };
 
+/** Where a task is for the panes that connect to it: waiting for it, ready, or ended. */
+export type TaskPhase = 'waiting' | 'ready' | 'ended';
+
+/* The phase of a task from its current allocation, the first one the master lists. */
+export const taskPhase = (task: Pick<Type.TaskItem, 'allocations' | 'endTime'>): TaskPhase => {
+  const allocation = task.allocations[0];
+  if (task.endTime || allocation?.state === CommandState.Terminated) return 'ended';
+  return allocation?.isReady ? 'ready' : 'waiting';
+};
+
+/** The command type of a task's type, for the task APIs that take one; none for other tasks. */
+export const commandTypeOfTask = (taskType?: V1TaskType): Type.CommandType | undefined => {
+  switch (taskType) {
+    case V1TaskType.COMMAND:
+      return Type.CommandType.Command;
+    case V1TaskType.NOTEBOOK:
+      return Type.CommandType.JupyterLab;
+    case V1TaskType.SHELL:
+      return Type.CommandType.Shell;
+    case V1TaskType.TENSORBOARD:
+      return Type.CommandType.TensorBoard;
+    default:
+      return undefined;
+  }
+};
+
+/**
+ * Whether a service's state has settled: it is ready, or it will not be (it has exited, or it
+ * cannot run). A service that is starting, or that the container has not reported yet, has not.
+ */
+export const taskServiceSettled = (state: V1TaskServiceState): boolean => {
+  return state !== V1TaskServiceState.STARTING && state !== V1TaskServiceState.UNSPECIFIED;
+};
+
+/** Whether a task has a page to open: an experiment's, or the task page of a task that has not ended. */
 export const canBeOpened = (task: Type.AnyTask): boolean => {
   if (isExperimentTask(task)) return true;
-  if (terminalCommandStates.has(task.state)) return false;
-  return !!task.serviceAddress;
+  return !terminalCommandStates.has(task.state);
 };
 
 /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
@@ -181,10 +217,7 @@ export const canKillGenericTask = (
   return canControl && !!task.state && killableGenericTaskStates.has(task.state);
 };
 
-export const isTaskKillable = (
-  task: Type.AnyTask | Type.FullExperimentItem,
-  canModifyWorkspaceNSC: boolean,
-): boolean => {
+export const isTaskKillable = (task: { state: State }, canModifyWorkspaceNSC: boolean): boolean => {
   return (
     canModifyWorkspaceNSC &&
     (killableRunStates.includes(task.state as Type.RunState) ||

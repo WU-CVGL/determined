@@ -10,6 +10,8 @@ import { openTerminalLink, ShellTerminalSize } from 'services/shellTerminal';
 import css from './ShellTerminalView.module.scss';
 
 export interface ShellTerminalViewHandle {
+  /** Fits the terminal to its container, e.g. once the container is shown again. */
+  fit: () => void;
   focus: () => void;
   reset: () => void;
   size: () => ShellTerminalSize;
@@ -48,7 +50,7 @@ const ShellTerminalView = forwardRef<ShellTerminalViewHandle, Props>(
   ({ darkMode, onInput, onResize, onTitleChange }: Props, ref) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const terminalRef = useRef<Terminal>();
-    const fitRef = useRef<FitAddon>();
+    const refitRef = useRef<() => void>();
     const callbacks = useRef({ onInput, onResize, onTitleChange });
     callbacks.current = { onInput, onResize, onTitleChange };
     const initialDarkMode = useRef(darkMode);
@@ -74,15 +76,18 @@ const ShellTerminalView = forwardRef<ShellTerminalViewHandle, Props>(
       terminal.loadAddon(new WebLinksAddon((_event, uri) => openTerminalLink(uri)));
       terminal.open(container);
       terminalRef.current = terminal;
-      fitRef.current = fit;
 
+      // Only a container with a size: the addon measures a hidden one as a few cells, and the
+      // terminal would pass that on to the shell. A hidden terminal keeps its size.
       const refit = () => {
+        if (container.clientWidth <= 0 || container.clientHeight <= 0) return;
         try {
           fit.fit();
         } catch {
-          // The container is hidden or not laid out yet.
+          // Not laid out yet.
         }
       };
+      refitRef.current = refit;
       refit();
 
       const disposables = [
@@ -105,7 +110,7 @@ const ShellTerminalView = forwardRef<ShellTerminalViewHandle, Props>(
         disposables.forEach((d) => d.dispose());
         terminal.dispose();
         terminalRef.current = undefined;
-        fitRef.current = undefined;
+        refitRef.current = undefined;
       };
     }, []);
 
@@ -118,6 +123,7 @@ const ShellTerminalView = forwardRef<ShellTerminalViewHandle, Props>(
     useImperativeHandle(
       ref,
       () => ({
+        fit: () => refitRef.current?.(),
         focus: () => terminalRef.current?.focus(),
         reset: () => terminalRef.current?.reset(),
         size: () => ({

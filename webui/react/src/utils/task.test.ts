@@ -1,3 +1,4 @@
+import { V1TaskServiceState, V1TaskType } from 'services/api-ts-sdk';
 import {
   CommandState,
   CommandTask,
@@ -13,10 +14,14 @@ import {
   canConnectToTask,
   canKillGenericTask,
   canOpenShellTerminal,
+  canOpenTaskService,
   canPauseGenericTask,
   canUnpauseGenericTask,
+  commandTypeOfTask,
   isExperimentTask,
   shortTaskId,
+  taskPhase,
+  taskServiceSettled,
 } from './task';
 
 const SampleTask: Task = { id: '', name: '', resourcePool: '', startTime: '' };
@@ -57,12 +62,12 @@ describe('canBeOpened', () => {
     expect(
       canBeOpened({ ...SampleCommandTask, state: 'TERMINATED' as CommandState }),
     ).toStrictEqual(false);
+    expect(canBeOpened({ ...SampleCommandTask, state: CommandState.Terminating })).toBe(false);
   });
-  it('Command Task without service address', () => {
-    expect(canBeOpened(SampleCommandTask)).toStrictEqual(false);
-  });
-  it('Command Task with service address', () => {
+  it('Command Task that has not ended, with or without a service address', () => {
+    expect(canBeOpened(SampleCommandTask)).toStrictEqual(true);
     expect(canBeOpened({ ...SampleCommandTask, serviceAddress: 'test' })).toStrictEqual(true);
+    expect(canBeOpened({ ...SampleCommandTask, type: CommandType.Shell })).toBe(true);
   });
 });
 
@@ -105,41 +110,81 @@ describe('generic task actions', () => {
   });
 });
 
-describe('canConnectToTask', () => {
-  const owner = { id: 5, isAdmin: false };
+describe('taskPhase', () => {
+  const running = { isReady: false, state: CommandState.Running };
 
-  it('allows the owner and admins to connect to a running shell', () => {
-    const task = { state: CommandState.Running, type: CommandType.Shell, userId: 5 };
-    expect(canConnectToTask(task, owner)).toBe(true);
-    expect(canConnectToTask(task, { id: 1, isAdmin: true })).toBe(true);
-    expect(canConnectToTask(task, { id: 6, isAdmin: false })).toBe(false);
-    expect(canConnectToTask(task, undefined)).toBe(false);
-  });
-
-  it('only offers running shells', () => {
-    const shell = { state: CommandState.Running, type: CommandType.Shell, userId: 5 };
-    expect(canConnectToTask({ ...shell, state: CommandState.Queued }, owner)).toBe(false);
-    expect(canConnectToTask({ ...shell, state: CommandState.Terminated }, owner)).toBe(false);
-    expect(canConnectToTask({ ...shell, type: CommandType.Command }, owner)).toBe(false);
-    expect(canConnectToTask({ ...shell, type: CommandType.JupyterLab }, owner)).toBe(false);
-    expect(canConnectToTask({ ...shell, type: CommandType.TensorBoard }, owner)).toBe(false);
+  it('follows the current allocation, the first one listed', () => {
+    expect(taskPhase({ allocations: [] })).toBe('waiting');
+    expect(taskPhase({ allocations: [running] })).toBe('waiting');
+    expect(taskPhase({ allocations: [{ ...running, isReady: true }] })).toBe('ready');
+    expect(taskPhase({ allocations: [{ ...running, state: CommandState.Terminated }] })).toBe(
+      'ended',
+    );
+    expect(
+      taskPhase({
+        allocations: [{ ...running, isReady: true }],
+        endTime: '2026-01-01T01:00:00Z',
+      }),
+    ).toBe('ended');
+    // The first allocation is the current one; an ended earlier one does not count.
+    expect(
+      taskPhase({
+        allocations: [
+          { ...running, isReady: true },
+          { ...running, state: CommandState.Terminated },
+        ],
+      }),
+    ).toBe('ready');
   });
 });
 
-describe('canOpenShellTerminal', () => {
-  const shell = { state: CommandState.Running, type: CommandType.Shell, userId: 5 };
-  const owner = { id: 5, isAdmin: false };
-
-  it('allows the owner and admins to open running shells', () => {
-    expect(canOpenShellTerminal(shell, owner)).toBe(true);
-    expect(canOpenShellTerminal(shell, { id: 1, isAdmin: true })).toBe(true);
-    expect(canOpenShellTerminal(shell, { id: 6, isAdmin: false })).toBe(false);
-    expect(canOpenShellTerminal(shell, undefined)).toBe(false);
+describe('commandTypeOfTask', () => {
+  it('maps the task types that have a command API', () => {
+    expect(commandTypeOfTask(V1TaskType.SHELL)).toBe(CommandType.Shell);
+    expect(commandTypeOfTask(V1TaskType.COMMAND)).toBe(CommandType.Command);
+    expect(commandTypeOfTask(V1TaskType.TENSORBOARD)).toBe(CommandType.TensorBoard);
+    expect(commandTypeOfTask(V1TaskType.NOTEBOOK)).toBe(CommandType.JupyterLab);
+    expect(commandTypeOfTask(V1TaskType.GENERIC)).toBeUndefined();
+    expect(commandTypeOfTask(V1TaskType.TRIAL)).toBeUndefined();
+    expect(commandTypeOfTask(undefined)).toBeUndefined();
   });
+});
 
-  it('only offers running shells', () => {
-    expect(canOpenShellTerminal({ ...shell, state: CommandState.Queued }, owner)).toBe(false);
-    expect(canOpenShellTerminal({ ...shell, state: CommandState.Terminated }, owner)).toBe(false);
-    expect(canOpenShellTerminal({ ...shell, type: CommandType.JupyterLab }, owner)).toBe(false);
+describe('canOpenTaskService', () => {
+  const ssh = { mayConnect: true, name: 'ssh' };
+  const jupyter = { mayConnect: true, name: 'jupyter' };
+
+  it('needs the named service, which the master lets the user connect to', () => {
+    expect(canOpenTaskService([ssh, jupyter], 'jupyter')).toBe(true);
+    expect(canOpenTaskService([ssh, { ...jupyter, mayConnect: false }], 'jupyter')).toBe(false);
+    expect(canOpenTaskService([ssh], 'jupyter')).toBe(false);
+    expect(canOpenTaskService([], 'ssh')).toBe(false);
   });
+});
+
+describe('taskServiceSettled', () => {
+  it('is false while a service starts or has not been reported, true once it is ready or will not be', () => {
+    expect(taskServiceSettled(V1TaskServiceState.UNSPECIFIED)).toBe(false);
+    expect(taskServiceSettled(V1TaskServiceState.STARTING)).toBe(false);
+    expect(taskServiceSettled(V1TaskServiceState.READY)).toBe(true);
+    expect(taskServiceSettled(V1TaskServiceState.EXITED)).toBe(true);
+    expect(taskServiceSettled(V1TaskServiceState.UNAVAILABLE)).toBe(true);
+  });
+});
+
+describe('canConnectToTask and canOpenShellTerminal', () => {
+  const ssh = { mayConnect: true, name: 'ssh' };
+  const jupyter = { mayConnect: true, name: 'jupyter' };
+
+  it.each([canConnectToTask, canOpenShellTerminal])(
+    'need an SSH service the master lets the user connect to (%o)',
+    (predicate) => {
+      expect(predicate([ssh])).toBe(true);
+      expect(predicate([jupyter, ssh])).toBe(true);
+      expect(predicate([{ ...ssh, mayConnect: false }])).toBe(false);
+      expect(predicate([{ ...ssh, mayConnect: false }, jupyter])).toBe(false);
+      expect(predicate([jupyter])).toBe(false);
+      expect(predicate([])).toBe(false);
+    },
+  );
 });

@@ -4,13 +4,20 @@ import React from 'react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 
 import { ThemeProvider } from 'components/ThemeProvider';
+import InteractiveTaskRedirect from 'pages/InteractiveTaskRedirect';
 import routes from 'routes/routes';
 import authStore from 'stores/auth';
-import { RouteConfig } from 'types';
+import { InteractiveTaskTab, RouteConfig } from 'types';
 
 import Router from './Router';
 
 const OPEN_PATH = '/tasks/task-1/services/jupyter/open';
+const TASK_PATH = '/tasks/task-1/interactive';
+
+const LocationProbe: React.FC = () => {
+  const location = useLocation();
+  return <div data-testid="location">{`${location.pathname}${location.search}`}</div>;
+};
 
 const LoginProbe: React.FC = () => {
   const location = useLocation();
@@ -25,12 +32,24 @@ const testRoutes: RouteConfig[] = [
   { element: <LoginProbe />, id: 'signIn', needAuth: false, path: '/login' },
 ];
 
-const setup = () =>
+const routeById = (id: string) => routes.find((r) => r.id === id) as RouteConfig;
+
+/* The task page and the two old routes that send to it, with their real redirect components. */
+const taskRoutes: RouteConfig[] = [
+  { ...routeById('interactiveTask'), element: <LocationProbe /> },
+  { ...routeById('interactive'), element: <InteractiveTaskRedirect /> },
+  {
+    ...routeById('shellTerminal'),
+    element: <InteractiveTaskRedirect tab={InteractiveTaskTab.Terminal} />,
+  },
+];
+
+const setup = (path = OPEN_PATH, withRoutes = testRoutes) =>
   render(
     <UIProvider theme={DefaultTheme.Light}>
       <ThemeProvider>
-        <MemoryRouter initialEntries={[OPEN_PATH]}>
-          <Router routes={testRoutes} />
+        <MemoryRouter initialEntries={[path]}>
+          <Router routes={withRoutes} />
         </MemoryRouter>
       </ThemeProvider>
     </UIProvider>,
@@ -55,5 +74,46 @@ describe('Router', () => {
     authStore.setAuth({ isAuthenticated: true });
     setup();
     expect(await screen.findByText('service page')).toBeInTheDocument();
+  });
+});
+
+describe('task page routes', () => {
+  beforeEach(() => authStore.setAuth({ isAuthenticated: true }));
+  afterEach(() => authStore.reset());
+
+  it('serve the task page by ID, behind a login', () => {
+    const route = routeById('interactiveTask');
+    expect(route.needAuth).toBe(true);
+    expect(route.path).toBe('/tasks/:taskId/interactive');
+    expect(routeById('interactive').needAuth).toBe(true);
+    expect(routeById('shellTerminal').needAuth).toBe(true);
+  });
+
+  it('send the old interactive page of the WebUI to the task page', async () => {
+    const waitUrl = encodeURIComponent('/det/wait/tensor-board/task-1?serviceAddr=/proxy/task-1/');
+    setup(
+      `/interactive/task-1/tensor-board/TensorBoard%20(x)/default/${waitUrl}/?currentSlotsExceeded=false`,
+      taskRoutes,
+    );
+    expect(await screen.findByTestId('location')).toHaveTextContent(TASK_PATH);
+    expect(screen.getByTestId('location')).toHaveTextContent(/interactive$/);
+  });
+
+  it('send the old interactive page as the CLI builds it to the task page, with its warning', async () => {
+    // quote_plus of the wait page URL, with the CLI's own type segment and no trailing slash.
+    const waitUrl =
+      '%2Fdet%2Fwait%2Ftensorboard%2Ftask-1%3FeventUrl%3D%2Fproxy%2Ftask-1%2Ftensorboard%2Ftask-1%2Fevents%3Ftail%3D1%26serviceAddr%3D%2Fproxy%2Ftask-1';
+    setup(
+      `/interactive/task-1/tensorboard/TensorBoard+%28x%29/default/${waitUrl}?currentSlotsExceeded=true`,
+      taskRoutes,
+    );
+    expect(await screen.findByTestId('location')).toHaveTextContent(
+      `${TASK_PATH}?currentSlotsExceeded=true`,
+    );
+  });
+
+  it('send the old terminal page to the Terminal tab of the task page', async () => {
+    setup('/shells/task-1/terminal', taskRoutes);
+    expect(await screen.findByTestId('location')).toHaveTextContent(`${TASK_PATH}?tab=terminal`);
   });
 });

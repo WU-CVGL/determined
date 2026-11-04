@@ -1,36 +1,26 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DefaultTheme, UIProvider } from 'hew/Theme';
-import { ConfirmationProvider } from 'hew/useConfirm';
 import React, { forwardRef, useImperativeHandle } from 'react';
-import { HelmetProvider } from 'react-helmet-async';
 import { BrowserRouter } from 'react-router-dom';
 
 import { ThemeProvider } from 'components/ThemeProvider';
 import { useSessionCheck } from 'hooks/useAuthCheck';
-import { getCurrentUser, getShells, getTask } from 'services/api';
+import { getCurrentUser } from 'services/api';
 import { ShellTerminalClose, ShellTerminalHandlers } from 'services/shellTerminal';
 import authStore from 'stores/auth';
 import userStore from 'stores/users';
-import { CommandState, CommandType } from 'types';
 import { reloadPage } from 'utils/browser';
+import { TaskPhase } from 'utils/task';
 
-import ShellTerminal from './ShellTerminal';
+import ShellTerminalPane from './ShellTerminalPane';
 
 const SHELL_ID = 'shell-1';
 
-vi.mock('react-router-dom', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('react-router-dom')>()),
-  useParams: () => ({ taskId: SHELL_ID }),
-}));
-
-// No getShell: the page must not fetch the endpoint that returns the shell's private key. Vitest
-// throws if a module uses an export that the mock does not define.
+// Nothing of the shell is fetched: the page feeds the pane. Vitest throws if a module uses an
+// export that the mock does not define.
 vi.mock('services/api', () => ({
   getCurrentUser: vi.fn(),
-  getShells: vi.fn(),
-  getTask: vi.fn(),
-  killTask: vi.fn(),
   storeSessionToken: vi.fn(),
 }));
 
@@ -44,11 +34,8 @@ vi.mock('routes/utils', async (importOriginal) => ({
   serverAddress: () => 'https://det.example.org',
 }));
 
-vi.mock('hooks/usePermissions', () => ({
-  default: () => ({ canModifyWorkspaceNSC: () => true }),
-}));
-
 const view = vi.hoisted(() => ({
+  fit: vi.fn(),
   props: undefined as
     | undefined
     | {
@@ -63,6 +50,7 @@ vi.mock('components/ShellTerminalView', () => ({
   default: forwardRef((props: NonNullable<typeof view.props>, ref) => {
     view.props = props;
     useImperativeHandle(ref, () => ({
+      fit: view.fit,
       focus: vi.fn(),
       reset: view.reset,
       size: () => ({ cols: 132, rows: 43 }),
@@ -95,28 +83,6 @@ vi.mock('services/shellTerminal', async (importOriginal) => ({
   },
 }));
 
-const shell = {
-  id: SHELL_ID,
-  name: 'Shell (brave-otter)',
-  resourcePool: 'default',
-  startTime: '2026-01-01T00:00:00Z',
-  state: CommandState.Running,
-  type: CommandType.Shell,
-  userId: 7,
-  workspaceId: 1,
-};
-
-const taskWith = (
-  isReady: boolean,
-  state: CommandState = CommandState.Running,
-  endTime?: string,
-) => ({
-  allocations: [{ isReady, state, taskId: SHELL_ID }],
-  endTime,
-  startTime: '2026-01-01T00:00:00Z',
-  taskId: SHELL_ID,
-});
-
 const OWNER = { id: 7, isActive: true, isAdmin: false, username: 'owner' };
 
 /* App's session check, which runs next to every page. */
@@ -125,21 +91,27 @@ const SessionCheck = () => {
   return null;
 };
 
-const setup = (beside?: React.ReactNode) =>
-  render(
-    <BrowserRouter>
-      <UIProvider theme={DefaultTheme.Light}>
-        <ThemeProvider>
-          <HelmetProvider>
-            <ConfirmationProvider>
-              {beside}
-              <ShellTerminal />
-            </ConfirmationProvider>
-          </HelmetProvider>
-        </ThemeProvider>
-      </UIProvider>
-    </BrowserRouter>,
-  );
+const Pane = ({
+  active = true,
+  beside,
+  phase,
+}: {
+  active?: boolean;
+  beside?: React.ReactNode;
+  phase: TaskPhase;
+}) => (
+  <BrowserRouter>
+    <UIProvider theme={DefaultTheme.Light}>
+      <ThemeProvider>
+        {beside}
+        <ShellTerminalPane active={active} phase={phase} shellId={SHELL_ID} />
+      </ThemeProvider>
+    </UIProvider>
+  </BrowserRouter>
+);
+
+const setup = (phase: TaskPhase, beside?: React.ReactNode) =>
+  render(<Pane beside={beside} phase={phase} />);
 
 const closeSession = (close: Partial<ShellTerminalClose>) =>
   act(() =>
@@ -164,21 +136,19 @@ const showTab = async () => {
 const connectWithSessionCheck = async () => {
   userStore.updateCurrentUser(OWNER);
   vi.mocked(getCurrentUser).mockResolvedValue(OWNER);
-  vi.mocked(getTask).mockResolvedValue(taskWith(true));
-  setup(<SessionCheck />);
+  setup('ready', <SessionCheck />);
   await waitFor(() => expect(sockets).toHaveLength(1));
   act(() => sockets[0].handlers.onReady?.());
   expect(screen.getByTestId('shell-terminal-status')).toHaveTextContent('Connected');
   await waitFor(() => expect(getCurrentUser).toHaveBeenCalledTimes(1));
 };
 
-describe('ShellTerminal', () => {
+describe('ShellTerminalPane', () => {
   beforeEach(() => {
     sockets.length = 0;
     view.props = undefined;
-    vi.mocked(getShells).mockResolvedValue([shell]);
+    view.fit.mockClear();
     userStore.reset();
-    // The page's route needs a signed-in user.
     authStore.reset();
     authStore.setAuth({ isAuthenticated: true });
     authStore.setAuthChecked();
@@ -186,27 +156,24 @@ describe('ShellTerminal', () => {
 
   afterEach(() => vi.restoreAllMocks());
 
-  it('connects only once the shell is ready', async () => {
-    vi.mocked(getTask).mockResolvedValue(taskWith(false));
-    setup();
-    expect(await screen.findByText('Shell (brave-otter)')).toBeInTheDocument();
+  it('connects only once the page says the shell is ready', async () => {
+    const { rerender } = setup('waiting');
     expect(screen.getByTestId('shell-terminal-status')).toHaveTextContent('Waiting');
-    await waitFor(() => expect(getTask).toHaveBeenCalledTimes(2), { timeout: 3000 });
     expect(sockets).toHaveLength(0);
 
-    vi.mocked(getTask).mockResolvedValue(taskWith(true));
-    await waitFor(() => expect(sockets).toHaveLength(1), { timeout: 3000 });
+    rerender(<Pane phase="ready" />);
+    await waitFor(() => expect(sockets).toHaveLength(1));
     const url = new URL(sockets[0].url);
     expect(url.origin).toBe('wss://det.example.org');
     expect(url.pathname).toBe(`/ws/shells/${SHELL_ID}/terminal`);
     expect(url.searchParams.get('cols')).toBe('132');
     expect(url.searchParams.get('rows')).toBe('43');
     expect(url.search).not.toMatch(/key|token/i);
+    expect(screen.getByTestId('shell-terminal-status')).toHaveTextContent('Connecting');
   });
 
   it('forwards input, asks before leaving, and offers to reconnect', async () => {
-    vi.mocked(getTask).mockResolvedValue(taskWith(true));
-    setup();
+    setup('ready');
     await waitFor(() => expect(sockets).toHaveLength(1));
     act(() => sockets[0].handlers.onReady?.());
     expect(screen.getByTestId('shell-terminal-status')).toHaveTextContent('Connected');
@@ -232,11 +199,30 @@ describe('ShellTerminal', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
     await waitFor(() => expect(sockets).toHaveLength(2));
     expect(view.reset).toHaveBeenCalled();
+    expect(sockets[0].closed).toBe(true);
+  });
+
+  it('tries again later when the shell is not ready after all', async () => {
+    vi.useFakeTimers();
+    try {
+      setup('ready');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(sockets).toHaveLength(1);
+      closeSession({ code: 4409, wasReady: false });
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      expect(sockets).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not offer to reconnect after the login session ended', async () => {
-    vi.mocked(getTask).mockResolvedValue(taskWith(true));
-    setup();
+    setup('ready');
     await waitFor(() => expect(sockets).toHaveLength(1));
     // How the master closes a terminal when its login session expires or is revoked.
     closeSession({ code: 4401, errorCode: 'session_expired' });
@@ -247,8 +233,7 @@ describe('ShellTerminal', () => {
   });
 
   it('offers to reconnect after the maximum session length', async () => {
-    vi.mocked(getTask).mockResolvedValue(taskWith(true));
-    setup();
+    setup('ready');
     await waitFor(() => expect(sockets).toHaveLength(1));
     closeSession({ code: 4408, errorCode: 'time_limit' });
     expect(
@@ -257,18 +242,32 @@ describe('ShellTerminal', () => {
     expect(screen.getByRole('button', { name: 'Reconnect' })).toBeInTheDocument();
   });
 
-  it('shows an ended shell without connecting', async () => {
-    vi.mocked(getTask).mockResolvedValue(
-      taskWith(false, CommandState.Terminated, '2026-01-01T01:00:00Z'),
-    );
-    setup();
-    expect(await screen.findByText('The shell has ended.')).toBeInTheDocument();
+  it('shows an ended shell without connecting, and no Reconnect once it ends', async () => {
+    const { rerender } = setup('ended');
+    expect(screen.getByText('The shell has ended.')).toBeInTheDocument();
+    expect(screen.getByTestId('shell-terminal-status')).toHaveTextContent('Ended');
     expect(sockets).toHaveLength(0);
+
+    rerender(<Pane phase="ready" />);
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    closeSession({ code: 4410 });
+    rerender(<Pane phase="ended" />);
+    expect(screen.getByTestId('shell-terminal-status')).toHaveTextContent('Ended');
+    expect(screen.queryByRole('button', { name: 'Reconnect' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('terminal-view')).toBeInTheDocument();
+  });
+
+  it('fits the terminal when the pane is shown and before it connects', async () => {
+    const { rerender } = render(<Pane active={false} phase="ready" />);
+    await waitFor(() => expect(sockets).toHaveLength(1));
+    const fitsBeforeConnecting = view.fit.mock.calls.length;
+    expect(fitsBeforeConnecting).toBeGreaterThan(0);
+    rerender(<Pane active phase="ready" />);
+    expect(view.fit.mock.calls.length).toBeGreaterThan(fitsBeforeConnecting);
   });
 
   it('shows terminal titles as plain text', async () => {
-    vi.mocked(getTask).mockResolvedValue(taskWith(true));
-    setup();
+    setup('ready');
     await waitFor(() => expect(view.props).toBeDefined());
     act(() => view.props?.onTitleChange('<img src=x onerror="alert(1)">user@box: ~'));
     expect(screen.getByTestId('shell-terminal-title')).toHaveTextContent(

@@ -35,6 +35,9 @@ class TaskActionDropdown extends DropdownMenu {
   readonly copy = this.menuItem(TaskAction.CopyTaskID);
   readonly viewLogs = this.menuItem(TaskAction.ViewLogs);
   readonly connect = this.menuItem(TaskAction.Connect);
+  readonly openTerminal = this.menuItem(TaskAction.OpenTerminal);
+  readonly openJupyterLab = this.menuItem(TaskAction.OpenJupyterLab);
+  readonly openVSCode = this.menuItem(TaskAction.OpenVSCode);
 }
 
 /**
@@ -44,7 +47,7 @@ class ShellLaunchedModal extends BaseOverlay {
   constructor(args: OverlayArgs) {
     super({
       ...args,
-      selector: '.ant-modal-content:has(.ant-modal-title:text-is("Shell Launched"))',
+      selector: '.ant-modal-content:has(.ant-modal-title:text-is("Interactive Task Launched"))',
     });
   }
   readonly closeButton = new BaseComponent({ parent: this, selector: '.ant-modal-close' });

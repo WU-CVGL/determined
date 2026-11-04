@@ -4,7 +4,7 @@ import { KeyboardEvent } from 'react';
 import { globalStorage } from 'globalStorage';
 import { ClusterApi, Configuration } from 'services/api-ts-sdk';
 import { BrandingType } from 'stores/determinedInfo';
-import { CommandTask, RouteConfig } from 'types';
+import { CommandTask, InteractiveTaskTab, RouteConfig } from 'types';
 import {
   AnyMouseEvent,
   AnyMouseEventHandler,
@@ -17,7 +17,6 @@ import {
   routeToExternalUrl,
   routeToReactUrl,
 } from 'utils/routes';
-import { waitPageUrl } from 'utils/wait';
 
 import routes from './routes';
 
@@ -119,18 +118,17 @@ export const paths = {
     const path = `/generic-tasks/${encodeURIComponent(taskId)}`;
     return tab ? `${path}/${tab}` : path;
   },
-  interactive: (command: CommandTask, maxSlotsExceeded = false): string => {
-    const path = [
-      'interactive',
-      command.id,
-      command.type,
-      command.name,
-      command.resourcePool,
-      waitPageUrl(command),
-    ]
-      .map(encodeURIComponent)
-      .join('/');
-    return `/${path}/?currentSlotsExceeded=${maxSlotsExceeded}`;
+  /** The task page: a task's services, logs and resources by its ID. */
+  interactiveTask: (
+    taskId: string,
+    params: { currentSlotsExceeded?: boolean; tab?: InteractiveTaskTab } = {},
+  ): string => {
+    const path = `/tasks/${encodeURIComponent(taskId)}/interactive`;
+    const query = new URLSearchParams();
+    if (params.tab) query.set('tab', params.tab);
+    if (params.currentSlotsExceeded) query.set('currentSlotsExceeded', 'true');
+    const search = query.toString();
+    return search ? `${path}?${search}` : path;
   },
   /** The Jobs page: runs of every kind. */
   jobs: (): string => {
@@ -165,9 +163,6 @@ export const paths = {
   },
   searchDetails: (searchId: number | string): string => {
     return `/searches/${searchId}`;
-  },
-  shellTerminal: (shellId: string): string => {
-    return `/shells/${encodeURIComponent(shellId)}/terminal`;
   },
   submitProductFeedback: (branding: BrandingType): string => {
     return branding === BrandingType.Determined

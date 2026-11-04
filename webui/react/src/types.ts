@@ -1027,12 +1027,26 @@ export const TaskAction = {
   Kill: 'Kill',
   LaunchAgain: 'Launch Again',
   ManageJob: 'Manage Job',
+  OpenJupyterLab: 'Open JupyterLab',
   OpenTerminal: 'Open Terminal',
+  OpenVSCode: 'Open VS Code',
   ViewLogs: 'View Logs',
   ViewResources: 'View Resources',
 } as const;
 
 export type TaskAction = ValueOf<typeof TaskAction>;
+
+/** The tabs of the task page, as its `tab` query names them. */
+export const InteractiveTaskTab = {
+  JupyterLab: 'jupyter',
+  Logs: 'logs',
+  Resources: 'resources',
+  TensorBoard: 'tensorboard',
+  Terminal: 'terminal',
+  VSCode: 'vscode',
+} as const;
+
+export type InteractiveTaskTab = ValueOf<typeof InteractiveTaskTab>;
 
 export type RecentEvent = {
   lastEvent: {

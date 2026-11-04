@@ -60,7 +60,10 @@ the SSH sessions. The master must serve code-server releases (see :ref:`master-c
    logs in to the editor and opens it on the shell's working directory. You can also open that page
    directly.
 
-Only the user who started the shell and administrators can open its editor.
+In the WebUI, the shell's page has a **VS Code** tab: on the **Jobs** page or a workspace's **Jobs**
+tab, click the shell's name, or choose **Open VS Code** from its action menu. The tab opens the
+editor once the service is ``READY``; see :ref:`shell-services`. Only the user who started the shell
+and administrators can open its editor.
 
 Where code-server Comes From
 ============================

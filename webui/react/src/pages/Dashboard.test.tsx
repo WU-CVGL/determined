@@ -349,16 +349,16 @@ describe('Dashboard', () => {
       );
     });
 
-    it('offers Launch Shell only, disabled without permission to launch', async () => {
+    it('offers Launch Interactive Task only, disabled without permission to launch', async () => {
       setup();
 
-      const shell = await screen.findByRole('button', { name: 'Launch Shell' });
+      const shell = await screen.findByRole('button', { name: 'Launch Interactive Task' });
       expect(shell).toBeDisabled();
       expect(screen.queryByRole('button', { name: 'Launch JupyterLab' })).not.toBeInTheDocument();
       expect(screen.queryByTestId('jupyter-lab-button')).not.toBeInTheDocument();
     });
 
-    it('"Launch Shell" opens the shell launch form, with permission to launch', async () => {
+    it('"Launch Interactive Task" opens the shell launch form, with permission to launch', async () => {
       vi.mocked(usePermissions).mockImplementation(
         () =>
           ({
@@ -369,7 +369,7 @@ describe('Dashboard', () => {
       );
       setup();
 
-      const entry = await screen.findByRole('button', { name: 'Launch Shell' });
+      const entry = await screen.findByRole('button', { name: 'Launch Interactive Task' });
       expect(entry).toBeEnabled();
       await userEvent.click(entry);
       expect(await screen.findByText('Start from')).toBeInTheDocument();

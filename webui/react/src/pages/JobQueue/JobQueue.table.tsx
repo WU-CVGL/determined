@@ -9,8 +9,7 @@ import { ColumnLayout, withColumn } from 'components/Table/columnLayout';
 import { ColumnDef } from 'components/Table/InteractiveTable';
 import { createOmitableRenderer, relativeTimeRenderer } from 'components/Table/Table';
 import { paths } from 'routes/utils';
-import { getTensorBoards } from 'services/api';
-import { CommandTask, FullJob, Job, JobType } from 'types';
+import { FullJob, Job, JobType } from 'types';
 import {
   genericJobLabel,
   jobTypeIconName,
@@ -20,7 +19,7 @@ import {
 } from 'utils/job';
 import { floatToPercent } from 'utils/string';
 import { ALLOCATION_START_TOOLTIP } from 'utils/taskTime';
-import { openCommand } from 'utils/wait';
+import { openInteractiveTask } from 'utils/wait';
 
 import css from './JobQueue.module.scss';
 import { DEFAULT_COLUMN_WIDTHS, DEFAULT_COLUMNS } from './JobQueue.settings';
@@ -30,24 +29,6 @@ export type JobTypeRenderer = Renderer<Job>;
 
 export const SCHEDULING_VAL_KEY = 'schedulingVal';
 
-const routeToTask = async (taskId: string, jobType: JobType): Promise<void> => {
-  let cmds: CommandTask[] = [];
-  switch (jobType) {
-    case JobType.TENSORBOARD:
-      cmds = await getTensorBoards({});
-      break;
-    default:
-      throw new Error(`Unsupported job type: ${jobType}`);
-  }
-
-  const task = cmds.find((t) => t.id === taskId);
-  if (task) {
-    openCommand(task);
-  } else {
-    throw new Error(`${jobType} ${taskId} not found`);
-  }
-};
-
 const linkToEntityPage = (job: Job, label: ReactNode): ReactNode => {
   if (!('entityId' in job)) return label;
   switch (job.type) {
@@ -55,15 +36,11 @@ const linkToEntityPage = (job: Job, label: ReactNode): ReactNode => {
       return <Link path={paths.experimentDetails(job.entityId)}>{label}</Link>;
     case JobType.GENERIC:
       return <Link path={paths.genericTaskDetails(job.entityId)}>{label}</Link>;
+    case JobType.COMMAND:
+    case JobType.SHELL:
     case JobType.TENSORBOARD:
-      return (
-        <Link
-          onClick={() => {
-            routeToTask(job.entityId, job.type);
-          }}>
-          {label}
-        </Link>
-      );
+      // The task page, by ID, as the task tables open it.
+      return <Link onClick={() => openInteractiveTask(job.entityId)}>{label}</Link>;
     default:
       return label;
   }
