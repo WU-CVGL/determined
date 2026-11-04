@@ -170,6 +170,9 @@ func (a *apiServer) prepareCommandLaunch(ctx context.Context, req *protoCommandP
 
 	workDirInDefaults := config.WorkDir
 	if len(configBytes) != 0 {
+		// Decoding replaces a service's entry as a whole; the template's idle_type stays unless
+		// the request's entry sets one.
+		templateServices := maps.Clone(config.Services)
 		dec := json.NewDecoder(bytes.NewBuffer(configBytes))
 		dec.DisallowUnknownFields()
 
@@ -177,6 +180,12 @@ func (a *apiServer) prepareCommandLaunch(ctx context.Context, req *protoCommandP
 			return nil, launchWarnings, status.Errorf(codes.InvalidArgument,
 				errors.Wrapf(err,
 					"unable to decode the merged config: %s", string(configBytes)).Error())
+		}
+		for name, service := range config.Services {
+			if service.IdleType == "" && templateServices[name].IdleType != "" {
+				service.IdleType = templateServices[name].IdleType
+				config.Services[name] = service
+			}
 		}
 	}
 	if len(config.Services) > 0 && !req.AllowServices {

@@ -181,7 +181,8 @@ The following configuration settings are supported:
    -  ``enabled``: Whether the shell runs the service. The default is ``true``.
 
    -  ``idle_type``: ``jupyter`` only. Specifies how to decide whether JupyterLab is idle or active
-      in a shell with ``idle_timeout``. The default is ``activity``. Valid values are:
+      in a shell with ``idle_timeout``. The default is ``activity``. A ``jupyter`` entry in the
+      launch configuration that does not set ``idle_type`` keeps the template's. Valid values are:
 
       -  ``kernels_or_terminals``: JupyterLab is considered active if any kernels or terminals are
          running.

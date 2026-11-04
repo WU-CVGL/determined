@@ -221,6 +221,35 @@ func TestPreviewShellTemplateServices(t *testing.T) {
 	require.Equal(t, model.ServiceVSCode, spec.Services[2].Name)
 }
 
+// A request's service entry keeps the template's idle_type, in the preview as in the launch.
+func TestPreviewShellTemplateIdleType(t *testing.T) {
+	api, _, ctx := setupPreviewTest(t)
+	templateName := "shell-idle-type-" + uuid.NewString()
+	_, err := db.Bun().NewRaw(
+		"INSERT INTO templates (name, config, workspace_id) VALUES (?, ?::jsonb, 1)",
+		templateName, `{"services": {"jupyter": {"idle_type": "kernels_or_terminals"}}}`).
+		Exec(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = db.Bun().NewDelete().Table("templates").Where("name = ?", templateName).
+			Exec(context.Background())
+	})
+	cfg := servicesConfig(t, map[string]any{"jupyter": map[string]any{}})
+	want := map[string]any{"idle_type": model.JupyterIdleTypeKernelsOrTerminals}
+
+	preview, err := api.PreviewShell(ctx, &apiv1.PreviewShellRequest{
+		Config: cfg, TemplateName: templateName,
+	})
+	require.NoError(t, err)
+	require.Equal(t, want, preview.Config.AsMap()["services"].(map[string]any)["jupyter"])
+
+	launch, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
+		Config: cfg, TemplateName: templateName,
+	})
+	require.NoError(t, err)
+	require.Equal(t, want, launch.Config.AsMap()["services"].(map[string]any)["jupyter"])
+}
+
 // A shell's preview fills the services that the launch runs by default: jupyter, and vscode only
 // when the master serves code-server. A request's or a template's entry is kept, enabled or not:
 // a disabled service shows in the config and runs nowhere, and a template's enabled false wins

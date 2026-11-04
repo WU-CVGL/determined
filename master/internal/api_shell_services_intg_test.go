@@ -348,7 +348,8 @@ func TestLaunchShellWithServicesDisabled(t *testing.T) {
 
 // A shell with an idle timeout is watched through its task's activity record, with or without
 // jupyter; with jupyter, JupyterLab's idle check reports there with the timeout and the idle type,
-// activity unless the template or the config sets another as services.jupyter.idle_type.
+// activity unless the template or the config sets another as services.jupyter.idle_type; a
+// request's jupyter entry without one keeps the template's.
 func TestLaunchShellIdleTimeout(t *testing.T) {
 	api, _, ctx := setupAPITest(t, nil)
 	cs, err := command.NewService(api.m.db, api.m.rm)
@@ -373,6 +374,18 @@ func TestLaunchShellIdleTimeout(t *testing.T) {
 		"jupyter template": {
 			template:     `{"services": {"jupyter": {"idle_type": "kernels_or_terminals"}}}`,
 			wantIdleType: model.JupyterIdleTypeKernelsOrTerminals,
+		},
+		"jupyter template and request": {
+			services:     jupyter,
+			template:     `{"services": {"jupyter": {"idle_type": "kernels_or_terminals"}}}`,
+			wantIdleType: model.JupyterIdleTypeKernelsOrTerminals,
+		},
+		"jupyter template and configured": {
+			services: map[string]any{
+				"jupyter": map[string]any{"idle_type": model.JupyterIdleTypeKernelConnections},
+			},
+			template:     `{"services": {"jupyter": {"idle_type": "kernels_or_terminals"}}}`,
+			wantIdleType: model.JupyterIdleTypeKernelConnections,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
