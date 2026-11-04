@@ -6,7 +6,7 @@ import {
   killableRunStates,
   terminalCommandStates,
 } from 'constants/states';
-import { V1TaskService, V1TaskType } from 'services/api-ts-sdk';
+import { V1TaskService, V1TaskServiceState, V1TaskType } from 'services/api-ts-sdk';
 import { LaunchTensorBoardParams } from 'services/types';
 import * as Type from 'types';
 import { CommandState, RunState, State } from 'types';
@@ -62,6 +62,14 @@ export const commandTypeOfTask = (taskType?: V1TaskType): Type.CommandType | und
 /** Whether a task has the named service, whatever its state. */
 export const hasTaskService = (services: Pick<V1TaskService, 'name'>[], name: string): boolean => {
   return services.some((s) => s.name === name);
+};
+
+/**
+ * Whether a service's state has settled: it is ready, or it will not be (it has exited, or it
+ * cannot run). A service that is starting, or that the container has not reported yet, has not.
+ */
+export const taskServiceSettled = (state: V1TaskServiceState): boolean => {
+  return state !== V1TaskServiceState.STARTING && state !== V1TaskServiceState.UNSPECIFIED;
 };
 
 /** Whether a task has a page to open: an experiment's, or the task page of a task that has not ended. */

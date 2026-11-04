@@ -16,11 +16,17 @@ import { useSettings } from 'hooks/useSettings';
 import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
 import { TaskLogsViewer } from 'pages/TaskLogs';
 import { getCommand, getShells, getTask, getTaskServices, getTensorBoard } from 'services/api';
-import { V1TaskService } from 'services/api-ts-sdk';
+import { V1TaskService, V1TaskServiceState } from 'services/api-ts-sdk';
 import { errorText } from 'services/taskService';
 import { CommandState, CommandTask, CommandType, InteractiveTaskTab, TaskItem } from 'types';
 import handleError, { ErrorLevel, ErrorType, handleWarning } from 'utils/error';
-import { canOpenShellTerminal, commandTypeOfTask, hasTaskService, taskPhase } from 'utils/task';
+import {
+  canOpenShellTerminal,
+  commandTypeOfTask,
+  hasTaskService,
+  taskPhase,
+  taskServiceSettled,
+} from 'utils/task';
 import { waitPageUrl } from 'utils/wait';
 
 import css from './InteractiveTask.module.scss';
@@ -140,62 +146,65 @@ export const InteractiveTask: React.FC = () => {
     }
   }, [slotsExceeded]);
 
-  // The one poll of the task, until it ends.
+  // The one poll of the task, until it ends, and of its services while one of them has not
+  // settled: the set of services is fixed, and a pane opens its service once it is ready.
   useEffect(() => {
     let cancelled = false;
     let failures = 0;
     let loaded = false;
+    let servicesSettled = false;
     const timer = setInterval(() => void poll(), POLL_MS);
-    const poll = async () => {
+    // Whether the task has ended, or the page gives up on it.
+    const pollTask = async (): Promise<'ended' | 'gone' | undefined> => {
       try {
         const response = await getTask({ taskId });
-        if (cancelled) return;
+        if (cancelled) return 'gone';
         failures = 0;
         if (!response) {
-          clearInterval(timer);
           if (!loaded) setError(`Task ${taskId} not found.`);
-          return;
+          return 'gone';
         }
         loaded = true;
         setTask(response);
-        if (taskPhase(response) === 'ended') clearInterval(timer);
+        return taskPhase(response) === 'ended' ? 'ended' : undefined;
       } catch (e) {
-        if (cancelled) return;
+        if (cancelled) return 'gone';
         // The server's text, before the handler puts its own on the error.
         const text = errorText(e);
         handleError(e, { publicMessage: 'Unable to load the task.', silent: true });
         if (++failures >= MAX_POLL_FAILURES) {
-          clearInterval(timer);
           if (!loaded) setError(text);
+          return 'gone';
         }
+        return undefined;
       }
     };
-    void poll();
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [taskId]);
-
-  // The services and the owner, once: the set of services is fixed, and a pane reads a service's
-  // state when it opens.
-  useEffect(() => {
-    let cancelled = false;
-    getTaskServices({ taskId })
-      .then((response) => {
+    // A failed read keeps the last services, if any, and is tried again on the next tick.
+    const pollServices = async () => {
+      try {
+        const response = await getTaskServices({ taskId });
         if (cancelled) return;
         setTaskServices({
           owner: { userId: response.userId, workspaceId: response.workspaceId },
           services: response.services,
         });
-      })
-      .catch((e) => {
+        servicesSettled = response.services.every((s) => taskServiceSettled(s.state));
+      } catch (e) {
         if (cancelled) return;
         handleError(e, { publicMessage: 'Unable to load the services of the task.', silent: true });
-        setTaskServices({ services: [] });
-      });
+      }
+    };
+    const poll = async () => {
+      const [outcome] = await Promise.all([
+        pollTask(),
+        servicesSettled ? undefined : pollServices(),
+      ]);
+      if (outcome === 'gone' || (outcome === 'ended' && servicesSettled)) clearInterval(timer);
+    };
+    void poll();
     return () => {
       cancelled = true;
+      clearInterval(timer);
     };
   }, [taskId]);
 
@@ -257,16 +266,30 @@ export const InteractiveTask: React.FC = () => {
 
   const items: TabItem[] = useMemo(() => {
     if (!task) return [];
+    const serviceState = (name: string): V1TaskServiceState =>
+      services.find((s) => s.name === name)?.state ?? V1TaskServiceState.UNSPECIFIED;
     const pane = (key: InteractiveTaskTab): React.ReactNode => {
       switch (key) {
         case InteractiveTaskTab.Terminal:
           return <ShellTerminalPane active={activeKey === key} phase={phase} shellId={taskId} />;
         case InteractiveTaskTab.JupyterLab:
           return (
-            <TaskServicePane label="JupyterLab" phase={phase} service="jupyter" taskId={taskId} />
+            <TaskServicePane
+              label="JupyterLab"
+              service="jupyter"
+              state={serviceState('jupyter')}
+              taskId={taskId}
+            />
           );
         case InteractiveTaskTab.VSCode:
-          return <TaskServicePane label="VS Code" phase={phase} service="vscode" taskId={taskId} />;
+          return (
+            <TaskServicePane
+              label="VS Code"
+              service="vscode"
+              state={serviceState('vscode')}
+              taskId={taskId}
+            />
+          );
         case InteractiveTaskTab.TensorBoard:
           return command ? (
             <iframe
@@ -285,7 +308,7 @@ export const InteractiveTask: React.FC = () => {
       }
     };
     return tabKeys.map((key) => ({ children: pane(key), key, label: TAB_LABELS[key] }));
-  }, [activeKey, command, phase, tabKeys, task, taskId]);
+  }, [activeKey, command, phase, services, tabKeys, task, taskId]);
 
   const state = task?.allocations[0]?.state;
   const title = ui.isPageHidden ? getTitleState(state, name) : name;

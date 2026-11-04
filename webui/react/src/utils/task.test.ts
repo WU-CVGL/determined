@@ -1,4 +1,4 @@
-import { V1TaskType } from 'services/api-ts-sdk';
+import { V1TaskServiceState, V1TaskType } from 'services/api-ts-sdk';
 import {
   CommandState,
   CommandTask,
@@ -21,6 +21,7 @@ import {
   isExperimentTask,
   shortTaskId,
   taskPhase,
+  taskServiceSettled,
 } from './task';
 
 const SampleTask: Task = { id: '', name: '', resourcePool: '', startTime: '' };
@@ -154,6 +155,16 @@ describe('hasTaskService', () => {
     expect(hasTaskService([{ name: 'ssh' }, { name: 'jupyter' }], 'jupyter')).toBe(true);
     expect(hasTaskService([{ name: 'ssh' }], 'jupyter')).toBe(false);
     expect(hasTaskService([], 'ssh')).toBe(false);
+  });
+});
+
+describe('taskServiceSettled', () => {
+  it('is false while a service starts or has not been reported, true once it is ready or will not be', () => {
+    expect(taskServiceSettled(V1TaskServiceState.UNSPECIFIED)).toBe(false);
+    expect(taskServiceSettled(V1TaskServiceState.STARTING)).toBe(false);
+    expect(taskServiceSettled(V1TaskServiceState.READY)).toBe(true);
+    expect(taskServiceSettled(V1TaskServiceState.EXITED)).toBe(true);
+    expect(taskServiceSettled(V1TaskServiceState.UNAVAILABLE)).toBe(true);
   });
 });
 

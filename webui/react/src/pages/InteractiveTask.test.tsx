@@ -51,8 +51,8 @@ vi.mock('components/ShellTerminalPane', () => ({
 }));
 
 vi.mock('components/TaskServicePane', () => ({
-  default: ({ phase, service }: { phase: TaskPhase; service: string }) => (
-    <div data-phase={phase} data-testid={`service-pane-${service}`} />
+  default: ({ service, state }: { service: string; state: V1TaskServiceState }) => (
+    <div data-state={state} data-testid={`service-pane-${service}`} />
   ),
 }));
 
@@ -98,14 +98,18 @@ const taskWith = (
   taskType,
 });
 
-const servicesWith = (names: string[], mayConnect = true): V1GetTaskServicesResponse => ({
+const servicesWith = (
+  names: string[],
+  mayConnect = true,
+  state: V1TaskServiceState = V1TaskServiceState.STARTING,
+): V1GetTaskServicesResponse => ({
   primary: names[0] ?? '',
   services: names.map((name) => ({
     mayConnect,
     name,
     protocol: name === 'ssh' ? TaskServiceProtocol.TCP : TaskServiceProtocol.HTTP,
     serviceId: name === 'ssh' ? TASK_ID : `${TASK_ID}:2900`,
-    state: V1TaskServiceState.STARTING,
+    state,
     url: name === 'ssh' ? '' : `/proxy/${TASK_ID}:2900/`,
   })),
   taskId: TASK_ID,
@@ -165,6 +169,9 @@ describe('InteractiveTask', () => {
   it('feeds the panes the phase of the task from one poll, which stops once the task ends', async () => {
     vi.useFakeTimers();
     try {
+      vi.mocked(getTaskServices).mockResolvedValue(
+        servicesWith(['ssh', 'jupyter'], true, V1TaskServiceState.READY),
+      );
       setup();
       await act(() => vi.advanceTimersByTimeAsync(0));
       expect(screen.getByTestId('terminal-pane')).toHaveAttribute('data-phase', 'waiting');
@@ -182,6 +189,41 @@ describe('InteractiveTask', () => {
       expect(getTask).toHaveBeenCalledTimes(3);
       await act(() => vi.advanceTimersByTimeAsync(6000));
       expect(getTask).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('feeds a pane the state of its service, read again while a service has not settled', async () => {
+    vi.useFakeTimers();
+    try {
+      setup('?tab=jupyter');
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(screen.getByTestId('service-pane-jupyter')).toHaveAttribute(
+        'data-state',
+        V1TaskServiceState.STARTING,
+      );
+      expect(getTaskServices).toHaveBeenCalledTimes(1);
+
+      // A failed read keeps the last services.
+      vi.mocked(getTaskServices).mockRejectedValueOnce(new Error('network'));
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+      expect(tabLabels()).toEqual(['Terminal', 'JupyterLab', 'VS Code', 'Logs', 'Resources']);
+      expect(getTaskServices).toHaveBeenCalledTimes(2);
+
+      vi.mocked(getTaskServices).mockResolvedValue(
+        servicesWith(['ssh', 'jupyter', 'vscode'], true, V1TaskServiceState.READY),
+      );
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+      expect(screen.getByTestId('service-pane-jupyter')).toHaveAttribute(
+        'data-state',
+        V1TaskServiceState.READY,
+      );
+      expect(getTaskServices).toHaveBeenCalledTimes(3);
+      // Settled: the task is still polled, the services are not.
+      await act(() => vi.advanceTimersByTimeAsync(4000));
+      expect(getTaskServices).toHaveBeenCalledTimes(3);
+      expect(getTask).toHaveBeenCalledTimes(5);
     } finally {
       vi.useRealTimers();
     }
