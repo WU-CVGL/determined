@@ -21,6 +21,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/sirupsen/logrus"
+
+	"github.com/determined-ai/determined/master/pkg/model"
 )
 
 // Service represents a registered service. The LastRequested field is used by
@@ -36,6 +38,8 @@ type Service struct {
 	// StripPrefix removes /proxy/<service ID> from the path of HTTP and WebSocket requests before
 	// they reach the service.
 	StripPrefix bool
+	// TaskID is the task that runs the service, whose activity the proxy records, if set.
+	TaskID model.TaskID
 }
 
 // Clone returns a deep copy of the Service.
@@ -48,6 +52,7 @@ func (s Service) Clone() Service {
 		AllowUnauthenticated: s.AllowUnauthenticated,
 		Exec:                 s.Exec,
 		StripPrefix:          s.StripPrefix,
+		TaskID:               s.TaskID,
 	}
 }
 
@@ -60,13 +65,45 @@ type ProxyHTTPAuth func(c echo.Context, service *Service) (done bool, err error)
 // never authenticates anyone.
 type IsMasterToken func(token string) bool
 
+// TaskActivity records the activity of the tasks whose services the proxy serves.
+type TaskActivity interface {
+	// Touch records activity of the task now.
+	Touch(taskID model.TaskID)
+	// Hold holds the task active until release is called.
+	Hold(taskID model.TaskID) (release func())
+}
+
 // Proxy is an actor that proxies requests to registered services.
 type Proxy struct {
 	lock          sync.RWMutex
 	HTTPAuth      ProxyHTTPAuth
 	IsMasterToken IsMasterToken
-	services      map[string]*Service
-	syslog        *logrus.Entry
+	// TaskActivity, when set before the proxy serves, hears of the requests that pass the access
+	// check of a service with a TaskID: every HTTP request and every TCP connection is activity,
+	// and a WebSocket connection holds its task active while it is open.
+	TaskActivity TaskActivity
+	services     map[string]*Service
+	syslog       *logrus.Entry
+}
+
+// activity is the activity of one task through a proxy's TaskActivity. It records nothing for a
+// service without a task or a proxy without TaskActivity.
+type activity struct {
+	recorder TaskActivity
+	taskID   model.TaskID
+}
+
+func (a activity) touch() {
+	if a.recorder != nil && a.taskID != "" {
+		a.recorder.Touch(a.taskID)
+	}
+}
+
+func (a activity) hold() (release func()) {
+	if a.recorder != nil && a.taskID != "" {
+		return a.recorder.Hold(a.taskID)
+	}
+	return func() {}
 }
 
 // DefaultProxy is the global proxy singleton.
@@ -193,19 +230,22 @@ func (p *Proxy) NewProxyHandler(serviceID string) echo.HandlerFunc {
 			req = withoutServicePrefix(req, c.Param("*"))
 		}
 
-		// Proxy the request to the target host.
+		// Proxy the request to the target host. The request passed the access check, so it is
+		// activity of the service's task.
+		taskActivity := activity{recorder: p.TaskActivity, taskID: service.TaskID}
 		var proxy http.Handler
 		switch {
 		case service.ProxyTCP:
-			proxy = newSingleHostReverseTCPOverWebSocketProxy(c, service.URL)
+			proxy = newSingleHostReverseTCPOverWebSocketProxy(c, service.URL, taskActivity)
 		case c.IsWebSocket():
-			proxy = newSingleHostReverseWebSocketProxy(c, service.URL)
+			proxy = newSingleHostReverseWebSocketProxy(c, service.URL, taskActivity)
 		default:
 			newProxy, err := setUpProxy(service.URL)
 			if err != nil {
 				return err
 			}
 
+			taskActivity.touch()
 			proxy = newProxy
 		}
 		proxy.ServeHTTP(c.Response(), req)
@@ -428,4 +468,12 @@ func logCopyError(c echo.Context, direction string, target *url.URL, err error) 
 		logf = c.Logger().Debugf
 	}
 	logf("error copying %s body for %v: %v", direction, target, err)
+}
+
+// logCopyErrorAfterClose logs err, the error of the copy that ended second, after the proxy closed
+// both connections of a proxied connection because the first copy ended, unless it is that close.
+func logCopyErrorAfterClose(c echo.Context, direction string, target *url.URL, err error) {
+	if !errors.Is(err, net.ErrClosed) {
+		logCopyError(c, direction, target, err)
+	}
 }

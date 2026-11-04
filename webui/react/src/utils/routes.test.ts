@@ -4,6 +4,7 @@ import React from 'react';
 import router from 'router';
 import { reactHostAddress } from 'utils/routes';
 
+import rootLogger from './Logger';
 import type { AnyMouseEvent } from './routes';
 import * as routes from './routes';
 
@@ -323,6 +324,23 @@ describe('Routes Utilities', () => {
       routes.replaceWithExternalUrl(externalUrl);
       expect(window.location.replace).toHaveBeenCalledTimes(1);
       expect(window.location.replace).toHaveBeenCalledWith(externalUrl);
+    });
+
+    it('should log only the path of the URL', () => {
+      const trace = vi.spyOn(Object.getPrototypeOf(rootLogger), 'trace');
+      for (const url of [
+        'https://www.determined.ai/proxy/task-1:2900/lab?token=secret#secret',
+        '/proxy/task-1:2900/lab?token=secret',
+      ]) {
+        routes.replaceWithExternalUrl(url);
+        expect(window.location.replace).toHaveBeenLastCalledWith(url);
+        expect(trace).toHaveBeenLastCalledWith(
+          'replacing with external url',
+          '/proxy/task-1:2900/lab',
+        );
+      }
+      expect(JSON.stringify(trace.mock.calls)).not.toContain('secret');
+      trace.mockRestore();
     });
   });
 

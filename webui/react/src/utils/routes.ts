@@ -73,7 +73,14 @@ export const routeToExternalUrl = (path: string): void => {
 };
 /* Like routeToExternalUrl, without leaving the current page in the history. */
 export const replaceWithExternalUrl = (path: string): void => {
-  logger.trace('replacing with external url', path);
+  // Only the path is logged: the URL's query or fragment can carry a credential.
+  let pathname = '';
+  try {
+    pathname = new URL(path, window.location.origin).pathname;
+  } catch (e) {
+    // Nothing of an unparsable URL is logged.
+  }
+  logger.trace('replacing with external url', pathname);
   window.location.replace(path);
 };
 export const routeToReactUrl = (path: string): void => {

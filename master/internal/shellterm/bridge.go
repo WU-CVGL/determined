@@ -84,6 +84,15 @@ type Options struct {
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
 	// OnStarted, when set, is called once the login shell has started.
 	OnStarted func()
+	// Activity, when set, holds the session's task active for its idle policy while the session
+	// is open.
+	Activity Activity
+}
+
+// Activity holds a terminal session's task active.
+type Activity interface {
+	// Hold is called when the session starts, and release when it has ended.
+	Hold() (release func())
 }
 
 func (o Options) withDefaults() Options {
@@ -164,6 +173,10 @@ func Serve(ctx context.Context, ws *websocket.Conn, t Target, o Options, log *lo
 	o = o.withDefaults()
 	if log == nil {
 		log = logrus.WithField("component", "shell-terminal")
+	}
+	if o.Activity != nil {
+		release := o.Activity.Hold()
+		defer release()
 	}
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)

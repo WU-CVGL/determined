@@ -66,6 +66,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/internal/stream"
 	"github.com/determined-ai/determined/master/internal/task"
+	"github.com/determined-ai/determined/master/internal/task/idle"
 	"github.com/determined-ai/determined/master/internal/task/tasklogger"
 	"github.com/determined-ai/determined/master/internal/task/taskmodel"
 	"github.com/determined-ai/determined/master/internal/telemetry"
@@ -1323,6 +1324,7 @@ func (m *Master) Run(ctx context.Context, gRPCLogInitDone chan struct{}) error {
 	userService := user.GetService()
 
 	proxy.InitProxy(processProxyAuthentication, user.IsMasterSignedToken)
+	proxy.DefaultProxy.TaskActivity = idle.Records{}
 	portregistry.InitPortRegistry(config.GetMasterConfig().ReservedPorts)
 
 	go periodicallyAggregateResourceAllocation(m.db)
