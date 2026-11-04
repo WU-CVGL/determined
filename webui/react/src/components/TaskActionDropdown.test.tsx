@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 
 import { getTaskServices } from 'services/api';
 import userStore from 'stores/users';
-import { CommandState, CommandTask, CommandType, DetailedUser } from 'types';
+import { CommandState, CommandTask, CommandType, DetailedUser, TaskAction } from 'types';
 import { isDangerMenuItem, menuLabels } from 'utils/tests/menu';
 
 import TaskActionDropdown from './TaskActionDropdown';
@@ -54,12 +54,19 @@ const owner: DetailedUser = { id: 101, isActive: true, isAdmin: false, username:
 const other: DetailedUser = { id: 102, isActive: true, isAdmin: false, username: 'other' };
 const admin: DetailedUser = { id: 1, isActive: true, isAdmin: true, username: 'admin' };
 
-const openMenu = async (ownerId: number, overrides: Partial<CommandTask> = {}) => {
+const openMenu = async (
+  ownerId: number,
+  overrides: Partial<CommandTask> = {},
+  onComplete?: (action?: TaskAction) => void,
+) => {
   render(
     <MemoryRouter>
       <UIProvider theme={DefaultTheme.Light}>
         <ConfirmationProvider>
-          <TaskActionDropdown task={{ ...task, userId: ownerId, ...overrides }} />
+          <TaskActionDropdown
+            task={{ ...task, userId: ownerId, ...overrides }}
+            onComplete={onComplete}
+          />
         </ConfirmationProvider>
       </UIProvider>
     </MemoryRouter>,
@@ -149,20 +156,28 @@ describe('TaskActionDropdown', () => {
   });
 
   it.each([
-    ['an ended', CommandState.Terminated],
-    ['a running', CommandState.Running],
+    ['an ended', 'nothing else', CommandState.Terminated, []],
+    ['a running', 'Open JupyterLab', CommandState.Running, ['Open JupyterLab']],
   ])(
-    'offers only View Logs, View Resources and Copy Task ID on %s notebook record',
-    async (_, state) => {
+    'on %s notebook record offers View Logs, View Resources, Copy Task ID and %s',
+    async (_, __, state, fromServices) => {
       resources.enabled = true;
-      // A notebook record's one service is JupyterLab, which the master lets no one open.
-      services.list = [{ mayConnect: false, name: 'jupyter' }];
+      // A notebook record's one service is JupyterLab, and the master lets its owner connect to
+      // every service alike. The entries follow the services, as the task page's tabs do, so a
+      // notebook that still runs (the master ends restored ones at start) offers Open JupyterLab.
+      services.list = [{ mayConnect: true, name: 'jupyter' }];
       const onLaunchAgain = await openLaunchAgainMenu({ ...notebook, state }, owner);
       await screen.findByText('View Logs');
       if (state === CommandState.Running) {
-        await waitFor(() => expect(getTaskServices).toHaveBeenCalledTimes(1));
+        await screen.findByText('Open JupyterLab');
+        expect(getTaskServices).toHaveBeenCalledTimes(1);
       }
-      expect(menuLabels()).toEqual(['View Logs', 'View Resources', 'Copy Task ID']);
+      expect(menuLabels()).toEqual([
+        'View Logs',
+        'View Resources',
+        'Copy Task ID',
+        ...fromServices,
+      ]);
       expect(onLaunchAgain).not.toHaveBeenCalled();
     },
   );
@@ -236,9 +251,11 @@ describe('TaskActionDropdown', () => {
 
     it('opens the Terminal tab of the task page in a tab named after the task', async () => {
       const open = vi.spyOn(window, 'open').mockReturnValue(null);
-      await openMenu(101, runningShell);
+      const onComplete = vi.fn();
+      await openMenu(101, runningShell, onComplete);
       await userEvent.click(await screen.findByText('Open Terminal'));
       expect(open).toHaveBeenCalledWith('/tasks/task-1/interactive?tab=terminal', 'task-1', '');
+      expect(onComplete).toHaveBeenCalledWith(TaskAction.OpenTerminal);
       // The CLI command is still offered.
       expect(screen.getByText('Connect via CLI')).toBeInTheDocument();
       open.mockRestore();
@@ -304,16 +321,18 @@ describe('TaskActionDropdown', () => {
     });
 
     it.each([
-      ['Open JupyterLab', 'jupyter'],
-      ['Open Visual Studio Code', 'vscode'],
+      [TaskAction.OpenJupyterLab, 'jupyter'],
+      [TaskAction.OpenVSCode, 'vscode'],
     ])(
       '"%s" opens the %s tab of the task page in a tab named after the task',
-      async (label, tab) => {
+      async (action, tab) => {
         const open = vi.spyOn(window, 'open').mockReturnValue(null);
+        const onComplete = vi.fn();
         services.list = allServices;
-        await openMenu(101, runningShell);
-        await userEvent.click(await screen.findByText(label));
+        await openMenu(101, runningShell, onComplete);
+        await userEvent.click(await screen.findByText(action));
         expect(open).toHaveBeenCalledWith(`/tasks/task-1/interactive?tab=${tab}`, 'task-1', '');
+        expect(onComplete).toHaveBeenCalledWith(action);
         open.mockRestore();
       },
     );

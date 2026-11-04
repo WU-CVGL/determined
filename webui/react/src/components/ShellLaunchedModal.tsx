@@ -4,45 +4,28 @@ import CodeSample from 'hew/CodeSample';
 import { Modal } from 'hew/Modal';
 import Row from 'hew/Row';
 import { Body, Label } from 'hew/Typography';
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 
 import Link from 'components/Link';
 import useFeature from 'hooks/useFeature';
 import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
 import { paths } from 'routes/utils';
-import { getTaskServices } from 'services/api';
 import { V1LaunchWarning, V1TaskService } from 'services/api-ts-sdk';
 import { CommandResponse, InteractiveTaskTab } from 'types';
-import handleError from 'utils/error';
 import { canOpenTaskService } from 'utils/task';
 import { openInteractiveTask } from 'utils/wait';
 
 interface Props {
   response: CommandResponse;
+  /** The launched task's services, read by the launching hook; a button per service it offers. */
+  services: V1TaskService[];
 }
 
 /** Shown after a shell launch: how to connect and where to follow the task. */
-const ShellLaunchedModalComponent: React.FC<Props> = ({ response }: Props) => {
+const ShellLaunchedModalComponent: React.FC<Props> = ({ response, services }: Props) => {
   const { command, warnings = [] } = response;
   const terminalEnabled = useFeature().isOn('shell_terminal');
   const resourcesEnabled = useTaskResourcesEnabled();
-  // The launch response does not list the task's services. They are fixed by its config, and the
-  // launching user owns the task, so one read says which service buttons to offer.
-  const [services, setServices] = useState<V1TaskService[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    setServices([]);
-    getTaskServices({ taskId: command.id })
-      .then((response) => {
-        if (!cancelled) setServices(response.services);
-      })
-      .catch((e) => {
-        handleError(e, { publicMessage: 'Unable to load the services of the task.', silent: true });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [command.id]);
   const openTab = (tab: InteractiveTaskTab) => () => openInteractiveTask(command.id, { tab });
   return (
     <Modal size="medium" title="Interactive Task Launched">
