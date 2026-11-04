@@ -148,13 +148,15 @@ export const InteractiveTask: React.FC = () => {
   }, [slotsExceeded]);
 
   // The one poll of the task, until it ends, and of its services while one of them has not
-  // settled: the set of services is fixed, and a pane opens its service once it is ready.
+  // settled: the set of services is fixed, and a pane opens its service once it is ready. One
+  // tick at a time: the next is scheduled once the current one has answered, so that an older
+  // answer never lands after a newer one.
   useEffect(() => {
     let cancelled = false;
     let failures = 0;
     let loaded = false;
     let servicesSettled = false;
-    const timer = setInterval(() => void poll(), POLL_MS);
+    let timer: ReturnType<typeof setTimeout> | undefined;
     // Whether the task has ended, or the page gives up on it.
     const pollTask = async (): Promise<'ended' | 'gone' | undefined> => {
       try {
@@ -207,12 +209,13 @@ export const InteractiveTask: React.FC = () => {
         pollTask(),
         servicesSettled ? undefined : pollServices(),
       ]);
-      if (outcome === 'gone' || (outcome === 'ended' && servicesSettled)) clearInterval(timer);
+      if (cancelled || outcome === 'gone' || (outcome === 'ended' && servicesSettled)) return;
+      timer = setTimeout(() => void poll(), POLL_MS);
     };
     void poll();
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      clearTimeout(timer);
     };
   }, [taskId]);
 

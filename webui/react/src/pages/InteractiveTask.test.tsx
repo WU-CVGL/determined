@@ -194,6 +194,39 @@ describe('InteractiveTask', () => {
     }
   });
 
+  it('reads the task one tick at a time, so that an older answer never follows a newer one', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getTaskServices).mockResolvedValue(
+        servicesWith(['ssh', 'jupyter'], true, V1TaskServiceState.READY),
+      );
+      let answer: (task: TaskItem) => void = () => undefined;
+      vi.mocked(getTask).mockResolvedValueOnce(taskWith(true));
+      vi.mocked(getTask).mockImplementationOnce(
+        () => new Promise<TaskItem>((resolve) => (answer = resolve)),
+      );
+      setup();
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+      expect(screen.getByTestId('terminal-pane')).toHaveAttribute('data-phase', 'ready');
+      expect(getTask).toHaveBeenCalledTimes(2);
+      // The second read has not answered: no third one starts, however long it takes.
+      await act(() => vi.advanceTimersByTimeAsync(6000));
+      expect(getTask).toHaveBeenCalledTimes(2);
+
+      act(() =>
+        answer(taskWith(false, V1TaskType.SHELL, CommandState.Terminated, '2026-01-01T01:00:00Z')),
+      );
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(screen.getByTestId('terminal-pane')).toHaveAttribute('data-phase', 'ended');
+      // Ended: the poll stops, and nothing brings the page back to ready.
+      await act(() => vi.advanceTimersByTimeAsync(6000));
+      expect(getTask).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId('terminal-pane')).toHaveAttribute('data-phase', 'ended');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('feeds a pane the state of its service, read again while a service has not settled', async () => {
     vi.useFakeTimers();
     try {
