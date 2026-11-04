@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -935,6 +936,77 @@ func testVSCodeUnitIncompleteWithoutLock(t *testing.T, status int) {
 	requireNoInstallLeft(t, dir)
 	require.FileExists(t, filepath.Join(dir, "bin", "code-server"))
 	require.NoFileExists(t, filepath.Join(dir, codeServerMarker))
+}
+
+// A stop of the shell ends an install of code-server, also while it waits for another task's lock
+// or for the install of a release without the marker, before the supervisor kills it: the unit
+// exits with the stop and leaves no temporary directory in the cache.
+func TestVSCodeUnitStopDuringInstall(t *testing.T) {
+	requireReporterPython(t)
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, v *vscodeTask, dir string) (ready func() bool)
+		// served is whether the master serves the tarball; else it holds it back.
+		served bool
+	}{
+		{
+			name: "waiting for the lock",
+			setup: func(t *testing.T, v *vscodeTask, dir string) func() bool {
+				require.NoError(t, os.MkdirAll(filepath.Dir(dir), 0o700))
+				lock, err := os.OpenFile(dir+".lock", os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec
+				require.NoError(t, err)
+				t.Cleanup(func() { _ = lock.Close() })
+				require.NoError(t, unix.Flock(int(lock.Fd()), unix.LOCK_EX))
+				return func() bool { return lockWaiter(v.order) }
+			},
+		},
+		{
+			name: "downloading without the lock",
+			setup: func(t *testing.T, v *vscodeTask, dir string) func() bool {
+				standInFlock(t, v, 65)
+				name := codeServerPinned + "/code-server-" + codeServerPinned + "-linux-" +
+					codeServerArch(t) + ".tar.gz"
+				return func() bool { return slices.Contains(v.master.codeServerRequests(), name) }
+			},
+		},
+		{
+			name: "waiting for the install of an incomplete release",
+			setup: func(t *testing.T, v *vscodeTask, dir string) func() bool {
+				standInFlock(t, v, 65)
+				writeCodeServer(t, dir, codeServerPinned, "partial")
+				return func() bool {
+					done, err := filepath.Glob(dir + ".tmp.*/*/" + codeServerMarker)
+					require.NoError(t, err)
+					return len(done) == 1
+				}
+			},
+			served: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := newVSCodeTask(t, "vscode", t.TempDir())
+			v.master.serveCodeServerRelease(t, codeServerPinned, "download", false)
+			gate := make(chan struct{})
+			v.master.mu.Lock()
+			v.master.codeServerGate = gate
+			v.master.mu.Unlock()
+			dir := v.cacheDir(codeServerPinned)
+			ready := tc.setup(t, v, dir)
+			if tc.served {
+				close(gate)
+			}
+			// The stop signals the service's group, whose members die at once.
+			v.killedGroups = true
+			v.start()
+			waitFor(t, "the install "+tc.name, ready)
+			v.signal(syscall.SIGTERM)
+			require.Equal(t, 128+int(syscall.SIGTERM), v.wait(), v.stderr.String())
+			require.Equal(t, []string{"[vscode] start", "[vscode] exited 143"}, v.logLines(),
+				v.stderr.String())
+			requireNoInstallLeft(t, dir)
+			require.NoFileExists(t, filepath.Join(dir, codeServerMarker))
+		})
+	}
 }
 
 // standInFlock puts a flock on the task's PATH that fails with the status rc and records its

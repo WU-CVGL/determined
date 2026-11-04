@@ -124,8 +124,9 @@ of their own, for example on shared storage that their shells mount, with
 ``DET_CODE_SERVER_CACHE_DIR`` in ``environment.environment_variables``.
 
 A shell installs a release in a temporary directory ``<version>/linux-<arch>.tmp.<suffix>`` next to
-it and removes only its own. A shell killed during an install can leave one behind; remove it while
-no shell installs that release.
+it and removes only its own, also when the shell is stopped during the install. A container that is
+killed outright during an install, for example when its node fails, can leave one behind; remove it
+while no shell installs that release.
 
 The editor keeps its extensions and settings in ``~/.local/share/code-server``, which goes away with
 the shell unless it is on shared storage. ``~`` is ``/root`` in a shell that runs as root. In a

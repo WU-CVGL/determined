@@ -21,8 +21,9 @@
 #   installed the release uses that copy, and a task that cannot take it (without flock, on an
 #   error, or after waiting 600 s) installs without it. A release without the marker is
 #   incomplete: a holder of the lock replaces it, and a task without the lock waits up to 600 s for
-#   that, then runs code-server from its own temporary directory until it exits. A cache that is
-#   full or read-only counts as one that cannot be installed into.
+#   that, then runs code-server from its own temporary directory until it exits. A stop of the
+#   shell ends an install, also while it waits, and removes its temporary directory. A cache that
+#   is full or read-only counts as one that cannot be installed into.
 #
 # The unit logs which cache it took code-server from, whether it installed it there, and why it
 # did so without the lock or outside the release directory.
@@ -209,6 +210,11 @@ vscode_install() {
             (umask 0 && mkdir -m "$mode" "$dir") 2>/dev/null
         fi
     fi
+    # A stop ends the install, also a wait, so that the EXIT trap removes its temporary directory
+    # before the supervisor kills the service. code-server gets the supervisor's handling.
+    vscode_stop_traps=$(trap -p INT TERM HUP)
+    trap 'service_stop_seen=1; exit 143' INT TERM HUP
+    [[ -z ${service_stop_seen-} ]] || exit 143
     # The lock only saves the tasks that share a cache from installing a release more than once.
     # Without it, the rename decides which task's install the release is.
     vscode_deadline=$((SECONDS + vscode_wait_seconds))
@@ -218,6 +224,9 @@ vscode_install() {
     vscode_install_release "$arch" "$dir" "$locked"
     rc=$?
     vscode_unlock
+    trap - INT TERM HUP
+    eval "$vscode_stop_traps"
+    [[ -z ${service_stop_seen-} ]] || exit 143
     umask "$umask_was"
     return "$rc"
 }
