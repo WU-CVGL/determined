@@ -235,10 +235,10 @@ To find out how to view and modify the Job Queue in the WebUI, start with :ref:`
  Starting JupyterLab
 *********************
 
-To start a shell that runs JupyterLab, select **Launch Shell** on the **Jobs** page or a workspace's
-**Jobs** tab and check **jupyter**. Open it from the **JupyterLab** tab of the shell's page, which
-opens when you click the shell's name, or with ``det task open <shell id> jupyter``; see
-:ref:`jupyter-service`.
+To start a shell that runs JupyterLab, select **Launch Interactive Task** on the **Jobs** page or a
+workspace's **Jobs** tab and check **jupyter**. Open it from the **JupyterLab** tab of the shell's
+page, which opens when you click the shell's name or choose **Open JupyterLab** from its action
+menu, or with ``det task open <shell id> jupyter``; see :ref:`jupyter-service`.
 
 ***********************
  Launching TensorBoard

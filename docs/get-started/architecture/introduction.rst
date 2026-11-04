@@ -481,8 +481,8 @@ If this field is not set, the task will be launched into one of the two default 
 compute pool. TensorBoards will be launched into the default auxiliary pool. Commands and shells
 that request a slot (which is the default behavior if the ``resources.slots`` field is not set) will
 be launched into the default compute pool. Commands and shells that explicitly request 0 slots (for
-example a shell launched with **Slots** set to 0 in the WebUI's **Launch Shell** form) will use the
-auxiliary pool.
+example a shell launched with **Slots** set to 0 in the WebUI's **Launch Interactive Task** form)
+will use the auxiliary pool.
 
 .. _scheduling:
 

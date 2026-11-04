@@ -157,9 +157,9 @@ The ``jupyter`` service runs `JupyterLab <https://jupyter.org/>`__ in the shell'
    det shell start --service jupyter
    det task open <shell id> jupyter
 
-In the WebUI, check **jupyter** in **Launch Shell** on the **Jobs** page or a workspace's **Jobs**
-tab, then open it from the **JupyterLab** tab of the shell's page (click the shell's name) or with
-``det task open``.
+In the WebUI, check **jupyter** in **Launch Interactive Task** on the **Jobs** page or a workspace's
+**Jobs** tab, then open it from the **JupyterLab** tab of the shell's page (click the shell's name,
+or choose **Open JupyterLab** from its action menu) or with ``det task open``.
 
 Opening a notebook in JupyterLab starts a kernel, which runs until you shut it down in JupyterLab.
 
@@ -228,8 +228,9 @@ Terminals in the WebUI
 You can also open a terminal in a running shell from the WebUI: on the **Jobs** page or a
 workspace's **Jobs** tab, click the shell's name, or choose **Open Terminal** from its action menu.
 The shell's page opens in a new browser tab, with the terminal in its **Terminal** tab next to a
-**JupyterLab** and a **VS Code** tab when the shell runs those services, and the shell's **Logs**
-and **Resources**. The terminal waits for the shell to run, connects when its tab is first shown and
+**JupyterLab** and a **VS Code** tab when the shell runs those services (the action menu's **Open
+JupyterLab** and **Open Visual Studio Code** open those tabs), and the shell's **Logs** and
+**Resources**. The terminal waits for the shell to run, connects when its tab is first shown and
 keeps its session while you use the other tabs. Only the user who started the shell and
 administrators can open terminals in it; when an administrator opens one, the shell's task log
 records it.
