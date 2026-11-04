@@ -19,8 +19,18 @@ from determined.common import api, context
 from determined.common.api import bindings
 
 
-def add_services(config: Dict[str, Any], services: List[str]) -> None:
-    """Add services to the services map of a shell config, keeping the ones it has."""
+def _service_on(name: str) -> Tuple[str, bool]:
+    return name, True
+
+
+def _service_off(name: str) -> Tuple[str, bool]:
+    return name, False
+
+
+def add_services(config: Dict[str, Any], services: List[Tuple[str, bool]]) -> None:
+    """Apply --service and --no-service, (name, enabled) pairs in command-line order, to the
+    services map of a shell config, keeping the ones it has: --service enables a service, with the
+    options it has, and --no-service disables it. The last flag for a name wins."""
     if not services:
         return
     # Only a missing key leaves the services undeclared; the master's validation answers for any
@@ -30,15 +40,22 @@ def add_services(config: Dict[str, Any], services: List[str]) -> None:
         declared = {}
     elif not isinstance(declared, dict):
         return
-    for name in services:
-        declared.setdefault(name, {})
+    for name, enabled in services:
+        options = declared.get(name)
+        if not isinstance(options, dict):
+            options = {}
+        if enabled:
+            options.pop("enabled", None)
+        else:
+            options["enabled"] = False
+        declared[name] = options
     config["services"] = declared
 
 
 def start_shell(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
     config = ntsc.parse_config(args.config_file, None, args.config, args.volume)
-    add_services(config, args.service)
+    add_services(config, args.services)
     workspace_id = cli.workspace.get_workspace_id_from_args(args)
 
     if args.preview:
@@ -314,7 +331,19 @@ args_description: cli.ArgsDescription = [
                         "--service",
                         action="append",
                         default=[],
+                        dest="services",
+                        metavar="NAME",
+                        type=_service_on,
                         help="service to run in the shell",
+                    ),
+                    cli.Arg(
+                        "--no-service",
+                        action="append",
+                        default=[],
+                        dest="services",
+                        metavar="NAME",
+                        type=_service_off,
+                        help="service not to run in the shell",
                     ),
                     cli.Arg(
                         "--template",
