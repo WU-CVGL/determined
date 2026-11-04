@@ -1883,6 +1883,10 @@ bearer token. Without this section, the master serves no code-server files. With
 runs the ``vscode`` service by default unless its configuration or template sets ``enabled: false``
 (see :ref:`shell-services`).
 
+Shells keep the releases that they download, extracted, in a cache of their own, which an
+administrator shares across users by mounting a directory at ``/var/cache/determined/code-server``
+in task containers (see :ref:`vscode-keep`); it is not ``dir``.
+
 On the first request for a tarball of ``version`` that is not in ``dir``, the master downloads it
 from ``url_template``, checks it against ``sha256``, and stores it in ``dir`` together with a
 ``.sha256`` file in the format of ``sha256sum``. Requests that arrive during the download wait for
