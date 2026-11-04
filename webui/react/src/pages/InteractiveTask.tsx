@@ -1,8 +1,9 @@
+import Button from 'hew/Button';
 import { Settings, settingsConfigForTask } from 'hew/LogViewer/LogViewerSelect.settings';
 import Message from 'hew/Message';
 import Pivot, { TabItem } from 'hew/Pivot';
 import Spinner from 'hew/Spinner';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { useParams, useSearchParams } from 'react-router-dom';
 
@@ -121,6 +122,10 @@ export const InteractiveTask: React.FC = () => {
   const resourcesEnabled = useTaskResourcesEnabled();
   const [task, setTask] = useState<TaskItem>();
   const [taskServices, setTaskServices] = useState<TaskServices>();
+  // Why the services have not been read yet, once the page has given up reading them.
+  const [servicesError, setServicesError] = useState<string>();
+  const [retrying, setRetrying] = useState(false);
+  const retryServicesRef = useRef<() => Promise<void>>();
   const [command, setCommand] = useState<CommandTask>();
   // Whether the lookup of the task's name and pool has answered, with or without a record.
   const [lookedUp, setLookedUp] = useState(false);
@@ -155,6 +160,11 @@ export const InteractiveTask: React.FC = () => {
     let cancelled = false;
     let failures = 0;
     let loaded = false;
+    let serviceFailures = 0;
+    let servicesLoaded = false;
+    // Whether the page has given up reading the services until Retry: the task's own tabs are
+    // shown without them.
+    let servicesGivenUp = false;
     let servicesSettled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     // Whether the task has ended, or the page gives up on it.
@@ -184,12 +194,16 @@ export const InteractiveTask: React.FC = () => {
         return undefined;
       }
     };
-    // A failed read keeps the last services, if any, and is tried again on the next tick; a task
-    // the services API does not know, such as a generic task, has none.
+    // A failed read keeps the last services, if any, and is tried again on the next tick; before
+    // the first answer, the page gives up after a few failures and shows the last one with Retry.
+    // A task the services API does not know, such as a generic task, has none.
     const pollServices = async () => {
       try {
         const response = await getTaskServices({ taskId });
         if (cancelled) return;
+        servicesLoaded = true;
+        servicesGivenUp = false;
+        setServicesError(undefined);
         setTaskServices({
           owner: { userId: response.userId, workspaceId: response.workspaceId },
           services: response.services,
@@ -197,25 +211,40 @@ export const InteractiveTask: React.FC = () => {
         servicesSettled = response.services.every((s) => taskServiceSettled(s.state));
       } catch (e) {
         if (cancelled) return;
+        const text = errorText(e);
         handleError(e, { publicMessage: 'Unable to load the services of the task.', silent: true });
         if (isNotFound(e as Error)) {
+          servicesLoaded = true;
+          servicesGivenUp = false;
+          setServicesError(undefined);
           setTaskServices({ services: [] });
           servicesSettled = true;
+        } else if (!servicesLoaded && (servicesGivenUp || ++serviceFailures >= MAX_POLL_FAILURES)) {
+          servicesGivenUp = true;
+          setServicesError(text);
         }
       }
+    };
+    // One more read, on request; a success resumes the reads of the poll.
+    retryServicesRef.current = async () => {
+      setRetrying(true);
+      await pollServices();
+      if (!cancelled) setRetrying(false);
     };
     const poll = async () => {
       const [outcome] = await Promise.all([
         pollTask(),
-        servicesSettled ? undefined : pollServices(),
+        servicesSettled || servicesGivenUp ? undefined : pollServices(),
       ]);
-      if (cancelled || outcome === 'gone' || (outcome === 'ended' && servicesSettled)) return;
+      const servicesDone = servicesSettled || servicesGivenUp;
+      if (cancelled || outcome === 'gone' || (outcome === 'ended' && servicesDone)) return;
       timer = setTimeout(() => void poll(), POLL_MS);
     };
     void poll();
     return () => {
       cancelled = true;
       clearTimeout(timer);
+      retryServicesRef.current = undefined;
     };
   }, [taskId]);
 
@@ -252,6 +281,8 @@ export const InteractiveTask: React.FC = () => {
       ),
     [setSearchParams],
   );
+
+  const retryServices = useCallback(() => void retryServicesRef.current?.(), []);
 
   const name = command?.name || taskId;
   const phase = task ? taskPhase(task) : 'waiting';
@@ -331,11 +362,29 @@ export const InteractiveTask: React.FC = () => {
         <Message title={error} />
       </div>
     );
-  } else if (!task || !taskServices || !lookedUp) {
+  } else if (!task || !lookedUp || (!taskServices && !servicesError)) {
     // Also the lookup: a TensorBoard's tab comes from it.
     content = <Spinner center spinning />;
   } else {
-    content = <Pivot activeKey={activeKey} items={items} onChange={selectTab} />;
+    content = (
+      <>
+        {servicesError && (
+          <div className={css.notice}>
+            <Message
+              action={
+                <Button disabled={retrying} onClick={retryServices}>
+                  Retry
+                </Button>
+              }
+              title={servicesError}
+            />
+          </div>
+        )}
+        <div className={css.tabs}>
+          <Pivot activeKey={activeKey} items={items} onChange={selectTab} />
+        </div>
+      </>
+    );
   }
 
   return (
