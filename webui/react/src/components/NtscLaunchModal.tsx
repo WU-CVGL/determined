@@ -32,6 +32,7 @@ import {
   formFieldsFromConfig,
   NtscLaunchOptions,
   sanitizeConfig,
+  SHELL_SERVICE_LABELS,
   SHELL_SERVICES,
   ShellService,
   ShellServiceChoices,
@@ -862,11 +863,11 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
           min={0}
         />
       </Form.Item>
-      <Form.Item>
+      <Form.Item label="Services">
         <Row>
           {SHELL_SERVICES.map((name) => (
             <Form.Item key={name} name={['services', name]} noStyle valuePropName="checked">
-              <Checkbox>{name}</Checkbox>
+              <Checkbox>{SHELL_SERVICE_LABELS[name]}</Checkbox>
             </Form.Item>
           ))}
         </Row>

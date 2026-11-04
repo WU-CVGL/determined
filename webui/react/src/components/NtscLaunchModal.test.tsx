@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Button from 'hew/Button';
 import { useModal } from 'hew/Modal';
@@ -225,7 +225,9 @@ const masterRefusal = (status: number, message: string) =>
     new Response(JSON.stringify({ error: { code: 3, error: message } }), { status }),
   );
 
-const serviceBox = (name: string) => screen.getByRole('checkbox', { name });
+/** The checkbox of a service by its config key, as the form labels it. */
+const SERVICE_LABELS: Record<string, string> = { jupyter: 'JupyterLab', vscode: 'VS Code' };
+const serviceBox = (name: string) => screen.getByRole('checkbox', { name: SERVICE_LABELS[name] });
 
 const launchedShell = {
   command: task(CommandType.Shell, {
@@ -353,7 +355,10 @@ describe('NtscLaunchModal', () => {
     await setup();
     expect(screen.getByText('Launch Interactive Task')).toBeInTheDocument();
     expect(screen.queryByRole('radio')).not.toBeInTheDocument();
-    expect(screen.queryByText('JupyterLab')).not.toBeInTheDocument();
+    // JupyterLab is a service of the shell, not a task type.
+    expect(screen.getByText('JupyterLab').closest('label')).toBe(
+      serviceBox('jupyter').closest('label'),
+    );
     expect(screen.getByText('Start from')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Name (optional)')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Show Full Config' })).toBeInTheDocument();
@@ -971,9 +976,13 @@ describe('NtscLaunchModal', () => {
   describe('services', () => {
     it('checks the services the master runs by default: jupyter, and vscode with code-server', async () => {
       await setup();
+      const services = screen.getByTitle('Services').closest('.ant-form-item') as HTMLElement;
       expect(
-        screen.getAllByRole('checkbox').map((box) => box.closest('label')?.textContent),
-      ).toEqual(['jupyter', 'vscode']);
+        within(services)
+          .getAllByRole('checkbox')
+          .map((box) => box.closest('label')?.textContent),
+      ).toEqual(['JupyterLab', 'VS Code']);
+      expect(screen.getAllByRole('checkbox')).toHaveLength(2);
       expect(serviceBox('jupyter')).toBeChecked();
       expect(serviceBox('vscode')).toBeChecked();
       // The start-from is previewed without services, so that the master fills its defaults.
