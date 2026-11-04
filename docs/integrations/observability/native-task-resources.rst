@@ -74,6 +74,13 @@ adds one XID query of its own, at most every 30 seconds per master, with a 5-sec
 Reading the Charts
 ==================
 
+The **Resources** tab of a shell:
+
+.. image:: /assets/images/task-resources.png
+   :alt: The Resources tab of a task with CPU, memory, GPU utilization and allocation lifecycle charts
+
+|
+
 Select a preset or a custom time range and optionally one allocation. The default range,
 **Since start**, begins when the task's first allocation got its resources, so time spent queued
 is not shown; with one allocation selected, it runs from that allocation's start to its end, or to

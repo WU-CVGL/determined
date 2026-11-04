@@ -8,6 +8,13 @@ The documentation build process is stored in the `Makefile`. Running `make live`
 
 Before submitting a pull request, run [rstfmt](https://pypi.org/project/rstfmt/).
 
+## Screenshots
+
+A page that describes a WebUI feature shows it with a screenshot. Save it under
+`assets/images/` as a PNG, 1440 px wide, in the light theme, with no personal data (user names,
+emails, hostnames, tokens), and reference it with `.. image:: /assets/images/<name>.png` and an
+`:alt:` text that says what the image shows. Replace a screenshot when the feature changes.
+
 ## Using `make live`
 
 When creating and editing files, you can use `make live` to simulate live docs
