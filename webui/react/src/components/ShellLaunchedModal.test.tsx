@@ -102,11 +102,11 @@ describe('ShellLaunchedModal', () => {
     open.mockRestore();
   });
 
-  it('offers Open JupyterLab and Open Visual Studio Code for the services of the task', async () => {
+  it('offers Open JupyterLab and Open VS Code for the services of the task', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
     await setup(RESPONSE, ALL_SERVICES);
     const jupyter = screen.getByRole('button', { name: 'Open JupyterLab' });
-    const vscode = screen.getByRole('button', { name: 'Open Visual Studio Code' });
+    const vscode = screen.getByRole('button', { name: 'Open VS Code' });
     const terminal = screen.getByRole('button', { name: 'Open Terminal' });
     expect(
       terminal.compareDocumentPosition(jupyter) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -133,7 +133,7 @@ describe('ShellLaunchedModal', () => {
   it('offers the service buttons without the terminal when the master turns it off', async () => {
     flags.terminal = false;
     await setup(RESPONSE, [service('ssh'), service('vscode')]);
-    expect(screen.getByRole('button', { name: 'Open Visual Studio Code' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Open VS Code' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: 'Open Terminal' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Open JupyterLab' })).not.toBeInTheDocument();
   });
@@ -142,9 +142,7 @@ describe('ShellLaunchedModal', () => {
     await setup();
     expect(screen.getByRole('button', { name: 'Open Terminal' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Open JupyterLab' })).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: 'Open Visual Studio Code' }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open VS Code' })).not.toBeInTheDocument();
   });
 
   it('shows no service buttons without services, as after a failed read', async () => {
@@ -152,9 +150,7 @@ describe('ShellLaunchedModal', () => {
     expect(screen.getByRole('button', { name: 'Open Terminal' })).toBeInTheDocument();
     expect(screen.getByText('det shell open shell-123')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Open JupyterLab' })).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: 'Open Visual Studio Code' }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open VS Code' })).not.toBeInTheDocument();
   });
 
   it('shows no service buttons for a service the user may not connect to', async () => {
@@ -164,9 +160,7 @@ describe('ShellLaunchedModal', () => {
       service('vscode', false),
     ]);
     expect(screen.queryByRole('button', { name: 'Open JupyterLab' })).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: 'Open Visual Studio Code' }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open VS Code' })).not.toBeInTheDocument();
   });
 
   it('links View Resources next to View Logs', async () => {

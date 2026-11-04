@@ -212,7 +212,7 @@ describe('useLaunchForm', () => {
       expect(mocks.getTaskServices).toHaveBeenCalledTimes(1);
     });
 
-    it('give the dialog its Open JupyterLab and Open Visual Studio Code buttons', async () => {
+    it('give the dialog its Open JupyterLab and Open VS Code buttons', async () => {
       mocks.getTaskServices.mockResolvedValue({
         services: [
           { mayConnect: true, name: 'ssh' },
@@ -222,7 +222,7 @@ describe('useLaunchForm', () => {
       });
       await launch();
       expect(await screen.findByRole('button', { name: 'Open JupyterLab' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Open Visual Studio Code' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Open VS Code' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Open Terminal' })).toBeInTheDocument();
     });
 
@@ -233,9 +233,7 @@ describe('useLaunchForm', () => {
       expect(screen.getByRole('button', { name: 'Open Terminal' })).toBeInTheDocument();
       expect(screen.getByText('det shell open shell-new')).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Open JupyterLab' })).not.toBeInTheDocument();
-      expect(
-        screen.queryByRole('button', { name: 'Open Visual Studio Code' }),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Open VS Code' })).not.toBeInTheDocument();
     });
   });
 

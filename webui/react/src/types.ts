@@ -1029,7 +1029,7 @@ export const TaskAction = {
   ManageJob: 'Manage Job',
   OpenJupyterLab: 'Open JupyterLab',
   OpenTerminal: 'Open Terminal',
-  OpenVSCode: 'Open Visual Studio Code',
+  OpenVSCode: 'Open VS Code',
   ViewLogs: 'View Logs',
   ViewResources: 'View Resources',
 } as const;

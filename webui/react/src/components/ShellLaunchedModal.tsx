@@ -53,7 +53,7 @@ const ShellLaunchedModalComponent: React.FC<Props> = ({ response, services }: Pr
         )}
         {canOpenTaskService(services, 'vscode') && (
           <Button size="large" onClick={openTab(InteractiveTaskTab.VSCode)}>
-            Open Visual Studio Code
+            Open VS Code
           </Button>
         )}
       </Row>

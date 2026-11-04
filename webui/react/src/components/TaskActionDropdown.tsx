@@ -114,7 +114,7 @@ const TaskActionDropdown: React.FC<Props> = ({
       items.push({ key: Action.OpenJupyterLab, label: 'Open JupyterLab' });
     }
     if (canBeOpened(task) && canOpenTaskService(services ?? [], 'vscode')) {
-      items.push({ key: Action.OpenVSCode, label: 'Open Visual Studio Code' });
+      items.push({ key: Action.OpenVSCode, label: 'Open VS Code' });
     }
     // A UI rule only: the API lets anyone who can view a task read its config.
     if (

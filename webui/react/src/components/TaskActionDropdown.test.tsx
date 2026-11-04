@@ -309,7 +309,7 @@ describe('TaskActionDropdown', () => {
     });
   });
 
-  describe('Open JupyterLab and Open Visual Studio Code', () => {
+  describe('Open JupyterLab and Open VS Code', () => {
     const allServices = [
       { mayConnect: true, name: 'ssh' },
       { mayConnect: true, name: 'jupyter' },
@@ -324,14 +324,14 @@ describe('TaskActionDropdown', () => {
     it('follow Open Terminal, one per service of the task', async () => {
       services.list = allServices;
       await openMenu(101, runningShell);
-      await screen.findByText('Open Visual Studio Code');
+      await screen.findByText('Open VS Code');
       expect(menuLabels()).toEqual([
         'View Logs',
         'Copy Task ID',
         'Connect via CLI',
         'Open Terminal',
         'Open JupyterLab',
-        'Open Visual Studio Code',
+        'Open VS Code',
         'Kill',
       ]);
     });
@@ -357,20 +357,20 @@ describe('TaskActionDropdown', () => {
       services.list = allServices;
       openContextMenu(101, runningShell);
       expect(await screen.findByText('Open JupyterLab')).toBeInTheDocument();
-      expect(screen.getByText('Open Visual Studio Code')).toBeInTheDocument();
+      expect(screen.getByText('Open VS Code')).toBeInTheDocument();
     });
 
     it('are offered without the terminal when the master turns it off', async () => {
       feature.on = false;
       services.list = allServices;
       await openMenu(101, runningShell);
-      await screen.findByText('Open Visual Studio Code');
+      await screen.findByText('Open VS Code');
       expect(menuLabels()).toEqual([
         'View Logs',
         'Copy Task ID',
         'Connect via CLI',
         'Open JupyterLab',
-        'Open Visual Studio Code',
+        'Open VS Code',
         'Kill',
       ]);
     });
@@ -381,7 +381,7 @@ describe('TaskActionDropdown', () => {
         { mayConnect: true, name: 'vscode' },
       ];
       await openMenu(101, runningShell);
-      await screen.findByText('Open Visual Studio Code');
+      await screen.findByText('Open VS Code');
       expect(menuLabels()).not.toContain('Open JupyterLab');
     });
 
@@ -390,7 +390,7 @@ describe('TaskActionDropdown', () => {
       await openMenu(102, runningShell);
       await waitFor(() => expect(getTaskServices).toHaveBeenCalledTimes(1));
       expect(screen.queryByText('Open JupyterLab')).not.toBeInTheDocument();
-      expect(screen.queryByText('Open Visual Studio Code')).not.toBeInTheDocument();
+      expect(screen.queryByText('Open VS Code')).not.toBeInTheDocument();
     });
 
     it('are hidden for shells that have ended', async () => {
@@ -398,7 +398,7 @@ describe('TaskActionDropdown', () => {
       await openMenu(101, { ...runningShell, state: CommandState.Terminated });
       await screen.findByText('View Logs');
       expect(screen.queryByText('Open JupyterLab')).not.toBeInTheDocument();
-      expect(screen.queryByText('Open Visual Studio Code')).not.toBeInTheDocument();
+      expect(screen.queryByText('Open VS Code')).not.toBeInTheDocument();
       expect(getTaskServices).not.toHaveBeenCalled();
     });
   });
