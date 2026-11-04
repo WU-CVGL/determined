@@ -926,8 +926,6 @@ type jupyterTask struct {
 }
 
 var (
-	// unsetBaseURLJupyter is a task whose master set no base URL.
-	unsetBaseURLJupyter = jupyterTask{baseURL: "/proxy/task-1/"}
 	// shellJupyter is a shell with the jupyter service: no idle type, a base URL at its port.
 	shellJupyter = jupyterTask{
 		env:     []string{"NOTEBOOK_BASE_URL=/proxy/task-1:2900/"},
@@ -936,7 +934,7 @@ var (
 	// shellJupyterWatched is a shell with the jupyter service and an idle timeout.
 	shellJupyterWatched = jupyterTask{
 		env: []string{
-			"NOTEBOOK_BASE_URL=/proxy/task-1:2900/", "NOTEBOOK_IDLE_TYPE=activity",
+			"NOTEBOOK_BASE_URL=/proxy/task-1:2900/", "DET_JUPYTER_IDLE_TYPE=activity",
 			"DET_IDLE_TIMEOUT_SECONDS=2700",
 		},
 		baseURL: "/proxy/task-1:2900/",
@@ -979,7 +977,7 @@ exit 0
 	}
 	// The task's variables only, whatever the test's environment has.
 	s.env = slices.DeleteFunc(s.env, func(kv string) bool {
-		return strings.HasPrefix(kv, "NOTEBOOK_IDLE_TYPE=") || strings.HasPrefix(kv, "NOTEBOOK_BASE_URL=")
+		return strings.HasPrefix(kv, "DET_JUPYTER_IDLE_TYPE=") || strings.HasPrefix(kv, "NOTEBOOK_BASE_URL=")
 	})
 	s.env = append(s.env,
 		"PATH="+bin+":"+os.Getenv("PATH"),
@@ -1071,13 +1069,6 @@ func TestSupervisorJupyterUnitOnShell(t *testing.T) {
 	})
 }
 
-// Without a base URL from the master, JupyterLab serves at its task ID; an empty base URL is unset.
-func TestSupervisorJupyterUnitDefaultBaseURL(t *testing.T) {
-	task := unsetBaseURLJupyter
-	task.env = append(slices.Clone(task.env), "NOTEBOOK_BASE_URL=")
-	testSupervisorJupyterUnit(t, defaultHook, task)
-}
-
 // replace changes the one occurrence of old in the supervisor to new.
 func (s *supervisorRun) replace(old, new string) {
 	s.t.Helper()
@@ -1144,7 +1135,7 @@ func TestSupervisorJupyterUnitWithoutJupyter(t *testing.T) {
 			s := newSupervisorRun(t, services)
 			s.unit("p", waitUntilOrder("p done")+"exit 0\n")
 			s.staticUnit("jupyter", staticScript(t, JupyterServiceResource))
-			s.env = append(s.env, "PATH="+pathWithout(t, "jupyter"), "NOTEBOOK_IDLE_TYPE=activity")
+			s.env = append(s.env, "PATH="+pathWithout(t, "jupyter"), "DET_JUPYTER_IDLE_TYPE=activity")
 			s.start()
 			missing := "jupyter service: jupyter is not installed\n[jupyter] exited 127\n"
 			s.waitForLog("[jupyter] exited 127")

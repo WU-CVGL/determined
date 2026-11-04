@@ -38,8 +38,6 @@ func (a TaskID) String() string {
 const (
 	// TaskTypeTrial is the "TRIAL" job type for the enum public.job_type in Postgres.
 	TaskTypeTrial TaskType = "TRIAL"
-	// TaskTypeNotebook is the "NOTEBOOK" job type for the enum public.job_type in Postgres.
-	TaskTypeNotebook TaskType = "NOTEBOOK"
 	// TaskTypeShell is the "SHELL" job type for the enum public.job_type in Postgres.
 	TaskTypeShell TaskType = "SHELL"
 	// TaskTypeCommand is the "COMMAND" job type for the enum public.job_type in Postgres.
@@ -581,7 +579,7 @@ func (t TaskLogBatch) ForEach(f func(interface{}) error) error {
 }
 
 // TaskContextDirectory represents a row in database for a tasks context directory.
-// This currently is only for notebooks, trials, tensorboards, and commands now.
+// This currently is only for shells, tensorboards, and commands now.
 // Trials aren't in it because they are stored on experiments.model_def.
 // In addition trials can have many tasks but currently can only have one model_def.
 // We would end up duplicating a lot of data migrating experiment's model_def over to this

@@ -1517,10 +1517,10 @@ func TestTaskSpec_computeResources(t *testing.T) {
 			},
 		},
 		{
-			name: "Task Type 'NOTEBOOK', Slot type GPU, gres & tres supported (Slurm)",
+			name: "Task Type 'SHELL', Slot type GPU, gres & tres supported (Slurm)",
 			fields: fields{
 				SlurmConfig: slurmConfig,
-				TaskType:    "NOTEBOOK",
+				TaskType:    "SHELL",
 			},
 			args: args{
 				tresSupported: true,
@@ -1538,10 +1538,10 @@ func TestTaskSpec_computeResources(t *testing.T) {
 			},
 		},
 		{
-			name: "Task Type 'NOTEBOOK', Slot type GPU, gres supported (PBS)",
+			name: "Task Type 'SHELL', Slot type GPU, gres supported (PBS)",
 			fields: fields{
 				PbsConfig: pbsConfig,
-				TaskType:  "NOTEBOOK",
+				TaskType:  "SHELL",
 			},
 			args: args{
 				tresSupported: false,
@@ -1918,21 +1918,20 @@ func TestTaskSpec_addQuotes(t *testing.T) {
 	assert.Equal(t, addQuotes(""), "\"\"")
 }
 
-// Verifies that 'restrictCommandsShellsAndNotebooksToSingleNode()' only adds
-// the 'nodes=1' instance for commands, shells, and notebooks, since those
+// Verifies that 'restrictCommandsAndShellsToSingleNode()' only adds
+// the 'nodes=1' instance for commands and shells, since those
 // task types must only run on a single node.
-func Test_restrictCommandsShellsAndNotebooksToSingleNode(t *testing.T) {
+func Test_restrictCommandsAndShellsToSingleNode(t *testing.T) {
 	taskTypes := []model.TaskType{
 		model.TaskTypeTrial,
 		model.TaskTypeTensorboard,
 		model.TaskTypeCheckpointGC,
 		model.TaskTypeCommand,
 		model.TaskTypeShell,
-		model.TaskTypeNotebook,
 	}
 
 	// For each task type, verify that the 'nodes=1' instance is added only for
-	// commands, shells, and notebooks.
+	// commands and shells.
 	for _, taskType := range taskTypes {
 		ts := &TaskSpec{TaskType: taskType}
 
@@ -1942,21 +1941,21 @@ func Test_restrictCommandsShellsAndNotebooksToSingleNode(t *testing.T) {
 		instancesBefore := make(map[string]int32)
 
 		// Pretend we already have "per-node" instance so we can verify that
-		// after the call to "restrictCommandsShellsAndNotebooksToSingleNode()"
-		// the "per-node" instance is not preserved for commands, shells, and
-		// notebooks, but preserved for all other task types.
+		// after the call to "restrictCommandsAndShellsToSingleNode()"
+		// the "per-node" instance is not preserved for commands and shells,
+		// but preserved for all other task types.
 		instancesBefore["per-node"] = 2
 
 		resources.SetInstances(instancesBefore)
 
-		ts.restrictCommandsShellsAndNotebooksToSingleNode(resources)
+		ts.restrictCommandsAndShellsToSingleNode(resources)
 
 		instancesAfter := resources.GetInstances()
 
-		// Verify the 'nodes=1' instance was set for commands, shells, and
-		// notebooks, but not for all other task types.
+		// Verify the 'nodes=1' instance was set for commands and shells, but
+		// not for all other task types.
 		switch ts.TaskType {
-		case model.TaskTypeCommand, model.TaskTypeShell, model.TaskTypeNotebook:
+		case model.TaskTypeCommand, model.TaskTypeShell:
 			// Verify that the "per-node" instance was not preserved.
 			_, ok := instancesAfter["per-node"]
 

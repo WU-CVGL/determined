@@ -2,15 +2,11 @@ package internal
 
 import (
 	"archive/tar"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
-
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/determined-ai/determined/master/internal/proxy"
 	"github.com/determined-ai/determined/master/pkg/archive"
@@ -85,22 +81,16 @@ func addShellJupyter(spec *tasks.GenericCommandSpec) (archive.Archive, error) {
 	if err != nil {
 		return nil, err
 	}
-	configBytes, err := json.Marshal(spec.Config)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "cannot marshal shell config: %s", err)
-	}
 	lo, hi := servicePortRange(interactiveServiceJupyter)
 	port, err := freeServicePort(spec, interactiveServiceJupyter, lo, hi)
 	if err != nil {
 		return nil, err
 	}
 	spec.AddService(jupyterService(port))
-	env := map[string]string{
-		"NOTEBOOK_PORT":   strconv.Itoa(port),
-		"NOTEBOOK_CONFIG": string(configBytes),
-	}
+	env := map[string]string{"NOTEBOOK_PORT": strconv.Itoa(port)}
 	if spec.Config.IdleTimeout != nil {
-		env[tasks.NotebookIdleTypeEnvVar] = spec.Config.NotebookIdleType
+		jupyter := spec.Config.Services[model.ServiceJupyter]
+		env[tasks.JupyterIdleTypeEnvVar] = jupyter.JupyterIdleType()
 		env[tasks.IdleTimeoutSecondsEnvVar] = strconv.FormatFloat(
 			time.Duration(*spec.Config.IdleTimeout).Seconds(), 'f', -1, 64)
 	}

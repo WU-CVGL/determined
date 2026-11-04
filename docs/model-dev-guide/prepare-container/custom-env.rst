@@ -22,8 +22,8 @@ guide.
 
 For both trial runners and commands, you can configure the environment variables inside the
 container using the :ref:`experiment <experiment-configuration>` or :ref:`task
-<command-notebook-configuration>` ``environment.environment_variables`` configuration field. The
-format is a list of ``NAME=VALUE`` strings. For example:
+<job-configuration-reference>` ``environment.environment_variables`` configuration field. The format
+is a list of ``NAME=VALUE`` strings. For example:
 
 .. code:: yaml
 

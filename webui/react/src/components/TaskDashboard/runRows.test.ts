@@ -143,7 +143,7 @@ describe('runRows', () => {
   });
 
   describe('state groups', () => {
-    it('maps notebooks, shells, commands and TensorBoards: terminated is ended, never paused', () => {
+    it('maps shells, commands and TensorBoards: terminated is ended, never paused', () => {
       expect(commandStateGroup(CommandState.Terminated)).toBe(StateGroup.Ended);
       [
         CommandState.Queued,
@@ -205,17 +205,6 @@ describe('runRows', () => {
         RunKind.Experiment,
       );
       expect(kindsOf({ type: 'workspace', workspaceId: 2 }, false)).toHaveLength(4);
-    });
-
-    it('lists and offers no JupyterLab, the kind of ended notebook records', () => {
-      for (const scope of [
-        { type: 'global' as const },
-        { type: 'workspace' as const, workspaceId: 2 },
-        { projectId: 1, type: 'project' as const },
-      ]) {
-        expect(kindsOf(scope, true)).not.toContain(RunKind.JupyterLab);
-        expect(kindsOf(scope, false)).not.toContain(RunKind.JupyterLab);
-      }
     });
 
     it('lists only experiments and generic tasks in a project', () => {
@@ -304,34 +293,34 @@ describe('runRows', () => {
       ),
       commandRow(command('cpu-cmd', '2026-01-02T00:00:00Z', { name: 'Preprocess' })),
       commandRow(
-        command('old-nb', '2026-01-01T00:00:00Z', {
+        command('old-tb', '2026-01-01T00:00:00Z', {
           slots: 4,
           state: CommandState.Terminated,
-          type: CommandType.JupyterLab,
+          type: CommandType.TensorBoard,
           userId: 2,
         }),
       ),
     ];
-    const all = [CommandType.Shell, CommandType.Command, CommandType.JupyterLab];
+    const all = [CommandType.Shell, CommandType.Command, CommandType.TensorBoard];
     const ids = (filtered: CommandRunRow[]) => filtered.map((row) => row.id);
 
     it('filters by kind, state, search, slots, owner and workspace', () => {
       expect(ids(filterCommandRows(rows, { kinds: [CommandType.Shell] }))).toEqual(['gpu-shell']);
       expect(ids(filterCommandRows(rows, { kinds: all, states: [StateGroup.Ended] }))).toEqual([
-        'old-nb',
+        'old-tb',
       ]);
       expect(ids(filterCommandRows(rows, { kinds: all, states: [StateGroup.Paused] }))).toEqual([]);
       expect(ids(filterCommandRows(rows, { kinds: all, search: 'PREPRO' }))).toEqual(['cpu-cmd']);
-      expect(ids(filterCommandRows(rows, { kinds: all, search: 'old-' }))).toEqual(['old-nb']);
+      expect(ids(filterCommandRows(rows, { kinds: all, search: 'old-' }))).toEqual(['old-tb']);
       expect(ids(filterCommandRows(rows, { kinds: all, slots: slotsQuery(['multi:0']) }))).toEqual([
         'gpu-shell',
-        'old-nb',
+        'old-tb',
       ]);
       expect(ids(filterCommandRows(rows, { kinds: all, slots: slotsQuery(['0', '4']) }))).toEqual([
         'cpu-cmd',
-        'old-nb',
+        'old-tb',
       ]);
-      expect(ids(filterCommandRows(rows, { kinds: all, userIds: [2] }))).toEqual(['old-nb']);
+      expect(ids(filterCommandRows(rows, { kinds: all, userIds: [2] }))).toEqual(['old-tb']);
       expect(ids(filterCommandRows(rows, { kinds: all, workspaceIds: [3, 4] }))).toEqual([
         'gpu-shell',
       ]);
@@ -343,11 +332,11 @@ describe('runRows', () => {
       const same = '2026-01-01T00:00:00Z';
       const sorted = sortCommandRows([
         commandRow(command('b', same)),
-        commandRow(command('z', same, { type: CommandType.JupyterLab })),
+        commandRow(command('z', same, { type: CommandType.Shell })),
         commandRow(command('a', same)),
         commandRow(command('new', '2026-01-02T00:00:00Z')),
       ]);
-      expect(keys(sorted)).toEqual(['command:new', 'jupyter-lab:z', 'command:a', 'command:b']);
+      expect(keys(sorted)).toEqual(['command:new', 'shell:z', 'command:a', 'command:b']);
     });
 
     it('sorts by end time, running tasks last both ways', () => {

@@ -305,7 +305,6 @@ export interface CommandAddress {
 
 export const CommandType = {
   Command: 'command',
-  JupyterLab: 'jupyter-lab',
   Shell: 'shell',
   TensorBoard: 'tensor-board',
 } as const;
@@ -321,7 +320,7 @@ export interface CommandConfig {
   description: string;
 }
 
-// The command type is shared between Commands, JupyterLabs, TensorBoards, and Shells.
+// The command type is shared between Commands, TensorBoards, and Shells.
 export interface Command {
   config: CommandConfig; // We do not use this field in the WebUI.
   exitStatus?: string;
@@ -931,7 +930,6 @@ export interface GenericTaskPagination {
 
 export interface TaskCounts {
   commands: number;
-  notebooks: number;
   shells: number;
   tensorboards: number;
 }
@@ -1061,16 +1059,6 @@ export type AnyTask = CommandTask | ExperimentTask;
 export type RecentTask = AnyTask & RecentEvent;
 export type RecentCommandTask = CommandTask & RecentEvent;
 export type RecentExperimentTask = ExperimentTask & RecentEvent;
-
-export const TaskType = {
-  Command: 'command',
-  Experiment: 'experiment',
-  JupyterLab: 'jupyter-lab',
-  Shell: 'shell',
-  TensorBoard: 'tensor-board',
-} as const;
-
-export type TaskType = ValueOf<typeof TaskType>;
 
 export const ArchiveFilter = {
   Archived: 'archived',

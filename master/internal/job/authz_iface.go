@@ -25,5 +25,5 @@ type JobAuthZ interface {
 	CanControlJobQueueUpdate(ctx context.Context, curUser model.User, jobID model.JobID) error
 }
 
-// AuthZProvider is the authz registry for Notebooks, Shells, and Commands.
+// AuthZProvider is the authz registry for Shells and Commands.
 var AuthZProvider authz.AuthZProviderType[JobAuthZ]

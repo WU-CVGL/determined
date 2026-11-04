@@ -528,15 +528,15 @@ func (t *TaskSpec) computeResources(
 		resources.SetInstances(map[string]int32{"nodes": int32(numNodes)})
 	}
 
-	// Commands, Shells, and Notebooks must run on a single node.
-	t.restrictCommandsShellsAndNotebooksToSingleNode(resources)
+	// Commands and shells must run on a single node.
+	t.restrictCommandsAndShellsToSingleNode(resources)
 
 	return resources
 }
 
-// Restricts commands, shells, and notebooks to a single node.
+// Restricts commands and shells to a single node.
 //
-// Commands, shells, and notebooks are intended to only run on a single
+// Commands and shells are intended to only run on a single
 // node.  However, if each compute node has 4 GPUs and, 8 GPUS are
 // specified in the configuration, as shown in the example below, then
 // more than one node will be allocated, which is not desirable.
@@ -557,11 +557,11 @@ func (t *TaskSpec) computeResources(
 // For PBS, the job will remain queued with the following reason:
 //
 //	Not Running: Insufficient amount of resource: ngpus
-func (t *TaskSpec) restrictCommandsShellsAndNotebooksToSingleNode(
+func (t *TaskSpec) restrictCommandsAndShellsToSingleNode(
 	resources *launcher.ResourceRequirements,
 ) {
 	switch t.TaskType {
-	case model.TaskTypeCommand, model.TaskTypeShell, model.TaskTypeNotebook:
+	case model.TaskTypeCommand, model.TaskTypeShell:
 		resources.SetInstances(map[string]int32{
 			"nodes": 1,
 		})

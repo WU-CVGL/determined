@@ -6,7 +6,7 @@ import userStore from 'stores/users';
 import { CommandResponse, RawJson } from 'types';
 import { isDetError } from 'utils/error';
 import { recordLaunch } from 'utils/launchHistory';
-import { configForShellLaunch, NtscLaunchOptions, simpleLaunchConfig } from 'utils/ntscConfig';
+import { NtscLaunchOptions, simpleLaunchConfig } from 'utils/ntscConfig';
 import { getResponseStatus } from 'utils/service';
 
 export interface ShellLaunchOptions extends NtscLaunchOptions {
@@ -16,7 +16,7 @@ export interface ShellLaunchOptions extends NtscLaunchOptions {
 
 /** The request a launch and a preview send for these options: the same for both. */
 export const shellRequest = (options: ShellLaunchOptions): LaunchShellParams => ({
-  config: options.config ? configForShellLaunch(options.config) : simpleLaunchConfig(options),
+  config: options.config ?? simpleLaunchConfig(options),
   templateName: options.config || options.template === '' ? undefined : options.template,
   workspaceId: options.workspaceId,
 });
@@ -38,12 +38,13 @@ export const actionableErrorMessage = (e: unknown): string | undefined => {
 export const PREVIEW_ERROR = 'Unable to fetch shell config.';
 
 /**
- * Launches a shell and returns the new task. The services wrapper has already
- * dropped the shell's SSH key from the response, so nothing here can keep it.
- * Errors are thrown so the launch modal can stay open and show them.
+ * Launches a shell, records its config in this browser's launch history and
+ * returns the new task. The services wrapper has already dropped the shell's
+ * SSH key from the response, so nothing here can keep it. Errors are thrown so
+ * the launch modal can stay open and show them.
  *
- * A shell cannot be opened like a TensorBoard (utils/wait); callers show how to
- * connect instead.
+ * Nothing here waits for the shell to run or opens it: the caller shows the
+ * launched shell, whose task page opens by the task's ID.
  */
 export const launchShell = async (options: ShellLaunchOptions = {}): Promise<CommandResponse> => {
   const response = await apiLaunchShell(shellRequest(options));

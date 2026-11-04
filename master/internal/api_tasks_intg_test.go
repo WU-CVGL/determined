@@ -105,18 +105,18 @@ func TestPostTaskLogs(t *testing.T) {
 	}
 }
 
-func mockNotebookWithWorkspaceID(
+func mockShellWithWorkspaceID(
 	ctx context.Context, t *testing.T, workspaceID int,
 ) model.TaskID {
-	nb := &model.Task{
+	shell := &model.Task{
 		TaskID:   model.NewTaskID(),
-		TaskType: model.TaskTypeNotebook,
+		TaskType: model.TaskTypeShell,
 	}
-	require.NoError(t, db.AddTask(ctx, nb))
+	require.NoError(t, db.AddTask(ctx, shell))
 
-	allocationID := model.AllocationID(string(nb.TaskID) + ".1")
+	allocationID := model.AllocationID(string(shell.TaskID) + ".1")
 	require.NoError(t, db.AddAllocation(ctx, &model.Allocation{
-		TaskID:       nb.TaskID,
+		TaskID:       shell.TaskID,
 		AllocationID: allocationID,
 	}))
 
@@ -130,7 +130,7 @@ func mockNotebookWithWorkspaceID(
 	}
 
 	_, err := db.Bun().NewInsert().Model(&commandSnapshot{
-		TaskID:       nb.TaskID,
+		TaskID:       shell.TaskID,
 		AllocationID: allocationID,
 		GenericCommandSpec: map[string]any{
 			"Metadata": map[string]any{
@@ -140,7 +140,7 @@ func mockNotebookWithWorkspaceID(
 	}).Exec(ctx)
 	require.NoError(t, err)
 
-	return nb.TaskID
+	return shell.TaskID
 }
 
 func TestGetTasksAuthZ(t *testing.T) {
@@ -166,11 +166,11 @@ func TestGetTasksAuthZ(t *testing.T) {
 			return e.ID == cantAccessTrial.ExperimentID
 		})).Return(authz2.PermissionDeniedError{}).Once()
 
-	canAccessNotebookID := mockNotebookWithWorkspaceID(ctx, t, -100)
+	canAccessShellID := mockShellWithWorkspaceID(ctx, t, -100)
 	authZNSC.On("CanGetNSC", mock.Anything, mock.Anything, model.AccessScopeID(-100)).
 		Return(nil).Once()
 
-	cantAccessNotebookID := mockNotebookWithWorkspaceID(ctx, t, -101)
+	cantAccessShellID := mockShellWithWorkspaceID(ctx, t, -101)
 	authZNSC.On("CanGetNSC", mock.Anything, mock.Anything, model.AccessScopeID(-101)).
 		Return(authz2.PermissionDeniedError{}).Once()
 
@@ -182,10 +182,10 @@ func TestGetTasksAuthZ(t *testing.T) {
 			TaskID: expCantAccessTask.TaskID,
 		},
 		"alloc2": {
-			TaskID: canAccessNotebookID,
+			TaskID: canAccessShellID,
 		},
 		"alloc3": {
-			TaskID: cantAccessNotebookID,
+			TaskID: cantAccessShellID,
 		},
 	}
 

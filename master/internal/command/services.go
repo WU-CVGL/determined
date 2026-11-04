@@ -11,7 +11,6 @@ import (
 	"github.com/determined-ai/determined/master/internal/api"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/pkg/model"
-	"github.com/determined-ai/determined/master/pkg/schemas"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/taskv1"
 )
@@ -53,9 +52,8 @@ type TaskServiceCredential struct {
 	Password   string
 }
 
-// taskServices returns the services of a task: its records, or, for a task saved without them,
-// the one service that its type runs, as proxyPortConfigs proxies it: a shell's sshd at the task
-// ID, a notebook's JupyterLab at the task ID over HTTPS. Commands and TensorBoards have none.
+// taskServices returns the services of a task: its records, or, for a shell saved without them,
+// its sshd at the task ID, as proxyPortConfigs proxies it. Commands and TensorBoards have none.
 func taskServices(spec tasks.GenericCommandSpec, taskType model.TaskType) []tasks.InteractiveService {
 	if len(spec.Services) > 0 {
 		return spec.Services
@@ -72,20 +70,6 @@ func taskServices(spec tasks.GenericCommandSpec, taskType model.TaskType) []task
 			DefaultServiceID: true,
 			ProxyTCP:         true,
 			Unauthenticated:  true,
-		}}
-	case model.TaskTypeNotebook:
-		port := 0
-		for _, pp := range schemas.WithDefaults(spec.Base.ExtraProxyPorts) {
-			if pp.DefaultServiceID() {
-				port = pp.ProxyPort()
-				break
-			}
-		}
-		return []tasks.InteractiveService{{
-			Name:             model.ServiceJupyter,
-			Port:             port,
-			DefaultServiceID: true,
-			TLS:              true,
 		}}
 	default:
 		return nil

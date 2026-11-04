@@ -113,23 +113,15 @@ describe('UserSettings', () => {
     vi.clearAllMocks();
   });
 
-  it('lists the shortcuts without JupyterLab, also with one stored for it', async () => {
-    const shortcut = { alt: false, ctrl: false, key: 'L', meta: true, shift: true };
+  it('lists the shortcuts, with one stored', async () => {
+    const shortcut = { alt: false, ctrl: false, key: 'K', meta: true, shift: true };
     settingsApi.getUserSetting.mockResolvedValue({
-      settings: [
-        { key: 'jupyterLab', storagePath: 'shortcuts', value: JSON.stringify(shortcut) },
-        {
-          key: 'omnibar',
-          storagePath: 'shortcuts',
-          value: JSON.stringify({ ...shortcut, key: 'K' }),
-        },
-      ],
+      settings: [{ key: 'omnibar', storagePath: 'shortcuts', value: JSON.stringify(shortcut) }],
     });
     try {
       setup();
       expect(await screen.findByText('Open Omnibar')).toBeInTheDocument();
       expect(screen.getByText('Toggle Sidebar')).toBeInTheDocument();
-      expect(screen.queryByText('Launch JupyterLab Notebook')).not.toBeInTheDocument();
       expect(settingsApi.getUserSetting).toHaveBeenCalled();
     } finally {
       settingsApi.getUserSetting.mockResolvedValue({ settings: [] });

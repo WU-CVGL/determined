@@ -601,7 +601,7 @@ func TestReportCheckpoint(t *testing.T) {
 func TestReportCheckpointNonTrialErrors(t *testing.T) {
 	api, _, ctx := setupAPITest(t, nil)
 
-	notebookTask := mockNotebookWithWorkspaceID(ctx, t, 1)
+	shellTask := mockShellWithWorkspaceID(ctx, t, 1)
 
 	checkpointMeta, err := structpb.NewStruct(map[string]any{
 		"steps_completed": 1,
@@ -611,7 +611,7 @@ func TestReportCheckpointNonTrialErrors(t *testing.T) {
 	checkpointID := uuid.New().String()
 	req := &apiv1.ReportCheckpointRequest{
 		Checkpoint: &checkpointv1.Checkpoint{
-			TaskId:       string(notebookTask),
+			TaskId:       string(shellTask),
 			AllocationId: nil,
 			Uuid:         checkpointID,
 			ReportTime:   timestamppb.New(time.Now().Truncate(time.Millisecond)),

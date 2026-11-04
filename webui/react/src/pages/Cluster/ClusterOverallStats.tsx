@@ -99,13 +99,6 @@ export const ClusterOverallStats: React.FC = () => {
             {Loadable.match(activeTasks, {
               _: () => null,
               Loaded: (activeTasks) =>
-                activeTasks.notebooks > 0 && (
-                  <OverviewStats title="Active JupyterLabs">{activeTasks.notebooks}</OverviewStats>
-                ),
-            })}
-            {Loadable.match(activeTasks, {
-              _: () => null,
-              Loaded: (activeTasks) =>
                 activeTasks.tensorboards > 0 && (
                   <OverviewStats title="Active TensorBoards">
                     {activeTasks.tensorboards}

@@ -13,9 +13,9 @@ const (
 	ServicesEnvVar = "DET_SERVICES"
 	// NotebookBaseURLEnvVar is the path under which JupyterLab serves: /proxy/<service ID>/.
 	NotebookBaseURLEnvVar = "NOTEBOOK_BASE_URL"
-	// NotebookIdleTypeEnvVar is the notebook_idle_type of JupyterLab's idle check, which reports to
-	// its task's activity record. The jupyter service starts the check when it is set.
-	NotebookIdleTypeEnvVar = "NOTEBOOK_IDLE_TYPE"
+	// JupyterIdleTypeEnvVar is the services.jupyter.idle_type of JupyterLab's idle check, which
+	// reports to its task's activity record. The jupyter service starts the check when it is set.
+	JupyterIdleTypeEnvVar = "DET_JUPYTER_IDLE_TYPE"
 	// IdleTimeoutSecondsEnvVar is the task's idle timeout in seconds, at a fraction of which
 	// JupyterLab's idle check reports to its task's activity record.
 	IdleTimeoutSecondsEnvVar = "DET_IDLE_TIMEOUT_SECONDS"

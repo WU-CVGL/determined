@@ -193,7 +193,6 @@ export const resourceStateToLabel: { [key in ResourceState]: string } = {
 
 export const commandTypeToLabel: { [key in CommandType]: string } = {
   [CommandType.Command]: 'Command',
-  [CommandType.JupyterLab]: 'JupyterLab',
   [CommandType.Shell]: 'Shell',
   [CommandType.TensorBoard]: 'TensorBoard',
 };

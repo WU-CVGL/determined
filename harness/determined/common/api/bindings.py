@@ -475,7 +475,6 @@ class jobv1Type(DetEnum):
     """Job type.
     - TYPE_UNSPECIFIED: Unspecified state.
     - TYPE_EXPERIMENT: Experiement Job.
-    - TYPE_NOTEBOOK: Jupyter Notebook Job.
     - TYPE_TENSORBOARD: TensorBoard Job.
     - TYPE_SHELL: Shell Job.
     - TYPE_COMMAND: Command Job.
@@ -485,7 +484,6 @@ class jobv1Type(DetEnum):
     """
     UNSPECIFIED = "TYPE_UNSPECIFIED"
     EXPERIMENT = "TYPE_EXPERIMENT"
-    NOTEBOOK = "TYPE_NOTEBOOK"
     TENSORBOARD = "TYPE_TENSORBOARD"
     SHELL = "TYPE_SHELL"
     COMMAND = "TYPE_COMMAND"
@@ -4713,12 +4711,10 @@ class v1GetActiveTasksCountResponse(Printable):
         self,
         *,
         commands: int,
-        notebooks: int,
         shells: int,
         tensorboards: int,
     ):
         self.commands = commands
-        self.notebooks = notebooks
         self.shells = shells
         self.tensorboards = tensorboards
 
@@ -4726,7 +4722,6 @@ class v1GetActiveTasksCountResponse(Printable):
     def from_json(cls, obj: Json) -> "v1GetActiveTasksCountResponse":
         kwargs: "typing.Dict[str, typing.Any]" = {
             "commands": obj["commands"],
-            "notebooks": obj["notebooks"],
             "shells": obj["shells"],
             "tensorboards": obj["tensorboards"],
         }
@@ -4735,7 +4730,6 @@ class v1GetActiveTasksCountResponse(Printable):
     def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
         out: "typing.Dict[str, typing.Any]" = {
             "commands": self.commands,
-            "notebooks": self.notebooks,
             "shells": self.shells,
             "tensorboards": self.tensorboards,
         }
@@ -11189,9 +11183,9 @@ class v1PermissionType(DetEnum):
     - PERMISSION_TYPE_UPDATE_EXPERIMENT: Ability to update experiment and experiment's lifecycle.
     - PERMISSION_TYPE_UPDATE_EXPERIMENT_METADATA: Ability to update experiment's metadata.
     - PERMISSION_TYPE_DELETE_EXPERIMENT: Ability to delete experiment.
-    - PERMISSION_TYPE_CREATE_NSC: Ability to create Notebooks, Shells, and Commands.
-    - PERMISSION_TYPE_VIEW_NSC: Ability to view Notebooks, Shells, and Commands.
-    - PERMISSION_TYPE_UPDATE_NSC: Ability to terminate Notebooks, Shells, and Commands.
+    - PERMISSION_TYPE_CREATE_NSC: Ability to create Shells and Commands.
+    - PERMISSION_TYPE_VIEW_NSC: Ability to view Shells and Commands.
+    - PERMISSION_TYPE_UPDATE_NSC: Ability to terminate Shells and Commands.
     - PERMISSION_TYPE_UPDATE_GROUP: Ability to create, update, and add / remove users from groups.
     - PERMISSION_TYPE_CREATE_WORKSPACE: Ability to create workspaces.
     - PERMISSION_TYPE_VIEW_WORKSPACE: Ability to view workspace.
@@ -16248,7 +16242,6 @@ class v1TaskType(DetEnum):
     """Type of the task
     - TASK_TYPE_UNSPECIFIED: The task type is unknown
     - TASK_TYPE_TRIAL: "TRIAL" task type for the enum public.task_type in Postgres.
-    - TASK_TYPE_NOTEBOOK: "NOTEBOOK" task type for the enum public.task_type in Postgres.
     - TASK_TYPE_SHELL: "SHELL" task type for the enum public.task_type in Postgres.
     - TASK_TYPE_COMMAND: "COMMAND" task type for the enum public.task_type in Postgres.
     - TASK_TYPE_TENSORBOARD: "TENSORBOARD" task type for the enum public.task_type in Postgres.
@@ -16257,7 +16250,6 @@ class v1TaskType(DetEnum):
     """
     UNSPECIFIED = "TASK_TYPE_UNSPECIFIED"
     TRIAL = "TASK_TYPE_TRIAL"
-    NOTEBOOK = "TASK_TYPE_NOTEBOOK"
     SHELL = "TASK_TYPE_SHELL"
     COMMAND = "TASK_TYPE_COMMAND"
     TENSORBOARD = "TASK_TYPE_TENSORBOARD"

@@ -98,11 +98,10 @@ defaults, without starting it, add ``--preview``:
 Services
 ========
 
-A shell runs more services than its SSH server: JupyterLab, and VS Code in the browser when the
-master serves code-server, each in the shell's container with the same user, files and environment
-as the SSH sessions. The shell's configuration lists them under :ref:`services
-<job-configuration-reference>`. To leave one out, set its ``enabled`` to ``false`` there, or pass
-``--no-service``:
+A new shell runs JupyterLab by default, and VS Code in the browser when the master serves
+code-server, each in the shell's container with the same user, files and environment as the SSH
+sessions. The shell's configuration lists them under :ref:`services <job-configuration-reference>`.
+To leave one out, set its ``enabled`` to ``false`` there, or pass ``--no-service``:
 
 .. code::
 
@@ -112,6 +111,10 @@ This is the same as ``det shell start --config "services={jupyter: {enabled: fal
 ``--service`` turns a service on again, for example one that a template turns off; for a service
 named by both, the last flag wins. The WebUI's **Launch Interactive Task** form has a checkbox for
 **jupyter** and **vscode**, checked for the services the shell would run.
+
+A task restored after a master restart keeps the services it was started with. The default does not
+install JupyterLab into the image: without it, the ``jupyter`` service is ``UNAVAILABLE`` and the
+shell runs on.
 
 To list a shell's services with their states and addresses:
 
@@ -145,15 +148,15 @@ services.
 A shell is not terminated for being idle unless its configuration sets :ref:`idle_timeout
 <job-configuration-reference>`. With it, open SSH sessions and browser terminals and browser
 sessions of its services such as JupyterLab count as activity, as does JupyterLab activity as
-``notebook_idle_type`` defines it; by default a kernel that is executing. An SSH session or a
-browser page kept open on the shell can therefore delay its termination.
+``services.jupyter.idle_type`` defines it; by default a kernel that is executing. An SSH session or
+a browser page kept open on the shell can therefore delay its termination.
 
 .. _jupyter-service:
 
 JupyterLab
 ----------
 
-The ``jupyter`` service runs `JupyterLab <https://jupyter.org/>`__ in the shell's container. Every
+The ``jupyter`` service runs `JupyterLab <https://jupyter.org/>`__ in the shell's container. A new
 shell runs it unless its configuration turns it off:
 
 .. code::

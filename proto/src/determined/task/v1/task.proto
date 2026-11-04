@@ -35,8 +35,8 @@ enum TaskType {
   TASK_TYPE_UNSPECIFIED = 0;
   // "TRIAL" task type for the enum public.task_type in Postgres.
   TASK_TYPE_TRIAL = 1;
-  // "NOTEBOOK" task type for the enum public.task_type in Postgres.
-  TASK_TYPE_NOTEBOOK = 2;
+  reserved 2;
+  reserved "TASK_TYPE_NOTEBOOK";
   // "SHELL" task type for the enum public.task_type in Postgres.
   TASK_TYPE_SHELL = 3;
   // "COMMAND" task type for the enum public.task_type in Postgres.

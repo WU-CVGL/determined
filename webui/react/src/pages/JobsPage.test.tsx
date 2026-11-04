@@ -61,9 +61,9 @@ describe('JobsPage', () => {
   });
 
   it('redirects the other old tabs to /tasks and keeps their kind filter', async () => {
-    setup('/tasks/interactive?type=jupyter-lab');
+    setup('/tasks/interactive?type=shell');
     await waitFor(() =>
-      expect(screen.getByTestId('location')).toHaveTextContent('/tasks?type=jupyter-lab'),
+      expect(screen.getByTestId('location')).toHaveTextContent('/tasks?type=shell'),
     );
     expect(await screen.findByTestId('dashboard')).toHaveTextContent('tasks only');
   });

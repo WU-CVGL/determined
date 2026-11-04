@@ -121,26 +121,6 @@ describe('launchHistory', () => {
     expect(window.localStorage.getItem('u:1/launch-history/shell')).toBeNull();
   });
 
-  it('reads the shells’ list only and leaves the notebooks’ list as it is', () => {
-    // An entry as a notebook launch stored it, under its own key.
-    const entry = {
-      config: { description: 'notebook' },
-      id: 'abc',
-      savedAt: 5,
-      v: 1,
-      workspaceId: 2,
-    };
-    const stored = JSON.stringify([entry]);
-    window.localStorage.setItem('u:1/launch-history/jupyter-lab', stored);
-    expect(listLaunchHistory(1)).toEqual([]);
-
-    recordLaunch(1, { config: launchConfig('shell'), workspaceId: 1 });
-    expect(listLaunchHistory(1).map((item) => item.config.description)).toEqual(['shell']);
-    clearLaunchHistory(1);
-    expect(listLaunchHistory(1)).toEqual([]);
-    expect(window.localStorage.getItem('u:1/launch-history/jupyter-lab')).toBe(stored);
-  });
-
   describe('storage failures', () => {
     it('reads corrupt or foreign data as an empty list or drops bad entries', () => {
       window.localStorage.setItem('u:1/launch-history/shell', '{not json');
@@ -156,6 +136,18 @@ describe('launchHistory', () => {
         JSON.stringify([{ v: 99 }, 'junk', ...stored]),
       );
       expect(listLaunchHistory(1).map((entry) => entry.config.description)).toEqual(['good']);
+    });
+
+    it('drops entries of an earlier version', () => {
+      const earlier = {
+        config: { notebook_idle_type: 'activity' },
+        id: 'shell:old',
+        savedAt: 1,
+        v: 1,
+        workspaceId: 1,
+      };
+      window.localStorage.setItem('u:1/launch-history/shell', JSON.stringify([earlier]));
+      expect(listLaunchHistory(1)).toEqual([]);
     });
 
     it('tolerates a getItem that throws', () => {

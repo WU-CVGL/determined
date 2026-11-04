@@ -67,14 +67,12 @@ type GenericCommandSpec struct {
 
 	// Services are the services of a shell, the primary one, ssh, first: their ports and how the
 	// master proxies each. The master builds the services' proxies and environment from them on
-	// every start, also on a restore. Empty for commands and TensorBoards, for notebooks, which the
-	// master saved before it ran JupyterLab in shells, and for shells saved before the master
-	// recorded them, whose proxies follow the task type: a shell's sshd is at SSHDPort or its
-	// default TCP proxy port, and a notebook reaches every port over HTTPS.
+	// every start, also on a restore. Empty for commands and TensorBoards, and for shells saved
+	// before the master recorded them, whose sshd is at SSHDPort or their default TCP proxy port.
 	Services []InteractiveService
 
 	// WatchProxyIdleTimeout watches the last request to the task's proxy when its config has an idle
-	// timeout. TensorBoards set it, as notebooks did.
+	// timeout. TensorBoards set it.
 	WatchProxyIdleTimeout bool
 	// WatchTaskActivity watches the task's activity record (see the idle package) when its config
 	// has an idle timeout. Shells set it.

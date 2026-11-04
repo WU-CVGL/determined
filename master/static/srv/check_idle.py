@@ -161,13 +161,13 @@ def main():
     # A retried report would come later than its timeout; the next round reports again.
     sess = authentication.login_from_task(master_url, cert=cert).with_retry(0)
     try:
-        idle_type = IdleType[os.environ["NOTEBOOK_IDLE_TYPE"].upper()]
+        idle_type = IdleType[os.environ["DET_JUPYTER_IDLE_TYPE"].upper()]
     except KeyError:
         logging.warning(
-            "unknown idle type '%s', using default value",
-            os.environ["NOTEBOOK_IDLE_TYPE"],
+            "unknown idle type '%s', using activity",
+            os.environ["DET_JUPYTER_IDLE_TYPE"],
         )
-        idle_type = IdleType.KERNELS_OR_TERMINALS
+        idle_type = IdleType.ACTIVITY
 
     wait_for_jupyter(("127.0.0.1", int(port)))
 

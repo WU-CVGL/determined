@@ -134,15 +134,15 @@ JupyterLab
 `JupyterLab <https://jupyter.org/>`__ is a convenient way to develop and debug machine learning
 models, visualize the behavior of trained models, or even manage the training lifecycle of a model
 manually. In Determined, JupyterLab runs as the :ref:`jupyter service <jupyter-service>` of a shell,
-which every shell runs unless its configuration turns it off:
+which a new shell runs by default unless its configuration or template turns it off:
 
 -  JupyterLab runs in a containerized environment on the cluster, so dependencies are managed with
    images and virtual environments. Its HTTP requests pass through the master's proxy to and from
    the container.
 
 -  A shell whose configuration sets ``idle_timeout`` is terminated once it has been idle that long,
-   to release resources. JupyterLab activity, as the ``notebook_idle_type`` option in the :ref:`task
-   configuration <command-notebook-configuration>` defines it, counts as activity.
+   to release resources. JupyterLab activity, as the ``services.jupyter.idle_type`` option in the
+   :ref:`task configuration <job-configuration-reference>` defines it, counts as activity.
 
 .. note::
 

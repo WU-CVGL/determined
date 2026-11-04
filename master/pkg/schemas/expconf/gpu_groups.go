@@ -102,8 +102,8 @@ func (g GPUGroupRequests) String() string {
 
 var gpuGroupName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 
-// Check refuses groups that the schema refuses, which commands, notebooks, shells, TensorBoards
-// and generic tasks are not checked against, and groups whose counts do not add up to the task's
+// Check refuses groups that the schema refuses, which commands, shells, TensorBoards and generic
+// tasks are not checked against, and groups whose counts do not add up to the task's
 // slots, given with the name of their field (slotsField). Unset groups pass.
 func (g GPUGroupRequests) Check(slots int, slotsField string) error {
 	if g == nil {

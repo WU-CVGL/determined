@@ -50,7 +50,7 @@ func TestCommandConfigServices(t *testing.T) {
 			if tc.want == nil {
 				require.Empty(t, config.Services)
 			} else {
-				require.Equal(t, tc.want, DeclaredServices(config.Services))
+				require.Equal(t, tc.want, EnabledServiceNames(config.Services))
 			}
 		})
 	}
@@ -63,9 +63,10 @@ func TestCommandConfigServices(t *testing.T) {
 		require.ErrorContains(t, err, `services: unknown service "`+name+`"`)
 	}
 
-	// A service's value is an object of options: "enabled", and no other.
+	// A service's value is an object of options: "enabled", "idle_type", and no other.
 	for _, value := range []string{
 		`1`, `"on"`, `true`, `[]`, `{"port": 8888}`, `{"enabled": 1}`, `{"enabled": "no"}`,
+		`{"idle_type": 1}`,
 	} {
 		_, err := decodeCommandConfig(`{"services": {"jupyter": ` + value + `}}`)
 		require.Error(t, err, value)
@@ -75,7 +76,7 @@ func TestCommandConfigServices(t *testing.T) {
 }
 
 // A service runs unless its config sets enabled to false; its entry stays in the config either
-// way, and a disabled one is not declared.
+// way, and a disabled one is not among the enabled names.
 func TestServiceConfigEnabled(t *testing.T) {
 	require.True(t, ServiceConfig{}.Runs())
 	require.True(t, ServiceConfig{Enabled: ptrs.Ptr(true)}.Runs())
@@ -85,8 +86,8 @@ func TestServiceConfigEnabled(t *testing.T) {
 		`{"services": {"jupyter": {"enabled": false}, "vscode": {"enabled": true}, "ssh": {}}}`)
 	require.NoError(t, err)
 	require.NoError(t, check.Validate(config))
-	require.Equal(t, []string{"ssh", "vscode"}, DeclaredServices(config.Services))
-	require.Equal(t, []string{"jupyter", "ssh", "vscode"}, configuredServices(config.Services))
+	require.Equal(t, []string{"ssh", "vscode"}, EnabledServiceNames(config.Services))
+	require.Equal(t, []string{"jupyter", "ssh", "vscode"}, configuredServiceNames(config.Services))
 	require.Len(t, config.Services, 3)
 	require.False(t, config.Services["jupyter"].Runs())
 
@@ -96,8 +97,8 @@ func TestServiceConfigEnabled(t *testing.T) {
 	require.JSONEq(t, `{"jupyter": {"enabled": false}, "vscode": {"enabled": true}, "ssh": {}}`,
 		string(raw))
 
-	require.Empty(t, DeclaredServices(nil))
-	require.Empty(t, DeclaredServices(map[string]ServiceConfig{
+	require.Empty(t, EnabledServiceNames(nil))
+	require.Empty(t, EnabledServiceNames(map[string]ServiceConfig{
 		"jupyter": {Enabled: ptrs.Ptr(false)},
 	}))
 }
@@ -119,6 +120,38 @@ func TestCommandConfigServicesRefusals(t *testing.T) {
 		err = check.Validate(config)
 		require.ErrorContains(t, err, `services: unknown service "emacs"`, value)
 	}
+}
+
+// The jupyter service's idle_type is one of the idle types, activity when unset; no other service
+// takes it. The config has no top-level notebook_idle_type.
+func TestServiceConfigIdleType(t *testing.T) {
+	require.Equal(t, JupyterIdleTypeActivity, ServiceConfig{}.JupyterIdleType())
+	for _, idleType := range JupyterIdleTypes {
+		config, err := decodeCommandConfig(`{"services": {"jupyter": {"idle_type": "` + idleType + `"}}}`)
+		require.NoError(t, err, idleType)
+		require.NoError(t, check.Validate(config), idleType)
+		require.Equal(t, idleType, config.Services[ServiceJupyter].JupyterIdleType())
+	}
+	config, err := decodeCommandConfig(`{"services": {"jupyter": {"enabled": false}}}`)
+	require.NoError(t, err)
+	require.Equal(t, JupyterIdleTypeActivity, config.Services[ServiceJupyter].JupyterIdleType())
+	raw, err := json.Marshal(config.Services)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"jupyter": {"enabled": false}}`, string(raw), "an unset idle_type is not stored")
+
+	for text, want := range map[string]string{
+		`{"services": {"jupyter": {"idle_type": "sometimes"}}}`: `services: jupyter: unknown idle_type "sometimes"`,
+		`{"services": {"jupyter": {"idle_type": "Activity"}}}`:  `services: jupyter: unknown idle_type "Activity"`,
+		`{"services": {"vscode": {"idle_type": "activity"}}}`:   "services: vscode: only jupyter takes idle_type",
+		`{"services": {"ssh": {"idle_type": "activity"}}}`:      "services: ssh: only jupyter takes idle_type",
+	} {
+		config, err := decodeCommandConfig(text)
+		require.NoError(t, err, text)
+		require.ErrorContains(t, check.Validate(config), want, text)
+	}
+
+	_, err = decodeCommandConfig(`{"notebook_idle_type": "activity"}`)
+	require.ErrorContains(t, err, `unknown field "notebook_idle_type"`)
 }
 
 // The default services of a shell: jupyter, and vscode when the master serves code-server.

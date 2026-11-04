@@ -63,15 +63,6 @@ func TestTaskServices(t *testing.T) {
 	ssh.Port = 3220
 	require.Equal(t, []tasks.InteractiveService{ssh}, taskServices(shell, model.TaskTypeShell))
 
-	// A notebook: JupyterLab at the task ID, over HTTPS.
-	var notebook tasks.GenericCommandSpec
-	notebook.Base.ExtraProxyPorts = expconf.ProxyPortsConfig{{
-		RawProxyPort: 2910, RawDefaultServiceID: ptrs.Ptr(true),
-	}}
-	require.Equal(t, []tasks.InteractiveService{{
-		Name: model.ServiceJupyter, Port: 2910, DefaultServiceID: true, TLS: true,
-	}}, taskServices(notebook, model.TaskTypeNotebook))
-
 	// Commands and TensorBoards have none.
 	require.Empty(t, taskServices(tasks.GenericCommandSpec{}, model.TaskTypeCommand))
 	require.Empty(t, taskServices(tasks.GenericCommandSpec{}, model.TaskTypeTensorboard))
@@ -170,15 +161,15 @@ func TestCommandServiceStatesAfterRestart(t *testing.T) {
 // A task without records takes snapshots of the service of its type; one without services takes
 // only the empty snapshot.
 func TestCommandServiceStatesWithoutRecords(t *testing.T) {
-	notebook := servicesCommand(tasks.GenericCommandSpec{}, model.TaskTypeNotebook)
-	require.NoError(t, notebook.setServiceStates(notebook.allocationID, 1,
-		snapshot(model.ServiceJupyter, taskv1.TaskService_STATE_READY)))
+	shell := servicesCommand(tasks.GenericCommandSpec{}, model.TaskTypeShell)
+	require.NoError(t, shell.setServiceStates(shell.allocationID, 1,
+		snapshot(model.ServiceSSH, taskv1.TaskService_STATE_READY)))
 	require.Equal(t, map[string]taskv1.TaskService_State{
-		model.ServiceJupyter: taskv1.TaskService_STATE_READY,
-	}, serviceStates(notebook.taskServicesWithState()))
-	err := notebook.setServiceStates(notebook.allocationID, 2, snapshot(
-		model.ServiceJupyter, taskv1.TaskService_STATE_READY,
-		model.ServiceSSH, taskv1.TaskService_STATE_READY))
+		model.ServiceSSH: taskv1.TaskService_STATE_READY,
+	}, serviceStates(shell.taskServicesWithState()))
+	err := shell.setServiceStates(shell.allocationID, 2, snapshot(
+		model.ServiceSSH, taskv1.TaskService_STATE_READY,
+		model.ServiceJupyter, taskv1.TaskService_STATE_READY))
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 
 	cmd := servicesCommand(tasks.GenericCommandSpec{}, model.TaskTypeCommand)

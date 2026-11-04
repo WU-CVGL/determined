@@ -210,7 +210,7 @@ describe('the Jobs page order', () => {
 
   describe.each(
     Object.entries(fixtureKeys).filter(([fixtureKey]) => !['stateGroup'].includes(fixtureKey)),
-  )('notebooks, shells, commands and TensorBoards by %s', (fixtureKey, key) => {
+  )('shells, commands and TensorBoards by %s', (fixtureKey, key) => {
     it.each([
       ['ascend', false],
       ['descend', true],

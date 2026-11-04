@@ -6,6 +6,8 @@ Port 2222
 Protocol 2
 # HostKeys for protocol version 2
 HostKey /run/determined/ssh/id_rsa
+# sshd runs as the task's user, who may not write the default /run/sshd.pid; nothing reads it.
+PidFile none
 
 AllowTcpForwarding yes
 PermitOpen any

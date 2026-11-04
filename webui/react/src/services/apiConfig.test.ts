@@ -65,7 +65,7 @@ describe('apiConfig', () => {
 
   describe('previewShell', () => {
     it('returns only the merged config, posted to the shell preview', async () => {
-      const config = { notebook_idle_type: 'activity', services: { jupyter: {} } };
+      const config = { idle_timeout: '30m', services: { jupyter: {} } };
       const spy = vi
         .spyOn(utils.detApi.Shells, 'previewShell')
         .mockResolvedValue({ config, warnings: [V1LaunchWarning.CURRENTSLOTSEXCEEDED] });

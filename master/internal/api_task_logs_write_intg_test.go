@@ -35,7 +35,7 @@ type logWriteTask struct {
 	allocationID model.AllocationID
 }
 
-// addCommandTaskForLogsTest persists a command, notebook, shell or TensorBoard the way
+// addCommandTaskForLogsTest persists a command, shell or TensorBoard the way
 // Command.registerJobAndTask and Command.persist do: a job that the owner owns, the task, its
 // allocation and its command state in a workspace.
 func addCommandTaskForLogsTest(
@@ -125,8 +125,6 @@ func TestTaskLogWritesNeedTaskControl(t *testing.T) {
 	taskList := []logWriteTask{
 		addCommandTaskForLogsTest(ctx, t, owner, model.TaskTypeCommand, model.JobTypeCommand,
 			workspaceID),
-		addCommandTaskForLogsTest(ctx, t, owner, model.TaskTypeNotebook, model.JobTypeNotebook,
-			workspaceID),
 		addCommandTaskForLogsTest(ctx, t, owner, model.TaskTypeShell, model.JobTypeShell,
 			workspaceID),
 		addCommandTaskForLogsTest(ctx, t, owner, model.TaskTypeTensorboard,
@@ -176,7 +174,7 @@ func TestTaskLogWritesNeedTaskControl(t *testing.T) {
 	}
 
 	// A task whose owner is unknown is refused, but for its own containers.
-	ownerless := mockNotebookWithWorkspaceID(ctx, t, workspaceID)
+	ownerless := mockShellWithWorkspaceID(ctx, t, workspaceID)
 	require.Equal(t, http.StatusForbidden, postTaskLogsAs(t, srv, adminToken,
 		jsonBody(t, shippedLogs(t, ownerless, "forged"))))
 	requireCode(t, codes.PermissionDenied, postTaskLogsGRPC(ctx, api, ownerless, "forged"))
@@ -257,41 +255,41 @@ func TestTaskLogWritesNTSCAuthZ(t *testing.T) {
 
 	const workspaceID = -120
 	ws := model.AccessScopeID(workspaceID)
-	nb := addCommandTaskForLogsTest(adminCtx, t, owner, model.TaskTypeNotebook,
-		model.JobTypeNotebook, workspaceID)
-	body := jsonBody(t, shippedLogs(t, nb.taskID, "line"))
+	shell := addCommandTaskForLogsTest(adminCtx, t, owner, model.TaskTypeShell,
+		model.JobTypeShell, workspaceID)
+	body := jsonBody(t, shippedLogs(t, shell.taskID, "line"))
 
 	// A user who cannot see the task is told that it does not exist.
 	authZNSC.On("CanGetNSC", mock.Anything, asCurUser, ws).
 		Return(authz2.PermissionDeniedError{}).Twice()
 	require.Equal(t, http.StatusNotFound, postTaskLogsAs(t, srv, token, body))
-	requireCode(t, codes.NotFound, postTaskLogsGRPC(ctx, api, nb.taskID, "line"))
+	requireCode(t, codes.NotFound, postTaskLogsGRPC(ctx, api, shell.taskID, "line"))
 
 	// A user who can see it but may not control it, without UPDATE_NSC under RBAC, is forbidden.
 	authZNSC.On("CanGetNSC", mock.Anything, asCurUser, ws).Return(nil).Twice()
 	authZNSC.On("CanControlGenericTask", mock.Anything, asCurUser, ws, ptrs.Ptr(owner.ID)).
 		Return(authz2.PermissionDeniedError{}).Twice()
 	require.Equal(t, http.StatusForbidden, postTaskLogsAs(t, srv, token, body))
-	requireCode(t, codes.PermissionDenied, postTaskLogsGRPC(ctx, api, nb.taskID, "line"))
-	require.Zero(t, taskLogRows(t, nb.taskID))
+	requireCode(t, codes.PermissionDenied, postTaskLogsGRPC(ctx, api, shell.taskID, "line"))
+	require.Zero(t, taskLogRows(t, shell.taskID))
 
 	// A user who may control it may write, whoever owns it.
 	authZNSC.On("CanGetNSC", mock.Anything, asCurUser, ws).Return(nil).Twice()
 	authZNSC.On("CanControlGenericTask", mock.Anything, asCurUser, ws, ptrs.Ptr(owner.ID)).
 		Return(nil).Twice()
 	require.Equal(t, http.StatusOK, postTaskLogsAs(t, srv, token, body))
-	require.NoError(t, postTaskLogsGRPC(ctx, api, nb.taskID, "line"))
-	require.Equal(t, 2, taskLogRows(t, nb.taskID))
+	require.NoError(t, postTaskLogsGRPC(ctx, api, shell.taskID, "line"))
+	require.Equal(t, 2, taskLogRows(t, shell.taskID))
 
 	// The task's own containers need only see it.
 	authZNSC.On("CanGetNSC", mock.Anything, asOwner, ws).Return(nil).Once()
-	ownSession := allocationSessionCtx(t, nb.allocationID, owner)
-	require.NoError(t, postTaskLogsGRPC(ownSession, api, nb.taskID, "shipped"))
-	require.Equal(t, 3, taskLogRows(t, nb.taskID))
+	ownSession := allocationSessionCtx(t, shell.allocationID, owner)
+	require.NoError(t, postTaskLogsGRPC(ownSession, api, shell.taskID, "shipped"))
+	require.Equal(t, 3, taskLogRows(t, shell.taskID))
 
 	// Reading the logs takes only the view check, as before.
 	authZNSC.On("CanGetNSC", mock.Anything, asCurUser, ws).Return(nil).Once()
-	require.Equal(t, 3, readTaskLogs(ctx, t, api, nb.taskID))
+	require.Equal(t, 3, readTaskLogs(ctx, t, api, shell.taskID))
 
 	// A checkpoint GC task asks no NSC permission: its owner or an admin may write, in every authz
 	// mode, and no one else.

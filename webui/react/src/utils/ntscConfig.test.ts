@@ -1,7 +1,6 @@
 import { cloneDeep } from 'lodash';
 
 import {
-  configForShellLaunch,
   configFromForm,
   formFieldsFromConfig,
   minimalDiff,
@@ -26,7 +25,6 @@ const mergedShellConfig = {
     registry_auth: { password: 'hunter2', username: 'me' },
   },
   idle_timeout: null,
-  notebook_idle_type: 'kernels_or_terminals',
   resources: { priority: 42, resource_pool: 'gpu', slots: 2 },
   work_dir: null,
 };
@@ -74,35 +72,12 @@ describe('ntscConfig', () => {
 
     it('keeps a description the user chose', () => {
       expect(sanitizeConfig({ description: 'my shell' }).description).toBe('my shell');
-      expect(sanitizeConfig({ description: 'JupyterLab (a-b-c)' })).not.toHaveProperty(
-        'description',
-      );
     });
 
     it('does not change its input', () => {
       const input = cloneDeep(mergedShellConfig);
       sanitizeConfig(input);
       expect(input).toEqual(mergedShellConfig);
-    });
-  });
-
-  describe('configForShellLaunch', () => {
-    it('drops the name the master generated for a notebook', () => {
-      const notebook = { description: 'JupyterLab (kindly-quick-heron)', idle_timeout: '30m' };
-      expect(configForShellLaunch(notebook)).toEqual({ idle_timeout: '30m' });
-      // The input is not changed.
-      expect(notebook.description).toBe('JupyterLab (kindly-quick-heron)');
-    });
-
-    it('keeps a shell’s name, any name given by the user and everything else', () => {
-      const shell = { description: 'Shell (lively-calm-fox)' };
-      expect(configForShellLaunch(shell)).toBe(shell);
-      const settings = { idle_timeout: '8h', notebook_idle_type: 'activity' };
-      expect(configForShellLaunch(settings)).toBe(settings);
-      expect(configForShellLaunch({ description: 'debug box' })).toEqual({
-        description: 'debug box',
-      });
-      expect(configForShellLaunch({})).toEqual({});
     });
   });
 
@@ -129,29 +104,32 @@ describe('ntscConfig', () => {
       });
     });
 
-    it('drops a service turned off that the defaults do not run', () => {
+    it('keeps a service turned off, also where the defaults do not run it', () => {
       const config = { services: { jupyter: {}, vscode: { enabled: false } } };
-      expect(templateFromConfig(config, { services: { jupyter: {} } })).toEqual({});
-      expect(
-        templateFromConfig(
-          { services: { jupyter: { enabled: false }, vscode: { enabled: false } } },
-          { services: { jupyter: {} } },
-        ),
-      ).toEqual({ services: { jupyter: { enabled: false } } });
-      // Where the defaults run it, turning it off is a setting.
+      // The cluster may run it later: the template keeps it off.
+      expect(templateFromConfig(config, { services: { jupyter: {} } })).toEqual({
+        services: { vscode: { enabled: false } },
+      });
       expect(templateFromConfig(config, { services: { jupyter: {}, vscode: {} } })).toEqual({
         services: { vscode: { enabled: false } },
       });
       expect(templateFromConfig(config, { services: { jupyter: {}, vscode: null } })).toEqual({
         services: { vscode: { enabled: false } },
       });
-      // A service with other options is kept.
+      expect(templateFromConfig(config, {})).toEqual({
+        services: { jupyter: {}, vscode: { enabled: false } },
+      });
+      // A service with other options keeps them.
       expect(
         templateFromConfig(
           { services: { vscode: { enabled: false, opt: 1 } } },
           { services: { jupyter: {} } },
         ),
       ).toEqual({ services: { vscode: { enabled: false, opt: 1 } } });
+      // A service that runs as the defaults run it is not a setting.
+      expect(
+        templateFromConfig({ services: { jupyter: {} } }, { services: { jupyter: {} } }),
+      ).toEqual({});
     });
 
     it('keeps a null work_dir that clears the default one', () => {

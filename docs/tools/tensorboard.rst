@@ -79,7 +79,7 @@ Example job configuration file:
 The tensorboard_args field allows you to provide optional TensorBoard arguments. In the example
 above, we set the maximum number of image to display to 100, overriding TensorBoard's default value.
 
-For detailed configuration settings, refer to the :ref:`command-notebook-configuration`.
+For detailed configuration settings, refer to the :ref:`job-configuration-reference`.
 
 To launch TensorBoard with an experiment configuration file, use ``det tensorboard start
 <experiment-id> --config-file=my_config.yaml``.

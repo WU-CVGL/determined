@@ -76,13 +76,17 @@ service takes from the first of:
 -  ``code-server`` on the image's ``PATH``, when it is that release. The service skips another
    release on the ``PATH`` and says so in the task log.
 
--  The cache in the home directory, ``~/.cache/determined/code-server/<version>/linux-<arch>``, or
-   in the directory that ``DET_CODE_SERVER_CACHE`` names. The cache holds each release for each
-   architecture, next to the lock file ``<version>/linux-<arch>.lock`` of its install.
+-  The cache: the directory that ``DET_CODE_SERVER_CACHE_DIR`` names in the shell's environment;
+   else ``/var/cache/determined/code-server`` when it exists in the container (see
+   :ref:`vscode-keep`); else ``~/.cache/determined/code-server``. A cache holds each release for
+   each architecture in ``<version>/linux-<arch>``.
 
 -  The master: the service downloads the release for the container's architecture, checks its
-   SHA-256, and installs it into the cache. Shells that share a home directory install a release
-   once, also when they start at the same time.
+   SHA-256, and installs it into the cache. Shells that share a cache install a release once, also
+   when they start at the same time, except for shells of different users on NFSv4, which may each
+   download it; one copy is kept. When the release is not in ``/var/cache/determined/code-server``
+   and cannot be installed there, the service installs it into ``~/.cache/determined/code-server``.
+   A line of the task log that starts with ``vscode service:`` names the directory.
 
 An administrator can override this release for every task: mount a directory that holds an extracted
 release into the containers read-only, for example with ``bind_mounts`` in
@@ -93,23 +97,48 @@ above without checking its release, which must be 4.14.1 or later.
 The service supports glibc 2.28 or later, the baseline of this integration; code-server's own
 minimum differs by release.
 
+.. _vscode-keep:
+
 Keeping Downloads, Extensions and Settings
 ==========================================
 
-The download is in ``~/.cache``, and the editor keeps its extensions and settings in
-``~/.local/share/code-server``. Unless the home directory is on storage that outlives the shell,
-they go away with it. Bind-mount the whole home directory, or at least these two directories, from
-shared storage, so that the download, the extensions and the settings persist across shells and
-agents. For example, with the paths of your home directory on the shared storage and in the
-container:
+A release of code-server takes about 700 MB, and a shell downloads it again unless its cache
+outlives the shell. To keep one copy for all users, mount a directory of shared storage at
+``/var/cache/determined/code-server`` in every task container, with ``bind_mounts`` in the
+:ref:`task_container_defaults <master-task-container-defaults>` of the master configuration:
 
 .. code:: yaml
 
+   task_container_defaults:
+     bind_mounts:
+       - host_path: /shared/cache/code-server
+         container_path: /var/cache/determined/code-server
+
+The first shell that needs a release installs it there and the others use it, whichever user they
+run as, so the directory must be writable by those users, for example with mode ``1777``. Each user
+then runs code-server as installed by another user. Where users do not trust each other, make the
+directory writable by an administrator only, who installs each release from a shell of their own;
+the other shells use it, or their home cache while the release is missing. A user can name a cache
+of their own, for example on shared storage that their shells mount, with
+``DET_CODE_SERVER_CACHE_DIR`` in ``environment.environment_variables``.
+
+The editor keeps its extensions and settings in ``~/.local/share/code-server``, which goes away with
+the shell unless it is on shared storage. ``~`` is ``/root`` in a shell that runs as root. In a
+shell that runs as a linked agent user (see :ref:`run-as-user`), ``~`` is the task's working
+directory, ``/run/determined/workdir`` unless ``work_dir`` names another. For such a user, set
+``work_dir`` to a directory of shared storage that the shell mounts:
+
+.. code:: yaml
+
+   work_dir: /shared/home/alice
    bind_mounts:
-     - host_path: /shared/home/alice/.cache
-       container_path: /home/alice/.cache
-     - host_path: /shared/home/alice/.local/share/code-server
-       container_path: /home/alice/.local/share/code-server
+     - host_path: /shared/home/alice
+       container_path: /shared/home/alice
+
+Or mount a directory of shared storage at ``<work_dir>/.local``, here
+``/run/determined/workdir/.local``. The host directory must exist and belong to the linked agent
+user. A mount at a deeper path, such as ``.local/share/code-server``, leaves the directories above
+it owned by root, so that the user cannot create others there, such as ``~/.local/bin``.
 
 When the Service Is UNAVAILABLE
 ===============================

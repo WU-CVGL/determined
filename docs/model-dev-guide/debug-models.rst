@@ -82,8 +82,8 @@ Determined cluster instead of locally.
    -  If you are unable to start the container and receive a message about the context directory
       exceeding the maximum allowed size, it is because the ``--context`` directory cannot be larger
       than 95MB. If you need larger model definition files, consider setting up a bind mount using
-      the ``bind_mounts`` field of the :ref:`task configuration <command-notebook-configuration>`.
-      The :ref:`prepare-data` document lists additional strategies for accessing files inside a
+      the ``bind_mounts`` field of the :ref:`task configuration <job-configuration-reference>`. The
+      :ref:`prepare-data` document lists additional strategies for accessing files inside a
       containerized environment.
 
    -  You might be referencing files that exist locally but are outside of the ``--context``
@@ -95,7 +95,7 @@ Determined cluster instead of locally.
       :ref:`custom-docker-images` for available options.
 
    -  If you need environment variables to be set for your model to work, see
-      :ref:`command-notebook-configuration`.
+      :ref:`job-configuration-reference`.
 
 .. _step3:
 

@@ -109,13 +109,6 @@ const openLaunchAgainMenu = async (
   return onLaunchAgain;
 };
 
-/** An ended notebook record: the master keeps its label, logs and resources, and nothing else. */
-const notebook: Partial<CommandTask> = {
-  id: 'nb-1',
-  state: CommandState.Terminated,
-  type: CommandType.JupyterLab,
-};
-
 const openContextMenu = (ownerId: number, overrides: Partial<CommandTask> = {}) => {
   render(
     <MemoryRouter>
@@ -154,33 +147,6 @@ describe('TaskActionDropdown', () => {
     await openMenu(101);
     expect(screen.getByText('Kill')).toBeInTheDocument();
   });
-
-  it.each([
-    ['an ended', 'nothing else', CommandState.Terminated, []],
-    ['a running', 'Open JupyterLab', CommandState.Running, ['Open JupyterLab']],
-  ])(
-    'on %s notebook record offers View Logs, View Resources, Copy Task ID and %s',
-    async (_, __, state, fromServices) => {
-      resources.enabled = true;
-      // A notebook record's one service is JupyterLab, and the master lets its owner connect to
-      // every service alike. The entries follow the services, as the task page's tabs do, so a
-      // notebook that still runs (the master ends restored ones at start) offers Open JupyterLab.
-      services.list = [{ mayConnect: true, name: 'jupyter' }];
-      const onLaunchAgain = await openLaunchAgainMenu({ ...notebook, state }, owner);
-      await screen.findByText('View Logs');
-      if (state === CommandState.Running) {
-        await screen.findByText('Open JupyterLab');
-        expect(getTaskServices).toHaveBeenCalledTimes(1);
-      }
-      expect(menuLabels()).toEqual([
-        'View Logs',
-        'View Resources',
-        'Copy Task ID',
-        ...fromServices,
-      ]);
-      expect(onLaunchAgain).not.toHaveBeenCalled();
-    },
-  );
 
   describe('Connect', () => {
     const shellLabel = 'Connect via CLI';

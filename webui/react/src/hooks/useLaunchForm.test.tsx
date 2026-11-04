@@ -103,7 +103,6 @@ const task = (type: CommandType, id: string): CommandTask => ({
   workspaceId: WORKSPACE.id,
 });
 
-const NOTEBOOK = task(CommandType.JupyterLab, 'nb-old');
 const SHELL = task(CommandType.Shell, 'shell-old');
 const COMMAND = task(CommandType.Command, 'cmd-old');
 
@@ -133,7 +132,7 @@ const Entries: React.FC = () => {
     <SettingsProvider>
       <>
         <Button onClick={() => openLaunchForm()}>Open Shell</Button>
-        {[NOTEBOOK, SHELL, COMMAND].map((item) => (
+        {[SHELL, COMMAND].map((item) => (
           <Button key={item.id} onClick={() => launchAgain(item)}>
             Again {item.id}
           </Button>
@@ -263,7 +262,7 @@ describe('useLaunchForm', () => {
       expect(mocks.onShellLaunched).toHaveBeenCalledTimes(1);
     });
 
-    it.each(['Again nb-old', 'Again cmd-old'])('"%s" opens nothing', async (entry) => {
+    it.each(['Again cmd-old'])('"%s" opens nothing', async (entry) => {
       const user = setup();
       await user.click(screen.getByRole('button', { name: entry }));
       expect(screen.queryByText('Start from')).not.toBeInTheDocument();

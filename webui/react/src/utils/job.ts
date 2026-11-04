@@ -19,8 +19,6 @@ export const jobTypeLabel = (jobType: JobType): string => {
   switch (jobType) {
     case JobType.GENERIC:
       return 'Generic Task';
-    case JobType.NOTEBOOK:
-      return 'JupyterLab';
     case JobType.TENSORBOARD:
       return 'TensorBoard';
     default:
@@ -39,7 +37,7 @@ export const genericJobLabel = (name: string, taskId: string): string => {
 };
 
 /*
- * The job name of a notebook, shell, command or TensorBoard with its short task ID, as the
+ * The job name of a shell, command or TensorBoard with its short task ID, as the
  * Tasks page shows it. Tasks without a name keep the type and the short ID.
  */
 export const taskJobLabel = (jobType: JobType, name: string, taskId: string): string => {
@@ -51,8 +49,6 @@ export const taskJobLabel = (jobType: JobType, name: string, taskId: string): st
 // translate JobType to CommandType
 export const jobTypeToCommandType = (jobType: JobType): CommandType | undefined => {
   switch (jobType) {
-    case JobType.NOTEBOOK:
-      return CommandType.JupyterLab;
     case JobType.SHELL:
       return CommandType.Shell;
     case JobType.TENSORBOARD:

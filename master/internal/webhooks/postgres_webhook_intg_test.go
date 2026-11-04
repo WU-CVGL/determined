@@ -363,7 +363,7 @@ func testGenerateTaskLogPayloadTest(
 			task = &model.Task{
 				TaskID:    model.NewTaskID(),
 				JobID:     nil,
-				TaskType:  model.TaskTypeNotebook,
+				TaskType:  model.TaskTypeShell,
 				StartTime: time.Now().UTC().Truncate(time.Millisecond),
 			}
 			require.NoError(t, db.AddTask(ctx, task))
@@ -418,7 +418,7 @@ func testGenerateTaskLogPayloadTest(
 		} else {
 			msg = fmt.Sprintf(
 				"Task ID `%s`, task type `%s`, running on node `nodeA`, reported a log\n",
-				task.TaskID, model.TaskTypeNotebook) +
+				task.TaskID, model.TaskTypeShell) +
 				"```trigA```\n" +
 				"This log matched the regex\n" +
 				"```regexa```\n"

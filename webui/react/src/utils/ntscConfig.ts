@@ -34,12 +34,8 @@ export interface LaunchFormFields {
   slots?: number;
 }
 
-/**
- * The master names a shell "Shell (<pet name>)" when no description is given. The configs of
- * notebooks, in this browser's history and in templates, carry "JupyterLab (<pet name>)".
- */
-const AUTO_DESCRIPTION = /^(JupyterLab|Shell) \([a-z]+(-[a-z]+)*\)$/;
-const AUTO_JUPYTERLAB_DESCRIPTION = /^JupyterLab \([a-z]+(-[a-z]+)*\)$/;
+/** The master names a shell "Shell (<pet name>)" when no description is given. */
+const AUTO_DESCRIPTION = /^Shell \([a-z]+(-[a-z]+)*\)$/;
 
 /** Environment variable names that probably hold a credential. */
 const SECRET_ENV_NAME = /TOKEN|SECRET|PASSW|KEY|AUTH|CRED/i;
@@ -117,22 +113,6 @@ export const sanitizeConfig = (config: RawJson): RawJson => {
   return out;
 };
 
-/**
- * Prepares a full config for a shell launch: a notebook's generated "JupyterLab (<pet name>)"
- * description is removed, so that the master names the shell. Everything else is sent as it is.
- */
-export const configForShellLaunch = (config: RawJson): RawJson => {
-  if (
-    typeof config.description !== 'string' ||
-    !AUTO_JUPYTERLAB_DESCRIPTION.test(config.description)
-  ) {
-    return config;
-  }
-  const out = cloneDeep(config);
-  delete out.description;
-  return out;
-};
-
 const dropNulls = (value: RawJson): RawJson => {
   const out: RawJson = {};
   Object.entries(value).forEach(([key, item]) => {
@@ -182,6 +162,10 @@ export const minimalDiff = (config: RawJson, defaults: RawJson): RawJson => {
  * is one of those settings. The defaults are required: without them there is
  * no telling an unset setting from a cleared one.
  *
+ * A service's entry with `enabled: false` is kept even where the defaults do
+ * not run the service, so that the template still turns it off if the cluster
+ * runs it later: a missing entry follows the defaults.
+ *
  * The resource pool and slots are always kept: the master ignores template
  * resources for shells, and the launch form copies them into its fields when
  * the template is picked.
@@ -192,17 +176,6 @@ export const templateFromConfig = (config: RawJson, defaults: RawJson): RawJson 
   const cleanDefaults = sanitizeConfig(defaults);
   delete cleanDefaults.description;
   const out = minimalDiff(clean, cleanDefaults);
-  // A service turned off that the defaults do not run either is not a setting.
-  const services = asObject(out.services);
-  if (services) {
-    const defaultServices = asObject(cleanDefaults.services);
-    Object.entries(services).forEach(([name, entry]) => {
-      if (defaultServices?.[name] === undefined && isEqual(entry, { enabled: false })) {
-        delete services[name];
-      }
-    });
-    if (Object.keys(services).length === 0) delete out.services;
-  }
   const resources = asObject(clean.resources);
   if (resources) {
     const kept: RawJson = {};
