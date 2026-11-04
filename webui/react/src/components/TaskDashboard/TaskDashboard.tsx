@@ -116,7 +116,6 @@ const runKindIcon: Record<RunKind, IconName> = {
   [RunKind.Command]: 'command',
   [RunKind.Experiment]: 'experiment',
   [RunKind.GenericTask]: 'tasks',
-  [RunKind.JupyterLab]: 'jupyter-lab',
   [RunKind.Shell]: 'shell',
   [RunKind.TensorBoard]: 'tensor-board',
 };
@@ -125,7 +124,6 @@ const runKindSingularLabel: Record<RunKind, string> = {
   [RunKind.Command]: 'command',
   [RunKind.Experiment]: 'experiment',
   [RunKind.GenericTask]: 'generic task',
-  [RunKind.JupyterLab]: 'JupyterLab',
   [RunKind.Shell]: 'shell',
   [RunKind.TensorBoard]: 'TensorBoard',
 };
@@ -275,8 +273,8 @@ const checklistFilter = ({
 });
 
 /**
- * One table of the runs of every kind: experiments, generic tasks, notebooks (JupyterLab), shells,
- * commands and TensorBoards, newest first by default.
+ * One table of the runs of every kind: experiments, generic tasks, shells, commands and
+ * TensorBoards, newest first by default.
  * - All workspaces (no props), a workspace, or a project (experiments and generic tasks only).
  * - The column headers sort and filter: kind, state, owner, slots and, on the global page,
  *   workspaces; the toolbar searches. Each dashboard stores them on its own, and a URL with any of

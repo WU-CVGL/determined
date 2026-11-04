@@ -57,8 +57,6 @@ export const commandTypeOfTask = (taskType?: V1TaskType): Type.CommandType | und
   switch (taskType) {
     case V1TaskType.COMMAND:
       return Type.CommandType.Command;
-    case V1TaskType.NOTEBOOK:
-      return Type.CommandType.JupyterLab;
     case V1TaskType.SHELL:
       return Type.CommandType.Shell;
     case V1TaskType.TENSORBOARD:

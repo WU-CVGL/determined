@@ -267,12 +267,12 @@ describe('urlView', () => {
 
   it('keeps old /tasks links: kinds, owners, workspaces and the Type sort, not old states', () => {
     expect(
-      urlView('?type=jupyter-lab&user=5&workspace=2&sortKey=type&sortDesc=false&state=RUNNING'),
+      urlView('?type=shell&user=5&workspace=2&sortKey=type&sortDesc=false&state=RUNNING'),
     ).toMatchObject({
       sortDesc: false,
       sortKey: 'type',
       state: undefined,
-      type: ['jupyter-lab'],
+      type: ['shell'],
       user: [5],
       workspace: [2],
     });

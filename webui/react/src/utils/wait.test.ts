@@ -7,7 +7,7 @@ import { generateUUID } from 'utils/string';
 import * as utils from './wait';
 
 const UUID = {
-  [CommandType.JupyterLab]: generateUUID(),
+  [CommandType.Command]: generateUUID(),
   [CommandType.Shell]: generateUUID(),
   [CommandType.TensorBoard]: generateUUID(),
 };
@@ -17,16 +17,16 @@ const SHARED_TASK: Partial<CommandTask> = {
   url: undefined,
 };
 const COMMAND_TASK: Record<RecordKey, CommandTask> = {
-  [CommandType.JupyterLab]: {
+  [CommandType.Command]: {
     ...SHARED_TASK,
     displayName: 'lee sung hoon',
-    id: UUID[CommandType.JupyterLab],
-    name: 'JupyterLab (directly-sharp-penguin)',
+    id: UUID[CommandType.Command],
+    name: 'Command (directly-sharp-penguin)',
     resourcePool: 'compute-pool',
-    serviceAddress: `/proxy/${UUID[CommandType.JupyterLab]}`,
+    serviceAddress: `/proxy/${UUID[CommandType.Command]}`,
     startTime: '2022-08-01T00:12:24Z',
     state: CommandState.Queued,
-    type: CommandType.JupyterLab,
+    type: CommandType.Command,
     userId: 34,
     workspaceId: 0,
   },
@@ -73,7 +73,7 @@ describe('Wait Page Utilities', () => {
       vi.mocked(global.open).mockRestore();
     });
 
-    it.each([CommandType.JupyterLab, CommandType.Shell, CommandType.TensorBoard])(
+    it.each([CommandType.Command, CommandType.Shell, CommandType.TensorBoard])(
       'opens the task page of a %s task in a tab named after the task',
       (type) => {
         const task = COMMAND_TASK[type];
@@ -124,7 +124,7 @@ describe('Wait Page Utilities', () => {
       );
     });
 
-    it.each([CommandType.JupyterLab, CommandType.Shell])(
+    it.each([CommandType.Command, CommandType.Shell])(
       'should throw error for a %s task, which is not a TensorBoard',
       (type) => {
         expect(() => {

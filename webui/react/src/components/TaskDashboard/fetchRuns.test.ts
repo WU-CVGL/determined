@@ -245,16 +245,6 @@ describe('fetchRunPage', () => {
     expect(page.total).toBe(2);
   });
 
-  it('fetches nothing for the JupyterLab kind of ended notebook records', async () => {
-    const page = await fetchRunPage(globalJobs({ kinds: [RunKind.JupyterLab] }));
-
-    [getCommands, getShells, getTensorBoards, getGenericTasks, getExperiments].forEach((fn) =>
-      expect(fn).not.toHaveBeenCalled(),
-    );
-    expect(page.rows).toEqual([]);
-    expect(page.total).toBe(0);
-  });
-
   describe('slots', () => {
     it('filters experiments and generic tasks on the master by counts and Multi-node', async () => {
       await fetchRunPage(globalJobs({ slots: slotsQuery(['0', '1', 'multi:8']) }));

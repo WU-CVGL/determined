@@ -143,7 +143,6 @@ describe('commandTypeOfTask', () => {
     expect(commandTypeOfTask(V1TaskType.SHELL)).toBe(CommandType.Shell);
     expect(commandTypeOfTask(V1TaskType.COMMAND)).toBe(CommandType.Command);
     expect(commandTypeOfTask(V1TaskType.TENSORBOARD)).toBe(CommandType.TensorBoard);
-    expect(commandTypeOfTask(V1TaskType.NOTEBOOK)).toBe(CommandType.JupyterLab);
     expect(commandTypeOfTask(V1TaskType.GENERIC)).toBeUndefined();
     expect(commandTypeOfTask(V1TaskType.TRIAL)).toBeUndefined();
     expect(commandTypeOfTask(undefined)).toBeUndefined();

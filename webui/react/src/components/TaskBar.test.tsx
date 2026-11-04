@@ -74,7 +74,6 @@ describe('TaskBar', () => {
   });
 
   it.each([
-    ['a notebook record, which has no kill API', { type: CommandType.JupyterLab }],
     ['a task of an unknown type', { type: undefined }],
     ['a task whose owner is unknown', { owner: undefined }],
     ['a task the user may not modify', { owner: { userId: 8, workspaceId: 1 } }],

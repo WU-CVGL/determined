@@ -6,7 +6,7 @@ import userStore from 'stores/users';
 import { CommandResponse, RawJson } from 'types';
 import { isDetError } from 'utils/error';
 import { recordLaunch } from 'utils/launchHistory';
-import { configForShellLaunch, NtscLaunchOptions, simpleLaunchConfig } from 'utils/ntscConfig';
+import { NtscLaunchOptions, simpleLaunchConfig } from 'utils/ntscConfig';
 import { getResponseStatus } from 'utils/service';
 
 export interface ShellLaunchOptions extends NtscLaunchOptions {
@@ -16,7 +16,7 @@ export interface ShellLaunchOptions extends NtscLaunchOptions {
 
 /** The request a launch and a preview send for these options: the same for both. */
 export const shellRequest = (options: ShellLaunchOptions): LaunchShellParams => ({
-  config: options.config ? configForShellLaunch(options.config) : simpleLaunchConfig(options),
+  config: options.config ?? simpleLaunchConfig(options),
   templateName: options.config || options.template === '' ? undefined : options.template,
   workspaceId: options.workspaceId,
 });

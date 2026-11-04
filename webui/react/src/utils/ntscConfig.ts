@@ -34,12 +34,8 @@ export interface LaunchFormFields {
   slots?: number;
 }
 
-/**
- * The master names a shell "Shell (<pet name>)" when no description is given. The configs of
- * notebooks, in this browser's history and in templates, carry "JupyterLab (<pet name>)".
- */
-const AUTO_DESCRIPTION = /^(JupyterLab|Shell) \([a-z]+(-[a-z]+)*\)$/;
-const AUTO_JUPYTERLAB_DESCRIPTION = /^JupyterLab \([a-z]+(-[a-z]+)*\)$/;
+/** The master names a shell "Shell (<pet name>)" when no description is given. */
+const AUTO_DESCRIPTION = /^Shell \([a-z]+(-[a-z]+)*\)$/;
 
 /** Environment variable names that probably hold a credential. */
 const SECRET_ENV_NAME = /TOKEN|SECRET|PASSW|KEY|AUTH|CRED/i;
@@ -114,22 +110,6 @@ export const sanitizeConfig = (config: RawJson): RawJson => {
   if (environment) delete environment.registry_auth;
   const resources = asObject(out.resources);
   if (resources) delete resources.priority;
-  return out;
-};
-
-/**
- * Prepares a full config for a shell launch: a notebook's generated "JupyterLab (<pet name>)"
- * description is removed, so that the master names the shell. Everything else is sent as it is.
- */
-export const configForShellLaunch = (config: RawJson): RawJson => {
-  if (
-    typeof config.description !== 'string' ||
-    !AUTO_JUPYTERLAB_DESCRIPTION.test(config.description)
-  ) {
-    return config;
-  }
-  const out = cloneDeep(config);
-  delete out.description;
   return out;
 };
 

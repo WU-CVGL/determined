@@ -95,7 +95,7 @@ interface Props {
 const ALL_JOBS = 2 ** 31 - 1;
 
 /**
- * The task of a shell, JupyterLab, command or TensorBoard job, as the task action menu takes it:
+ * The task of a shell, command or TensorBoard job, as the task action menu takes it:
  * the job has the task's ID, name, owner, workspace and pool, and the task's record has its state,
  * the state of its latest allocation (the master lists the open allocation first).
  */
@@ -117,7 +117,7 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState, onHighlight 
   const users = useMemo(() => Loadable.getOrElse([], loadableUsers), [loadableUsers]);
   const [managingJob, setManagingJob] = useState<Job>();
   const [jobs, setJobs] = useState<Job[]>([]);
-  // The shells, JupyterLabs, commands and TensorBoards among the jobs on the page, by task ID.
+  // The shells, commands and TensorBoards among the jobs on the page, by task ID.
   const [commandTasks, setCommandTasks] = useState<Record<string, CommandTask>>({});
   // The task IDs on the page, and those being looked up: one lookup per task at a time.
   const pageTaskIds = useRef<Set<string>>(new Set());
@@ -170,7 +170,7 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState, onHighlight 
   }, []);
 
   /**
-   * The task action menu of a shell, JupyterLab, command or TensorBoard needs the task's state,
+   * The task action menu of a shell, command or TensorBoard needs the task's state,
    * which its job does not have. Each such job on the page is looked up by its task ID on every
    * poll (unless its last lookup is still running), on its own: a failed lookup leaves the other
    * rows alone, and the jobs table does not wait for the lookups. A job whose task has not been
@@ -479,7 +479,7 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState, onHighlight 
               render: createOmitableRenderer<Job, FullJob>(
                 'entityId',
                 (_, record) => {
-                  // Shells, JupyterLabs, commands and TensorBoards get the Tasks page's menu.
+                  // Shells, commands and TensorBoards get the Tasks page's menu.
                   const task = jobTypeToCommandType(record.type)
                     ? commandTasks[record.entityId]
                     : undefined;

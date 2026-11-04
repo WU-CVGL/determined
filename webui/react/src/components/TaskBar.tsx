@@ -22,7 +22,7 @@ interface Props {
   resourcePool: string;
   /** The task's state: only a task that has not ended can be killed. */
   state?: CommandState;
-  /** The task's type, for the kill API; a notebook, the label of ended records, has none. */
+  /** The task's type, for the kill API. */
   type?: CommandType;
 }
 
@@ -45,7 +45,6 @@ export const TaskBar: React.FC<Props> = ({
 
   const canKill =
     !!type &&
-    type !== CommandType.JupyterLab &&
     !!owner &&
     !!state &&
     isTaskKillable(

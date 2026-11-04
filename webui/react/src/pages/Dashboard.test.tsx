@@ -354,8 +354,6 @@ describe('Dashboard', () => {
 
       const shell = await screen.findByRole('button', { name: 'Launch Interactive Task' });
       expect(shell).toBeDisabled();
-      expect(screen.queryByRole('button', { name: 'Launch JupyterLab' })).not.toBeInTheDocument();
-      expect(screen.queryByTestId('jupyter-lab-button')).not.toBeInTheDocument();
     });
 
     it('"Launch Interactive Task" opens the shell launch form, with permission to launch', async () => {

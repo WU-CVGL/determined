@@ -13,8 +13,7 @@
  * pod_spec; see sensitiveEnvNames), plus the workspace id, the save time and
  * the names of the removed variables. Nothing else, and
  * never a shell's SSH key. At most LAUNCH_HISTORY_LIMIT entries per user are
- * kept. The notebooks' list, under `.../jupyter-lab`, is left as it is and not
- * read.
+ * kept.
  *
  * Every storage access is wrapped in try/catch; failures read as an empty list
  * and writes are dropped.

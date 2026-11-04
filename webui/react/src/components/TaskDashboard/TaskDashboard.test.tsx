@@ -46,7 +46,6 @@ import handleError from 'utils/error';
 import { isDangerMenuItem, isDisabledMenuItem, menuLabels, openMenuItem } from 'utils/tests/menu';
 
 import { fetchRunPage } from './fetchRuns';
-import { RunKind } from './runRows';
 import TaskDashboard from './TaskDashboard';
 import { MIN_SORT_FILTER_WIDTHS } from './TaskDashboard.settings';
 
@@ -671,12 +670,12 @@ describe('TaskDashboard', () => {
     await waitFor(() => expect(screen.queryByText('eval-sweep')).not.toBeInTheDocument());
   });
 
-  it('decodes ?type=jupyter-lab, the kind of ended notebook records, as no kind filter', async () => {
-    setup({ tasksOnly: true }, '/tasks?type=jupyter-lab');
+  it('decodes an unknown ?type as no kind filter', async () => {
+    setup({ tasksOnly: true }, '/tasks?type=no-such-kind');
 
     expect(await screen.findByText('gpu-shell', {}, AFTER_LOAD)).toBeInTheDocument();
     expect(screen.getByText('eval-sweep')).toBeInTheDocument();
-    expect(vi.mocked(fetchRunPage).mock.lastCall?.[0].kinds).not.toContain(RunKind.JupyterLab);
+    expect(vi.mocked(fetchRunPage).mock.lastCall?.[0].kinds).not.toContain('no-such-kind');
     expect(screen.queryByText('Clear Filters', { exact: false })).not.toBeInTheDocument();
     expect(ticked(await openFilter('Filter by kind'))).toEqual([]);
   });

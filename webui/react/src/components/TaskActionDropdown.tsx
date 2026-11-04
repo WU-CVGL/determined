@@ -127,9 +127,7 @@ const TaskActionDropdown: React.FC<Props> = ({
       items.push({ key: Action.LaunchAgain, label: 'Launch Again' });
     }
     if (onManageJob) items.push({ key: Action.ManageJob, label: 'Manage Job' });
-    // The master has no API to kill a notebook, the label of ended records.
     if (
-      task.type !== CommandType.JupyterLab &&
       isTaskKillable(
         task,
         canModifyWorkspaceNSC({ userId: task.userId, workspace: { id: task.workspaceId } }),

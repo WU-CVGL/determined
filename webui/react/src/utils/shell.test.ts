@@ -41,7 +41,9 @@ describe('shell', () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.mocked(apiLaunchShell).mockReset().mockResolvedValue(launched);
-    vi.mocked(apiPreviewShell).mockReset().mockResolvedValue({ notebook_idle_type: 'activity' });
+    vi.mocked(apiPreviewShell)
+      .mockReset()
+      .mockResolvedValue({ services: { jupyter: {} } });
     userStore.updateCurrentUser({ id: 1, isActive: true, isAdmin: false, username: 'me' });
   });
 
@@ -70,13 +72,10 @@ describe('shell', () => {
       expect(shellRequest({ template: 'tpl' }).config).not.toHaveProperty('services');
     });
 
-    it('sends a full config as it is, without a template or a notebook’s generated name', () => {
-      const config = {
-        description: 'JupyterLab (kindly-quick-heron)',
-        services: { vscode: {} },
-      };
+    it('sends a full config as it is, without a template', () => {
+      const config = { description: 'debug box', services: { vscode: {} } };
       expect(shellRequest({ config, services: { jupyter: true }, template: 'tpl' })).toEqual({
-        config: { services: { vscode: {} } },
+        config: { description: 'debug box', services: { vscode: {} } },
         templateName: undefined,
         workspaceId: undefined,
       });
@@ -90,7 +89,7 @@ describe('shell', () => {
       slots: 1,
       workspaceId: 3,
     };
-    expect(await previewShell(options)).toEqual({ notebook_idle_type: 'activity' });
+    expect(await previewShell(options)).toEqual({ services: { jupyter: {} } });
     await launchShell(options);
     expect(vi.mocked(apiPreviewShell).mock.calls[0][0]).toEqual(shellRequest(options));
     expect(vi.mocked(apiLaunchShell).mock.calls[0][0]).toEqual(shellRequest(options));
