@@ -152,7 +152,8 @@ const CodeEditor = React.lazy(() => import('hew/CodeEditor'));
  * Start from a config (a recent task or this browser's history): the config
  * is the base and the simple fields are applied on top of it; no template is
  * sent. A recent task's config is fetched when it is picked; Launch and the
- * full config stay disabled until it arrives.
+ * full config stay disabled until it arrives, and until the master's preview
+ * of the start-from's services answers.
  */
 const NtscLaunchModalComponent: React.FC<Props> = ({
   initialTask,
@@ -228,10 +229,12 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
 
   // The services that the start-from runs, previewed through the master without the checkboxes
   // each time the start-from changes, once the simple form shows it: the master's defaults, and
-  // what a template or a config turns off. The checkboxes follow the latest preview, except a box
-  // changed while it was on its way. A refused preview leaves them, and the full config shows the
-  // refusal; it is sent again when the pool or the workspace changes. Showing the simple form
-  // again after the full config previews nothing, so that the checkboxes keep their changes.
+  // what a template or a config turns off. A new template or the defaults clear the checkboxes
+  // first; a config fills them from its entries. The checkboxes follow the latest preview, except a
+  // box changed while it was on its way. Until the current start-from's preview answers, Launch and
+  // the full config wait. A refused preview shows its message with Retry and is sent again when
+  // the pool or the workspace changes. Showing the simple form again after the full config
+  // previews nothing, so that the checkboxes keep their changes.
   const [simpleFormShown, setSimpleFormShown] = useState(false);
   const source = Form.useWatch('source', form);
   const pool = Form.useWatch('pool', form);
@@ -242,19 +245,29 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     seq: number;
     source?: string;
   }>({ seq: 0 });
+  // The start-from of the last preview that answered, and its error; unset until one answers.
+  const [servicesAnswer, setServicesAnswer] = useState<{
+    baseConfig?: RawJson;
+    error?: string;
+    source?: string;
+  }>();
+  const [servicesRetry, setServicesRetry] = useState(0);
+  const servicesPending =
+    servicesAnswer === undefined ||
+    servicesAnswer.source !== source ||
+    servicesAnswer.baseConfig !== baseConfig;
   useEffect(() => {
     if (!simpleFormShown || startFromLoading) return;
     const last = servicesPreview.current;
-    if (
-      !last.failed &&
-      last.seq !== 0 &&
-      last.source === source &&
-      last.baseConfig === baseConfig
-    ) {
-      return;
-    }
+    const sameStart = last.seq !== 0 && last.source === source && last.baseConfig === baseConfig;
+    if (!last.failed && sameStart) return;
     const seq = last.seq + 1;
     servicesPreview.current = { baseConfig, seq, source };
+    if (!sameStart && !baseConfig) {
+      // The checkboxes were filled for another start-from.
+      offered.current = [];
+      form.resetFields(SHELL_SERVICES.map((name) => ['services', name]));
+    }
     const fields: LaunchFormValues = form.getFieldsValue(true);
     const sent = fields.services;
     previewShell(simpleOptions({ ...fields, services: undefined, source }))
@@ -272,22 +285,30 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
             ]),
           ),
         });
+        setServicesAnswer({ baseConfig, source });
       })
-      .catch(() => {
-        if (seq === servicesPreview.current.seq) {
-          servicesPreview.current = { ...servicesPreview.current, failed: true };
-        }
+      .catch((e) => {
+        if (seq !== servicesPreview.current.seq) return;
+        servicesPreview.current = { ...servicesPreview.current, failed: true };
+        setServicesAnswer({
+          baseConfig,
+          error: e instanceof Error ? e.message : PREVIEW_ERROR,
+          source,
+        });
       });
   }, [
     baseConfig,
     form,
     pool,
+    servicesRetry,
     simpleFormShown,
     simpleOptions,
     source,
     startFromLoading,
     workspaceId,
   ]);
+
+  const handleServicesRetry = useCallback(() => setServicesRetry((count) => count + 1), []);
 
   // Previewed each time the full config opens.
   const fetchConfig = useCallback(async () => {
@@ -456,7 +477,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       submit={{
         disabled: showFullConfig
           ? fullConfigFormInvalid
-          : !currentWorkspace?.id || startFromLoading,
+          : !currentWorkspace?.id || startFromLoading || servicesPending,
         form: idPrefix + (showFullConfig ? '-full-' : '-simple-') + BASE_FORM_ID,
         handleError,
         handler: handleSubmit,
@@ -486,9 +507,11 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
           formId={idPrefix + '-simple-' + BASE_FORM_ID}
           initialTask={initialTask}
           lockedWorkspace={!!workspace}
+          servicesError={servicesAnswer?.error}
           setWorkspace={setCurrentWorkspace}
           startFromLoadingTask={startFromLoadingTask}
           workspaces={workspaces}
+          onServicesRetry={handleServicesRetry}
           onShown={setSimpleFormShown}
           onStartFrom={handleStartFrom}
           onStartFromAutoSelected={handleStartFromAutoSelected}
@@ -504,7 +527,9 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
         />
       )}
       <Row>
-        <Button disabled={startFromLoading} onClick={handleSecondary}>
+        <Button
+          disabled={startFromLoading || (!showFullConfig && servicesPending)}
+          onClick={handleSecondary}>
           {showFullConfig ? 'Show Simple Config' : 'Show Full Config'}
         </Button>
         {showFullConfig && canSaveTemplate && (
@@ -652,11 +677,14 @@ interface LaunchFormProps {
   formId: string;
   initialTask?: CommandTask;
   lockedWorkspace: boolean;
+  onServicesRetry: () => void;
   /** Called with true once the form shows, and with false when it is replaced. */
   onShown: (shown: boolean) => void;
   onStartFrom: (start: StartFrom) => void;
   onStartFromAutoSelected: () => void;
   onStartFromLoadingTask: (taskId?: string) => void;
+  /** The message of the refused preview of the services, if the last one was refused. */
+  servicesError?: string;
   setWorkspace: (arg0: Workspace | undefined) => void;
   startFromLoadingTask?: string;
   workspaces: Workspace[];
@@ -670,10 +698,12 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
   formId,
   initialTask,
   lockedWorkspace,
+  onServicesRetry,
   onShown,
   onStartFrom,
   onStartFromAutoSelected,
   onStartFromLoadingTask,
+  servicesError,
   setWorkspace,
   startFromLoadingTask,
   workspaces,
@@ -813,6 +843,17 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
           ))}
         </Row>
       </Form.Item>
+      {servicesError && (
+        <Alert
+          action={
+            <Button size="small" onClick={onServicesRetry}>
+              Retry
+            </Button>
+          }
+          message={servicesError}
+          type="error"
+        />
+      )}
     </Form>
   );
 };
