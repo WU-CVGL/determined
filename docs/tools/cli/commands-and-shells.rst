@@ -136,8 +136,8 @@ To start a shell with VS Code in the browser, the ``vscode`` service, and open i
 
 In the WebUI, the shell's page has a tab for each of its services (see :ref:`shell-web-terminal`). A
 service's tab opens the service once it is ``READY``; a service that cannot be opened shows its
-state in its tab, and reloading the page tries again (a reload ends a connected terminal session).
-Only the user who started the shell and administrators can open its services.
+state in its tab with **Retry**. Only the user who started the shell and administrators can open its
+services.
 
 A shell is not terminated for being idle unless its configuration sets :ref:`idle_timeout
 <job-configuration-reference>`. With it, open SSH sessions and browser terminals and browser
@@ -229,11 +229,10 @@ You can also open a terminal in a running shell from the WebUI: on the **Jobs** 
 workspace's **Jobs** tab, click the shell's name, or choose **Open Terminal** from its action menu.
 The shell's page opens in a new browser tab, with the terminal in its **Terminal** tab next to a
 **JupyterLab** and a **VS Code** tab when the shell runs those services (the action menu's **Open
-JupyterLab** and **Open Visual Studio Code** open those tabs), and the shell's **Logs** and
-**Resources**. The terminal waits for the shell to run, connects when its tab is first shown and
-keeps its session while you use the other tabs. Only the user who started the shell and
-administrators can open terminals in it; when an administrator opens one, the shell's task log
-records it.
+JupyterLab** and **Open VS Code** open those tabs), and the shell's **Logs** and **Resources**. The
+terminal waits for the shell to run, connects when its tab is first shown and keeps its session
+while you use the other tabs. Only the user who started the shell and administrators can open
+terminals in it; when an administrator opens one, the shell's task log records it.
 
 The master connects to the shell's SSH server for you, with the shell's own key, so the key never
 reaches the browser. A browser terminal is a new SSH session, like ``det shell open``, and both work
