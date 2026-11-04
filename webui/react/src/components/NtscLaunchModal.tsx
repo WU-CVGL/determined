@@ -231,8 +231,8 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   // each time the start-from changes, once the simple form shows it: the master's defaults, and
   // what a template or a config turns off. A new template or the defaults clear the checkboxes
   // first; a config fills them from its entries. The checkboxes follow the latest preview, except a
-  // box changed while it was on its way. Until the current start-from's preview answers, Launch and
-  // the full config wait. A refused preview shows its message with Retry and is sent again when
+  // box changed while it was on its way. Until the preview on its way answers, Launch and the full
+  // config wait. A refused preview shows its message with Retry and is sent again when
   // the pool or the workspace changes. Showing the simple form again after the full config
   // previews nothing, so that the checkboxes keep their changes.
   const [simpleFormShown, setSimpleFormShown] = useState(false);
@@ -245,7 +245,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     seq: number;
     source?: string;
   }>({ seq: 0 });
-  // The start-from of the last preview that answered, and its error; unset until one answers.
+  // The start-from of the last preview that answered, and its error; unset while one is on its way.
   const [servicesAnswer, setServicesAnswer] = useState<{
     baseConfig?: RawJson;
     error?: string;
@@ -263,6 +263,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     if (!last.failed && sameStart) return;
     const seq = last.seq + 1;
     servicesPreview.current = { baseConfig, seq, source };
+    setServicesAnswer(undefined);
     if (!sameStart && !baseConfig) {
       // The checkboxes were filled for another start-from.
       offered.current = [];
