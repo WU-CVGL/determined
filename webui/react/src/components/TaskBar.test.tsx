@@ -5,7 +5,7 @@ import { ConfirmationProvider } from 'hew/useConfirm';
 import { MemoryRouter } from 'react-router-dom';
 
 import { killTask } from 'services/api';
-import { CommandType } from 'types';
+import { CommandState, CommandType } from 'types';
 import { isDangerMenuItem, isDisabledMenuItem, menuLabels } from 'utils/tests/menu';
 
 import TaskBar from './TaskBar';
@@ -35,6 +35,7 @@ const renderBar = (
             name="TensorBoard (lively-calm-fox)"
             owner={OWNER}
             resourcePool="default"
+            state={CommandState.Running}
             type={CommandType.TensorBoard}
             {...props}
           />
@@ -77,6 +78,8 @@ describe('TaskBar', () => {
     ['a task of an unknown type', { type: undefined }],
     ['a task whose owner is unknown', { owner: undefined }],
     ['a task the user may not modify', { owner: { userId: 8, workspaceId: 1 } }],
+    ['a task that has ended', { state: CommandState.Terminated }],
+    ['a task whose state is unknown', { state: undefined }],
   ])('keeps View Logs and leaves Kill disabled for %s', async (_, props) => {
     const handleViewLogsClick = vi.fn();
     renderBar(props, handleViewLogsClick);

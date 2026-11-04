@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DefaultTheme, UIProvider } from 'hew/Theme';
 import { ConfirmationProvider } from 'hew/useConfirm';
@@ -23,6 +23,7 @@ import {
 import { CommandState, CommandTask, CommandType, TaskItem } from 'types';
 import { DetError } from 'utils/error';
 import { TaskPhase } from 'utils/task';
+import { isDisabledMenuItem } from 'utils/tests/menu';
 
 import InteractiveTask from './InteractiveTask';
 
@@ -194,6 +195,39 @@ describe('InteractiveTask', () => {
     }
   });
 
+  it('reads the task one tick at a time, so that an older answer never follows a newer one', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getTaskServices).mockResolvedValue(
+        servicesWith(['ssh', 'jupyter'], true, V1TaskServiceState.READY),
+      );
+      let answer: (task: TaskItem) => void = () => undefined;
+      vi.mocked(getTask).mockResolvedValueOnce(taskWith(true));
+      vi.mocked(getTask).mockImplementationOnce(
+        () => new Promise<TaskItem>((resolve) => (answer = resolve)),
+      );
+      setup();
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+      expect(screen.getByTestId('terminal-pane')).toHaveAttribute('data-phase', 'ready');
+      expect(getTask).toHaveBeenCalledTimes(2);
+      // The second read has not answered: no third one starts, however long it takes.
+      await act(() => vi.advanceTimersByTimeAsync(6000));
+      expect(getTask).toHaveBeenCalledTimes(2);
+
+      act(() =>
+        answer(taskWith(false, V1TaskType.SHELL, CommandState.Terminated, '2026-01-01T01:00:00Z')),
+      );
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(screen.getByTestId('terminal-pane')).toHaveAttribute('data-phase', 'ended');
+      // Ended: the poll stops, and nothing brings the page back to ready.
+      await act(() => vi.advanceTimersByTimeAsync(6000));
+      expect(getTask).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId('terminal-pane')).toHaveAttribute('data-phase', 'ended');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('feeds a pane the state of its service, read again while a service has not settled', async () => {
     vi.useFakeTimers();
     try {
@@ -339,6 +373,87 @@ describe('InteractiveTask', () => {
     }
   });
 
+  // With no tab in the query, as the task links open the page, and with the Logs tab in it.
+  it.each(['', '?tab=logs'])(
+    'shows the logs and resources with Retry when the services cannot be read, and the service tabs on the same tab once they are (query %j)',
+    async (search) => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(getTaskServices).mockImplementation(() =>
+          Promise.reject(new DetError(undefined, { publicMessage: 'master unreachable' })),
+        );
+        setup(search);
+        // Four failures: at the start and after 2, 4 and 6 seconds.
+        await act(() => vi.advanceTimersByTimeAsync(7000));
+        expect(getTaskServices).toHaveBeenCalledTimes(4);
+        expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+        await act(() => vi.advanceTimersByTimeAsync(1000));
+        await act(() => vi.advanceTimersByTimeAsync(0));
+        expect(getTaskServices).toHaveBeenCalledTimes(5);
+        expect(screen.getByText('master unreachable')).toBeInTheDocument();
+        expect(tabLabels()).toEqual(['Logs', 'Resources']);
+        expect(screen.getByTestId('logs-pane')).toBeInTheDocument();
+        // The task is still polled; the services are not until Retry.
+        await act(() => vi.advanceTimersByTimeAsync(4000));
+        expect(getTaskServices).toHaveBeenCalledTimes(5);
+        expect(getTask).toHaveBeenCalledTimes(7);
+
+        // One read per Retry; a failure is shown again.
+        vi.mocked(getTaskServices).mockRejectedValueOnce(
+          new DetError(undefined, { publicMessage: 'still unreachable' }),
+        );
+        fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+        await act(() => vi.advanceTimersByTimeAsync(0));
+        expect(getTaskServices).toHaveBeenCalledTimes(6);
+        expect(screen.getByText('still unreachable')).toBeInTheDocument();
+        expect(tabLabels()).toEqual(['Logs', 'Resources']);
+
+        vi.mocked(getTaskServices).mockResolvedValue(
+          servicesWith(['ssh', 'jupyter', 'vscode'], true, V1TaskServiceState.READY),
+        );
+        fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+        await act(() => vi.advanceTimersByTimeAsync(0));
+        expect(getTaskServices).toHaveBeenCalledTimes(7);
+        expect(screen.queryByText('still unreachable')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+        expect(tabLabels()).toEqual(['Terminal', 'JupyterLab', 'VS Code', 'Logs', 'Resources']);
+        // The logs stay mounted and shown; no other pane is mounted.
+        expect(document.querySelector('.ant-tabs-tab-active')?.textContent).toBe('Logs');
+        expect(screen.getByTestId('logs-pane')).toBeInTheDocument();
+        expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('takes a not-found answer to Retry as final: no services, and no notice', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getTaskServices).mockImplementation(() =>
+        Promise.reject(new DetError(undefined, { publicMessage: 'master unreachable' })),
+      );
+      setup();
+      await act(() => vi.advanceTimersByTimeAsync(8000));
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(screen.getByText('master unreachable')).toBeInTheDocument();
+
+      vi.mocked(getTaskServices).mockRejectedValue(
+        new DetError(undefined, { publicMessage: `task ${TASK_ID} not found` }),
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(screen.queryByText('master unreachable')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+      expect(tabLabels()).toEqual(['Logs', 'Resources']);
+      expect(getTaskServices).toHaveBeenCalledTimes(6);
+      await act(() => vi.advanceTimersByTimeAsync(4000));
+      expect(getTaskServices).toHaveBeenCalledTimes(6);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('names an ended task by its ID when its lookup is gone', async () => {
     vi.mocked(getTask).mockResolvedValue(
       taskWith(false, V1TaskType.SHELL, CommandState.Terminated, '2026-01-01T01:00:00Z'),
@@ -348,6 +463,19 @@ describe('InteractiveTask', () => {
     expect(await screen.findByTestId('terminal-pane')).toHaveAttribute('data-phase', 'ended');
     expect(screen.getByText(TASK_ID)).toBeInTheDocument();
     expect(document.title).toBe(TASK_ID);
+    // Nothing to kill any more.
+    await userEvent.click(screen.getByTestId('task-action-dropdown-trigger'));
+    await screen.findByText('Kill');
+    expect(isDisabledMenuItem('Kill')).toBe(true);
+  });
+
+  it('offers Kill for a task whose allocation waits', async () => {
+    vi.mocked(getTask).mockResolvedValue(taskWith(true, V1TaskType.SHELL, CommandState.Waiting));
+    setup();
+    await screen.findByTestId('terminal-pane');
+    await userEvent.click(screen.getByTestId('task-action-dropdown-trigger'));
+    await screen.findByText('Kill');
+    expect(isDisabledMenuItem('Kill')).toBe(false);
   });
 
   it('shows why the task cannot be shown', async () => {

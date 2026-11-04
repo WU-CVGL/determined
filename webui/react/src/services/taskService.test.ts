@@ -189,4 +189,9 @@ describe('errorText', () => {
     expect(errorText(new Error('plain'))).toBe('plain');
     expect(errorText('text')).toBe('text');
   });
+  it('falls back to the message when the public message is not a string', () => {
+    const error = new DetError(new Error('raw'));
+    (error as { publicMessage: unknown }).publicMessage = { message: 'forbidden' };
+    expect(errorText(error)).toBe('raw');
+  });
 });

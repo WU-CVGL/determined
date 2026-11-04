@@ -6,7 +6,7 @@ import { useToast } from 'hew/Toast';
 import useConfirm from 'hew/useConfirm';
 import { Loadable } from 'hew/utils/loadable';
 import { useObservable } from 'micro-observables';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import css from 'components/ActionDropdown/ActionDropdown.module.scss';
@@ -58,11 +58,14 @@ const TaskActionDropdown: React.FC<Props> = ({
 
   const confirm = useConfirm();
 
-  // The task's services, read when the menu opens: they say whether the user may connect.
+  // The task's services, read when the menu opens: they say whether the user may connect. Only an
+  // answer is kept; after a failed read, the next opening reads again.
   const [services, setServices] = useState<V1TaskService[]>();
+  const loadingServices = useRef(false);
   const loadServices = useCallback(
     (open: boolean) => {
-      if (!open || services !== undefined || !canBeOpened(task)) return;
+      if (!open || services !== undefined || loadingServices.current || !canBeOpened(task)) return;
+      loadingServices.current = true;
       getTaskServices({ taskId: task.id })
         .then((response) => setServices(response.services))
         .catch((e) => {
@@ -70,7 +73,9 @@ const TaskActionDropdown: React.FC<Props> = ({
             publicMessage: 'Unable to load the services of the task.',
             silent: true,
           });
-          setServices([]);
+        })
+        .finally(() => {
+          loadingServices.current = false;
         });
     },
     [services, task],
@@ -109,7 +114,7 @@ const TaskActionDropdown: React.FC<Props> = ({
       items.push({ key: Action.OpenJupyterLab, label: 'Open JupyterLab' });
     }
     if (canBeOpened(task) && canOpenTaskService(services ?? [], 'vscode')) {
-      items.push({ key: Action.OpenVSCode, label: 'Open Visual Studio Code' });
+      items.push({ key: Action.OpenVSCode, label: 'Open VS Code' });
     }
     // A UI rule only: the API lets anyone who can view a task read its config.
     if (

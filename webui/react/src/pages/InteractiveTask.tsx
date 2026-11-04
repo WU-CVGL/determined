@@ -1,8 +1,9 @@
+import Button from 'hew/Button';
 import { Settings, settingsConfigForTask } from 'hew/LogViewer/LogViewerSelect.settings';
 import Message from 'hew/Message';
 import Pivot, { TabItem } from 'hew/Pivot';
 import Spinner from 'hew/Spinner';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { useParams, useSearchParams } from 'react-router-dom';
 
@@ -121,6 +122,10 @@ export const InteractiveTask: React.FC = () => {
   const resourcesEnabled = useTaskResourcesEnabled();
   const [task, setTask] = useState<TaskItem>();
   const [taskServices, setTaskServices] = useState<TaskServices>();
+  // Why the services have not been read yet, once the page has given up reading them.
+  const [servicesError, setServicesError] = useState<string>();
+  const [retrying, setRetrying] = useState(false);
+  const retryServicesRef = useRef<() => Promise<void>>();
   const [command, setCommand] = useState<CommandTask>();
   // Whether the lookup of the task's name and pool has answered, with or without a record.
   const [lookedUp, setLookedUp] = useState(false);
@@ -148,13 +153,20 @@ export const InteractiveTask: React.FC = () => {
   }, [slotsExceeded]);
 
   // The one poll of the task, until it ends, and of its services while one of them has not
-  // settled: the set of services is fixed, and a pane opens its service once it is ready.
+  // settled: the set of services is fixed, and a pane opens its service once it is ready. One
+  // tick at a time: the next is scheduled once the current one has answered, so that an older
+  // answer never lands after a newer one.
   useEffect(() => {
     let cancelled = false;
     let failures = 0;
     let loaded = false;
+    let serviceFailures = 0;
+    let servicesLoaded = false;
+    // Whether the page has given up reading the services until Retry: the task's own tabs are
+    // shown without them.
+    let servicesGivenUp = false;
     let servicesSettled = false;
-    const timer = setInterval(() => void poll(), POLL_MS);
+    let timer: ReturnType<typeof setTimeout> | undefined;
     // Whether the task has ended, or the page gives up on it.
     const pollTask = async (): Promise<'ended' | 'gone' | undefined> => {
       try {
@@ -182,12 +194,16 @@ export const InteractiveTask: React.FC = () => {
         return undefined;
       }
     };
-    // A failed read keeps the last services, if any, and is tried again on the next tick; a task
-    // the services API does not know, such as a generic task, has none.
+    // A failed read keeps the last services, if any, and is tried again on the next tick; before
+    // the first answer, the page gives up after a few failures and shows the last one with Retry.
+    // A task the services API does not know, such as a generic task, has none.
     const pollServices = async () => {
       try {
         const response = await getTaskServices({ taskId });
         if (cancelled) return;
+        servicesLoaded = true;
+        servicesGivenUp = false;
+        setServicesError(undefined);
         setTaskServices({
           owner: { userId: response.userId, workspaceId: response.workspaceId },
           services: response.services,
@@ -195,24 +211,40 @@ export const InteractiveTask: React.FC = () => {
         servicesSettled = response.services.every((s) => taskServiceSettled(s.state));
       } catch (e) {
         if (cancelled) return;
+        const text = errorText(e);
         handleError(e, { publicMessage: 'Unable to load the services of the task.', silent: true });
         if (isNotFound(e as Error)) {
+          servicesLoaded = true;
+          servicesGivenUp = false;
+          setServicesError(undefined);
           setTaskServices({ services: [] });
           servicesSettled = true;
+        } else if (!servicesLoaded && (servicesGivenUp || ++serviceFailures >= MAX_POLL_FAILURES)) {
+          servicesGivenUp = true;
+          setServicesError(text);
         }
       }
+    };
+    // One more read, on request; a success resumes the reads of the poll while it runs.
+    retryServicesRef.current = async () => {
+      setRetrying(true);
+      await pollServices();
+      setRetrying(false);
     };
     const poll = async () => {
       const [outcome] = await Promise.all([
         pollTask(),
-        servicesSettled ? undefined : pollServices(),
+        servicesSettled || servicesGivenUp ? undefined : pollServices(),
       ]);
-      if (outcome === 'gone' || (outcome === 'ended' && servicesSettled)) clearInterval(timer);
+      const servicesDone = servicesSettled || servicesGivenUp;
+      if (cancelled || outcome === 'gone' || (outcome === 'ended' && servicesDone)) return;
+      timer = setTimeout(() => void poll(), POLL_MS);
     };
     void poll();
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      clearTimeout(timer);
+      retryServicesRef.current = undefined;
     };
   }, [taskId]);
 
@@ -272,6 +304,13 @@ export const InteractiveTask: React.FC = () => {
 
   const activeKey = tabKeys.find((key) => key === requestedTab) ?? tabKeys[0];
 
+  // Without a tab in the URL, the page stays on the tab it shows when a Retry adds the service
+  // tabs before it; a tab in the URL is the one asked for.
+  const retryServices = useCallback(() => {
+    if (!requestedTab) selectTab(activeKey);
+    void retryServicesRef.current?.();
+  }, [activeKey, requestedTab, selectTab]);
+
   const items: TabItem[] = useMemo(() => {
     if (!task) return [];
     const serviceState = (name: string): V1TaskServiceState =>
@@ -320,6 +359,11 @@ export const InteractiveTask: React.FC = () => {
 
   const state = task?.allocations[0]?.state;
   const title = ui.isPageHidden ? getTitleState(state, name) : name;
+  // The state for the task bar's Kill: ended by the phase, else the allocation's, queued without
+  // one or while it waits (a live state, as the task tables show it).
+  let killState: CommandState | undefined;
+  if (task && phase === 'ended') killState = CommandState.Terminated;
+  else if (task) killState = state && state !== CommandState.Waiting ? state : CommandState.Queued;
 
   let content: React.ReactNode;
   if (error) {
@@ -328,11 +372,29 @@ export const InteractiveTask: React.FC = () => {
         <Message title={error} />
       </div>
     );
-  } else if (!task || !taskServices || !lookedUp) {
+  } else if (!task || !lookedUp || (!taskServices && !servicesError)) {
     // Also the lookup: a TensorBoard's tab comes from it.
     content = <Spinner center spinning />;
   } else {
-    content = <Pivot activeKey={activeKey} items={items} onChange={selectTab} />;
+    content = (
+      <>
+        {servicesError && (
+          <div className={css.notice}>
+            <Message
+              action={
+                <Button disabled={retrying} onClick={retryServices}>
+                  Retry
+                </Button>
+              }
+              title={servicesError}
+            />
+          </div>
+        )}
+        <div className={css.tabs}>
+          <Pivot activeKey={activeKey} items={items} onChange={selectTab} />
+        </div>
+      </>
+    );
   }
 
   return (
@@ -348,6 +410,7 @@ export const InteractiveTask: React.FC = () => {
             name={name}
             owner={taskServices?.owner}
             resourcePool={command?.resourcePool ?? ''}
+            state={killState}
             type={commandType}
           />
         </div>

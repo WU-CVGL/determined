@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 
 import { getTaskServices } from 'services/api';
 import userStore from 'stores/users';
-import { CommandState, CommandTask, CommandType, DetailedUser } from 'types';
+import { CommandState, CommandTask, CommandType, DetailedUser, TaskAction } from 'types';
 import { isDangerMenuItem, menuLabels } from 'utils/tests/menu';
 
 import TaskActionDropdown from './TaskActionDropdown';
@@ -54,12 +54,19 @@ const owner: DetailedUser = { id: 101, isActive: true, isAdmin: false, username:
 const other: DetailedUser = { id: 102, isActive: true, isAdmin: false, username: 'other' };
 const admin: DetailedUser = { id: 1, isActive: true, isAdmin: true, username: 'admin' };
 
-const openMenu = async (ownerId: number, overrides: Partial<CommandTask> = {}) => {
+const openMenu = async (
+  ownerId: number,
+  overrides: Partial<CommandTask> = {},
+  onComplete?: (action?: TaskAction) => void,
+) => {
   render(
     <MemoryRouter>
       <UIProvider theme={DefaultTheme.Light}>
         <ConfirmationProvider>
-          <TaskActionDropdown task={{ ...task, userId: ownerId, ...overrides }} />
+          <TaskActionDropdown
+            task={{ ...task, userId: ownerId, ...overrides }}
+            onComplete={onComplete}
+          />
         </ConfirmationProvider>
       </UIProvider>
     </MemoryRouter>,
@@ -149,20 +156,28 @@ describe('TaskActionDropdown', () => {
   });
 
   it.each([
-    ['an ended', CommandState.Terminated],
-    ['a running', CommandState.Running],
+    ['an ended', 'nothing else', CommandState.Terminated, []],
+    ['a running', 'Open JupyterLab', CommandState.Running, ['Open JupyterLab']],
   ])(
-    'offers only View Logs, View Resources and Copy Task ID on %s notebook record',
-    async (_, state) => {
+    'on %s notebook record offers View Logs, View Resources, Copy Task ID and %s',
+    async (_, __, state, fromServices) => {
       resources.enabled = true;
-      // A notebook record's one service is JupyterLab, which the master lets no one open.
-      services.list = [{ mayConnect: false, name: 'jupyter' }];
+      // A notebook record's one service is JupyterLab, and the master lets its owner connect to
+      // every service alike. The entries follow the services, as the task page's tabs do, so a
+      // notebook that still runs (the master ends restored ones at start) offers Open JupyterLab.
+      services.list = [{ mayConnect: true, name: 'jupyter' }];
       const onLaunchAgain = await openLaunchAgainMenu({ ...notebook, state }, owner);
       await screen.findByText('View Logs');
       if (state === CommandState.Running) {
-        await waitFor(() => expect(getTaskServices).toHaveBeenCalledTimes(1));
+        await screen.findByText('Open JupyterLab');
+        expect(getTaskServices).toHaveBeenCalledTimes(1);
       }
-      expect(menuLabels()).toEqual(['View Logs', 'View Resources', 'Copy Task ID']);
+      expect(menuLabels()).toEqual([
+        'View Logs',
+        'View Resources',
+        'Copy Task ID',
+        ...fromServices,
+      ]);
       expect(onLaunchAgain).not.toHaveBeenCalled();
     },
   );
@@ -226,6 +241,22 @@ describe('TaskActionDropdown', () => {
       await waitFor(() => expect(exactly(shellLabel)).toBeInTheDocument());
       expect(getTaskServices).toHaveBeenCalledTimes(1);
     });
+
+    it('reads the services again when the menu opens after a failed read', async () => {
+      vi.mocked(getTaskServices).mockRejectedValueOnce(new Error('network'));
+      await openMenu(101, runningShell);
+      await screen.findByText('View Logs');
+      await waitFor(() => expect(getTaskServices).toHaveBeenCalledTimes(1));
+      expect(exactly(shellLabel)).not.toBeInTheDocument();
+      expect(exactly('Open Terminal')).not.toBeInTheDocument();
+      // Closed and opened again from its button.
+      await userEvent.click(screen.getByRole('button'));
+      await waitFor(() => expect(document.querySelector('.ant-dropdown-hidden')).not.toBeNull());
+      await userEvent.click(screen.getByRole('button'));
+      await waitFor(() => expect(exactly(shellLabel)).toBeInTheDocument());
+      expect(exactly('Open Terminal')).toBeInTheDocument();
+      expect(getTaskServices).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('Open Terminal', () => {
@@ -236,9 +267,11 @@ describe('TaskActionDropdown', () => {
 
     it('opens the Terminal tab of the task page in a tab named after the task', async () => {
       const open = vi.spyOn(window, 'open').mockReturnValue(null);
-      await openMenu(101, runningShell);
+      const onComplete = vi.fn();
+      await openMenu(101, runningShell, onComplete);
       await userEvent.click(await screen.findByText('Open Terminal'));
       expect(open).toHaveBeenCalledWith('/tasks/task-1/interactive?tab=terminal', 'task-1', '');
+      expect(onComplete).toHaveBeenCalledWith(TaskAction.OpenTerminal);
       // The CLI command is still offered.
       expect(screen.getByText('Connect via CLI')).toBeInTheDocument();
       open.mockRestore();
@@ -276,7 +309,7 @@ describe('TaskActionDropdown', () => {
     });
   });
 
-  describe('Open JupyterLab and Open Visual Studio Code', () => {
+  describe('Open JupyterLab and Open VS Code', () => {
     const allServices = [
       { mayConnect: true, name: 'ssh' },
       { mayConnect: true, name: 'jupyter' },
@@ -291,29 +324,31 @@ describe('TaskActionDropdown', () => {
     it('follow Open Terminal, one per service of the task', async () => {
       services.list = allServices;
       await openMenu(101, runningShell);
-      await screen.findByText('Open Visual Studio Code');
+      await screen.findByText('Open VS Code');
       expect(menuLabels()).toEqual([
         'View Logs',
         'Copy Task ID',
         'Connect via CLI',
         'Open Terminal',
         'Open JupyterLab',
-        'Open Visual Studio Code',
+        'Open VS Code',
         'Kill',
       ]);
     });
 
     it.each([
-      ['Open JupyterLab', 'jupyter'],
-      ['Open Visual Studio Code', 'vscode'],
+      [TaskAction.OpenJupyterLab, 'jupyter'],
+      [TaskAction.OpenVSCode, 'vscode'],
     ])(
       '"%s" opens the %s tab of the task page in a tab named after the task',
-      async (label, tab) => {
+      async (action, tab) => {
         const open = vi.spyOn(window, 'open').mockReturnValue(null);
+        const onComplete = vi.fn();
         services.list = allServices;
-        await openMenu(101, runningShell);
-        await userEvent.click(await screen.findByText(label));
+        await openMenu(101, runningShell, onComplete);
+        await userEvent.click(await screen.findByText(action));
         expect(open).toHaveBeenCalledWith(`/tasks/task-1/interactive?tab=${tab}`, 'task-1', '');
+        expect(onComplete).toHaveBeenCalledWith(action);
         open.mockRestore();
       },
     );
@@ -322,20 +357,20 @@ describe('TaskActionDropdown', () => {
       services.list = allServices;
       openContextMenu(101, runningShell);
       expect(await screen.findByText('Open JupyterLab')).toBeInTheDocument();
-      expect(screen.getByText('Open Visual Studio Code')).toBeInTheDocument();
+      expect(screen.getByText('Open VS Code')).toBeInTheDocument();
     });
 
     it('are offered without the terminal when the master turns it off', async () => {
       feature.on = false;
       services.list = allServices;
       await openMenu(101, runningShell);
-      await screen.findByText('Open Visual Studio Code');
+      await screen.findByText('Open VS Code');
       expect(menuLabels()).toEqual([
         'View Logs',
         'Copy Task ID',
         'Connect via CLI',
         'Open JupyterLab',
-        'Open Visual Studio Code',
+        'Open VS Code',
         'Kill',
       ]);
     });
@@ -346,7 +381,7 @@ describe('TaskActionDropdown', () => {
         { mayConnect: true, name: 'vscode' },
       ];
       await openMenu(101, runningShell);
-      await screen.findByText('Open Visual Studio Code');
+      await screen.findByText('Open VS Code');
       expect(menuLabels()).not.toContain('Open JupyterLab');
     });
 
@@ -355,7 +390,7 @@ describe('TaskActionDropdown', () => {
       await openMenu(102, runningShell);
       await waitFor(() => expect(getTaskServices).toHaveBeenCalledTimes(1));
       expect(screen.queryByText('Open JupyterLab')).not.toBeInTheDocument();
-      expect(screen.queryByText('Open Visual Studio Code')).not.toBeInTheDocument();
+      expect(screen.queryByText('Open VS Code')).not.toBeInTheDocument();
     });
 
     it('are hidden for shells that have ended', async () => {
@@ -363,7 +398,7 @@ describe('TaskActionDropdown', () => {
       await openMenu(101, { ...runningShell, state: CommandState.Terminated });
       await screen.findByText('View Logs');
       expect(screen.queryByText('Open JupyterLab')).not.toBeInTheDocument();
-      expect(screen.queryByText('Open Visual Studio Code')).not.toBeInTheDocument();
+      expect(screen.queryByText('Open VS Code')).not.toBeInTheDocument();
       expect(getTaskServices).not.toHaveBeenCalled();
     });
   });

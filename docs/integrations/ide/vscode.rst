@@ -63,9 +63,9 @@ or pass ``--no-service vscode`` to ``det shell start``, to leave it out.
    directly.
 
 In the WebUI, the shell's page has a **VS Code** tab: on the **Jobs** page or a workspace's **Jobs**
-tab, click the shell's name, or choose **Open Visual Studio Code** from its action menu. The tab
-opens the editor once the service is ``READY``; see :ref:`shell-services`. Only the user who started
-the shell and administrators can open its editor.
+tab, click the shell's name, or choose **Open VS Code** from its action menu. The tab opens the
+editor once the service is ``READY``; see :ref:`shell-services`. Only the user who started the shell
+and administrators can open its editor.
 
 Where code-server Comes From
 ============================

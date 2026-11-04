@@ -16,6 +16,7 @@ import { CommandState, CommandTask, CommandType, RawJson, WorkspaceState } from 
 
 const mocks = vi.hoisted(() => ({
   getShellConfig: vi.fn(),
+  getTaskServices: vi.fn(),
   launchShell: vi.fn(),
   onShellLaunched: vi.fn(),
   openCommandResponse: vi.fn(),
@@ -27,7 +28,7 @@ vi.mock('services/api', () => ({
   getResourcePools: () => Promise.resolve([]),
   getShellConfig: mocks.getShellConfig,
   getShells: () => Promise.resolve([]),
-  getTaskServices: () => Promise.resolve({ services: [] }),
+  getTaskServices: mocks.getTaskServices,
   getTaskTemplates: () => Promise.resolve([]),
   getUsers: () => Promise.resolve({ users: [] }),
   getUserSetting: () => Promise.resolve({ settings: [] }),
@@ -170,6 +171,9 @@ describe('useLaunchForm', () => {
       description: 'old shell',
       resources: { resource_pool: 'gpu', slots: 1 },
     });
+    mocks.getTaskServices
+      .mockReset()
+      .mockResolvedValue({ services: [{ mayConnect: true, name: 'ssh' }] });
     mocks.launchShell.mockReset().mockResolvedValue(launchedShell);
     mocks.onShellLaunched.mockReset();
     mocks.openCommandResponse.mockReset();
@@ -188,6 +192,51 @@ describe('useLaunchForm', () => {
     expect(mocks.launchShell).toHaveBeenCalled();
     expect(mocks.openCommandResponse).not.toHaveBeenCalled();
     expect(mocks.onShellLaunched).toHaveBeenCalledTimes(1);
+  });
+
+  describe('the launched shell’s services', () => {
+    const launch = async () => {
+      const user = setup();
+      await open(user, 'Open Shell');
+      await user.click(screen.getByRole('button', { name: 'Launch' }));
+      await screen.findByText('Interactive Task Launched');
+      return user;
+    };
+
+    it('are read once per launch, not again when the dialog closes', async () => {
+      const user = await launch();
+      expect(mocks.getTaskServices).toHaveBeenCalledTimes(1);
+      expect(mocks.getTaskServices).toHaveBeenCalledWith({ taskId: 'shell-new' });
+      await user.click(screen.getByRole('button', { name: 'OK' }));
+      await waitFor(() =>
+        expect(screen.queryByText('Interactive Task Launched')).not.toBeInTheDocument(),
+      );
+      expect(mocks.getTaskServices).toHaveBeenCalledTimes(1);
+    });
+
+    it('give the dialog its Open JupyterLab and Open VS Code buttons', async () => {
+      mocks.getTaskServices.mockResolvedValue({
+        services: [
+          { mayConnect: true, name: 'ssh' },
+          { mayConnect: true, name: 'jupyter' },
+          { mayConnect: true, name: 'vscode' },
+        ],
+      });
+      await launch();
+      expect(await screen.findByRole('button', { name: 'Open JupyterLab' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Open VS Code' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Open Terminal' })).toBeInTheDocument();
+    });
+
+    it('leave the dialog without service buttons when the read fails', async () => {
+      mocks.getTaskServices.mockRejectedValueOnce(new Error('services unavailable'));
+      await launch();
+      await waitFor(() => expect(mocks.getTaskServices).toHaveBeenCalledTimes(1));
+      expect(screen.getByRole('button', { name: 'Open Terminal' })).toBeInTheDocument();
+      expect(screen.getByText('det shell open shell-new')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Open JupyterLab' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Open VS Code' })).not.toBeInTheDocument();
+    });
   });
 
   describe('Launch Again', () => {

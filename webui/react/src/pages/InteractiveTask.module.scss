@@ -9,13 +9,22 @@
     height: 32px;
   }
   .contentContainer {
+    display: flex;
     flex: 1 1 auto;
+    flex-direction: column;
     min-height: 0;
 
     :global(.ant-tabs-nav) {
       margin: 0;
       padding: 0 8px;
     }
+  }
+  .notice {
+    flex: 0 0 auto;
+  }
+  .tabs {
+    flex: 1 1 auto;
+    min-height: 0;
   }
   .pane {
     height: 100%;

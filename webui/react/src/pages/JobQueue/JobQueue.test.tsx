@@ -134,7 +134,6 @@ vi.mock('services/api', () => ({
   getTaskServices: vi.fn(() =>
     Promise.resolve({ services: [{ mayConnect: services.mayConnect, name: 'ssh' }] }),
   ),
-  getTensorBoards: vi.fn(() => Promise.resolve([])),
   getUsers: vi.fn(() => Promise.resolve({ pagination: {}, users: [] })),
   killExperiment: vi.fn(),
   killGenericTask: vi.fn(),
@@ -405,6 +404,30 @@ describe('JobQueue', () => {
     await waitForShells();
     expect(await screen.findByText('Shell (lively-calm-fox) (shell)')).toBeInTheDocument();
     expect(screen.queryByText('Shell shell')).not.toBeInTheDocument();
+  });
+
+  it('opens the task page of a task job by its ID from its name', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    try {
+      mocks.jobs = [
+        shellJob,
+        {
+          ...shellJob,
+          entityId: 'tb-1',
+          jobId: 'job-3',
+          name: 'TensorBoard',
+          type: JobType.TENSORBOARD,
+        },
+      ];
+      setup();
+      await waitForShells();
+      await userEvent.click(await screen.findByText('Shell (lively-calm-fox) (shell)'));
+      expect(open).toHaveBeenCalledWith('/tasks/shell-1/interactive', 'shell-1', '');
+      await userEvent.click(screen.getByText('TensorBoard (tb)'));
+      expect(open).toHaveBeenCalledWith('/tasks/tb-1/interactive', 'tb-1', '');
+    } finally {
+      open.mockRestore();
+    }
   });
 
   it('gives an active shell the full task menu, in the Tasks page order', async () => {
