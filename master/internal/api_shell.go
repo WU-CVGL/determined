@@ -45,10 +45,11 @@ const (
 	// Agent ports 2600 - 3500 are split between TensorBoards, services, and sshd.
 	minSshdPort = 3200
 	maxSshdPort = minSshdPort + 299
-	// minShellIdleTimeout is the shortest idle_timeout a shell takes: the idle watcher's tick, so
-	// that JupyterLab's activity, reported every third of the timeout but at most every second,
-	// reaches the task's record more often than the timeout.
-	minShellIdleTimeout = 5 * time.Second
+	// minShellIdleTimeout is the shortest idle_timeout a shell takes: JupyterLab's idle check
+	// reports every quarter of the timeout and gives each request as long in all, 2.5 s at this
+	// minimum, so that a JupyterLab that answers within 2 s still reaches the task's record more
+	// often than the timeout. It is also longer than the idle watcher's tick.
+	minShellIdleTimeout = 10 * time.Second
 )
 
 func (a *apiServer) GetShells(

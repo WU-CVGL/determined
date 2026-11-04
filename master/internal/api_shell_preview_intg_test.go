@@ -256,7 +256,7 @@ func TestPreviewShellRefusesAsLaunch(t *testing.T) {
 		},
 		"idle_timeout short": {
 			config: previewConfig(t, map[string]any{"idle_timeout": "4s"}),
-			msg:    "idle_timeout must be at least 5s",
+			msg:    "idle_timeout must be at least 10s",
 		},
 		"unknown field": {
 			config: previewConfig(t, map[string]any{"descriptio": "typo"}),

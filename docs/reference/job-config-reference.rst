@@ -164,7 +164,7 @@ The following configuration settings are supported:
    as "30s", "1h", or "1m30s". Valid time units are "s", "m", "h". The duration must be positive.
    This is only used by shells and TensorBoard instances:
 
-   -  Shells: There is no default, and the shortest value is ``5s``; a shell is only terminated for
+   -  Shells: There is no default, and the shortest value is ``10s``; a shell is only terminated for
       being idle when this is set. The idle time counts from the last activity, once no browser
       terminal, SSH connection through the master or WebSocket connection to the shell is open.
       Activity is a browser terminal, an SSH connection through the master, a request to any of the
