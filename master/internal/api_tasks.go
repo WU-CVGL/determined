@@ -745,7 +745,8 @@ func (a *apiServer) GetActiveTasksCount(
 	}
 
 	finalResp := &apiv1.GetActiveTasksCountResponse{
-		// Notebooks still running from before the master stopped launching them.
+		// Notebook records from an older master that are still running; this master ends the
+		// notebooks it restores.
 		Notebooks: command.DefaultCmdService.CountRunning(model.TaskTypeNotebook),
 	}
 
