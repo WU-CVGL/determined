@@ -113,8 +113,8 @@ describe('ShellLaunchedModal', () => {
     ).toBeTruthy();
     expect(jupyter.compareDocumentPosition(vscode) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(terminal).toHaveClass('ant-btn-primary');
-    expect(jupyter).not.toHaveClass('ant-btn-primary');
-    expect(vscode).not.toHaveClass('ant-btn-primary');
+    expect(jupyter).toHaveClass('ant-btn-primary');
+    expect(vscode).toHaveClass('ant-btn-primary');
     // One stack of full-width buttons.
     for (const button of [terminal, jupyter, vscode]) {
       expect(button).toHaveClass('ant-btn-block', 'ant-btn-lg');
