@@ -34,7 +34,7 @@ export class NtscLaunchModal extends Modal {
 }
 
 /**
- * A service's checkbox: its label, which a click toggles, and its input.
+ * A service's checkbox: its label, which checks or unchecks it, and its input.
  */
 class ServiceCheckbox extends BaseComponent {
   readonly input = new BaseComponent({ parent: this, selector: 'input[type="checkbox"]' });
