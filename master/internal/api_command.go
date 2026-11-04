@@ -61,9 +61,19 @@ type protoCommandParams struct {
 	MustZeroSlot bool
 	// AllowServices accepts the config's services, which only shells run.
 	AllowServices bool
-	// NotebookIdleType, when set, replaces the default notebook_idle_type, before the template and
-	// the config apply.
-	NotebookIdleType string
+}
+
+// notebookIdleTypeKey is the config key that services.jupyter.idle_type replaces. A request config
+// or a template that sets it is refused with a message that names the new key.
+const notebookIdleTypeKey = "notebook_idle_type"
+
+// refuseNotebookIdleType refuses a config, as its top-level keys, that sets notebook_idle_type.
+func refuseNotebookIdleType[V any](config map[string]V, source string) error {
+	if _, ok := config[notebookIdleTypeKey]; !ok {
+		return nil
+	}
+	return status.Errorf(codes.InvalidArgument, "%s%s: use services.jupyter.idle_type",
+		source, notebookIdleTypeKey)
 }
 
 // prepareCommandLaunch prepares the launch of an NTSC task from a request, without side effects:
@@ -97,6 +107,9 @@ func (a *apiServer) prepareCommandLaunch(ctx context.Context, req *protoCommandP
 		return nil, nil, err
 	}
 
+	if err := refuseNotebookIdleType(req.Config.GetFields(), ""); err != nil {
+		return nil, nil, err
+	}
 	var configBytes []byte
 	if req.Config != nil {
 		configBytes, err = protojson.Marshal(req.Config)
@@ -130,13 +143,23 @@ func (a *apiServer) prepareCommandLaunch(ctx context.Context, req *protoCommandP
 
 	// Get the full configuration.
 	config := model.DefaultConfig(&taskSpec.TaskContainerDefaults)
-	if req.NotebookIdleType != "" {
-		config.NotebookIdleType = req.NotebookIdleType
-	}
 	if req.TemplateName != "" {
-		err := templates.UnmarshalTemplateConfig(ctx, req.TemplateName, aUser, &config, false)
+		// The template is read as its keys first, since its decode ignores unknown keys.
+		var template map[string]any
+		err := templates.UnmarshalTemplateConfig(ctx, req.TemplateName, aUser, &template, false)
 		if err != nil {
 			return nil, launchWarnings, err
+		}
+		if err := refuseNotebookIdleType(template,
+			fmt.Sprintf("template %s: ", req.TemplateName)); err != nil {
+			return nil, launchWarnings, err
+		}
+		templateBytes, err := json.Marshal(template)
+		if err != nil {
+			return nil, launchWarnings, err
+		}
+		if err := json.Unmarshal(templateBytes, &config); err != nil {
+			return nil, launchWarnings, fmt.Errorf("template %s: %w", req.TemplateName, err)
 		}
 	}
 	w, err := a.GetWorkspaceByID(ctx, int32(cmdSpec.Metadata.WorkspaceID), *userModel, false)

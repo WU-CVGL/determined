@@ -185,7 +185,7 @@ func TestSetTaskConfigPolicies(t *testing.T) {
 
 			// Test update NTSC task config policies.
 			test.tcps.InvariantConfig = ptrs.Ptr(
-				`{"description":"random description","resources":{"slots":4,"max_slots":8},"notebook_idle_type":"activity"}`)
+				`{"description":"random description","resources":{"slots":4,"max_slots":8},"idle_timeout":"30m"}`)
 			err = SetTaskConfigPolicies(ctx, test.tcps)
 			require.NoError(t, err)
 

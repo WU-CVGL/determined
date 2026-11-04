@@ -196,11 +196,8 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 	require.Equal(t, string(model.TaskTypeShell), env["DET_TASK_TYPE"])
 	require.Equal(t, strconv.Itoa(jupyter.Port), env["NOTEBOOK_PORT"])
 	require.Equal(t, "/proxy/"+jupyterID+"/", env["NOTEBOOK_BASE_URL"])
-	var notebookConfig model.CommandConfig
-	require.NoError(t, json.Unmarshal([]byte(env["NOTEBOOK_CONFIG"]), &notebookConfig))
-	require.Equal(t, spec.Config.Description, notebookConfig.Description)
 	// Nor does JupyterLab's idle check run.
-	require.NotContains(t, env, tasks.NotebookIdleTypeEnvVar)
+	require.NotContains(t, env, tasks.JupyterIdleTypeEnvVar)
 	require.NotContains(t, env, tasks.IdleTimeoutSecondsEnvVar)
 	require.NotContains(t, env, "DET_ACTIVITY_REPORT")
 
@@ -332,8 +329,8 @@ func TestLaunchShellWithServicesDisabled(t *testing.T) {
 			env := spec.Base.ExtraEnvVars
 			require.Equal(t, "ssh", env["DET_SERVICES"])
 			for _, key := range []string{
-				model.NotebookSessionEnvVar, "NOTEBOOK_PORT", "NOTEBOOK_CONFIG", "NOTEBOOK_BASE_URL",
-				tasks.NotebookIdleTypeEnvVar, tasks.IdleTimeoutSecondsEnvVar,
+				model.NotebookSessionEnvVar, "NOTEBOOK_PORT", "NOTEBOOK_BASE_URL",
+				tasks.JupyterIdleTypeEnvVar, tasks.IdleTimeoutSecondsEnvVar,
 			} {
 				require.NotContains(t, env, key)
 			}
@@ -351,7 +348,7 @@ func TestLaunchShellWithServicesDisabled(t *testing.T) {
 
 // A shell with an idle timeout is watched through its task's activity record, with or without
 // jupyter; with jupyter, JupyterLab's idle check reports there with the timeout and the idle type,
-// activity unless the template or the config sets another.
+// activity unless the template or the config sets another as services.jupyter.idle_type.
 func TestLaunchShellIdleTimeout(t *testing.T) {
 	api, _, ctx := setupAPITest(t, nil)
 	cs, err := command.NewService(api.m.db, api.m.rm)
@@ -362,21 +359,20 @@ func TestLaunchShellIdleTimeout(t *testing.T) {
 
 	for name, tc := range map[string]struct {
 		services     map[string]any
-		idleType     string
 		template     string
 		wantIdleType string
 	}{
 		"ssh":     {services: map[string]any{"jupyter": map[string]any{"enabled": false}}},
-		"jupyter": {services: jupyter, wantIdleType: model.NotebookIdleTypeActivity},
+		"jupyter": {services: jupyter, wantIdleType: model.JupyterIdleTypeActivity},
 		"jupyter configured": {
-			services:     jupyter,
-			idleType:     model.NotebookIdleTypeKernelConnections,
-			wantIdleType: model.NotebookIdleTypeKernelConnections,
+			services: map[string]any{
+				"jupyter": map[string]any{"idle_type": model.JupyterIdleTypeKernelConnections},
+			},
+			wantIdleType: model.JupyterIdleTypeKernelConnections,
 		},
 		"jupyter template": {
-			services:     jupyter,
-			template:     `{"notebook_idle_type": "kernels_or_terminals"}`,
-			wantIdleType: model.NotebookIdleTypeKernelsOrTerminals,
+			template:     `{"services": {"jupyter": {"idle_type": "kernels_or_terminals"}}}`,
+			wantIdleType: model.JupyterIdleTypeKernelsOrTerminals,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -396,9 +392,6 @@ func TestLaunchShellIdleTimeout(t *testing.T) {
 			if tc.services != nil {
 				config["services"] = tc.services
 			}
-			if tc.idleType != "" {
-				config["notebook_idle_type"] = tc.idleType
-			}
 			raw, err := structpb.NewStruct(config)
 			require.NoError(t, err)
 			resp, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
@@ -416,17 +409,49 @@ func TestLaunchShellIdleTimeout(t *testing.T) {
 
 			env := spec.Base.ExtraEnvVars
 			if tc.wantIdleType == "" {
-				require.NotContains(t, env, tasks.NotebookIdleTypeEnvVar)
+				require.NotContains(t, env, tasks.JupyterIdleTypeEnvVar)
 				require.NotContains(t, env, tasks.IdleTimeoutSecondsEnvVar)
 				return
 			}
-			require.Equal(t, tc.wantIdleType, env[tasks.NotebookIdleTypeEnvVar])
-			require.Equal(t, tc.wantIdleType, spec.Config.NotebookIdleType)
+			require.Equal(t, tc.wantIdleType, env[tasks.JupyterIdleTypeEnvVar])
+			require.Equal(t, tc.wantIdleType,
+				spec.Config.Services[model.ServiceJupyter].JupyterIdleType())
 			// The idle check has one mode, the task's activity record.
 			require.NotContains(t, env, "DET_ACTIVITY_REPORT")
 			require.Equal(t, "2700", env[tasks.IdleTimeoutSecondsEnvVar])
 		})
 	}
+}
+
+// A shell's config or template that sets notebook_idle_type is refused with the key that replaces
+// it, and launches nothing.
+func TestLaunchShellRefusesNotebookIdleType(t *testing.T) {
+	api, curUser, ctx := setupAPITest(t, nil)
+	cs, err := command.NewService(api.m.db, api.m.rm)
+	require.NoError(t, err)
+	command.SetDefaultService(cs)
+
+	templateName := "shell-notebook-idle-" + uuid.NewString()
+	_, err = db.Bun().NewRaw(
+		"INSERT INTO templates (name, config, workspace_id) VALUES (?, ?::jsonb, 1)",
+		templateName, `{"notebook_idle_type": "activity"}`).Exec(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = db.Bun().NewDelete().Table("templates").Where("name = ?", templateName).
+			Exec(context.Background())
+	})
+	config, err := structpb.NewStruct(map[string]any{"notebook_idle_type": "activity"})
+	require.NoError(t, err)
+
+	before := launchRows(t, curUser.ID)
+	_, err = api.LaunchShell(ctx, &apiv1.LaunchShellRequest{Config: config})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.ErrorContains(t, err, ": notebook_idle_type: use services.jupyter.idle_type")
+	_, err = api.LaunchShell(ctx, &apiv1.LaunchShellRequest{TemplateName: templateName})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.ErrorContains(t, err,
+		": template "+templateName+": notebook_idle_type: use services.jupyter.idle_type")
+	require.Equal(t, before, launchRows(t, curUser.ID))
 }
 
 // A shell refuses an idle_timeout shorter than 10s, with or without jupyter, and takes one of
