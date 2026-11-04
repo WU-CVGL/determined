@@ -260,18 +260,6 @@ const UserSettings: React.FC<Props> = ({ show, onClose }: Props) => {
                   <InputShortcut />
                 </InlineForm>
                 <InlineForm<KeyboardShortcut>
-                  initialValue={shortcutSettings.jupyterLab}
-                  label="Launch JupyterLab Notebook"
-                  valueFormatter={shortcutToString}
-                  onSubmit={(sc) => {
-                    userSettings.set(shortcutSettingsConfig, shortcutsSettingsPath, {
-                      ...shortcutSettings,
-                      jupyterLab: sc,
-                    });
-                  }}>
-                  <InputShortcut />
-                </InlineForm>
-                <InlineForm<KeyboardShortcut>
                   initialValue={shortcutSettings.navbarCollapsed}
                   label="Toggle Sidebar"
                   valueFormatter={shortcutToString}

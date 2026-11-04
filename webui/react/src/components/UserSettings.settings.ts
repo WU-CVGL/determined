@@ -5,24 +5,15 @@ import { SettingsConfig } from 'hooks/useSettings';
 
 export interface Settings {
   navbarCollapsed: KeyboardShortcut;
-  jupyterLab: KeyboardShortcut;
   omnibar: KeyboardShortcut;
 }
 
 export const shortcutSettingsConfig = type({
-  jupyterLab: KeyboardShortcut,
   navbarCollapsed: KeyboardShortcut,
   omnibar: KeyboardShortcut,
 });
 
 export const shortcutSettingsDefaults = {
-  jupyterLab: {
-    alt: false,
-    ctrl: false,
-    key: 'L',
-    meta: true,
-    shift: true,
-  },
   navbarCollapsed: {
     alt: false,
     ctrl: false,
@@ -43,18 +34,6 @@ export const shortcutsSettingsPath = 'shortcuts';
 
 const shortCutSettingsConfig: SettingsConfig<Settings> = {
   settings: {
-    jupyterLab: {
-      defaultValue: {
-        alt: false,
-        ctrl: false,
-        key: 'L',
-        meta: true,
-        shift: true,
-      },
-      skipUrlEncoding: true,
-      storageKey: 'jupyterLab',
-      type: KeyboardShortcut,
-    },
     navbarCollapsed: {
       defaultValue: {
         alt: false,

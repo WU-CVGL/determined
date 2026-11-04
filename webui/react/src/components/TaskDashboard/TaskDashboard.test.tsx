@@ -570,7 +570,6 @@ describe('TaskDashboard', () => {
     expect(screen.queryByText('bert-finetune')).not.toBeInTheDocument();
     expect(options(await openFilter('Filter by kind'))).toEqual([
       'Generic Task',
-      'JupyterLab',
       'Shell',
       'Command',
       'TensorBoard',
@@ -663,13 +662,14 @@ describe('TaskDashboard', () => {
     await waitFor(() => expect(screen.queryByText('eval-sweep')).not.toBeInTheDocument());
   });
 
-  it('decodes ?type=jupyter-lab, the kind of ended notebook records, and lists none of them', async () => {
+  it('decodes ?type=jupyter-lab, the kind of ended notebook records, as no kind filter', async () => {
     setup({ tasksOnly: true }, '/tasks?type=jupyter-lab');
 
-    await waitFor(() => expect(fetchRunPage).toHaveBeenCalled(), AFTER_LOAD);
-    expect(vi.mocked(fetchRunPage).mock.lastCall?.[0].kinds).toEqual([RunKind.JupyterLab]);
-    expect(getShells).not.toHaveBeenCalled();
-    expect(screen.queryByText('gpu-shell')).not.toBeInTheDocument();
+    expect(await screen.findByText('gpu-shell', {}, AFTER_LOAD)).toBeInTheDocument();
+    expect(screen.getByText('eval-sweep')).toBeInTheDocument();
+    expect(vi.mocked(fetchRunPage).mock.lastCall?.[0].kinds).not.toContain(RunKind.JupyterLab);
+    expect(screen.queryByText('Clear Filters', { exact: false })).not.toBeInTheDocument();
+    expect(ticked(await openFilter('Filter by kind'))).toEqual([]);
   });
 
   it('sets the whole view from a URL with any of its keys: no filter or the default sort where it has none', async () => {

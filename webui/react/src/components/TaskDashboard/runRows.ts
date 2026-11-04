@@ -35,7 +35,11 @@ export const RunKind = {
 
 export type RunKind = ValueOf<typeof RunKind>;
 
-/** The order of the kinds: the Kind filter's and sort's, and of runs that started at the same time. */
+/**
+ * The order of the kinds: the Kind filter's and sort's, and of runs that started at the same time.
+ * JupyterLab is the label of ended notebook records: a URL's `type=jupyter-lab` still decodes, but
+ * no dashboard lists or offers it (LISTED_KINDS).
+ */
 export const RUN_KINDS: RunKind[] = [
   RunKind.Experiment,
   RunKind.GenericTask,
@@ -44,6 +48,9 @@ export const RUN_KINDS: RunKind[] = [
   RunKind.Command,
   RunKind.TensorBoard,
 ];
+
+/** The kinds a dashboard lists and its Kind filter offers. */
+export const LISTED_KINDS: RunKind[] = RUN_KINDS.filter((kind) => kind !== RunKind.JupyterLab);
 
 /** Shells, commands and TensorBoards: the kinds the master lists whole, from memory. */
 export const COMMAND_KINDS = [RunKind.Shell, RunKind.Command, RunKind.TensorBoard] as const;
@@ -84,7 +91,7 @@ export type DashboardScope =
  */
 export const kindsOf = (scope: DashboardScope, experiments: boolean): RunKind[] => {
   if (scope.type === 'project') return [RunKind.Experiment, RunKind.GenericTask];
-  return experiments ? RUN_KINDS : RUN_KINDS.filter((kind) => kind !== RunKind.Experiment);
+  return experiments ? LISTED_KINDS : LISTED_KINDS.filter((kind) => kind !== RunKind.Experiment);
 };
 
 /* State */
