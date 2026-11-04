@@ -370,8 +370,9 @@ func TestExhaustiveEnums(t *testing.T) {
 			ignore:          ignore,
 		}
 	}
-	addCheck("JobType", "public.job_type", map[string]bool{})
-	addCheck("TaskType", "public.task_type", map[string]bool{})
+	// Postgres keeps NOTEBOOK in both enums; no row has it.
+	addCheck("JobType", "public.job_type", map[string]bool{"NOTEBOOK": true})
+	addCheck("TaskType", "public.task_type", map[string]bool{"NOTEBOOK": true})
 	addCheck("State", "public.experiment_state", map[string]bool{
 		"PARTIALLY_DELETED": true,
 		"DELETED":           true,
