@@ -194,7 +194,7 @@ shell's configuration to work there; a :ref:`configuration template <config-temp
 for every launch. A cluster started with ``det deploy local cluster-up --auto-work-dir <directory>``
 makes that directory available to task containers as ``./shared_fs``.
 
-A notebook kept on the shared filesystem can be opened again in the JupyterLab of a later shell. To
+A notebook kept on the shared filesystem can be opened again in the JupyterLab of another shell. To
 restore its last saved state, use JupyterLab's **File** > **Revert to Checkpoint**. JupyterLab saves
 a checkpoint every 120 seconds in an ``.ipynb_checkpoints`` directory next to the notebook; change
 ``autosaveInterval`` of the **Document Manager** in **Settings** > **Advanced Settings Editor** to
