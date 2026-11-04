@@ -207,7 +207,7 @@ The following configuration settings are supported:
    :ref:`master-config-interactive`): the launch adds each of them to the map unless the map, or the
    template's, has it. A service's port is chosen outside the ports of ``environment.proxy_ports``.
 
-   For example, a shell that runs its SSH server and VS Code, but not JupyterLab:
+   For example, a shell that does not run JupyterLab:
 
    .. code:: yaml
 

@@ -110,8 +110,8 @@ as the SSH sessions. The shell's configuration lists them under :ref:`services
 
 This is the same as ``det shell start --config "services={jupyter: {enabled: false}}"``.
 ``--service`` turns a service on again, for example one that a template turns off; for a service
-named by both, the last flag wins. The configuration form of the WebUI has a checkbox per service,
-checked for the services the shell would run.
+named by both, the last flag wins. The WebUI's **Launch Interactive Task** form has a checkbox for
+**jupyter** and **vscode**, checked for the services the shell would run.
 
 To list a shell's services with their states and addresses:
 
