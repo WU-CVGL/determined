@@ -19,7 +19,9 @@ import (
 )
 
 // The migration drops notebook_idle_type from every stored config, and moves a value other than
-// the default to services.jupyter.idle_type when the config has a jupyter entry without one.
+// the default to services.jupyter.idle_type when the jupyter entry has none: in a stored task's
+// config, when it has a jupyter entry; in a template's, when it has a non-empty services object,
+// with a jupyter entry or without one.
 func TestMigrateDropsNotebookIdleType(t *testing.T) {
 	require.NoError(t, etc.SetRootPath("../../static/srv"))
 	pgDB, cleanup := db.MustResolveNewPostgresDatabase(t)
@@ -28,7 +30,7 @@ func TestMigrateDropsNotebookIdleType(t *testing.T) {
 	before := MigrateWithNotebookIdleType(t, pgDB, "file://../../static/migrations")
 	require.Equal(t, map[string]int{
 		"command_state.generic_command_spec":    5,
-		"templates.config":                      2,
+		"templates.config":                      7,
 		"task_config_policies.invariant_config": 1,
 	}, before)
 
@@ -49,14 +51,23 @@ func TestMigrateDropsNotebookIdleType(t *testing.T) {
 	wantTemplates := map[string]string{
 		"olddata-idle-template-carried": `{"services":
 			{"jupyter": {"idle_type": "kernels_or_terminals"}}}`,
-		"olddata-idle-template-default":   `{"description": "x"}`,
-		"olddata-idle-template-untouched": NotebookIdleTypeTemplates["olddata-idle-template-untouched"],
+		"olddata-idle-template-vscode-off": `{"idle_timeout": "30m", "services": {
+			"vscode": {"enabled": false}, "jupyter": {"idle_type": "kernels_or_terminals"}}}`,
+		"olddata-idle-template-ssh": `{"services":
+			{"ssh": {}, "jupyter": {"idle_type": "kernel_connections"}}}`,
+		"olddata-idle-template-set": `{"services":
+			{"jupyter": {"idle_type": "kernel_connections"}}}`,
+		"olddata-idle-template-command":        `{"entrypoint": ["sleep", "60"]}`,
+		"olddata-idle-template-empty-services": `{"services": {}}`,
+		"olddata-idle-template-default":        `{"description": "x"}`,
+		"olddata-idle-template-untouched":      NotebookIdleTypeTemplates["olddata-idle-template-untouched"],
 	}
 	wantPolicies := map[string]string{
 		"NTSC":       `{"description": "z"}`,
 		"EXPERIMENT": NotebookIdleTypePolicies["EXPERIMENT"],
 	}
 	require.Len(t, wantSpecs, len(NotebookIdleTypeSpecs))
+	require.Len(t, wantTemplates, len(NotebookIdleTypeTemplates))
 
 	stored := func(query string, arg any) string {
 		var s string
