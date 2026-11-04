@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# The jupyter service: JupyterLab, with the idle check of a notebook in the background, under the
+# The jupyter service: JupyterLab, with its idle check in the background when set, under the
 # base URL that the master sets, NOTEBOOK_BASE_URL; tasks saved before the master set it are at
 # their task ID. The supervisor sources this file before the init, to set SHELL, and after it.
 
@@ -19,8 +19,8 @@ if ! command -v jupyter >/dev/null; then
     exit 127
 fi
 
-# The idle check reports to the notebook API, which only takes notebooks: only they set the idle
-# type.
+# The idle check reports JupyterLab's state, a notebook's to the notebook API and a shell's to its
+# task's activity record. The master sets the idle type only where the idle time is watched.
 if [[ -n ${NOTEBOOK_IDLE_TYPE+set} ]]; then
     "$DET_PYTHON_EXECUTABLE" /run/determined/jupyter/check_idle.py &
 fi

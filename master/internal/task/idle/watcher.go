@@ -92,6 +92,18 @@ func (w *Watcher) tick(ctx context.Context) (done bool) {
 		lastActivity = ptrs.Ptr(service.LastRequested)
 	}
 
+	if w.cfg.UseTaskActivity {
+		t, held := w.taskActivity()
+		if held {
+			// A held task is active: its idle time has not started.
+			w.syslog.Debugf("idle timeout watcher ticked while the task is held")
+			return false
+		}
+		if t != nil && (lastActivity == nil || t.After(*lastActivity)) {
+			lastActivity = t
+		}
+	}
+
 	if w.cfg.UseRunnerState {
 		w.mu.Lock()
 		if lastActivity == nil ||
@@ -120,4 +132,20 @@ func (w *Watcher) tick(ctx context.Context) (done bool) {
 		return true
 	}
 	return false
+}
+
+// taskActivity returns whether something holds the watched task, or else its last activity, nil
+// before its first activity.
+func (w *Watcher) taskActivity() (lastActivity *time.Time, held bool) {
+	a, ok := ActivityOf(w.cfg.TaskID)
+	switch {
+	case !ok:
+		return nil, false
+	case a.Holds > 0:
+		return nil, true
+	case a.LastActivity.IsZero():
+		return nil, false
+	default:
+		return &a.LastActivity, false
+	}
 }

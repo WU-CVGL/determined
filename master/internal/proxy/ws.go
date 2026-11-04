@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -25,30 +26,39 @@ func connectWithbackoff(tlsConn *tls.Conn) error {
 	return err
 }
 
-func newSingleHostReverseWebSocketProxy(c echo.Context, t *url.URL) http.Handler {
+// newSingleHostReverseWebSocketProxy proxies a WebSocket connection to t. The connection holds
+// its task active from the forwarded upgrade request until it closes. It closes when either side
+// ends it, also without a close handshake.
+func newSingleHostReverseWebSocketProxy(c echo.Context, t *url.URL, a activity) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		in, _, err := c.Response().Hijack()
 		if err != nil {
 			c.Error(errors.Errorf("error hijacking connection to %v: %v", t, err))
 			return
 		}
-		defer func() {
-			if cerr := in.Close(); cerr != nil {
-				c.Logger().Error(cerr)
-			}
-		}()
+		var out net.Conn
+		var closeOnce sync.Once
+		closeConns := func() {
+			closeOnce.Do(func() {
+				if cerr := in.Close(); cerr != nil {
+					c.Logger().Error(cerr)
+				}
+				if out == nil {
+					return
+				}
+				if cerr := out.Close(); cerr != nil {
+					c.Logger().Error(cerr)
+				}
+			})
+		}
+		defer closeConns()
 
-		out, err := net.Dial("tcp", t.Host)
+		out, err = net.Dial("tcp", t.Host)
 		if err != nil {
 			c.Error(echo.NewHTTPError(http.StatusBadGateway,
 				errors.Errorf("error dialing to %v: %v", t, err)))
 			return
 		}
-		defer func() {
-			if cerr := out.Close(); cerr != nil {
-				c.Logger().Error(cerr)
-			}
-		}()
 
 		if t.Scheme == https {
 			keyBytes, certBytes, err := MasterKeyAndCert()
@@ -95,9 +105,23 @@ func newSingleHostReverseWebSocketProxy(c echo.Context, t *url.URL) http.Handler
 			return
 		}
 
+		release := a.hold()
+		defer release()
 		copyReqErr := asyncCopy(out, in)
 		copyResErr := asyncCopy(in, out)
-		logCopyError(c, "request", t, <-copyReqErr)
-		logCopyError(c, "response", t, <-copyResErr)
+		// The first copy to end, on a close, an end of stream or an error of either side, closes
+		// both connections, which ends the other copy: a client that goes away without a close
+		// handshake does not leave the service's connection open, nor the task held. The other
+		// copy's error from that close is not logged.
+		select {
+		case err := <-copyReqErr:
+			logCopyError(c, "request", t, err)
+			closeConns()
+			logCopyErrorAfterClose(c, "response", t, <-copyResErr)
+		case err := <-copyResErr:
+			logCopyError(c, "response", t, err)
+			closeConns()
+			logCopyErrorAfterClose(c, "request", t, <-copyReqErr)
+		}
 	})
 }

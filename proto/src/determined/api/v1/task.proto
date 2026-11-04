@@ -262,6 +262,16 @@ message AllocationReadyRequest {
 // Response to AllocationReadyRequest.
 message AllocationReadyResponse {}
 
+// Report the activity of a service of a task.
+message ReportTaskActivityRequest {
+  // The id of the allocation.
+  string allocation_id = 1;
+  // Whether the service is active now.
+  bool active = 2;
+}
+// Response to ReportTaskActivityRequest.
+message ReportTaskActivityResponse {}
+
 // Mark the given task as waiting.
 message AllocationWaitingRequest {
   // The id of the allocation.

@@ -11,8 +11,12 @@ var idlers = mapx.New[string, *Watcher]()
 
 // Register an idler to default service. The action is called at most once when the idle timeout is
 // exceeded. The action can trigger until Unregister is called.
-// ID must be a globally unique identifier for the idler.
+// ID must be a globally unique identifier for the idler. A watcher that uses the task's activity
+// gets a new record of the task, which Unregister removes.
 func Register(cfg sproto.IdleTimeoutConfig, action TimeoutFn) {
+	if cfg.UseTaskActivity {
+		startActivity(cfg.TaskID)
+	}
 	idlers.Store(cfg.ServiceID, New(cfg, action))
 }
 
@@ -24,6 +28,9 @@ func Unregister(id string) {
 		return
 	}
 	iw.Close()
+	if iw.cfg.UseTaskActivity {
+		stopActivity(iw.cfg.TaskID)
+	}
 }
 
 // RecordActivity records activity for a idler.

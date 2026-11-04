@@ -120,6 +120,12 @@ To open JupyterLab in the browser once it is ``READY``:
 
 Only the user who started the shell and administrators can open its services.
 
+A shell is not terminated for being idle unless its configuration sets :ref:`idle_timeout
+<job-configuration-reference>`. With it, open SSH sessions and browser terminals and browser
+sessions of its services such as JupyterLab count as activity, as does JupyterLab activity as
+``notebook_idle_type`` defines it; by default a kernel that is executing. An SSH session or a
+browser page kept open on the shell can therefore delay its termination.
+
 .. _shell-image-requirements:
 
 Image Requirements

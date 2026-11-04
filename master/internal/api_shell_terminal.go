@@ -22,6 +22,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/shellterm"
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/internal/task"
+	"github.com/determined-ai/determined/master/internal/task/idle"
 	"github.com/determined-ai/determined/master/internal/user"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
@@ -222,6 +223,8 @@ func (s *shellTerminalService) serve(
 	opts.Deadline = time.Now().Add(time.Duration(s.cfg.MaxSessionDuration))
 	// The terminal also ends when its login session expires, which asks the user to sign in again.
 	opts.LoginExpiry = loginSession.Expiry
+	// An open terminal holds the shell active, if its idle time is watched.
+	opts.Activity = idle.TaskRecorder(target.TaskID)
 
 	start := time.Now()
 	who := curUser.Username

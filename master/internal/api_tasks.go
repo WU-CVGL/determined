@@ -27,6 +27,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/grpcutil"
 	"github.com/determined-ai/determined/master/internal/logpattern"
 	"github.com/determined-ai/determined/master/internal/task"
+	"github.com/determined-ai/determined/master/internal/task/idle"
 	"github.com/determined-ai/determined/master/internal/webhooks"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
@@ -274,6 +275,21 @@ func (a *apiServer) AllocationReady(
 		return nil, err
 	}
 	return &apiv1.AllocationReadyResponse{}, nil
+}
+
+// ReportTaskActivity records that a service of the allocation's task is active now, when the task's
+// idle time is watched through its activity record. A report never holds the task active: a
+// reporter that stops reporting cannot keep it alive.
+func (a *apiServer) ReportTaskActivity(
+	ctx context.Context, req *apiv1.ReportTaskActivityRequest,
+) (*apiv1.ReportTaskActivityResponse, error) {
+	if err := a.canControlAllocation(ctx, req.AllocationId); err != nil {
+		return nil, err
+	}
+	if req.Active {
+		idle.Touch(model.AllocationID(req.AllocationId).ToTaskID())
+	}
+	return &apiv1.ReportTaskActivityResponse{}, nil
 }
 
 func (a *apiServer) AllocationWaiting(

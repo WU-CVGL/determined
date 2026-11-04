@@ -249,8 +249,8 @@ func TestTCPProxyLogsWriteAfterCloseAtDebug(t *testing.T) {
 }
 
 // A client that breaks the WebSocket protocol, here with an unmasked frame, makes gorilla/websocket
-// send a close 1002 itself; the service's next write then fails with websocket.ErrCloseSent. The
-// protocol error stays an error, the secondary ErrCloseSent is logged at debug level.
+// send a close 1002 itself. The protocol error stays an error; the proxy then closes the service's
+// connection, and the end of the copy from it is not logged.
 func TestTCPProxyLogsProtocolErrorAsError(t *testing.T) {
 	hook := captureLogs(t)
 	var sawAuthCookie string
@@ -277,13 +277,12 @@ func TestTCPProxyLogsProtocolErrorAsError(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = ws.ReadMessage()
 	require.True(t, websocket.IsCloseError(err, websocket.CloseProtocolError), err)
-	_, err = upstream.Write([]byte("late data"))
-	require.NoError(t, err)
-	require.NoError(t, upstream.Close())
+	require.NoError(t, upstream.SetReadDeadline(deadline))
+	_, err = upstream.Read(make([]byte, 1))
+	require.Equal(t, io.EOF, err, "the proxy closes the service's connection")
 
 	requireCopyErrors(t, hook, addr, map[string]logrus.Level{
-		"websocket: bad MASK":   logrus.ErrorLevel,
-		"websocket: close sent": logrus.DebugLevel,
+		"websocket: bad MASK": logrus.ErrorLevel,
 	})
 }
 
