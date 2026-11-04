@@ -170,17 +170,6 @@ func (s *Service) UserAndNotebookSessionFromToken(
 		return nil, nil, db.ErrNotFound
 	}
 	var user model.User
-
-	// Check if the user session ID exists; some notebooks launched before the change to use
-	// user IDs may still have the session ID on the token.
-	if notebookSession.SessionID != nil {
-		user, err := BySessionID(context.TODO(), *notebookSession.SessionID)
-		if err != nil {
-			return nil, nil, err
-		}
-		return user, &notebookSession, nil
-	}
-
 	err := db.Bun().NewSelect().
 		Table("users").
 		Where("id = ?", notebookSession.UserID).Scan(ctx, &user)

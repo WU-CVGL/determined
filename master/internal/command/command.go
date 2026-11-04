@@ -46,7 +46,7 @@ var queueStates = []model.AllocationState{
 }
 
 // Command is executed in a containerized environment on a Determined cluster.
-// Locking in: Start, OnExit, DeleteIfInWorkspace, ToV1Command/Shell/Tensorboard, v1State.
+// Locking in: Start, OnExit, DeleteIfInWorkspace, ToV1Command/Shell/Tensorboard.
 type Command struct {
 	mu sync.Mutex
 
@@ -257,7 +257,7 @@ func (c *Command) OnExit(ae *task.AllocationExited) {
 		c.syslog.WithError(err).Errorf(
 			"failure to delete user session for task: %v", c.taskID)
 	}
-	// Shells that run JupyterLab, and notebooks, have a notebook session for its token.
+	// Shells that run JupyterLab have a notebook session for its token.
 	if c.Base.ExtraEnvVars[model.NotebookSessionEnvVar] != "" {
 		if err := internaldb.DeleteNotebookSessionByTask(context.TODO(), c.taskID); err != nil {
 			c.syslog.WithError(err).Errorf(
@@ -426,15 +426,6 @@ func (c *Command) ToV1Tensorboard() *tensorboardv1.Tensorboard {
 	}
 }
 
-// v1State returns the state of the command, as ToV1Command, ToV1Shell and ToV1Tensorboard report
-// it.
-func (c *Command) v1State() taskv1.State {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	return enrichState(c.refreshAllocationState().State)
-}
-
 // ToV1Command(), ToV1Shell(), ToV1Tensorboard() helper functions:
 // refreshAllocationState, enrichState, toProto, endTimeProto, serviceAddress, stringID
 
@@ -489,12 +480,10 @@ func (c *Command) stringID() string {
 // proxyPortConfigs returns the proxies of a command's ports, built from its persisted spec on
 // every start and restore. Each service's port gets one proxy from its record in spec.Services,
 // and the other ports, such as those of the config's environment, are plain; a plain port that a
-// record owns is skipped. A spec without records reaches every port over HTTPS if it is a
-// notebook, since JupyterLab serves a master-signed cert.
+// record owns is skipped. A spec without records reaches every port as a plain port.
 func proxyPortConfigs(spec tasks.GenericCommandSpec, taskID model.TaskID) []*sproto.ProxyPortConfig {
 	if len(spec.Services) == 0 {
-		return sproto.NewProxyPortConfig(
-			spec.ProxyPorts(), taskID, spec.TaskType == model.TaskTypeNotebook)
+		return sproto.NewProxyPortConfig(spec.ProxyPorts(), taskID, false)
 	}
 	ports := make([]*sproto.ProxyPortConfig, 0, len(spec.Services))
 	owned := make(map[int]bool, len(spec.Services))
@@ -520,8 +509,8 @@ func proxyPortConfigs(spec tasks.GenericCommandSpec, taskID model.TaskID) []*spr
 }
 
 // idleTimeoutConfig returns how the task's idle time is watched, if its config sets an idle
-// timeout: a shell's through its task's activity record, a TensorBoard's and a restored notebook's
-// through the last request to its proxy, as their launches chose. Other tasks are not watched.
+// timeout: a shell's through its task's activity record, a TensorBoard's through the last request
+// to its proxy, as its launch chose. Other tasks are not watched.
 func idleTimeoutConfig(spec tasks.GenericCommandSpec, taskID model.TaskID) *sproto.IdleTimeoutConfig {
 	if spec.Config.IdleTimeout == nil {
 		return nil

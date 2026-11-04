@@ -49,9 +49,9 @@ type shellTerminalEnv struct {
 	srv     *httptest.Server
 	sshd    *shelltermtest.SSHD
 	shellID model.TaskID
-	// notebookID is a task of another type.
-	notebookID model.TaskID
-	keyPEM     string
+	// commandID is a task of another type.
+	commandID model.TaskID
+	keyPEM    string
 
 	owner, other, admin model.User
 	tokens              map[model.UserID]string
@@ -97,11 +97,11 @@ func setupShellTerminalTest(
 	shell, err := command.DefaultCmdService.LaunchGenericCommand(model.TaskTypeShell, model.JobTypeShell, req)
 	require.NoError(t, err)
 	env.shellID = model.TaskID(shell.ToV1Shell().Id)
-	nbReq := mockGenericReq(t, api.m.db)
-	nbReq.Spec.Base.Owner = &model.User{ID: env.owner.ID}
-	nb, err := command.DefaultCmdService.LaunchGenericCommand(model.TaskTypeNotebook, model.JobTypeNotebook, nbReq)
+	cmdReq := mockGenericReq(t, api.m.db)
+	cmdReq.Spec.Base.Owner = &model.User{ID: env.owner.ID}
+	cmd, err := command.DefaultCmdService.LaunchGenericCommand(model.TaskTypeCommand, model.JobTypeCommand, cmdReq)
 	require.NoError(t, err)
-	env.notebookID = model.TaskID(nb.ToV1Command().Id)
+	env.commandID = model.TaskID(cmd.ToV1Command().Id)
 
 	cfg := config.DefaultShellTerminalConfig()
 	if cfgFn != nil {
@@ -367,7 +367,7 @@ func TestShellTerminalAuthZ(t *testing.T) {
 	// Unknown IDs, other task types and other users' shells all get the same plain 404.
 	unknown := env.refused(t, &env.owner, model.TaskID("no-such-shell"), nil, http.StatusNotFound)
 	require.JSONEq(t, `{"message":"Not Found"}`, unknown)
-	require.Equal(t, unknown, env.refused(t, &env.owner, env.notebookID, nil, http.StatusNotFound))
+	require.Equal(t, unknown, env.refused(t, &env.owner, env.commandID, nil, http.StatusNotFound))
 	require.Equal(t, unknown, env.refused(t, &env.other, env.shellID, nil, http.StatusNotFound))
 	require.Zero(t, env.dials.Load(), "dialed sshd for a refused request")
 
@@ -610,7 +610,7 @@ func TestShellTerminalTargetSnapshot(t *testing.T) {
 	require.Equal(t, shellTerminalAgentUser, target.LoginUser)
 	require.Equal(t, env.keyPEM, string(target.PrivateKey))
 
-	_, err = command.DefaultCmdService.ShellTerminalTarget(env.notebookID)
+	_, err = command.DefaultCmdService.ShellTerminalTarget(env.commandID)
 	require.ErrorIs(t, err, command.ErrShellTerminalNotFound)
 	_, err = command.DefaultCmdService.ShellTerminalTarget("no-such-task")
 	require.ErrorIs(t, err, command.ErrShellTerminalNotFound)

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -13,12 +12,10 @@ import (
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/rm"
 	"github.com/determined-ai/determined/master/internal/task"
-	"github.com/determined-ai/determined/master/internal/task/tasklogger"
 	"github.com/determined-ai/determined/master/pkg/logger"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/protoutils"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
-	"github.com/determined-ai/determined/proto/pkg/taskv1"
 )
 
 // DefaultCmdService is the global command service singleton.
@@ -54,8 +51,7 @@ func SetDefaultService(cs *CommandService) {
 	DefaultCmdService = cs
 }
 
-// RestoreAllCommands restores all terminated commands whose end time isn't set. It ends the
-// notebooks among them (see endRestoredNotebook).
+// RestoreAllCommands restores all terminated commands whose end time isn't set.
 func (cs *CommandService) RestoreAllCommands(
 	ctx context.Context,
 ) error {
@@ -86,37 +82,8 @@ func (cs *CommandService) RestoreAllCommands(
 		// Restore to the command service registry.
 		cs.commands[cmd.taskID] = cmd
 		cs.syslog.Debugf("restored & started generic command %s", cmd.taskID)
-		if cmd.taskType == model.TaskTypeNotebook {
-			go cmd.endRestoredNotebook()
-		}
 	}
 	return nil
-}
-
-// restoredNotebookEndReason is the task log line and the kill reason of a notebook that the master
-// ends when it restores it: JupyterLab runs as a service of a shell, and nothing else can end a
-// notebook.
-const restoredNotebookEndReason = "notebooks are not supported: ended at the master's start"
-
-// restoredNotebookKillRetry is the wait between the attempts to end a restored notebook whose
-// allocation is not restored yet.
-var restoredNotebookKillRetry = 10 * time.Second
-
-// endRestoredNotebook ends a notebook that the master restored, with one line in its task log. It
-// kills the notebook's allocation once the resource manager has restored it, until the allocation
-// is killed or gone.
-func (c *Command) endRestoredNotebook() {
-	tasklogger.Insert(tasklogger.CreateLogFromMaster(
-		c.taskID, model.LogLevelInfo, restoredNotebookEndReason))
-	for {
-		err := task.DefaultService.Signal(c.allocationID, task.KillAllocation,
-			restoredNotebookEndReason)
-		if err == nil || strings.Contains(err.Error(), "not found") {
-			return
-		}
-		c.syslog.WithError(err).Warn("ending a restored notebook, retrying")
-		time.Sleep(restoredNotebookKillRetry)
-	}
 }
 
 // LaunchGenericCommand creates NTSC commands and persists them to the database.
@@ -368,21 +335,6 @@ func (cs *CommandService) GetCommand(req *apiv1.GetCommandRequest) (*apiv1.GetCo
 		Command: c.ToV1Command(),
 		Config:  protoutils.ToStruct(c.Config),
 	}, nil
-}
-
-// CountRunning returns the number of the commands of a type that the command service runs whose
-// state is running.
-func (cs *CommandService) CountRunning(cmdType model.TaskType) int32 {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
-	var n int32
-	for _, c := range cs.listByType(nil, nil, cmdType, 0) {
-		if c.v1State() == taskv1.State_STATE_RUNNING {
-			n++
-		}
-	}
-	return n
 }
 
 // GetShells returns all shells in the command service registry matching the workspace ID.

@@ -639,9 +639,9 @@ func (a *apiServer) canWriteTaskLogs(
 	return workspaceID, expID, nil
 }
 
-// canWriteNonTrialTaskLogs is the write rule for the logs of a command, notebook, shell,
-// TensorBoard, generic task or checkpoint GC task. The task's own containers, which ship their
-// output with its allocation session (ship_logs.py), may always write. Anyone else must be allowed
+// canWriteNonTrialTaskLogs is the write rule for the logs of a command, shell, TensorBoard,
+// generic task or checkpoint GC task. The task's own containers, which ship their output with its
+// allocation session (ship_logs.py), may always write. Anyone else must be allowed
 // to control the task, whose owner is the owner of its job. For a task with command state, that is
 // CanControlGenericTask, as for killing it: the owner or an admin under basic authorization,
 // UPDATE_NSC in its workspace under RBAC. A task without command state, such as a checkpoint GC
@@ -744,11 +744,7 @@ func (a *apiServer) GetActiveTasksCount(
 		return nil, status.Error(codes.PermissionDenied, err.Error())
 	}
 
-	finalResp := &apiv1.GetActiveTasksCountResponse{
-		// Notebook records from an older master that are still running; this master ends the
-		// notebooks it restores.
-		Notebooks: command.DefaultCmdService.CountRunning(model.TaskTypeNotebook),
-	}
+	finalResp := &apiv1.GetActiveTasksCountResponse{}
 
 	resp2, err := command.DefaultCmdService.GetTensorboards(&apiv1.GetTensorboardsRequest{})
 	if err != nil {

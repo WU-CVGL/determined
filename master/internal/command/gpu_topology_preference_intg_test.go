@@ -43,7 +43,7 @@ func (s *captureStarts) StartAllocation(
 	})
 }
 
-// Commands, notebooks, shells and TensorBoards pass their prefer_gpu_topology to the resource
+// Commands, shells and TensorBoards pass their prefer_gpu_topology to the resource
 // manager.
 func TestNTSCCarriesGPUTopologyPreference(t *testing.T) {
 	pgDB := setupTest(t)
@@ -57,7 +57,6 @@ func TestNTSCCarriesGPUTopologyPreference(t *testing.T) {
 		job  model.JobType
 	}{
 		{model.TaskTypeCommand, model.JobTypeCommand},
-		{model.TaskTypeNotebook, model.JobTypeNotebook},
 		{model.TaskTypeShell, model.JobTypeShell},
 		{model.TaskTypeTensorboard, model.JobTypeTensorboard},
 	} {

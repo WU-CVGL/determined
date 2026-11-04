@@ -33,22 +33,14 @@ func legacySpec(taskType model.TaskType, ports ...expconf.ProxyPort) tasks.Gener
 	return spec
 }
 
-// Specs without service records, as every spec was before the master recorded them and as
-// notebooks still are, get the proxies they had: a shell's sshd as its default TCP port, plain
-// other ports, and every port of a notebook over HTTPS.
+// Specs without service records, as every spec was before the master recorded them, get the
+// proxies they had: a shell's sshd as its default TCP port, and plain other ports.
 func TestProxyPortConfigsWithoutRecords(t *testing.T) {
 	shell := legacySpec(model.TaskTypeShell, sshdProxyPort(3210))
 	require.Equal(t, []*sproto.ProxyPortConfig{
 		{ServiceID: "task-1", Port: 3210, ProxyTCP: true, Unauthenticated: true},
 		{ServiceID: "task-1:8080", Port: 8080},
 	}, proxyPortConfigs(shell, "task-1"))
-
-	notebook := legacySpec(model.TaskTypeNotebook,
-		expconf.ProxyPort{RawProxyPort: 2950, RawDefaultServiceID: ptrs.Ptr(true)})
-	require.Equal(t, []*sproto.ProxyPortConfig{
-		{ServiceID: "task-1", Port: 2950, TLS: true},
-		{ServiceID: "task-1:8080", Port: 8080, TLS: true},
-	}, proxyPortConfigs(notebook, "task-1"))
 
 	command := legacySpec(model.TaskTypeCommand)
 	require.Equal(t, []*sproto.ProxyPortConfig{{ServiceID: "task-1:8080", Port: 8080}},

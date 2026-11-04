@@ -194,7 +194,7 @@ func TestNonExperimentTasksContextDirectory(t *testing.T) {
 	tID := model.NewTaskID()
 	require.NoError(t, AddTask(ctx, &model.Task{
 		TaskID:    tID,
-		TaskType:  model.TaskTypeNotebook,
+		TaskType:  model.TaskTypeShell,
 		StartTime: time.Now().UTC().Truncate(time.Millisecond),
 	}), "failed to add task")
 
@@ -208,7 +208,7 @@ func TestNonExperimentTasksContextDirectory(t *testing.T) {
 	tID = model.NewTaskID()
 	require.NoError(t, AddTask(ctx, &model.Task{
 		TaskID:    tID,
-		TaskType:  model.TaskTypeNotebook,
+		TaskType:  model.TaskTypeShell,
 		StartTime: time.Now().UTC().Truncate(time.Millisecond),
 	}), "failed to add task")
 
