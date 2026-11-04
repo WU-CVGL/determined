@@ -36,6 +36,11 @@ func TestCommandConfigServices(t *testing.T) {
 			config: `{"services": {"ssh": {}, "jupyter": {}}}`,
 			want:   []string{"jupyter", "ssh"},
 		},
+		{
+			name:   "vscode",
+			config: `{"services": {"vscode": {}, "jupyter": {}}}`,
+			want:   []string{"jupyter", "vscode"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			config, err := decodeCommandConfig(tc.config)
@@ -50,7 +55,7 @@ func TestCommandConfigServices(t *testing.T) {
 	}
 
 	// A service that the supervisor has no unit for.
-	for _, name := range []string{"vscode", "SSH", ""} {
+	for _, name := range []string{"emacs", "VSCode", "SSH", ""} {
 		config, err := decodeCommandConfig(`{"services": {"` + name + `": {}}}`)
 		require.NoError(t, err, name)
 		err = check.Validate(config)
@@ -102,4 +107,5 @@ func TestInteractiveServicesSorted(t *testing.T) {
 	require.IsNonDecreasing(t, InteractiveServices)
 	require.Contains(t, InteractiveServices, ServiceSSH)
 	require.Contains(t, InteractiveServices, ServiceJupyter)
+	require.Contains(t, InteractiveServices, ServiceVSCode)
 }

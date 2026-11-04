@@ -132,6 +132,10 @@ func (a *apiServer) GetTaskServiceCredential(
 		resp.Token = ptrs.Ptr(cred.Token)
 		resp.Url = ptrs.Ptr(command.NotebookServiceAddress(
 			serviceURL(cred.Service.ServiceID(model.TaskID(req.TaskId)), false), cred.Token))
+	case model.ServiceVSCode:
+		// code-server's login form is at <url>login.
+		resp.Password = ptrs.Ptr(cred.Password)
+		resp.Url = ptrs.Ptr(serviceURL(cred.Service.ServiceID(model.TaskID(req.TaskId)), false))
 	}
 	logCredentialRead(*curUser, req.Service+" credential", req.TaskId, ownerID)
 	return resp, nil

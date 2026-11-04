@@ -4,21 +4,27 @@
 package internal
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/argon2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/determined-ai/determined/master/internal/command"
+	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/mocks"
 	"github.com/determined-ai/determined/master/internal/rm/rmevents"
@@ -438,6 +444,7 @@ func TestLaunchShellServicePortsExhausted(t *testing.T) {
 	cs, err := command.NewService(api.m.db, api.m.rm)
 	require.NoError(t, err)
 	command.SetDefaultService(cs)
+	withCodeServer(t, api, "4.96.4")
 	jupyter := map[string]any{"jupyter": map[string]any{}}
 
 	for name, tc := range map[string]struct {
@@ -451,6 +458,11 @@ func TestLaunchShellServicePortsExhausted(t *testing.T) {
 		"jupyter": {
 			shellConfig(t, jupyter, portsExcept(minNotebookPort, maxNotebookPort)...),
 			"services: jupyter: no free port in 2900-3199",
+		},
+		"vscode": {
+			shellConfig(t, map[string]any{"vscode": map[string]any{}},
+				portsExcept(minNotebookPort, maxNotebookPort)...),
+			"services: vscode: no free port in 2900-3199",
 		},
 	} {
 		_, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{Config: tc.config})
@@ -574,7 +586,7 @@ func TestLaunchRejectsServices(t *testing.T) {
 		msg      string
 	}{
 		"unknown": {
-			map[string]any{"vscode": map[string]any{}}, `services: unknown service "vscode"`,
+			map[string]any{"emacs": map[string]any{}}, `services: unknown service "emacs"`,
 		},
 		"not an object": {map[string]any{"jupyter": 1.0}, "model.ServiceConfig"},
 		"an option": {
@@ -591,6 +603,147 @@ func TestLaunchRejectsServices(t *testing.T) {
 	// An empty map is no services, on every launch.
 	_, err = api.LaunchCommand(ctx, &apiv1.LaunchCommandRequest{
 		Config: servicesConfig(t, map[string]any{}),
+	})
+	require.NoError(t, err)
+}
+
+// withCodeServer makes the master serve code-server's release version for the test, as the
+// interactive.code_server section does.
+func withCodeServer(t *testing.T, api *apiServer, version string) {
+	t.Helper()
+	prev := api.m.config.Interactive.CodeServer
+	api.m.config.Interactive.CodeServer = config.CodeServerConfig{
+		Version: version, Dir: t.TempDir(), URLTemplate: config.DefaultCodeServerURLTemplate,
+	}
+	t.Cleanup(func() { api.m.config.Interactive.CodeServer = prev })
+}
+
+// requireCodeServerHash checks that hash is an argon2id PHC string of password, by computing the
+// hash again from its parameters and salt.
+func requireCodeServerHash(t *testing.T, hash, password string) {
+	t.Helper()
+	fields := strings.Split(hash, "$")
+	require.Len(t, fields, 6, hash)
+	require.Equal(t, []string{"", "argon2id", fmt.Sprintf("v=%d", argon2.Version)}, fields[:3])
+	var memory, iterations uint32
+	var threads uint8
+	_, err := fmt.Sscanf(fields[3], "m=%d,t=%d,p=%d", &memory, &iterations, &threads)
+	require.NoError(t, err, hash)
+	salt, err := base64.RawStdEncoding.DecodeString(fields[4])
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(salt), 16)
+	key, err := base64.RawStdEncoding.DecodeString(fields[5])
+	require.NoError(t, err)
+	require.Equal(t, key,
+		argon2.IDKey([]byte(password), salt, iterations, memory, threads, uint32(len(key))))
+	require.NotEqual(t, key,
+		argon2.IDKey([]byte(password+"x"), salt, iterations, memory, threads, uint32(len(key))))
+}
+
+// A shell with the vscode service runs code-server next to sshd and JupyterLab: at
+// "<task>:<port>", with a port of its own from the notebooks' range, over plain HTTP behind a
+// master login and the owner rule, with its prefix stripped. The master pins the release it
+// serves and mints a password, which the spec keeps in its metadata: the container gets only its
+// argon2id hash, in neither its environment nor its files the password itself.
+func TestLaunchShellWithVSCodeService(t *testing.T) {
+	api, _, ctx := setupAPITest(t, nil)
+	cs, err := command.NewService(api.m.db, api.m.rm)
+	require.NoError(t, err)
+	command.SetDefaultService(cs)
+	rm := api.m.rm.(*mocks.ResourceManager)
+	withCodeServer(t, api, "4.96.4")
+
+	resp, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
+		Config: shellConfig(t, map[string]any{"vscode": map[string]any{}, "jupyter": nil}),
+	})
+	require.NoError(t, err)
+	taskID := resp.Shell.Id
+	spec := launchedSpec(t, taskID)
+
+	// ssh first, then the declared services in sorted order.
+	require.Len(t, spec.Services, 3)
+	ssh, jupyter, vscode := spec.Services[0], spec.Services[1], spec.Services[2]
+	require.Equal(t, model.ServiceSSH, ssh.Name)
+	require.Equal(t, model.ServiceJupyter, jupyter.Name)
+	require.GreaterOrEqual(t, vscode.Port, minNotebookPort)
+	require.LessOrEqual(t, vscode.Port, maxNotebookPort)
+	require.NotEqual(t, jupyter.Port, vscode.Port)
+	require.Equal(t, tasks.InteractiveService{
+		Name: model.ServiceVSCode, Port: vscode.Port, Exec: true, StripPrefix: true,
+	}, vscode)
+
+	vscodeID := taskID + ":" + strconv.Itoa(vscode.Port)
+	alloc := allocateRequest(t, rm, taskID)
+	requireOnePolicyPerPort(t, alloc.ProxyPorts)
+	require.Equal(t, []*sproto.ProxyPortConfig{
+		{ServiceID: taskID, Port: ssh.Port, ProxyTCP: true, Unauthenticated: true},
+		{ServiceID: taskID + ":" + strconv.Itoa(jupyter.Port), Port: jupyter.Port, TLS: true, Exec: true},
+		{ServiceID: vscodeID, Port: vscode.Port, Exec: true, StripPrefix: true},
+	}, alloc.ProxyPorts)
+
+	env := spec.Base.ExtraEnvVars
+	require.Equal(t, "ssh,jupyter,vscode", env["DET_SERVICES"])
+	require.Equal(t, "4.96.4", env["DET_CODE_SERVER_VERSION"])
+	require.Equal(t, strconv.Itoa(vscode.Port), env["DET_CODE_SERVER_PORT"])
+	require.Equal(t, strconv.Itoa(jupyter.Port), env["NOTEBOOK_PORT"])
+
+	// The password: random and URL-safe, in the metadata only.
+	require.NotNil(t, spec.Metadata.CodeServerPassword)
+	password := *spec.Metadata.CodeServerPassword
+	secret, err := base64.RawURLEncoding.DecodeString(password)
+	require.NoError(t, err)
+	require.Len(t, secret, 32)
+	requireCodeServerHash(t, env["HASHED_PASSWORD"], password)
+	require.True(t, strings.HasPrefix(env["HASHED_PASSWORD"], "$argon2id$v=19$m=19456,t=2,p=1$"))
+	for key, value := range env {
+		require.NotContains(t, value, password, key)
+	}
+	for _, a := range spec.ToTaskSpec().ExtraArchives {
+		for _, item := range a.Archive {
+			require.False(t, bytes.Contains(item.Content, []byte(password)), item.Path)
+		}
+	}
+	raw, err := json.Marshal(spec.Config)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), password)
+
+	// The unit, and the run directory of code-server.
+	paths := containerFilePaths(spec)
+	requireOncePerPath(t, paths)
+	require.Contains(t, paths, "/run/determined/services/vscode.sh")
+	require.Contains(t, paths, codeServerRunDir)
+
+	// Each shell gets its own password; a shell keeps its release when the master's changes.
+	api.m.config.Interactive.CodeServer.Version = "4.99.0"
+	other, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
+		Config: servicesConfig(t, map[string]any{"vscode": map[string]any{}}),
+	})
+	require.NoError(t, err)
+	otherSpec := launchedSpec(t, other.Shell.Id)
+	require.Equal(t, "4.99.0", otherSpec.Base.ExtraEnvVars["DET_CODE_SERVER_VERSION"])
+	require.NotEqual(t, password, *otherSpec.Metadata.CodeServerPassword)
+	require.Equal(t, "4.96.4", launchedSpec(t, taskID).Base.ExtraEnvVars["DET_CODE_SERVER_VERSION"])
+}
+
+// The vscode service needs the master to serve code-server; without interactive.code_server a
+// shell that declares it is refused, and other shells launch as before.
+func TestLaunchShellVSCodeNeedsCodeServer(t *testing.T) {
+	api, _, ctx := setupAPITest(t, nil)
+	cs, err := command.NewService(api.m.db, api.m.rm)
+	require.NoError(t, err)
+	command.SetDefaultService(cs)
+	prev := api.m.config.Interactive.CodeServer
+	api.m.config.Interactive.CodeServer = config.DefaultCodeServerConfig()
+	t.Cleanup(func() { api.m.config.Interactive.CodeServer = prev })
+
+	_, err = api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
+		Config: servicesConfig(t, map[string]any{"vscode": map[string]any{}}),
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err), err)
+	require.Equal(t, "services: vscode: the master serves no code-server", status.Convert(err).Message())
+
+	_, err = api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
+		Config: servicesConfig(t, map[string]any{"jupyter": map[string]any{}}),
 	})
 	require.NoError(t, err)
 }

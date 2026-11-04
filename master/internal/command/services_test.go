@@ -222,3 +222,20 @@ func TestCommandServiceCredential(t *testing.T) {
 	_, err = shell.serviceCredential(model.ServiceJupyter)
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
+
+// The vscode service's credential is the password in the spec's metadata; a spec without one has
+// none.
+func TestCommandServiceCredentialVSCode(t *testing.T) {
+	spec := shellWithJupyter()
+	vscode := tasks.InteractiveService{Name: model.ServiceVSCode, Port: 2901, Exec: true, StripPrefix: true}
+	spec.Services = append(spec.Services, vscode)
+	spec.Base.Owner = &model.User{ID: 7}
+	c := servicesCommand(spec, model.TaskTypeShell)
+	_, err := c.serviceCredential(model.ServiceVSCode)
+	require.Equal(t, codes.NotFound, status.Code(err))
+
+	c.Metadata.CodeServerPassword = ptrs.Ptr("password")
+	cred, err := c.serviceCredential(model.ServiceVSCode)
+	require.NoError(t, err)
+	require.Equal(t, TaskServiceCredential{Service: vscode, OwnerID: 7, Password: "password"}, cred)
+}

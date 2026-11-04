@@ -45,6 +45,7 @@ func requireInteractiveSupervisorFiles(t *testing.T, files archive.Archive, uid,
 		"/run/determined/report_service_states.py":  etc.ServiceStateReporterResource,
 		"/run/determined/services/ssh.sh":           etc.SSHServiceResource,
 		"/run/determined/services/jupyter.sh":       etc.JupyterServiceResource,
+		"/run/determined/services/vscode.sh":        etc.VSCodeServiceResource,
 	}
 	found := map[string]bool{}
 	for _, item := range files {

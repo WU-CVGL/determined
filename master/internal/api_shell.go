@@ -3,6 +3,8 @@ package internal
 import (
 	"archive/tar"
 	"context"
+	cryptorand "crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -11,6 +13,7 @@ import (
 
 	petname "github.com/dustinkirkland/golang-petname"
 	"github.com/pkg/errors"
+	"golang.org/x/crypto/argon2"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -19,6 +22,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/api/apiutils"
 	"github.com/determined-ai/determined/master/internal/authz"
 	"github.com/determined-ai/determined/master/internal/command"
+	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
 	"github.com/determined-ai/determined/master/internal/proxy"
@@ -349,6 +353,12 @@ func (a *apiServer) LaunchShell(
 				return nil, err
 			}
 			launchReq.Spec.AdditionalFiles = append(launchReq.Spec.AdditionalFiles, files...)
+		case interactiveServiceVSCode:
+			files, err := addShellVSCode(launchReq.Spec, a.m.config.Interactive.CodeServer)
+			if err != nil {
+				return nil, err
+			}
+			launchReq.Spec.AdditionalFiles = append(launchReq.Spec.AdditionalFiles, files...)
 		default:
 			return nil, status.Errorf(codes.InvalidArgument, "services: unknown service %q", name)
 		}
@@ -432,4 +442,94 @@ func addShellJupyter(spec *tasks.GenericCommandSpec) (archive.Archive, error) {
 	}
 	addExtraEnvVars(spec, env)
 	return jupyterFiles(spec.Base.AgentUserGroup, key, cert), nil
+}
+
+const (
+	// codeServerRunDir holds the files of a shell's code-server run: its config file and its
+	// session socket.
+	codeServerRunDir = "/run/determined/code-server"
+	// codeServerVersionEnvVar is the code-server release that a shell's vscode service runs: the
+	// one that the master served when it created the shell, which the shell keeps.
+	codeServerVersionEnvVar = "DET_CODE_SERVER_VERSION"
+	// codeServerPortEnvVar is the container port of a shell's code-server.
+	codeServerPortEnvVar = "DET_CODE_SERVER_PORT"
+	// codeServerHashEnvVar is the hash of the password of a shell's code-server, which code-server
+	// reads and removes from its environment.
+	codeServerHashEnvVar = "HASHED_PASSWORD"
+	// codeServerPasswordBytes is the entropy of a code-server password.
+	codeServerPasswordBytes = 32
+)
+
+// The argon2id parameters of a code-server password's hash: OWASP's minimum setting (19 MiB, t=2,
+// p=1). A password of codeServerPasswordBytes random bytes needs no harder hash, and code-server
+// checks the hash on every login.
+const (
+	codeServerArgon2Time    = 2
+	codeServerArgon2Memory  = 19 * 1024
+	codeServerArgon2Threads = 1
+	codeServerArgon2KeyLen  = 32
+	codeServerArgon2SaltLen = 16
+)
+
+// vscodeService is the vscode service of a shell: at "<task>:<port>", reached over plain HTTP,
+// since code-server serves no TLS in the container, by the task's owner and admins only, since it
+// runs code as the owner. The proxy strips its prefix: code-server's routes see the stripped path
+// and its pages link relative to it.
+func vscodeService(port int) tasks.InteractiveService {
+	return tasks.InteractiveService{
+		Name:        interactiveServiceVSCode,
+		Port:        port,
+		Exec:        true,
+		StripPrefix: true,
+	}
+}
+
+// codeServerPasswordHash returns the argon2id hash of password, with a random salt, as a PHC
+// string, "$argon2id$v=19$m=...,t=...,p=...$<salt>$<hash>", which code-server takes as its
+// HASHED_PASSWORD.
+func codeServerPasswordHash(password string) (string, error) {
+	salt := make([]byte, codeServerArgon2SaltLen)
+	if _, err := cryptorand.Read(salt); err != nil {
+		return "", err
+	}
+	key := argon2.IDKey([]byte(password), salt,
+		codeServerArgon2Time, codeServerArgon2Memory, codeServerArgon2Threads, codeServerArgon2KeyLen)
+	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s", argon2.Version,
+		codeServerArgon2Memory, codeServerArgon2Time, codeServerArgon2Threads,
+		base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(key)), nil
+}
+
+// addShellVSCode adds the vscode service to a shell spec: a port from the notebooks' range,
+// outside the spec's other ports, and a new password, which the spec keeps in its metadata, as it
+// keeps the private key. The container gets the password's hash, the release that conf serves now,
+// which the shell keeps, and the port, in its environment, and the run directory, which
+// addShellVSCode returns. Without code-server on the master the service is refused.
+func addShellVSCode(spec *tasks.GenericCommandSpec, conf config.CodeServerConfig) (archive.Archive, error) {
+	if !conf.Enabled() {
+		return nil, status.Error(codes.InvalidArgument,
+			"services: vscode: the master serves no code-server")
+	}
+	port, err := freeServicePort(spec, interactiveServiceVSCode, minNotebookPort, maxNotebookPort)
+	if err != nil {
+		return nil, err
+	}
+	secret := make([]byte, codeServerPasswordBytes)
+	if _, err := cryptorand.Read(secret); err != nil {
+		return nil, status.Errorf(codes.Internal, "generating the code-server password: %s", err)
+	}
+	password := base64.RawURLEncoding.EncodeToString(secret)
+	hash, err := codeServerPasswordHash(password)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "hashing the code-server password: %s", err)
+	}
+	spec.AddService(vscodeService(port))
+	spec.Metadata.CodeServerPassword = &password
+	addExtraEnvVars(spec, map[string]string{
+		codeServerVersionEnvVar: conf.Version,
+		codeServerPortEnvVar:    strconv.Itoa(port),
+		codeServerHashEnvVar:    hash,
+	})
+	return archive.Archive{
+		spec.Base.AgentUserGroup.OwnedArchiveItem(codeServerRunDir, nil, 0o700, tar.TypeDir),
+	}, nil
 }
