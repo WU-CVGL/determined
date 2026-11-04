@@ -177,7 +177,7 @@ belonging to the current user. It is possible to show assets owned by all users 
 
    det experiment list -a   # List all experiments.
    det command list -a      # List all commands.
-   det notebook list -a     # List all notebooks.
+   det shell list -a        # List all shells.
    det tensorboard list -a  # List all TensorBoards.
 
 .. _webui-1:
@@ -207,7 +207,7 @@ To reactivate a user, ``user activate`` can be used:
  Run Tasks as Specific Agent Users
 ***********************************
 
-For experiment, notebook, or command tasks using the ``bind_mount`` option in their
+For experiment, shell, or command tasks using the ``bind_mount`` option in their
 :ref:`experiment-config-reference`, setting the Unix user and group on the agent ensures file
 permission consistency between the task and agent.
 

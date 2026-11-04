@@ -16,7 +16,7 @@ These debugging steps introduce environment and code changes incrementally, work
 functioning distributed training on a Determined cluster:
 
 -  `Step 1 - Verify that your training script runs locally`_
--  `Step 2 - Verify that your training script runs in a notebook or shell`_
+-  `Step 2 - Verify that your training script runs in a shell`_
 -  `Step 3 - Verify that a single-GPU experiment works`_
 -  `Step 4 - Verify that a multi-GPU experiment works`_
 
@@ -46,34 +46,32 @@ Confirm that your code works as expected before continuing.
 
 .. _step2:
 
-***********************************************************************
- Step 2 - Verify that your training script runs in a notebook or shell
-***********************************************************************
+***********************************************************
+ Step 2 - Verify that your training script runs in a shell
+***********************************************************
 
 This step is the same as :ref:`Step 1 <step1>`, except the your training script runs on the
 Determined cluster instead of locally.
 
-#. Launch a notebook or shell on the cluster:
+#. Launch a shell on the cluster:
 
    Pass the root directory containing your model and training scripts in the ``--context`` argument:
-
-   If you prefer a Jupyter notebook, enter:
-
-   .. code:: bash
-
-      det notebook start --context my_model_dir
-      # Your browser should automatically open the notebook.
-
-   If you prefer to use SSH to interact with your model, enter:
 
    .. code:: bash
 
       det shell start --context my_model_dir
       # Your terminal should automatically connect to the shell.
 
-   Note that changes made to the ``--context`` directory while inside the notebook or shell do not
-   affect the original files outside of the notebook or shell. See :ref:`notebook-state` for more
-   information.
+   If you prefer JupyterLab, add the ``jupyter`` service, and open it once ``det task services
+   <shell id>`` shows it ``READY``:
+
+   .. code:: bash
+
+      det shell start --context my_model_dir --service jupyter
+      det task open <shell id> jupyter
+
+   Note that changes made to the ``--context`` directory while inside the shell do not affect the
+   original files outside of the shell. See :ref:`jupyter-state` for more information.
 
 #. Verify code execution:
 
@@ -141,9 +139,8 @@ the cluster and managed by Determined.
    experiment configuration`` during submission, review the :ref:`experiment configuration
    <experiment-config-reference>`.
 
-   If your training script runs inside a notebook or shell, but fails when on-cluster, make sure
-   that notebook or shell customizations you might have made are replicated in your experiment
-   config, such as:
+   If your training script runs inside a shell, but fails when on-cluster, make sure that shell
+   customizations you might have made are replicated in your experiment config, such as:
 
    -  If required, a custom Docker image is set in the experiment configuration.
 
@@ -241,7 +238,7 @@ This step introduces distributed training.
       -  A ``slots_per_trial`` value of ``32`` is too large for the cluster and is also an invalid
          case.
 
-      Ensure that there are no other notebooks, shells, or experiments on the cluster that might
+      Ensure that there are no other shells, commands, or experiments on the cluster that might
       consume too many resources and prevent the experiment from starting.
 
    -  Determined is designed to control many of the details of distributed training for you. If you

@@ -9,7 +9,7 @@ Detached mode is an enhancement to the Core API that allows you to:
 -  Log metrics in Determined while running your workload *anywhere*.
 -  Maintain full control of your workload-associated metrics and metadata.
 -  Report metrics from multiple jobs rather than a single experiment.
--  Track experiments using Determined notebooks.
+-  Track experiments from JupyterLab in a Determined shell.
 
 This means you can try out Determined's experiment tracking and visualization features and then
 transition to submitting your workloads to Determined when you want to perform distributed training,

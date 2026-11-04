@@ -60,19 +60,19 @@ You can also set variables for each accelerator type, separately:
 ***************
 
 If a ``startup-hook.sh`` file exists in the top level of your model definition directory (for
-experiments), or context directory (for shells, notebooks, and TensorBoards), it is automatically
-run with every Docker container startup before any Python interpreters are launched or deep learning
-operations are performed. The startup hook can customize the container environment, install
-additional dependencies, and download datasets, among other shell script commands.
+experiments), or context directory (for shells and TensorBoards), it is automatically run with every
+Docker container startup before any Python interpreters are launched or deep learning operations are
+performed. The startup hook can customize the container environment, install additional
+dependencies, and download datasets, among other shell script commands.
 
 .. note::
 
-   ``startup-hook.sh`` does not apply to ``det cmd``. It applies to experiments, notebooks, shells,
-   and TensorBoards, but not commands.
+   ``startup-hook.sh`` does not apply to ``det cmd``. It applies to experiments, shells, and
+   TensorBoards, but not commands.
 
-For shells, notebooks, and TensorBoards, make sure to supply the context directory using the
-``--context`` or ``-c`` option. You can also use the ``--include`` option, though it may require
-more directory management.
+For shells and TensorBoards, make sure to supply the context directory using the ``--context`` or
+``-c`` option. You can also use the ``--include`` option, though it may require more directory
+management.
 
 Startup hooks are not cached and run before the start of every workload, so expensive or
 long-running operations in a startup hook can result in poor performance.
@@ -170,7 +170,7 @@ Example Dockerfile that installs custom ``conda``-, ``pip``-, and ``apt``-based 
       pip install --requirement /tmp/pip_requirements.txt
 
 Assuming this image is published to a public repository on Docker Hub, configure an experiment,
-command, or notebook with:
+command, or shell with:
 
 .. code:: yaml
 
@@ -244,5 +244,5 @@ Example using a :ref:`startup hook <startup-hooks>` to switch to a virtual envir
 
 .. note::
 
-   ``startup-hook.sh`` does not apply to ``det cmd``. It applies to experiments, notebooks, shells,
-   and TensorBoards, but not commands.
+   ``startup-hook.sh`` does not apply to ``det cmd``. It applies to experiments, shells, and
+   TensorBoards, but not commands.

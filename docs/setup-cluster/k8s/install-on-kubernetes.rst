@@ -216,7 +216,7 @@ Instead of using ``shared_fs``, configure either AWS S3, Microsoft Azure Blob St
 Default Pod Specs (Optional)
 ============================
 
-As described in the :ref:`determined-on-kubernetes` guide, when tasks (e.g., experiments, notebooks)
+As described in the :ref:`determined-on-kubernetes` guide, when tasks (e.g., experiments, shells)
 are started in a Determined cluster running on Kubernetes, the Determined master launches pods to
 execute these tasks. The Determined helm chart makes it possible to set default pod specs for all
 CPU and GPU tasks. The defaults can be defined in ``values.yaml`` under

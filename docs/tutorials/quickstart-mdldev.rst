@@ -372,4 +372,4 @@ For faster, less structured ways to run a Determined cluster without writing a m
 following resources:
 
 -  :ref:`commands-and-shells`
--  :ref:`notebooks`
+-  :ref:`JupyterLab in a shell <jupyter-service>`

@@ -5,7 +5,7 @@
 #################
 
 In a :ref:`Determined cluster running on Kubernetes <determined-on-kubernetes>`, tasks (e.g.,
-experiments, notebooks) are executed by launching a Kubernetes job. These jobs launch one or more
+experiments, shells) are executed by launching a Kubernetes job. These jobs launch one or more
 Kubernetes pods. You can customize these pods by providing custom `pod specs
 <https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.23/#pod-v1-core>`__. Common use
 cases include assigning pods to specific nodes, specifying additional volume mounts, and attaching
@@ -81,7 +81,8 @@ Determined supports configuring the following fields:
 
    For those fields, use ``det user link-with-agent-user`` instead.
 
-   Example of configuring a :ref:`pachyderm-integration` notebook plugin to run in ``det notebook``:
+   Example of configuring a :ref:`pachyderm-integration` JupyterLab plugin to run in a shell's
+   ``jupyter`` service:
 
    .. code:: yaml
 
@@ -103,8 +104,8 @@ Default pod specs must be configured when :ref:`installing or upgrading <install
 Determined. The default pod specs are configured in ``values.yaml`` of the
 :ref:`helm-config-reference` under ``taskContainerDefaults.cpuPodSpec`` and
 ``taskContainerDefaults.gpuPodSpec``. The ``gpuPodSpec`` is applied to all tasks that use GPUs
-(e.g., experiments, notebooks). ``cpuPodSpec`` is applied to all tasks that only use CPUs (e.g.,
-TensorBoards, CPU-only notebooks). Fields that are not specified will remain at their default
+(e.g., experiments, shells). ``cpuPodSpec`` is applied to all tasks that only use CPUs (e.g.,
+TensorBoards, CPU-only shells). Fields that are not specified will remain at their default
 Determined values.
 
 Example of configuring default pod specs in ``values.yaml``:

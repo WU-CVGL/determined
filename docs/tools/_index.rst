@@ -34,9 +34,9 @@
              </a>
          </div>
          <div class="tile-container">
-             <a class="tile" href="notebooks.html">
-                 <h2 class="tile-title">Jupyter Notebooks</h2>
-                 <p class="tile-description">Launching and managing Jupyter Notebooks.</p>
+             <a class="tile" href="cli/commands-and-shells.html#shell-services">
+                 <h2 class="tile-title">JupyterLab and VS Code</h2>
+                 <p class="tile-description">Running JupyterLab and VS Code in a shell.</p>
              </a>
          </div>
          <div class="tile-container">
@@ -62,7 +62,6 @@
    Commands and Shells <cli/commands-and-shells>
    Generic Tasks <cli/generic-tasks>
    GenAI Studio <genai/_index>
-   Notebooks <notebooks>
    Proxy Ports <proxy-ports>
    TensorBoard <tensorboard>
    WebUI <webui-if>
