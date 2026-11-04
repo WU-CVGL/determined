@@ -1406,13 +1406,13 @@ describe('NtscLaunchModal', () => {
       expect(mocks.previewShell).toHaveBeenCalledTimes(previews);
       expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
 
+      // The retry's answer keeps the box that the user changed while the refusal showed.
       refuse = false;
       await user.click(screen.getByRole('button', { name: 'Retry' }));
       await waitFor(() => expect(launchButton()).toBeEnabled());
       expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
       expect(serviceBox('jupyter')).not.toBeChecked();
-      expect(serviceBox('vscode')).toBeChecked();
-      await user.click(serviceBox('vscode'));
+      expect(serviceBox('vscode')).not.toBeChecked();
       await launch(user);
       await waitFor(() => expect(onLaunched).toHaveBeenCalled());
       expect(mocks.launchShell).toHaveBeenCalledTimes(1);
@@ -1565,6 +1565,35 @@ describe('NtscLaunchModal', () => {
         image: { cuda: 'edited:7' },
       });
       expect(config.resources).toEqual({ priority: 42, resource_pool: 'default', slots: 1 });
+    });
+
+    it('drops the late answer of an earlier full config', async () => {
+      const { onLaunched, user } = await setup();
+      const first = deferred<void>();
+      mocks.previewShell.mockImplementationOnce(async (params: { config?: RawJson }) => {
+        await first.promise;
+        return previewFor(params);
+      });
+      await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+      await waitFor(() => expect(mocks.previewShell).toHaveBeenCalledTimes(2));
+      await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
+      await user.click(serviceBox('vscode'));
+      await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+      await waitFor(() => expect(editorText()).toContain('enabled: false'));
+
+      first.resolve();
+      await waitFor(() => expect(mocks.previewShell.mock.results[1].value).resolves.toBeDefined());
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(yaml.load(editorText())).toMatchObject({
+        services: { jupyter: {}, vscode: { enabled: false } },
+      });
+      await launch(user);
+
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell.mock.calls[0][0].config.services).toEqual({
+        jupyter: {},
+        vscode: { enabled: false },
+      });
     });
   });
 

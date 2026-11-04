@@ -83,12 +83,14 @@ const offeredServices = (choices: ShellServiceChoices = {}): ShellService[] =>
   SHELL_SERVICES.filter((name) => choices[name] !== undefined);
 
 /**
- * A preview of the start-from's services: the start-from it was sent for, its number, and whether
- * it is on its way, succeeded or failed with error.
+ * A preview of the start-from's services: the start-from it was sent for, its number, the
+ * checkboxes as they were when the start-from's first preview was sent, and whether it is on its
+ * way, succeeded or failed with error.
  */
 interface ServicesPreview {
   baseConfig?: RawJson;
   error?: string;
+  sent?: LaunchFormValues['services'];
   seq: number;
   source?: string;
   status: 'pending' | 'success' | 'error';
@@ -243,7 +245,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   // each time the start-from changes, once the simple form shows it: the master's defaults, and
   // what a template or a config turns off. A new template or the defaults clear the checkboxes
   // first; a config fills them from its entries. The checkboxes follow the latest preview, except a
-  // box changed while it was on its way. Launch and the full config wait for a successful preview
+  // box changed since the start-from's first preview was sent, also while a refusal showed. Launch and the full config wait for a successful preview
   // of the current start-from: a refused one shows its message with Retry, keeps them disabled, and
   // is sent again when the pool or the workspace changes. Showing the simple form again after the
   // full config previews nothing, so that the checkboxes keep their changes.
@@ -270,14 +272,15 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     const sameStart = last.seq !== 0 && last.source === source && last.baseConfig === baseConfig;
     if (last.status !== 'error' && sameStart) return;
     const seq = last.seq + 1;
-    setServicesPreview({ baseConfig, seq, source, status: 'pending' });
     if (!sameStart && !baseConfig) {
       // The checkboxes were filled for another start-from.
       offered.current = [];
       form.resetFields(SHELL_SERVICES.map((name) => ['services', name]));
     }
     const fields: LaunchFormValues = form.getFieldsValue(true);
-    const sent = fields.services;
+    // A retry, or a pool or workspace change after a refusal, keeps the boxes changed since.
+    const sent = sameStart ? last.sent : fields.services;
+    setServicesPreview({ baseConfig, sent, seq, source, status: 'pending' });
     previewShell(simpleOptions({ ...fields, services: undefined, source }))
       .then((previewed) => {
         if (seq !== servicesPreview.current.seq) return;
@@ -293,13 +296,14 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
             ]),
           ),
         });
-        setServicesPreview({ baseConfig, seq, source, status: 'success' });
+        setServicesPreview({ baseConfig, sent, seq, source, status: 'success' });
       })
       .catch((e) => {
         if (seq !== servicesPreview.current.seq) return;
         setServicesPreview({
           baseConfig,
           error: e instanceof Error ? e.message : PREVIEW_ERROR,
+          sent,
           seq,
           source,
           status: 'error',
@@ -320,23 +324,27 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
 
   const handleServicesRetry = useCallback(() => setServicesRetry((count) => count + 1), []);
 
-  // Previewed each time the full config opens.
+  // Previewed each time the full config opens, numbered so that a late answer is dropped.
+  const configSeq = useRef(0);
   const fetchConfig = useCallback(async () => {
+    const seq = ++configSeq.current;
     setConfig(NotLoaded);
     setConfigError(undefined);
 
     const fields: LaunchFormValues = form.getFieldsValue(true);
     try {
       const newConfig = await previewShell(simpleOptions(fields));
-      setConfig(Loaded(yaml.dump(newConfig)));
+      if (seq === configSeq.current) setConfig(Loaded(yaml.dump(newConfig)));
     } catch (e) {
-      setConfigError(e instanceof Error ? e.message : PREVIEW_ERROR);
+      if (seq === configSeq.current) setConfigError(e instanceof Error ? e.message : PREVIEW_ERROR);
     }
   }, [form, simpleOptions]);
 
   const handleSecondary = useCallback(() => {
-    if (showFullConfig) setFullConfigFormInvalid(false);
-    else if (servicesConfirmed) fetchConfig();
+    if (showFullConfig) {
+      configSeq.current++;
+      setFullConfigFormInvalid(false);
+    } else if (servicesConfirmed) fetchConfig();
     else return;
     setShowFullConfig((show) => !show);
   }, [fetchConfig, servicesConfirmed, showFullConfig]);
