@@ -241,6 +241,22 @@ describe('TaskActionDropdown', () => {
       await waitFor(() => expect(exactly(shellLabel)).toBeInTheDocument());
       expect(getTaskServices).toHaveBeenCalledTimes(1);
     });
+
+    it('reads the services again when the menu opens after a failed read', async () => {
+      vi.mocked(getTaskServices).mockRejectedValueOnce(new Error('network'));
+      await openMenu(101, runningShell);
+      await screen.findByText('View Logs');
+      await waitFor(() => expect(getTaskServices).toHaveBeenCalledTimes(1));
+      expect(exactly(shellLabel)).not.toBeInTheDocument();
+      expect(exactly('Open Terminal')).not.toBeInTheDocument();
+      // Closed and opened again from its button.
+      await userEvent.click(screen.getByRole('button'));
+      await waitFor(() => expect(document.querySelector('.ant-dropdown-hidden')).not.toBeNull());
+      await userEvent.click(screen.getByRole('button'));
+      await waitFor(() => expect(exactly(shellLabel)).toBeInTheDocument());
+      expect(exactly('Open Terminal')).toBeInTheDocument();
+      expect(getTaskServices).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('Open Terminal', () => {
