@@ -16,8 +16,8 @@ installation on Kubernetes.
 For an optional link from task views to an externally managed Grafana task dashboard, see
 :ref:`grafana-task-resources`.
 
-For resource charts inside the Determined WebUI backed by an existing agent-cluster monitoring
-deployment, see :ref:`native-task-resources`.
+Clusters of Determined agents do not use this guide: for the resource charts inside the Determined
+WebUI, :ref:`native-task-resources` lists the metrics their Prometheus must provide.
 
 ***************
  Prerequisites

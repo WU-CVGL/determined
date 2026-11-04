@@ -116,6 +116,10 @@ use, follow these steps:
    The topology visualization shows the state of each slot. The pool's **Active** tab lists the GPUs
    each job holds; click a job's GPUs to outline them in the topology visualization.
 
+The topology view needs no monitoring service; the GPU health view, which marks a GPU with a
+:ref:`recent critical XID <agent-gpu-xids>` as in error, needs the :ref:`task resources integration
+<native-task-resources>`.
+
 ***********************************
  Managing User Accounts and Groups
 ***********************************

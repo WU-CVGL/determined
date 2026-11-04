@@ -376,13 +376,11 @@ that ends on another date, and the UTC offset to the windows of a GPU when they 
 daylight saving time. A GPU stays in error until its XIDs leave the 24 hours, also after a reboot
 that fixed it. A CLI older than this release shows such a GPU as ``error`` without its XIDs.
 
-Every XID code counts except 13, 31, 43 and 45. This is an exclusion policy that matches the
-``gpu-xid-critical`` alert of `cluster-setup <https://github.com/WU-CVGL/cluster-setup>`__:
-applications commonly trigger these codes, and counting them would raise false alarms. It does not
-mean that they always come from user code; NVIDIA describes XID 31, for example, as usually an
-application error that can also be a driver or hardware error. A fault that shows only as one of
-these codes therefore does not count. For a GPU that fails without an XID, use :ref:`exclude_gpus
-<agent-exclude-gpus>`.
+Every XID code counts except 13, 31, 43 and 45. This is an exclusion policy: applications commonly
+trigger these codes, and counting them would raise false alarms. It does not mean that they always
+come from user code; NVIDIA describes XID 31, for example, as usually an application error that can
+also be a driver or hardware error. A fault that shows only as one of these codes therefore does not
+count. For a GPU that fails without an XID, use :ref:`exclude_gpus <agent-exclude-gpus>`.
 
 The master runs one range query over the 24 hours at a 300-second step, with steps on a 5-minute
 grid that ends at or after the query time:
@@ -401,10 +399,10 @@ step, so the steps see every sample.
 
 The windows are when the master saw an XID, not when it happened. The XID happened in its first
 window, or at most one exporter collection interval and one scrape interval before it (earlier only
-for the first window of the 24 hours). A record stays in the exporter's window (5 minutes in
-cluster-setup), so the last window can end up to about 10 minutes after the last XID, and a single
-XID usually shows as two consecutive windows, as in the example above. The agent API returns each
-GPU's ``recent_xids`` with ``first_observed`` and ``last_observed``, the ends of the first and last
+for the first window of the 24 hours). A record stays in the exporter's window; with a 5-minute
+window, the last window can end up to about 10 minutes after the last XID, and a single XID usually
+shows as two consecutive windows, as in the example above. The agent API returns each GPU's
+``recent_xids`` with ``first_observed`` and ``last_observed``, the ends of the first and last
 window, and for the agent ``xid_query_status`` (``NOT_CONFIGURED``, ``OK`` or ``FAILED``),
 ``xid_query_error`` and ``xid_queried_at``.
 

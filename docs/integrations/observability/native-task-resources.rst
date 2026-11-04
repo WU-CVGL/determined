@@ -33,17 +33,32 @@ Prometheus instance or change its storage.
 Metric Collection
 =================
 
-The integration expects the agent-cluster recording rules and exporter labels provided by
-`cluster-setup <https://github.com/WU-CVGL/cluster-setup>`__. In particular, Prometheus must have
-``det:allocation_task:info``, ``det:runtime_task:info``, and ``det:gpu_task:info`` ownership rules,
-cAdvisor metrics with ``det_cluster``, ``container_runtime_id``, and ``node`` labels, and DCGM
-metrics with ``det_cluster`` and ``gpu_uuid`` labels. The configured cluster must match the
-``det_cluster`` label. The existing Kubernetes dashboard's pod-label schema alone does not
-satisfy this contract.
+The master queries a fixed set of series, which any Prometheus that provides them can serve:
 
-The same configuration lets the master read each GPU's recent critical XIDs for the GPU health view
-of agents (:ref:`agent-gpu-xids`). That needs DCGM-Exporter's ``DCGM_EXP_XID_ERRORS_COUNT``, which
-the exporter's counters file must enable, with the ``det_cluster`` and ``gpu_uuid`` labels above.
+-  Three ownership recording rules, each with the labels ``det_cluster``, ``task_id`` and
+   ``allocation_id`` and the value 1: ``det:allocation_task:info`` while an allocation runs,
+   ``det:runtime_task:info`` with each of its containers' ``container_runtime_id``, and
+   ``det:gpu_task:info`` with each of its GPUs' ``gpu_uuid``. The rules join the mappings that the
+   master exports on ``/prom/det-state-metrics`` (see :ref:`prometheus-grafana`).
+
+-  cAdvisor's ``container_cpu_usage_seconds_total``, ``container_memory_working_set_bytes`` and
+   ``container_memory_rss`` with ``job="cadvisor"`` and the labels ``det_cluster``,
+   ``container_runtime_id`` and ``node``.
+
+-  DCGM-Exporter's ``DCGM_FI_DEV_GPU_UTIL``, ``DCGM_FI_DEV_FB_USED``, ``DCGM_FI_DEV_POWER_USAGE``
+   and ``DCGM_FI_DEV_GPU_TEMP`` with ``job="dcgm"`` and the labels ``det_cluster`` and ``gpu_uuid``;
+   the legend also reads their ``pci_bus_id``, ``gpu`` and ``modelName``.
+
+-  For the GPU health view of agents (:ref:`agent-gpu-xids`), DCGM-Exporter's
+   ``DCGM_EXP_XID_ERRORS_COUNT`` with the same job and labels and ``xid``, which the exporter's
+   counters file must enable.
+
+The ``det_cluster`` label must match ``integrations.task_resources.det_cluster``. The Kubernetes
+dashboard's pod-label schema alone does not satisfy this contract. To build the monitoring stack,
+see the official documentation of `Prometheus recording rules
+<https://prometheus.io/docs/prometheus/latest/configuration/recording_rules/>`__, `cAdvisor
+<https://github.com/google/cadvisor>`__, `DCGM-Exporter <https://github.com/NVIDIA/dcgm-exporter>`__
+and `Grafana <https://grafana.com/docs/grafana/latest/>`__.
 
 An allocation's metrics, including its **Allocation lifecycle** chart, begin once it has run for
 :ref:`observability.task_mapping_delay <master-config-observability>` (5 minutes by default),
