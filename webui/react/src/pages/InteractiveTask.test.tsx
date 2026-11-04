@@ -301,6 +301,32 @@ describe('InteractiveTask', () => {
     expect(tabLabels()).toEqual(['JupyterLab', 'Logs', 'Resources']);
   });
 
+  it('shows a shell’s tensorboard service as its TensorBoard tab, after VS Code', async () => {
+    vi.mocked(getTaskServices).mockResolvedValue(
+      servicesWith(['ssh', 'jupyter', 'tensorboard', 'vscode']),
+    );
+    setup('?tab=tensorboard');
+    const pane = await screen.findByTestId('service-pane-tensorboard');
+    expect(pane).toHaveAttribute('data-state', V1TaskServiceState.STARTING);
+    expect(tabLabels()).toEqual([
+      'Terminal',
+      'JupyterLab',
+      'VS Code',
+      'TensorBoard',
+      'Logs',
+      'Resources',
+    ]);
+    expect(screen.queryByTitle('TensorBoard')).not.toBeInTheDocument();
+    expect(getTensorBoard).not.toHaveBeenCalled();
+  });
+
+  it('leaves out the TensorBoard tab when the user may not connect to the service', async () => {
+    vi.mocked(getTaskServices).mockResolvedValue(servicesWith(['ssh', 'tensorboard'], false));
+    setup();
+    expect(await screen.findByTestId('logs-pane')).toBeInTheDocument();
+    expect(tabLabels()).toEqual(['Logs', 'Resources']);
+  });
+
   it('shows a TensorBoard in a frame of its wait page', async () => {
     vi.mocked(getTask).mockResolvedValue(taskWith(false, V1TaskType.TENSORBOARD));
     vi.mocked(getTaskServices).mockResolvedValue(servicesWith([]));

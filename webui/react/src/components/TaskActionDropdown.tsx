@@ -116,6 +116,9 @@ const TaskActionDropdown: React.FC<Props> = ({
     if (canBeOpened(task) && canOpenTaskService(services ?? [], 'vscode')) {
       items.push({ key: Action.OpenVSCode, label: 'Open VS Code' });
     }
+    if (canBeOpened(task) && canOpenTaskService(services ?? [], 'tensorboard')) {
+      items.push({ key: Action.OpenTensorBoard, label: 'Open TensorBoard' });
+    }
     // A UI rule only: the API lets anyone who can view a task read its config.
     if (
       onLaunchAgain &&
@@ -166,6 +169,10 @@ const TaskActionDropdown: React.FC<Props> = ({
           break;
         case Action.OpenVSCode:
           openInteractiveTask(task.id, { tab: InteractiveTaskTab.VSCode });
+          onComplete?.(key);
+          break;
+        case Action.OpenTensorBoard:
+          openInteractiveTask(task.id, { tab: InteractiveTaskTab.TensorBoard });
           onComplete?.(key);
           break;
         case Action.LaunchAgain:

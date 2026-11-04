@@ -19,9 +19,9 @@ interface Props {
 }
 
 /**
- * An HTTP service of a task, such as JupyterLab or VS Code, in an iframe. The service's credential
- * is read once, when the pane is shown and the service's state has settled: the browser is logged
- * in to the service and the iframe loads it. A failure stays, as the service's own text, with
+ * An HTTP service of a task, such as JupyterLab, VS Code or TensorBoard, in an iframe. The
+ * service's credential, if it has one, is read once, when the pane is shown and the service's
+ * state has settled: the browser is logged in to the service and the iframe loads it. A failure stays, as the service's own text, with
  * Reconnect, which reads the credential and loads the service once more (the service's process is
  * left as it is): nothing is tried again on its own, since code-server limits failed logins.
  */

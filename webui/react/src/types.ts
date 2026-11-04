@@ -1026,6 +1026,7 @@ export const TaskAction = {
   LaunchAgain: 'Launch Again',
   ManageJob: 'Manage Job',
   OpenJupyterLab: 'Open JupyterLab',
+  OpenTensorBoard: 'Open TensorBoard',
   OpenTerminal: 'Open Terminal',
   OpenVSCode: 'Open VS Code',
   ViewLogs: 'View Logs',

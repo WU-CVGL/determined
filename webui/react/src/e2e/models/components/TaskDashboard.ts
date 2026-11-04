@@ -38,6 +38,7 @@ class TaskActionDropdown extends DropdownMenu {
   readonly openTerminal = this.menuItem(TaskAction.OpenTerminal);
   readonly openJupyterLab = this.menuItem(TaskAction.OpenJupyterLab);
   readonly openVSCode = this.menuItem(TaskAction.OpenVSCode);
+  readonly openTensorBoard = this.menuItem(TaskAction.OpenTensorBoard);
 }
 
 /**

@@ -110,9 +110,9 @@ const LogsPane: React.FC<{ taskId: string }> = ({ taskId }) => {
 };
 
 /**
- * A task's page: its services as tabs (a terminal, JupyterLab, VS Code; TensorBoard's own page),
- * then its logs and resources. One poll of the task feeds the title and the panes, which stay
- * mounted once shown so that their sessions keep their state.
+ * A task's page: its services as tabs (a terminal, JupyterLab, VS Code, TensorBoard; a
+ * TensorBoard task's own page), then its logs and resources. One poll of the task feeds the title
+ * and the panes, which stay mounted once shown so that their sessions keep their state.
  */
 export const InteractiveTask: React.FC = () => {
   const { taskId = '' } = useParams<Params>();
@@ -292,7 +292,10 @@ export const InteractiveTask: React.FC = () => {
     if (terminalEnabled && canOpenShellTerminal(services)) keys.push(InteractiveTaskTab.Terminal);
     if (canOpenTaskService(services, 'jupyter')) keys.push(InteractiveTaskTab.JupyterLab);
     if (canOpenTaskService(services, 'vscode')) keys.push(InteractiveTaskTab.VSCode);
-    if (command?.type === CommandType.TensorBoard && command.serviceAddress) {
+    if (
+      (command?.type === CommandType.TensorBoard && command.serviceAddress) ||
+      canOpenTaskService(services, 'tensorboard')
+    ) {
       keys.push(InteractiveTaskTab.TensorBoard);
     }
     keys.push(InteractiveTaskTab.Logs);
@@ -338,14 +341,25 @@ export const InteractiveTask: React.FC = () => {
             />
           );
         case InteractiveTaskTab.TensorBoard:
-          return command ? (
-            <iframe
-              allowFullScreen
-              className={css.frame}
-              src={waitPageUrl(command)}
-              title="TensorBoard"
+          // A TensorBoard task's own page, or a shell's tensorboard service.
+          if (command?.type === CommandType.TensorBoard) {
+            return (
+              <iframe
+                allowFullScreen
+                className={css.frame}
+                src={waitPageUrl(command)}
+                title="TensorBoard"
+              />
+            );
+          }
+          return (
+            <TaskServicePane
+              label="TensorBoard"
+              service="tensorboard"
+              state={serviceState('tensorboard')}
+              taskId={taskId}
             />
-          ) : null;
+          );
         case InteractiveTaskTab.Logs:
           return <LogsPane taskId={taskId} />;
         case InteractiveTaskTab.Resources:

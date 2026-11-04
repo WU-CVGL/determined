@@ -67,8 +67,8 @@ class ShellTerminalPane extends BaseReactFragment {
 }
 
 /**
- * Represents a TaskServicePane from src/components/TaskServicePane.tsx: the JupyterLab or VS
- * Code tab, which loads the service in a frame or shows why it cannot.
+ * Represents a TaskServicePane from src/components/TaskServicePane.tsx: the JupyterLab, VS Code or
+ * TensorBoard tab, which loads the service in a frame or shows why it cannot.
  */
 class TaskServicePane extends BaseReactFragment {
   readonly frame: BaseComponent;
@@ -99,6 +99,12 @@ export class InteractiveTask extends DeterminedPage {
   readonly terminal = new ShellTerminalPane({ parent: this.tabs.tabContent });
   readonly jupyter = new TaskServicePane({ label: 'JupyterLab', parent: this.tabs.tabContent });
   readonly vscode = new TaskServicePane({ label: 'VS Code', parent: this.tabs.tabContent });
+  /** A shell's tensorboard service. */
+  readonly tensorBoardService = new TaskServicePane({
+    label: 'TensorBoard',
+    parent: this.tabs.tabContent,
+  });
+  /** A TensorBoard task's own page. */
   readonly tensorBoard = new BaseComponent({
     parent: this.tabs.tabContent,
     selector: 'iframe[title="TensorBoard"]',

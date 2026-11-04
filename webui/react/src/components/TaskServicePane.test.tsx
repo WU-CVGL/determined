@@ -39,6 +39,23 @@ describe('TaskServicePane', () => {
     expect(taskServiceUrl).toHaveBeenCalledTimes(1);
   });
 
+  it('opens a service without a credential, such as TensorBoard', async () => {
+    vi.mocked(taskServiceUrl).mockResolvedValue('https://det.example.org/proxy/task-1:2902/');
+    render(
+      <UIProvider theme={DefaultTheme.Light}>
+        <TaskServicePane
+          label="TensorBoard"
+          service="tensorboard"
+          state={V1TaskServiceState.READY}
+          taskId="task-1"
+        />
+      </UIProvider>,
+    );
+    const frame = await screen.findByTitle('TensorBoard');
+    expect(frame).toHaveAttribute('src', 'https://det.example.org/proxy/task-1:2902/');
+    expect(taskServiceUrl).toHaveBeenCalledWith('task-1', 'tensorboard');
+  });
+
   it('shows why the service cannot be opened, without trying again on its own', async () => {
     vi.mocked(taskServiceUrl).mockRejectedValue(new Error('jupyter: login failed'));
     const { rerender } = render(<Pane state={V1TaskServiceState.READY} />);

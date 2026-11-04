@@ -12,6 +12,7 @@ import { errorText, loginCodeServer, taskServiceUrl } from './taskService';
 const TASK_ID = 'task-1';
 const JUPYTER_ID = `${TASK_ID}:2900`;
 const VSCODE_ID = `${TASK_ID}:2901`;
+const TENSORBOARD_ID = `${TASK_ID}:2902`;
 const VSCODE_LOGIN = `https://det.example.org/proxy/${VSCODE_ID}/login`;
 
 vi.mock('services/api', () => ({
@@ -139,6 +140,27 @@ describe('taskServiceUrl', () => {
     await expect(taskServiceUrl(TASK_ID, 'web')).resolves.toBe(
       `https://det.example.org/proxy/${JUPYTER_ID}/`,
     );
+  });
+
+  it('gives the URL of TensorBoard without reading a credential', async () => {
+    const response = services();
+    response.services.push({
+      mayConnect: true,
+      name: 'tensorboard',
+      protocol: TaskServiceProtocol.HTTP,
+      serviceId: TENSORBOARD_ID,
+      state: V1TaskServiceState.READY,
+      url: `/proxy/${TENSORBOARD_ID}/`,
+    });
+    vi.mocked(getTaskServices).mockResolvedValue(response);
+    await expect(taskServiceUrl(TASK_ID, 'tensorboard')).resolves.toBe(
+      `https://det.example.org/proxy/${TENSORBOARD_ID}/`,
+    );
+    expect(getTaskServiceCredential).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+
+    response.services[2] = { ...response.services[2], state: V1TaskServiceState.EXITED };
+    await expect(taskServiceUrl(TASK_ID, 'tensorboard')).rejects.toThrow('tensorboard: EXITED');
   });
 
   it('passes on the error of the credential', async () => {
