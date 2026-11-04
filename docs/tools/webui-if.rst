@@ -256,11 +256,12 @@ To find out how to view and modify the Job Queue in the WebUI, start with :ref:`
 *******************************
 
 An interactive task is a shell, which runs JupyterLab by default. To start one, select **Launch
-Interactive Task** on the **Jobs** page or a workspace's **Jobs** tab; **jupyter** and, when the
-master serves code-server, **vscode** are checked, and unchecking a service leaves it out.
+Interactive Task** on the **Jobs** page or a workspace's **Jobs** tab; under **Services**,
+**JupyterLab** and, when the master serves code-server, **VS Code** are checked, and unchecking a
+service leaves it out.
 
 .. image:: /assets/images/launch-interactive-task.png
-   :alt: The Launch Interactive Task form with a resource pool, slots, and the jupyter and vscode services checked
+   :alt: The Launch Interactive Task form with a resource pool, slots, and the JupyterLab and VS Code services checked under Services
 
 |
 

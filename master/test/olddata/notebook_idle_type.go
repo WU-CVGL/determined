@@ -49,8 +49,24 @@ var NotebookIdleTypeSpecs = map[string]string{
 // NotebookIdleTypeTemplates are the template configs, by name, that MigrateWithNotebookIdleType
 // stores before notebook_idle_type is dropped.
 var NotebookIdleTypeTemplates = map[string]string{
+	// A shell template with a jupyter entry.
 	"olddata-idle-template-carried": `{"notebook_idle_type": "kernels_or_terminals",
 		"services": {"jupyter": null}}`,
+	// A shell template that disables vscode and relies on the default jupyter.
+	"olddata-idle-template-vscode-off": `{"idle_timeout": "30m",
+		"notebook_idle_type": "kernels_or_terminals", "services": {"vscode": {"enabled": false}}}`,
+	// A shell template with ssh only.
+	"olddata-idle-template-ssh": `{"notebook_idle_type": "kernel_connections",
+		"services": {"ssh": {}}}`,
+	// A shell template whose jupyter entry sets an idle type already.
+	"olddata-idle-template-set": `{"notebook_idle_type": "kernels_or_terminals",
+		"services": {"jupyter": {"idle_type": "kernel_connections"}}}`,
+	// A template without services, which may be a command's.
+	"olddata-idle-template-command": `{"notebook_idle_type": "kernels_or_terminals",
+		"entrypoint": ["sleep", "60"]}`,
+	// A template with an empty services object, which a command's may have.
+	"olddata-idle-template-empty-services": `{"notebook_idle_type": "kernel_connections",
+		"services": {}}`,
 	"olddata-idle-template-default":   `{"notebook_idle_type": "activity", "description": "x"}`,
 	"olddata-idle-template-untouched": `{"description": "y"}`,
 }

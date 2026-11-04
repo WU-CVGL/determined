@@ -32,6 +32,7 @@ import {
   formFieldsFromConfig,
   NtscLaunchOptions,
   sanitizeConfig,
+  SHELL_SERVICE_LABELS,
   SHELL_SERVICES,
   ShellService,
   ShellServiceChoices,
@@ -81,6 +82,20 @@ const serviceChecks = (choices: ShellServiceChoices = {}): Record<string, boolea
 /** The services that a config has an entry for: the ones the master offers for it. */
 const offeredServices = (choices: ShellServiceChoices = {}): ShellService[] =>
   SHELL_SERVICES.filter((name) => choices[name] !== undefined);
+
+/**
+ * A preview of the start-from's services: the start-from it was sent for, its number, the
+ * checkboxes as they were when the start-from's first preview was sent, and whether it is on its
+ * way, succeeded or failed with error.
+ */
+interface ServicesPreview {
+  baseConfig?: RawJson;
+  error?: string;
+  sent?: LaunchFormValues['services'];
+  seq: number;
+  source?: string;
+  status: 'pending' | 'success' | 'error';
+}
 
 /** The user's last-used form values, kept on the server. */
 const settingsConfig: SettingsConfig<LaunchFormSettings> = {
@@ -231,46 +246,42 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   // each time the start-from changes, once the simple form shows it: the master's defaults, and
   // what a template or a config turns off. A new template or the defaults clear the checkboxes
   // first; a config fills them from its entries. The checkboxes follow the latest preview, except a
-  // box changed while it was on its way. Until the preview on its way answers, Launch and the full
-  // config wait. A refused preview shows its message with Retry and is sent again when
-  // the pool or the workspace changes. Showing the simple form again after the full config
-  // previews nothing, so that the checkboxes keep their changes.
+  // box changed since the start-from's first preview was sent, also while a refusal showed. Launch and the full config wait for a successful preview
+  // of the current start-from: a refused one shows its message with Retry, keeps them disabled, and
+  // is sent again when the pool or the workspace changes. Showing the simple form again after the
+  // full config previews nothing, so that the checkboxes keep their changes.
   const [simpleFormShown, setSimpleFormShown] = useState(false);
   const source = Form.useWatch('source', form);
   const pool = Form.useWatch('pool', form);
   const workspaceId = Form.useWatch('workspaceId', form);
-  const servicesPreview = useRef<{
-    baseConfig?: RawJson;
-    failed?: boolean;
-    seq: number;
-    source?: string;
-  }>({ seq: 0 });
-  // The start-from of the last preview that answered, and its error; unset while one is on its way.
-  const [servicesAnswer, setServicesAnswer] = useState<{
-    baseConfig?: RawJson;
-    error?: string;
-    source?: string;
-  }>();
+  // The last services preview sent, numbered so that a late answer is dropped, and its result.
+  // The ref is what the effect reads; the state renders it.
+  const servicesPreview = useRef<ServicesPreview>({ seq: 0, status: 'pending' });
+  const [servicesResult, setServicesResult] = useState<ServicesPreview>(servicesPreview.current);
   const [servicesRetry, setServicesRetry] = useState(0);
-  const servicesPending =
-    servicesAnswer === undefined ||
-    servicesAnswer.source !== source ||
-    servicesAnswer.baseConfig !== baseConfig;
+  const setServicesPreview = useCallback((preview: ServicesPreview) => {
+    servicesPreview.current = preview;
+    setServicesResult(preview);
+  }, []);
+  const servicesConfirmed =
+    servicesResult.status === 'success' &&
+    servicesResult.source === source &&
+    servicesResult.baseConfig === baseConfig;
   useEffect(() => {
     if (!simpleFormShown || startFromLoading) return;
     const last = servicesPreview.current;
     const sameStart = last.seq !== 0 && last.source === source && last.baseConfig === baseConfig;
-    if (!last.failed && sameStart) return;
+    if (last.status !== 'error' && sameStart) return;
     const seq = last.seq + 1;
-    servicesPreview.current = { baseConfig, seq, source };
-    setServicesAnswer(undefined);
     if (!sameStart && !baseConfig) {
       // The checkboxes were filled for another start-from.
       offered.current = [];
       form.resetFields(SHELL_SERVICES.map((name) => ['services', name]));
     }
     const fields: LaunchFormValues = form.getFieldsValue(true);
-    const sent = fields.services;
+    // A retry, or a pool or workspace change after a refusal, keeps the boxes changed since.
+    const sent = sameStart ? last.sent : fields.services;
+    setServicesPreview({ baseConfig, sent, seq, source, status: 'pending' });
     previewShell(simpleOptions({ ...fields, services: undefined, source }))
       .then((previewed) => {
         if (seq !== servicesPreview.current.seq) return;
@@ -286,15 +297,17 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
             ]),
           ),
         });
-        setServicesAnswer({ baseConfig, source });
+        setServicesPreview({ baseConfig, sent, seq, source, status: 'success' });
       })
       .catch((e) => {
         if (seq !== servicesPreview.current.seq) return;
-        servicesPreview.current = { ...servicesPreview.current, failed: true };
-        setServicesAnswer({
+        setServicesPreview({
           baseConfig,
           error: e instanceof Error ? e.message : PREVIEW_ERROR,
+          sent,
+          seq,
           source,
+          status: 'error',
         });
       });
   }, [
@@ -302,6 +315,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     form,
     pool,
     servicesRetry,
+    setServicesPreview,
     simpleFormShown,
     simpleOptions,
     source,
@@ -311,25 +325,30 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
 
   const handleServicesRetry = useCallback(() => setServicesRetry((count) => count + 1), []);
 
-  // Previewed each time the full config opens.
+  // Previewed each time the full config opens, numbered so that a late answer is dropped.
+  const configSeq = useRef(0);
   const fetchConfig = useCallback(async () => {
+    const seq = ++configSeq.current;
     setConfig(NotLoaded);
     setConfigError(undefined);
 
     const fields: LaunchFormValues = form.getFieldsValue(true);
     try {
       const newConfig = await previewShell(simpleOptions(fields));
-      setConfig(Loaded(yaml.dump(newConfig)));
+      if (seq === configSeq.current) setConfig(Loaded(yaml.dump(newConfig)));
     } catch (e) {
-      setConfigError(e instanceof Error ? e.message : PREVIEW_ERROR);
+      if (seq === configSeq.current) setConfigError(e instanceof Error ? e.message : PREVIEW_ERROR);
     }
   }, [form, simpleOptions]);
 
   const handleSecondary = useCallback(() => {
-    if (showFullConfig) setFullConfigFormInvalid(false);
-    else fetchConfig();
+    if (showFullConfig) {
+      configSeq.current++;
+      setFullConfigFormInvalid(false);
+    } else if (servicesConfirmed) fetchConfig();
+    else return;
     setShowFullConfig((show) => !show);
-  }, [fetchConfig, showFullConfig]);
+  }, [fetchConfig, servicesConfirmed, showFullConfig]);
 
   const launch = useCallback(
     async (options: NtscLaunchOptions & { config?: RawJson }) => {
@@ -352,11 +371,20 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
           workspaceId: values.workspaceId,
         });
       }
-    } else {
+    } else if (servicesConfirmed) {
       const values = await form.validateFields();
       if (values) await launch(simpleOptions(fields));
     }
-  }, [config, fullConfigForm, form, launch, saveDefaults, showFullConfig, simpleOptions]);
+  }, [
+    config,
+    fullConfigForm,
+    form,
+    launch,
+    saveDefaults,
+    servicesConfirmed,
+    showFullConfig,
+    simpleOptions,
+  ]);
 
   const handleConfigChange = useCallback(
     (config: string) => {
@@ -478,7 +506,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       submit={{
         disabled: showFullConfig
           ? fullConfigFormInvalid
-          : !currentWorkspace?.id || startFromLoading || servicesPending,
+          : !currentWorkspace?.id || startFromLoading || !servicesConfirmed,
         form: idPrefix + (showFullConfig ? '-full-' : '-simple-') + BASE_FORM_ID,
         handleError,
         handler: handleSubmit,
@@ -508,7 +536,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
           formId={idPrefix + '-simple-' + BASE_FORM_ID}
           initialTask={initialTask}
           lockedWorkspace={!!workspace}
-          servicesError={servicesAnswer?.error}
+          servicesError={servicesResult.status === 'error' ? servicesResult.error : undefined}
           setWorkspace={setCurrentWorkspace}
           startFromLoadingTask={startFromLoadingTask}
           workspaces={workspaces}
@@ -529,7 +557,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       )}
       <Row>
         <Button
-          disabled={startFromLoading || (!showFullConfig && servicesPending)}
+          disabled={startFromLoading || (!showFullConfig && !servicesConfirmed)}
           onClick={handleSecondary}>
           {showFullConfig ? 'Show Simple Config' : 'Show Full Config'}
         </Button>
@@ -835,11 +863,11 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
           min={0}
         />
       </Form.Item>
-      <Form.Item>
+      <Form.Item label="Services">
         <Row>
           {SHELL_SERVICES.map((name) => (
             <Form.Item key={name} name={['services', name]} noStyle valuePropName="checked">
-              <Checkbox>{name}</Checkbox>
+              <Checkbox>{SHELL_SERVICE_LABELS[name]}</Checkbox>
             </Form.Item>
           ))}
         </Row>

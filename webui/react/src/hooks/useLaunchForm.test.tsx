@@ -247,7 +247,9 @@ describe('useLaunchForm', () => {
         expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('old shell'),
       );
       expect(mocks.getShellConfig).toHaveBeenCalledWith({ commandId: 'shell-old' });
-      await waitFor(() => expect(screen.getByRole('checkbox', { name: 'jupyter' })).toBeChecked());
+      await waitFor(() =>
+        expect(screen.getByRole('checkbox', { name: 'JupyterLab' })).toBeChecked(),
+      );
       await user.click(screen.getByRole('button', { name: 'Launch' }));
 
       expect(await screen.findByText('Interactive Task Launched')).toBeInTheDocument();
