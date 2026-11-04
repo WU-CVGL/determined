@@ -22,9 +22,8 @@ Binding and unbinding resource pools allows administrators to control resource p
 within the cluster.
 
 Resource pools can be either unbound, meaning they are shared across the entire cluster, or bound to
-specific workspaces. Experiments, notebooks, TensorBoards, shells, or commands associated with a
-particular workspace can only use resource pools that are either unbound or bound to a particular
-workspace.
+specific workspaces. Experiments, TensorBoards, shells, or commands associated with a particular
+workspace can only use resource pools that are either unbound or bound to a particular workspace.
 
 In addition, you can set a bound resource pool as the default compute or auxiliary pool for the
 workspace. If a user leaves the resource pool configuration option blank for their task, workloads

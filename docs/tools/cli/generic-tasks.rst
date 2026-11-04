@@ -26,8 +26,9 @@ trials, searcher, metrics or checkpoints.
 | Proxy ports                   | yes         | yes                           | yes             |
 +-------------------------------+-------------+-------------------------------+-----------------+
 
-Use a command or shell for interactive work, an experiment for long training that should survive
-node failures, and a generic task for batch jobs that you want to name, organize, pause and resume.
+Use a shell for interactive work, a command for a one-off program, an experiment for long training
+that should survive node failures, and a generic task for batch jobs that you want to name,
+organize, pause and resume.
 
 **********
  Creating
