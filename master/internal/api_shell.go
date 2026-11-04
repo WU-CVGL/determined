@@ -334,7 +334,7 @@ func validateShellConfig(config model.CommandConfig) error {
 	return nil
 }
 
-// validateShellServices checks that the master can run a shell's declared services, the ones that
+// validateShellServices checks that the master can run a shell's enabled services, the ones that
 // run: that it knows each, that it serves code-server for vscode, and that each gets a port of its
 // range outside the spec's other ports, as the launch assigns them, on a copy of the spec's
 // services.
@@ -342,7 +342,7 @@ func (a *apiServer) validateShellServices(spec *tasks.GenericCommandSpec) error 
 	scratch := *spec
 	scratch.Services = slices.Clone(spec.Services)
 	for _, name := range append([]string{interactiveServiceSSH},
-		model.DeclaredServices(spec.Config.Services)...) {
+		model.EnabledServiceNames(spec.Config.Services)...) {
 		switch name {
 		case interactiveServiceSSH, interactiveServiceJupyter:
 		case interactiveServiceVSCode:
@@ -450,10 +450,10 @@ func (a *apiServer) LaunchShell(
 			tar.TypeReg,
 		),
 	}
-	// The declared services after ssh, the primary one, in sorted order, which Command.Start
+	// The enabled services after ssh, the primary one, in sorted order, which Command.Start
 	// passes on to the supervisor from their records. prepareShellLaunch checked them; a disabled
 	// service stays in the config and gets no record.
-	for _, name := range model.DeclaredServices(launchReq.Spec.Config.Services) {
+	for _, name := range model.EnabledServiceNames(launchReq.Spec.Config.Services) {
 		files, err := a.addShellService(launchReq.Spec, name)
 		if err != nil {
 			return nil, err
@@ -499,7 +499,7 @@ func (a *apiServer) LaunchShell(
 	}, nil
 }
 
-// addShellService adds a declared service other than ssh, which every shell runs, to a shell
+// addShellService adds an enabled service other than ssh, which every shell runs, to a shell
 // spec, and returns its files.
 func (a *apiServer) addShellService(
 	spec *tasks.GenericCommandSpec, name string,
