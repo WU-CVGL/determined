@@ -38,6 +38,8 @@ type Params = {
 };
 
 const POLL_MS = 2000;
+/** How often the services are read once they have settled, while the task runs. */
+const SERVICES_SLOW_POLL_MS = 10000;
 const MAX_POLL_FAILURES = 5;
 const DEFAULT_PAGE_TITLE = 'Tasks - Determined';
 
@@ -152,10 +154,13 @@ export const InteractiveTask: React.FC = () => {
     }
   }, [slotsExceeded]);
 
-  // The one poll of the task, until it ends, and of its services while one of them has not
-  // settled: the set of services is fixed, and a pane opens its service once it is ready. One
-  // tick at a time: the next is scheduled once the current one has answered, so that an older
-  // answer never lands after a newer one.
+  // The one poll of the task, until it ends, and of its services: on every tick while one of them
+  // has not settled, then every SERVICES_SLOW_POLL_MS while the task runs, so that a service that
+  // exits after it was ready shows its state, and once more when the task has ended. The set of
+  // services is fixed, and a pane opens its service once it is ready. The services are not read
+  // while the page is hidden; showing it reads them at once. One tick at a time: the next is
+  // scheduled once the current one has answered, and one read of the services at a time, so that
+  // an older answer never lands after a newer one.
   useEffect(() => {
     let cancelled = false;
     let failures = 0;
@@ -165,7 +170,15 @@ export const InteractiveTask: React.FC = () => {
     // Whether the page has given up reading the services until Retry: the task's own tabs are
     // shown without them.
     let servicesGivenUp = false;
+    // Whether the services API does not know the task, which then has no services to read again.
+    let servicesUnknown = false;
     let servicesSettled = false;
+    // The read of the services in flight, if any.
+    let servicesRead: Promise<void> | undefined;
+    // When the last read of the services started, and whether the read after the task's end ran.
+    let servicesReadAt = 0;
+    let endRead = false;
+    let ended = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     // Whether the task has ended, or the page gives up on it.
     const pollTask = async (): Promise<'ended' | 'gone' | undefined> => {
@@ -216,6 +229,7 @@ export const InteractiveTask: React.FC = () => {
         if (isNotFound(e as Error)) {
           servicesLoaded = true;
           servicesGivenUp = false;
+          servicesUnknown = true;
           setServicesError(undefined);
           setTaskServices({ services: [] });
           servicesSettled = true;
@@ -225,25 +239,53 @@ export const InteractiveTask: React.FC = () => {
         }
       }
     };
+    // One read at a time; a read asked for while another runs waits for that one.
+    const readServices = (): Promise<void> => {
+      if (servicesRead) return servicesRead;
+      servicesReadAt = Date.now();
+      servicesRead = pollServices().finally(() => {
+        servicesRead = undefined;
+      });
+      return servicesRead;
+    };
+    // Whether the page reads the services on this tick.
+    const servicesDue = (): boolean => {
+      if (servicesGivenUp || servicesUnknown || servicesRead || document.hidden) return false;
+      if (!servicesSettled) return true;
+      return !ended && Date.now() - servicesReadAt >= SERVICES_SLOW_POLL_MS;
+    };
     // One more read, on request; a success resumes the reads of the poll while it runs.
     retryServicesRef.current = async () => {
       setRetrying(true);
-      await pollServices();
+      await readServices();
       setRetrying(false);
     };
     const poll = async () => {
-      const [outcome] = await Promise.all([
-        pollTask(),
-        servicesSettled || servicesGivenUp ? undefined : pollServices(),
-      ]);
-      const servicesDone = servicesSettled || servicesGivenUp;
-      if (cancelled || outcome === 'gone' || (outcome === 'ended' && servicesDone)) return;
+      const [outcome] = await Promise.all([pollTask(), servicesDue() ? readServices() : undefined]);
+      if (cancelled || outcome === 'gone') return;
+      if (outcome === 'ended') {
+        ended = true;
+        // The services' states after the end, once, from a read that starts after the end.
+        if (!endRead && !servicesGivenUp && !servicesUnknown) {
+          endRead = true;
+          await servicesRead;
+          if (cancelled) return;
+          await readServices();
+          if (cancelled) return;
+        }
+        if (servicesSettled || servicesGivenUp) return;
+      }
       timer = setTimeout(() => void poll(), POLL_MS);
     };
+    const onVisibilityChange = () => {
+      if (!document.hidden && !ended && !servicesGivenUp && !servicesUnknown) void readServices();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
     void poll();
     return () => {
       cancelled = true;
       clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       retryServicesRef.current = undefined;
     };
   }, [taskId]);

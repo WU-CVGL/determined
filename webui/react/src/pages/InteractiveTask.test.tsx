@@ -254,10 +254,162 @@ describe('InteractiveTask', () => {
         V1TaskServiceState.READY,
       );
       expect(getTaskServices).toHaveBeenCalledTimes(3);
-      // Settled: the task is still polled, the services are not.
-      await act(() => vi.advanceTimersByTimeAsync(4000));
+      // Settled: the task is still polled every 2 s, the services every 10 s.
+      await act(() => vi.advanceTimersByTimeAsync(8000));
       expect(getTaskServices).toHaveBeenCalledTimes(3);
-      expect(getTask).toHaveBeenCalledTimes(5);
+      expect(getTask).toHaveBeenCalledTimes(7);
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+      expect(getTaskServices).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows the state of a service that exits after it was ready, from the slow poll', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getTaskServices).mockResolvedValue(
+        servicesWith(['ssh', 'jupyter', 'tensorboard'], true, V1TaskServiceState.READY),
+      );
+      setup('?tab=tensorboard');
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(tabLabels()).toEqual(['Terminal', 'JupyterLab', 'TensorBoard', 'Logs', 'Resources']);
+      expect(screen.getByTestId('service-pane-tensorboard')).toHaveAttribute(
+        'data-state',
+        V1TaskServiceState.READY,
+      );
+      expect(getTaskServices).toHaveBeenCalledTimes(1);
+
+      const exited = servicesWith(
+        ['ssh', 'jupyter', 'tensorboard'],
+        true,
+        V1TaskServiceState.READY,
+      );
+      exited.services[2].state = V1TaskServiceState.EXITED;
+      vi.mocked(getTaskServices).mockResolvedValue(exited);
+      await act(() => vi.advanceTimersByTimeAsync(8000));
+      expect(getTaskServices).toHaveBeenCalledTimes(1);
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+      expect(getTaskServices).toHaveBeenCalledTimes(2);
+      // The tab stays, with the service's state.
+      expect(tabLabels()).toEqual(['Terminal', 'JupyterLab', 'TensorBoard', 'Logs', 'Resources']);
+      expect(screen.getByTestId('service-pane-tensorboard')).toHaveAttribute(
+        'data-state',
+        V1TaskServiceState.EXITED,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reads no services while the page is hidden, and reads them at once when it is shown', async () => {
+    let hidden = false;
+    const visibility = vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden);
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getTaskServices).mockResolvedValue(
+        servicesWith(['ssh', 'jupyter'], true, V1TaskServiceState.READY),
+      );
+      setup();
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(getTaskServices).toHaveBeenCalledTimes(1);
+
+      hidden = true;
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await act(() => vi.advanceTimersByTimeAsync(20000));
+      expect(getTaskServices).toHaveBeenCalledTimes(1);
+      // The task itself is still polled.
+      expect(getTask).toHaveBeenCalledTimes(11);
+
+      hidden = false;
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(getTaskServices).toHaveBeenCalledTimes(2);
+      // The slow poll goes on from that read.
+      await act(() => vi.advanceTimersByTimeAsync(8000));
+      expect(getTaskServices).toHaveBeenCalledTimes(2);
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+      expect(getTaskServices).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+      visibility.mockRestore();
+    }
+  });
+
+  it('reads the services once more when the task ends, then stops', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getTaskServices).mockResolvedValue(
+        servicesWith(['ssh', 'jupyter'], true, V1TaskServiceState.READY),
+      );
+      setup('?tab=jupyter');
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(getTaskServices).toHaveBeenCalledTimes(1);
+
+      vi.mocked(getTask).mockResolvedValue(
+        taskWith(false, V1TaskType.SHELL, CommandState.Terminated, '2026-01-01T01:00:00Z'),
+      );
+      vi.mocked(getTaskServices).mockResolvedValue(
+        servicesWith(['ssh', 'jupyter'], true, V1TaskServiceState.EXITED),
+      );
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+      expect(getTaskServices).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId('service-pane-jupyter')).toHaveAttribute(
+        'data-state',
+        V1TaskServiceState.EXITED,
+      );
+      await act(() => vi.advanceTimersByTimeAsync(20000));
+      expect(getTaskServices).toHaveBeenCalledTimes(2);
+      expect(getTask).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reads the services after the end, past a read the shown page started before it', async () => {
+    vi.useFakeTimers();
+    try {
+      const ready = servicesWith(['ssh', 'jupyter'], true, V1TaskServiceState.READY);
+      vi.mocked(getTaskServices).mockResolvedValue(ready);
+      setup('?tab=jupyter');
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(getTaskServices).toHaveBeenCalledTimes(1);
+
+      // The page is shown again: its read is still in flight when the poll sees the end.
+      let answer: (value: V1GetTaskServicesResponse) => void = () => undefined;
+      vi.mocked(getTaskServices).mockReturnValueOnce(
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+      );
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      expect(getTaskServices).toHaveBeenCalledTimes(2);
+      vi.mocked(getTask).mockResolvedValue(
+        taskWith(false, V1TaskType.SHELL, CommandState.Terminated, '2026-01-01T01:00:00Z'),
+      );
+      vi.mocked(getTaskServices).mockResolvedValue(
+        servicesWith(['ssh', 'jupyter'], true, V1TaskServiceState.EXITED),
+      );
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+      expect(getTaskServices).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        answer(ready);
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(getTaskServices).toHaveBeenCalledTimes(3);
+      expect(screen.getByTestId('service-pane-jupyter')).toHaveAttribute(
+        'data-state',
+        V1TaskServiceState.EXITED,
+      );
+      await act(() => vi.advanceTimersByTimeAsync(20000));
+      expect(getTaskServices).toHaveBeenCalledTimes(3);
     } finally {
       vi.useRealTimers();
     }
@@ -376,9 +528,9 @@ describe('InteractiveTask', () => {
       expect(getShells).not.toHaveBeenCalled();
       expect(getCommand).not.toHaveBeenCalled();
       // Not asked again: the services API does not know the task.
-      await act(() => vi.advanceTimersByTimeAsync(4000));
+      await act(() => vi.advanceTimersByTimeAsync(20000));
       expect(getTaskServices).toHaveBeenCalledTimes(1);
-      expect(getTask).toHaveBeenCalledTimes(3);
+      expect(getTask).toHaveBeenCalledTimes(11);
     } finally {
       vi.useRealTimers();
     }

@@ -35,9 +35,30 @@ describe('TaskServicePane', () => {
     expect(frame).toHaveAttribute('src', 'https://det.example.org/proxy/task-1:2900/?token=t');
     expect(taskServiceUrl).toHaveBeenCalledWith('task-1', 'jupyter');
     // Once: later states do not load it again.
-    rerender(<Pane state={V1TaskServiceState.EXITED} />);
+    rerender(<Pane state={V1TaskServiceState.READY} />);
     expect(taskServiceUrl).toHaveBeenCalledTimes(1);
   });
+
+  it.each([V1TaskServiceState.EXITED, V1TaskServiceState.UNAVAILABLE])(
+    'shows the state of a service that goes away after it loaded (%s)',
+    async (gone) => {
+      vi.mocked(taskServiceUrl).mockResolvedValueOnce('https://det.example.org/proxy/task-1:2900/');
+      vi.mocked(taskServiceUrl).mockRejectedValueOnce(
+        new Error(`jupyter: ${gone.replace('STATE_', '')}`),
+      );
+      const { rerender } = render(<Pane state={V1TaskServiceState.READY} />);
+      expect(await screen.findByTitle('JupyterLab')).toBeInTheDocument();
+      rerender(<Pane state={gone} />);
+      const text = `jupyter: ${gone.replace('STATE_', '')}`;
+      expect(screen.getByText(text)).toBeInTheDocument();
+      expect(screen.queryByTitle('JupyterLab')).not.toBeInTheDocument();
+      expect(taskServiceUrl).toHaveBeenCalledTimes(1);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
+      expect(await screen.findByText(text)).toBeInTheDocument();
+      expect(taskServiceUrl).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it('opens a service without a credential, such as TensorBoard', async () => {
     vi.mocked(taskServiceUrl).mockResolvedValue('https://det.example.org/proxy/task-1:2902/');
