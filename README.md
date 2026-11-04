@@ -7,8 +7,9 @@
 
 Determined is an open-source deep learning platform for teams that share GPU clusters. A master
 schedules work onto the agents of its resource pools, tracks experiments, checkpoints and logs,
-and serves a WebUI, a REST API and the `det` CLI. One cluster runs interactive development and
-batch training side by side, with PyTorch, TensorFlow, DeepSpeed or any program in a container.
+and serves a WebUI with light and dark themes, a REST API and the `det` CLI. One cluster runs
+interactive development and batch training side by side, with PyTorch, TensorFlow, DeepSpeed or
+any program in a container.
 
 # Interactive
 

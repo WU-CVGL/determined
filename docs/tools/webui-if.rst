@@ -163,6 +163,15 @@ To revert to default settings:
 -  Select **Reset to Default**.
 -  Confirm you want to reset all user settings to their default values.
 
+******************
+ Choosing a Theme
+******************
+
+The WebUI has a light and a dark theme, and follows your system's setting unless you pick one. To
+pick one, select your profile name in the upper left corner and click the theme entry, which shows
+the current choice and switches between **Day Theme**, **Night Theme** and **System Theme**. The
+**Theme Mode** setting in the Preferences section of your user settings makes the same choice.
+
 ****************************************
  Selecting a Table Density (Row Height)
 ****************************************
@@ -260,8 +269,13 @@ The shell's page opens when you click its name or choose **Open Terminal**, **Op
 **Logs** and **Resources**; ``det task open <shell id> jupyter`` opens JupyterLab from the CLI. See
 :ref:`shell-services`.
 
+.. image:: /assets/images/interactive-task-page-dark.png
+   :class: only-dark
+   :alt: The page of a shell with its Terminal, JupyterLab, VS Code, Logs and Resources tabs, JupyterLab open, in dark mode
+
 .. image:: /assets/images/interactive-task-page.png
-   :alt: The page of a shell with its Terminal, JupyterLab, VS Code, Logs and Resources tabs, JupyterLab open
+   :class: only-light
+   :alt: The page of a shell with its Terminal, JupyterLab, VS Code, Logs and Resources tabs, JupyterLab open, in light mode
 
 |
 
