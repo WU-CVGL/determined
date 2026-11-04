@@ -250,13 +250,16 @@ describe('InteractiveTask', () => {
     expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
   });
 
-  it('leaves out the Terminal tab when the user may not connect or the master turns it off', async () => {
+  it('leaves out the service tabs when the user may not connect, with no credential read', async () => {
     vi.mocked(getTaskServices).mockResolvedValue(servicesWith(['ssh', 'jupyter'], false));
-    const { unmount } = setup();
-    expect(await screen.findByTestId('service-pane-jupyter')).toBeInTheDocument();
-    expect(tabLabels()).toEqual(['JupyterLab', 'Logs', 'Resources']);
-    unmount();
+    setup('?tab=terminal');
+    expect(await screen.findByTestId('logs-pane')).toBeInTheDocument();
+    expect(tabLabels()).toEqual(['Logs', 'Resources']);
+    expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('service-pane-jupyter')).not.toBeInTheDocument();
+  });
 
+  it('leaves out the Terminal tab when the master turns it off', async () => {
     feature.on = false;
     vi.mocked(getTaskServices).mockResolvedValue(servicesWith(['ssh', 'jupyter']));
     setup();

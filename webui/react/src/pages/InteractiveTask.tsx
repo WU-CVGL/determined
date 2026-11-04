@@ -23,8 +23,8 @@ import handleError, { ErrorLevel, ErrorType, handleWarning } from 'utils/error';
 import { isNotFound } from 'utils/service';
 import {
   canOpenShellTerminal,
+  canOpenTaskService,
   commandTypeOfTask,
-  hasTaskService,
   taskPhase,
   taskServiceSettled,
 } from 'utils/task';
@@ -258,8 +258,8 @@ export const InteractiveTask: React.FC = () => {
   const tabKeys = useMemo(() => {
     const keys: InteractiveTaskTab[] = [];
     if (terminalEnabled && canOpenShellTerminal(services)) keys.push(InteractiveTaskTab.Terminal);
-    if (hasTaskService(services, 'jupyter')) keys.push(InteractiveTaskTab.JupyterLab);
-    if (hasTaskService(services, 'vscode')) keys.push(InteractiveTaskTab.VSCode);
+    if (canOpenTaskService(services, 'jupyter')) keys.push(InteractiveTaskTab.JupyterLab);
+    if (canOpenTaskService(services, 'vscode')) keys.push(InteractiveTaskTab.VSCode);
     if (command?.type === CommandType.TensorBoard && command.serviceAddress) {
       keys.push(InteractiveTaskTab.TensorBoard);
     }

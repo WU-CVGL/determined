@@ -14,10 +14,10 @@ import {
   canConnectToTask,
   canKillGenericTask,
   canOpenShellTerminal,
+  canOpenTaskService,
   canPauseGenericTask,
   canUnpauseGenericTask,
   commandTypeOfTask,
-  hasTaskService,
   isExperimentTask,
   shortTaskId,
   taskPhase,
@@ -150,11 +150,15 @@ describe('commandTypeOfTask', () => {
   });
 });
 
-describe('hasTaskService', () => {
-  it('finds a service by name whatever its state', () => {
-    expect(hasTaskService([{ name: 'ssh' }, { name: 'jupyter' }], 'jupyter')).toBe(true);
-    expect(hasTaskService([{ name: 'ssh' }], 'jupyter')).toBe(false);
-    expect(hasTaskService([], 'ssh')).toBe(false);
+describe('canOpenTaskService', () => {
+  const ssh = { mayConnect: true, name: 'ssh' };
+  const jupyter = { mayConnect: true, name: 'jupyter' };
+
+  it('needs the named service, which the master lets the user connect to', () => {
+    expect(canOpenTaskService([ssh, jupyter], 'jupyter')).toBe(true);
+    expect(canOpenTaskService([ssh, { ...jupyter, mayConnect: false }], 'jupyter')).toBe(false);
+    expect(canOpenTaskService([ssh], 'jupyter')).toBe(false);
+    expect(canOpenTaskService([], 'ssh')).toBe(false);
   });
 });
 

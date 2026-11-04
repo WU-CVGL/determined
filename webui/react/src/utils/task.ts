@@ -14,13 +14,22 @@ import { CommandState, RunState, State } from 'types';
 import { runStateSortValues } from './experiment';
 
 /**
- * Whether to offer a browser terminal in a task: it has an SSH service that the master lets the
- * user connect to (the task's owner, or an admin). The master enforces the same rule.
+ * Whether to offer the named service of a task: the task has it and the master lets the user
+ * connect to it (the task's owner, or an admin), which is also who may read its credential. The
+ * master enforces the same rule.
  */
+export const canOpenTaskService = (
+  services: Pick<V1TaskService, 'mayConnect' | 'name'>[],
+  name: string,
+): boolean => {
+  return services.some((s) => s.name === name && s.mayConnect);
+};
+
+/** Whether to offer a browser terminal in a task: its SSH service, by the rule of every service. */
 export const canOpenShellTerminal = (
   services: Pick<V1TaskService, 'mayConnect' | 'name'>[],
 ): boolean => {
-  return services.some((s) => s.name === 'ssh' && s.mayConnect);
+  return canOpenTaskService(services, 'ssh');
 };
 
 /**
@@ -57,11 +66,6 @@ export const commandTypeOfTask = (taskType?: V1TaskType): Type.CommandType | und
     default:
       return undefined;
   }
-};
-
-/** Whether a task has the named service, whatever its state. */
-export const hasTaskService = (services: Pick<V1TaskService, 'name'>[], name: string): boolean => {
-  return services.some((s) => s.name === name);
 };
 
 /**
