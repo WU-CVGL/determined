@@ -298,15 +298,42 @@ describe('InteractiveTask', () => {
     expect(await screen.findByText('Command')).toBeInTheDocument();
   });
 
-  it('gives a task of another type, which has no lookup, its logs and resources', async () => {
-    vi.mocked(getTask).mockResolvedValue(taskWith(false, V1TaskType.GENERIC));
-    vi.mocked(getTaskServices).mockResolvedValue(servicesWith([]));
-    setup();
-    expect(await screen.findByTestId('logs-pane')).toBeInTheDocument();
-    expect(tabLabels()).toEqual(['Logs', 'Resources']);
-    expect(screen.getByText(TASK_ID)).toBeInTheDocument();
-    expect(getShells).not.toHaveBeenCalled();
-    expect(getCommand).not.toHaveBeenCalled();
+  it('gives a task of another type, which has no lookup and no services, its logs and resources', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getTask).mockResolvedValue(taskWith(false, V1TaskType.GENERIC));
+      vi.mocked(getTaskServices).mockRejectedValue(
+        new DetError(undefined, { publicMessage: `task ${TASK_ID} not found` }),
+      );
+      setup();
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(screen.getByTestId('logs-pane')).toBeInTheDocument();
+      expect(tabLabels()).toEqual(['Logs', 'Resources']);
+      expect(screen.getByText(TASK_ID)).toBeInTheDocument();
+      expect(getShells).not.toHaveBeenCalled();
+      expect(getCommand).not.toHaveBeenCalled();
+      // Not asked again: the services API does not know the task.
+      await act(() => vi.advanceTimersByTimeAsync(4000));
+      expect(getTaskServices).toHaveBeenCalledTimes(1);
+      expect(getTask).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows the tabs once a failed read of the services succeeds', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getTaskServices).mockRejectedValueOnce(new Error('network'));
+      setup();
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+      expect(tabLabels()).toEqual(['Terminal', 'JupyterLab', 'VS Code', 'Logs', 'Resources']);
+      expect(getTaskServices).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('names an ended task by its ID when its lookup is gone', async () => {

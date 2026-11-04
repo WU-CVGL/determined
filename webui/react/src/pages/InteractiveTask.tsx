@@ -20,6 +20,7 @@ import { V1TaskService, V1TaskServiceState } from 'services/api-ts-sdk';
 import { errorText } from 'services/taskService';
 import { CommandState, CommandTask, CommandType, InteractiveTaskTab, TaskItem } from 'types';
 import handleError, { ErrorLevel, ErrorType, handleWarning } from 'utils/error';
+import { isNotFound } from 'utils/service';
 import {
   canOpenShellTerminal,
   commandTypeOfTask,
@@ -179,7 +180,8 @@ export const InteractiveTask: React.FC = () => {
         return undefined;
       }
     };
-    // A failed read keeps the last services, if any, and is tried again on the next tick.
+    // A failed read keeps the last services, if any, and is tried again on the next tick; a task
+    // the services API does not know, such as a generic task, has none.
     const pollServices = async () => {
       try {
         const response = await getTaskServices({ taskId });
@@ -192,6 +194,10 @@ export const InteractiveTask: React.FC = () => {
       } catch (e) {
         if (cancelled) return;
         handleError(e, { publicMessage: 'Unable to load the services of the task.', silent: true });
+        if (isNotFound(e as Error)) {
+          setTaskServices({ services: [] });
+          servicesSettled = true;
+        }
       }
     };
     const poll = async () => {
