@@ -3,9 +3,14 @@ import { getTaskServiceCredential, getTaskServices } from 'services/api';
 import { TaskServiceProtocol, V1TaskServiceState } from 'services/api-ts-sdk';
 import { isDetError } from 'utils/error';
 
-/** The text of an error for a message: a DetError's public message, else its message. */
+/**
+ * The text of an error for a message: a DetError's public message when it is a string (the API
+ * error handler copies a response's error field as it is, so it can be an object), else its message.
+ */
 export const errorText = (e: unknown): string => {
-  if (isDetError(e)) return e.publicMessage || e.message;
+  if (isDetError(e)) {
+    return typeof e.publicMessage === 'string' && e.publicMessage ? e.publicMessage : e.message;
+  }
   return e instanceof Error ? e.message : String(e);
 };
 
