@@ -43,11 +43,15 @@ The master queries a fixed set of series, which any Prometheus that provides the
 
 -  cAdvisor's ``container_cpu_usage_seconds_total``, ``container_memory_working_set_bytes`` and
    ``container_memory_rss`` with ``job="cadvisor"`` and the labels ``det_cluster``,
-   ``container_runtime_id`` and ``node``.
+   ``container_runtime_id`` and ``node``. The CPU query reads only the aggregate samples, whose
+   ``cpu`` label is absent, empty or ``total`` (``cpu=~"^(total)?$"``), so per-core samples are not
+   read.
 
 -  DCGM-Exporter's ``DCGM_FI_DEV_GPU_UTIL``, ``DCGM_FI_DEV_FB_USED``, ``DCGM_FI_DEV_POWER_USAGE``
-   and ``DCGM_FI_DEV_GPU_TEMP`` with ``job="dcgm"`` and the labels ``det_cluster`` and ``gpu_uuid``;
-   the legend also reads their ``pci_bus_id``, ``gpu`` and ``modelName``.
+   and ``DCGM_FI_DEV_GPU_TEMP`` with ``job="dcgm"`` and the labels ``det_cluster``, ``gpu_uuid`` and
+   ``node``, the GPU's host, which the response reports and by which the legend groups an
+   allocation's GPUs before numbering them; the legend also reads their ``pci_bus_id``, ``gpu`` and
+   ``modelName``.
 
 -  For the GPU health view of agents (:ref:`agent-gpu-xids`), DCGM-Exporter's
    ``DCGM_EXP_XID_ERRORS_COUNT`` with the same job and labels and ``xid``, which the exporter's

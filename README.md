@@ -13,9 +13,10 @@ any program in a container.
 
 # Interactive
 
-One shell task runs an SSH server, JupyterLab and VS Code in the browser (code-server served by
-the master) in the same container, with the same user, files and GPUs. Start it with **Launch
-Interactive Task** on the **Jobs** page and work on its task page, in the **Terminal**,
+A shell task runs an SSH server; a new shell also runs JupyterLab by default, and VS Code in the
+browser when the master serves code-server, in the same container with the same user, files and
+GPUs. JupyterLab comes from the task image; the default does not install it. Start a shell with
+**Launch Interactive Task** on the **Jobs** page and work on its task page, in the **Terminal**,
 **JupyterLab**, **VS Code**, **Logs** and **Resources** tabs. A shell runs until it is killed,
 or until it has been idle for the `idle_timeout` its configuration sets.
 
@@ -24,7 +25,7 @@ or until it has been idle for the `idle_timeout` its configuration sets.
 ![The Launch Interactive Task form with a resource pool, slots, and the JupyterLab and VS Code services checked under Services](docs/assets/images/launch-interactive-task.png)
 
 ```bash
-det shell start                    # an SSH session; JupyterLab and VS Code run with it
+det shell start                    # an SSH session and the default services
 det task services <shell id>       # the shell's services and their states
 det task open <shell id> vscode    # VS Code in the browser
 ```

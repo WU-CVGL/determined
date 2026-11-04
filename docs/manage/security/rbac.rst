@@ -465,8 +465,8 @@ scope.
 ==========
 
 The ``Viewer`` role supersedes the ``ModelRegistryViewer`` role and includes permissions to see
-workspaces, projects, TensorBoards, shells, commands (NTSC tasks), and experiments, as well as
-experiment metadata and artifacts within its scope.
+workspaces, projects, TensorBoards, shells, commands, and experiments, as well as experiment
+metadata and artifacts within its scope.
 
 ``EditorRestricted``
 ====================
@@ -474,11 +474,11 @@ experiment metadata and artifacts within its scope.
 The ``EditorRestricted`` role supersedes the ``Viewer`` role and includes permissions to create,
 edit, or delete projects and experiments within its scope.
 
--  ``EditorRestricted`` users lack the permissions to create or update NSC (shell, command) type
-   workloads. ``EditorRestricted`` users can still perform all experiment-related jobs, just like
-   those with the ``Editor`` role. The only additional permissions granted by the ``Editor`` role
-   include the ability to create shells and commands (NSC tasks), as well as the permission to
-   update these tasks, such as changing the task's priority or deleting it.
+-  ``EditorRestricted`` users lack the permissions to create or update shells and commands.
+   ``EditorRestricted`` users can still perform all experiment-related jobs, just like those with
+   the ``Editor`` role. The only additional permissions granted by the ``Editor`` role include the
+   ability to create shells and commands, as well as the permission to update these tasks, such as
+   changing the task's priority or deleting it.
 
 ``EditorProjectRestricted``
 ===========================
@@ -487,15 +487,15 @@ The ``EditorProjectRestricted`` role supersedes the ``Viewer`` role and precedes
 role. Assign the ``EditorProjectRestricted`` to users who need ``Editor`` permissions without the
 ability to create or update projects. More specifically:
 
--  ``EditorProjectRestricted`` users can create, edit, or delete experiments and TensorBoard, shell,
-   or command (NTSC) tasks within their designated scope, just like those with the ``Editor`` role.
-   However, ``EditorProjectRestricted`` users lack the permissions to create or update projects.
+-  ``EditorProjectRestricted`` users can create, edit, or delete experiments, TensorBoards, shells
+   and commands within their designated scope, just like those with the ``Editor`` role. However,
+   ``EditorProjectRestricted`` users lack the permissions to create or update projects.
 
 ``Editor``
 ==========
 
 The ``Editor`` role supersedes the ``EditorRestricted`` role and includes permissions to create or
-update NTSC tasks within its scope.
+update TensorBoards, shells and commands within its scope.
 
 .. _rbac-workspaceadmin:
 
