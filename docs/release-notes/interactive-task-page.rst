@@ -1,0 +1,8 @@
+:orphan:
+
+**Improvements**
+
+-  WebUI: A task's page, ``/tasks/<task id>/interactive``, shows a shell's services as tabs:
+   **Terminal**, **JupyterLab** and **VS Code** when the shell runs them, then the task's **Logs**
+   and **Resources**. Task names, **Open Terminal** and TensorBoard launches open it, and links to
+   the old interactive and terminal pages redirect to it.

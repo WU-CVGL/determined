@@ -134,6 +134,7 @@ To start a shell with VS Code in the browser, the ``vscode`` service, and open i
    det shell start --service vscode
    det task open <shell id> vscode
 
+In the WebUI, the shell's page has a tab for each of its services (see :ref:`shell-web-terminal`).
 Only the user who started the shell and administrators can open its services.
 
 A shell is not terminated for being idle unless its configuration sets :ref:`idle_timeout
@@ -155,7 +156,8 @@ The ``jupyter`` service runs `JupyterLab <https://jupyter.org/>`__ in the shell'
    det task open <shell id> jupyter
 
 In the WebUI, check **jupyter** in **Launch Shell** on the **Jobs** page or a workspace's **Jobs**
-tab, then open it with ``det task open``.
+tab, then open it from the **JupyterLab** tab of the shell's page (click the shell's name) or with
+``det task open``.
 
 Opening a notebook in JupyterLab starts a kernel, which runs until you shut it down in JupyterLab.
 
@@ -223,8 +225,11 @@ Terminals in the WebUI
 
 You can also open a terminal in a running shell from the WebUI: on the **Jobs** page or a
 workspace's **Jobs** tab, click the shell's name, or choose **Open Terminal** from its action menu.
-The terminal opens in a new browser tab. Only the user who started the shell and administrators can
-open terminals in it; when an administrator opens one, the shell's task log records it.
+The shell's page opens in a new browser tab, with the terminal in its **Terminal** tab next to a
+**JupyterLab** and a **VS Code** tab when the shell runs those services, and the shell's **Logs**
+and **Resources**. The terminal connects when its tab is first shown and keeps its session while you
+use the other tabs. Only the user who started the shell and administrators can open terminals in it;
+when an administrator opens one, the shell's task log records it.
 
 The master connects to the shell's SSH server for you, with the shell's own key, so the key never
 reaches the browser. A browser terminal is a new SSH session, like ``det shell open``, and both work

@@ -35,6 +35,7 @@ class TaskActionDropdown extends DropdownMenu {
   readonly copy = this.menuItem(TaskAction.CopyTaskID);
   readonly viewLogs = this.menuItem(TaskAction.ViewLogs);
   readonly connect = this.menuItem(TaskAction.Connect);
+  readonly openTerminal = this.menuItem(TaskAction.OpenTerminal);
 }
 
 /**
