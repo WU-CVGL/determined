@@ -250,7 +250,9 @@ func TestServiceConfigTensorBoard(t *testing.T) {
 
 	// The flags that the service sets, as "--flag value", as "--flag=value" or bare last, are
 	// refused, whether or not the service runs, each by name.
-	for _, flag := range []string{"--logdir", "--port", "--path_prefix", "--host", "--bind_all"} {
+	for _, flag := range []string{
+		"--logdir", "--port", "--path_prefix", "--host", "--bind_all", "--reuse_port",
+	} {
 		for _, args := range []string{
 			`["` + flag + `", "x"]`, `["--reload_interval=5", "` + flag + `=x"]`, `["` + flag + `"]`,
 		} {
@@ -270,7 +272,7 @@ func TestServiceConfigTensorBoard(t *testing.T) {
 		`"--po", "7000"`: "--port is set by the service", `"--path_p=/x"`: "--path_prefix is set by the service",
 		`"--logd"`: "--logdir is set by the service", `"--flagfile=f"`: "--flagfile is not allowed",
 		`"--flagfile", "f"`: "--flagfile is not allowed", `"-flagfile=f"`: "--flagfile is not allowed",
-		`"--flagf=f"`: "--flagfile is not allowed",
+		`"--flagf=f"`: "--flagfile is not allowed", `"--reu=true"`: "--reuse_port is set by the service",
 	} {
 		text := `{"services": {"tensorboard": {"logdir": "runs", "args": ["--reload_interval=5", ` + arg + `]}}}`
 		config, err := decodeCommandConfig(text)

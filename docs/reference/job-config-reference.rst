@@ -202,8 +202,9 @@ The following configuration settings are supported:
 
    -  ``args``: ``tensorboard`` only. A list of more TensorBoard arguments. The service sets
       ``--logdir``, ``--port``, ``--path_prefix``, ``--host`` and ``--load_fast``, and its values
-      take precedence; an argument that sets ``--logdir``, ``--port``, ``--path_prefix``, ``--host``
-      or ``--bind_all``, also abbreviated, or that names a flag file is refused.
+      take precedence; an argument that sets ``--logdir``, ``--port``, ``--path_prefix``,
+      ``--host``, ``--bind_all`` or ``--reuse_port``, also abbreviated, or that names a flag file is
+      refused.
 
    A service's entry in the launch configuration keeps the template's ``idle_type``, ``logdir`` and
    ``args`` when it does not set them, and runs the service unless it sets ``enabled`` to ``false``;

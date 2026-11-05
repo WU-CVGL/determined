@@ -164,8 +164,11 @@ func validateServices(services map[string]ServiceConfig) []error {
 }
 
 // tensorBoardServiceFlags are the flags that the tensorboard service's args may not set: the
-// TensorBoard flags that the service sets itself, and --bind_all, which would replace its --host.
-var tensorBoardServiceFlags = []string{"--logdir", "--port", "--path_prefix", "--host", "--bind_all"}
+// TensorBoard flags that the service sets itself, --bind_all, which would replace its --host, and
+// --reuse_port, which would let another process share its port.
+var tensorBoardServiceFlags = []string{
+	"--logdir", "--port", "--path_prefix", "--host", "--bind_all", "--reuse_port",
+}
 
 // tensorBoardFlagFile is TensorBoard's flag that reads more flags from a file, which the args may
 // not set either.

@@ -245,9 +245,9 @@ answers.
 
 ``services.tensorboard.args`` adds TensorBoard arguments. The service's own ``--logdir``,
 ``--port``, ``--path_prefix``, ``--host 0.0.0.0`` and ``--load_fast=false`` take precedence over
-them. An argument that sets ``--logdir``, ``--port``, ``--path_prefix``, ``--host`` or
-``--bind_all``, also abbreviated, or that names a flag file is refused. One argument is a list of
-one; an argument with a comma goes in quotes inside a list:
+them. An argument that sets ``--logdir``, ``--port``, ``--path_prefix``, ``--host``, ``--bind_all``
+or ``--reuse_port``, also abbreviated, or that names a flag file is refused. One argument is a list
+of one; an argument with a comma goes in quotes inside a list:
 
 .. code::
 
