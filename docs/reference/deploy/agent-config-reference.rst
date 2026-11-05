@@ -366,8 +366,8 @@ under load still shows it. The agent API reports both, as ``pcie_link_gen`` and
 Recent critical XIDs
 ====================
 
-An XID is an error report of the NVIDIA driver. When the master has a Prometheus for :ref:`native
-task resources <native-task-resources>` (``integrations.task_resources``), it reads each GPU's
+An XID is an error report of the NVIDIA driver. When the master has a Prometheus for :ref:`task
+resources <task-resources>` (``integrations.task_resources``), it reads each GPU's
 critical XIDs of the last 24 hours from the cluster's DCGM-Exporter. A GPU with one is in error, and
 its details list each code with the first and last 5-minute window in which the master saw it, for
 example ``79 (2026-10-07 10:05-10:10+0000 to 2026-10-07 10:10-10:15+0000)`` in ``det agent

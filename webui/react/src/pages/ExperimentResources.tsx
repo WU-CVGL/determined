@@ -78,7 +78,7 @@ const ExperimentResources: React.FC = () => {
         <Alert
           message={
             enabled === false
-              ? 'Native task resources are unavailable on this cluster.'
+              ? 'Task resources are unavailable on this cluster.'
               : `This ${entity.toLowerCase()} is unavailable or you do not have permission to view it.`
           }
           type="error"

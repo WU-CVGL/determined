@@ -1,10 +1,10 @@
-.. _native-task-resources:
+.. _task-resources:
 
-#######################
- Native Task Resources
-#######################
+################
+ Task Resources
+################
 
-The native **Resources** tab shows task CPU, memory, assigned GPU metrics, and allocation
+The **Resources** tab shows task CPU, memory, assigned GPU metrics, and allocation
 lifetimes inside the Determined WebUI. Trial details include the tab; task logs link to a
 dedicated resource page. The page uses the existing Determined login and task permissions.
 
@@ -13,7 +13,7 @@ supported job's action menu under **Cluster > Resource Pool > Active Tasks**. Ta
 that task directly. Experiment entries open a Trial selector so multiple Trials are not silently
 combined or reduced to an arbitrary Trial. Generic Tasks in the cluster queue link to their own
 resource page. External jobs and entries without a visible entity ID do not offer this action.
-These actions appear only when native resource monitoring is enabled.
+These actions appear only when task resource monitoring is enabled.
 
 Enable the integration in the master configuration and restart the master:
 
@@ -146,6 +146,6 @@ The generated :ref:`REST API reference <rest-api>` documents the request and res
 Deployed masters serve the same specification at ``/api/v1/api.swagger.json`` and the interactive
 reference at ``/docs/rest-api/``. The existing WebUI endpoints remain available for compatibility.
 
-The :ref:`Grafana link <grafana-task-resources>` remains available when native monitoring is
-disabled and a Grafana dashboard is configured. When native monitoring is enabled, resource
+The :ref:`Grafana link <grafana-task-resources>` remains available when task resource monitoring is
+disabled and a Grafana dashboard is configured. When task resource monitoring is enabled, resource
 links stay within Determined. Grafana continues to manage its own access permissions separately.
