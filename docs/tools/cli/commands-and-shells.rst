@@ -243,10 +243,11 @@ directory when it is missing, so that a training run in the shell can write its 
 later; until then TensorBoard shows its empty page. The service is ``READY`` once TensorBoard
 answers.
 
-``services.tensorboard.args`` adds TensorBoard arguments after the service's own: ``--logdir``,
-``--port``, ``--path_prefix``, ``--host 127.0.0.1``, and ``--load_fast=false`` for TensorBoard 2.5
-and later. An argument that sets ``--logdir``, ``--port``, ``--path_prefix``, ``--host`` or
-``--bind_all`` is refused. One argument is a list of one; an argument with a comma goes in quotes
+``services.tensorboard.args`` adds TensorBoard arguments, after ``--load_fast=false``, which the
+service gives TensorBoard 2.5 and later, and before the service's ``--logdir``, ``--port``,
+``--path_prefix`` and ``--host 127.0.0.1``, which take precedence. An argument that sets
+``--logdir``, ``--port``, ``--path_prefix``, ``--host`` or ``--bind_all``, also abbreviated, or that
+names a flag file is refused. One argument is a list of one; an argument with a comma goes in quotes
 inside a list:
 
 .. code::

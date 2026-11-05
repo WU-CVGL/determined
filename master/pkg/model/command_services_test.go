@@ -222,6 +222,7 @@ func TestServiceConfigTensorBoard(t *testing.T) {
 		`{"services": {"tensorboard": {"logdir": "runs", "args": ["--logdir_spec=a:runs", "--hostx"]}}}`,
 		`{"services": {"tensorboard": {"logdir": "runs", "args": ["--reload_interval", "5"]}}}`,
 		`{"services": {"tensorboard": {"enabled": false, "args": ["--load_fast=true"]}}}`,
+		`{"services": {"tensorboard": {"logdir": "runs", "args": ["--", "-", "--=x", "--samples_per_plugin=scalars=500"]}}}`,
 	} {
 		config, err := decodeCommandConfig(text)
 		require.NoError(t, err, text)
@@ -261,6 +262,20 @@ func TestServiceConfigTensorBoard(t *testing.T) {
 					"services: tensorboard: args: "+flag+" is set by the service", text)
 			}
 		}
+	}
+	// So are their abbreviations, which TensorBoard takes too, each by the flag's full name, and a
+	// flag file, which could hold them.
+	for arg, want := range map[string]string{
+		`"--bind"`: "--bind_all is set by the service", `"--hos=0.0.0.0"`: "--host is set by the service",
+		`"--po", "7000"`: "--port is set by the service", `"--path_p=/x"`: "--path_prefix is set by the service",
+		`"--logd"`: "--logdir is set by the service", `"--flagfile=f"`: "--flagfile is not allowed",
+		`"--flagfile", "f"`: "--flagfile is not allowed", `"-flagfile=f"`: "--flagfile is not allowed",
+		`"--flagf=f"`: "--flagfile is not allowed",
+	} {
+		text := `{"services": {"tensorboard": {"logdir": "runs", "args": ["--reload_interval=5", ` + arg + `]}}}`
+		config, err := decodeCommandConfig(text)
+		require.NoError(t, err, text)
+		require.ErrorContains(t, check.Validate(config), "services: tensorboard: args: "+want, text)
 	}
 	text := `{"services": {"tensorboard": {"logdir": "runs", "args": ["--host=0.0.0.0", "--bind_all"]}}}`
 	config, err = decodeCommandConfig(text)

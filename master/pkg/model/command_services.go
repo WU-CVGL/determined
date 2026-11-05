@@ -167,12 +167,34 @@ func validateServices(services map[string]ServiceConfig) []error {
 // TensorBoard flags that the service sets itself, and --bind_all, which would replace its --host.
 var tensorBoardServiceFlags = []string{"--logdir", "--port", "--path_prefix", "--host", "--bind_all"}
 
+// tensorBoardFlagFile is TensorBoard's flag that reads more flags from a file, which the args may
+// not set either.
+const tensorBoardFlagFile = "--flagfile"
+
+// tensorBoardRefusedFlag returns the flag of tensorBoardServiceFlags or tensorBoardFlagFile that
+// arg sets, or "". TensorBoard takes "--flag", which may take its value from the next argument, and
+// "--flag=value", each also with the flag abbreviated, and "-flagfile".
+func tensorBoardRefusedFlag(arg string) string {
+	name, _, _ := strings.Cut(arg, "=")
+	if name == "-flagfile" {
+		return tensorBoardFlagFile
+	}
+	if !strings.HasPrefix(name, "--") || len(name) == len("--") {
+		return ""
+	}
+	for _, flag := range append(slices.Clone(tensorBoardServiceFlags), tensorBoardFlagFile) {
+		if strings.HasPrefix(flag, name) {
+			return flag
+		}
+	}
+	return ""
+}
+
 // validateTensorBoardOptions returns an error for a logdir or args on a service other than
 // tensorboard, and, on the tensorboard service, for a missing logdir when it runs, for a NUL
 // character, which the container's environment cannot hold, in the logdir or an argument, and for
-// an argument that sets one of tensorBoardServiceFlags, as "--flag", which may take its value from
-// the next argument, or as "--flag=value". The args are checked whether or not the service runs, as
-// the NUL characters are.
+// an argument that sets a flag of tensorBoardRefusedFlag. The args are checked whether or not the
+// service runs, as the NUL characters are.
 func validateTensorBoardOptions(name string, service ServiceConfig) []error {
 	if name != ServiceTensorBoard {
 		var errs []error
@@ -198,10 +220,12 @@ func validateTensorBoardOptions(name string, service ServiceConfig) []error {
 		}
 	}
 	for _, arg := range service.Args {
-		for _, flag := range tensorBoardServiceFlags {
-			if arg == flag || strings.HasPrefix(arg, flag+"=") {
-				errs = append(errs, fmt.Errorf("services: tensorboard: args: %s is set by the service", flag))
-			}
+		switch flag := tensorBoardRefusedFlag(arg); flag {
+		case "":
+		case tensorBoardFlagFile:
+			errs = append(errs, fmt.Errorf("services: tensorboard: args: %s is not allowed", flag))
+		default:
+			errs = append(errs, fmt.Errorf("services: tensorboard: args: %s is set by the service", flag))
 		}
 	}
 	return errs

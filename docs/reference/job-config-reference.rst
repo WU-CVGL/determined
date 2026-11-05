@@ -200,9 +200,10 @@ The following configuration settings are supported:
       reads, a path in the container; a relative one is resolved against the working directory, and
       a missing one is created.
 
-   -  ``args``: ``tensorboard`` only. A list of more TensorBoard arguments, after the service's own.
-      The service sets ``--logdir``, ``--port``, ``--path_prefix`` and ``--host``; an argument that
-      sets one of them or ``--bind_all`` is refused.
+   -  ``args``: ``tensorboard`` only. A list of more TensorBoard arguments. The service sets
+      ``--logdir``, ``--port``, ``--path_prefix`` and ``--host``, and its values take precedence; an
+      argument that sets one of them or ``--bind_all``, also abbreviated, or that names a flag file
+      is refused.
 
    A service's entry in the launch configuration keeps the template's ``idle_type``, ``logdir`` and
    ``args`` when it does not set them, and runs the service unless it sets ``enabled`` to ``false``;
