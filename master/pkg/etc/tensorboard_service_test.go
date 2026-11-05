@@ -25,7 +25,7 @@ const tensorBoardTestToken = "test-token"
 
 // tensorBoardStandIn is a tensorboard program: it prints TB_STAND_IN_VERSION, 2.9.0 by default, for
 // --version_tb; otherwise it records its arguments NUL-separated and "tensorboard" in the order
-// file, and serves HTTP on 127.0.0.1 at its --port, with 200 under its --path_prefix and 404
+// file, and serves HTTP on 127.0.0.1 at its last --port, with 200 under its last --path_prefix and 404
 // elsewhere, until the order file has "stop tensorboard". Then it exits with
 // TB_STAND_IN_EXIT, 0 by default.
 const tensorBoardStandIn = `
@@ -45,8 +45,14 @@ import threading
 import time
 
 argv = sys.argv[1:]
-port = int(argv[argv.index("--port") + 1])
-prefix = argv[argv.index("--path_prefix") + 1]
+
+
+def last(flag):
+    return argv[len(argv) - 1 - argv[::-1].index(flag) + 1]
+
+
+port = int(last("--port"))
+prefix = last("--path_prefix")
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -141,13 +147,14 @@ func (v *tensorBoardTask) args() []string {
 	return strings.Split(strings.TrimSuffix(string(b), "\x00"), "\x00")
 }
 
-// localPort returns TensorBoard's own port, its --port.
+// localPort returns TensorBoard's own port, its last --port.
 func (v *tensorBoardTask) localPort() string {
 	v.t.Helper()
-	args := v.args()
+	args := slices.Clone(v.args())
+	slices.Reverse(args)
 	i := slices.Index(args, "--port")
-	require.Greater(v.t, i, -1, args)
-	return args[i+1]
+	require.Greater(v.t, i, 0, args)
+	return args[i-1]
 }
 
 // get returns the status of a GET of the prefix on 127.0.0.1 at port, with the token header if
@@ -189,12 +196,12 @@ func (v *tensorBoardTask) addOrder(line string) {
 	require.NoError(v.t, f.Close())
 }
 
-// The unit runs TensorBoard on the log directory, a relative one under the work directory, which it
-// creates, with a port of its own on 127.0.0.1, the prefix, the flags of the release and the
-// config's arguments, in order, last. The front on the service's port refuses a request without
-// the token and passes on one with it. The service is READY once the front answers under the
-// prefix; its readiness does not mark the task ready. TensorBoard's exit stops the front and
-// leaves the shell running.
+// The unit runs TensorBoard with the flags of the release, then the config's arguments, then the
+// log directory, a relative one under the work directory, which it creates, a port of its own on
+// 127.0.0.1 and the prefix, last, so that they win over the config's. The front on the service's
+// port refuses a request without the token and passes on one with it. The service is READY once
+// the front answers under the prefix; its readiness does not mark the task ready. TensorBoard's
+// exit stops the front and leaves the shell running.
 func TestTensorBoardUnitRuns(t *testing.T) {
 	absolute := filepath.Join(t.TempDir(), "abs", "logs")
 	for _, tc := range []struct {
@@ -210,6 +217,12 @@ func TestTensorBoardUnitRuns(t *testing.T) {
 			args:  `["--reload_interval=5", "two words", "--samples_per_plugin=scalars=500", ""]`,
 			flags: []string{"--load_fast=false"},
 			extra: []string{"--reload_interval=5", "two words", "--samples_per_plugin=scalars=500", ""},
+		},
+		{
+			name: "overridden", version: "2.9.0", logdir: "runs",
+			args:  `["--load_fast=true", "--hos=0.0.0.0", "--port", "1", "--path_p=/x"]`,
+			flags: []string{"--load_fast=false"},
+			extra: []string{"--load_fast=true", "--hos=0.0.0.0", "--port", "1", "--path_p=/x"},
 		},
 		{
 			name: "before 2.5", version: "2.4.1", logdir: "runs", args: `["--x"]`,
@@ -234,10 +247,10 @@ func TestTensorBoardUnitRuns(t *testing.T) {
 			require.True(t, info.IsDir())
 			local := v.localPort()
 			require.NotEqual(t, v.port, local)
-			require.Equal(t, append(append([]string{
+			require.Equal(t, append(append(slices.Clone(tc.flags), tc.extra...),
 				"--logdir", dir, "--port", local, "--path_prefix", strings.TrimSuffix(v.prefix, "/"),
 				"--host", "127.0.0.1",
-			}, tc.flags...), tc.extra...), v.args())
+			), v.args())
 			require.Equal(t, http.StatusUnauthorized, v.get(v.port, ""))
 			require.Equal(t, http.StatusUnauthorized, v.get(v.port, "wrong"))
 			require.Equal(t, http.StatusOK, v.get(v.port, tensorBoardTestToken))

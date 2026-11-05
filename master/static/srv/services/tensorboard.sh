@@ -2,9 +2,9 @@
 
 # The tensorboard service: TensorBoard from the image, reading DET_TENSORBOARD_LOGDIR, under
 # DET_TENSORBOARD_PATH_PREFIX, the path at which the master proxies it, with the more arguments of
-# DET_TENSORBOARD_ARGS, a JSON array of strings, after its own, behind a front on
-# DET_TENSORBOARD_PORT that takes only the master proxy's requests. The supervisor sources this
-# file after the init.
+# DET_TENSORBOARD_ARGS, a JSON array of strings, before its own --logdir, --port, --path_prefix and
+# --host, which therefore win, behind a front on DET_TENSORBOARD_PORT that takes only the master
+# proxy's requests. The supervisor sources this file after the init.
 #
 # - TensorBoard is the tensorboard program on the PATH, else the module tensorboard.main of the
 #   first of python3 and python that has it. The unit installs nothing.
@@ -84,10 +84,12 @@ if [[ ! $tensorboard_local_port =~ ^[0-9]+$ ]]; then
     tensorboard_unavailable "cannot find a free port on 127.0.0.1"
 fi
 
-tensorboard_flags=(--port "$tensorboard_local_port" --path_prefix "${tensorboard_prefix%/}"
-    --host 127.0.0.1)
+# The release's flags go before the more arguments, which may change them; the service's own go
+# after, so that TensorBoard, which keeps a flag's last value, takes them however the more arguments
+# spell theirs.
+tensorboard_release_flags=()
 if ((tensorboard_major > 2 || (tensorboard_major == 2 && tensorboard_minor >= 5))); then
-    tensorboard_flags+=(--load_fast=false)
+    tensorboard_release_flags+=(--load_fast=false)
 fi
 
 # The more arguments, each followed by NUL, then "ok" once all are decoded.
@@ -151,7 +153,9 @@ tensorboard_exit() {
     exit "$status"
 }
 
-"${tensorboard_cmd[@]}" --logdir "$tensorboard_logdir" "${tensorboard_flags[@]}" "${tensorboard_args[@]}" &
+"${tensorboard_cmd[@]}" "${tensorboard_release_flags[@]}" "${tensorboard_args[@]}" \
+    --logdir "$tensorboard_logdir" --port "$tensorboard_local_port" \
+    --path_prefix "${tensorboard_prefix%/}" --host 127.0.0.1 &
 tensorboard_pid=$!
 
 if ! tensorboard_probe "http://127.0.0.1:$tensorboard_local_port$tensorboard_prefix" "$tensorboard_pid"; then
