@@ -12,3 +12,6 @@
 
 -  Master: The proxy no longer compresses a task's already compressed response a second time, which
    left TensorBoard's toolbar icons blank.
+
+-  WebUI: A shell's service tabs show the services' end once the shell has ended, instead of the
+   last page of the service.

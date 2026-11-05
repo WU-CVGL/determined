@@ -150,8 +150,8 @@ To open TensorBoard, the ``tensorboard`` service:
 
 In the WebUI, the shell's page has a tab for each of its services (see :ref:`shell-web-terminal`). A
 service's tab opens the service once it is ``READY``; a service that cannot be opened shows its
-state in its tab with **Reconnect**. Only the user who started the shell and administrators can open
-its services.
+state in its tab with **Reconnect** while the shell runs; once the shell has ended, the tab shows
+the service's end. Only the user who started the shell and administrators can open its services.
 
 A shell is not terminated for being idle unless its configuration sets :ref:`idle_timeout
 <job-configuration-reference>`. With it, open SSH sessions and browser terminals and browser
