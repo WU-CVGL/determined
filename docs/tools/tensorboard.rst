@@ -79,6 +79,17 @@ Example job configuration file:
 The tensorboard_args field allows you to provide optional TensorBoard arguments. In the example
 above, we set the maximum number of image to display to 100, overriding TensorBoard's default value.
 
+The TensorBoard task installs ``tensorboard`` with pip when the image lacks it, keeping the image's
+``numpy``, ``protobuf``, ``requests`` and ``tensorboard`` at their versions. The profile plugin
+(``tensorboard-plugin-profile``) is installed only when the environment variable
+``DET_TENSORBOARD_PLUGIN_PROFILE`` is set to a non-empty value:
+
+.. code:: yaml
+
+   environment:
+     environment_variables:
+       - DET_TENSORBOARD_PLUGIN_PROFILE=1
+
 For detailed configuration settings, refer to the :ref:`job-configuration-reference`.
 
 To launch TensorBoard with an experiment configuration file, use ``det tensorboard start
