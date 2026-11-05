@@ -131,18 +131,21 @@ import urllib.request
 url, pid = sys.argv[1], int(sys.argv[2])
 headers = {"X-Determined-Service-Token": os.environ["DET_TENSORBOARD_TOKEN"]}
 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-while True:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        sys.exit(1)
-    try:
-        with opener.open(urllib.request.Request(url, headers=headers), timeout=5) as response:
-            if response.status == 200:
-                sys.exit(0)
-    except (OSError, ValueError):
-        pass
-    time.sleep(0.5)
+try:
+    while True:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            sys.exit(1)
+        try:
+            with opener.open(urllib.request.Request(url, headers=headers), timeout=5) as response:
+                if response.status == 200:
+                    sys.exit(0)
+        except (OSError, ValueError):
+            pass
+        time.sleep(0.5)
+except KeyboardInterrupt:
+    sys.exit(130)
 ' "$@"
 }
 
@@ -153,17 +156,26 @@ tensorboard_exit() {
     exit "$status"
 }
 
-"${tensorboard_cmd[@]}" "${tensorboard_release_flags[@]}" "${tensorboard_args[@]}" \
-    --logdir "$tensorboard_logdir" --port "$tensorboard_local_port" \
-    --path_prefix "${tensorboard_prefix%/}" --host 127.0.0.1 &
+# A job of a shell without job control ignores SIGINT; TensorBoard and the front take it again, as a
+# stop's signal.
+{
+    trap - INT
+    exec "${tensorboard_cmd[@]}" "${tensorboard_release_flags[@]}" "${tensorboard_args[@]}" \
+        --logdir "$tensorboard_logdir" --port "$tensorboard_local_port" \
+        --path_prefix "${tensorboard_prefix%/}" --host 127.0.0.1
+} &
 tensorboard_pid=$!
 
 if ! tensorboard_probe "http://127.0.0.1:$tensorboard_local_port$tensorboard_prefix" "$tensorboard_pid"; then
     tensorboard_exit "$tensorboard_pid"
 fi
 
-"$DET_PYTHON_EXECUTABLE" -m determined.exec.service_front --listen "0.0.0.0:$tensorboard_port" \
-    --upstream "127.0.0.1:$tensorboard_local_port" --token-env DET_TENSORBOARD_TOKEN &
+{
+    trap - INT
+    exec "$DET_PYTHON_EXECUTABLE" -m determined.exec.service_front \
+        --listen "0.0.0.0:$tensorboard_port" --upstream "127.0.0.1:$tensorboard_local_port" \
+        --token-env DET_TENSORBOARD_TOKEN
+} &
 tensorboard_front_pid=$!
 
 # One line once the front answers marks the service READY.

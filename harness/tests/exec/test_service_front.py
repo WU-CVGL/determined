@@ -228,3 +228,23 @@ def test_tensorboard_front_requires_the_token(
     ]
     assert service_front.main(argv) == 1
     assert capsys.readouterr().err == "service front: FRONT_TEST_TOKEN is not set\n"
+
+
+def test_tensorboard_front_stops_on_sigint(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    def interrupted(self: service_front._Server, poll_interval: float = 0.5) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setenv("FRONT_TEST_TOKEN", TOKEN)
+    monkeypatch.setattr(service_front._Server, "serve_forever", interrupted)
+    argv = [
+        "--listen",
+        "127.0.0.1:0",
+        "--upstream",
+        "127.0.0.1:1",
+        "--token-env",
+        "FRONT_TEST_TOKEN",
+    ]
+    assert service_front.main(argv) == 130
+    assert capsys.readouterr().err == ""

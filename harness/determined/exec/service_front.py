@@ -20,6 +20,7 @@ import hmac
 import http.client
 import http.server
 import os
+import signal
 import socket
 import sys
 from typing import Any, Iterator, List, Optional, Set, Tuple
@@ -192,6 +193,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     server = _Server(args.listen, args.upstream, token.encode("utf-8"))
     try:
         server.serve_forever()
+    except KeyboardInterrupt:
+        return 128 + signal.SIGINT
     finally:
         server.server_close()
     return 0

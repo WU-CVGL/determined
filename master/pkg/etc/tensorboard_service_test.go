@@ -25,9 +25,9 @@ const tensorBoardTestToken = "test-token"
 
 // tensorBoardStandIn is a tensorboard program: it prints TB_STAND_IN_VERSION, 2.9.0 by default, for
 // --version_tb; otherwise it records its arguments NUL-separated and "tensorboard" in the order
-// file, and serves HTTP on 127.0.0.1 at its last --port, with 200 under its last --path_prefix and 404
-// elsewhere, until the order file has "stop tensorboard". Then it exits with
-// TB_STAND_IN_EXIT, 0 by default.
+// file, and serves HTTP on 127.0.0.1 at its last --port, with 200 under its last --path_prefix and
+// 404 elsewhere, until the order file has "stop tensorboard". Then it exits with
+// TB_STAND_IN_EXIT, 0 by default; on SIGINT it exits 130.
 const tensorBoardStandIn = `
 for arg; do
     if [[ $arg == --version_tb ]]; then
@@ -81,7 +81,10 @@ def watch():
 
 threading.Thread(target=watch, daemon=True).start()
 print("tensorboard stand-in serving", file=sys.stderr, flush=True)
-server.serve_forever()
+try:
+    server.serve_forever()
+except KeyboardInterrupt:
+    sys.exit(130)
 sys.exit(int(os.environ.get("TB_STAND_IN_EXIT", "0")))
 ' "$@"
 `
@@ -346,6 +349,22 @@ func TestTensorBoardUnitStop(t *testing.T) {
 	v.signal(syscall.SIGTERM)
 	require.Equal(t, 128+int(syscall.SIGTERM), v.wait())
 	require.Contains(t, v.logLines(), "[tensorboard] exited 143")
+}
+
+// TensorBoard and the front take a stop's SIGINT, so the service exits with TensorBoard's status
+// well within the grace, before the supervisor would kill it.
+func TestTensorBoardUnitStopOnSIGINT(t *testing.T) {
+	v := newTensorBoardTask(t, "runs")
+	v.setting("stop_grace_seconds", 10)
+	v.standIn()
+	v.start()
+	v.waitForLog("[tensorboard] ready")
+	stopped := time.Now()
+	v.signal(syscall.SIGINT)
+	require.Equal(t, 128+int(syscall.SIGINT), v.wait())
+	require.Less(t, time.Since(stopped), 5*time.Second)
+	require.Contains(t, v.logLines(), "[tensorboard] exited 130")
+	require.NotContains(t, v.stderr.String(), "KeyboardInterrupt")
 }
 
 // Without TensorBoard, or with what the unit needs missing, the unit says why in one line and
