@@ -6,16 +6,19 @@ set -e
 
 if [ -z "$DET_SKIP_PIP_INSTALL" ]; then
     # Install tensorboard if not already installed (for custom PyTorch images). The image's numpy,
-    # protobuf, requests and tensorboard stay at their versions: a newer profile plugin would
-    # otherwise replace numpy with one the image's tensorboard cannot import. The profile plugin
-    # is optional; TensorBoard runs without it.
+    # protobuf, requests and tensorboard stay at their versions: a newer package would otherwise
+    # replace numpy with one the image's tensorboard cannot import. The profile plugin is installed
+    # only when DET_TENSORBOARD_PLUGIN_PROFILE is set: it pulls in xprof and the Google Cloud
+    # libraries, which takes minutes, and TensorBoard runs without it.
     PIP_CONSTRAINT="$(mktemp)"
     export PIP_CONSTRAINT
     "$DET_PYTHON_EXECUTABLE" -m pip freeze 2>/dev/null \
         | grep -iE '^(numpy|protobuf|requests|tensorboard)==' > "$PIP_CONSTRAINT" || true
     "$DET_PYTHON_EXECUTABLE" -m pip install tensorboard
-    "$DET_PYTHON_EXECUTABLE" -m pip install tensorboard-plugin-profile \
-        || echo "tensorboard-plugin-profile was not installed; TensorBoard runs without it"
+    if [ -n "$DET_TENSORBOARD_PLUGIN_PROFILE" ]; then
+        "$DET_PYTHON_EXECUTABLE" -m pip install tensorboard-plugin-profile \
+            || echo "tensorboard-plugin-profile was not installed; TensorBoard runs without it"
+    fi
     unset PIP_CONSTRAINT
 fi
 
