@@ -1,17 +1,21 @@
 """
 Tests of tensorboard_service.py, the tensorboard unit's program, with the stand-in tensorboard
 package of tensorboard_service_test.go, whose directory is TENSORBOARD_STAND_IN, on the
-PYTHONPATH with the program's. TestTensorBoardServiceProgram runs them.
+PYTHONPATH with the program's. TestTensorBoardServiceProgram runs them with python3 -S, so that
+the stand-in is the only tensorboard package.
 """
 
+import contextlib
 import io
 import os
 import subprocess
 import sys
+import threading
 import types
 import unittest
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 from unittest import mock
+from wsgiref import simple_server
 
 import tensorboard_service
 
@@ -95,21 +99,108 @@ class ServerFactoryTest(unittest.TestCase):
         for name in ["create_port_scanning_werkzeug_server", "WerkzeugServer"]:
             with self.subTest(name=name):
                 made: List[Tuple[Any, Any]] = []
+                bound: List[Tuple[Any, Any]] = []
 
                 def server(wsgi_app: Any, flags: Any, made: List[Tuple[Any, Any]] = made) -> str:
+                    self.assertEqual([], bound, "bound comes after the server")
                     made.append((wsgi_app, flags))
                     return "server"
 
                 program = types.SimpleNamespace(**{name: server})
                 app = App()
                 flags = object()
-                factory = tensorboard_service.server_factory(program, TOKEN.encode())
+                factory = tensorboard_service.server_factory(
+                    program, TOKEN.encode(), lambda *args: bound.append(args)
+                )
                 self.assertEqual("server", factory(app, flags))
                 self.assertEqual(1, len(made))
                 self.assertIs(flags, made[0][1])
+                self.assertEqual([("server", flags)], bound)
                 self.assertEqual("401 Unauthorized", request(made[0][0], None)[0].status)
                 self.assertEqual("200 OK", request(made[0][0], TOKEN)[0].status)
                 self.assertEqual(1, len(app.environs))
+
+
+class Recorder:
+    """A WSGI application that records each request's token header and answers status."""
+
+    def __init__(self, status: str, headers: Optional[List[Tuple[str, str]]] = None) -> None:
+        self.status = status
+        self.headers = headers or []
+        self.tokens: List[Optional[str]] = []
+
+    def __call__(self, environ: Dict[str, Any], start_response: Any) -> Iterable[bytes]:
+        self.tokens.append(environ.get(tensorboard_service.TOKEN_HEADER))
+        start_response(self.status, [("Content-Length", "0"), *self.headers])
+        return [b""]
+
+
+class QuietHandler(simple_server.WSGIRequestHandler):
+    def log_message(self, *args: Any) -> None:
+        pass
+
+
+@contextlib.contextmanager
+def serve(app: Any) -> Iterator[simple_server.WSGIServer]:
+    server = simple_server.make_server("127.0.0.1", 0, app, handler_class=QuietHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+class ProbeTest(unittest.TestCase):
+    path = "/proxy/task-1:6006/"
+
+    def probe(self, app: Any) -> Tuple[str, str]:
+        """What the probe of a server of app writes to its descriptor and to stderr."""
+        read, write = os.pipe()
+        ready = os.fdopen(write, "w")
+        with os.fdopen(read) as out:
+            with serve(app) as server:
+                with mock.patch.object(tensorboard_service, "PROBE_INTERVAL", 0.01):
+                    with mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                        tensorboard_service.probe(server.server_port, self.path, TOKEN, ready)
+            self.assertTrue(ready.closed)
+            return out.read(), stderr.getvalue()
+
+    def test_ready(self) -> None:
+        app = App()
+        written, stderr = self.probe(tensorboard_service.check_token(app, TOKEN.encode()))
+        self.assertEqual("tensorboard: http ready\n", written)
+        self.assertEqual("", stderr)
+        self.assertEqual(1, len(app.environs))
+        self.assertEqual(self.path, app.environs[0]["PATH_INFO"])
+
+    def test_not_ready_without_the_check(self) -> None:
+        app = Recorder("200 OK")
+        written, stderr = self.probe(app)
+        self.assertEqual("", written)
+        self.assertEqual("tensorboard service: TensorBoard answers without the token\n", stderr)
+        self.assertEqual([None], app.tokens)
+
+    def test_status_follows_no_redirect(self) -> None:
+        other = Recorder("200 OK")
+        with serve(other) as target:
+            location = f"http://127.0.0.1:{target.server_port}/"
+            moved = Recorder("302 Found", [("Location", location)])
+            with serve(moved) as server:
+                with mock.patch.dict(os.environ, {"http_proxy": location, "no_proxy": ""}):
+                    status = tensorboard_service.http_status(
+                        server.server_port, self.path, {"X-Determined-Service-Token": TOKEN}
+                    )
+        self.assertEqual(302, status)
+        self.assertEqual([TOKEN], moved.tokens)
+        self.assertEqual([], other.tokens, "neither the redirect nor a proxy gets the request")
+
+    def test_status_without_a_server(self) -> None:
+        with serve(App()) as server:
+            port = server.server_port
+        self.assertIsNone(tensorboard_service.http_status(port, self.path, {}))
 
 
 class FlagsTest(unittest.TestCase):
@@ -117,7 +208,7 @@ class FlagsTest(unittest.TestCase):
         "DET_TENSORBOARD_PORT": "6006",
         "DET_TENSORBOARD_PATH_PREFIX": "/proxy/task-1:6006/",
     }
-    flag_names = ["logdir", "port", "path_prefix", "host", "bind_all", "load_fast"]
+    flag_names = ["logdir", "port", "path_prefix", "host", "bind_all", "load_fast", "reuse_port"]
 
     def configure(self, args: List[str], bind_all: str) -> Any:
         from tensorboard import default, program
@@ -132,7 +223,14 @@ class FlagsTest(unittest.TestCase):
 
     def test_service_flags_win(self) -> None:
         # The config refuses these arguments; the service's flags win over them all the same.
-        args = ["--load_fast=true", "--port", "1", "--hos=127.0.0.2", "--path_prefix=/x"]
+        args = [
+            "--load_fast=true",
+            "--port",
+            "1",
+            "--hos=127.0.0.2",
+            "--path_prefix=/x",
+            "--reuse_port=true",
+        ]
         for bind_all in ["true", "false"]:
             with self.subTest(bind_all=bind_all):
                 flags = self.configure(args, bind_all)
@@ -144,6 +242,7 @@ class FlagsTest(unittest.TestCase):
                         "host": "0.0.0.0",
                         "bind_all": False,
                         "load_fast": "false",
+                        "reuse_port": False,
                     },
                     {k: getattr(flags, k) for k in self.flag_names},
                 )
@@ -195,7 +294,7 @@ class MainTest(unittest.TestCase):
         )
         environ.update(env)
         return subprocess.run(
-            [sys.executable, tensorboard_service.__file__, *args],
+            [sys.executable, "-S", tensorboard_service.__file__, *args],
             env=environ,
             capture_output=True,
             text=True,
@@ -240,6 +339,7 @@ class MainTest(unittest.TestCase):
                 {"DET_TENSORBOARD_ARGS": '["--a", 1]'},
                 "DET_TENSORBOARD_ARGS is not a JSON array of strings",
             ),
+            ("no descriptor", ["/logs"], {}, "descriptor 3 is not open"),
         ]
         for name, args, env, line in cases:
             with self.subTest(name):

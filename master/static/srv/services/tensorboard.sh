@@ -13,8 +13,9 @@
 # - A relative log directory is resolved against the task's work directory. A missing one is
 #   created, so that a training run can write to it later.
 # - The service is READY once TensorBoard refuses a request without the token and answers one with
-#   it under the prefix, which a probe in the background asks every half second. A TensorBoard that
-#   answers without the token is never READY.
+#   it under the prefix, which the program's probe asks once TensorBoard has bound the port, and
+#   writes to descriptor 3 for the readiness check. A TensorBoard that answers without the token is
+#   never READY.
 # - The task's activity record, which the master's proxy feeds, is the idle signal: the unit has
 #   no idle timer of its own.
 #
@@ -81,45 +82,8 @@ if ! tensorboard_error=$(mkdir -p -- "$tensorboard_logdir" 2>&1); then
     tensorboard_unavailable "cannot create the log directory $tensorboard_logdir: ${tensorboard_error##*: }"
 fi
 
-# The probe asks TensorBoard under the prefix, past any proxy of the task's environment, without
-# and with the token, and prints one line, which marks the service READY, once TensorBoard refuses
-# the first and answers the second.
-"$DET_PYTHON_EXECUTABLE" -c '
-import os
-import sys
-import time
-import urllib.error
-import urllib.request
-
-url = sys.argv[1]
-token = {"X-Determined-Service-Token": os.environ["DET_TENSORBOARD_TOKEN"]}
-opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-
-
-def status(headers):
-    try:
-        with opener.open(urllib.request.Request(url, headers=headers), timeout=5) as response:
-            return response.status
-    except urllib.error.HTTPError as e:
-        return e.code
-    except (OSError, ValueError):
-        return None
-
-
-try:
-    while True:
-        refused = status({})
-        if refused == 200:
-            print("tensorboard service: TensorBoard answers without the token", file=sys.stderr)
-            sys.exit(1)
-        if refused == 401 and status(token) == 200:
-            print("tensorboard: http ready", flush=True)
-            break
-        time.sleep(0.5)
-except KeyboardInterrupt:
-    sys.exit(130)
-' "http://127.0.0.1:$tensorboard_port$tensorboard_prefix" \
-    | "$DET_PYTHON_EXECUTABLE" /run/determined/check_ready_logs.py \
-        --ready-regex '^tensorboard: http ready$' "${service_ready_args[@]}" &
-
-"$tensorboard_python" /run/determined/services/tensorboard_service.py "$tensorboard_logdir"
+# The group makes the readiness check a child of this shell rather than of the program.
+{
+    "$tensorboard_python" /run/determined/services/tensorboard_service.py "$tensorboard_logdir"
+} 3> >("$DET_PYTHON_EXECUTABLE" /run/determined/check_ready_logs.py \
+    --ready-regex '^tensorboard: http ready$' "${service_ready_args[@]}")

@@ -12,9 +12,17 @@ the token is logged.
 
 TensorBoard gets the config's arguments, DET_TENSORBOARD_ARGS, a JSON array of strings, and then
 the service's own flags, which win over them: --logdir, --port DET_TENSORBOARD_PORT, on every IPv4
-address, --path_prefix DET_TENSORBOARD_PATH_PREFIX and --load_fast=false, which keeps TensorBoard's
-data server, a listener without the check, from starting. --bind_all is false, whatever its
-default, which some builds set to true.
+address, --path_prefix DET_TENSORBOARD_PATH_PREFIX, --load_fast=false, which keeps TensorBoard's
+data server, a listener without the check, from starting, and --reuse_port=false, so that no other
+process can share the port. --bind_all is false, whatever its default, which some builds set to
+true.
+
+Once TensorBoard's server has bound the port, and only then, a probe asks it on 127.0.0.1 under the
+prefix, without and with the token, every half second, and writes "tensorboard: http ready" to
+descriptor 3 once TensorBoard refuses the first and answers the second. While TensorBoard holds
+the port, no other process can listen on 127.0.0.1 at that port, so the probe sends the token to
+TensorBoard only. It follows no redirect and takes no proxy. A TensorBoard that answers without
+the token is never ready, and the probe says so once.
 
 TensorBoard 2.9 and later is supported. With an earlier release, or what the program needs
 missing, it says why in one line and exits 127, which makes the service UNAVAILABLE. Otherwise it
@@ -26,16 +34,25 @@ runs it.
 """
 
 import hmac
+import http.client
 import inspect
 import json
 import os
 import re
 import sys
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Tuple
+import threading
+import time
+from typing import IO, Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 TOKEN_ENV = "DET_TENSORBOARD_TOKEN"
-# The token's header, X-Determined-Service-Token, in the WSGI environment.
+TOKEN_HEADER_NAME = "X-Determined-Service-Token"
+# The token's header in the WSGI environment.
 TOKEN_HEADER = "HTTP_X_DETERMINED_SERVICE_TOKEN"
+# The descriptor that the probe writes READY_LINE to, which the unit hands over.
+READY_FD = 3
+READY_LINE = "tensorboard: http ready\n"
+PROBE_INTERVAL = 0.5
+PROBE_TIMEOUT = 5
 MIN_RELEASE = (2, 9)
 UNAVAILABLE_STATUS = 127
 # How much of a refused request's body is read, so that its connection can take the next request.
@@ -85,6 +102,7 @@ def service_flags(environ: Mapping[str, str], logdir: str) -> Dict[str, Any]:
         "host": "0.0.0.0",
         "bind_all": False,
         "load_fast": "false",
+        "reuse_port": False,
     }
 
 
@@ -128,16 +146,84 @@ def check_token(app: WSGIApp, token: bytes) -> WSGIApp:
     return checked
 
 
-def server_factory(program: Any, token: bytes) -> Callable[[WSGIApp, Any], Any]:
-    """The server_class of TensorBoard: its own default server, of the application behind token."""
+def server_factory(
+    program: Any, token: bytes, bound: Callable[[Any, Any], None]
+) -> Callable[[WSGIApp, Any], Any]:
+    """
+    The server_class of TensorBoard: its own default server, of the application behind token.
+    bound gets the server and the flags once the server has bound its port.
+    """
     default = getattr(program, "create_port_scanning_werkzeug_server", None)
     if default is None:
         default = program.WerkzeugServer
 
     def create(wsgi_app: WSGIApp, flags: Any) -> Any:
-        return default(check_token(wsgi_app, token), flags)
+        server = default(check_token(wsgi_app, token), flags)
+        bound(server, flags)
+        return server
 
     return create
+
+
+def http_status(port: int, path: str, headers: Mapping[str, str]) -> Optional[int]:
+    """
+    The status of a GET of path on 127.0.0.1 at port, without a proxy or a redirect, or None if
+    the port does not answer.
+    """
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=PROBE_TIMEOUT)
+    try:
+        connection.request("GET", path, headers=dict(headers))
+        response = connection.getresponse()
+        response.read()
+        return response.status
+    except (OSError, http.client.HTTPException):
+        return None
+    finally:
+        connection.close()
+
+
+def probe(port: int, path: str, token: str, ready: IO[str]) -> None:
+    """
+    Ask TensorBoard, whose server has bound port, until it refuses a request without the token and
+    answers one with it, and then write READY_LINE to ready; or, if it answers without the token,
+    say so and return.
+    """
+    try:
+        while True:
+            refused = http_status(port, path, {})
+            if refused == 200:
+                print(
+                    "tensorboard service: TensorBoard answers without the token",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return
+            if refused == 401 and http_status(port, path, {TOKEN_HEADER_NAME: token}) == 200:
+                ready.write(READY_LINE)
+                ready.flush()
+                return
+            time.sleep(PROBE_INTERVAL)
+    except OSError:
+        # The readiness check has gone.
+        pass
+    finally:
+        try:
+            ready.close()
+        except OSError:
+            pass
+
+
+def start_probe(token: bytes, ready: IO[str]) -> Callable[[Any, Any], None]:
+    """The bound of server_factory: probe the server's port in a thread."""
+
+    def bound(server: Any, flags: Any) -> None:
+        threading.Thread(
+            target=probe,
+            args=(server.server_port, flags.path_prefix + "/", token.decode("utf-8"), ready),
+            daemon=True,
+        ).start()
+
+    return bound
 
 
 def run(argv: List[str], environ: Mapping[str, str]) -> int:
@@ -158,6 +244,11 @@ def run(argv: List[str], environ: Mapping[str, str]) -> int:
     if "server_class" not in inspect.signature(program.TensorBoard.__init__).parameters:
         raise Unavailable(f"TensorBoard {tensorboard_version} takes no server_class")
     args = user_args(environ)
+    try:
+        os.set_inheritable(READY_FD, False)
+        ready = os.fdopen(READY_FD, "w")
+    except OSError:
+        raise Unavailable(f"descriptor {READY_FD} is not open") from None
     print(f"tensorboard service: TensorBoard {tensorboard_version} reads {logdir}", file=sys.stderr)
 
     try:
@@ -167,7 +258,8 @@ def run(argv: List[str], environ: Mapping[str, str]) -> int:
     else:
         main_lib.global_init()
     tensorboard = program.TensorBoard(
-        plugins=default.get_plugins(), server_class=server_factory(program, token)
+        plugins=default.get_plugins(),
+        server_class=server_factory(program, token, start_probe(token, ready)),
     )
     try:
         tensorboard.configure(tensorboard_argv(args), **service_flags(environ, logdir))

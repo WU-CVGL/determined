@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -27,8 +28,8 @@ const tensorBoardTestToken = "test-token"
 // tensorBoardStandIn is a tensorboard package, by path under the package's directory, with what
 // tensorboard_service.py takes of TensorBoard's. Its version is TB_STAND_IN_VERSION, 2.9.0 by
 // default. Its core plugin's loader defines --bind_all with the default TB_STAND_IN_BIND_ALL, true
-// by default as in some builds, and --host, --port, --path_prefix, --logdir and --load_fast, and
-// refuses --host while --bind_all is true, as TensorBoard's does. Its program.TensorBoard, without
+// by default as in some builds, and --host, --port, --path_prefix, --logdir, --load_fast and
+// --reuse_port, and refuses --host while --bind_all is true, as TensorBoard's does. Its program.TensorBoard, without
 // server_class when TB_STAND_IN_NO_SERVER_CLASS is "yes", configures its flags as TensorBoard's
 // does: the command line, then the keyword arguments, then the loaders' checks. Its main records
 // its arguments NUL-separated in "$ORDER_FILE.tensorboard-args", its flags as JSON in
@@ -36,8 +37,9 @@ const tensorBoardTestToken = "test-token"
 // "$ORDER_FILE.tensorboard-python", and "tensorboard" in the order file. Then it serves, until the
 // order file has "stop tensorboard", an application that answers 200 under the --path_prefix and
 // 404 elsewhere and that creates "$ORDER_FILE.tensorboard-saw-token" when a request reaches it
-// with the token's header. It serves with its server_class, or with the default server and
-// without it when TB_STAND_IN_SERVE is "unchecked", or not at all when TB_STAND_IN_SERVE is "no".
+// with the token's header. It builds its server with its server_class, once the order file has
+// the line TB_STAND_IN_WAIT if that is set, and serves the application through the server's, or
+// directly when TB_STAND_IN_SERVE is "unchecked", or not at all when TB_STAND_IN_SERVE is "no".
 // Like TensorBoard's, the server ends on SIGINT and main exits 0 on SIGTERM; otherwise main returns
 // TB_STAND_IN_EXIT, 0 by default.
 var tensorBoardStandIn = map[string]string{
@@ -68,6 +70,12 @@ class CorePluginLoader:
         parser.add_argument("--path_prefix", default="")
         parser.add_argument("--logdir", default="")
         parser.add_argument("--load_fast", default="auto")
+        parser.add_argument(
+            "--reuse_port",
+            type=lambda v: {"true": True, "false": False}.get(v.lower(), v),
+            choices=[True, False],
+            default=False,
+        )
 
     def fix_flags(self, flags):
         if flags.host is not None and flags.bind_all:
@@ -114,12 +122,16 @@ def create_port_scanning_werkzeug_server(wsgi_app, flags):
     return server
 
 
-def _stopped():
+def _ordered(line):
     try:
         with open(os.environ["ORDER_FILE"]) as f:
-            return "stop tensorboard\n" in f.read()
+            return line + "\n" in f.read().splitlines(True)
     except OSError:
         return False
+
+
+def _stopped():
+    return _ordered("stop tensorboard")
 
 
 class TensorBoard:
@@ -154,7 +166,7 @@ class TensorBoard:
         with open(order + ".tensorboard-args", "w") as f:
             f.write("".join(arg + "\0" for arg in self.argv[1:]))
         with open(order + ".tensorboard-flags", "w") as f:
-            names = ["bind_all", "host", "port", "path_prefix", "logdir", "load_fast"]
+            names = ["bind_all", "host", "port", "path_prefix", "logdir", "load_fast", "reuse_port"]
             json.dump({name: getattr(flags, name) for name in names}, f)
         with open(order + ".tensorboard-python", "w") as f:
             f.write(os.environ["TB_STAND_IN_PYTHON"])
@@ -173,10 +185,12 @@ class TensorBoard:
             start_response("200 OK" if found else "404 Not Found", [("Content-Length", "0")])
             return [b""]
 
+        wait = os.environ.get("TB_STAND_IN_WAIT")
+        while wait and not _ordered(wait):
+            time.sleep(0.05)
+        server = self.server_class(app, flags)
         if serve == "unchecked":
-            server = create_port_scanning_werkzeug_server(app, flags)
-        else:
-            server = self.server_class(app, flags)
+            server.set_app(app)
 
         def watch():
             while not _stopped():
@@ -255,8 +269,9 @@ func writeTensorBoardStandIn(t *testing.T, dir string) {
 	}
 }
 
-// standInPython writes, at path, a python that has the stand-in tensorboard package: python3 with
-// the package's directory on its PYTHONPATH and TB_STAND_IN_PYTHON set to path.
+// standInPython writes, at path, a python that has the stand-in tensorboard package: python3 without
+// its site packages, with the package's directory on its PYTHONPATH and TB_STAND_IN_PYTHON set to
+// path.
 func (v *tensorBoardTask) standInPython(path string) {
 	v.t.Helper()
 	pkg := filepath.Join(v.dir, "tensorboard-package")
@@ -265,7 +280,7 @@ func (v *tensorBoardTask) standInPython(path string) {
 	require.NoError(v.t, err)
 	require.NoError(v.t, os.MkdirAll(filepath.Dir(path), 0o700))
 	writeScript(v.t, path, `export TB_STAND_IN_PYTHON="$0" PYTHONPATH=`+strconv.Quote(pkg)+"\n"+
-		`exec `+strconv.Quote(python)+` "$@"`+"\n")
+		`exec `+strconv.Quote(python)+` -S "$@"`+"\n")
 }
 
 // standInProgram puts on the PATH a tensorboard program whose first line is shebang.
@@ -323,7 +338,7 @@ func (v *tensorBoardTask) serviceFlags(logdir string) map[string]any {
 	require.NoError(v.t, err)
 	return map[string]any{
 		"logdir": logdir, "port": float64(port), "path_prefix": strings.TrimSuffix(v.prefix, "/"),
-		"host": "0.0.0.0", "bind_all": false, "load_fast": "false",
+		"host": "0.0.0.0", "bind_all": false, "load_fast": "false", "reuse_port": false,
 	}
 }
 
@@ -361,15 +376,13 @@ func pythonHasTensorBoard() bool {
 	return exec.Command("python3", "-c", "import tensorboard.program").Run() == nil
 }
 
-// The program's own tests, testdata/tensorboard_service_test.py, with python3 and the stand-in
-// tensorboard package.
+// The program's own tests, testdata/tensorboard_service_test.py, with python3 without its site
+// packages and with the stand-in tensorboard package. Python writes no bytecode next to the
+// program, which the master's static files ship.
 func TestTensorBoardServiceProgram(t *testing.T) {
 	python, err := exec.LookPath("python3")
 	if err != nil {
 		t.Skip("python3 is not installed")
-	}
-	if pythonHasTensorBoard() {
-		t.Skip("python3 has tensorboard")
 	}
 	pkg := t.TempDir()
 	writeTensorBoardStandIn(t, pkg)
@@ -377,11 +390,11 @@ func TestTensorBoardServiceProgram(t *testing.T) {
 	require.NoError(t, err)
 	test, err := filepath.Abs("testdata/tensorboard_service_test.py")
 	require.NoError(t, err)
-	cmd := exec.Command(python, test) //nolint:gosec
+	cmd := exec.Command(python, "-S", test) //nolint:gosec
 	cmd.Env = append(slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		return strings.HasPrefix(kv, "PYTHONPATH=") || strings.HasPrefix(kv, "DET_TENSORBOARD_") ||
 			strings.HasPrefix(kv, "TB_STAND_IN_")
-	}), "PYTHONPATH="+pkg+":"+services, "TENSORBOARD_STAND_IN="+pkg)
+	}), "PYTHONPATH="+pkg+":"+services, "TENSORBOARD_STAND_IN="+pkg, "PYTHONDONTWRITEBYTECODE=1")
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
 	t.Log(string(out))
@@ -391,7 +404,7 @@ func TestTensorBoardServiceProgram(t *testing.T) {
 // relative one under the work directory, which it creates. TensorBoard gets the config's
 // arguments and then the service's flags, which win over them, whether --bind_all defaults to
 // true or not: the log directory, the service's port on every IPv4 address, the prefix and
-// --load_fast=false. TensorBoard refuses a request without the token or with a wrong one, and
+// --load_fast=false and --reuse_port=false. TensorBoard refuses a request without the token or with a wrong one, and
 // answers one with it, without the header. The service is READY once TensorBoard refuses the one
 // and answers the other under the prefix; its readiness does not mark the task ready.
 // TensorBoard's exit leaves the shell running.
@@ -413,8 +426,11 @@ func TestTensorBoardUnitRuns(t *testing.T) {
 		},
 		{
 			name: "overridden", version: "2.9.0", logdir: "runs",
-			args:  `["--load_fast=true", "--hos=127.0.0.2", "--port", "1", "--path_p=/x"]`,
-			extra: []string{"--load_fast=true", "--hos=127.0.0.2", "--port", "1", "--path_p=/x"},
+			args: `["--load_fast=true", "--hos=127.0.0.2", "--port", "1", "--path_p=/x",
+				"--reuse_port=true"]`,
+			extra: []string{
+				"--load_fast=true", "--hos=127.0.0.2", "--port", "1", "--path_p=/x", "--reuse_port=true",
+			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -504,7 +520,7 @@ func TestTensorBoardUnitPython(t *testing.T) {
 			name: "python",
 			setup: func(v *tensorBoardTask) string {
 				if pythonHasTensorBoard() {
-					t.Skip("python3 has tensorboard")
+					v.t.Skip("python3 has tensorboard")
 				}
 				python := filepath.Join(v.bin, "python")
 				v.standInPython(python)
@@ -560,7 +576,8 @@ func TestTensorBoardUnitNotReadyWithoutHTTP(t *testing.T) {
 	require.NotContains(t, v.logLines(), "[tensorboard] ready")
 }
 
-// A TensorBoard that answers without the token is never READY, and the probe says so once.
+// A TensorBoard whose server answers without the token is never READY, and the probe says so
+// once.
 func TestTensorBoardUnitNotReadyWithoutTokenCheck(t *testing.T) {
 	v := newTensorBoardTask(t, "runs")
 	v.standIn()
@@ -575,6 +592,46 @@ func TestTensorBoardUnitNotReadyWithoutTokenCheck(t *testing.T) {
 	v.addOrder("sshd done")
 	require.Equal(t, 0, v.wait())
 	require.NotContains(t, v.logLines(), "[tensorboard] ready")
+}
+
+// The probe sends the token only to TensorBoard's own server: a listener that holds the port while
+// TensorBoard starts gets no request, and the service is READY once TensorBoard has the port.
+func TestTensorBoardUnitProbesOnlyTensorBoard(t *testing.T) {
+	v := newTensorBoardTask(t, "runs")
+	v.standIn()
+	v.env = append(v.env, "TB_STAND_IN_WAIT=serve tensorboard")
+	l, err := net.Listen("tcp", "127.0.0.1:"+v.port)
+	require.NoError(t, err)
+	var requests, tokens atomic.Int32
+	other := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests.Add(1)
+			if r.Header.Values("X-Determined-Service-Token") != nil {
+				tokens.Add(1)
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+		}),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	served := make(chan error, 1)
+	go func() { served <- other.Serve(l) }()
+	v.start()
+	v.waitForOrder("tensorboard")
+	// Longer than a probe that asked while TensorBoard starts would take.
+	time.Sleep(2 * time.Second)
+	require.NoError(t, other.Close())
+	require.ErrorIs(t, <-served, http.ErrServerClosed)
+	require.Zero(t, requests.Load(), "the listener gets no request")
+	v.addOrder("serve tensorboard")
+	v.waitForLog("[tensorboard] ready")
+	require.Equal(t, http.StatusOK, v.get(tensorBoardTestToken))
+	require.Zero(t, requests.Load())
+	require.Zero(t, tokens.Load(), "the listener never gets the token")
+	require.NotContains(t, v.stderr.String(), tensorBoardTestToken)
+	v.addOrder("stop tensorboard")
+	v.waitForLog("[tensorboard] exited 0")
+	v.addOrder("sshd done")
+	require.Equal(t, 0, v.wait())
 }
 
 // A stop of the shell stops TensorBoard, which exits 0 on SIGTERM, and its probe with it.
@@ -607,9 +664,6 @@ func TestTensorBoardUnitStopOnSIGINT(t *testing.T) {
 // Without TensorBoard, or with what the service needs missing, the unit or the program says why in
 // one line and exits 127: the service is UNAVAILABLE, and the shell stays up.
 func TestTensorBoardUnitUnavailable(t *testing.T) {
-	if pythonHasTensorBoard() {
-		t.Skip("python3 has tensorboard")
-	}
 	for _, tc := range []struct {
 		name, line string
 		setup      func(v *tensorBoardTask)
@@ -622,9 +676,12 @@ func TestTensorBoardUnitUnavailable(t *testing.T) {
 			name: "python without tensorboard",
 			line: "tensorboard service: tensorboard is not installed",
 			setup: func(v *tensorBoardTask) {
+				if pythonHasTensorBoard() {
+					v.t.Skip("python3 has tensorboard")
+				}
 				py, err := exec.LookPath("python3")
-				require.NoError(t, err)
-				require.NoError(t, os.Symlink(py, filepath.Join(v.bin, "python3")))
+				require.NoError(v.t, err)
+				require.NoError(v.t, os.Symlink(py, filepath.Join(v.bin, "python3")))
 			},
 		},
 		{
