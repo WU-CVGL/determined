@@ -3,7 +3,9 @@
 package etc
 
 import (
+	"context"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,9 +14,14 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
+	"github.com/hashicorp/go-cleanhttp"
 	"github.com/stretchr/testify/require"
 )
+
+// tensorBoardTestToken is the DET_TENSORBOARD_TOKEN of the tests.
+const tensorBoardTestToken = "test-token"
 
 // tensorBoardStandIn is a tensorboard program: it prints TB_STAND_IN_VERSION, 2.9.0 by default, for
 // --version_tb; otherwise it records its arguments NUL-separated and "tensorboard" in the order
@@ -74,8 +81,8 @@ sys.exit(int(os.environ.get("TB_STAND_IN_EXIT", "0")))
 `
 
 // tensorBoardTask is a task with ssh, a stand-in that waits for "sshd done" in the order file, as
-// its primary service, and the tensorboard service with the real unit, a directory on the PATH for
-// stand-ins, a free port and the prefix /proxy/<task>:<port>/.
+// its primary service, and the tensorboard service with the real unit and the harness's front, a
+// directory on the PATH for stand-ins, a free port, the prefix /proxy/<task>:<port>/ and a token.
 type tensorBoardTask struct {
 	*supervisorRun
 	bin    string
@@ -92,11 +99,16 @@ func newTensorBoardTask(t *testing.T, logdir string) *tensorBoardTask {
 	require.NoError(t, os.Mkdir(task.bin, 0o700))
 	s.unit("ssh", waitUntilOrder("sshd done")+"exit 0\n")
 	s.staticUnit("tensorboard", staticScript(t, TensorBoardServiceResource))
+	front, err := filepath.Abs("../../../harness/determined/exec/service_front.py")
+	require.NoError(t, err)
+	require.FileExists(t, front)
 	s.env = slices.DeleteFunc(s.env, func(kv string) bool {
 		return strings.HasPrefix(kv, "PATH=") || strings.HasPrefix(kv, "DET_TENSORBOARD_") ||
 			strings.HasPrefix(kv, "TB_STAND_IN_")
 	})
 	s.env = append(s.env,
+		"SERVICE_FRONT="+front,
+		"DET_TENSORBOARD_TOKEN="+tensorBoardTestToken,
 		"PATH="+task.bin+":"+pathWithoutPrograms(t, filepath.Join(s.dir, "path"), "tensorboard"),
 		"DET_TENSORBOARD_PORT="+task.port,
 		"DET_TENSORBOARD_LOGDIR="+logdir,
@@ -129,6 +141,45 @@ func (v *tensorBoardTask) args() []string {
 	return strings.Split(strings.TrimSuffix(string(b), "\x00"), "\x00")
 }
 
+// localPort returns TensorBoard's own port, its --port.
+func (v *tensorBoardTask) localPort() string {
+	v.t.Helper()
+	args := v.args()
+	i := slices.Index(args, "--port")
+	require.Greater(v.t, i, -1, args)
+	return args[i+1]
+}
+
+// get returns the status of a GET of the prefix on 127.0.0.1 at port, with the token header if
+// token is set, or 0 if the port does not answer.
+func (v *tensorBoardTask) get(port, token string) int {
+	v.t.Helper()
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+		"http://127.0.0.1:"+port+v.prefix, nil)
+	require.NoError(v.t, err)
+	if token != "" {
+		req.Header.Set("X-Determined-Service-Token", token)
+	}
+	client := cleanhttp.DefaultClient()
+	client.Timeout = 5 * time.Second
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0
+	}
+	require.NoError(v.t, resp.Body.Close())
+	return resp.StatusCode
+}
+
+// frontPid returns the pid of the front.
+func (v *tensorBoardTask) frontPid() int {
+	v.t.Helper()
+	b, err := os.ReadFile(v.order + ".front-pid")
+	require.NoError(v.t, err)
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	require.NoError(v.t, err)
+	return pid
+}
+
 func (v *tensorBoardTask) addOrder(line string) {
 	v.t.Helper()
 	f, err := os.OpenFile(v.order, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
@@ -139,9 +190,11 @@ func (v *tensorBoardTask) addOrder(line string) {
 }
 
 // The unit runs TensorBoard on the log directory, a relative one under the work directory, which it
-// creates, with the port, the prefix, the flags of the release and the config's arguments, in
-// order, last. The service is READY once TensorBoard answers under the prefix; its readiness does
-// not mark the task ready. TensorBoard's exit leaves the shell running.
+// creates, with a port of its own on 127.0.0.1, the prefix, the flags of the release and the
+// config's arguments, in order, last. The front on the service's port refuses a request without
+// the token and passes on one with it. The service is READY once the front answers under the
+// prefix; its readiness does not mark the task ready. TensorBoard's exit stops the front and
+// leaves the shell running.
 func TestTensorBoardUnitRuns(t *testing.T) {
 	absolute := filepath.Join(t.TempDir(), "abs", "logs")
 	for _, tc := range []struct {
@@ -150,21 +203,20 @@ func TestTensorBoardUnitRuns(t *testing.T) {
 	}{
 		{
 			name: "relative", version: "2.9.0", logdir: "runs/exp", args: "[]",
-			flags: []string{"--bind_all", "--load_fast=false"},
+			flags: []string{"--load_fast=false"},
 		},
 		{
 			name: "absolute", version: "2.5.0", logdir: absolute,
 			args:  `["--reload_interval=5", "two words", "--samples_per_plugin=scalars=500", ""]`,
-			flags: []string{"--bind_all", "--load_fast=false"},
+			flags: []string{"--load_fast=false"},
 			extra: []string{"--reload_interval=5", "two words", "--samples_per_plugin=scalars=500", ""},
 		},
 		{
 			name: "before 2.5", version: "2.4.1", logdir: "runs", args: `["--x"]`,
-			flags: []string{"--bind_all"}, extra: []string{"--x"},
+			extra: []string{"--x"},
 		},
 		{
 			name: "before 2", version: "1.15.0", logdir: "runs", args: "",
-			flags: []string{"--host", "0.0.0.0"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -180,9 +232,15 @@ func TestTensorBoardUnitRuns(t *testing.T) {
 			info, err := os.Stat(dir)
 			require.NoError(t, err, "the log directory is created")
 			require.True(t, info.IsDir())
+			local := v.localPort()
+			require.NotEqual(t, v.port, local)
 			require.Equal(t, append(append([]string{
-				"--logdir", dir, "--port", v.port, "--path_prefix", strings.TrimSuffix(v.prefix, "/"),
+				"--logdir", dir, "--port", local, "--path_prefix", strings.TrimSuffix(v.prefix, "/"),
+				"--host", "127.0.0.1",
 			}, tc.flags...), tc.extra...), v.args())
+			require.Equal(t, http.StatusUnauthorized, v.get(v.port, ""))
+			require.Equal(t, http.StatusUnauthorized, v.get(v.port, "wrong"))
+			require.Equal(t, http.StatusOK, v.get(v.port, tensorBoardTestToken))
 			require.Contains(t, v.stderr.String(),
 				"tensorboard service: TensorBoard "+tc.version+" reads "+dir+"\n")
 			waitFor(t, "tensorboard READY", func() bool {
@@ -197,6 +255,7 @@ func TestTensorBoardUnitRuns(t *testing.T) {
 				return states[len(states)-1] == "EXITED"
 			})
 			require.True(t, v.running(), "the shell stays up")
+			require.Equal(t, 0, v.get(v.port, tensorBoardTestToken), "the front is stopped")
 			v.addOrder("sshd done")
 			require.Equal(t, 0, v.wait())
 			require.Equal(t, []string{
@@ -225,7 +284,29 @@ func TestTensorBoardUnitExitAfterReady(t *testing.T) {
 	require.Equal(t, 0, v.wait())
 }
 
-// A TensorBoard that never answers is never READY; its probe goes with the service.
+// A front that exits makes the service EXITED with its status, and the unit stops TensorBoard; the
+// shell stays up.
+func TestTensorBoardUnitFrontExit(t *testing.T) {
+	v := newTensorBoardTask(t, "runs")
+	v.standIn()
+	v.start()
+	v.waitForLog("[tensorboard] ready")
+	local := v.localPort()
+	require.Equal(t, http.StatusOK, v.get(local, ""), "TensorBoard answers on its own port")
+	require.NoError(t, syscall.Kill(v.frontPid(), syscall.SIGKILL))
+	v.waitForLog("[tensorboard] exited 137")
+	waitFor(t, "tensorboard EXITED", func() bool {
+		return slices.Equal([]string{"STARTING", "READY", "EXITED"},
+			statesOf(v.master.received(), "tensorboard"))
+	})
+	require.Equal(t, 0, v.get(local, ""), "TensorBoard is stopped")
+	require.True(t, v.running(), "the shell stays up")
+	v.addOrder("sshd done")
+	require.Equal(t, 0, v.wait())
+}
+
+// A TensorBoard that never answers is never READY, and the front never starts; the probe goes with
+// the service.
 func TestTensorBoardUnitNotReadyWithoutHTTP(t *testing.T) {
 	v := newTensorBoardTask(t, "runs")
 	writeScript(t, filepath.Join(v.bin, "tensorboard"), `
@@ -240,6 +321,7 @@ echo tensorboard >>"$ORDER_FILE"
 	v.addOrder("sshd done")
 	require.Equal(t, 0, v.wait())
 	require.NotContains(t, v.logLines(), "[tensorboard] ready")
+	require.NoFileExists(t, v.order+".front-pid")
 }
 
 // A stop of the shell stops TensorBoard and its probe with it.
@@ -298,6 +380,14 @@ func TestTensorBoardUnitUnavailable(t *testing.T) {
 			setup: func(v *tensorBoardTask) {
 				v.standIn()
 				v.env = append(v.env, "DET_TENSORBOARD_PATH_PREFIX=/proxy/x")
+			},
+		},
+		{
+			name: "no token",
+			line: "tensorboard service: DET_TENSORBOARD_TOKEN is not set",
+			setup: func(v *tensorBoardTask) {
+				v.standIn()
+				v.env = append(v.env, "DET_TENSORBOARD_TOKEN=")
 			},
 		},
 		{

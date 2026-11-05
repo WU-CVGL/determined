@@ -40,7 +40,14 @@ type Service struct {
 	StripPrefix bool
 	// TaskID is the task that runs the service, whose activity the proxy records, if set.
 	TaskID model.TaskID
+	// ServiceToken, if set, is ServiceTokenHeader on every request that the proxy passes on to the
+	// service, which requires it, after the access check. It is never logged.
+	ServiceToken string
 }
+
+// ServiceTokenHeader carries a Service's ServiceToken to the service. The proxy removes it from
+// the requests to a service without one.
+const ServiceTokenHeader = "X-Determined-Service-Token"
 
 // Clone returns a deep copy of the Service.
 func (s Service) Clone() Service {
@@ -53,6 +60,7 @@ func (s Service) Clone() Service {
 		Exec:                 s.Exec,
 		StripPrefix:          s.StripPrefix,
 		TaskID:               s.TaskID,
+		ServiceToken:         s.ServiceToken,
 	}
 }
 
@@ -214,6 +222,12 @@ func (p *Proxy) NewProxyHandler(serviceID string) echo.HandlerFunc {
 		// visitor's master credentials, whether or not the master authenticated the request.
 		req := c.Request()
 		stripMasterCredentials(req.Header, authenticate, p.IsMasterToken)
+		// The service's own token, which no visitor may set.
+		if service.ServiceToken != "" {
+			req.Header.Set(ServiceTokenHeader, service.ServiceToken)
+		} else {
+			req.Header.Del(ServiceTokenHeader)
+		}
 
 		// Set proxy headers.
 		if req.Header.Get(echo.HeaderXRealIP) == "" {

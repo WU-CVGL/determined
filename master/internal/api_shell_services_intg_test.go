@@ -839,13 +839,21 @@ func TestLaunchShellWithTensorBoardService(t *testing.T) {
 		Name: model.ServiceTensorBoard, Port: tensorBoard.Port, Exec: true,
 	}, tensorBoard)
 
+	// A new token of 32 random bytes, kept in the persisted spec's metadata.
+	require.NotNil(t, spec.Metadata.TensorBoardToken)
+	token := *spec.Metadata.TensorBoardToken
+	raw, err := base64.RawURLEncoding.DecodeString(token)
+	require.NoError(t, err)
+	require.Len(t, raw, 32)
+
+	// The proxy adds the token to the requests that it passes on to TensorBoard only.
 	tensorBoardID := taskID + ":" + strconv.Itoa(tensorBoard.Port)
 	alloc := allocateRequest(t, rm, taskID)
 	requireOnePolicyPerPort(t, alloc.ProxyPorts)
 	require.Equal(t, []*sproto.ProxyPortConfig{
 		{ServiceID: taskID, Port: ssh.Port, ProxyTCP: true, Unauthenticated: true},
 		{ServiceID: taskID + ":" + strconv.Itoa(jupyter.Port), Port: jupyter.Port, TLS: true, Exec: true},
-		{ServiceID: tensorBoardID, Port: tensorBoard.Port, Exec: true},
+		{ServiceID: tensorBoardID, Port: tensorBoard.Port, Exec: true, ServiceToken: token},
 	}, alloc.ProxyPorts)
 
 	env := spec.Base.ExtraEnvVars
@@ -856,6 +864,7 @@ func TestLaunchShellWithTensorBoardService(t *testing.T) {
 	require.Equal(t, "/proxy/"+tensorBoardID+"/", env[tasks.TensorBoardPathPrefixEnvVar])
 	require.Equal(t, serviceURL(tensorBoard.ServiceID(model.TaskID(taskID)), false),
 		env[tasks.TensorBoardPathPrefixEnvVar])
+	require.Equal(t, token, env["DET_TENSORBOARD_TOKEN"])
 
 	// The unit, and no files of its own.
 	paths := containerFilePaths(spec)
@@ -870,7 +879,9 @@ func TestLaunchShellWithTensorBoardService(t *testing.T) {
 	require.Equal(t, taskv1.TaskService_PROTOCOL_HTTP, listed.Services[2].Protocol)
 	require.Equal(t, env[tasks.TensorBoardPathPrefixEnvVar], listed.Services[2].Url)
 	require.True(t, listed.Services[2].MayConnect)
+	require.NotContains(t, listed.String(), token)
 
+	// The token is the proxy's: the owner gets no credential.
 	_, err = api.GetTaskServiceCredential(ctx, &apiv1.GetTaskServiceCredentialRequest{
 		TaskId: taskID, Service: model.ServiceTensorBoard,
 	})
@@ -888,9 +899,14 @@ func TestLaunchShellWithTensorBoardService(t *testing.T) {
 		Config: servicesConfig(t, map[string]any{"tensorboard": map[string]any{"logdir": "/logs"}}),
 	})
 	require.NoError(t, err)
-	otherEnv := launchedSpec(t, other.Shell.Id).Base.ExtraEnvVars
+	otherSpec := launchedSpec(t, other.Shell.Id)
+	otherEnv := otherSpec.Base.ExtraEnvVars
 	require.Equal(t, "[]", otherEnv["DET_TENSORBOARD_ARGS"])
 	require.Equal(t, "/logs", otherEnv["DET_TENSORBOARD_LOGDIR"])
+	// Each shell gets its own token.
+	require.NotNil(t, otherSpec.Metadata.TensorBoardToken)
+	require.NotEqual(t, token, *otherSpec.Metadata.TensorBoardToken)
+	require.Equal(t, *otherSpec.Metadata.TensorBoardToken, otherEnv["DET_TENSORBOARD_TOKEN"])
 }
 
 // The tensorboard service is not a default: a shell without it, or with it disabled, gets no record
@@ -909,6 +925,7 @@ func TestLaunchShellTensorBoardOff(t *testing.T) {
 		spec := launchedSpec(t, resp.Shell.Id)
 		_, ok := spec.Service(model.ServiceTensorBoard)
 		require.False(t, ok, name)
+		require.Nil(t, spec.Metadata.TensorBoardToken, name)
 		for key := range spec.Base.ExtraEnvVars {
 			require.False(t, strings.HasPrefix(key, "DET_TENSORBOARD_"), "%s: %s", name, key)
 		}

@@ -244,10 +244,10 @@ later; until then TensorBoard shows its empty page. The service is ``READY`` onc
 answers.
 
 ``services.tensorboard.args`` adds TensorBoard arguments after the service's own: ``--logdir``,
-``--port``, ``--path_prefix``, ``--bind_all`` for TensorBoard 2 and later (``--host 0.0.0.0``
-before), and ``--load_fast=false`` for TensorBoard 2.5 and later. An argument that sets
-``--logdir``, ``--port``, ``--path_prefix``, ``--host`` or ``--bind_all`` is refused. One argument
-is a list of one; an argument with a comma goes in quotes inside a list:
+``--port``, ``--path_prefix``, ``--host 127.0.0.1``, and ``--load_fast=false`` for TensorBoard 2.5
+and later. An argument that sets ``--logdir``, ``--port``, ``--path_prefix``, ``--host`` or
+``--bind_all`` is refused. One argument is a list of one; an argument with a comma goes in quotes
+inside a list:
 
 .. code::
 
@@ -260,7 +260,11 @@ The service runs the TensorBoard of the image, the ``tensorboard`` program on th
 the ``tensorboard`` package of ``python3`` or ``python``, and installs nothing; without it, the
 service is ``UNAVAILABLE`` and the task log says why. TensorBoard has no login of its own: as for
 the other services, only the user who started the shell and administrators can open it, through the
-master. When TensorBoard stops, the shell and its other services keep running.
+master. TensorBoard listens inside the container only, and the master's proxy reaches it with a
+token that the task was given, so the shell's published TensorBoard port refuses other requests.
+Under a ``network_mode`` of ``host``, the container's address is the agent's, and users of the agent
+can reach TensorBoard on its loopback address. When TensorBoard stops, the shell and its other
+services keep running.
 
 In the WebUI, check **TensorBoard** under **Services** of the **Launch Interactive Task** form and
 enter the directory as **Log directory in the task** under **Data source**. The shell's page then

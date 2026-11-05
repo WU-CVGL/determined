@@ -25,6 +25,9 @@ type genericCommandSpecMetadata struct {
 	// CodeServerPassword is the password of the vscode service's code-server, the same class of
 	// secret as the private key. The container gets its hash only.
 	CodeServerPassword *string `json:"codeServerPassword,omitempty"`
+	// TensorBoardToken is the token that the master's proxy adds to the tensorboard service's
+	// requests and that the service's front requires. It stays in the master and the container.
+	TensorBoardToken *string `json:"tensorBoardToken,omitempty"`
 }
 
 // MarshalToMap converts typed struct into a map.

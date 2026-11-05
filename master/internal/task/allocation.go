@@ -1250,10 +1250,12 @@ func (a *allocation) registerProxies(addresses []cproto.Address) {
 			AllowUnauthenticated: pcfg.Unauthenticated,
 			Exec:                 pcfg.Exec,
 			StripPrefix:          pcfg.StripPrefix,
+			ServiceToken:         pcfg.ServiceToken,
 			// Every port of an allocation is a service of its task.
 			TaskID: a.req.TaskID,
 		})
-		a.syslog.Debugf("registered proxy id: %s, cfg: %v\n", pcfg.ServiceID, pcfg)
+		a.syslog.Debugf("registered proxy id: %s, port: %d, tcp: %t, exec: %t", pcfg.ServiceID,
+			pcfg.Port, pcfg.ProxyTCP, pcfg.Exec)
 		a.proxies = append(a.proxies, pcfg.ServiceID)
 	}
 	// The task's idle time, if watched, counts from when its services can be reached, as a

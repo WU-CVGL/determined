@@ -1,18 +1,24 @@
 #!/usr/bin/env bash
 
-# The tensorboard service: TensorBoard from the image on DET_TENSORBOARD_PORT, reading
-# DET_TENSORBOARD_LOGDIR, under DET_TENSORBOARD_PATH_PREFIX, the path at which the master proxies
-# it, with the more arguments of DET_TENSORBOARD_ARGS, a JSON array of strings, after its own. The
-# supervisor sources this file after the init.
+# The tensorboard service: TensorBoard from the image, reading DET_TENSORBOARD_LOGDIR, under
+# DET_TENSORBOARD_PATH_PREFIX, the path at which the master proxies it, with the more arguments of
+# DET_TENSORBOARD_ARGS, a JSON array of strings, after its own, behind a front on
+# DET_TENSORBOARD_PORT that takes only the master proxy's requests. The supervisor sources this
+# file after the init.
 #
 # - TensorBoard is the tensorboard program on the PATH, else the module tensorboard.main of the
 #   first of python3 and python that has it. The unit installs nothing.
 # - A relative log directory is resolved against the task's work directory. A missing one is
 #   created, so that a training run can write to it later.
-# - TensorBoard 2 and later listens on every address with --bind_all, an earlier one with
-#   --host 0.0.0.0; TensorBoard 2.5 and later gets --load_fast=false, which loads every plugin.
-# - The service is READY once TensorBoard answers HTTP under the prefix, which a probe in the
-#   background asks every half second.
+# - TensorBoard listens on 127.0.0.1 only, on a port that the unit picks there and that the
+#   container does not publish; TensorBoard 2.5 and later gets --load_fast=false, which loads every
+#   plugin.
+# - Once TensorBoard answers HTTP under the prefix, the front, determined.exec.service_front,
+#   listens on DET_TENSORBOARD_PORT and passes on to TensorBoard the requests that carry
+#   DET_TENSORBOARD_TOKEN, which the master's proxy adds, and refuses the others. The service is
+#   READY once the front answers, which a probe in the background asks every half second.
+# - When TensorBoard or the front exits, the unit exits with its status, and the supervisor stops
+#   the other one.
 # - The task's activity record, which the master's proxy feeds, is the idle signal: the unit has
 #   no idle timer of its own.
 #
@@ -38,6 +44,9 @@ fi
 if [[ -z $tensorboard_logdir ]]; then
     tensorboard_unavailable "DET_TENSORBOARD_LOGDIR is not set"
 fi
+if [[ -z ${DET_TENSORBOARD_TOKEN-} ]]; then
+    tensorboard_unavailable "DET_TENSORBOARD_TOKEN is not set"
+fi
 
 tensorboard_cmd=()
 if command -v tensorboard >/dev/null; then
@@ -61,13 +70,23 @@ tensorboard_version=${tensorboard_version##*$'\n'}
 if [[ ! $tensorboard_version =~ ^([0-9]+)\.([0-9]+) ]]; then
     tensorboard_unavailable "cannot tell the release of ${tensorboard_cmd[*]}: \"$tensorboard_version\""
 fi
-tensorboard_flags=(--port "$tensorboard_port" --path_prefix "${tensorboard_prefix%/}")
-if ((10#${BASH_REMATCH[1]} >= 2)); then
-    tensorboard_flags+=(--bind_all)
-else
-    tensorboard_flags+=(--host 0.0.0.0)
+tensorboard_major=$((10#${BASH_REMATCH[1]})) tensorboard_minor=$((10#${BASH_REMATCH[2]}))
+
+# TensorBoard's own port, one that 127.0.0.1 has free now.
+tensorboard_local_port=$("$DET_PYTHON_EXECUTABLE" -c '
+import socket
+
+with socket.socket() as s:
+    s.bind(("127.0.0.1", 0))
+    print(s.getsockname()[1])
+' 2>/dev/null) || true
+if [[ ! $tensorboard_local_port =~ ^[0-9]+$ ]]; then
+    tensorboard_unavailable "cannot find a free port on 127.0.0.1"
 fi
-if ((10#${BASH_REMATCH[1]} > 2 || (10#${BASH_REMATCH[1]} == 2 && 10#${BASH_REMATCH[2]} >= 5))); then
+
+tensorboard_flags=(--port "$tensorboard_local_port" --path_prefix "${tensorboard_prefix%/}"
+    --host 127.0.0.1)
+if ((tensorboard_major > 2 || (tensorboard_major == 2 && tensorboard_minor >= 5))); then
     tensorboard_flags+=(--load_fast=false)
 fi
 
@@ -98,25 +117,62 @@ if ! tensorboard_error=$(mkdir -p -- "$tensorboard_logdir" 2>&1); then
 fi
 echo "tensorboard service: TensorBoard $tensorboard_version reads $tensorboard_logdir" >&2
 
-# The probe asks TensorBoard directly, past any proxy of the task's environment, and prints one
-# line once it answers, which marks the service READY.
-"$DET_PYTHON_EXECUTABLE" -c '
+# tensorboard_probe URL PID asks URL every half second, past any proxy of the task's environment,
+# with the token, until it answers 200, and then succeeds; it fails once PID has exited.
+tensorboard_probe() {
+    "$DET_PYTHON_EXECUTABLE" -c '
+import os
 import sys
 import time
 import urllib.request
 
+url, pid = sys.argv[1], int(sys.argv[2])
+headers = {"X-Determined-Service-Token": os.environ["DET_TENSORBOARD_TOKEN"]}
 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 while True:
     try:
-        with opener.open(sys.argv[1], timeout=5) as response:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        sys.exit(1)
+    try:
+        with opener.open(urllib.request.Request(url, headers=headers), timeout=5) as response:
             if response.status == 200:
-                print("tensorboard: http ready", flush=True)
-                break
+                sys.exit(0)
     except (OSError, ValueError):
         pass
     time.sleep(0.5)
-' "http://127.0.0.1:$tensorboard_port$tensorboard_prefix" \
+' "$@"
+}
+
+# tensorboard_exit PID exits with the status of PID, which has exited.
+tensorboard_exit() {
+    local status=0
+    wait "$1" || status=$?
+    exit "$status"
+}
+
+"${tensorboard_cmd[@]}" --logdir "$tensorboard_logdir" "${tensorboard_flags[@]}" "${tensorboard_args[@]}" &
+tensorboard_pid=$!
+
+if ! tensorboard_probe "http://127.0.0.1:$tensorboard_local_port$tensorboard_prefix" "$tensorboard_pid"; then
+    tensorboard_exit "$tensorboard_pid"
+fi
+
+"$DET_PYTHON_EXECUTABLE" -m determined.exec.service_front --listen "0.0.0.0:$tensorboard_port" \
+    --upstream "127.0.0.1:$tensorboard_local_port" --token-env DET_TENSORBOARD_TOKEN &
+tensorboard_front_pid=$!
+
+# One line once the front answers marks the service READY.
+{ tensorboard_probe "http://127.0.0.1:$tensorboard_port$tensorboard_prefix" "$tensorboard_front_pid" \
+    && echo "tensorboard: http ready"; } \
     | "$DET_PYTHON_EXECUTABLE" /run/determined/check_ready_logs.py \
         --ready-regex '^tensorboard: http ready$' "${service_ready_args[@]}" &
 
-"${tensorboard_cmd[@]}" --logdir "$tensorboard_logdir" "${tensorboard_flags[@]}" "${tensorboard_args[@]}"
+# The probe is a job too, and a stop's signal ends a wait: wait until one of the two has exited.
+while kill -0 "$tensorboard_pid" 2>/dev/null && kill -0 "$tensorboard_front_pid" 2>/dev/null; do
+    wait -n || true
+done
+if ! kill -0 "$tensorboard_pid" 2>/dev/null; then
+    tensorboard_exit "$tensorboard_pid"
+fi
+tensorboard_exit "$tensorboard_front_pid"

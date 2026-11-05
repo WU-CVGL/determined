@@ -196,7 +196,7 @@ func TestSetProxyAddress(t *testing.T) {
 }
 
 // TestRegisterProxiesPerPortScheme checks that each proxied port of one allocation gets the
-// upstream scheme and the policy of its own config.
+// upstream scheme, the policy and the service token of its own config.
 func TestRegisterProxiesPerPortScheme(t *testing.T) {
 	prefix := uuid.NewString()
 	ports := []*sproto.ProxyPortConfig{
@@ -206,6 +206,7 @@ func TestRegisterProxiesPerPortScheme(t *testing.T) {
 		{ServiceID: prefix + ":2222", Port: 2222, ProxyTCP: true, TLS: true},
 		{ServiceID: prefix + ":3600", Port: 3600, Exec: true, StripPrefix: true},
 		{ServiceID: prefix + ":3601", Port: 3601, StripPrefix: true},
+		{ServiceID: prefix + ":3000", Port: 3000, Exec: true, ServiceToken: "tb-token"},
 	}
 	closeDB, _, id, q, exitFuture := requireStarted(t, func(ar *sproto.AllocateRequest) {
 		ar.ProxyPorts = ports
@@ -240,13 +241,15 @@ func TestRegisterProxiesPerPortScheme(t *testing.T) {
 		unauth    bool
 		exec      bool
 		strip     bool
+		token     string
 	}{
-		{prefix, "https", "remotehost:12900", false, false, false, false},
-		{prefix + ":8080", "http", "remotehost:18080", false, false, false, false},
-		{prefix + ":22", "http", "remotehost:10022", true, true, false, false},
-		{prefix + ":2222", "https", "remotehost:12222", true, false, false, false},
-		{prefix + ":3600", "http", "remotehost:13600", false, false, true, true},
-		{prefix + ":3601", "http", "remotehost:13601", false, false, false, true},
+		{prefix, "https", "remotehost:12900", false, false, false, false, ""},
+		{prefix + ":8080", "http", "remotehost:18080", false, false, false, false, ""},
+		{prefix + ":22", "http", "remotehost:10022", true, true, false, false, ""},
+		{prefix + ":2222", "https", "remotehost:12222", true, false, false, false, ""},
+		{prefix + ":3600", "http", "remotehost:13600", false, false, true, true, ""},
+		{prefix + ":3601", "http", "remotehost:13601", false, false, false, true, ""},
+		{prefix + ":3000", "http", "remotehost:13000", false, false, true, false, "tb-token"},
 	} {
 		svc := proxy.DefaultProxy.GetService(tc.serviceID)
 		require.NotNil(t, svc, tc.serviceID)
@@ -256,6 +259,7 @@ func TestRegisterProxiesPerPortScheme(t *testing.T) {
 		require.Equal(t, tc.unauth, svc.AllowUnauthenticated, tc.serviceID)
 		require.Equal(t, tc.exec, svc.Exec, tc.serviceID)
 		require.Equal(t, tc.strip, svc.StripPrefix, tc.serviceID)
+		require.Equal(t, tc.token, svc.ServiceToken, tc.serviceID)
 	}
 
 	requireKilled(t, id, exitFuture)
