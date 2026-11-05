@@ -507,7 +507,7 @@ open-source project.
 
 See :doc:`resource pools <maintenance/dynamic-pools>`,
 :doc:`task recovery <maintenance/task-continuity>`, and
-:ref:`native resource monitoring <task-resources>` for setup and usage.
+:ref:`task resource monitoring <task-resources>` for setup and usage.
 
 **************
  Version 0.38
