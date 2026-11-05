@@ -23,71 +23,99 @@ import (
 // tensorBoardTestToken is the DET_TENSORBOARD_TOKEN of the tests.
 const tensorBoardTestToken = "test-token"
 
-// tensorBoardStandIn is a tensorboard program: it prints TB_STAND_IN_VERSION, 2.9.0 by default, for
-// --version_tb; otherwise it records its arguments NUL-separated and "tensorboard" in the order
-// file, and serves HTTP on 127.0.0.1 at its last --port, with 200 under its last --path_prefix and
-// 404 elsewhere, until the order file has "stop tensorboard". Then it exits with
-// TB_STAND_IN_EXIT, 0 by default; on SIGINT it exits 130.
-const tensorBoardStandIn = `
-for arg; do
-    if [[ $arg == --version_tb ]]; then
-        echo "${TB_STAND_IN_VERSION:-2.9.0}"
-        exit 0
-    fi
-done
-printf '%s\0' "$@" >"$ORDER_FILE.tensorboard-args"
-echo tensorboard >>"$ORDER_FILE"
-exec "$REPORTER_PYTHON" -c '
+// tensorBoardStandIn is a tensorboard package, by path under the package's directory. Its version
+// is TB_STAND_IN_VERSION, 2.9.0 by default. Its core plugin's loader defines --bind_all with the
+// default TB_STAND_IN_BIND_ALL, true by default as in some builds, and --host, --port,
+// --path_prefix, --logdir and --load_fast. Its main, like TensorBoard's, refuses --host while
+// --bind_all is true; otherwise it records its arguments NUL-separated, "tensorboard" in the order
+// file and its interpreter, TB_STAND_IN_PYTHON, in "$ORDER_FILE.tensorboard-python", and serves HTTP
+// at its --host, or all addresses with --bind_all, and --port, with 200 under its --path_prefix and
+// 404 elsewhere, or with TB_STAND_IN_SERVE=no serves nothing, until the order file has "stop
+// tensorboard". Then it returns TB_STAND_IN_EXIT, 0 by default.
+var tensorBoardStandIn = map[string]string{
+	"tensorboard/__init__.py":              "",
+	"tensorboard/plugins/__init__.py":      "",
+	"tensorboard/plugins/core/__init__.py": "",
+	"tensorboard/version.py": `
+import os
+
+VERSION = os.environ.get("TB_STAND_IN_VERSION", "2.9.0")
+`,
+	"tensorboard/plugins/core/core_plugin.py": `
+import os
+
+
+class CorePluginLoader:
+    def define_flags(self, parser):
+        bind_all = os.environ.get("TB_STAND_IN_BIND_ALL", "true") == "true"
+        parser.add_argument("--bind_all", default=bind_all, action="store_true")
+        parser.add_argument("--host")
+        parser.add_argument("--port", type=int)
+        parser.add_argument("--path_prefix", default="")
+        parser.add_argument("--logdir")
+        parser.add_argument("--load_fast")
+`,
+	"tensorboard/main.py": `
+import argparse
 import http.server
 import os
 import sys
 import threading
 import time
 
-argv = sys.argv[1:]
+from tensorboard.plugins.core import core_plugin
 
 
-def last(flag):
-    return argv[len(argv) - 1 - argv[::-1].index(flag) + 1]
+def stopped():
+    try:
+        with open(os.environ["ORDER_FILE"]) as f:
+            return "stop tensorboard\n" in f.read()
+    except OSError:
+        return False
 
 
-port = int(last("--port"))
-prefix = last("--path_prefix")
+def run_main():
+    argv = sys.argv[1:]
+    parser = argparse.ArgumentParser(prog="tensorboard")
+    core_plugin.CorePluginLoader().define_flags(parser)
+    flags, _ = parser.parse_known_args(argv)
+    if flags.bind_all and flags.host:
+        print("Error: Must not specify both --host and --bind_all.", file=sys.stderr)
+        return 1
+    order = os.environ["ORDER_FILE"]
+    with open(order + ".tensorboard-args", "w") as f:
+        f.write("".join(arg + "\0" for arg in argv))
+    with open(order + ".tensorboard-python", "w") as f:
+        f.write(os.environ["TB_STAND_IN_PYTHON"])
+    with open(order, "a") as f:
+        f.write("tensorboard\n")
+    if os.environ.get("TB_STAND_IN_SERVE") == "no":
+        while not stopped():
+            time.sleep(0.05)
+        return 0
 
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200 if self.path == flags.path_prefix + "/" else 404)
+            self.end_headers()
 
-class Handler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200 if self.path == prefix + "/" else 404)
-        self.end_headers()
-
-    def log_message(self, *args):
-        pass
-
-
-server = http.server.HTTPServer(("127.0.0.1", port), Handler)
-
-
-def watch():
-    while True:
-        try:
-            with open(os.environ["ORDER_FILE"]) as f:
-                if "stop tensorboard\n" in f.read():
-                    break
-        except OSError:
+        def log_message(self, *args):
             pass
-        time.sleep(0.05)
-    server.shutdown()
 
+    host = "" if flags.bind_all else flags.host or "localhost"
+    server = http.server.HTTPServer((host, flags.port), Handler)
 
-threading.Thread(target=watch, daemon=True).start()
-print("tensorboard stand-in serving", file=sys.stderr, flush=True)
-try:
+    def watch():
+        while not stopped():
+            time.sleep(0.05)
+        server.shutdown()
+
+    threading.Thread(target=watch, daemon=True).start()
+    print("tensorboard stand-in serving", file=sys.stderr, flush=True)
     server.serve_forever()
-except KeyboardInterrupt:
-    sys.exit(130)
-sys.exit(int(os.environ.get("TB_STAND_IN_EXIT", "0")))
-' "$@"
-`
+    return int(os.environ.get("TB_STAND_IN_EXIT", "0"))
+`,
+}
 
 // tensorBoardTask is a task with ssh, a stand-in that waits for "sshd done" in the order file, as
 // its primary service, and the tensorboard service with the real unit and the harness's front, a
@@ -137,9 +165,55 @@ func freePort(t *testing.T) string {
 	return strconv.Itoa(port)
 }
 
-// standIn puts the stand-in tensorboard on the PATH.
+// standInPython writes, at path, a python that has the stand-in tensorboard package: python3 with
+// the package's directory on its PYTHONPATH and TB_STAND_IN_PYTHON set to path.
+func (v *tensorBoardTask) standInPython(path string) {
+	v.t.Helper()
+	pkg := filepath.Join(v.dir, "tensorboard-package")
+	for name, body := range tensorBoardStandIn {
+		file := filepath.Join(pkg, name)
+		require.NoError(v.t, os.MkdirAll(filepath.Dir(file), 0o700))
+		require.NoError(v.t, os.WriteFile(file, []byte(body), 0o600))
+	}
+	python, err := exec.LookPath("python3")
+	require.NoError(v.t, err)
+	require.NoError(v.t, os.MkdirAll(filepath.Dir(path), 0o700))
+	writeScript(v.t, path, `export TB_STAND_IN_PYTHON="$0" PYTHONPATH=`+strconv.Quote(pkg)+"\n"+
+		`exec `+strconv.Quote(python)+` "$@"`+"\n")
+}
+
+// standInProgram puts on the PATH a tensorboard program whose first line is shebang.
+func (v *tensorBoardTask) standInProgram(shebang string) {
+	v.t.Helper()
+	program := shebang + `
+import sys
+
+from tensorboard.main import run_main
+
+sys.exit(run_main())
+`
+	//nolint:gosec // The program is executable.
+	require.NoError(v.t, os.WriteFile(filepath.Join(v.bin, "tensorboard"), []byte(program), 0o700))
+}
+
+// tbPython is the python of the tensorboard program that standIn writes.
+func (v *tensorBoardTask) tbPython() string {
+	return filepath.Join(v.dir, "tensorboard-python", "python")
+}
+
+// standIn puts on the PATH a tensorboard program of a python that has the stand-in package, as a
+// pip installation does.
 func (v *tensorBoardTask) standIn() {
-	writeScript(v.t, filepath.Join(v.bin, "tensorboard"), tensorBoardStandIn)
+	v.standInPython(v.tbPython())
+	v.standInProgram("#!" + v.tbPython())
+}
+
+// python returns the interpreter that ran the stand-in tensorboard.
+func (v *tensorBoardTask) python() string {
+	v.t.Helper()
+	b, err := os.ReadFile(v.order + ".tensorboard-python")
+	require.NoError(v.t, err)
+	return string(b)
 }
 
 // args returns the arguments that the stand-in tensorboard got.
@@ -199,20 +273,25 @@ func (v *tensorBoardTask) addOrder(line string) {
 	require.NoError(v.t, f.Close())
 }
 
-// The unit runs TensorBoard with the flags of the release, then the config's arguments, then the
-// log directory, a relative one under the work directory, which it creates, a port of its own on
-// 127.0.0.1 and the prefix, last, so that they win over the config's. The front on the service's
+// The unit runs TensorBoard, with the python of the tensorboard program, with the flags of the
+// release, then the config's arguments, then the log directory, a relative one under the work
+// directory, which it creates, a port of its own and the prefix, and --host 127.0.0.1, which holds
+// whether --bind_all defaults to true or not, last, so that they win over the config's. The front on the service's
 // port refuses a request without the token and passes on one with it. The service is READY once
 // the front answers under the prefix; its readiness does not mark the task ready. TensorBoard's
 // exit stops the front and leaves the shell running.
 func TestTensorBoardUnitRuns(t *testing.T) {
 	absolute := filepath.Join(t.TempDir(), "abs", "logs")
 	for _, tc := range []struct {
-		name, version, logdir, args string
-		flags, extra                []string
+		name, version, logdir, args, bindAll string
+		flags, extra                         []string
 	}{
 		{
 			name: "relative", version: "2.9.0", logdir: "runs/exp", args: "[]",
+			flags: []string{"--load_fast=false"},
+		},
+		{
+			name: "bind_all false", version: "2.9.0", logdir: "runs", args: "[]", bindAll: "false",
 			flags: []string{"--load_fast=false"},
 		},
 		{
@@ -239,6 +318,9 @@ func TestTensorBoardUnitRuns(t *testing.T) {
 			v := newTensorBoardTask(t, tc.logdir)
 			v.standIn()
 			v.env = append(v.env, "TB_STAND_IN_VERSION="+tc.version, "DET_TENSORBOARD_ARGS="+tc.args)
+			if tc.bindAll != "" {
+				v.env = append(v.env, "TB_STAND_IN_BIND_ALL="+tc.bindAll)
+			}
 			v.start()
 			v.waitForLog("[tensorboard] ready")
 			dir := tc.logdir
@@ -254,6 +336,7 @@ func TestTensorBoardUnitRuns(t *testing.T) {
 				"--logdir", dir, "--port", local, "--path_prefix", strings.TrimSuffix(v.prefix, "/"),
 				"--host", "127.0.0.1",
 			), v.args())
+			require.Equal(t, v.tbPython(), v.python())
 			require.Equal(t, http.StatusUnauthorized, v.get(v.port, ""))
 			require.Equal(t, http.StatusUnauthorized, v.get(v.port, "wrong"))
 			require.Equal(t, http.StatusOK, v.get(v.port, tensorBoardTestToken))
@@ -278,6 +361,66 @@ func TestTensorBoardUnitRuns(t *testing.T) {
 				"[ssh] start", "[tensorboard] start", "[tensorboard] ready", "[tensorboard] exited 0",
 				"[ssh] exited 0",
 			}, v.logLines())
+		})
+	}
+}
+
+// TensorBoard's python is the first that has it of the tensorboard program's, named by its first
+// line directly or through env, python3 and python.
+func TestTensorBoardUnitPython(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(v *tensorBoardTask) string
+	}{
+		{
+			name: "env",
+			setup: func(v *tensorBoardTask) string {
+				python := filepath.Join(v.bin, "python3.10")
+				v.standInPython(python)
+				v.standInProgram("#!/usr/bin/env -S python3.10 -u")
+				return python
+			},
+		},
+		{
+			name: "program of no python",
+			setup: func(v *tensorBoardTask) string {
+				python := filepath.Join(v.bin, "python3")
+				v.standInPython(python)
+				v.standInProgram("#!/usr/bin/env bash")
+				return python
+			},
+		},
+		{
+			name: "python3",
+			setup: func(v *tensorBoardTask) string {
+				python := filepath.Join(v.bin, "python3")
+				v.standInPython(python)
+				return python
+			},
+		},
+		{
+			name: "python",
+			setup: func(v *tensorBoardTask) string {
+				if err := exec.Command("python3", "-c", "import tensorboard.main").Run(); err == nil {
+					t.Skip("python3 has tensorboard")
+				}
+				python := filepath.Join(v.bin, "python")
+				v.standInPython(python)
+				return python
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := newTensorBoardTask(t, "runs")
+			python := tc.setup(v)
+			v.start()
+			v.waitForLog("[tensorboard] ready")
+			require.Equal(t, python, v.python())
+			require.Equal(t, http.StatusOK, v.get(v.port, tensorBoardTestToken))
+			v.addOrder("stop tensorboard")
+			v.waitForLog("[tensorboard] exited 0")
+			v.addOrder("sshd done")
+			require.Equal(t, 0, v.wait())
 		})
 	}
 }
@@ -325,10 +468,8 @@ func TestTensorBoardUnitFrontExit(t *testing.T) {
 // the service.
 func TestTensorBoardUnitNotReadyWithoutHTTP(t *testing.T) {
 	v := newTensorBoardTask(t, "runs")
-	writeScript(t, filepath.Join(v.bin, "tensorboard"), `
-[[ $1 != --version_tb ]] || { echo 2.9.0; exit 0; }
-echo tensorboard >>"$ORDER_FILE"
-`+waitUntilOrder("stop tensorboard")+"exit 0\n")
+	v.standIn()
+	v.env = append(v.env, "TB_STAND_IN_SERVE=no")
 	v.start()
 	v.waitForOrder("tensorboard")
 	v.addOrder("stop tensorboard")
@@ -392,7 +533,7 @@ func TestTensorBoardUnitUnavailable(t *testing.T) {
 		},
 		{
 			name: "no release",
-			line: `tensorboard service: cannot tell the release of tensorboard: "unknown"`,
+			line: `tensorboard service: cannot tell the release of the tensorboard of <python>: "unknown"`,
 			setup: func(v *tensorBoardTask) {
 				v.standIn()
 				v.env = append(v.env, "TB_STAND_IN_VERSION=unknown")
@@ -450,7 +591,8 @@ func TestTensorBoardUnitUnavailable(t *testing.T) {
 			}
 			v.start()
 			v.waitForLog("[tensorboard] exited 127")
-			require.Contains(t, v.stderr.String(), tc.line+"\n[tensorboard] exited 127\n")
+			line := strings.ReplaceAll(tc.line, "<python>", v.tbPython())
+			require.Contains(t, v.stderr.String(), line+"\n[tensorboard] exited 127\n")
 			require.Equal(t, 1, strings.Count(v.stderr.String(), "tensorboard service: "),
 				v.stderr.String())
 			waitFor(t, "tensorboard UNAVAILABLE", func() bool {

@@ -6,8 +6,9 @@
 # --host, which therefore win, behind a front on DET_TENSORBOARD_PORT that takes only the master
 # proxy's requests. The supervisor sources this file after the init.
 #
-# - TensorBoard is the tensorboard program on the PATH, else the module tensorboard.main of the
-#   first of python3 and python that has it. The unit installs nothing.
+# - TensorBoard is the package tensorboard of the first interpreter that has it of the tensorboard
+#   program's on the PATH, python3 and python. The unit runs TensorBoard's main with the default of
+#   --bind_all, true in some builds, set to false, so that --host holds. The unit installs nothing.
 # - A relative log directory is resolved against the task's work directory. A missing one is
 #   created, so that a training run can write to it later.
 # - TensorBoard listens on 127.0.0.1 only, on a port that the unit picks there and that the
@@ -48,27 +49,44 @@ if [[ -z ${DET_TENSORBOARD_TOKEN-} ]]; then
     tensorboard_unavailable "DET_TENSORBOARD_TOKEN is not set"
 fi
 
-tensorboard_cmd=()
-if command -v tensorboard >/dev/null; then
-    tensorboard_cmd=(tensorboard)
-else
-    for tensorboard_python in python3 python; do
-        if command -v "$tensorboard_python" >/dev/null \
-            && "$tensorboard_python" -c 'import tensorboard.main' >/dev/null 2>&1; then
-            tensorboard_cmd=("$tensorboard_python" -m tensorboard.main)
+# The interpreters to try: the tensorboard program's, from its "#!" line, if it is a python, then
+# python3 and python.
+tensorboard_pythons=()
+if tensorboard_program=$(command -v tensorboard) \
+    && IFS= read -r tensorboard_shebang <"$tensorboard_program" 2>/dev/null \
+    && [[ $tensorboard_shebang == '#!'* ]]; then
+    read -r -a tensorboard_words <<<"${tensorboard_shebang#??}"
+    for tensorboard_word in "${tensorboard_words[@]}"; do
+        if [[ $tensorboard_word != -* && $tensorboard_word != */env ]]; then
+            if [[ ${tensorboard_word##*/} == python* ]]; then
+                tensorboard_pythons+=("$tensorboard_word")
+            fi
             break
         fi
     done
 fi
-if ((${#tensorboard_cmd[@]} == 0)); then
+tensorboard_pythons+=(python3 python)
+
+# The release, for example "2.9.0", from the first interpreter that has TensorBoard.
+tensorboard_python=
+for tensorboard_candidate in "${tensorboard_pythons[@]}"; do
+    if command -v "$tensorboard_candidate" >/dev/null \
+        && tensorboard_version=$("$tensorboard_candidate" -c '
+import tensorboard.main
+import tensorboard.version
+
+print(tensorboard.version.VERSION)
+' 2>/dev/null); then
+        tensorboard_python=$tensorboard_candidate
+        break
+    fi
+done
+if [[ -z $tensorboard_python ]]; then
     tensorboard_unavailable "tensorboard is not installed"
 fi
-
-# --version_tb prints the release, for example "2.9.0".
-tensorboard_version=$("${tensorboard_cmd[@]}" --version_tb 2>/dev/null) || true
 tensorboard_version=${tensorboard_version##*$'\n'}
 if [[ ! $tensorboard_version =~ ^([0-9]+)\.([0-9]+) ]]; then
-    tensorboard_unavailable "cannot tell the release of ${tensorboard_cmd[*]}: \"$tensorboard_version\""
+    tensorboard_unavailable "cannot tell the release of the tensorboard of $tensorboard_python: \"$tensorboard_version\""
 fi
 tensorboard_major=$((10#${BASH_REMATCH[1]})) tensorboard_minor=$((10#${BASH_REMATCH[2]}))
 
@@ -160,7 +178,30 @@ tensorboard_exit() {
 # stop's signal.
 {
     trap - INT
-    exec "${tensorboard_cmd[@]}" "${tensorboard_release_flags[@]}" "${tensorboard_args[@]}" \
+    exec "$tensorboard_python" -c '
+import sys
+
+try:
+    from tensorboard.plugins.core.core_plugin import CorePluginLoader
+except ImportError:
+    CorePluginLoader = None
+if CorePluginLoader is not None:
+    define_flags = CorePluginLoader.define_flags
+
+    def define_flags_bound_to_host(self, parser):
+        define_flags(self, parser)
+        parser.set_defaults(bind_all=False)
+
+    CorePluginLoader.define_flags = define_flags_bound_to_host
+
+from tensorboard import main
+
+sys.argv[0] = "tensorboard"
+try:
+    sys.exit(main.run_main())
+except KeyboardInterrupt:
+    sys.exit(130)
+' "${tensorboard_release_flags[@]}" "${tensorboard_args[@]}" \
         --logdir "$tensorboard_logdir" --port "$tensorboard_local_port" \
         --path_prefix "${tensorboard_prefix%/}" --host 127.0.0.1
 } &
