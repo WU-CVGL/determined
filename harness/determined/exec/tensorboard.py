@@ -136,7 +136,6 @@ def start_tensorboard(
         # Get fetcher and perform initial fetch
         logger.debug(
             f"Building fetcher...\n"
-            f"\tstorage_config: {storage_config}\n"
             f"\tstorage_paths: {storage_paths}\n"
             f"\tlocal_dir: {local_dir}"
         )
@@ -320,8 +319,7 @@ if __name__ == "__main__":
         f"Tensorboard (v{tb_version}) Initializing...\n"
         f"\tstorage_config_path: {storage_config_path}\n"
         f"\tstorage_paths: {storage_paths}\n"
-        f"\tadditional_tb_args: {additional_tb_args}\n"
-        f"\tstorage_config: {storage_config}"
+        f"\tadditional_tb_args: {additional_tb_args}"
     )
 
     ret = start_tensorboard(storage_config, storage_paths, additional_tb_args)
