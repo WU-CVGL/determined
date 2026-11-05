@@ -201,6 +201,8 @@ The following configuration settings are supported:
       a missing one is created.
 
    -  ``args``: ``tensorboard`` only. A list of more TensorBoard arguments, after the service's own.
+      ``--logdir``, ``--port``, ``--path_prefix``, ``--host`` and ``--bind_all`` are set by the
+      service, and an argument that sets one of them is refused.
 
    A service's entry in the launch configuration keeps the template's ``idle_type``, ``logdir`` and
    ``args`` when it does not set them, and runs the service unless it sets ``enabled`` to ``false``;

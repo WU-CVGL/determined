@@ -245,9 +245,9 @@ answers.
 
 ``services.tensorboard.args`` adds TensorBoard arguments after the service's own: ``--logdir``,
 ``--port``, ``--path_prefix``, ``--bind_all`` for TensorBoard 2 and later (``--host 0.0.0.0``
-before), and ``--load_fast=false`` for TensorBoard 2.5 and later. An argument that sets one of them
-again can keep TensorBoard from starting, for example ``--host`` next to ``--bind_all``. One
-argument is a list of one; an argument with a comma goes in quotes inside a list:
+before), and ``--load_fast=false`` for TensorBoard 2.5 and later. An argument that sets
+``--logdir``, ``--port``, ``--path_prefix``, ``--host`` or ``--bind_all`` is refused. One argument
+is a list of one; an argument with a comma goes in quotes inside a list:
 
 .. code::
 

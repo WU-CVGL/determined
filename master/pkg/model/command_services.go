@@ -163,9 +163,16 @@ func validateServices(services map[string]ServiceConfig) []error {
 	return errs
 }
 
+// tensorBoardServiceFlags are the TensorBoard flags that the tensorboard service sets itself, which
+// its args may not set again.
+var tensorBoardServiceFlags = []string{"--logdir", "--port", "--path_prefix", "--host", "--bind_all"}
+
 // validateTensorBoardOptions returns an error for a logdir or args on a service other than
-// tensorboard, and, on the tensorboard service, for a missing logdir when it runs and for a NUL
-// character, which the container's environment cannot hold, in the logdir or an argument.
+// tensorboard, and, on the tensorboard service, for a missing logdir when it runs, for a NUL
+// character, which the container's environment cannot hold, in the logdir or an argument, and for
+// an argument that sets one of tensorBoardServiceFlags, as "--flag", which may take its value from
+// the next argument, or as "--flag=value". The args are checked whether or not the service runs, as
+// the NUL characters are.
 func validateTensorBoardOptions(name string, service ServiceConfig) []error {
 	if name != ServiceTensorBoard {
 		var errs []error
@@ -188,6 +195,13 @@ func validateTensorBoardOptions(name string, service ServiceConfig) []error {
 		if strings.ContainsRune(arg, 0) {
 			errs = append(errs, fmt.Errorf("services: tensorboard: args contain a NUL character"))
 			break
+		}
+	}
+	for _, arg := range service.Args {
+		for _, flag := range tensorBoardServiceFlags {
+			if arg == flag || strings.HasPrefix(arg, flag+"=") {
+				errs = append(errs, fmt.Errorf("services: tensorboard: args: %s is set by the service", flag))
+			}
 		}
 	}
 	return errs

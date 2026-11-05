@@ -219,6 +219,9 @@ func TestServiceConfigTensorBoard(t *testing.T) {
 		`{"services": {"tensorboard": {"enabled": false}}}`,
 		`{"services": {"tensorboard": {"enabled": false, "args": ["--x"]}}}`,
 		`{"services": {"tensorboard": {"logdir": "/abs/dir"}}}`,
+		`{"services": {"tensorboard": {"logdir": "runs", "args": ["--logdir_spec=a:runs", "--hostx"]}}}`,
+		`{"services": {"tensorboard": {"logdir": "runs", "args": ["--reload_interval", "5"]}}}`,
+		`{"services": {"tensorboard": {"enabled": false, "args": ["--load_fast=true"]}}}`,
 	} {
 		config, err := decodeCommandConfig(text)
 		require.NoError(t, err, text)
@@ -243,6 +246,28 @@ func TestServiceConfigTensorBoard(t *testing.T) {
 		require.NoError(t, err, text)
 		require.ErrorContains(t, check.Validate(config), want, text)
 	}
+
+	// The flags that the service sets, as "--flag value", as "--flag=value" or bare last, are
+	// refused, whether or not the service runs, each by name.
+	for _, flag := range []string{"--logdir", "--port", "--path_prefix", "--host", "--bind_all"} {
+		for _, args := range []string{
+			`["` + flag + `", "x"]`, `["--reload_interval=5", "` + flag + `=x"]`, `["` + flag + `"]`,
+		} {
+			for _, entry := range []string{`"logdir": "runs"`, `"enabled": false`} {
+				text := `{"services": {"tensorboard": {` + entry + `, "args": ` + args + `}}}`
+				config, err := decodeCommandConfig(text)
+				require.NoError(t, err, text)
+				require.ErrorContains(t, check.Validate(config),
+					"services: tensorboard: args: "+flag+" is set by the service", text)
+			}
+		}
+	}
+	text := `{"services": {"tensorboard": {"logdir": "runs", "args": ["--host=0.0.0.0", "--bind_all"]}}}`
+	config, err = decodeCommandConfig(text)
+	require.NoError(t, err)
+	err = check.Validate(config)
+	require.ErrorContains(t, err, "services: tensorboard: args: --host is set by the service")
+	require.ErrorContains(t, err, "services: tensorboard: args: --bind_all is set by the service")
 
 	require.NotContains(t, DefaultShellServices(true), ServiceTensorBoard)
 	require.NotContains(t, DefaultShellServices(false), ServiceTensorBoard)
