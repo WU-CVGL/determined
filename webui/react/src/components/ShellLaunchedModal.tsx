@@ -61,6 +61,11 @@ const ShellLaunchedModalComponent: React.FC<Props> = ({ response, services }: Pr
             Open VS Code
           </Button>
         )}
+        {canOpenTaskService(services, 'tensorboard') && (
+          <Button block size="large" onClick={openTab(InteractiveTaskTab.TensorBoard)}>
+            Open TensorBoard
+          </Button>
+        )}
       </Column>
       <Label>Start an interactive SSH session in the terminal:</Label>
       <CodeSample text={`det shell open ${command.id}`} />

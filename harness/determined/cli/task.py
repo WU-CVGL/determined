@@ -260,8 +260,8 @@ def open_service(args: argparse.Namespace) -> None:
             f"Cannot open {service.name}: only the user who started the task or an administrator "
             "can open it."
         )
-    # The WebUI's page logs the browser in to the master, then fetches the credential as the
-    # browser's user and opens the service.
+    # The WebUI's page logs the browser in to the master, then fetches the credential, for a
+    # service that has one, as the browser's user and opens the service.
     public_url = os.environ.get("PUBLIC_URL", "/det")
     task_id = urllib.parse.quote(args.task_id, safe="")
     name = urllib.parse.quote(service.name, safe="")

@@ -47,7 +47,12 @@ const service = (name: string, mayConnect = true): V1TaskService => ({
 });
 /** A shell's SSH alone, the default. */
 const SSH_ONLY = [service('ssh')];
-const ALL_SERVICES = [service('ssh'), service('jupyter'), service('vscode')];
+const ALL_SERVICES = [
+  service('ssh'),
+  service('jupyter'),
+  service('tensorboard'),
+  service('vscode'),
+];
 
 interface OpenerProps {
   response: CommandResponse;
@@ -102,21 +107,25 @@ describe('ShellLaunchedModal', () => {
     open.mockRestore();
   });
 
-  it('offers Open JupyterLab and Open VS Code for the services of the task', async () => {
+  it('offers Open JupyterLab, Open VS Code and Open TensorBoard for the services of the task', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
     await setup(RESPONSE, ALL_SERVICES);
     const jupyter = screen.getByRole('button', { name: 'Open JupyterLab' });
     const vscode = screen.getByRole('button', { name: 'Open VS Code' });
+    const tensorboard = screen.getByRole('button', { name: 'Open TensorBoard' });
     const terminal = screen.getByRole('button', { name: 'Open Terminal' });
     expect(
       terminal.compareDocumentPosition(jupyter) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(jupyter.compareDocumentPosition(vscode) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      vscode.compareDocumentPosition(tensorboard) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(terminal).toHaveClass('ant-btn-primary');
     expect(jupyter).toHaveClass('ant-btn-primary');
     expect(vscode).toHaveClass('ant-btn-primary');
     // One stack of full-width buttons.
-    for (const button of [terminal, jupyter, vscode]) {
+    for (const button of [terminal, jupyter, vscode, tensorboard]) {
       expect(button).toHaveClass('ant-btn-block', 'ant-btn-lg');
       expect(button.parentElement).toBe(terminal.parentElement);
     }
@@ -130,6 +139,12 @@ describe('ShellLaunchedModal', () => {
     await userEvent.click(vscode);
     expect(open).toHaveBeenLastCalledWith(
       expect.stringContaining('/tasks/shell-123/interactive?tab=vscode'),
+      'shell-123',
+      '',
+    );
+    await userEvent.click(tensorboard);
+    expect(open).toHaveBeenLastCalledWith(
+      expect.stringContaining('/tasks/shell-123/interactive?tab=tensorboard'),
       'shell-123',
       '',
     );
@@ -149,6 +164,7 @@ describe('ShellLaunchedModal', () => {
     expect(screen.getByRole('button', { name: 'Open Terminal' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Open JupyterLab' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Open VS Code' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open TensorBoard' })).not.toBeInTheDocument();
   });
 
   it('shows no service buttons without services, as after a failed read', async () => {
@@ -163,10 +179,12 @@ describe('ShellLaunchedModal', () => {
     await setup(RESPONSE, [
       service('ssh', false),
       service('jupyter', false),
+      service('tensorboard', false),
       service('vscode', false),
     ]);
     expect(screen.queryByRole('button', { name: 'Open JupyterLab' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Open VS Code' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open TensorBoard' })).not.toBeInTheDocument();
   });
 
   it('links View Resources next to View Logs', async () => {

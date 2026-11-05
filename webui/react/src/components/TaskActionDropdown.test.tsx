@@ -275,10 +275,11 @@ describe('TaskActionDropdown', () => {
     });
   });
 
-  describe('Open JupyterLab and Open VS Code', () => {
+  describe('Open JupyterLab, Open VS Code and Open TensorBoard', () => {
     const allServices = [
       { mayConnect: true, name: 'ssh' },
       { mayConnect: true, name: 'jupyter' },
+      { mayConnect: true, name: 'tensorboard' },
       { mayConnect: true, name: 'vscode' },
     ];
 
@@ -298,6 +299,7 @@ describe('TaskActionDropdown', () => {
         'Open Terminal',
         'Open JupyterLab',
         'Open VS Code',
+        'Open TensorBoard',
         'Kill',
       ]);
     });
@@ -305,6 +307,7 @@ describe('TaskActionDropdown', () => {
     it.each([
       [TaskAction.OpenJupyterLab, 'jupyter'],
       [TaskAction.OpenVSCode, 'vscode'],
+      [TaskAction.OpenTensorBoard, 'tensorboard'],
     ])(
       '"%s" opens the %s tab of the task page in a tab named after the task',
       async (action, tab) => {
@@ -337,6 +340,7 @@ describe('TaskActionDropdown', () => {
         'Connect via CLI',
         'Open JupyterLab',
         'Open VS Code',
+        'Open TensorBoard',
         'Kill',
       ]);
     });
@@ -349,6 +353,7 @@ describe('TaskActionDropdown', () => {
       await openMenu(101, runningShell);
       await screen.findByText('Open VS Code');
       expect(menuLabels()).not.toContain('Open JupyterLab');
+      expect(menuLabels()).not.toContain('Open TensorBoard');
     });
 
     it('are hidden for a shell the master does not let the user connect to', async () => {
@@ -357,6 +362,7 @@ describe('TaskActionDropdown', () => {
       await waitFor(() => expect(getTaskServices).toHaveBeenCalledTimes(1));
       expect(screen.queryByText('Open JupyterLab')).not.toBeInTheDocument();
       expect(screen.queryByText('Open VS Code')).not.toBeInTheDocument();
+      expect(screen.queryByText('Open TensorBoard')).not.toBeInTheDocument();
     });
 
     it('are hidden for shells that have ended', async () => {
@@ -365,6 +371,7 @@ describe('TaskActionDropdown', () => {
       await screen.findByText('View Logs');
       expect(screen.queryByText('Open JupyterLab')).not.toBeInTheDocument();
       expect(screen.queryByText('Open VS Code')).not.toBeInTheDocument();
+      expect(screen.queryByText('Open TensorBoard')).not.toBeInTheDocument();
       expect(getTaskServices).not.toHaveBeenCalled();
     });
   });

@@ -20,14 +20,17 @@ const (
 	interactiveServiceJupyter = model.ServiceJupyter
 	// interactiveServiceVSCode runs code-server.
 	interactiveServiceVSCode = model.ServiceVSCode
+	// interactiveServiceTensorBoard runs TensorBoard.
+	interactiveServiceTensorBoard = model.ServiceTensorBoard
 )
 
 // interactiveServiceUnits maps each service of the supervisor to the static resource of its unit.
 // Its names are model.InteractiveServices, which a config's services are checked against.
 var interactiveServiceUnits = map[string]string{
-	interactiveServiceSSH:     etc.SSHServiceResource,
-	interactiveServiceJupyter: etc.JupyterServiceResource,
-	interactiveServiceVSCode:  etc.VSCodeServiceResource,
+	interactiveServiceSSH:         etc.SSHServiceResource,
+	interactiveServiceJupyter:     etc.JupyterServiceResource,
+	interactiveServiceTensorBoard: etc.TensorBoardServiceResource,
+	interactiveServiceVSCode:      etc.VSCodeServiceResource,
 }
 
 // interactiveSupervisorEntrypoint is the entrypoint of a shell task: the supervisor, which passes
@@ -45,7 +48,8 @@ func addExtraEnvVars(spec *tasks.GenericCommandSpec, vars map[string]string) {
 }
 
 // interactiveSupervisorFiles returns the run-dir files of the supervisor: the init, the supervisor,
-// the reporter of the services' states and the unit of every service.
+// the reporter of the services' states, the unit of every service and the tensorboard unit's
+// program.
 func interactiveSupervisorFiles(aug *model.AgentUserGroup) archive.Archive {
 	files := archive.Archive{
 		aug.OwnedArchiveItem(
@@ -78,5 +82,10 @@ func interactiveSupervisorFiles(aug *model.AgentUserGroup) archive.Archive {
 			tar.TypeReg,
 		))
 	}
-	return files
+	return append(files, aug.OwnedArchiveItem(
+		tensorBoardServiceProgram,
+		etc.MustStaticFile(etc.TensorBoardServiceProgramResource),
+		0o700,
+		tar.TypeReg,
+	))
 }

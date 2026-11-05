@@ -38,6 +38,8 @@ type Params = {
 };
 
 const POLL_MS = 2000;
+/** How often the services are read once they have settled, while the task runs. */
+const SERVICES_SLOW_POLL_MS = 10000;
 const MAX_POLL_FAILURES = 5;
 const DEFAULT_PAGE_TITLE = 'Tasks - Determined';
 
@@ -110,9 +112,9 @@ const LogsPane: React.FC<{ taskId: string }> = ({ taskId }) => {
 };
 
 /**
- * A task's page: its services as tabs (a terminal, JupyterLab, VS Code; TensorBoard's own page),
- * then its logs and resources. One poll of the task feeds the title and the panes, which stay
- * mounted once shown so that their sessions keep their state.
+ * A task's page: its services as tabs (a terminal, JupyterLab, VS Code, TensorBoard; a
+ * TensorBoard task's own page), then its logs and resources. One poll of the task feeds the title
+ * and the panes, which stay mounted once shown so that their sessions keep their state.
  */
 export const InteractiveTask: React.FC = () => {
   const { taskId = '' } = useParams<Params>();
@@ -152,10 +154,13 @@ export const InteractiveTask: React.FC = () => {
     }
   }, [slotsExceeded]);
 
-  // The one poll of the task, until it ends, and of its services while one of them has not
-  // settled: the set of services is fixed, and a pane opens its service once it is ready. One
-  // tick at a time: the next is scheduled once the current one has answered, so that an older
-  // answer never lands after a newer one.
+  // The one poll of the task, until it ends, and of its services: on every tick while one of them
+  // has not settled, then every SERVICES_SLOW_POLL_MS while the task runs, so that a service that
+  // exits after it was ready shows its state, and once more when the task has ended. The set of
+  // services is fixed, and a pane opens its service once it is ready. The services are not read
+  // while the page is hidden; showing it reads them at once. One tick at a time: the next is
+  // scheduled once the current one has answered, and one read of the services at a time, so that
+  // an older answer never lands after a newer one.
   useEffect(() => {
     let cancelled = false;
     let failures = 0;
@@ -165,7 +170,15 @@ export const InteractiveTask: React.FC = () => {
     // Whether the page has given up reading the services until Retry: the task's own tabs are
     // shown without them.
     let servicesGivenUp = false;
+    // Whether the services API does not know the task, which then has no services to read again.
+    let servicesUnknown = false;
     let servicesSettled = false;
+    // The read of the services in flight, if any.
+    let servicesRead: Promise<string | undefined> | undefined;
+    // When the last read of the services started, and whether the read after the task's end ran.
+    let servicesReadAt = 0;
+    let endRead = false;
+    let ended = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     // Whether the task has ended, or the page gives up on it.
     const pollTask = async (): Promise<'ended' | 'gone' | undefined> => {
@@ -196,11 +209,12 @@ export const InteractiveTask: React.FC = () => {
     };
     // A failed read keeps the last services, if any, and is tried again on the next tick; before
     // the first answer, the page gives up after a few failures and shows the last one with Retry.
-    // A task the services API does not know, such as a generic task, has none.
-    const pollServices = async () => {
+    // A task the services API does not know, such as a generic task, has none. The text of a
+    // failure, if any.
+    const pollServices = async (): Promise<string | undefined> => {
       try {
         const response = await getTaskServices({ taskId });
-        if (cancelled) return;
+        if (cancelled) return undefined;
         servicesLoaded = true;
         servicesGivenUp = false;
         setServicesError(undefined);
@@ -209,41 +223,79 @@ export const InteractiveTask: React.FC = () => {
           services: response.services,
         });
         servicesSettled = response.services.every((s) => taskServiceSettled(s.state));
+        return undefined;
       } catch (e) {
-        if (cancelled) return;
+        if (cancelled) return undefined;
         const text = errorText(e);
         handleError(e, { publicMessage: 'Unable to load the services of the task.', silent: true });
         if (isNotFound(e as Error)) {
           servicesLoaded = true;
           servicesGivenUp = false;
+          servicesUnknown = true;
           setServicesError(undefined);
           setTaskServices({ services: [] });
           servicesSettled = true;
-        } else if (!servicesLoaded && (servicesGivenUp || ++serviceFailures >= MAX_POLL_FAILURES)) {
+          return undefined;
+        }
+        if (servicesGivenUp || (!servicesLoaded && ++serviceFailures >= MAX_POLL_FAILURES)) {
           servicesGivenUp = true;
           setServicesError(text);
         }
+        return text;
       }
+    };
+    // One read at a time; a read asked for while another runs waits for that one.
+    const readServices = (): Promise<string | undefined> => {
+      if (servicesRead) return servicesRead;
+      servicesReadAt = Date.now();
+      servicesRead = pollServices().finally(() => {
+        servicesRead = undefined;
+      });
+      return servicesRead;
+    };
+    // Whether the page reads the services on this tick.
+    const servicesDue = (): boolean => {
+      if (servicesGivenUp || servicesUnknown || servicesRead || document.hidden) return false;
+      if (!servicesSettled) return true;
+      return !ended && Date.now() - servicesReadAt >= SERVICES_SLOW_POLL_MS;
     };
     // One more read, on request; a success resumes the reads of the poll while it runs.
     retryServicesRef.current = async () => {
       setRetrying(true);
-      await pollServices();
+      await readServices();
       setRetrying(false);
     };
     const poll = async () => {
-      const [outcome] = await Promise.all([
-        pollTask(),
-        servicesSettled || servicesGivenUp ? undefined : pollServices(),
-      ]);
-      const servicesDone = servicesSettled || servicesGivenUp;
-      if (cancelled || outcome === 'gone' || (outcome === 'ended' && servicesDone)) return;
+      const [outcome] = await Promise.all([pollTask(), servicesDue() ? readServices() : undefined]);
+      if (cancelled || outcome === 'gone') return;
+      if (outcome === 'ended') {
+        ended = true;
+        // The services' states after the end, once, from a read that starts after the end. Its
+        // failure is shown with Retry: the last services read are not the final ones.
+        if (!endRead && !servicesGivenUp && !servicesUnknown) {
+          endRead = true;
+          await servicesRead;
+          if (cancelled) return;
+          const failure = await readServices();
+          if (cancelled) return;
+          if (failure !== undefined) {
+            servicesGivenUp = true;
+            setServicesError(failure);
+          }
+        }
+        if (servicesSettled || servicesGivenUp) return;
+      }
       timer = setTimeout(() => void poll(), POLL_MS);
     };
+    const onVisibilityChange = () => {
+      if (!document.hidden && !ended && !servicesGivenUp && !servicesUnknown) void readServices();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
     void poll();
     return () => {
       cancelled = true;
       clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       retryServicesRef.current = undefined;
     };
   }, [taskId]);
@@ -292,7 +344,10 @@ export const InteractiveTask: React.FC = () => {
     if (terminalEnabled && canOpenShellTerminal(services)) keys.push(InteractiveTaskTab.Terminal);
     if (canOpenTaskService(services, 'jupyter')) keys.push(InteractiveTaskTab.JupyterLab);
     if (canOpenTaskService(services, 'vscode')) keys.push(InteractiveTaskTab.VSCode);
-    if (command?.type === CommandType.TensorBoard && command.serviceAddress) {
+    if (
+      (command?.type === CommandType.TensorBoard && command.serviceAddress) ||
+      canOpenTaskService(services, 'tensorboard')
+    ) {
       keys.push(InteractiveTaskTab.TensorBoard);
     }
     keys.push(InteractiveTaskTab.Logs);
@@ -322,6 +377,7 @@ export const InteractiveTask: React.FC = () => {
         case InteractiveTaskTab.JupyterLab:
           return (
             <TaskServicePane
+              ended={phase === 'ended'}
               label="JupyterLab"
               service="jupyter"
               state={serviceState('jupyter')}
@@ -331,6 +387,7 @@ export const InteractiveTask: React.FC = () => {
         case InteractiveTaskTab.VSCode:
           return (
             <TaskServicePane
+              ended={phase === 'ended'}
               label="VS Code"
               service="vscode"
               state={serviceState('vscode')}
@@ -338,14 +395,26 @@ export const InteractiveTask: React.FC = () => {
             />
           );
         case InteractiveTaskTab.TensorBoard:
-          return command ? (
-            <iframe
-              allowFullScreen
-              className={css.frame}
-              src={waitPageUrl(command)}
-              title="TensorBoard"
+          // A TensorBoard task's own page, or a shell's tensorboard service.
+          if (command?.type === CommandType.TensorBoard) {
+            return (
+              <iframe
+                allowFullScreen
+                className={css.frame}
+                src={waitPageUrl(command)}
+                title="TensorBoard"
+              />
+            );
+          }
+          return (
+            <TaskServicePane
+              ended={phase === 'ended'}
+              label="TensorBoard"
+              service="tensorboard"
+              state={serviceState('tensorboard')}
+              taskId={taskId}
             />
-          ) : null;
+          );
         case InteractiveTaskTab.Logs:
           return <LogsPane taskId={taskId} />;
         case InteractiveTaskTab.Resources:

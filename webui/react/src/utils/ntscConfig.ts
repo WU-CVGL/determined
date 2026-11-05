@@ -3,13 +3,14 @@ import { cloneDeep, isEqual, isNil, isPlainObject } from 'lodash';
 import { RawJson } from 'types';
 
 /** The services a shell can run besides sshd, which every shell runs: config.services.<name>. */
-export const SHELL_SERVICES = ['jupyter', 'vscode'] as const;
+export const SHELL_SERVICES = ['jupyter', 'vscode', 'tensorboard'] as const;
 
 export type ShellService = (typeof SHELL_SERVICES)[number];
 
 /** The display name of each service of SHELL_SERVICES, as the launch form labels its checkbox. */
 export const SHELL_SERVICE_LABELS: Record<ShellService, string> = {
   jupyter: 'JupyterLab',
+  tensorboard: 'TensorBoard',
   vscode: 'VS Code',
 };
 
@@ -21,6 +22,8 @@ export type ShellServiceChoices = Partial<Record<ShellService, boolean>>;
 
 /** The simple launch form's fields, as the launch helpers take them. */
 export interface NtscLaunchOptions {
+  /** The log directory of the tensorboard service, sent when the service runs. */
+  logdir?: string;
   name?: string;
   pool?: string;
   /** The services to send. Undefined or empty sends no services: the master runs its defaults. */
@@ -31,6 +34,11 @@ export interface NtscLaunchOptions {
 }
 
 export interface LaunchFormFields {
+  /**
+   * The log directory of the tensorboard service: read from a config's entry, and set in one that
+   * runs the service when given; unset keeps the entry's.
+   */
+  logdir?: string;
   name?: string;
   pool?: string;
   /**
@@ -57,11 +65,20 @@ const asObject = (value: unknown): RawJson | undefined =>
 const serviceRuns = (entry: unknown): boolean =>
   entry !== undefined && asObject(entry)?.enabled !== false;
 
-/** Sets a service's entry to run the service or not, keeping its other options. */
-const serviceEntry = (entry: unknown, runs: boolean): RawJson => {
+/**
+ * Sets a service's entry to run the service or not, keeping its other options; the tensorboard
+ * service that runs gets the log directory, when one is given.
+ */
+const serviceEntry = (
+  name: ShellService,
+  entry: unknown,
+  runs: boolean,
+  logdir: string | undefined,
+): RawJson => {
   const options = { ...asObject(entry) };
   if (runs) delete options.enabled;
   else options.enabled = false;
+  if (name === 'tensorboard' && runs && logdir) options.logdir = logdir;
   return options;
 };
 
@@ -77,7 +94,8 @@ const serviceChoices = (choices: ShellServiceChoices = {}): [ShellService, boole
 
 /**
  * The config the simple form sends: a description, the resources and an entry per service with a
- * choice: `{}` for one to run, `{enabled: false}` for one not to.
+ * choice: `{}` for one to run, `{logdir}` for the tensorboard service, `{enabled: false}` for one
+ * not to.
  */
 export const simpleLaunchConfig = (options: NtscLaunchOptions): RawJson => {
   const services = serviceChoices(options.services);
@@ -91,7 +109,10 @@ export const simpleLaunchConfig = (options: NtscLaunchOptions): RawJson => {
       ? {}
       : {
           services: Object.fromEntries(
-            services.map(([name, runs]) => [name, serviceEntry(undefined, runs)]),
+            services.map(([name, runs]) => [
+              name,
+              serviceEntry(name, undefined, runs, options.logdir),
+            ]),
           ),
         }),
   };
@@ -192,12 +213,17 @@ export const templateFromConfig = (config: RawJson, defaults: RawJson): RawJson 
   return out;
 };
 
-/** Reads the simple form's fields out of a config: whether each service with an entry runs. */
+/**
+ * Reads the simple form's fields out of a config: whether each service with an entry runs, and the
+ * log directory of the tensorboard service's entry.
+ */
 export const formFieldsFromConfig = (config: RawJson): LaunchFormFields => {
   const resources = asObject(config.resources);
   const description = config.description;
   const services = asObject(config.services);
+  const logdir = asObject(services?.tensorboard)?.logdir;
   return {
+    logdir: typeof logdir === 'string' ? logdir : undefined,
     name: typeof description === 'string' && !isAutoDescription(description) ? description : '',
     pool: typeof resources?.resource_pool === 'string' ? resources.resource_pool : undefined,
     services: Object.fromEntries(
@@ -228,7 +254,7 @@ export const configFromForm = (base: RawJson, fields: LaunchFormFields): RawJson
   if (choices.length !== 0) {
     const services: RawJson = { ...asObject(out.services) };
     choices.forEach(([name, runs]) => {
-      services[name] = serviceEntry(services[name], runs);
+      services[name] = serviceEntry(name, services[name], runs, fields.logdir);
     });
     out.services = services;
   }

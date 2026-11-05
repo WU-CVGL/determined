@@ -264,32 +264,9 @@ func TestRestoreQueuedShellFindsSSHD(t *testing.T) {
 				})
 			require.Equal(t, tc.sshdPort, shell.SSHDPort)
 
-			rID := sproto.ResourcesID(cproto.NewID())
-			var resources mocks.Resources
-			resources.On("Summary").Return(sproto.ResourcesSummary{
-				AllocationID:  shell.allocationID,
-				ResourcesID:   rID,
-				ResourcesType: sproto.ResourcesTypeDockerContainer,
-				AgentDevices:  map[aproto.ID][]device.Device{"agent": nil},
-			})
-			var started atomic.Bool
-			resources.On("Start", mock.Anything, mock.Anything, mock.Anything).Return(nil).
-				Run(func(mock.Arguments) { started.Store(true) })
-			resources.On("Kill", mock.Anything).Return()
-			q.Put(&sproto.ResourcesAllocated{
-				ID:                shell.allocationID,
-				ResourcePool:      shell.Config.Resources.ResourcePool,
-				Resources:         map[sproto.ResourcesID]sproto.Resources{rID: &resources},
-				JobSubmissionTime: shell.registeredTime,
-			})
-			require.Eventually(t, started.Load, 5*time.Second, 10*time.Millisecond)
-			q.Put(&sproto.ResourcesStateChanged{
-				ResourcesID:    rID,
-				ResourcesState: sproto.Running,
-				ResourcesStarted: &sproto.ResourcesStarted{Addresses: []cproto.Address{
-					{ContainerIP: "172.17.0.2", ContainerPort: 3210, HostIP: "10.0.0.7", HostPort: 40002},
-					{ContainerIP: "172.17.0.2", ContainerPort: 2222, HostIP: "10.0.0.7", HostPort: 40003},
-				}},
+			runRestoredShell(t, shell, q, []cproto.Address{
+				{ContainerIP: "172.17.0.2", ContainerPort: 3210, HostIP: "10.0.0.7", HostPort: 40002},
+				{ContainerIP: "172.17.0.2", ContainerPort: 2222, HostIP: "10.0.0.7", HostPort: 40003},
 			})
 
 			var target *ShellTerminalTarget
@@ -303,6 +280,75 @@ func TestRestoreQueuedShellFindsSSHD(t *testing.T) {
 			require.Equal(t, *shell.Metadata.PrivateKey, string(target.PrivateKey))
 		})
 	}
+}
+
+// runRestoredShell gives a restored shell's allocation its resources and starts them, then
+// reports them running at addresses.
+func runRestoredShell(t *testing.T, shell *Command, q *queue.Queue[sproto.ResourcesEvent],
+	addresses []cproto.Address,
+) {
+	t.Helper()
+	rID := sproto.ResourcesID(cproto.NewID())
+	var resources mocks.Resources
+	resources.On("Summary").Return(sproto.ResourcesSummary{
+		AllocationID:  shell.allocationID,
+		ResourcesID:   rID,
+		ResourcesType: sproto.ResourcesTypeDockerContainer,
+		AgentDevices:  map[aproto.ID][]device.Device{"agent": nil},
+	})
+	var started atomic.Bool
+	resources.On("Start", mock.Anything, mock.Anything, mock.Anything).Return(nil).
+		Run(func(mock.Arguments) { started.Store(true) })
+	resources.On("Kill", mock.Anything).Return()
+	q.Put(&sproto.ResourcesAllocated{
+		ID:                shell.allocationID,
+		ResourcePool:      shell.Config.Resources.ResourcePool,
+		Resources:         map[sproto.ResourcesID]sproto.Resources{rID: &resources},
+		JobSubmissionTime: shell.registeredTime,
+	})
+	require.Eventually(t, started.Load, 5*time.Second, 10*time.Millisecond)
+	q.Put(&sproto.ResourcesStateChanged{
+		ResourcesID:      rID,
+		ResourcesState:   sproto.Running,
+		ResourcesStarted: &sproto.ResourcesStarted{Addresses: addresses},
+	})
+}
+
+// A restored shell's tensorboard service is registered with the proxy again with the token of the
+// persisted spec.
+func TestRestoreQueuedShellRegistersTensorBoardToken(t *testing.T) {
+	if proxy.DefaultProxy == nil {
+		proxy.InitProxy(nil, nil)
+	}
+	token := testTensorBoardToken
+	shell, _, q := restartWithQueuedShell(t, time.Now().UTC().Add(-time.Hour),
+		func(req *CreateGeneric) {
+			req.Spec.AddService(tasks.InteractiveService{
+				Name: model.ServiceSSH, Port: 2222, DefaultServiceID: true, ProxyTCP: true,
+				Unauthenticated: true,
+			})
+			req.Spec.AddService(tasks.InteractiveService{
+				Name: model.ServiceTensorBoard, Port: 3000, Exec: true,
+			})
+			req.Spec.Metadata.TensorBoardToken = &token
+		})
+	require.NotNil(t, shell.Metadata.TensorBoardToken)
+	require.Equal(t, token, *shell.Metadata.TensorBoardToken)
+
+	runRestoredShell(t, shell, q, []cproto.Address{
+		{ContainerIP: "172.17.0.2", ContainerPort: 2222, HostIP: "10.0.0.7", HostPort: 40003},
+		{ContainerIP: "172.17.0.2", ContainerPort: 3000, HostIP: "10.0.0.7", HostPort: 40004},
+	})
+	serviceID := string(shell.taskID) + ":3000"
+	var service *proxy.Service
+	require.Eventually(t, func() bool {
+		service = proxy.DefaultProxy.GetService(serviceID)
+		return service != nil
+	}, 5*time.Second, 10*time.Millisecond)
+	require.Equal(t, "10.0.0.7:40004", service.URL.Host)
+	require.True(t, service.Exec)
+	require.Equal(t, token, service.ServiceToken)
+	require.Empty(t, proxy.DefaultProxy.GetService(string(shell.taskID)).ServiceToken)
 }
 
 // A restored task gets the proxies it had: a task saved without service records, as every task was
@@ -365,6 +411,35 @@ func TestRestoreQueuedTaskKeepsProxyPorts(t *testing.T) {
 				return map[string]string{
 					tasks.ServicesEnvVar:        "ssh,jupyter",
 					tasks.NotebookBaseURLEnvVar: "/proxy/" + taskID + ":2950/",
+				}
+			},
+		},
+		{
+			name:     "shell with a tensorboard record",
+			taskType: model.TaskTypeShell,
+			jobType:  model.JobTypeShell,
+			configure: func(req *CreateGeneric) {
+				req.Spec.AddService(tasks.InteractiveService{
+					Name: model.ServiceSSH, Port: 3210, DefaultServiceID: true, ProxyTCP: true,
+					Unauthenticated: true,
+				})
+				req.Spec.AddService(tasks.InteractiveService{
+					Name: model.ServiceTensorBoard, Port: 3000, Exec: true,
+				})
+				req.Spec.Metadata.TensorBoardToken = ptrs.Ptr(testTensorBoardToken)
+				req.Spec.Base.ExtraEnvVars = map[string]string{"DET_TENSORBOARD_TOKEN": testTensorBoardToken}
+			},
+			want: func(taskID string) []*sproto.ProxyPortConfig {
+				return []*sproto.ProxyPortConfig{
+					{ServiceID: taskID, Port: 3210, ProxyTCP: true, Unauthenticated: true},
+					{ServiceID: taskID + ":3000", Port: 3000, Exec: true, ServiceToken: testTensorBoardToken},
+				}
+			},
+			wantEnv: func(taskID string) map[string]string {
+				return map[string]string{
+					tasks.ServicesEnvVar:              "ssh,tensorboard",
+					tasks.TensorBoardPathPrefixEnvVar: "/proxy/" + taskID + ":3000/",
+					"DET_TENSORBOARD_TOKEN":           testTensorBoardToken,
 				}
 			},
 		},

@@ -1,6 +1,7 @@
 package command
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -11,6 +12,9 @@ import (
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 )
+
+// testTensorBoardToken is the tensorboard service's token of the tests.
+const testTensorBoardToken = "tb-token"
 
 // sshdProxyPort is the extra proxy port that the master gives a shell's sshd.
 func sshdProxyPort(port int) expconf.ProxyPort {
@@ -48,8 +52,8 @@ func TestProxyPortConfigsWithoutRecords(t *testing.T) {
 }
 
 // A spec with service records gets one proxy policy per container port: each service's from its
-// record, and the config's ports and the launch's own extra ports plain. The services' ports are
-// in the records only.
+// record, the tensorboard service's with the spec's token, and the config's ports and the launch's
+// own extra ports plain. The services' ports are in the records only.
 func TestProxyPortConfigsFromRecords(t *testing.T) {
 	var spec tasks.GenericCommandSpec
 	spec.TaskType = model.TaskTypeShell
@@ -60,17 +64,34 @@ func TestProxyPortConfigsFromRecords(t *testing.T) {
 		},
 		{Name: model.ServiceJupyter, Port: 2950, TLS: true, Exec: true},
 		{Name: "editor", Port: 2700, StripPrefix: true},
+		{Name: model.ServiceTensorBoard, Port: 3000, Exec: true},
 	}
 	spec.Base.ExtraProxyPorts = expconf.ProxyPortsConfig{{RawProxyPort: 2600}}
 	spec.Config.Environment.ProxyPorts = model.ProxyPortsConfig{userProxyPort}
+	token := testTensorBoardToken
+	spec.Metadata.TensorBoardToken = &token
 
 	require.Equal(t, []*sproto.ProxyPortConfig{
 		{ServiceID: "task-1", Port: 3210, ProxyTCP: true, Unauthenticated: true},
 		{ServiceID: "task-1:2950", Port: 2950, TLS: true, Exec: true},
 		{ServiceID: "task-1:2700", Port: 2700, StripPrefix: true},
+		{ServiceID: "task-1:3000", Port: 3000, Exec: true, ServiceToken: token},
 		{ServiceID: "task-1:2600", Port: 2600},
 		{ServiceID: "task-1:8080", Port: 8080},
 	}, proxyPortConfigs(spec, "task-1"))
+
+	// A spec without a token, as one saved before the tokens, proxies its TensorBoard without one.
+	spec.Metadata.TensorBoardToken = nil
+	require.Empty(t, proxyPortConfigs(spec, "task-1")[3].ServiceToken)
+}
+
+// The token is in no encoding of a proxy config, such as the task list's.
+func TestProxyPortConfigEncodingHidesToken(t *testing.T) {
+	config := &sproto.ProxyPortConfig{ServiceID: "task-1:3000", Port: 3000, ServiceToken: testTensorBoardToken}
+	encoded, err := json.Marshal(sproto.AllocationSummary{ProxyPorts: []*sproto.ProxyPortConfig{config}})
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), testTensorBoardToken)
+	require.NotContains(t, config.Proto().String(), testTensorBoardToken)
 }
 
 // A spec with records may also hold copies of the services' ports in its extra proxy ports, as

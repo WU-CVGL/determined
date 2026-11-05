@@ -32,11 +32,14 @@ export const loginCodeServer = async (url: string, password: string): Promise<bo
   return response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400);
 };
 
+/** The services without a credential: the master's proxy login is their only one. */
+const CREDENTIAL_FREE_SERVICES = new Set(['tensorboard']);
+
 /**
  * The URL to open a service of a task at, once the browser is logged in: the service must be an
- * HTTP service that is READY, the credential is read as the browser's user, and the browser logs
- * in to the service when it has a login form. Throws with the reason otherwise; a failed
- * code-server login is not retried.
+ * HTTP service that is READY, the credential, for a service that has one, is read as the
+ * browser's user, and the browser logs in to the service when it has a login form. Throws with the
+ * reason otherwise; a failed code-server login is not retried.
  */
 export const taskServiceUrl = async (taskId: string, serviceName: string): Promise<string> => {
   const { services } = await getTaskServices({ taskId });
@@ -48,6 +51,7 @@ export const taskServiceUrl = async (taskId: string, serviceName: string): Promi
   if (service.state !== V1TaskServiceState.READY) {
     throw new Error(`${serviceName}: ${service.state.replace('STATE_', '')}`);
   }
+  if (CREDENTIAL_FREE_SERVICES.has(serviceName)) return serverAddress(service.url);
   const credential = await getTaskServiceCredential({ service: serviceName, taskId });
   const url = credential.url || service.url;
   if (serviceName === 'vscode') {

@@ -13,6 +13,9 @@ const (
 	ServicesEnvVar = "DET_SERVICES"
 	// NotebookBaseURLEnvVar is the path under which JupyterLab serves: /proxy/<service ID>/.
 	NotebookBaseURLEnvVar = "NOTEBOOK_BASE_URL"
+	// TensorBoardPathPrefixEnvVar is the path under which TensorBoard serves: /proxy/<service ID>/,
+	// the service's URL.
+	TensorBoardPathPrefixEnvVar = "DET_TENSORBOARD_PATH_PREFIX"
 	// JupyterIdleTypeEnvVar is the services.jupyter.idle_type of JupyterLab's idle check, which
 	// reports to its task's activity record. The jupyter service starts the check when it is set.
 	JupyterIdleTypeEnvVar = "DET_JUPYTER_IDLE_TYPE"
@@ -70,8 +73,9 @@ func (s *GenericCommandSpec) Service(name string) (InteractiveService, bool) {
 }
 
 // SetServicesEnv sets the environment that the services take from their records: the services
-// that the supervisor starts and JupyterLab's base URL. It only reads the persisted spec, so a
-// restore sets the same values. A spec without records keeps its environment.
+// that the supervisor starts, JupyterLab's base URL and TensorBoard's path prefix. It only reads
+// the persisted spec, so a restore sets the same values. A spec without records keeps its
+// environment.
 func (s *GenericCommandSpec) SetServicesEnv(taskID model.TaskID) {
 	if len(s.Services) == 0 {
 		return
@@ -86,5 +90,8 @@ func (s *GenericCommandSpec) SetServicesEnv(taskID model.TaskID) {
 	s.Base.ExtraEnvVars[ServicesEnvVar] = strings.Join(names, ",")
 	if jupyter, ok := s.Service(model.ServiceJupyter); ok {
 		s.Base.ExtraEnvVars[NotebookBaseURLEnvVar] = "/proxy/" + jupyter.ServiceID(taskID) + "/"
+	}
+	if tensorBoard, ok := s.Service(model.ServiceTensorBoard); ok {
+		s.Base.ExtraEnvVars[TensorBoardPathPrefixEnvVar] = "/proxy/" + tensorBoard.ServiceID(taskID) + "/"
 	}
 }

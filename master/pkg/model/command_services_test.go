@@ -197,4 +197,168 @@ func TestInteractiveServicesSorted(t *testing.T) {
 	require.Contains(t, InteractiveServices, ServiceSSH)
 	require.Contains(t, InteractiveServices, ServiceJupyter)
 	require.Contains(t, InteractiveServices, ServiceVSCode)
+	require.Contains(t, InteractiveServices, ServiceTensorBoard)
+}
+
+// The tensorboard service takes a logdir, which it requires when it runs, and args; no other
+// service takes either. It is not a default service.
+func TestServiceConfigTensorBoard(t *testing.T) {
+	config, err := decodeCommandConfig(
+		`{"services": {"tensorboard": {"logdir": "runs", "args": ["--reload_interval=5", "a b"]}}}`)
+	require.NoError(t, err)
+	require.NoError(t, check.Validate(config))
+	require.Equal(t, ServiceConfig{LogDir: "runs", Args: []string{"--reload_interval=5", "a b"}},
+		config.Services[ServiceTensorBoard])
+	require.Equal(t, []string{ServiceTensorBoard}, EnabledServiceNames(config.Services))
+	raw, err := json.Marshal(config.Services)
+	require.NoError(t, err)
+	require.JSONEq(t,
+		`{"tensorboard": {"logdir": "runs", "args": ["--reload_interval=5", "a b"]}}`, string(raw))
+
+	for _, text := range []string{
+		`{"services": {"tensorboard": {"enabled": false}}}`,
+		`{"services": {"tensorboard": {"enabled": false, "args": ["--x"]}}}`,
+		`{"services": {"tensorboard": {"logdir": "/abs/dir"}}}`,
+		`{"services": {"tensorboard": {"logdir": "runs", "args": ["--logdir_spec=a:runs", "--hostx"]}}}`,
+		`{"services": {"tensorboard": {"logdir": "runs", "args": ["--reload_interval", "5"]}}}`,
+		`{"services": {"tensorboard": {"enabled": false, "args": ["--load_fast=true"]}}}`,
+		`{"services": {"tensorboard": {"logdir": "runs", "args": ["--", "-", "--=x", "--samples_per_plugin=scalars=500"]}}}`,
+	} {
+		config, err := decodeCommandConfig(text)
+		require.NoError(t, err, text)
+		require.NoError(t, check.Validate(config), text)
+	}
+
+	for text, want := range map[string]string{
+		`{"services": {"tensorboard": {}}}`:                    "services: tensorboard: logdir is required",
+		`{"services": {"tensorboard": null}}`:                  "services: tensorboard: logdir is required",
+		`{"services": {"tensorboard": {"enabled": true}}}`:     "services: tensorboard: logdir is required",
+		`{"services": {"tensorboard": {"args": ["--x"]}}}`:     "services: tensorboard: logdir is required",
+		`{"services": {"jupyter": {"logdir": "runs"}}}`:        "services: jupyter: only tensorboard takes logdir",
+		`{"services": {"vscode": {"args": []}}}`:               "services: vscode: only tensorboard takes args",
+		`{"services": {"ssh": {"args": ["--x"]}}}`:             "services: ssh: only tensorboard takes args",
+		`{"services": {"tensorboard": {"logdir": "a\u0000"}}}`: "services: tensorboard: logdir contains a NUL",
+		`{"services": {"tensorboard": {"logdir": "runs", "args": ["\u0000"]}}}`: "services: tensorboard: " +
+			"args contain a NUL",
+		`{"services": {"tensorboard": {"logdir": "runs", "idle_type": "activity"}}}`: "services: " +
+			"tensorboard: only jupyter takes idle_type",
+	} {
+		config, err := decodeCommandConfig(text)
+		require.NoError(t, err, text)
+		require.ErrorContains(t, check.Validate(config), want, text)
+	}
+
+	// The flags that the service sets, as "--flag value", as "--flag=value" or bare last, are
+	// refused, whether or not the service runs, each by name.
+	for _, flag := range []string{
+		"--logdir", "--port", "--path_prefix", "--host", "--bind_all", "--reuse_port",
+	} {
+		for _, args := range []string{
+			`["` + flag + `", "x"]`, `["--reload_interval=5", "` + flag + `=x"]`, `["` + flag + `"]`,
+		} {
+			for _, entry := range []string{`"logdir": "runs"`, `"enabled": false`} {
+				text := `{"services": {"tensorboard": {` + entry + `, "args": ` + args + `}}}`
+				config, err := decodeCommandConfig(text)
+				require.NoError(t, err, text)
+				require.ErrorContains(t, check.Validate(config),
+					"services: tensorboard: args: "+flag+" is set by the service", text)
+			}
+		}
+	}
+	// So are their abbreviations, which TensorBoard takes too, each by the flag's full name, and a
+	// flag file, which could hold them.
+	for arg, want := range map[string]string{
+		`"--bind"`: "--bind_all is set by the service", `"--hos=0.0.0.0"`: "--host is set by the service",
+		`"--po", "7000"`: "--port is set by the service", `"--path_p=/x"`: "--path_prefix is set by the service",
+		`"--logd"`: "--logdir is set by the service", `"--flagfile=f"`: "--flagfile is not allowed",
+		`"--flagfile", "f"`: "--flagfile is not allowed", `"-flagfile=f"`: "--flagfile is not allowed",
+		`"--flagf=f"`: "--flagfile is not allowed", `"--reu=true"`: "--reuse_port is set by the service",
+	} {
+		text := `{"services": {"tensorboard": {"logdir": "runs", "args": ["--reload_interval=5", ` + arg + `]}}}`
+		config, err := decodeCommandConfig(text)
+		require.NoError(t, err, text)
+		require.ErrorContains(t, check.Validate(config), "services: tensorboard: args: "+want, text)
+	}
+	text := `{"services": {"tensorboard": {"logdir": "runs", "args": ["--host=0.0.0.0", "--bind_all"]}}}`
+	config, err = decodeCommandConfig(text)
+	require.NoError(t, err)
+	err = check.Validate(config)
+	require.ErrorContains(t, err, "services: tensorboard: args: --host is set by the service")
+	require.ErrorContains(t, err, "services: tensorboard: args: --bind_all is set by the service")
+
+	require.NotContains(t, DefaultShellServices(true), ServiceTensorBoard)
+	require.NotContains(t, DefaultShellServices(false), ServiceTensorBoard)
+}
+
+// A request's entry over a template's: the request's enabled wins, unset meaning enabled; each
+// option that the request leaves unset is the template's; an explicit empty args list clears the
+// template's. The template's other entries stay.
+func TestMergeServices(t *testing.T) {
+	template := map[string]ServiceConfig{
+		ServiceJupyter:     {IdleType: JupyterIdleTypeKernelConnections},
+		ServiceTensorBoard: {Enabled: ptrs.Ptr(false), LogDir: "runs", Args: []string{"--a"}},
+		ServiceVSCode:      {Enabled: ptrs.Ptr(false)},
+	}
+	for _, tc := range []struct {
+		name    string
+		request map[string]ServiceConfig
+		want    map[string]ServiceConfig
+	}{
+		{name: "no request", want: template},
+		{
+			name:    "empty entries",
+			request: map[string]ServiceConfig{ServiceJupyter: {}, ServiceTensorBoard: {}},
+			want: map[string]ServiceConfig{
+				ServiceJupyter:     {IdleType: JupyterIdleTypeKernelConnections},
+				ServiceTensorBoard: {LogDir: "runs", Args: []string{"--a"}},
+				ServiceVSCode:      {Enabled: ptrs.Ptr(false)},
+			},
+		},
+		{
+			name: "options set",
+			request: map[string]ServiceConfig{
+				ServiceJupyter:     {IdleType: JupyterIdleTypeActivity},
+				ServiceTensorBoard: {Enabled: ptrs.Ptr(true), LogDir: "/logs", Args: []string{"--b"}},
+			},
+			want: map[string]ServiceConfig{
+				ServiceJupyter:     {IdleType: JupyterIdleTypeActivity},
+				ServiceTensorBoard: {Enabled: ptrs.Ptr(true), LogDir: "/logs", Args: []string{"--b"}},
+				ServiceVSCode:      {Enabled: ptrs.Ptr(false)},
+			},
+		},
+		{
+			name: "disabled kept, args cleared",
+			request: map[string]ServiceConfig{
+				ServiceTensorBoard: {Enabled: ptrs.Ptr(false), Args: []string{}},
+				ServiceVSCode:      {Enabled: ptrs.Ptr(false)},
+			},
+			want: map[string]ServiceConfig{
+				ServiceJupyter:     {IdleType: JupyterIdleTypeKernelConnections},
+				ServiceTensorBoard: {Enabled: ptrs.Ptr(false), LogDir: "runs", Args: []string{}},
+				ServiceVSCode:      {Enabled: ptrs.Ptr(false)},
+			},
+		},
+		{
+			name:    "new entry",
+			request: map[string]ServiceConfig{"emacs": {}},
+			want: map[string]ServiceConfig{
+				ServiceJupyter:     {IdleType: JupyterIdleTypeKernelConnections},
+				ServiceTensorBoard: {Enabled: ptrs.Ptr(false), LogDir: "runs", Args: []string{"--a"}},
+				ServiceVSCode:      {Enabled: ptrs.Ptr(false)},
+				"emacs":            {},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, MergeServices(template, tc.request))
+		})
+	}
+	require.Nil(t, MergeServices(nil, nil))
+	require.Equal(t, map[string]ServiceConfig{ServiceJupyter: {}},
+		MergeServices(nil, map[string]ServiceConfig{ServiceJupyter: {}}))
+
+	// The merge does not share the template's args.
+	merged := MergeServiceConfig(template[ServiceTensorBoard], ServiceConfig{})
+	merged.Args[0] = "--changed"
+	require.Equal(t, "--a", template[ServiceTensorBoard].Args[0])
 }

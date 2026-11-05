@@ -170,8 +170,9 @@ func (a *apiServer) prepareCommandLaunch(ctx context.Context, req *protoCommandP
 
 	workDirInDefaults := config.WorkDir
 	if len(configBytes) != 0 {
-		// Decoding replaces a service's entry as a whole; the template's idle_type stays unless
-		// the request's entry sets one.
+		// Decoding replaces a service's entry as a whole, so the request's entries are merged
+		// over the template's afterwards: a request's entry keeps the template's options that it
+		// does not set.
 		templateServices := maps.Clone(config.Services)
 		dec := json.NewDecoder(bytes.NewBuffer(configBytes))
 		dec.DisallowUnknownFields()
@@ -181,11 +182,9 @@ func (a *apiServer) prepareCommandLaunch(ctx context.Context, req *protoCommandP
 				errors.Wrapf(err,
 					"unable to decode the merged config: %s", string(configBytes)).Error())
 		}
-		for name, service := range config.Services {
-			if service.IdleType == "" && templateServices[name].IdleType != "" {
-				service.IdleType = templateServices[name].IdleType
-				config.Services[name] = service
-			}
+		// A request's "services: null" clears the template's, as a null clears any setting.
+		if config.Services != nil {
+			config.Services = model.MergeServices(templateServices, config.Services)
 		}
 	}
 	if len(config.Services) > 0 && !req.AllowServices {

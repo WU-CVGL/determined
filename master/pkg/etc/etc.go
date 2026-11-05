@@ -40,6 +40,11 @@ const (
 	JupyterServiceResource = "services/jupyter.sh"
 	// VSCodeServiceResource is the supervisor's unit for code-server.
 	VSCodeServiceResource = "services/vscode.sh"
+	// TensorBoardServiceResource is the supervisor's unit for TensorBoard.
+	TensorBoardServiceResource = "services/tensorboard.sh"
+	// TensorBoardServiceProgramResource is the program that the tensorboard service's unit runs
+	// with TensorBoard's python: TensorBoard behind the master proxy's token.
+	TensorBoardServiceProgramResource = "services/tensorboard_service.py"
 	// ServiceStateReporterResource is the interactive task supervisor's reporter, which posts the
 	// snapshot of the states of the task's services to the master.
 	ServiceStateReporterResource = "report_service_states.py"

@@ -258,16 +258,19 @@ To find out how to view and modify the Job Queue in the WebUI, start with :ref:`
 An interactive task is a shell, which runs JupyterLab by default. To start one, select **Launch
 Interactive Task** on the **Jobs** page or a workspace's **Jobs** tab; under **Services**,
 **JupyterLab** and, when the master serves code-server, **VS Code** are checked, and unchecking a
-service leaves it out.
+service leaves it out. Checking **TensorBoard** adds **Data source**, where **Log directory in the
+task** is the directory that TensorBoard reads, relative to the shell's working directory unless it
+starts with ``/``; see :ref:`tensorboard-service`.
 
 .. image:: /assets/images/launch-interactive-task.png
    :alt: The Launch Interactive Task form with a resource pool, slots, and the JupyterLab and VS Code services checked under Services
 
 |
 
-The shell's page opens when you click its name or choose **Open Terminal**, **Open JupyterLab** or
-**Open VS Code** from its action menu. It has a tab for each of the shell's services, then its
-**Logs** and **Resources**; ``det task open <shell id> jupyter`` opens JupyterLab from the CLI. See
+The shell's page opens when you click its name or choose **Open Terminal**, **Open JupyterLab**,
+**Open VS Code** or **Open TensorBoard** from its action menu. It has a tab for each of the shell's
+services, then its **Logs** and **Resources**; ``det task open <shell id> jupyter`` opens JupyterLab
+from the CLI. A service that stops while the page is open shows its state in its tab. See
 :ref:`shell-services`.
 
 .. image:: /assets/images/interactive-task-page-dark.png

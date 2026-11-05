@@ -4,7 +4,11 @@ import { Modal } from 'e2e/models/common/hew/Modal';
 import { Select } from 'e2e/models/common/hew/Select';
 
 /** The form's label of each service's checkbox, by the service's config key. */
-const SERVICE_LABELS = { jupyter: 'JupyterLab', vscode: 'VS Code' } as const;
+const SERVICE_LABELS = {
+  jupyter: 'JupyterLab',
+  tensorboard: 'TensorBoard',
+  vscode: 'VS Code',
+} as const;
 
 /**
  * Represents the shell launch form in src/components/NtscLaunchModal.tsx, which Launch Interactive
@@ -34,6 +38,11 @@ export class NtscLaunchModal extends Modal {
       parent: this,
       selector: `.ant-form-item:has(label[title="Services"]) label.ant-checkbox-wrapper:has(span:text-is("${SERVICE_LABELS[name]}"))`,
     });
+  /** The tensorboard service's log directory, under Data source while TensorBoard is checked. */
+  readonly logdir = new BaseComponent({
+    parent: this,
+    selector: '.ant-form-item:has(label[title="Log directory in the task"]) input',
+  });
 }
 
 /**

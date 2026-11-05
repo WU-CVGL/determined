@@ -48,6 +48,8 @@ var (
 	interactiveSupervisorScript = "/run/determined/interactive-supervisor.sh"
 	// interactiveServicesDir holds the supervisor's service units, <service>.sh.
 	interactiveServicesDir = "/run/determined/services"
+	// tensorBoardServiceProgram is the program that the tensorboard unit runs.
+	tensorBoardServiceProgram = "/run/determined/services/tensorboard_service.py"
 	// serviceStateReporterScript reports the states of the services to the master for the
 	// supervisor.
 	serviceStateReporterScript = "/run/determined/report_service_states.py"

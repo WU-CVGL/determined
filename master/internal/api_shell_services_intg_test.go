@@ -32,6 +32,7 @@ import (
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
+	"github.com/determined-ai/determined/proto/pkg/taskv1"
 )
 
 // servicesConfig returns a launch config with the given services, as the CLI sends
@@ -625,6 +626,22 @@ func TestLaunchRejectsServices(t *testing.T) {
 			map[string]any{"emacs": map[string]any{"enabled": false}},
 			`services: unknown service "emacs"`,
 		},
+		"tensorboard without logdir": {
+			map[string]any{"tensorboard": map[string]any{"args": []any{"--x"}}},
+			"services: tensorboard: logdir is required",
+		},
+		"logdir on jupyter": {
+			map[string]any{"jupyter": map[string]any{"logdir": "runs"}},
+			"services: jupyter: only tensorboard takes logdir",
+		},
+		"args on vscode": {
+			map[string]any{"vscode": map[string]any{"enabled": false, "args": []any{"--x"}}},
+			"services: vscode: only tensorboard takes args",
+		},
+		"args not strings": {
+			map[string]any{"tensorboard": map[string]any{"logdir": "runs", "args": []any{1.0}}},
+			"ServiceConfig.services.args of type string",
+		},
 	} {
 		_, err = api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
 			Config: servicesConfig(t, tc.services),
@@ -784,4 +801,143 @@ func TestLaunchShellVSCodeNeedsCodeServer(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, "ssh,jupyter", launchedSpec(t, resp.Shell.Id).Base.ExtraEnvVars["DET_SERVICES"])
+}
+
+// A shell with the tensorboard service runs TensorBoard next to sshd and JupyterLab: at
+// "<task>:<port>", with a port of its own from the services' range, over plain HTTP behind a
+// master login and the owner rule, under its own prefix, which the proxy keeps. The container gets
+// the port, the log directory as the config gives it, the arguments as a JSON array and the
+// prefix, which is the service's URL. TensorBoard has no credential; another user is refused first.
+func TestLaunchShellWithTensorBoardService(t *testing.T) {
+	api, _, ctx := setupAPITest(t, nil)
+	cs, err := command.NewService(api.m.db, api.m.rm)
+	require.NoError(t, err)
+	command.SetDefaultService(cs)
+	rm := api.m.rm.(*mocks.ResourceManager)
+
+	resp, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
+		Config: shellConfig(t, map[string]any{"tensorboard": map[string]any{
+			"logdir": "runs/exp 1", "args": []any{"--reload_interval=5", `a "b"`},
+		}}),
+	})
+	require.NoError(t, err)
+	taskID := resp.Shell.Id
+	require.Equal(t, map[string]any{
+		"logdir": "runs/exp 1", "args": []any{"--reload_interval=5", `a "b"`},
+	}, resp.Config.AsMap()["services"].(map[string]any)["tensorboard"])
+	spec := launchedSpec(t, taskID)
+
+	// ssh first, then the services in sorted order.
+	require.Len(t, spec.Services, 3)
+	ssh, jupyter, tensorBoard := spec.Services[0], spec.Services[1], spec.Services[2]
+	require.Equal(t, model.ServiceSSH, ssh.Name)
+	require.Equal(t, model.ServiceJupyter, jupyter.Name)
+	require.GreaterOrEqual(t, tensorBoard.Port, minServicePort)
+	require.LessOrEqual(t, tensorBoard.Port, maxServicePort)
+	require.NotEqual(t, jupyter.Port, tensorBoard.Port)
+	require.Equal(t, tasks.InteractiveService{
+		Name: model.ServiceTensorBoard, Port: tensorBoard.Port, Exec: true,
+	}, tensorBoard)
+
+	// A new token of 32 random bytes, kept in the persisted spec's metadata.
+	require.NotNil(t, spec.Metadata.TensorBoardToken)
+	token := *spec.Metadata.TensorBoardToken
+	raw, err := base64.RawURLEncoding.DecodeString(token)
+	require.NoError(t, err)
+	require.Len(t, raw, 32)
+
+	// The proxy adds the token to the requests that it passes on to TensorBoard only.
+	tensorBoardID := taskID + ":" + strconv.Itoa(tensorBoard.Port)
+	alloc := allocateRequest(t, rm, taskID)
+	requireOnePolicyPerPort(t, alloc.ProxyPorts)
+	require.Equal(t, []*sproto.ProxyPortConfig{
+		{ServiceID: taskID, Port: ssh.Port, ProxyTCP: true, Unauthenticated: true},
+		{ServiceID: taskID + ":" + strconv.Itoa(jupyter.Port), Port: jupyter.Port, TLS: true, Exec: true},
+		{ServiceID: tensorBoardID, Port: tensorBoard.Port, Exec: true, ServiceToken: token},
+	}, alloc.ProxyPorts)
+
+	env := spec.Base.ExtraEnvVars
+	require.Equal(t, "ssh,jupyter,tensorboard", env["DET_SERVICES"])
+	require.Equal(t, strconv.Itoa(tensorBoard.Port), env["DET_TENSORBOARD_PORT"])
+	require.Equal(t, "runs/exp 1", env["DET_TENSORBOARD_LOGDIR"])
+	require.Equal(t, `["--reload_interval=5","a \"b\""]`, env["DET_TENSORBOARD_ARGS"])
+	require.Equal(t, "/proxy/"+tensorBoardID+"/", env[tasks.TensorBoardPathPrefixEnvVar])
+	require.Equal(t, serviceURL(tensorBoard.ServiceID(model.TaskID(taskID)), false),
+		env[tasks.TensorBoardPathPrefixEnvVar])
+	require.Equal(t, token, env["DET_TENSORBOARD_TOKEN"])
+
+	// The unit and its program, and no files of its own.
+	paths := containerFilePaths(spec)
+	requireOncePerPath(t, paths)
+	require.Contains(t, paths, "/run/determined/services/tensorboard.sh")
+	require.Contains(t, paths, "/run/determined/services/tensorboard_service.py")
+
+	listed, err := api.GetTaskServices(ctx, &apiv1.GetTaskServicesRequest{TaskId: taskID})
+	require.NoError(t, err)
+	require.Len(t, listed.Services, 3)
+	require.Equal(t, model.ServiceTensorBoard, listed.Services[2].Name)
+	require.Equal(t, tensorBoardID, listed.Services[2].ServiceId)
+	require.Equal(t, taskv1.TaskService_PROTOCOL_HTTP, listed.Services[2].Protocol)
+	require.Equal(t, env[tasks.TensorBoardPathPrefixEnvVar], listed.Services[2].Url)
+	require.True(t, listed.Services[2].MayConnect)
+	require.NotContains(t, listed.String(), token)
+
+	// The token is the proxy's: the owner gets no credential.
+	_, err = api.GetTaskServiceCredential(ctx, &apiv1.GetTaskServiceCredentialRequest{
+		TaskId: taskID, Service: model.ServiceTensorBoard,
+	})
+	require.Equal(t, codes.FailedPrecondition, status.Code(err), err)
+	require.Equal(t, "services: tensorboard has no credential", status.Convert(err).Message())
+	// Another user meets the owner rule first, as for the other services.
+	stranger := db.RequireMockUser(t, api.m.db)
+	_, err = api.GetTaskServiceCredential(ntscUserCtx(t, stranger), &apiv1.GetTaskServiceCredentialRequest{
+		TaskId: taskID, Service: model.ServiceTensorBoard,
+	})
+	require.Equal(t, codes.PermissionDenied, status.Code(err), err)
+
+	// Without args, the container gets an empty array.
+	other, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
+		Config: servicesConfig(t, map[string]any{"tensorboard": map[string]any{"logdir": "/logs"}}),
+	})
+	require.NoError(t, err)
+	otherSpec := launchedSpec(t, other.Shell.Id)
+	otherEnv := otherSpec.Base.ExtraEnvVars
+	require.Equal(t, "[]", otherEnv["DET_TENSORBOARD_ARGS"])
+	require.Equal(t, "/logs", otherEnv["DET_TENSORBOARD_LOGDIR"])
+	// Each shell gets its own token.
+	require.NotNil(t, otherSpec.Metadata.TensorBoardToken)
+	require.NotEqual(t, token, *otherSpec.Metadata.TensorBoardToken)
+	require.Equal(t, *otherSpec.Metadata.TensorBoardToken, otherEnv["DET_TENSORBOARD_TOKEN"])
+}
+
+// The tensorboard service is not a default: a shell without it, or with it disabled, gets no record
+// and none of its environment. An enabled one needs a logdir, in the preview as in the launch.
+func TestLaunchShellTensorBoardOff(t *testing.T) {
+	api, _, ctx := setupPreviewTest(t)
+	for name, services := range map[string]any{
+		"unset":    nil,
+		"disabled": map[string]any{"tensorboard": map[string]any{"enabled": false}},
+		"disabled with options": map[string]any{"tensorboard": map[string]any{
+			"enabled": false, "logdir": "runs", "args": []any{"--x"},
+		}},
+	} {
+		resp, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{Config: shellConfig(t, services)})
+		require.NoError(t, err, name)
+		spec := launchedSpec(t, resp.Shell.Id)
+		_, ok := spec.Service(model.ServiceTensorBoard)
+		require.False(t, ok, name)
+		require.Nil(t, spec.Metadata.TensorBoardToken, name)
+		for key := range spec.Base.ExtraEnvVars {
+			require.False(t, strings.HasPrefix(key, "DET_TENSORBOARD_"), "%s: %s", name, key)
+		}
+		require.NotContains(t, spec.Base.ExtraEnvVars["DET_SERVICES"], "tensorboard", name)
+	}
+
+	cfg := servicesConfig(t, map[string]any{"tensorboard": map[string]any{}})
+	_, err := api.PreviewShell(ctx, &apiv1.PreviewShellRequest{Config: cfg})
+	require.Equal(t, codes.InvalidArgument, status.Code(err), err)
+	require.ErrorContains(t, err, "services: tensorboard: logdir is required")
+	_, err = api.LaunchShell(ctx, &apiv1.LaunchShellRequest{Config: cfg})
+	require.Equal(t, codes.InvalidArgument, status.Code(err), err)
+	require.ErrorContains(t, err, "services: tensorboard: logdir is required")
 }

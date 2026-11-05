@@ -158,3 +158,69 @@ func TestProxyExecPortOwnerOrAdmin(t *testing.T) {
 	require.NotEqual(t, http.StatusOK, code)
 	require.False(t, ok)
 }
+
+// A service with a token, as the tensorboard service, gets it from the master's proxy on the
+// owner's request, in place of one that the visitor sent; another user's request never reaches
+// the service.
+func TestProxyServiceTokenOnlyAfterAccessCheck(t *testing.T) {
+	api, authz, _, _ := setupNTSCAuthzTest(t)
+	authz.On("CanGetNSC", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	user.InitService(api.m.db, &model.ExternalSessions{})
+	if proxy.DefaultProxy == nil {
+		proxy.InitProxy(processProxyAuthentication, user.IsMasterSignedToken)
+	}
+
+	ctx := context.TODO()
+	owner, _, taskID := launchOwnedCommand(t, api)
+	other := db.RequireMockUser(t, api.m.db)
+	sessionOf := func(u model.User) string {
+		token, err := user.StartSession(ctx, &u)
+		require.NoError(t, err)
+		return token
+	}
+	ownerToken, otherToken := sessionOf(owner), sessionOf(other)
+
+	reached := make(chan http.Header, 1)
+	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached <- r.Header.Clone()
+	}))
+	defer service.Close()
+	serviceURL, err := url.Parse(service.URL)
+	require.NoError(t, err)
+	tensorBoard := taskID + ":tensorboard"
+	proxy.DefaultProxy.RegisterService(tensorBoard, proxy.Service{
+		URL: serviceURL, Exec: true, ServiceToken: "tb-token",
+	})
+	defer proxy.DefaultProxy.Unregister(tensorBoard)
+
+	e := echo.New()
+	e.HTTPErrorHandler = apiPkg.JSONErrorHandler
+	e.Any("/proxy/:service/*", proxy.DefaultProxy.NewProxyHandler("service"))
+	master := httptest.NewServer(e)
+	defer master.Close()
+	send := func(session string) (int, http.Header) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			master.URL+"/proxy/"+tensorBoard+"/data", nil)
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer "+session)
+		req.Header.Set(proxy.ServiceTokenHeader, "forged")
+		resp, err := cleanhttp.DefaultClient().Do(req)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		select {
+		case header := <-reached:
+			return resp.StatusCode, header
+		default:
+			return resp.StatusCode, nil
+		}
+	}
+
+	code, header := send(ownerToken)
+	require.Equal(t, http.StatusOK, code)
+	require.Equal(t, []string{"tb-token"}, header.Values(proxy.ServiceTokenHeader))
+	require.Empty(t, header.Values("Authorization"))
+
+	code, header = send(otherToken)
+	require.Equal(t, http.StatusNotFound, code)
+	require.Nil(t, header)
+}

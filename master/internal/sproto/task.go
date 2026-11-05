@@ -91,6 +91,10 @@ type (
 		// StripPrefix makes the proxy remove /proxy/<service ID> from the request path before it
 		// reaches the upstream, on HTTP and WebSocket requests. TCP proxies ignore it.
 		StripPrefix bool `json:"strip_prefix"`
+		// ServiceToken, if set, is the proxy's proxy.ServiceTokenHeader on every request that it
+		// passes on to the port, which the service requires. It is a secret of the master's: no
+		// encoding or print of the config shows it.
+		ServiceToken string `json:"-"`
 	}
 
 	// ResourcesReleased notifies resource providers to return resources from a task.

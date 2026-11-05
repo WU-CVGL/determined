@@ -41,7 +41,8 @@ type TaskServices struct {
 }
 
 // TaskServiceCredential is the credential of a service: the SSH key pair and login user of the
-// ssh service, the token of the jupyter service, the password of the vscode service.
+// ssh service, the token of the jupyter service, the password of the vscode service. The
+// tensorboard service has none: its token is the master proxy's own.
 type TaskServiceCredential struct {
 	Service    tasks.InteractiveService
 	OwnerID    model.UserID
@@ -205,6 +206,10 @@ func (c *Command) serviceCredential(name string) (TaskServiceCredential, error) 
 			return TaskServiceCredential{}, notFound
 		}
 		cred.Password = *c.Metadata.CodeServerPassword
+	case model.ServiceTensorBoard:
+		// TensorBoard has no login: the master's proxy authenticates its requests and adds the
+		// token, which only the proxy uses. The caller checks the owner before it answers that
+		// there is no credential.
 	default:
 		return TaskServiceCredential{}, notFound
 	}

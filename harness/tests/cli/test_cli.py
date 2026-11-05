@@ -51,6 +51,27 @@ def test_parse_config() -> None:
     }
 
 
+def test_parse_config_tensorboard_service() -> None:
+    # A nested map and dotted keys give the same entry; a single argument is a list of one.
+    for config in (
+        ["services={tensorboard: {logdir: runs, args: [--reload_interval=5]}}"],
+        ["services.tensorboard.logdir=runs", "services.tensorboard.args=--reload_interval=5"],
+        ["services.tensorboard.logdir=runs", "services.tensorboard.args=[--reload_interval=5]"],
+    ):
+        assert ntsc.parse_config(None, [], config, []) == {
+            "services": {"tensorboard": {"logdir": "runs", "args": ["--reload_interval=5"]}}
+        }, config
+
+    config = ["services.tensorboard.args=--a=1,--b", "services.tensorboard.logdir=/logs"]
+    assert ntsc.parse_config(None, [], config, []) == {
+        "services": {"tensorboard": {"logdir": "/logs", "args": ["--a=1", "--b"]}}
+    }
+    config = ["services.tensorboard.args=['--samples_per_plugin=scalars=500,images=10']"]
+    assert ntsc.parse_config(None, [], config, []) == {
+        "services": {"tensorboard": {"args": ["--samples_per_plugin=scalars=500,images=10"]}}
+    }
+
+
 # mock_experiment was derived from a real v1Experiment.to_json(), with none of the optional fields.
 mock_experiment = {
     "archived": False,

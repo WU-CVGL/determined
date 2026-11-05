@@ -45,15 +45,20 @@ import { launchShell, PREVIEW_ERROR, previewShell } from 'utils/shell';
 const DEFAULT_SLOT_COUNT = 1;
 const BASE_FORM_ID = 'ntsc-launch-form';
 
-/** The user's last-used form values. The services are not among them: the master's defaults are. */
-type LaunchFormSettings = Omit<NtscLaunchOptions, 'services'>;
+/**
+ * The user's last-used form values. The services and their options are not among them: the
+ * master's defaults are.
+ */
+type LaunchFormSettings = Omit<NtscLaunchOptions, 'services' | 'logdir'>;
 
 /**
  * The simple form's values. `source` is the "Start from" picker's value; `services` holds a
  * checkbox per service of SHELL_SERVICES, unset until the master's preview of the start-from
- * fills them with what it would run.
+ * fills them with what it would run; `logdir` is the tensorboard service's log directory, which
+ * the form shows and sends while that service is checked.
  */
 interface LaunchFormValues extends LaunchFormSettings {
+  logdir?: string;
   services?: Partial<Record<string, boolean>>;
   source?: string;
 }
@@ -85,13 +90,14 @@ const offeredServices = (choices: ShellServiceChoices = {}): ShellService[] =>
 
 /**
  * A preview of the start-from's services: the start-from it was sent for, its number, the
- * checkboxes as they were when the start-from's first preview was sent, and whether it is on its
- * way, succeeded or failed with error.
+ * checkboxes and the log directory as they were when the start-from's first preview was sent, and
+ * whether it is on its way, succeeded or failed with error.
  */
 interface ServicesPreview {
   baseConfig?: RawJson;
   error?: string;
   sent?: LaunchFormValues['services'];
+  sentLogdir?: string;
   seq: number;
   source?: string;
   status: 'pending' | 'success' | 'error';
@@ -232,6 +238,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
             workspaceId: fields.workspaceId,
           }
         : {
+            logdir: fields.logdir,
             name: fields.name,
             pool: fields.pool,
             services: checkedServices(fields, offered.current),
@@ -246,10 +253,12 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   // each time the start-from changes, once the simple form shows it: the master's defaults, and
   // what a template or a config turns off. A new template or the defaults clear the checkboxes
   // first; a config fills them from its entries. The checkboxes follow the latest preview, except a
-  // box changed since the start-from's first preview was sent, also while a refusal showed. Launch and the full config wait for a successful preview
-  // of the current start-from: a refused one shows its message with Retry, keeps them disabled, and
-  // is sent again when the pool or the workspace changes. Showing the simple form again after the
-  // full config previews nothing, so that the checkboxes keep their changes.
+  // box changed since the start-from's first preview was sent, also while a refusal showed. The
+  // tensorboard service's log directory follows the same rule as its checkbox. Launch and the full
+  // config wait for a successful preview of the current start-from: a refused one shows its
+  // message with Retry, keeps them disabled, and is sent again when the pool or the workspace
+  // changes. Showing the simple form again after the full config previews nothing, so that the
+  // checkboxes keep their changes.
   const [simpleFormShown, setSimpleFormShown] = useState(false);
   const source = Form.useWatch('source', form);
   const pool = Form.useWatch('pool', form);
@@ -276,20 +285,24 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     if (!sameStart && !baseConfig) {
       // The checkboxes were filled for another start-from.
       offered.current = [];
-      form.resetFields(SHELL_SERVICES.map((name) => ['services', name]));
+      form.resetFields([...SHELL_SERVICES.map((name) => ['services', name]), 'logdir']);
     }
     const fields: LaunchFormValues = form.getFieldsValue(true);
     // A retry, or a pool or workspace change after a refusal, keeps the boxes changed since.
     const sent = sameStart ? last.sent : fields.services;
-    setServicesPreview({ baseConfig, sent, seq, source, status: 'pending' });
+    const sentLogdir = sameStart ? last.sentLogdir : fields.logdir;
+    setServicesPreview({ baseConfig, sent, sentLogdir, seq, source, status: 'pending' });
     previewShell(simpleOptions({ ...fields, services: undefined, source }))
       .then((previewed) => {
         if (seq !== servicesPreview.current.seq) return;
-        const choices = formFieldsFromConfig(previewed).services;
+        const previewedFields = formFieldsFromConfig(previewed);
+        const choices = previewedFields.services;
         offered.current = offeredServices(choices);
         const checks = serviceChecks(choices);
         const current: LaunchFormValues['services'] = form.getFieldValue('services');
+        const currentLogdir: string | undefined = form.getFieldValue('logdir');
         form.setFieldsValue({
+          logdir: currentLogdir === sentLogdir ? previewedFields.logdir : currentLogdir,
           services: Object.fromEntries(
             SHELL_SERVICES.map((name) => [
               name,
@@ -297,7 +310,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
             ]),
           ),
         });
-        setServicesPreview({ baseConfig, sent, seq, source, status: 'success' });
+        setServicesPreview({ baseConfig, sent, sentLogdir, seq, source, status: 'success' });
       })
       .catch((e) => {
         if (seq !== servicesPreview.current.seq) return;
@@ -305,6 +318,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
           baseConfig,
           error: e instanceof Error ? e.message : PREVIEW_ERROR,
           sent,
+          sentLogdir,
           seq,
           source,
           status: 'error',
@@ -341,14 +355,21 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     }
   }, [form, simpleOptions]);
 
-  const handleSecondary = useCallback(() => {
+  const handleSecondary = useCallback(async () => {
     if (showFullConfig) {
       configSeq.current++;
       setFullConfigFormInvalid(false);
-    } else if (servicesConfirmed) fetchConfig();
-    else return;
+    } else if (servicesConfirmed) {
+      // The full config is the simple form's: a checked service's required field comes first.
+      try {
+        await form.validateFields(['logdir']);
+      } catch {
+        return;
+      }
+      fetchConfig();
+    } else return;
     setShowFullConfig((show) => !show);
-  }, [fetchConfig, servicesConfirmed, showFullConfig]);
+  }, [fetchConfig, form, servicesConfirmed, showFullConfig]);
 
   const launch = useCallback(
     async (options: NtscLaunchOptions & { config?: RawJson }) => {
@@ -406,6 +427,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
         setRedactedEnv(start.redactedEnv);
         offered.current = offeredServices(fields.services);
         form.setFieldsValue({
+          logdir: fields.logdir,
           name: fields.name,
           pool: fields.pool,
           services: serviceChecks(fields.services),
@@ -738,6 +760,7 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
   workspaces,
 }: LaunchFormProps) => {
   const selectedWorkspaceId = Form.useWatch('workspaceId', form);
+  const tensorBoardChecked = Form.useWatch(['services', 'tensorboard'], form);
   const templatesOn = useFeature().isOn('task_templates');
 
   useEffect(() => {
@@ -872,6 +895,22 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
           ))}
         </Row>
       </Form.Item>
+      {tensorBoardChecked && (
+        <Form.Item label="Data source">
+          <Form.Item
+            label="Log directory in the task"
+            name="logdir"
+            rules={[
+              {
+                message: 'Log directory in the task is required',
+                required: true,
+                whitespace: true,
+              },
+            ]}>
+            <Input placeholder="runs" />
+          </Form.Item>
+        </Form.Item>
+      )}
       {servicesError && (
         <Alert
           action={

@@ -257,6 +257,51 @@ describe('ntscConfig', () => {
       expect(base.services).toEqual({ jupyter: { enabled: false, opt: 1 }, other: {} });
     });
 
+    it('carries the log directory of the tensorboard service', () => {
+      expect(
+        formFieldsFromConfig({ services: { tensorboard: { args: ['--x'], logdir: 'runs' } } }),
+      ).toMatchObject({ logdir: 'runs', services: { tensorboard: true } });
+      expect(
+        formFieldsFromConfig({ services: { tensorboard: { enabled: false, logdir: 'runs' } } }),
+      ).toMatchObject({ logdir: 'runs', services: { tensorboard: false } });
+      expect(formFieldsFromConfig({ services: { jupyter: {} } }).logdir).toBeUndefined();
+
+      // Sent with the service that runs, never on its own or with one that does not.
+      expect(
+        simpleLaunchConfig({ logdir: 'runs', services: { jupyter: true, tensorboard: true } })
+          .services,
+      ).toEqual({ jupyter: {}, tensorboard: { logdir: 'runs' } });
+      expect(
+        simpleLaunchConfig({ logdir: 'runs', services: { tensorboard: false } }).services,
+      ).toEqual({ tensorboard: { enabled: false } });
+      expect(simpleLaunchConfig({ logdir: 'runs' })).not.toHaveProperty('services');
+      expect(simpleLaunchConfig({ logdir: 'runs', services: { jupyter: true } }).services).toEqual({
+        jupyter: {},
+      });
+
+      // Over a base config: the field replaces the entry's logdir, the entry's args stay.
+      const base = { services: { tensorboard: { args: ['--x'], enabled: false, logdir: 'old' } } };
+      expect(
+        configFromForm(base, { logdir: 'new', services: { tensorboard: true } }).services,
+      ).toEqual({ tensorboard: { args: ['--x'], logdir: 'new' } });
+      expect(configFromForm(base, { services: { tensorboard: true } }).services).toEqual({
+        tensorboard: { args: ['--x'], logdir: 'old' },
+      });
+      expect(
+        configFromForm(base, { logdir: 'new', services: { tensorboard: false } }).services,
+      ).toEqual(base.services);
+      expect(configFromForm(base, { logdir: 'new' }).services).toEqual(base.services);
+    });
+
+    it('keeps the tensorboard service and its options in a template', () => {
+      const config = {
+        services: { jupyter: {}, tensorboard: { args: ['--x'], logdir: 'runs' } },
+      };
+      expect(templateFromConfig(config, { services: { jupyter: {} } })).toEqual({
+        services: { tensorboard: { args: ['--x'], logdir: 'runs' } },
+      });
+    });
+
     it('applies the form on top of a base config without touching other keys', () => {
       const out = configFromForm(sanitizeConfig(mergedShellConfig), {
         name: 'again',

@@ -165,6 +165,46 @@ func TestProxyStripsMasterCredentialsHTTP(t *testing.T) {
 	}
 }
 
+// A service with a token gets it in ServiceTokenHeader on every request, in place of any that the
+// visitor sent; a service without one never gets the header. The service's clone keeps the token.
+func TestProxyAddsServiceToken(t *testing.T) {
+	var sawAuthCookie string
+	p, base := newTestProxy(t, &sawAuthCookie)
+
+	upstreamHeaders := make(chan http.Header, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHeaders <- r.Header.Clone()
+	}))
+	defer upstream.Close()
+	upstreamURL, err := url.Parse(upstream.URL)
+	require.NoError(t, err)
+	p.RegisterService("tb", Service{URL: upstreamURL, Exec: true, ServiceToken: "tb-token"})
+	p.RegisterService("svc", Service{URL: upstreamURL, Exec: true})
+	require.Equal(t, "tb-token", p.GetService("tb").ServiceToken)
+
+	for _, tc := range []struct {
+		service, sent string
+		want          []string
+	}{
+		{"tb", "", []string{"tb-token"}},
+		{"tb", "forged", []string{"tb-token"}},
+		{"svc", "", nil},
+		{"svc", "forged", nil},
+	} {
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+			base+"/proxy/"+tc.service+"/data", nil)
+		require.NoError(t, err)
+		if tc.sent != "" {
+			req.Header.Set(ServiceTokenHeader, tc.sent)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.Equal(t, tc.want, (<-upstreamHeaders).Values(ServiceTokenHeader), tc)
+	}
+}
+
 func TestProxyStripsMasterCredentialsWebSocket(t *testing.T) {
 	for _, tc := range credentialCases {
 		t.Run(tc.name, func(t *testing.T) {

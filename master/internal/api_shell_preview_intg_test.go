@@ -250,6 +250,77 @@ func TestPreviewShellTemplateIdleType(t *testing.T) {
 	require.Equal(t, want, launch.Config.AsMap()["services"].(map[string]any)["jupyter"])
 }
 
+// A request's entry for the tensorboard service keeps the template's logdir and args unless it
+// sets them, and its own enabled, in the preview as in the launch: "tensorboard: {}" runs the
+// service of a template that turns it off, and an explicit enabled: false is kept.
+func TestPreviewShellTemplateTensorBoard(t *testing.T) {
+	api, _, ctx := setupPreviewTest(t)
+	templateName := "shell-tensorboard-" + uuid.NewString()
+	_, err := db.Bun().NewRaw(
+		"INSERT INTO templates (name, config, workspace_id) VALUES (?, ?::jsonb, 1)",
+		templateName,
+		`{"services": {"tensorboard": {"enabled": false, "logdir": "runs", "args": ["--x"]}}}`).
+		Exec(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = db.Bun().NewDelete().Table("templates").Where("name = ?", templateName).
+			Exec(context.Background())
+	})
+	for name, tc := range map[string]struct {
+		request any
+		want    map[string]any
+		runs    bool
+	}{
+		"no request": {
+			want: map[string]any{"enabled": false, "logdir": "runs", "args": []any{"--x"}},
+		},
+		"enabled": {
+			request: map[string]any{},
+			want:    map[string]any{"logdir": "runs", "args": []any{"--x"}},
+			runs:    true,
+		},
+		"null entry": {
+			request: nil,
+			want:    map[string]any{"logdir": "runs", "args": []any{"--x"}},
+			runs:    true,
+		},
+		"disabled": {
+			request: map[string]any{"enabled": false},
+			want:    map[string]any{"enabled": false, "logdir": "runs", "args": []any{"--x"}},
+		},
+		"own options": {
+			request: map[string]any{"logdir": "/logs", "args": []any{}},
+			want:    map[string]any{"logdir": "/logs"},
+			runs:    true,
+		},
+	} {
+		services := map[string]any{"jupyter": map[string]any{}}
+		if name != "no request" {
+			services["tensorboard"] = tc.request
+		}
+		cfg := servicesConfig(t, services)
+		preview, err := api.PreviewShell(ctx, &apiv1.PreviewShellRequest{
+			Config: cfg, TemplateName: templateName,
+		})
+		require.NoError(t, err, name)
+		require.Equal(t, tc.want,
+			preview.Config.AsMap()["services"].(map[string]any)["tensorboard"], name)
+
+		launch, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
+			Config: cfg, TemplateName: templateName,
+		})
+		require.NoError(t, err, name)
+		require.Equal(t, tc.want,
+			launch.Config.AsMap()["services"].(map[string]any)["tensorboard"], name)
+		spec := launchedSpec(t, launch.Shell.Id)
+		_, ok := spec.Service(model.ServiceTensorBoard)
+		require.Equal(t, tc.runs, ok, name)
+		if tc.runs {
+			require.Equal(t, tc.want["logdir"], spec.Base.ExtraEnvVars["DET_TENSORBOARD_LOGDIR"], name)
+		}
+	}
+}
+
 // A shell's preview fills the services that the launch runs by default: jupyter, and vscode only
 // when the master serves code-server. A request's or a template's entry is kept, enabled or not:
 // a disabled service shows in the config and runs nowhere, and a template's enabled false wins
