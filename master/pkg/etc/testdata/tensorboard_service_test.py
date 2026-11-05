@@ -8,6 +8,7 @@ the stand-in is the only tensorboard package.
 import contextlib
 import io
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -15,7 +16,6 @@ import types
 import unittest
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 from unittest import mock
-from wsgiref import simple_server
 
 import tensorboard_service
 
@@ -65,22 +65,20 @@ class CheckTokenTest(unittest.TestCase):
                 self.assertEqual("401 Unauthorized", response.status)
                 self.assertEqual(b"Unauthorized\n", body)
                 self.assertIn(("Content-Length", str(len(body))), response.headers)
+                self.assertIn(("Connection", "close"), response.headers)
                 self.assertEqual([], app.environs, "the request does not reach TensorBoard")
 
-    def test_drains_a_refused_body(self) -> None:
-        for length, read in [(10, 10), (1 << 20, tensorboard_service.DRAIN_LIMIT)]:
-            with self.subTest(length=length):
-                stream = io.BytesIO(b"x" * length)
-                checked = tensorboard_service.check_token(App(), TOKEN.encode())
-                response, _ = request(
-                    checked,
-                    None,
-                    REQUEST_METHOD="POST",
-                    CONTENT_LENGTH=str(length),
-                    **{"wsgi.input": stream},
-                )
-                self.assertEqual("401 Unauthorized", response.status)
-                self.assertEqual(read, stream.tell())
+    def test_reads_no_refused_body(self) -> None:
+        stream = io.BytesIO(b"x" * 10)
+        response, _ = request(
+            tensorboard_service.check_token(App(), TOKEN.encode()),
+            "wrong",
+            REQUEST_METHOD="POST",
+            CONTENT_LENGTH="10",
+            **{"wsgi.input": stream},
+        )
+        self.assertEqual("401 Unauthorized", response.status)
+        self.assertEqual(0, stream.tell())
 
     def test_passes_on_without_the_header(self) -> None:
         app = App()
@@ -99,9 +97,14 @@ class ServerFactoryTest(unittest.TestCase):
         for name in ["create_port_scanning_werkzeug_server", "WerkzeugServer"]:
             with self.subTest(name=name):
                 made: List[Tuple[Any, Any]] = []
-                bound: List[Tuple[Any, Any]] = []
+                bound: List[Tuple[Any, ...]] = []
 
-                def server(wsgi_app: Any, flags: Any, made: List[Tuple[Any, Any]] = made) -> str:
+                def server(
+                    wsgi_app: Any,
+                    flags: Any,
+                    made: List[Tuple[Any, Any]] = made,
+                    bound: List[Tuple[Any, ...]] = bound,
+                ) -> str:
                     self.assertEqual([], bound, "bound comes after the server")
                     made.append((wsgi_app, flags))
                     return "server"
@@ -110,7 +113,7 @@ class ServerFactoryTest(unittest.TestCase):
                 app = App()
                 flags = object()
                 factory = tensorboard_service.server_factory(
-                    program, TOKEN.encode(), lambda *args: bound.append(args)
+                    program, TOKEN.encode(), lambda *args, bound=bound: bound.append(args)
                 )
                 self.assertEqual("server", factory(app, flags))
                 self.assertEqual(1, len(made))
@@ -135,14 +138,30 @@ class Recorder:
         return [b""]
 
 
-class QuietHandler(simple_server.WSGIRequestHandler):
-    def log_message(self, *args: Any) -> None:
-        pass
+class Echo:
+    """A WSGI application that answers the length of a request's body and records its request."""
+
+    def __init__(self) -> None:
+        self.environs: List[Dict[str, Any]] = []
+
+    def __call__(self, environ: Dict[str, Any], start_response: Any) -> Iterable[bytes]:
+        self.environs.append(dict(environ))
+        body = environ["wsgi.input"].read(int(environ.get("CONTENT_LENGTH") or 0))
+        answer = str(len(body)).encode()
+        start_response("200 OK", [("Content-Length", str(len(answer)))])
+        return [answer]
 
 
 @contextlib.contextmanager
-def serve(app: Any) -> Iterator[simple_server.WSGIServer]:
-    server = simple_server.make_server("127.0.0.1", 0, app, handler_class=QuietHandler)
+def serve(app: Any) -> Iterator[Any]:
+    """
+    A server of app on 127.0.0.1, the stand-in's model of TensorBoard's: HTTP/1.1 with keep-alive,
+    which leaves a body that app does not read on the connection.
+    """
+    from tensorboard import program
+
+    flags = types.SimpleNamespace(bind_all=False, host="127.0.0.1", port=0)
+    server = program.create_port_scanning_werkzeug_server(app, flags)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -151,6 +170,91 @@ def serve(app: Any) -> Iterator[simple_server.WSGIServer]:
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+def read_response(sock: socket.socket) -> Tuple[str, List[Tuple[str, str]], bytes]:
+    """The status line, the headers and the body of the next response on sock."""
+    data = b""
+    while b"\r\n\r\n" not in data:
+        chunk = sock.recv(65536)
+        if not chunk:
+            raise AssertionError(f"the connection closed before a response: {data!r}")
+        data += chunk
+    head, body = data.split(b"\r\n\r\n", 1)
+    status, *lines = head.decode("latin-1").split("\r\n")
+    headers = [(k, v.strip()) for k, v in (line.split(":", 1) for line in lines)]
+    length = int({k.lower(): v for k, v in headers}["content-length"])
+    while len(body) < length:
+        chunk = sock.recv(65536)
+        if not chunk:
+            break
+        body += chunk
+    return status, headers, body
+
+
+class ConnectionTest(unittest.TestCase):
+    """The token check in a server that speaks HTTP/1.1 with keep-alive, through a socket."""
+
+    path = "/proxy/task-1:6006/"
+
+    def assert_closed(self, sock: socket.socket) -> None:
+        try:
+            self.assertEqual(b"", sock.recv(65536))
+        except ConnectionResetError:
+            pass
+
+    def test_refuses_a_withheld_body_at_once(self) -> None:
+        app = Echo()
+        with serve(tensorboard_service.check_token(app, TOKEN.encode())) as server:
+            with socket.create_connection(("127.0.0.1", server.server_port), timeout=2) as sock:
+                sock.sendall(
+                    f"POST {self.path} HTTP/1.1\r\nHost: localhost\r\n"
+                    "Content-Length: 1\r\n\r\n".encode()
+                )
+                status, headers, body = read_response(sock)
+                self.assertEqual("HTTP/1.1 401 Unauthorized", status)
+                self.assertIn(("Connection", "close"), headers)
+                self.assertEqual(b"Unauthorized\n", body)
+                self.assert_closed(sock)
+        self.assertEqual([], app.environs)
+
+    def test_never_reads_a_refused_body_as_a_request(self) -> None:
+        app = Echo()
+        smuggled = (
+            f"GET {self.path} HTTP/1.1\r\nHost: localhost\r\n"
+            f"{tensorboard_service.TOKEN_HEADER_NAME}: {TOKEN}\r\n\r\n"
+        ).encode()
+        with serve(tensorboard_service.check_token(app, TOKEN.encode())) as server:
+            with socket.create_connection(("127.0.0.1", server.server_port), timeout=2) as sock:
+                sock.sendall(
+                    f"POST {self.path} HTTP/1.1\r\nHost: localhost\r\n"
+                    f"{tensorboard_service.TOKEN_HEADER_NAME}: wrong\r\n"
+                    f"Content-Length: {1 << 20}\r\n\r\n".encode() + smuggled
+                )
+                status, headers, _ = read_response(sock)
+                self.assertEqual("HTTP/1.1 401 Unauthorized", status)
+                self.assertIn(("Connection", "close"), headers)
+                self.assert_closed(sock)
+        self.assertEqual([], app.environs, "the body is never served as a request")
+
+    def test_passes_on_a_body(self) -> None:
+        app = Echo()
+        body = b"x" * (1 << 20)
+        with serve(tensorboard_service.check_token(app, TOKEN.encode())) as server:
+            with socket.create_connection(("127.0.0.1", server.server_port), timeout=10) as sock:
+                for _ in range(2):
+                    sock.sendall(
+                        f"POST {self.path} HTTP/1.1\r\nHost: localhost\r\n"
+                        f"{tensorboard_service.TOKEN_HEADER_NAME}: {TOKEN}\r\n"
+                        f"Content-Length: {len(body)}\r\n\r\n".encode() + body
+                    )
+                    status, headers, answer = read_response(sock)
+                    self.assertEqual("HTTP/1.1 200 OK", status)
+                    self.assertNotIn("connection", [k.lower() for k, _ in headers])
+                    self.assertEqual(str(len(body)).encode(), answer)
+        self.assertEqual(2, len(app.environs), "the connection takes the next request")
+        for environ in app.environs:
+            self.assertNotIn(tensorboard_service.TOKEN_HEADER, environ)
 
 
 class ProbeTest(unittest.TestCase):

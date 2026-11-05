@@ -37,7 +37,10 @@ const tensorBoardTestToken = "test-token"
 // "$ORDER_FILE.tensorboard-python", and "tensorboard" in the order file. Then it serves, until the
 // order file has "stop tensorboard", an application that answers 200 under the --path_prefix and
 // 404 elsewhere and that creates "$ORDER_FILE.tensorboard-saw-token" when a request reaches it
-// with the token's header. It builds its server with its server_class, once the order file has
+// with the token's header. Its default server, a model of TensorBoard's werkzeug server, speaks
+// HTTP/1.1 with keep-alive, sends an application's headers as they are, so that "Connection: close"
+// closes the connection after the response, and leaves a body that the application does not read
+// on the connection. It builds its server with its server_class, once the order file has
 // the line TB_STAND_IN_WAIT if that is set, and serves the application through the server's, or
 // directly when TB_STAND_IN_SERVE is "unchecked", or not at all when TB_STAND_IN_SERVE is "no".
 // Like TensorBoard's, the server ends on SIGINT and main exits 0 on SIGTERM; otherwise main returns
@@ -91,21 +94,59 @@ def get_plugins():
 `,
 	"tensorboard/program.py": `
 import argparse
+import http.server
 import json
 import os
 import signal
+import socketserver
 import sys
 import threading
 import time
-from wsgiref import simple_server
 
 
-class _Handler(simple_server.WSGIRequestHandler):
+class _Handler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
     def log_message(self, *args):
         pass
 
+    def do_GET(self):
+        path, _, query = self.path.partition("?")
+        environ = {
+            "REQUEST_METHOD": self.command,
+            "PATH_INFO": path,
+            "QUERY_STRING": query,
+            "SERVER_PROTOCOL": self.request_version,
+            "wsgi.input": self.rfile,
+        }
+        for name, value in self.headers.items():
+            if "_" in name:
+                continue
+            key = name.upper().replace("-", "_")
+            if key not in ("CONTENT_TYPE", "CONTENT_LENGTH"):
+                key = "HTTP_" + key
+            environ[key] = environ[key] + "," + value if key in environ else value
 
-class _Server(simple_server.WSGIServer):
+        def start_response(status, headers, exc_info=None):
+            code, _, reason = status.partition(" ")
+            self.send_response(int(code), reason)
+            for name, value in headers:
+                self.send_header(name, value)
+            self.end_headers()
+            return self.wfile.write
+
+        for data in self.server.app(environ, start_response):
+            self.wfile.write(data)
+
+    do_POST = do_GET
+
+
+class _Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
+
+    def set_app(self, app):
+        self.app = app
+
     def serve_forever(self, poll_interval=0.5):
         try:
             super().serve_forever(poll_interval)

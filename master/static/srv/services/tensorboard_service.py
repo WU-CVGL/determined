@@ -5,7 +5,8 @@ its argument, absolute and created.
 
 TensorBoard refuses every request that does not carry exactly one X-Determined-Service-Token
 header equal to DET_TENSORBOARD_TOKEN, which the master's proxy adds once it has authorized the
-request: it answers 401 and never passes the request on. The check wraps TensorBoard's whole WSGI
+request: it answers 401 at once, without reading the request's body, closes the connection after
+the response and never passes the request on. The check wraps TensorBoard's whole WSGI
 application, inside TensorBoard's own server, so that no port of the container, in any network
 mode, serves TensorBoard without the token. The header does not reach TensorBoard, and nothing of
 the token is logged.
@@ -55,8 +56,6 @@ PROBE_INTERVAL = 0.5
 PROBE_TIMEOUT = 5
 MIN_RELEASE = (2, 9)
 UNAVAILABLE_STATUS = 127
-# How much of a refused request's body is read, so that its connection can take the next request.
-DRAIN_LIMIT = 64 * 1024
 UNAUTHORIZED = b"Unauthorized\n"
 
 WSGIApp = Callable[[Dict[str, Any], Callable[..., Any]], Iterable[bytes]]
@@ -106,25 +105,13 @@ def service_flags(environ: Mapping[str, str], logdir: str) -> Dict[str, Any]:
     }
 
 
-def drain(environ: Dict[str, Any]) -> None:
-    """Read a refused request's body, up to DRAIN_LIMIT."""
-    try:
-        length = min(int(environ.get("CONTENT_LENGTH") or 0), DRAIN_LIMIT)
-    except ValueError:
-        return
-    stream = environ.get("wsgi.input")
-    while length > 0 and stream is not None:
-        chunk = stream.read(length)
-        if not chunk:
-            break
-        length -= len(chunk)
-
-
 def check_token(app: WSGIApp, token: bytes) -> WSGIApp:
     """
-    app behind the token: a request without exactly one token header equal to token gets 401 and
-    never reaches app; app gets the others without the header. Two headers reach a WSGI
-    environment joined by a comma, which a token never has.
+    app behind the token: a request without exactly one token header equal to token gets 401 at
+    once and never reaches app; app gets the others without the header. Two headers reach a WSGI
+    environment joined by a comma, which a token never has. The 401 reads nothing of the body and
+    has "Connection: close", which makes TensorBoard's server close the connection after it, so
+    that the unread body is never read as a request.
     """
 
     def checked(environ: Dict[str, Any], start_response: Callable[..., Any]) -> Iterable[bytes]:
@@ -132,12 +119,12 @@ def check_token(app: WSGIApp, token: bytes) -> WSGIApp:
         if not isinstance(value, str) or not hmac.compare_digest(
             value.encode("latin-1", "replace"), token
         ):
-            drain(environ)
             start_response(
                 "401 Unauthorized",
                 [
                     ("Content-Type", "text/plain; charset=utf-8"),
                     ("Content-Length", str(len(UNAUTHORIZED))),
+                    ("Connection", "close"),
                 ],
             )
             return [UNAUTHORIZED]
