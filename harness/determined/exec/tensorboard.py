@@ -20,8 +20,6 @@ TENSORBOARD_TRIGGER_READY_MSG = "TensorBoard contains metrics"
 
 # The program that runs TensorBoard behind the master proxy's token, which the master ships.
 SERVICE_PROGRAM = "/run/determined/tensorboard/tensorboard_service.py"
-# The descriptor that the program writes its ready line to.
-SERVICE_READY_FD = 3
 SERVICE_READY_LINE = b"tensorboard: http ready\n"
 
 TICK_INTERVAL = 1  # How many seconds to wait on each iteration of our check loop
@@ -53,15 +51,16 @@ def set_s3_region() -> None:
         os.environ["AWS_REGION"] = str(region)
 
 
-def service_env(environ: Mapping[str, str], add_args: List[str]) -> Dict[str, str]:
+def service_env(environ: Mapping[str, str], add_args: List[str], ready_fd: int) -> Dict[str, str]:
     """The environment of the service program: the task's, with TensorBoard's port, path prefix
-    and arguments. The token is in the task's environment.
+    and arguments and the descriptor of the ready line. The token is in the task's environment.
     """
     return {
         **environ,
         "DET_TENSORBOARD_PORT": environ["TENSORBOARD_PORT"],
         "DET_TENSORBOARD_PATH_PREFIX": f"/proxy/{environ['DET_TASK_ID']}/",
         "DET_TENSORBOARD_ARGS": json.dumps(add_args),
+        "DET_TENSORBOARD_READY_FD": str(ready_fd),
     }
 
 
@@ -73,19 +72,12 @@ def start_service(tfevents_dir: str, add_args: List[str]) -> Tuple[subprocess.Po
     args = [sys.executable, SERVICE_PROGRAM, tfevents_dir]
     logger.debug(f"tensorboard service args: {args}")
     ready, ready_w = os.pipe()
-
-    def open_ready_fd() -> None:
-        os.dup2(ready_w, SERVICE_READY_FD)
-        os.set_inheritable(SERVICE_READY_FD, True)
-
     try:
-        # The descriptors of the launcher are not inheritable, so close_fds=False passes only the
-        # standard streams and the ready descriptor.
+        # The program gets the standard streams and the write end only.
         process = subprocess.Popen(
             args,
-            env=service_env(os.environ, add_args),
-            close_fds=False,
-            preexec_fn=open_ready_fd,
+            env=service_env(os.environ, add_args, ready_w),
+            pass_fds=(ready_w,),
         )
     except BaseException:
         os.close(ready)
@@ -107,7 +99,9 @@ def check_service_ready(p: subprocess.Popen, ready: int, received: bytearray) ->
         try:
             p.wait(timeout=TICK_INTERVAL)
         except subprocess.TimeoutExpired:
-            raise RuntimeError("Tensorboard answers without the token.") from None
+            raise RuntimeError(
+                "TensorBoard closed its readiness channel before reporting ready."
+            ) from None
         raise_if_dead(p)
     received.extend(chunk)
     return SERVICE_READY_LINE in received
@@ -199,6 +193,7 @@ def start_tensorboard(
                 if tensorboard_process.poll() is None:
                     logger.info("Killing tensorboard process")
                     tensorboard_process.kill()
+                    tensorboard_process.wait()
 
 
 class TBFetchManager:

@@ -21,7 +21,8 @@ true.
 
 Once TensorBoard's server has bound the port, and only then, a probe asks it on 127.0.0.1 under the
 prefix, without and with the token, every half second, and writes "tensorboard: http ready" to
-descriptor 3 once TensorBoard refuses the first and answers the second. While TensorBoard holds
+the descriptor DET_TENSORBOARD_READY_FD, 3 if unset, once TensorBoard refuses the first and answers
+the second. While TensorBoard holds
 the port, no other process can listen on 127.0.0.1 at that port, so the probe sends the token to
 TensorBoard only. It follows no redirect and takes no proxy. A TensorBoard that answers without
 the token is never ready, and the probe says so once.
@@ -50,7 +51,9 @@ TOKEN_ENV = "DET_TENSORBOARD_TOKEN"
 TOKEN_HEADER_NAME = "X-Determined-Service-Token"
 # The token's header in the WSGI environment.
 TOKEN_HEADER = "HTTP_X_DETERMINED_SERVICE_TOKEN"
-# The descriptor that the probe writes READY_LINE to, which the unit hands over.
+# The descriptor that the probe writes READY_LINE to: DET_TENSORBOARD_READY_FD, or READY_FD, which
+# the unit hands over.
+READY_FD_ENV = "DET_TENSORBOARD_READY_FD"
 READY_FD = 3
 READY_LINE = "tensorboard: http ready\n"
 PROBE_INTERVAL = 0.5
@@ -83,6 +86,16 @@ def user_args(environ: Mapping[str, str]) -> List[str]:
     if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
         raise Unavailable("DET_TENSORBOARD_ARGS is not a JSON array of strings")
     return args
+
+
+def ready_fd(environ: Mapping[str, str]) -> int:
+    """The descriptor of the ready line: DET_TENSORBOARD_READY_FD, READY_FD if unset."""
+    value = environ.get(READY_FD_ENV, "")
+    if not value:
+        return READY_FD
+    if not re.fullmatch(r"[0-9]+", value) or int(value) < 3:
+        raise Unavailable(f'{READY_FD_ENV} is not a descriptor: "{value}"')
+    return int(value)
 
 
 def tensorboard_argv(args: List[str]) -> List[str]:
@@ -232,11 +245,12 @@ def run(argv: List[str], environ: Mapping[str, str]) -> int:
     if "server_class" not in inspect.signature(program.TensorBoard.__init__).parameters:
         raise Unavailable(f"TensorBoard {tensorboard_version} takes no server_class")
     args = user_args(environ)
+    fd = ready_fd(environ)
     try:
-        os.set_inheritable(READY_FD, False)
-        ready = os.fdopen(READY_FD, "w")
+        os.set_inheritable(fd, False)
+        ready = os.fdopen(fd, "w")
     except OSError:
-        raise Unavailable(f"descriptor {READY_FD} is not open") from None
+        raise Unavailable(f"descriptor {fd} is not open") from None
     print(f"tensorboard service: TensorBoard {tensorboard_version} reads {logdir}", file=sys.stderr)
 
     try:
