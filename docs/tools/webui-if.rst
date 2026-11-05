@@ -125,7 +125,7 @@ A resource pool's topology, two nodes with their NUMA groups and each GPU's stat
 
 The topology view needs no monitoring service; the GPU health view, which marks a GPU with a
 :ref:`recent critical XID <agent-gpu-xids>` as in error, needs the :ref:`task resources integration
-<native-task-resources>`.
+<task-resources>`.
 
 ***********************************
  Managing User Accounts and Groups

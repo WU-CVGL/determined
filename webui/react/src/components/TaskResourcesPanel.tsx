@@ -197,7 +197,7 @@ const TaskResourcesPanel: React.FC<Props> = ({
   if (enabled === undefined) return <Spinner center spinning />;
   if (!enabled)
     return (
-      <Alert message="Native resource monitoring is not enabled for this cluster." type="info" />
+      <Alert message="Task resource monitoring is not enabled for this cluster." type="info" />
     );
 
   return (
