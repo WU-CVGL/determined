@@ -866,10 +866,11 @@ func TestLaunchShellWithTensorBoardService(t *testing.T) {
 		env[tasks.TensorBoardPathPrefixEnvVar])
 	require.Equal(t, token, env["DET_TENSORBOARD_TOKEN"])
 
-	// The unit, and no files of its own.
+	// The unit and its program, and no files of its own.
 	paths := containerFilePaths(spec)
 	requireOncePerPath(t, paths)
 	require.Contains(t, paths, "/run/determined/services/tensorboard.sh")
+	require.Contains(t, paths, "/run/determined/services/tensorboard_service.py")
 
 	listed, err := api.GetTaskServices(ctx, &apiv1.GetTaskServicesRequest{TaskId: taskID})
 	require.NoError(t, err)

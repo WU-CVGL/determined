@@ -26,7 +26,8 @@ type genericCommandSpecMetadata struct {
 	// secret as the private key. The container gets its hash only.
 	CodeServerPassword *string `json:"codeServerPassword,omitempty"`
 	// TensorBoardToken is the token that the master's proxy adds to the tensorboard service's
-	// requests and that the service's front requires. It stays in the master and the container.
+	// requests and that TensorBoard itself requires of every request, in every network mode. It
+	// stays in the master and the container.
 	TensorBoardToken *string `json:"tensorBoardToken,omitempty"`
 }
 

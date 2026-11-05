@@ -35,18 +35,20 @@ func TestAddExtraEnvVarsKeepsOthers(t *testing.T) {
 	}, spec.Base.ExtraEnvVars)
 }
 
-// requireInteractiveSupervisorFiles checks that files has the init, the supervisor and every unit
-// at their run-dir paths, with the static content, owned by uid and gid.
+// requireInteractiveSupervisorFiles checks that files has the init, the supervisor, every unit and
+// the tensorboard unit's program at their run-dir paths, with the static content, owned by uid
+// and gid.
 func requireInteractiveSupervisorFiles(t *testing.T, files archive.Archive, uid, gid int) {
 	t.Helper()
 	want := map[string]string{
-		"/run/determined/interactive-init.sh":       etc.InteractiveInitScriptResource,
-		"/run/determined/interactive-supervisor.sh": etc.InteractiveSupervisorResource,
-		"/run/determined/report_service_states.py":  etc.ServiceStateReporterResource,
-		"/run/determined/services/ssh.sh":           etc.SSHServiceResource,
-		"/run/determined/services/jupyter.sh":       etc.JupyterServiceResource,
-		"/run/determined/services/vscode.sh":        etc.VSCodeServiceResource,
-		"/run/determined/services/tensorboard.sh":   etc.TensorBoardServiceResource,
+		"/run/determined/interactive-init.sh":             etc.InteractiveInitScriptResource,
+		"/run/determined/interactive-supervisor.sh":       etc.InteractiveSupervisorResource,
+		"/run/determined/report_service_states.py":        etc.ServiceStateReporterResource,
+		"/run/determined/services/ssh.sh":                 etc.SSHServiceResource,
+		"/run/determined/services/jupyter.sh":             etc.JupyterServiceResource,
+		"/run/determined/services/vscode.sh":              etc.VSCodeServiceResource,
+		"/run/determined/services/tensorboard.sh":         etc.TensorBoardServiceResource,
+		"/run/determined/services/tensorboard_service.py": etc.TensorBoardServiceProgramResource,
 	}
 	found := map[string]bool{}
 	for _, item := range files {

@@ -48,7 +48,8 @@ func addExtraEnvVars(spec *tasks.GenericCommandSpec, vars map[string]string) {
 }
 
 // interactiveSupervisorFiles returns the run-dir files of the supervisor: the init, the supervisor,
-// the reporter of the services' states and the unit of every service.
+// the reporter of the services' states, the unit of every service and the tensorboard unit's
+// program.
 func interactiveSupervisorFiles(aug *model.AgentUserGroup) archive.Archive {
 	files := archive.Archive{
 		aug.OwnedArchiveItem(
@@ -81,5 +82,10 @@ func interactiveSupervisorFiles(aug *model.AgentUserGroup) archive.Archive {
 			tar.TypeReg,
 		))
 	}
-	return files
+	return append(files, aug.OwnedArchiveItem(
+		tensorBoardServiceProgram,
+		etc.MustStaticFile(etc.TensorBoardServiceProgramResource),
+		0o700,
+		tar.TypeReg,
+	))
 }

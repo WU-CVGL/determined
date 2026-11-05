@@ -32,19 +32,13 @@ import (
 // "posted <service>" unless --no-post; check_idle.py records its pid; report_service_states.py,
 // the reporter of the services' states, records its process group in REPORTER_GROUP_FILE and runs
 // as itself with REPORTER_PYTHON, posting to the stand-in master, or without it only waits for the
-// stop line; "-c" runs the program with REPORTER_PYTHON, as the vscode unit's download does;
-// "-m determined.exec.service_front" records its pid in "$ORDER_FILE.front-pid" and runs the
-// harness's file SERVICE_FRONT with REPORTER_PYTHON.
+// stop line; "-c" runs the program with REPORTER_PYTHON, as the vscode unit's download does.
 const pythonStandIn = `
 case $1 in
 -c)
     exec "$REPORTER_PYTHON" "$@"
     ;;
 -m)
-    if [[ $2 == determined.exec.service_front ]]; then
-        echo "$$" >"$ORDER_FILE.front-pid"
-        exec "$REPORTER_PYTHON" "$SERVICE_FRONT" "${@:3}"
-    fi
     [[ "$*" == "-m determined.exec.prep_container --resources --proxy --download_context_directory" ]] || exit 2
     echo prep >>"$ORDER_FILE"
     exit "${PREP_EXIT:-0}"
