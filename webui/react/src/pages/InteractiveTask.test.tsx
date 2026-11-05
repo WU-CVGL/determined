@@ -52,8 +52,16 @@ vi.mock('components/ShellTerminalPane', () => ({
 }));
 
 vi.mock('components/TaskServicePane', () => ({
-  default: ({ service, state }: { service: string; state: V1TaskServiceState }) => (
-    <div data-state={state} data-testid={`service-pane-${service}`} />
+  default: ({
+    ended,
+    service,
+    state,
+  }: {
+    ended: boolean;
+    service: string;
+    state: V1TaskServiceState;
+  }) => (
+    <div data-ended={String(ended)} data-state={state} data-testid={`service-pane-${service}`} />
   ),
 }));
 
@@ -365,6 +373,68 @@ describe('InteractiveTask', () => {
       await act(() => vi.advanceTimersByTimeAsync(20000));
       expect(getTaskServices).toHaveBeenCalledTimes(2);
       expect(getTask).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Service READY -> task ends -> the last services read fails -> the page must not keep showing a
+  // live service; showing the page again must not sit in a silent stale state.
+  it('shows the end and the failure of the last read of the services, not a live service', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getTaskServices).mockResolvedValue(
+        servicesWith(['ssh', 'tensorboard'], true, V1TaskServiceState.READY),
+      );
+      setup('?tab=tensorboard');
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(screen.getByTestId('service-pane-tensorboard')).toHaveAttribute('data-ended', 'false');
+      expect(getTaskServices).toHaveBeenCalledTimes(1);
+
+      vi.mocked(getTask).mockResolvedValue(
+        taskWith(false, V1TaskType.SHELL, CommandState.Terminated, '2026-01-01T01:00:00Z'),
+      );
+      vi.mocked(getTaskServices).mockRejectedValue(
+        new DetError(undefined, { publicMessage: 'master unreachable' }),
+      );
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+      expect(getTaskServices).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId('service-pane-tensorboard')).toHaveAttribute('data-ended', 'true');
+      expect(screen.getByText('master unreachable')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+
+      // Shown again: the end and the failure stay, with Retry.
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await act(() => vi.advanceTimersByTimeAsync(20000));
+      expect(getTaskServices).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId('service-pane-tensorboard')).toHaveAttribute('data-ended', 'true');
+      expect(screen.getByText('master unreachable')).toBeInTheDocument();
+
+      // A failed Retry shows its own failure; a successful one the final states.
+      vi.mocked(getTaskServices).mockRejectedValueOnce(
+        new DetError(undefined, { publicMessage: 'still unreachable' }),
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(getTaskServices).toHaveBeenCalledTimes(3);
+      expect(screen.getByText('still unreachable')).toBeInTheDocument();
+
+      vi.mocked(getTaskServices).mockResolvedValue(
+        servicesWith(['ssh', 'tensorboard'], true, V1TaskServiceState.EXITED),
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(getTaskServices).toHaveBeenCalledTimes(4);
+      expect(screen.queryByText('still unreachable')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+      expect(screen.getByTestId('service-pane-tensorboard')).toHaveAttribute(
+        'data-state',
+        V1TaskServiceState.EXITED,
+      );
+      await act(() => vi.advanceTimersByTimeAsync(20000));
+      expect(getTaskServices).toHaveBeenCalledTimes(4);
     } finally {
       vi.useRealTimers();
     }

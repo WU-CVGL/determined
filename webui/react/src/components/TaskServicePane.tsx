@@ -10,6 +10,8 @@ import { taskServiceSettled } from 'utils/task';
 import css from './TaskServicePane.module.scss';
 
 interface Props {
+  /** Whether the task has ended: its services no longer serve, whatever the last read said. */
+  ended: boolean;
   /** The iframe's title. */
   label: string;
   service: string;
@@ -31,21 +33,22 @@ const GONE_STATES: V1TaskServiceState[] = [
  * stays, as the service's own text, with Reconnect, which reads the credential and loads the
  * service once more (the service's process is left as it is): nothing is tried again on its own,
  * since code-server limits failed logins. A service that exits after it loaded shows its state the
- * same way.
+ * same way. Once the task has ended, the pane shows the service's end, EXITED unless the service
+ * could not run, and reads nothing.
  */
-const TaskServicePane: React.FC<Props> = ({ label, service, state, taskId }: Props) => {
+const TaskServicePane: React.FC<Props> = ({ ended, label, service, state, taskId }: Props) => {
   const [src, setSrc] = useState<string>();
   const [error, setError] = useState<string>();
   const [attempt, setAttempt] = useState(0);
   const started = useRef(false);
 
   useEffect(() => {
-    if (started.current || !taskServiceSettled(state)) return;
+    if (ended || started.current || !taskServiceSettled(state)) return;
     started.current = true;
     taskServiceUrl(taskId, service)
       .then(setSrc)
       .catch((e) => setError(errorText(e)));
-  }, [attempt, service, state, taskId]);
+  }, [attempt, ended, service, state, taskId]);
 
   const reconnect = useCallback(() => {
     started.current = false;
@@ -53,6 +56,14 @@ const TaskServicePane: React.FC<Props> = ({ label, service, state, taskId }: Pro
     setAttempt((a) => a + 1);
   }, []);
 
+  if (ended) {
+    const end = GONE_STATES.includes(state) ? state : V1TaskServiceState.EXITED;
+    return (
+      <div className={css.message}>
+        <Message title={`${service}: ${end.replace('STATE_', '')}`} />
+      </div>
+    );
+  }
   if (error) {
     return (
       <div className={css.message}>

@@ -174,7 +174,7 @@ export const InteractiveTask: React.FC = () => {
     let servicesUnknown = false;
     let servicesSettled = false;
     // The read of the services in flight, if any.
-    let servicesRead: Promise<void> | undefined;
+    let servicesRead: Promise<string | undefined> | undefined;
     // When the last read of the services started, and whether the read after the task's end ran.
     let servicesReadAt = 0;
     let endRead = false;
@@ -209,11 +209,12 @@ export const InteractiveTask: React.FC = () => {
     };
     // A failed read keeps the last services, if any, and is tried again on the next tick; before
     // the first answer, the page gives up after a few failures and shows the last one with Retry.
-    // A task the services API does not know, such as a generic task, has none.
-    const pollServices = async () => {
+    // A task the services API does not know, such as a generic task, has none. The text of a
+    // failure, if any.
+    const pollServices = async (): Promise<string | undefined> => {
       try {
         const response = await getTaskServices({ taskId });
-        if (cancelled) return;
+        if (cancelled) return undefined;
         servicesLoaded = true;
         servicesGivenUp = false;
         setServicesError(undefined);
@@ -222,8 +223,9 @@ export const InteractiveTask: React.FC = () => {
           services: response.services,
         });
         servicesSettled = response.services.every((s) => taskServiceSettled(s.state));
+        return undefined;
       } catch (e) {
-        if (cancelled) return;
+        if (cancelled) return undefined;
         const text = errorText(e);
         handleError(e, { publicMessage: 'Unable to load the services of the task.', silent: true });
         if (isNotFound(e as Error)) {
@@ -233,14 +235,17 @@ export const InteractiveTask: React.FC = () => {
           setServicesError(undefined);
           setTaskServices({ services: [] });
           servicesSettled = true;
-        } else if (!servicesLoaded && (servicesGivenUp || ++serviceFailures >= MAX_POLL_FAILURES)) {
+          return undefined;
+        }
+        if (servicesGivenUp || (!servicesLoaded && ++serviceFailures >= MAX_POLL_FAILURES)) {
           servicesGivenUp = true;
           setServicesError(text);
         }
+        return text;
       }
     };
     // One read at a time; a read asked for while another runs waits for that one.
-    const readServices = (): Promise<void> => {
+    const readServices = (): Promise<string | undefined> => {
       if (servicesRead) return servicesRead;
       servicesReadAt = Date.now();
       servicesRead = pollServices().finally(() => {
@@ -265,13 +270,18 @@ export const InteractiveTask: React.FC = () => {
       if (cancelled || outcome === 'gone') return;
       if (outcome === 'ended') {
         ended = true;
-        // The services' states after the end, once, from a read that starts after the end.
+        // The services' states after the end, once, from a read that starts after the end. Its
+        // failure is shown with Retry: the last services read are not the final ones.
         if (!endRead && !servicesGivenUp && !servicesUnknown) {
           endRead = true;
           await servicesRead;
           if (cancelled) return;
-          await readServices();
+          const failure = await readServices();
           if (cancelled) return;
+          if (failure !== undefined) {
+            servicesGivenUp = true;
+            setServicesError(failure);
+          }
         }
         if (servicesSettled || servicesGivenUp) return;
       }
@@ -367,6 +377,7 @@ export const InteractiveTask: React.FC = () => {
         case InteractiveTaskTab.JupyterLab:
           return (
             <TaskServicePane
+              ended={phase === 'ended'}
               label="JupyterLab"
               service="jupyter"
               state={serviceState('jupyter')}
@@ -376,6 +387,7 @@ export const InteractiveTask: React.FC = () => {
         case InteractiveTaskTab.VSCode:
           return (
             <TaskServicePane
+              ended={phase === 'ended'}
               label="VS Code"
               service="vscode"
               state={serviceState('vscode')}
@@ -396,6 +408,7 @@ export const InteractiveTask: React.FC = () => {
           }
           return (
             <TaskServicePane
+              ended={phase === 'ended'}
               label="TensorBoard"
               service="tensorboard"
               state={serviceState('tensorboard')}

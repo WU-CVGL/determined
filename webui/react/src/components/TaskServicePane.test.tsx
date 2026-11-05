@@ -12,9 +12,15 @@ vi.mock('services/taskService', async (importOriginal) => ({
   taskServiceUrl: vi.fn(),
 }));
 
-const Pane = ({ state }: { state: V1TaskServiceState }) => (
+const Pane = ({ ended = false, state }: { ended?: boolean; state: V1TaskServiceState }) => (
   <UIProvider theme={DefaultTheme.Light}>
-    <TaskServicePane label="JupyterLab" service="jupyter" state={state} taskId="task-1" />
+    <TaskServicePane
+      ended={ended}
+      label="JupyterLab"
+      service="jupyter"
+      state={state}
+      taskId="task-1"
+    />
   </UIProvider>
 );
 
@@ -65,6 +71,7 @@ describe('TaskServicePane', () => {
     render(
       <UIProvider theme={DefaultTheme.Light}>
         <TaskServicePane
+          ended={false}
           label="TensorBoard"
           service="tensorboard"
           state={V1TaskServiceState.READY}
@@ -105,6 +112,27 @@ describe('TaskServicePane', () => {
     expect(frame).toHaveAttribute('src', 'https://det.example.org/proxy/task-1:2900/');
     expect(taskServiceUrl).toHaveBeenCalledTimes(3);
     expect(screen.queryByRole('button', { name: 'Reconnect' })).not.toBeInTheDocument();
+  });
+
+  it('shows the end of a task over the last state read, without Reconnect', async () => {
+    vi.mocked(taskServiceUrl).mockResolvedValue('https://det.example.org/proxy/task-1:2900/');
+    const { rerender } = render(<Pane state={V1TaskServiceState.READY} />);
+    expect(await screen.findByTitle('JupyterLab')).toBeInTheDocument();
+    rerender(<Pane ended state={V1TaskServiceState.READY} />);
+    expect(screen.getByText('jupyter: EXITED')).toBeInTheDocument();
+    expect(screen.queryByTitle('JupyterLab')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reconnect' })).not.toBeInTheDocument();
+    expect(taskServiceUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [V1TaskServiceState.READY, 'jupyter: EXITED'],
+    [V1TaskServiceState.UNAVAILABLE, 'jupyter: UNAVAILABLE'],
+  ])('reads nothing for an ended task (%s)', (state, text) => {
+    render(<Pane ended state={state} />);
+    expect(screen.getByText(text)).toBeInTheDocument();
+    expect(screen.queryByTitle('JupyterLab')).not.toBeInTheDocument();
+    expect(taskServiceUrl).not.toHaveBeenCalled();
   });
 
   it('reads the state of a service that has exited or cannot run', async () => {
