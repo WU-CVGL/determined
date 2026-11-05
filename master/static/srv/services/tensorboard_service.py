@@ -1,7 +1,8 @@
 """
 tensorboard_service.py runs TensorBoard for the tensorboard service of a shell, with the python
 that has TensorBoard, which the unit tensorboard.sh picks, on the log directory that it gives as
-its argument, absolute and created.
+its argument, absolute and created. The launcher of a TensorBoard task runs it as well, with its
+own python, on the directory that it fetches the logs into.
 
 TensorBoard refuses every request that does not carry exactly one X-Determined-Service-Token
 header equal to DET_TENSORBOARD_TOKEN, which the master's proxy adds once it has authorized the

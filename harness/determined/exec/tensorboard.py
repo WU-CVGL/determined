@@ -2,22 +2,27 @@ import json
 import logging
 import os
 import queue
+import select
 import subprocess
 import sys
 import tempfile
 import threading
 import time
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Mapping, Tuple
 
 import boto3
-import requests
-from packaging import version
 
 import determined as det
 import determined.common
 from determined.tensorboard import fetchers
 
 TENSORBOARD_TRIGGER_READY_MSG = "TensorBoard contains metrics"
+
+# The program that runs TensorBoard behind the master proxy's token, which the master ships.
+SERVICE_PROGRAM = "/run/determined/tensorboard/tensorboard_service.py"
+# The descriptor that the program writes its ready line to.
+SERVICE_READY_FD = 3
+SERVICE_READY_LINE = b"tensorboard: http ready\n"
 
 TICK_INTERVAL = 1  # How many seconds to wait on each iteration of our check loop
 MAX_WAIT_TIME = 600  # How many seconds to wait for the first metric file to download
@@ -48,57 +53,71 @@ def set_s3_region() -> None:
         os.environ["AWS_REGION"] = str(region)
 
 
-def get_tensorboard_args(tb_version: str, tfevents_dir: str, add_args: List[str]) -> List[str]:
-    """Build tensorboard startup args.
-
-    Args are added and deprecated at the mercy of tensorboard; all of the below are necessary to
-    support versions 1.14, 2.4, and 2.5
-
-    - Tensorboard 2+ no longer exposes all ports. Must pass in "--bind_all" to expose localhost
-    - Tensorboard 2.5.0 introduces an experimental feature (default load_fast=true)
-    which prevents multiple plugins from loading correctly.
+def service_env(environ: Mapping[str, str], add_args: List[str]) -> Dict[str, str]:
+    """The environment of the service program: the task's, with TensorBoard's port, path prefix
+    and arguments. The token is in the task's environment.
     """
-    task_id = os.environ["DET_TASK_ID"]
-    port = os.environ["TENSORBOARD_PORT"]
-
-    tensorboard_args = [
-        "tensorboard",
-        f"--port={port}",
-        f"--path_prefix=/proxy/{task_id}",
-        *add_args,
-    ]
-
-    # Version dependant args
-    if version.parse(tb_version) >= version.parse("2"):
-        tensorboard_args.append("--bind_all")
-    if version.parse(tb_version) >= version.parse("2.5"):
-        tensorboard_args.append("--load_fast=false")
-
-    tensorboard_args.append(f"--logdir={tfevents_dir}")
-
-    return tensorboard_args
+    return {
+        **environ,
+        "DET_TENSORBOARD_PORT": environ["TENSORBOARD_PORT"],
+        "DET_TENSORBOARD_PATH_PREFIX": f"/proxy/{environ['DET_TASK_ID']}/",
+        "DET_TENSORBOARD_ARGS": json.dumps(add_args),
+    }
 
 
-def get_tensorboard_url() -> str:
-    task_id = os.environ["DET_TASK_ID"]
-    port = os.environ["TENSORBOARD_PORT"]
-    tensorboard_addr = f"http://localhost:{port}/proxy/{task_id}"
-    return tensorboard_addr
+def start_service(tfevents_dir: str, add_args: List[str]) -> Tuple[subprocess.Popen, int]:
+    """Start the service program, which runs TensorBoard behind the master proxy's token, on
+    tfevents_dir. The program writes its ready line, once TensorBoard has bound its port and
+    refuses requests without the token, to a pipe, whose read end is returned with the process.
+    """
+    args = [sys.executable, SERVICE_PROGRAM, tfevents_dir]
+    logger.debug(f"tensorboard service args: {args}")
+    ready, ready_w = os.pipe()
 
+    def open_ready_fd() -> None:
+        os.dup2(ready_w, SERVICE_READY_FD)
+        os.set_inheritable(SERVICE_READY_FD, True)
 
-def check_tensorboard_responsive() -> bool:
-    # Ensure Tensorboard is responding to HTTP request to prevent 502 from master.
-    tensorboard_url = get_tensorboard_url()
     try:
-        # Attempt HTTP request to Tensorboard.
-        res = requests.get(tensorboard_url)
-        res.raise_for_status()
-        return True
+        # The descriptors of the launcher are not inheritable, so close_fds=False passes only the
+        # standard streams and the ready descriptor.
+        process = subprocess.Popen(
+            args,
+            env=service_env(os.environ, add_args),
+            close_fds=False,
+            preexec_fn=open_ready_fd,
+        )
+    except BaseException:
+        os.close(ready)
+        raise
+    finally:
+        os.close(ready_w)
+    return process, ready
 
-    except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError, ValueError) as exp:
-        logger.warning(f"Tensorboard not responding to HTTP: {exp}")
 
-    return False
+def check_service_ready(p: subprocess.Popen, ready: int, received: bytearray) -> bool:
+    """Whether the program has written its ready line to ready, waiting on it up to a tick, to
+    prevent 502 from master. received keeps what the program has written so far.
+    """
+    readable, _, _ = select.select([ready], [], [], TICK_INTERVAL)
+    if not readable:
+        return False
+    chunk = os.read(ready, 4096)
+    if not chunk:
+        try:
+            p.wait(timeout=TICK_INTERVAL)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("Tensorboard answers without the token.") from None
+        raise_if_dead(p)
+    received.extend(chunk)
+    return SERVICE_READY_LINE in received
+
+
+def check_launch(environ: Mapping[str, str]) -> bool:
+    """Whether the task has the token and the program, which a TensorBoard launched by an earlier
+    master lacks.
+    """
+    return bool(environ.get("DET_TENSORBOARD_TOKEN")) and os.path.exists(SERVICE_PROGRAM)
 
 
 def raise_if_dead(p: subprocess.Popen) -> None:
@@ -109,7 +128,6 @@ def raise_if_dead(p: subprocess.Popen) -> None:
 
 def start_tensorboard(
     storage_config: Dict[str, Any],
-    tb_version: str,
     storage_paths: List[str],
     add_tb_args: List[str],
 ) -> int:
@@ -124,10 +142,7 @@ def start_tensorboard(
         )
         fetcher = fetchers.build(storage_config, storage_paths, local_dir)
 
-        # Build Tensorboard args and launch process.
-        tb_args = get_tensorboard_args(tb_version, local_dir, add_tb_args)
-        logger.debug(f"tensorboard args: {tb_args}")
-        tensorboard_process = subprocess.Popen(tb_args)
+        tensorboard_process, ready = start_service(local_dir, add_tb_args)
         tb_fetch_manager = TBFetchManager()
         work_queue: queue.Queue = queue.Queue(maxsize=WORK_QUEUE_MAX_SIZE)
 
@@ -150,14 +165,16 @@ def start_tensorboard(
 
                 # Wait for the Tensorboard process to start responding before proceeding.
                 responsive = False
+                received = bytearray()
                 while not responsive:
                     raise_if_dead(tensorboard_process)
 
                     if time.time() > tb_unresponsive_stop_time:
                         raise RuntimeError("Tensorboard wasn't responsive before the timeout.")
 
-                    time.sleep(TICK_INTERVAL)
-                    responsive = check_tensorboard_responsive()
+                    responsive = check_service_ready(tensorboard_process, ready, received)
+                os.close(ready)
+                ready = -1
 
                 # Continuously loop checking for new files
                 stop_time = time.time() + MAX_WAIT_TIME
@@ -178,6 +195,8 @@ def start_tensorboard(
                     time.sleep(TICK_INTERVAL)
 
             finally:
+                if ready >= 0:
+                    os.close(ready)
                 if tensorboard_process.poll() is None:
                     logger.info("Killing tensorboard process")
                     tensorboard_process.kill()
@@ -294,6 +313,9 @@ if __name__ == "__main__":
         storage_config = json.load(config_file)
 
     determined.common.set_logger(determined.common.util.debug_mode())
+    if not check_launch(os.environ):
+        print("TensorBoard: launched by an earlier master; launch it again.", file=sys.stderr)
+        sys.exit(1)
     logger.debug(
         f"Tensorboard (v{tb_version}) Initializing...\n"
         f"\tstorage_config_path: {storage_config_path}\n"
@@ -302,5 +324,5 @@ if __name__ == "__main__":
         f"\tstorage_config: {storage_config}"
     )
 
-    ret = start_tensorboard(storage_config, tb_version, storage_paths, additional_tb_args)
+    ret = start_tensorboard(storage_config, storage_paths, additional_tb_args)
     sys.exit(ret)

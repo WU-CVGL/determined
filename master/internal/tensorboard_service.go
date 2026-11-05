@@ -26,8 +26,8 @@ const (
 	// strings, which the service decodes, so that an argument may hold any character but NUL, which
 	// the config refuses.
 	tensorBoardArgsEnvVar = "DET_TENSORBOARD_ARGS"
-	// tensorBoardTokenEnvVar is the token that a shell's TensorBoard requires of every request,
-	// which the master's proxy adds to the requests that it passes on.
+	// tensorBoardTokenEnvVar is the token that TensorBoard, of a shell or a task, requires of every
+	// request, which the master's proxy adds to the requests that it passes on.
 	tensorBoardTokenEnvVar = "DET_TENSORBOARD_TOKEN" //nolint:gosec // A variable's name.
 	// tensorBoardTokenBytes is the entropy of a tensorboard service's token.
 	tensorBoardTokenBytes = 32
@@ -70,11 +70,10 @@ func addShellTensorBoard(spec *tasks.GenericCommandSpec) (archive.Archive, error
 	if err != nil {
 		return nil, err
 	}
-	secret := make([]byte, tensorBoardTokenBytes)
-	if _, err := cryptorand.Read(secret); err != nil {
-		return nil, status.Errorf(codes.Internal, "generating the tensorboard token: %s", err)
+	token, err := newTensorBoardToken()
+	if err != nil {
+		return nil, err
 	}
-	token := base64.RawURLEncoding.EncodeToString(secret)
 	spec.AddService(tensorBoardService(port))
 	spec.Metadata.TensorBoardToken = &token
 	addExtraEnvVars(spec, map[string]string{
@@ -84,4 +83,13 @@ func addShellTensorBoard(spec *tasks.GenericCommandSpec) (archive.Archive, error
 		tensorBoardTokenEnvVar:  token,
 	})
 	return nil, nil
+}
+
+// newTensorBoardToken returns a new token for a TensorBoard behind the master's proxy.
+func newTensorBoardToken() (string, error) {
+	secret := make([]byte, tensorBoardTokenBytes)
+	if _, err := cryptorand.Read(secret); err != nil {
+		return "", status.Errorf(codes.Internal, "generating the tensorboard token: %s", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(secret), nil
 }

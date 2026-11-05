@@ -4,6 +4,7 @@
 package internal
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 
@@ -16,6 +17,7 @@ import (
 
 	"github.com/determined-ai/determined/master/internal/command"
 	"github.com/determined-ai/determined/master/internal/db"
+	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/schemas"
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
@@ -189,4 +191,53 @@ func TestLaunchTensorboardInheritsImageOnlyFromOwnExperiment(t *testing.T) {
 			require.Equal(t, c.want, launchedImageCreds(t, resp))
 		})
 	}
+}
+
+// A TensorBoard requires a new token of every request: the persisted spec keeps it, the container
+// gets it and the program that checks it, and the proxy adds it to the requests that it passes on
+// to the TensorBoard's port. The response does not carry it.
+func TestLaunchTensorboardServiceToken(t *testing.T) {
+	mockRM := MockRM()
+	mockRM.On("SmallerValueIsHigherPriority", mock.Anything).Return(true, nil)
+	api, curUser, ctx := setupAPITest(t, nil, mockRM)
+	cs, err := command.NewService(api.m.db, api.m.rm)
+	require.NoError(t, err)
+	command.SetDefaultService(cs)
+	exp := createTestExp(t, api, curUser)
+
+	launch := func() (*apiv1.LaunchTensorboardResponse, string) {
+		resp, err := api.LaunchTensorboard(ctx, &apiv1.LaunchTensorboardRequest{
+			ExperimentIds: []int32{int32(exp.ID)},
+		})
+		require.NoError(t, err)
+		spec := launchedSpec(t, resp.Tensorboard.Id)
+		require.NotNil(t, spec.Metadata.TensorBoardToken)
+		return resp, *spec.Metadata.TensorBoardToken
+	}
+	resp, token := launch()
+	taskID := resp.Tensorboard.Id
+	spec := launchedSpec(t, taskID)
+
+	raw, err := base64.RawURLEncoding.DecodeString(token)
+	require.NoError(t, err)
+	require.Len(t, raw, 32)
+	require.Equal(t, token, spec.Base.ExtraEnvVars["DET_TENSORBOARD_TOKEN"])
+
+	require.Len(t, spec.Base.ExtraProxyPorts, 1)
+	port := spec.Base.ExtraProxyPorts[0].ProxyPort()
+	alloc := allocateRequest(t, mockRM, taskID)
+	requireOnePolicyPerPort(t, alloc.ProxyPorts)
+	require.Equal(t, []*sproto.ProxyPortConfig{
+		{ServiceID: taskID, Port: port, ServiceToken: token},
+	}, alloc.ProxyPorts)
+
+	paths := containerFilePaths(spec)
+	requireOncePerPath(t, paths)
+	require.Contains(t, paths, "/run/determined/tensorboard/tensorboard_service.py")
+	require.Contains(t, paths, "/run/determined/tensorboard/tensorboard-entrypoint.sh")
+
+	require.NotContains(t, resp.String(), token)
+
+	_, other := launch()
+	require.NotEqual(t, token, other)
 }
