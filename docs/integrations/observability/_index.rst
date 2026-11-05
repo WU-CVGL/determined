@@ -8,7 +8,7 @@
    :hidden:
 
    grafana-task-resources
-   native-task-resources
+   task-resources
 
 This guide provides recommendations and assists in setting up monitoring for a Determined
 installation on Kubernetes.
@@ -17,7 +17,7 @@ For an optional link from task views to an externally managed Grafana task dashb
 :ref:`grafana-task-resources`.
 
 Clusters of Determined agents do not use this guide: for the resource charts inside the Determined
-WebUI, :ref:`native-task-resources` lists the metrics their Prometheus must provide.
+WebUI, :ref:`task-resources` lists the metrics their Prometheus must provide.
 
 ***************
  Prerequisites
