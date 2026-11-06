@@ -51,6 +51,9 @@ const (
 	maxTensorBoardPort        = minTensorBoardPort + 299
 	tensorboardEntrypointFile = "/run/determined/tensorboard/tensorboard-entrypoint.sh"
 	storageConfPath           = "/run/determined/tensorboard/storage_config.json"
+	// tensorboardServiceProgram runs TensorBoard behind the master proxy's token, as for the
+	// tensorboard service of a shell.
+	tensorboardServiceProgram = "/run/determined/tensorboard/tensorboard_service.py"
 )
 
 func filesToArchive(files []*utilv1.File) archive.Archive {
@@ -417,6 +420,15 @@ func (a *apiServer) LaunchTensorboard(
 
 	launchReq.Spec.Base.ExtraEnvVars = uniqEnvVars
 
+	// TensorBoard requires the task's token of every request, which the master's proxy adds to
+	// the requests that it passes on; the spec keeps it for a restore.
+	token, err := newTensorBoardToken()
+	if err != nil {
+		return nil, err
+	}
+	launchReq.Spec.Metadata.TensorBoardToken = &token
+	addExtraEnvVars(launchReq.Spec, map[string]string{tensorBoardTokenEnvVar: token})
+
 	// The TensorBoard runs as its launcher, with the launcher's session token and agent user. The
 	// experiment's image is code chosen by the experiment's owner, and its image pull secrets and
 	// registry_auth are the owner's credentials. So inherit them only from the launcher's own
@@ -470,6 +482,11 @@ func (a *apiServer) LaunchTensorboard(
 		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(
 			tensorboardEntrypointFile,
 			etc.MustStaticFile(etc.TensorboardEntryScriptResource), 0o700,
+			tar.TypeReg,
+		),
+		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(
+			tensorboardServiceProgram,
+			etc.MustStaticFile(etc.TensorBoardServiceProgramResource), 0o700,
 			tar.TypeReg,
 		),
 		launchReq.Spec.Base.AgentUserGroup.OwnedArchiveItem(storageConfPath, confBytes, 0o700, tar.TypeReg),

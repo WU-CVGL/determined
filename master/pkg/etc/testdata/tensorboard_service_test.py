@@ -6,11 +6,14 @@ the stand-in is the only tensorboard package.
 """
 
 import contextlib
+import fcntl
 import io
 import os
+import select
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import types
 import unittest
@@ -370,6 +373,18 @@ class FlagsTest(unittest.TestCase):
                 ):
                     tensorboard_service.user_args({"DET_TENSORBOARD_ARGS": value})
 
+    def test_ready_fd(self) -> None:
+        for value, want in [(None, 3), ("", 3), ("3", 3), ("7", 7), ("12", 12)]:
+            environ = {} if value is None else {"DET_TENSORBOARD_READY_FD": value}
+            self.assertEqual(want, tensorboard_service.ready_fd(environ))
+        for value in ["x", "-1", "0", "2", " 7", "7.0"]:
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    tensorboard_service.Unavailable,
+                    f'^DET_TENSORBOARD_READY_FD is not a descriptor: "{value}"$',
+                ):
+                    tensorboard_service.ready_fd({"DET_TENSORBOARD_READY_FD": value})
+
     def test_release(self) -> None:
         self.assertEqual((2, 9), tensorboard_service.release("2.9.0"))
         self.assertEqual((2, 18), tensorboard_service.release("2.18.0"))
@@ -382,7 +397,7 @@ class FlagsTest(unittest.TestCase):
 class MainTest(unittest.TestCase):
     """The program's refusals, each one line and 127, before TensorBoard starts."""
 
-    def run_program(self, *args: str, **env: str) -> "subprocess.CompletedProcess[str]":
+    def program_env(self, **env: str) -> Dict[str, str]:
         environ = {
             k: v
             for k, v in os.environ.items()
@@ -397,6 +412,10 @@ class MainTest(unittest.TestCase):
             }
         )
         environ.update(env)
+        return environ
+
+    def run_program(self, *args: str, **env: str) -> "subprocess.CompletedProcess[str]":
+        environ = self.program_env(**env)
         return subprocess.run(
             [sys.executable, "-S", tensorboard_service.__file__, *args],
             env=environ,
@@ -444,6 +463,18 @@ class MainTest(unittest.TestCase):
                 "DET_TENSORBOARD_ARGS is not a JSON array of strings",
             ),
             ("no descriptor", ["/logs"], {}, "descriptor 3 is not open"),
+            (
+                "no given descriptor",
+                ["/logs"],
+                {"DET_TENSORBOARD_READY_FD": "7"},
+                "descriptor 7 is not open",
+            ),
+            (
+                "bad descriptor",
+                ["/logs"],
+                {"DET_TENSORBOARD_READY_FD": "1"},
+                'DET_TENSORBOARD_READY_FD is not a descriptor: "1"',
+            ),
         ]
         for name, args, env, line in cases:
             with self.subTest(name):
@@ -451,6 +482,39 @@ class MainTest(unittest.TestCase):
                 self.assertEqual(127, result.returncode, result.stderr)
                 self.assertEqual("tensorboard service: " + line + "\n", result.stderr)
                 self.assertEqual("", result.stdout)
+
+    def test_ready_line_on_the_given_descriptor(self) -> None:
+        # The program writes its ready line to DET_TENSORBOARD_READY_FD, not to descriptor 3.
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        read, pipe_write = os.pipe()
+        write = fcntl.fcntl(pipe_write, fcntl.F_DUPFD_CLOEXEC, 10)
+        os.close(pipe_write)
+        with tempfile.TemporaryDirectory() as tmp, os.fdopen(read, "rb") as ready:
+            environ = self.program_env(
+                DET_TENSORBOARD_PORT=str(port),
+                DET_TENSORBOARD_READY_FD=str(write),
+                ORDER_FILE=os.path.join(tmp, "order"),
+                TB_STAND_IN_PYTHON=sys.executable,
+            )
+            try:
+                p = subprocess.Popen(
+                    [sys.executable, "-S", tensorboard_service.__file__, "/logs"],
+                    env=environ,
+                    pass_fds=(write,),
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+            finally:
+                os.close(write)
+            try:
+                readable, _, _ = select.select([ready], [], [], 30)
+                written = ready.read() if readable else b""
+            finally:
+                p.terminate()
+                _, stderr = p.communicate(timeout=30)
+        self.assertEqual(b"tensorboard: http ready\n", written, stderr)
 
 
 if __name__ == "__main__":

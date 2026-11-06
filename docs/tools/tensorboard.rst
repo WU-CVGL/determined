@@ -69,7 +69,7 @@ Example job configuration file:
 .. code:: yaml
 
    environment:
-     image: determinedai/environments:cuda-11.3-pytorch-1.12-tf-2.8-gpu-0.20.1
+     image: determinedai/pytorch-ngc-dev:0736b6d
    bind_mounts:
      - host_path: /my/agent/path
        container_path: /my/container/path
@@ -79,9 +79,10 @@ Example job configuration file:
 The tensorboard_args field allows you to provide optional TensorBoard arguments. In the example
 above, we set the maximum number of image to display to 100, overriding TensorBoard's default value.
 
-The TensorBoard task installs ``tensorboard`` with pip when the image lacks it, keeping the image's
-``numpy``, ``protobuf``, ``requests`` and ``tensorboard`` at their versions. The profile plugin
-(``tensorboard-plugin-profile``) is installed only when the environment variable
+The TensorBoard task needs TensorBoard 2.9 or later; with an earlier release in the image, the task
+fails and its log says why. The task installs ``tensorboard`` with pip when the image lacks it,
+keeping the image's ``numpy``, ``protobuf``, ``requests`` and ``tensorboard`` at their versions. The
+profile plugin (``tensorboard-plugin-profile``) is installed only when the environment variable
 ``DET_TENSORBOARD_PLUGIN_PROFILE`` is set to a non-empty value:
 
 .. code:: yaml
@@ -186,6 +187,9 @@ logs``.
 Determined schedules TensorBoard instances in containers that run on agent machines. The Determined
 master will proxy HTTP requests to and from the TensorBoard container. TensorBoard instances are
 hosted on agent machines but they do not occupy GPUs.
+
+TensorBoard listens behind the master's proxy: the proxy adds a token that the task was given to the
+requests that it passes on, and TensorBoard refuses requests without it, in every network mode.
 
 ***************************************
  Logging Additional TensorBoard Events

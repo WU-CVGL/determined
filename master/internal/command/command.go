@@ -481,10 +481,18 @@ func (c *Command) stringID() string {
 // every start and restore. Each service's port gets one proxy from its record in spec.Services,
 // the tensorboard service's with its token, and the other ports, such as those of the config's
 // environment, are plain; a plain port that a record owns is skipped. A spec without records
-// reaches every port as a plain port.
+// reaches every port as a plain port, but for a TensorBoard's own port, which gets the spec's token.
 func proxyPortConfigs(spec tasks.GenericCommandSpec, taskID model.TaskID) []*sproto.ProxyPortConfig {
 	if len(spec.Services) == 0 {
-		return sproto.NewProxyPortConfig(spec.ProxyPorts(), taskID, false)
+		ports := sproto.NewProxyPortConfig(spec.ProxyPorts(), taskID, false)
+		if spec.TaskType == model.TaskTypeTensorboard && spec.Metadata.TensorBoardToken != nil {
+			for _, port := range ports {
+				if port.ServiceID == string(taskID) {
+					port.ServiceToken = *spec.Metadata.TensorBoardToken
+				}
+			}
+		}
+		return ports
 	}
 	ports := make([]*sproto.ProxyPortConfig, 0, len(spec.Services))
 	owned := make(map[int]bool, len(spec.Services))
