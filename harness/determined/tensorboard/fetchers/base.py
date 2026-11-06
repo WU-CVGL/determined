@@ -39,6 +39,10 @@ class Fetcher(metaclass=abc.ABCMeta):
         """
         pass
 
+    def forget(self, filepath: str) -> None:
+        """Forgets the record of filepath, so that the next listing yields it again"""
+        self._file_records.pop(filepath, None)
+
     def list_all_generator(self) -> Generator[str, None, None]:
         """Iterates over all files that need to be fetched"""
         for storage_path in self.storage_paths:
