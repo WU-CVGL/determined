@@ -29,6 +29,9 @@ WORK_QUEUE_MAX_SIZE = 20  # Size of the threading work queue for fetching
 FULL_ITERATION_SLEEP_TIME = 20  # How long to wait between a full iteration run (in seconds)
 NUM_FETCH_THREADS = 5  # Number of fetching threads to run concurrently
 READY_SIGNAL_DELAY = 7  # How many seconds to wait before sending the ready signal
+FETCH_ATTEMPTS = 5  # How many times a fetch thread tries a file before it gives up on it
+FETCH_RETRY_PAUSE = 0.5  # How many seconds to wait after a file's first failed attempt
+FETCH_RETRY_MAX_PAUSE = 4  # The longest wait between two attempts, in seconds
 
 logger = logging.getLogger("determined")
 
@@ -188,6 +191,8 @@ def start_tensorboard(
                     time.sleep(TICK_INTERVAL)
 
             finally:
+                for fetch_thread in fetch_threads:
+                    fetch_thread.stop_event.set()
                 if ready >= 0:
                     os.close(ready)
                 if tensorboard_process.poll() is None:
@@ -236,6 +241,7 @@ class TBFetchIterationThread(threading.Thread):
     Note: We are making the assumption that there will only be one of these running per process.
     If we add more, then the base fetcher will need to support locking around the _file_records
     dictionary. Defined in <ROOT>/harness/determined/tensorboard/fetchers/base.py
+    The fetch threads only remove a record (Fetcher.forget), which at worst fetches a file twice.
     """
 
     def __init__(
@@ -265,7 +271,10 @@ class TBFetchIterationThread(threading.Thread):
 
 
 class TBFetchThread(threading.Thread):
-    """Thread to continuously read from the queue and fetch the files"""
+    """Thread to continuously read from the queue and fetch the files. A file that fails is tried
+    again by the thread itself, never put back on the queue; once its attempts are used up, the
+    fetcher forgets it, so that a later listing yields it again. stop_event ends the thread.
+    """
 
     def __init__(
         self,
@@ -278,22 +287,35 @@ class TBFetchThread(threading.Thread):
         self._fetcher = fetcher
         self._work_queue = work_queue
         self._new_file_callback = new_file_callback
+        self.stop_event = threading.Event()
         super().__init__(*args, **kwargs)
 
     def run(self) -> None:
-        while True:
+        while not self.stop_event.is_set():
             try:
-                filepath = self._work_queue.get(block=True)
+                filepath = self._work_queue.get(timeout=TICK_INTERVAL)
+            except queue.Empty:
+                continue
+            self._fetch_with_retries(filepath)
+
+    def _fetch_with_retries(self, filepath: str) -> None:
+        pause = FETCH_RETRY_PAUSE
+        for attempt in range(1, FETCH_ATTEMPTS + 1):
+            try:
                 self._fetcher._fetch(filepath, self._new_file_callback)
+                return
             except Exception as e:
+                if attempt == FETCH_ATTEMPTS:
+                    logger.error(f"Failed to fetch TensorBoard file {filepath}: {e}")
+                    self._fetcher.forget(filepath)
+                    return
                 logger.warning(
-                    f"Timeout fetching TensorBoard files from {self._fetcher}. Error: {e}"
-                    f" (retrying)...",
-                    exc_info=True,
+                    f"Failed to fetch TensorBoard file {filepath} (attempt {attempt} of"
+                    f" {FETCH_ATTEMPTS}): {e}"
                 )
-                # Put the failed filepath back onto the list
-                if filepath:
-                    self._work_queue.put(filepath, block=True)
+            if self.stop_event.wait(pause):
+                return
+            pause = min(pause * 2, FETCH_RETRY_MAX_PAUSE)
 
 
 if __name__ == "__main__":
