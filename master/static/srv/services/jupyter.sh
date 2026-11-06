@@ -42,26 +42,27 @@ jupyter_ready_check() {
     exec "$DET_PYTHON_EXECUTABLE" /run/determined/check_ready_logs.py --ready-regex "${READINESS_REGEX}" "${service_ready_args[@]}"
 }
 
-# The group makes the log helper a child of this shell rather than of JupyterLab.
-{
-    # A busy port fails the service: Jupyter Server would move off it, but the master proxies it.
-    jupyter lab --ServerApp.port=${NOTEBOOK_PORT} \
-        --ServerApp.port_retries=0 \
-        --ServerApp.allow_origin="*" \
-        --ServerApp.base_url="${NOTEBOOK_BASE_URL}" \
-        --ServerApp.allow_root=True \
-        --ServerApp.certfile=/run/determined/jupyter/jupyterCert.pem \
-        --ServerApp.keyfile=/run/determined/jupyter/jupyterKey.key \
-        --ServerApp.ip="*" \
-        --ServerApp.open_browser=False \
-        --ServerApp.token="$DET_NOTEBOOK_TOKEN" \
-        --ServerApp.trust_xheaders=True \
-        --Application.log_format="$JUPYTER_LAB_LOG_FORMAT" \
-        --JupyterApp.log_format="$JUPYTER_LAB_LOG_FORMAT" \
-        --ExtensionApp.log_format="$JUPYTER_LAB_LOG_FORMAT" \
-        --LabServerApp.log_format="$JUPYTER_LAB_LOG_FORMAT" \
-        --LabApp.log_format="$JUPYTER_LAB_LOG_FORMAT" \
-        --ServerApp.log_format="$JUPYTER_LAB_LOG_FORMAT" \
-        --ServerApp.root_dir="/" \
-        --ContentsManager.preferred_dir="$PWD"
-} 2> >(jupyter_log)
+# The log helper is a child of this shell rather than of JupyterLab, which gets its pipe as its
+# standard error only. A busy port fails the service: Jupyter Server would move off it, but the
+# master proxies it.
+exec {jupyter_log_fd}> >(jupyter_log)
+jupyter lab --ServerApp.port=${NOTEBOOK_PORT} \
+    --ServerApp.port_retries=0 \
+    --ServerApp.allow_origin="*" \
+    --ServerApp.base_url="${NOTEBOOK_BASE_URL}" \
+    --ServerApp.allow_root=True \
+    --ServerApp.certfile=/run/determined/jupyter/jupyterCert.pem \
+    --ServerApp.keyfile=/run/determined/jupyter/jupyterKey.key \
+    --ServerApp.ip="*" \
+    --ServerApp.open_browser=False \
+    --ServerApp.token="$DET_NOTEBOOK_TOKEN" \
+    --ServerApp.trust_xheaders=True \
+    --Application.log_format="$JUPYTER_LAB_LOG_FORMAT" \
+    --JupyterApp.log_format="$JUPYTER_LAB_LOG_FORMAT" \
+    --ExtensionApp.log_format="$JUPYTER_LAB_LOG_FORMAT" \
+    --LabServerApp.log_format="$JUPYTER_LAB_LOG_FORMAT" \
+    --LabApp.log_format="$JUPYTER_LAB_LOG_FORMAT" \
+    --ServerApp.log_format="$JUPYTER_LAB_LOG_FORMAT" \
+    --ServerApp.root_dir="/" \
+    --ContentsManager.preferred_dir="$PWD" \
+    2>&"$jupyter_log_fd" {jupyter_log_fd}>&- {service_stdout}>&- {service_stderr}>&-

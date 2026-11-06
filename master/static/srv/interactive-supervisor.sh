@@ -13,6 +13,10 @@
 #   "[[ ${supervisor_phase-} != pre-init ]] || return 0".
 # - A unit passes "${service_ready_args[@]}" to check_ready_logs.py: only the primary service's
 #   readiness marks the task ready, and each service's is logged.
+# - A service's program gets its standard streams and the descriptors that its unit passes it, and
+#   no other: the unit runs it with "{service_stdout}>&- {service_stderr}>&-", which close the
+#   subshell's copies of its output, and opens a pipe to a helper with "exec {name}> >(...)", which
+#   it passes on as, for example, '2>&"$name" {name}>&-'.
 # - The task ends with the primary service's exit status when it exits; the others are stopped.
 #   A service that is not the primary one does not end the task.
 # - SIGINT, SIGTERM and SIGHUP stop all services, and the supervisor exits as if killed by the
@@ -258,6 +262,7 @@ start_service() {
         # Outlive the service when a stop signals the process group, and end with its status.
         trap service_stop_seen=1 INT TERM HUP
         service_inherited_pid=${!-}
+        # The EXIT trap's copies of the output; the service's program does not get them.
         exec {service_stdout}>&1 {service_stderr}>&2
         trap service_exited EXIT
         service_ready_args=(--service "$name")

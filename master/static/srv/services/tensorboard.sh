@@ -82,8 +82,9 @@ if ! tensorboard_error=$(mkdir -p -- "$tensorboard_logdir" 2>&1); then
     tensorboard_unavailable "cannot create the log directory $tensorboard_logdir: ${tensorboard_error##*: }"
 fi
 
-# The group makes the readiness check a child of this shell rather than of the program.
-{
-    "$tensorboard_python" /run/determined/services/tensorboard_service.py "$tensorboard_logdir"
-} 3> >("$DET_PYTHON_EXECUTABLE" /run/determined/check_ready_logs.py \
+# The readiness check is a child of this shell rather than of the program, which gets the check's
+# pipe as its descriptor 3 only.
+exec {tensorboard_ready}> >("$DET_PYTHON_EXECUTABLE" /run/determined/check_ready_logs.py \
     --ready-regex '^tensorboard: http ready$' "${service_ready_args[@]}")
+"$tensorboard_python" /run/determined/services/tensorboard_service.py "$tensorboard_logdir" \
+    3>&"$tensorboard_ready" {tensorboard_ready}>&- {service_stdout}>&- {service_stderr}>&-

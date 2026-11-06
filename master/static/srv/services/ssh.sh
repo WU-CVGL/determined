@@ -121,5 +121,7 @@ ssh_ready_check() {
     exec "$DET_PYTHON_EXECUTABLE" /run/determined/check_ready_logs.py --ready-regex "$READINESS_REGEX" "${service_ready_args[@]}"
 }
 
-# The group makes the log helper a child of this shell rather than of sshd.
-{ /usr/sbin/sshd "$@"; } 2> >(ssh_log)
+# The log helper is a child of this shell rather than of sshd, which gets its pipe as its standard
+# error only.
+exec {ssh_log_fd}> >(ssh_log)
+/usr/sbin/sshd "$@" 2>&"$ssh_log_fd" {ssh_log_fd}>&- {service_stdout}>&- {service_stderr}>&-

@@ -27,14 +27,14 @@ const (
 var filterDefinition = regexp.MustCompile(`(?m)^[ \t]*(?:function[ \t]+)?` + filterFunc + `\b`)
 
 // sshdLine matches the start of the line that runs sshd, with or without exec or a group around it,
-// but not a comment that names it.
-var sshdLine = regexp.MustCompile(
-	`(?m)^[ \t]*(?:\{[ \t]+)?(?:exec[ \t]+)?` + regexp.QuoteMeta(sshdPath) + `\b`)
+// but not a comment that names it, or of the line before it that opens a descriptor for it.
+var sshdLine = regexp.MustCompile(`(?m)^(?:[ \t]*exec[ \t]+\{\w+\}>[^\n]*\n)?` +
+	`[ \t]*(?:\{[ \t]+)?(?:exec[ \t]+)?` + regexp.QuoteMeta(sshdPath) + `\b`)
 
 // sshUnitTail returns the end of the ssh service's unit, from the definition of the sshd log filter
 // on, split at the start of the line that runs sshd: the filter, the readiness regex and the log
-// helpers, then the sshd command to the end of the unit. It assumes only that order, not how the
-// code is laid out.
+// helpers, then the sshd command, with the line that opens its log, to the end of the unit. It
+// assumes only that order, not how the code is laid out.
 func sshUnitTail(t *testing.T) (defs, sshdCommand string) {
 	t.Helper()
 	if _, err := exec.LookPath("bash"); err != nil {
@@ -232,8 +232,12 @@ exit 3
 	sshdArgs := []string{
 		"-f", "/run/determined/ssh/sshd_config", "-p", "2222", "-D", "-e", "-o", "LogLevel VERBOSE",
 	}
+	// The supervisor's subshell has copies of its output, which sshd does not get.
 	cmd := exec.CommandContext(ctx, "bash", //nolint:gosec
-		append([]string{"-c", "set -e\nshopt -s extglob\n" + tail, "ssh.sh"}, sshdArgs...)...)
+		append([]string{
+			"-c", "set -e\nshopt -s extglob\nexec {service_stdout}>&1 {service_stderr}>&2\n" + tail,
+			"ssh.sh",
+		}, sshdArgs...)...)
 	cmd.WaitDelay = 10 * time.Second
 	cmd.Env = append(os.Environ(),
 		"DET_PYTHON_EXECUTABLE="+python,

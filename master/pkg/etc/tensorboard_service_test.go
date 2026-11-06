@@ -321,6 +321,7 @@ func (v *tensorBoardTask) standInPython(path string) {
 	require.NoError(v.t, err)
 	require.NoError(v.t, os.MkdirAll(filepath.Dir(path), 0o700))
 	writeScript(v.t, path, `export TB_STAND_IN_PYTHON="$0" PYTHONPATH=`+strconv.Quote(pkg)+"\n"+
+		`if [[ ${1-} == */tensorboard_service.py ]]; then `+recordFDs("tensorboard")+"fi\n"+
 		`exec `+strconv.Quote(python)+` -S "$@"`+"\n")
 }
 
@@ -493,6 +494,11 @@ func TestTensorBoardUnitRuns(t *testing.T) {
 			require.Equal(t, tc.extra, v.args())
 			require.Equal(t, v.serviceFlags(dir), v.flags())
 			require.Equal(t, v.tbPython(), v.python())
+			// The program gets the readiness check's pipe on 3, and no other end of it.
+			ready, err := os.ReadFile(filepath.Join(v.dir, "ready-args.tensorboard-input"))
+			require.NoError(t, err)
+			fds := requireProgramFDs(t, v.order, "tensorboard", strings.TrimSpace(string(ready)))
+			require.Equal(t, strings.TrimSpace(string(ready)), fds["3"])
 			require.Equal(t, http.StatusUnauthorized, v.get(""))
 			require.Equal(t, http.StatusUnauthorized, v.get("wrong"))
 			require.NoFileExists(t, v.order+".tensorboard-saw-token")

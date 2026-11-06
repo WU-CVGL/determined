@@ -150,7 +150,7 @@ if [[ -n $version ]]; then
     exit 0
 fi
 printf '%s\0' "$@" >"$ORDER_FILE.code-server-args"
-env -0 >"$ORDER_FILE.code-server-env"
+` + recordFDs("code-server") + `env -0 >"$ORDER_FILE.code-server-env"
 printf '%s' "${HASHED_PASSWORD-}" >"$ORDER_FILE.code-server-hash"
 echo "code-server ` + tag + `" >>"$ORDER_FILE"
 echo "[2026-01-01T00:00:00.000Z] info  HTTP server listening on http://$host:$port/"
@@ -327,6 +327,7 @@ func (v *vscodeTask) requireServed(tag string) {
 	hash, err := os.ReadFile(v.order + ".code-server-hash")
 	require.NoError(v.t, err)
 	require.Equal(v.t, codeServerHash, string(hash))
+	requireProgramFDs(v.t, v.order, "code-server")
 	config, err := os.ReadFile(filepath.Join(run, "config.yaml")) //nolint:gosec
 	require.NoError(v.t, err)
 	require.Equal(v.t, `bind-addr: "0.0.0.0:`+codeServerPort+`"

@@ -469,8 +469,8 @@ vscode_ready_check() {
     exec "$DET_PYTHON_EXECUTABLE" /run/determined/check_ready_logs.py --ready-regex "${READINESS_REGEX}" "${service_ready_args[@]}"
 }
 
-# The group makes the log helper a child of this shell rather than of code-server. code-server
-# logs to its standard output and error. It opens the task's working directory.
+# The log helper is a child of this shell rather than of code-server, which logs to its standard
+# output and error and gets the helper's pipe as these only. It opens the task's working directory.
 #
 # code-server applies the environment variables PORT and CODE_SERVER_HOST after --bind-addr, so
 # that a task that sets them would move it off the port the master proxies; --host and --port,
@@ -479,17 +479,17 @@ vscode_ready_check() {
 # code-server releases changes.
 #
 # --ignore-last-opened: the task's directory, not the last one opened from the shared home.
-{
-    "$vscode_bin" --config "$vscode_config" \
-        --bind-addr "0.0.0.0:$vscode_port" \
-        --host 0.0.0.0 \
-        --port "$vscode_port" \
-        --auth password \
-        --user-data-dir "$vscode_data" \
-        --extensions-dir "$vscode_data/extensions" \
-        --disable-telemetry \
-        --disable-update-check \
-        --disable-workspace-trust \
-        --ignore-last-opened \
-        "$PWD"
-} > >(vscode_log) 2>&1
+exec {vscode_log_fd}> >(vscode_log)
+"$vscode_bin" --config "$vscode_config" \
+    --bind-addr "0.0.0.0:$vscode_port" \
+    --host 0.0.0.0 \
+    --port "$vscode_port" \
+    --auth password \
+    --user-data-dir "$vscode_data" \
+    --extensions-dir "$vscode_data/extensions" \
+    --disable-telemetry \
+    --disable-update-check \
+    --disable-workspace-trust \
+    --ignore-last-opened \
+    "$PWD" \
+    >&"$vscode_log_fd" 2>&1 {vscode_log_fd}>&- {service_stdout}>&- {service_stderr}>&-
