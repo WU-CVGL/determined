@@ -56,6 +56,7 @@ case $1 in
         esac
     done
     printf '%s post=%s\n' "$service" "$post" >>"$READY_ARGS_FILE"
+    [[ -z $service ]] || readlink /proc/$$/fd/0 >"$READY_ARGS_FILE.$service-input"
     while IFS= read -r line; do
         if [[ $line =~ ^($regex) ]]; then
             if [[ -n $service ]]; then
@@ -426,6 +427,43 @@ ready_check() {
 // waitUntilOrder is a unit line that waits for a line in the order file.
 func waitUntilOrder(line string) string {
 	return `for _ in $(seq 400); do grep -qx '` + line + `' "$ORDER_FILE" && break; sleep 0.05; done` + "\n"
+}
+
+// recordFDs is a stand-in program's line that records the descriptors that the program got in
+// $ORDER_FILE.<name>-fds, "<fd> <target>" for each that it passes on to the programs it runs, which
+// leaves out the ones that bash opens for itself. Another process reads them, so that the line
+// opens none in the program.
+func recordFDs(name string) string {
+	return `bash -c 'for fd in /proc/$1/fd/*; do
+    flags=
+    while read -r key value; do [[ $key != flags: ]] || flags=$value; done <"/proc/$1/fdinfo/${fd##*/}" || continue
+    ((8#$flags & 8#2000000)) || printf "%s %s\n" "${fd##*/}" "$(readlink "$fd")"
+done 2>/dev/null' fds "$$" >"$ORDER_FILE.` + name + `-fds"` + "\n"
+}
+
+// requireProgramFDs checks the descriptors that the stand-in program name recorded with recordFDs:
+// its standard streams and, besides them, descriptors of the targets want only, each once.
+func requireProgramFDs(t *testing.T, order, name string, want ...string) map[string]string {
+	t.Helper()
+	b, err := os.ReadFile(order + "." + name + "-fds") //nolint:gosec
+	require.NoError(t, err)
+	fds := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSuffix(string(b), "\n"), "\n") {
+		fd, target, ok := strings.Cut(line, " ")
+		require.True(t, ok, "a descriptor and its target: %q", line)
+		fds[fd] = target
+	}
+	others := []string{}
+	for fd, target := range fds {
+		if fd != "0" && fd != "1" && fd != "2" {
+			others = append(others, target)
+		}
+	}
+	for _, fd := range []string{"0", "1", "2"} {
+		require.Contains(t, fds, fd, "the standard streams of %s", name)
+	}
+	require.ElementsMatch(t, want, others, "the descriptors of %s: %v", name, fds)
+	return fds
 }
 
 // The init runs once, after task-setup.sh and before any service, and each service inherits what
@@ -847,7 +885,7 @@ func testSupervisorSSHUnit(t *testing.T, hook string) {
 	s := newSupervisorRun(t, "ssh")
 	s.hook(hook)
 	sshd := filepath.Join(s.dir, "sshd")
-	writeScript(t, sshd, `
+	writeScript(t, sshd, recordFDs("sshd")+`
 printf '%s\0' "$@" >"$ORDER_FILE.sshd-args"
 printf '%s\r\n' "Server listening on 0.0.0.0 port 2222." >&2
 for _ in $(seq 400); do
@@ -875,6 +913,7 @@ exit 0
 	args, err := os.ReadFile(s.order + ".sshd-args")
 	require.NoError(t, err)
 	require.Equal(t, strings.Join(sshdArgs, "\x00")+"\x00", string(args))
+	requireProgramFDs(t, s.order, "sshd")
 
 	require.Contains(t, s.orderLines(), "posted ssh")
 	log := strings.Replace(s.stderr.String(), "[ssh] ready\n", "", 1)
@@ -947,7 +986,7 @@ func testSupervisorJupyterUnit(t *testing.T, hook string, task jupyterTask) *sup
 	s.hook(hook)
 	bin := filepath.Join(s.dir, "bin")
 	require.NoError(t, os.Mkdir(bin, 0o700))
-	writeScript(t, filepath.Join(bin, "jupyter"), `
+	writeScript(t, filepath.Join(bin, "jupyter"), recordFDs("jupyter")+`
 printf '%s\0' "$@" >"$ORDER_FILE.jupyter-args"
 if [[ -n $EXPECT_IDLE ]]; then
     for _ in $(seq 400); do
@@ -1030,6 +1069,7 @@ exit 0
 	args, err := os.ReadFile(s.order + ".jupyter-args")
 	require.NoError(t, err)
 	require.Equal(t, strings.Join(want, "\x00")+"\x00", string(args))
+	requireProgramFDs(t, s.order, "jupyter")
 	require.Equal(t, []string{"[jupyter] start", "[jupyter] ready", "[jupyter] exited 0"}, s.logLines())
 	require.Contains(t, s.stderr.String(), "Jupyter Server 2.14.0 is running at:\n")
 	return s
