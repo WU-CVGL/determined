@@ -272,8 +272,10 @@ class TBFetchIterationThread(threading.Thread):
 
 class TBFetchThread(threading.Thread):
     """Thread to continuously read from the queue and fetch the files. A file that fails is tried
-    again by the thread itself, never put back on the queue; once its attempts are used up, the
-    fetcher forgets it, so that a later listing yields it again. stop_event ends the thread.
+    again by the thread itself, up to FETCH_ATTEMPTS times each time it comes off the queue, and
+    never put back on the queue; after the last attempt the fetcher forgets it, so that a later
+    listing yields it again. stop_event ends the thread's wait on the queue and its pauses between
+    attempts; a fetch that is already running returns when the storage client does.
     """
 
     def __init__(
