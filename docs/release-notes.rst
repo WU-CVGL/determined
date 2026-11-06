@@ -10,6 +10,51 @@
  Version 0.43
 **************
 
+Version 0.43.1
+==============
+
+**Release Date:** November 7, 2026
+
+**Breaking Changes**
+
+-  TensorBoard: The TensorBoard task no longer installs ``tensorboard-plugin-profile`` unless the
+   environment variable ``DET_TENSORBOARD_PLUGIN_PROFILE`` is set. The plugin's install pulled in
+   xprof and the Google Cloud libraries and took minutes, longer than the default idle timeout.
+
+**New Features**
+
+-  Shell: A shell runs TensorBoard from its image on a log directory of the container as the
+   ``tensorboard`` service, with ``services.tensorboard.logdir``, a **TensorBoard** tab on the
+   shell's page and ``det task open <shell id> tensorboard``. TensorBoard itself refuses requests
+   without the master proxy's token, in every network mode.
+
+**Bug Fixes**
+
+-  TensorBoard: The TensorBoard task keeps the image's ``numpy``, ``protobuf``, ``requests`` and
+   ``tensorboard`` when it installs packages. The newer ``tensorboard-plugin-profile`` releases
+   pulled in ``numpy`` 2, which the image's TensorBoard cannot import, and the task exited with
+   ``AttributeError: module 'numpy' has no attribute 'bool8'``.
+
+-  TensorBoard: The TensorBoard task resumes fetching event files after a short storage outage. When
+   every download failed at once, the task could stop fetching new files for good.
+
+-  Master: The proxy no longer compresses a task's already compressed response a second time, which
+   left TensorBoard's toolbar icons blank.
+
+-  WebUI: A shell's service tabs show the services' end once the shell has ended, instead of the
+   last page of the service.
+
+-  WebUI: The three open buttons of **Interactive Task Launched** share one style.
+
+**Security Fixes**
+
+-  TensorBoard: The TensorBoard task's TensorBoard refuses requests without the master proxy's
+   token, in every network mode, so that only the proxy reaches its data. The task needs TensorBoard
+   2.9 or later in its image. TensorBoard tasks that are running or queued at the upgrade keep their
+   earlier TensorBoard, without the token, until they end: kill them (an administrator lists every
+   user's with ``det tensorboard list --all``) and start them again after the upgrade. Their event
+   data is untouched.
+
 Version 0.43.0
 ==============
 
