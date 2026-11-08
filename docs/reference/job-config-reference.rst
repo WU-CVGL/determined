@@ -196,15 +196,22 @@ The following configuration settings are supported:
          output is treated as idle, since JupyterLab does not provide activity information for those
          case.)
 
-   -  ``logdir``: ``tensorboard`` only, and required when it runs. The directory that TensorBoard
-      reads, a path in the container; a relative one is resolved against the working directory, and
-      a missing one is created.
+   -  ``logdir``: ``tensorboard`` only, and required when it runs without ``experiment_ids`` or
+      ``trial_ids``. The directory that TensorBoard reads, a path in the container; a relative one
+      is resolved against the working directory, and a missing one is created.
+
+   -  ``experiment_ids``: ``tensorboard`` only. The experiments, with all their trials, whose
+      TensorBoard logs TensorBoard reads instead of ``logdir``. At most 1000 IDs with ``trial_ids``.
+      All need the same checkpoint storage.
+
+   -  ``trial_ids``: ``tensorboard`` only. More trials whose logs it reads, beside
+      ``experiment_ids``.
 
    -  ``args``: ``tensorboard`` only. A list of more TensorBoard arguments. The service sets
-      ``--logdir``, ``--port``, ``--path_prefix``, ``--host`` and ``--load_fast``, and its values
-      take precedence; an argument that sets ``--logdir``, ``--port``, ``--path_prefix``,
-      ``--host``, ``--bind_all`` or ``--reuse_port``, also abbreviated, or that names a flag file is
-      refused.
+      ``--logdir``, ``--port``, ``--path_prefix``, ``--host`` and ``--load_fast``, and
+      ``--reload_multifile`` with ``experiment_ids`` or ``trial_ids``, and its values take
+      precedence; an argument that sets ``--logdir``, ``--port``, ``--path_prefix``, ``--host``,
+      ``--bind_all`` or ``--reuse_port``, also abbreviated, or that names a flag file is refused.
 
    A service's entry in the launch configuration keeps the template's ``idle_type``, ``logdir`` and
    ``args`` when it does not set them, and runs the service unless it sets ``enabled`` to ``false``;
@@ -213,8 +220,14 @@ The following configuration settings are supported:
    The services are:
 
    -  ``jupyter``: JupyterLab.
-   -  ``ssh``: The SSH server, which every shell runs; it cannot be disabled.
-   -  ``tensorboard``: TensorBoard on ``logdir``. See :ref:`tensorboard-service`.
+
+   -  ``ssh``: The SSH server, which every shell runs, except one whose ``tensorboard`` reads
+      ``experiment_ids`` or ``trial_ids``: it may disable ``ssh``, and then runs with
+      ``resources.slots`` 0.
+
+   -  ``tensorboard``: TensorBoard on ``logdir``, or on the logs of ``experiment_ids`` and
+      ``trial_ids``. See :ref:`tensorboard-service` and :ref:`tensorboards`.
+
    -  ``vscode``: VS Code in the browser, code-server. See :ref:`vscode-browser`.
 
    By default a shell runs ``jupyter``, and ``vscode`` when the master serves code-server (see

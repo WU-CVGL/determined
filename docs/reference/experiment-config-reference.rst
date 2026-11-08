@@ -661,11 +661,9 @@ when the container exits.
 
 .. warning::
 
-   TensorBoards currently do not inherit ``bind_mounts`` or ``pod_specs`` from their parent
-   experiments. Therefore, if an experiment is using ``type: directory`` storage, and mounts the
-   storage separately, a launched TensorBoard will need the same mount configuration provided
-   explicitly using ``det tensorboard start <experiment_id> --config-file <CONFIG FILE>`` or
-   similar.
+   A TensorBoard does not inherit ``bind_mounts`` or ``pod_spec`` from its experiments. For an
+   experiment with ``type: directory`` storage on a mount, give the TensorBoard the same mount, for
+   example with ``det tensorboard start <experiment_id> --config-file <CONFIG FILE>``.
 
 .. warning::
 
