@@ -533,14 +533,17 @@ func TestRestoreTensorBoardViewingSession(t *testing.T) {
 		})
 	taskID := string(shell.taskID)
 
+	calls := 0
 	for _, call := range restartedRM.Calls {
 		if call.Method == "Allocate" {
+			calls++
 			require.Equal(t, []*sproto.ProxyPortConfig{{
 				ServiceID: taskID + ":3000", Port: 3000, Exec: true, SourcesCheck: true,
 				ServiceToken: testTensorBoardToken,
 			}}, call.Arguments.Get(0).(sproto.AllocateRequest).ProxyPorts)
 		}
 	}
+	require.Equal(t, 1, calls)
 	require.Equal(t, model.ServiceTensorBoard, shell.Base.ExtraEnvVars[tasks.ServicesEnvVar])
 	_, ok := shell.Service(model.ServiceSSH)
 	require.False(t, ok)

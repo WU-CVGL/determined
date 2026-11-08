@@ -68,8 +68,4 @@ func TestCanGetTensorBoardSourcesBasic(t *testing.T) {
 			impl.CanGetTensorBoardSources(ctx, user, []int32{}, []int32{})))
 	}
 
-	basic := &NSCAuthZBasic{}
-	require.NoError(t, basic.CanGetTensorBoardSources(ctx, user, []int32{1}, nil))
-	require.NoError(t, basic.CanGetTensorBoardSources(ctx, user, nil, []int32{2}))
-	require.NoError(t, basic.CanGetTensorBoardSources(ctx, user, []int32{1}, []int32{2}))
 }

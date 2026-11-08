@@ -945,8 +945,9 @@ func TestLaunchShellTensorBoardOff(t *testing.T) {
 
 // A TensorBoard-viewing shell's services: tensorboard is the primary service, which its owner may
 // connect to only with the permission on every source, while the owner's other services keep the
-// owner rule; another user may connect to none. The response holds the sources. TensorBoard has no
-// credential.
+// owner rule; another user may connect to none. The response holds the sources for the owner, an
+// admin, and another user with the permission on every source; the shell's sources follow the same
+// rule in GetShell and only the owner rule in GetShells. TensorBoard has no credential.
 func TestGetTaskServicesSources(t *testing.T) {
 	api, _, ctx := setupPreviewTest(t)
 	alice := db.RequireMockUser(t, api.m.db)
@@ -968,42 +969,120 @@ func TestGetTaskServicesSources(t *testing.T) {
 	command.AuthZProvider.RegisterOverride("tb-sources-services", nsc)
 	selectAuthZTypeForTest(t, "tb-sources-services")
 	nsc.On("CanGetNSC", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	nsc.On("AccessibleScopes", mock.Anything, mock.Anything, mock.Anything).Return(
+		model.AccessScopeSet{model.AccessScopeID(resp.Shell.WorkspaceId): true}, nil)
 	sourcesCheck := func(u model.User, err error) {
 		nsc.On("CanGetTensorBoardSources", mock.Anything, mock.MatchedBy(func(v model.User) bool {
 			return v.ID == u.ID
 		}), exps, trials).Return(err).Once()
 	}
-	mayConnect := func(ctx context.Context) map[string]bool {
+	mayConnect := func(ctx context.Context, wantSources bool) map[string]bool {
 		t.Helper()
 		listed, err := api.GetTaskServices(ctx, &apiv1.GetTaskServicesRequest{TaskId: taskID})
 		require.NoError(t, err)
 		require.Equal(t, model.ServiceTensorBoard, listed.Primary)
-		require.Equal(t, exps, listed.ExperimentIds)
-		require.Equal(t, trials, listed.TrialIds)
+		if wantSources {
+			require.Equal(t, exps, listed.ExperimentIds)
+			require.Equal(t, trials, listed.TrialIds)
+		} else {
+			require.Empty(t, listed.ExperimentIds)
+			require.Empty(t, listed.TrialIds)
+		}
 		out := map[string]bool{}
 		for _, s := range listed.Services {
 			out[s.Name] = s.MayConnect
 		}
 		return out
 	}
+	// shellSources returns the sources of the shell and of its config that GetShell returns.
+	shellSources := func(ctx context.Context) ([]int32, []int32, map[string]any) {
+		t.Helper()
+		shell, err := api.GetShell(ctx, &apiv1.GetShellRequest{ShellId: taskID})
+		require.NoError(t, err)
+		services := shell.Config.AsMap()["services"].(map[string]any)
+		config := map[string]any{}
+		for key, value := range services[model.ServiceTensorBoard].(map[string]any) {
+			if key == "experiment_ids" || key == "trial_ids" {
+				config[key] = value
+			}
+		}
+		return shell.Shell.ExperimentIds, shell.Shell.TrialIds, config
+	}
+	wantConfig := map[string]any{
+		"experiment_ids": tbSourcesIDs(exp.ID), "trial_ids": tbSourcesIDs(trial),
+	}
 
 	sourcesCheck(alice, nil)
 	require.Equal(t, map[string]bool{model.ServiceTensorBoard: true, model.ServiceVSCode: true},
-		mayConnect(aliceCtx))
+		mayConnect(aliceCtx, true))
 	sourcesCheck(alice, authz2.PermissionDeniedError{})
 	require.Equal(t, map[string]bool{model.ServiceTensorBoard: false, model.ServiceVSCode: true},
-		mayConnect(aliceCtx))
+		mayConnect(aliceCtx, true))
 	sourcesCheck(bob, nil)
 	require.Equal(t, map[string]bool{model.ServiceTensorBoard: false, model.ServiceVSCode: false},
-		mayConnect(bobCtx))
+		mayConnect(bobCtx, true))
+	sourcesCheck(bob, authz2.PermissionDeniedError{})
+	require.Equal(t, map[string]bool{model.ServiceTensorBoard: false, model.ServiceVSCode: false},
+		mayConnect(bobCtx, false))
 	// An admin, by the owner rule, with the permission on the sources.
 	nsc.On("CanGetTensorBoardSources", mock.Anything, mock.Anything, exps, trials).Return(nil).Once()
 	require.Equal(t, map[string]bool{model.ServiceTensorBoard: true, model.ServiceVSCode: true},
-		mayConnect(ctx))
+		mayConnect(ctx, true))
 	// An error other than a refusal fails the request.
 	sourcesCheck(alice, fmt.Errorf("database unavailable"))
 	_, err = api.GetTaskServices(aliceCtx, &apiv1.GetTaskServicesRequest{TaskId: taskID})
 	require.ErrorContains(t, err, "database unavailable")
+	sourcesCheck(bob, fmt.Errorf("database unavailable"))
+	_, err = api.GetShell(bobCtx, &apiv1.GetShellRequest{ShellId: taskID})
+	require.ErrorContains(t, err, "database unavailable")
+
+	// The owner sees the shell's sources without a check; another user only with the permission.
+	for name, tc := range map[string]struct {
+		ctx    context.Context
+		check  func()
+		exps   []int32
+		trials []int32
+		config map[string]any
+	}{
+		"owner": {
+			ctx: aliceCtx, check: func() {}, exps: exps, trials: trials, config: wantConfig,
+		},
+		"other, permitted": {
+			ctx: bobCtx, check: func() { sourcesCheck(bob, nil) }, exps: exps, trials: trials,
+			config: wantConfig,
+		},
+		"other, refused": {
+			ctx: bobCtx, check: func() { sourcesCheck(bob, authz2.PermissionDeniedError{}) },
+			config: map[string]any{},
+		},
+	} {
+		tc.check()
+		gotExps, gotTrials, gotConfig := shellSources(tc.ctx)
+		require.Equal(t, tc.exps, gotExps, name)
+		require.Equal(t, tc.trials, gotTrials, name)
+		require.Equal(t, tc.config, gotConfig, name)
+	}
+	// A list shows the sources to the owner only, without a check.
+	for name, tc := range map[string]struct {
+		ctx    context.Context
+		exps   []int32
+		trials []int32
+	}{
+		"owner": {ctx: aliceCtx, exps: exps, trials: trials},
+		"other": {ctx: bobCtx},
+	} {
+		shells, err := api.GetShells(tc.ctx, &apiv1.GetShellsRequest{})
+		require.NoError(t, err, name)
+		var found bool
+		for _, shell := range shells.Shells {
+			if shell.Id == taskID {
+				found = true
+				require.Equal(t, tc.exps, shell.ExperimentIds, name)
+				require.Equal(t, tc.trials, shell.TrialIds, name)
+			}
+		}
+		require.True(t, found, name)
+	}
 	nsc.AssertExpectations(t)
 
 	_, err = api.GetTaskServiceCredential(aliceCtx, &apiv1.GetTaskServiceCredentialRequest{

@@ -77,9 +77,12 @@ func (a *apiServer) GetTaskServices(
 
 	owner := canReadTaskCredential(*curUser, int32(services.OwnerID))
 	// A service that shows the logs of the task's experiments and trials also needs the viewer's
-	// permission on all of them, as the proxy checks.
+	// permission on all of them, as the proxy checks. Only the owner, admins and viewers with that
+	// permission see which experiments and trials they are.
 	sourcesOK := false
-	if slices.ContainsFunc(services.Services, func(s command.TaskService) bool { return s.SourcesCheck }) {
+	checked := slices.ContainsFunc(services.Services,
+		func(s command.TaskService) bool { return s.SourcesCheck })
+	if checked || !owner && len(spec.ExperimentIDs)+len(spec.TrialIDs) > 0 {
 		err = command.AuthZProvider.Get().CanGetTensorBoardSources(
 			audit.SupplyEntityID(ctx, req.TaskId), *curUser, spec.ExperimentIDs, spec.TrialIDs)
 		switch {
@@ -90,12 +93,13 @@ func (a *apiServer) GetTaskServices(
 		}
 	}
 	resp := &apiv1.GetTaskServicesResponse{
-		TaskId:        req.TaskId,
-		UserId:        int32(services.OwnerID),
-		WorkspaceId:   int32(spec.WorkspaceID),
-		Services:      []*taskv1.TaskService{},
-		ExperimentIds: spec.ExperimentIDs,
-		TrialIds:      spec.TrialIDs,
+		TaskId:      req.TaskId,
+		UserId:      int32(services.OwnerID),
+		WorkspaceId: int32(spec.WorkspaceID),
+		Services:    []*taskv1.TaskService{},
+	}
+	if owner || sourcesOK {
+		resp.ExperimentIds, resp.TrialIds = spec.ExperimentIDs, spec.TrialIDs
 	}
 	for i, s := range services.Services {
 		if i == 0 {

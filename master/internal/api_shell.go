@@ -38,6 +38,7 @@ import (
 	"github.com/determined-ai/determined/master/pkg/ssh"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
+	"github.com/determined-ai/determined/proto/pkg/shellv1"
 )
 
 const (
@@ -107,6 +108,12 @@ func (a *apiServer) GetShells(
 	if err = api.Paginate(&resp.Pagination, &resp.Shells, req.Offset, req.Limit); err != nil {
 		return nil, err
 	}
+	// A list checks no permission per shell: only the owner and admins see a shell's sources.
+	for _, shell := range resp.Shells {
+		if !canReadTaskCredential(*curUser, shell.UserId) {
+			redactShellSources(shell, nil)
+		}
+	}
 	starts := make([]allocationStartTarget, 0, len(resp.Shells))
 	for _, item := range resp.Shells {
 		starts = append(starts, allocationStartTarget{item.Id, &item.AllocationStartTime})
@@ -134,7 +141,59 @@ func (a *apiServer) GetShell(
 		logCredentialRead(*curUser, "shell private key", req.ShellId, resp.Shell.UserId)
 	}
 	redactTaskConfig(*curUser, resp.Shell.UserId, req.ShellId, resp.Config)
+	if err = checkShellSources(ctx, *curUser, req.ShellId, resp.Shell, resp.Config); err != nil {
+		return nil, err
+	}
 	return resp, nil
+}
+
+// mayReadTensorBoardSources reports whether user may see which experiments and trials a task's
+// tensorboard service reads: the task's owner and admins may, and anyone else with the permission
+// on every one of them. A refusal is false; any other error is returned.
+func mayReadTensorBoardSources(
+	ctx context.Context, user model.User, ownerID int32, experimentIDs, trialIDs []int32,
+) (bool, error) {
+	if canReadTaskCredential(user, ownerID) || len(experimentIDs)+len(trialIDs) == 0 {
+		return true, nil
+	}
+	err := command.AuthZProvider.Get().CanGetTensorBoardSources(ctx, user, experimentIDs, trialIDs)
+	switch {
+	case err == nil:
+		return true, nil
+	case authz.IsPermissionDenied(err):
+		return false, nil
+	default:
+		return false, err
+	}
+}
+
+// checkShellSources removes a shell's tensorboard sources from the shell and its config, if it
+// has one, unless user may see them (mayReadTensorBoardSources).
+func checkShellSources(
+	ctx context.Context, user model.User, shellID string, shell *shellv1.Shell,
+	config *structpb.Struct,
+) error {
+	ok, err := mayReadTensorBoardSources(audit.SupplyEntityID(ctx, shellID), user, shell.UserId,
+		shell.ExperimentIds, shell.TrialIds)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		redactShellSources(shell, config)
+	}
+	return nil
+}
+
+// redactShellSources removes the experiment and trial IDs of a shell's tensorboard service from
+// the shell and, when it is not nil, from its config.
+func redactShellSources(shell *shellv1.Shell, config *structpb.Struct) {
+	shell.ExperimentIds, shell.TrialIds = nil, nil
+	services := config.GetFields()["services"].GetStructValue()
+	tensorBoard := services.GetFields()[model.ServiceTensorBoard].GetStructValue()
+	if tensorBoard != nil {
+		delete(tensorBoard.Fields, "experiment_ids")
+		delete(tensorBoard.Fields, "trial_ids")
+	}
 }
 
 // getShell returns a shell, without its private key but with its full config, if the current user
@@ -188,7 +247,11 @@ func (a *apiServer) KillShell(
 	if err != nil {
 		return nil, err
 	}
-	return &apiv1.KillShellResponse{Shell: cmd.ToV1Shell()}, nil
+	shell := cmd.ToV1Shell()
+	if err = checkShellSources(ctx, *curUser, req.ShellId, shell, nil); err != nil {
+		return nil, err
+	}
+	return &apiv1.KillShellResponse{Shell: shell}, nil
 }
 
 func (a *apiServer) SetShellPriority(
@@ -221,7 +284,11 @@ func (a *apiServer) SetShellPriority(
 		return nil, err
 	}
 
-	return &apiv1.SetShellPriorityResponse{Shell: cmd.ToV1Shell()}, nil
+	shell := cmd.ToV1Shell()
+	if err = checkShellSources(ctx, *curUser, req.ShellId, shell, nil); err != nil {
+		return nil, err
+	}
+	return &apiv1.SetShellPriorityResponse{Shell: shell}, nil
 }
 
 // sshService is the ssh service of a shell, at sshd's port: the shell's primary service and its

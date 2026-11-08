@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"errors"
 
 	"github.com/determined-ai/determined/proto/pkg/tensorboardv1"
 
@@ -86,12 +87,19 @@ func (a *NSCAuthZBasic) CanGetTensorboard(
 	return nil
 }
 
-// CanGetTensorBoardSources refuses empty lists and returns nil otherwise.
+// CanGetTensorBoardSources refuses empty lists and IDs that name nothing, such as a deleted
+// experiment, and returns nil otherwise.
 func (a *NSCAuthZBasic) CanGetTensorBoardSources(
 	ctx context.Context, curUser model.User, experimentIDs, trialIDs []int32,
 ) error {
 	if len(experimentIDs)+len(trialIDs) == 0 {
 		return authz.PermissionDeniedError{}
+	}
+	if _, err := db.TensorBoardSourceWorkspaceIDs(ctx, experimentIDs, trialIDs); errors.Is(
+		err, db.ErrNotFound) {
+		return authz.PermissionDeniedError{}
+	} else if err != nil {
+		return err
 	}
 	return nil
 }

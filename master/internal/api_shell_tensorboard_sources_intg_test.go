@@ -270,6 +270,7 @@ func TestLaunchShellTensorBoardSources(t *testing.T) {
 	// other keys, and a bucket without keys.
 	s3Keys := createTestExpWithStorage(t, api, alice,
 		tbSourcesS3("tb-bucket", tbSourcesAccessKey, tbSourcesSecretKey))
+	s3KeysTrial := db.RequireMockTrialID(t, api.m.db, s3Keys)
 	s3KeysSaveStorage := tbSourcesS3("tb-bucket", tbSourcesAccessKey, tbSourcesSecretKey)
 	s3KeysSaveStorage.RawSaveExperimentBest = ptrs.Ptr(5)
 	s3KeysSaveStorage.RawSaveTrialLatest = ptrs.Ptr(3)
@@ -615,17 +616,26 @@ func TestLaunchShellTensorBoardSources(t *testing.T) {
 	})
 
 	t.Run("inline credentials", func(t *testing.T) {
-		// Another user may not read the logs of storage with inline credentials.
-		requireBothRefuse(t, bobCtx, tbSourcesConfig(t, tbSourcesExperiments(s3Keys.ID), nil, nil),
-			codes.PermissionDenied, fmt.Sprintf(
-				"services: tensorboard: experiment %d: its checkpoint storage has credentials; "+
-					"only its owner or an admin may read its logs", s3Keys.ID))
+		// Another user may not read the logs of storage with inline credentials, of the whole
+		// experiment or of one of its trials.
+		keyed := map[string]map[string]any{
+			"experiment": tbSourcesExperiments(s3Keys.ID),
+			"trial":      {"trial_ids": tbSourcesIDs(s3KeysTrial)},
+		}
+		for _, tb := range keyed {
+			requireBothRefuse(t, bobCtx, tbSourcesConfig(t, tb, nil, nil),
+				codes.PermissionDenied, fmt.Sprintf(
+					"services: tensorboard: experiment %d: its checkpoint storage has credentials; "+
+						"only its owner or an admin may read its logs", s3Keys.ID))
+		}
 		// Its owner and an admin may.
 		for name, ctx := range map[string]context.Context{"owner": aliceCtx, "admin": adminCtx} {
-			_, err := api.PreviewShell(ctx, &apiv1.PreviewShellRequest{
-				Config: tbSourcesConfig(t, tbSourcesExperiments(s3Keys.ID), nil, nil),
-			})
-			require.NoError(t, err, name)
+			for source, tb := range keyed {
+				_, err := api.PreviewShell(ctx, &apiv1.PreviewShellRequest{
+					Config: tbSourcesConfig(t, tb, nil, nil),
+				})
+				require.NoError(t, err, "%s: %s", name, source)
+			}
 		}
 		resp, err := api.LaunchShell(adminCtx, &apiv1.LaunchShellRequest{
 			Config: tbSourcesConfig(t, tbSourcesExperiments(s3Keys.ID), nil, nil),

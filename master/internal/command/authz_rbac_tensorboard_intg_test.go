@@ -132,3 +132,44 @@ func TestCanGetTensorBoardSourcesRBAC(t *testing.T) {
 		}
 	}
 }
+
+// Without RBAC, any user reads the TensorBoard logs of experiments and trials that exist; sources
+// that name nothing, such as a deleted experiment, are refused, so a deletion denies the next
+// request.
+func TestCanGetTensorBoardSourcesBasicNotFound(t *testing.T) {
+	pgDB := setupTest(t)
+	ctx := context.Background()
+
+	owner := db.RequireMockUser(t, pgDB)
+	viewer := db.RequireMockUser(t, pgDB)
+	exp := db.RequireMockExperiment(t, pgDB, owner)
+	trial := int32(db.RequireMockTrialID(t, pgDB, exp))
+	deleted := db.RequireMockExperiment(t, pgDB, owner)
+	_, err := db.Bun().NewDelete().Table("experiments").Where("id = ?", deleted.ID).Exec(ctx)
+	require.NoError(t, err)
+
+	for name, impl := range map[string]NSCAuthZ{
+		"basic": &NSCAuthZBasic{}, "permissive": &NSCAuthZPermissive{},
+	} {
+		for _, tc := range []struct {
+			name    string
+			exps    []int32
+			trials  []int32
+			allowed bool
+		}{
+			{name: "experiment", exps: []int32{int32(exp.ID)}, allowed: true},
+			{name: "trial", trials: []int32{trial}, allowed: true},
+			{name: "both", exps: []int32{int32(exp.ID)}, trials: []int32{trial}, allowed: true},
+			{name: "deleted experiment", exps: []int32{int32(exp.ID), int32(deleted.ID)}},
+			{name: "unknown experiment", exps: []int32{math.MaxInt32}},
+			{name: "unknown trial", exps: []int32{int32(exp.ID)}, trials: []int32{math.MaxInt32}},
+		} {
+			err := impl.CanGetTensorBoardSources(ctx, viewer, tc.exps, tc.trials)
+			if tc.allowed {
+				require.NoError(t, err, "%s: %s", name, tc.name)
+			} else {
+				require.Equal(t, authz.PermissionDeniedError{}, err, "%s: %s", name, tc.name)
+			}
+		}
+	}
+}
