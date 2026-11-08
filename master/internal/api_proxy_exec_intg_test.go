@@ -17,11 +17,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	apiPkg "github.com/determined-ai/determined/master/internal/api"
+	authz2 "github.com/determined-ai/determined/master/internal/authz"
 	"github.com/determined-ai/determined/master/internal/command"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/proxy"
 	"github.com/determined-ai/determined/master/internal/user"
 	"github.com/determined-ai/determined/master/pkg/model"
+	"github.com/determined-ai/determined/master/pkg/ptrs"
+	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 )
 
 // TestProxyExecPortOwnerOrAdmin checks that a port whose service runs code as the task's owner is
@@ -223,4 +226,147 @@ func TestProxyServiceTokenOnlyAfterAccessCheck(t *testing.T) {
 	code, header = send(otherToken)
 	require.Equal(t, http.StatusNotFound, code)
 	require.Nil(t, header)
+}
+
+// A tensorboard service that reads the task's experiments and trials is reached only by the
+// owner, or with the task's notebook token, and admins, as an exec port, and only while the
+// visitor may read every source: the proxy checks the sources on every request, after the owner
+// rule, so a revoked permission refuses the next request. The task's other ports, and a
+// tensorboard service on a log directory, never check the sources.
+func TestProxyTensorBoardSourcesPort(t *testing.T) {
+	api, authz, admin, _ := setupNTSCAuthzTest(t)
+	authz.On("CanGetNSC", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	user.InitService(api.m.db, &model.ExternalSessions{})
+	if proxy.DefaultProxy == nil {
+		proxy.InitProxy(processProxyAuthentication, user.IsMasterSignedToken)
+	}
+
+	ctx := context.TODO()
+	exps, trials := []int32{3, 5}, []int32{8}
+	req := mockGenericReq(t, api.m.db)
+	req.Spec.Base.ExtraProxyPorts = expconf.ProxyPortsConfig{{
+		RawProxyPort: 8080, RawDefaultServiceID: ptrs.Ptr(true),
+	}}
+	req.Spec.Metadata.ExperimentIDs, req.Spec.Metadata.TrialIDs = exps, trials
+	cmd, err := command.DefaultCmdService.LaunchGenericCommand(
+		model.TaskTypeCommand, model.JobTypeCommand, req)
+	require.NoError(t, err)
+	taskID := cmd.ToV1Command().Id
+	ownerRow, err := user.ByID(ctx, req.Spec.Base.Owner.ID)
+	require.NoError(t, err)
+	owner := ownerRow.ToUser()
+	other := db.RequireMockUser(t, api.m.db)
+	sessionOf := func(u model.User) string {
+		token, err := user.StartSession(ctx, &u)
+		require.NoError(t, err)
+		return token
+	}
+	ownerToken, otherToken, adminToken := sessionOf(owner), sessionOf(other), sessionOf(admin)
+	notebookToken, err := db.GenerateNotebookSessionToken(owner.ID, model.TaskID(taskID))
+	require.NoError(t, err)
+
+	reached := make(chan struct{}, 1)
+	service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached <- struct{}{}
+	}))
+	defer service.Close()
+	serviceURL, err := url.Parse(service.URL)
+	require.NoError(t, err)
+	tensorBoard, jupyter, vscode, logDir := taskID+":tb", taskID+":jupyter", taskID+":vscode",
+		taskID+":logdir"
+	for id, s := range map[string]proxy.Service{
+		tensorBoard: {URL: serviceURL, Exec: true, SourcesCheck: true, ServiceToken: "tb-token"},
+		jupyter:     {URL: serviceURL, Exec: true},
+		vscode:      {URL: serviceURL, Exec: true, StripPrefix: true},
+		logDir:      {URL: serviceURL, Exec: true, ServiceToken: "logdir-token"},
+	} {
+		proxy.DefaultProxy.RegisterService(id, s)
+		defer proxy.DefaultProxy.Unregister(id)
+	}
+
+	e := echo.New()
+	e.HTTPErrorHandler = apiPkg.JSONErrorHandler
+	e.Any("/proxy/:service/*", proxy.DefaultProxy.NewProxyHandler("service"))
+	master := httptest.NewServer(e)
+	defer master.Close()
+	send := func(serviceID, query, session string) (int, bool) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			master.URL+"/proxy/"+serviceID+"/data"+query, nil)
+		require.NoError(t, err)
+		if session != "" {
+			req.Header.Set("Authorization", "Bearer "+session)
+		}
+		resp, err := cleanhttp.DefaultClient().Do(req)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		select {
+		case <-reached:
+			return resp.StatusCode, true
+		default:
+			return resp.StatusCode, false
+		}
+	}
+	sourcesCalls := func() int {
+		n := 0
+		for _, call := range authz.Calls {
+			if call.Method == "CanGetTensorBoardSources" {
+				n++
+			}
+		}
+		return n
+	}
+	// expectSources makes the next sources check of u return err.
+	expectSources := func(u model.User, err error) {
+		authz.On("CanGetTensorBoardSources", mock.Anything, mock.MatchedBy(func(v model.User) bool {
+			return v.ID == u.ID
+		}), exps, trials).Return(err).Once()
+	}
+	requireReached := func(name, serviceID, query, session string) {
+		t.Helper()
+		code, ok := send(serviceID, query, session)
+		require.Equal(t, http.StatusOK, code, name)
+		require.True(t, ok, name)
+	}
+	requireNotFound := func(name, serviceID, query, session string) {
+		t.Helper()
+		code, ok := send(serviceID, query, session)
+		require.Equal(t, http.StatusNotFound, code, name)
+		require.False(t, ok, name)
+	}
+
+	// The owner passes while the sources check does, on every request.
+	expectSources(owner, nil)
+	requireReached("owner", tensorBoard, "", ownerToken)
+	expectSources(owner, nil)
+	requireReached("owner, again", tensorBoard, "", ownerToken)
+	require.Equal(t, 2, sourcesCalls())
+	// A revoked permission refuses the next request.
+	expectSources(owner, authz2.PermissionDeniedError{})
+	requireNotFound("owner, revoked", tensorBoard, "", ownerToken)
+	require.Equal(t, 3, sourcesCalls())
+	// The task's notebook token acts as the owner, sources included.
+	expectSources(owner, nil)
+	requireReached("notebook token", tensorBoard, "?token="+notebookToken, "")
+	expectSources(owner, authz2.PermissionDeniedError{})
+	requireNotFound("notebook token, revoked", tensorBoard, "?token="+notebookToken, "")
+	require.Equal(t, 5, sourcesCalls())
+
+	// Another user who can see the task is refused by the owner rule, before the sources check.
+	requireNotFound("other user", tensorBoard, "", otherToken)
+	require.Equal(t, 5, sourcesCalls())
+	// An admin passes with the permission on the sources.
+	expectSources(admin, nil)
+	requireReached("admin", tensorBoard, "", adminToken)
+	expectSources(admin, authz2.PermissionDeniedError{})
+	requireNotFound("admin, without the sources", tensorBoard, "", adminToken)
+	require.Equal(t, 7, sourcesCalls())
+
+	// The task's other ports, and a tensorboard service on a log directory, keep their rules.
+	for _, id := range []string{jupyter, vscode, logDir} {
+		requireReached("owner, "+id, id, "", ownerToken)
+		requireReached("admin, "+id, id, "", adminToken)
+		requireNotFound("other user, "+id, id, "", otherToken)
+	}
+	require.Equal(t, 7, sourcesCalls())
+	authz.AssertExpectations(t)
 }
