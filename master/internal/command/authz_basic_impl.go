@@ -86,6 +86,16 @@ func (a *NSCAuthZBasic) CanGetTensorboard(
 	return nil
 }
 
+// CanGetTensorBoardSources refuses empty lists and returns nil otherwise.
+func (a *NSCAuthZBasic) CanGetTensorBoardSources(
+	ctx context.Context, curUser model.User, experimentIDs, trialIDs []int32,
+) error {
+	if len(experimentIDs)+len(trialIDs) == 0 {
+		return authz.PermissionDeniedError{}
+	}
+	return nil
+}
+
 // CanTerminateTensorboard always returns nil.
 func (a *NSCAuthZBasic) CanTerminateTensorboard(
 	ctx context.Context, curUser model.User, workspaceID model.AccessScopeID,

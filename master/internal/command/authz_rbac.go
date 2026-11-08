@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	log "github.com/sirupsen/logrus"
@@ -213,6 +214,24 @@ func (a *NSCAuthZRBAC) CanGetTensorboard(
 		workspaceIDs, rbacv1.PermissionType_PERMISSION_TYPE_VIEW_EXPERIMENT_ARTIFACTS)
 
 	return err
+}
+
+// CanGetTensorBoardSources returns nil if the user may view the experiment artifacts of the
+// workspaces of every experiment and trial. Empty lists, and IDs that name nothing, are refused.
+func (a *NSCAuthZRBAC) CanGetTensorBoardSources(
+	ctx context.Context, curUser model.User, experimentIDs, trialIDs []int32,
+) error {
+	if len(experimentIDs)+len(trialIDs) == 0 {
+		return authz.PermissionDeniedError{}
+	}
+	workspaceIDs, err := db.TensorBoardSourceWorkspaceIDs(ctx, experimentIDs, trialIDs)
+	if errors.Is(err, db.ErrNotFound) {
+		return authz.PermissionDeniedError{}
+	} else if err != nil {
+		return err
+	}
+	return a.checkForPermissions(ctx, curUser, workspaceIDs,
+		rbacv1.PermissionType_PERMISSION_TYPE_VIEW_EXPERIMENT_ARTIFACTS)
 }
 
 // CanTerminateTensorboard always returns nil.

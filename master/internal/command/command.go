@@ -513,6 +513,7 @@ func proxyPortConfigs(spec tasks.GenericCommandSpec, taskID model.TaskID) []*spr
 			TLS:             service.TLS,
 			Exec:            service.Exec,
 			StripPrefix:     service.StripPrefix,
+			SourcesCheck:    service.SourcesCheck,
 		}
 		if service.Name == model.ServiceTensorBoard && spec.Metadata.TensorBoardToken != nil {
 			port.ServiceToken = *spec.Metadata.TensorBoardToken

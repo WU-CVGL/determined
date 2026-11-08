@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -74,12 +75,27 @@ func (a *apiServer) GetTaskServices(
 		return nil, err
 	}
 
-	mayConnect := canReadTaskCredential(*curUser, int32(services.OwnerID))
+	owner := canReadTaskCredential(*curUser, int32(services.OwnerID))
+	// A service that shows the logs of the task's experiments and trials also needs the viewer's
+	// permission on all of them, as the proxy checks.
+	sourcesOK := false
+	if slices.ContainsFunc(services.Services, func(s command.TaskService) bool { return s.SourcesCheck }) {
+		err = command.AuthZProvider.Get().CanGetTensorBoardSources(
+			audit.SupplyEntityID(ctx, req.TaskId), *curUser, spec.ExperimentIDs, spec.TrialIDs)
+		switch {
+		case err == nil:
+			sourcesOK = true
+		case !authz.IsPermissionDenied(err):
+			return nil, err
+		}
+	}
 	resp := &apiv1.GetTaskServicesResponse{
-		TaskId:      req.TaskId,
-		UserId:      int32(services.OwnerID),
-		WorkspaceId: int32(spec.WorkspaceID),
-		Services:    []*taskv1.TaskService{},
+		TaskId:        req.TaskId,
+		UserId:        int32(services.OwnerID),
+		WorkspaceId:   int32(spec.WorkspaceID),
+		Services:      []*taskv1.TaskService{},
+		ExperimentIds: spec.ExperimentIDs,
+		TrialIds:      spec.TrialIDs,
 	}
 	for i, s := range services.Services {
 		if i == 0 {
@@ -96,7 +112,7 @@ func (a *apiServer) GetTaskServices(
 			ServiceId:  serviceID,
 			Protocol:   protocol,
 			Url:        serviceURL(serviceID, s.ProxyTCP),
-			MayConnect: mayConnect,
+			MayConnect: owner && (!s.SourcesCheck || sourcesOK),
 		})
 	}
 	return resp, nil

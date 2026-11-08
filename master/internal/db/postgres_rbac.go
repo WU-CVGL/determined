@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 
 	"github.com/uptrace/bun"
 
@@ -202,5 +203,64 @@ func TrialIDsToWorkspaceIDs(ctx context.Context, trialIDs []int32) (
 		workspaceIDs = append(workspaceIDs, model.AccessScopeID(wID))
 	}
 
+	return workspaceIDs, nil
+}
+
+// TensorBoardSourceWorkspaceIDs returns the workspaces of the given experiments and trials, each
+// once. It returns ErrNotFound if any of the IDs names no experiment or trial.
+func TensorBoardSourceWorkspaceIDs(ctx context.Context, experimentIDs, trialIDs []int32) (
+	[]model.AccessScopeID, error,
+) {
+	type sourceWorkspace struct {
+		ID          int32 `bun:"id"`
+		WorkspaceID int32 `bun:"workspace_id"`
+	}
+	workspaceSet := map[model.AccessScopeID]bool{}
+	resolve := func(ids []int32, query *bun.SelectQuery) error {
+		asked := map[int32]bool{}
+		for _, id := range ids {
+			asked[id] = true
+		}
+		if len(asked) == 0 {
+			return nil
+		}
+		var rows []sourceWorkspace
+		if err := query.Scan(ctx, &rows); err != nil {
+			return err
+		}
+		resolved := map[int32]bool{}
+		for _, row := range rows {
+			resolved[row.ID] = true
+			workspaceSet[model.AccessScopeID(row.WorkspaceID)] = true
+		}
+		if len(resolved) < len(asked) {
+			return ErrNotFound
+		}
+		return nil
+	}
+
+	if err := resolve(experimentIDs, Bun().NewSelect().TableExpr("experiments AS e").
+		ColumnExpr("e.id AS id").
+		ColumnExpr("p.workspace_id AS workspace_id").
+		Join("JOIN projects p ON p.id = e.project_id").
+		Where("e.id IN (?)", bun.In(experimentIDs)),
+	); err != nil {
+		return nil, err
+	}
+	if err := resolve(trialIDs, Bun().NewSelect().TableExpr("trials AS t").
+		ColumnExpr("t.id AS id").
+		ColumnExpr("p.workspace_id AS workspace_id").
+		Join("JOIN experiments e ON e.id = t.experiment_id").
+		Join("JOIN projects p ON p.id = e.project_id").
+		Where("t.id IN (?)", bun.In(trialIDs)),
+	); err != nil {
+		return nil, err
+	}
+
+	workspaceIDs := make([]model.AccessScopeID, 0, len(workspaceSet))
+	for wID := range workspaceSet {
+		workspaceIDs = append(workspaceIDs, wID)
+	}
+	slices.Sort(workspaceIDs)
 	return workspaceIDs, nil
 }

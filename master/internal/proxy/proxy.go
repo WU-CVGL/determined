@@ -35,6 +35,9 @@ type Service struct {
 	// Exec marks a service that runs code as its task's owner. HTTPAuth decides who may reach it,
 	// even when AllowUnauthenticated is set.
 	Exec bool
+	// SourcesCheck marks a service that shows the logs of its task's experiments and trials. HTTPAuth
+	// also checks the viewer's permission on them, even when AllowUnauthenticated is set.
+	SourcesCheck bool
 	// StripPrefix removes /proxy/<service ID> from the path of HTTP and WebSocket requests before
 	// they reach the service.
 	StripPrefix bool
@@ -58,6 +61,7 @@ func (s Service) Clone() Service {
 		ProxyTCP:             s.ProxyTCP,
 		AllowUnauthenticated: s.AllowUnauthenticated,
 		Exec:                 s.Exec,
+		SourcesCheck:         s.SourcesCheck,
 		StripPrefix:          s.StripPrefix,
 		TaskID:               s.TaskID,
 		ServiceToken:         s.ServiceToken,
@@ -208,7 +212,7 @@ func (p *Proxy) NewProxyHandler(serviceID string) echo.HandlerFunc {
 				fmt.Sprintf("service not found: %s", serviceName))
 		}
 
-		authenticate := service.Exec || !service.AllowUnauthenticated
+		authenticate := service.Exec || service.SourcesCheck || !service.AllowUnauthenticated
 		if authenticate {
 			switch done, err := p.HTTPAuth(c, service); {
 			case err != nil:
