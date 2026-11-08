@@ -443,8 +443,12 @@ func TestTensorBoardSourcesValidation(t *testing.T) {
 		exps, trials int
 		ok           bool
 	}{
-		{exps: 1000, ok: true}, {exps: 600, trials: 400, ok: true}, {trials: 1000, ok: true},
-		{exps: 1001}, {exps: 600, trials: 401}, {trials: 1001},
+		{exps: 1000, ok: true},
+		{exps: 600, trials: 400, ok: true},
+		{trials: 1000, ok: true},
+		{exps: 1001},
+		{exps: 600, trials: 401},
+		{trials: 1001},
 	} {
 		config := DefaultConfig(nil)
 		config.Entrypoint = []string{"run"}

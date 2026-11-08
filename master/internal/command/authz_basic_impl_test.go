@@ -67,5 +67,4 @@ func TestCanGetTensorBoardSourcesBasic(t *testing.T) {
 		require.True(t, authz.IsPermissionDenied(
 			impl.CanGetTensorBoardSources(ctx, user, []int32{}, []int32{})))
 	}
-
 }

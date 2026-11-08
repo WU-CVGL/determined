@@ -1038,7 +1038,7 @@ func TestGetTaskServicesSources(t *testing.T) {
 
 	// The owner sees the shell's sources without a check; another user only with the permission.
 	for name, tc := range map[string]struct {
-		ctx    context.Context
+		ctx    context.Context //nolint:containedctx
 		check  func()
 		exps   []int32
 		trials []int32
@@ -1064,7 +1064,7 @@ func TestGetTaskServicesSources(t *testing.T) {
 	}
 	// A list shows the sources to the owner only, without a check.
 	for name, tc := range map[string]struct {
-		ctx    context.Context
+		ctx    context.Context //nolint:containedctx
 		exps   []int32
 		trials []int32
 	}{
