@@ -96,7 +96,7 @@ func (cs *CommandService) LaunchGenericCommand(
 }
 
 // LaunchShellCommand creates shell commands and persists them to the database. A shell with the
-// jupyter service gets a notebook session of user, whose token is JupyterLab's.
+// jupyter service gets a JupyterLab token of user.
 func (cs *CommandService) LaunchShellCommand(
 	req *CreateGeneric,
 	user *model.User,
@@ -109,7 +109,7 @@ func (cs *CommandService) LaunchShellCommand(
 }
 
 // launch creates a command and persists it to the database. With jupyterUser, the command runs
-// JupyterLab, whose token is a notebook session of that user.
+// JupyterLab, whose token names the task and that user.
 func (cs *CommandService) launch(
 	taskType model.TaskType,
 	jobType model.JobType,
@@ -157,12 +157,6 @@ func (cs *CommandService) launch(
 
 	if err := cmd.Start(context.TODO()); err != nil {
 		return nil, err
-	}
-
-	if jupyterUser != nil {
-		if err := db.StartNotebookSession(context.TODO(), jupyterUser.ID, taskID); err != nil {
-			return nil, err
-		}
 	}
 
 	// Add it to the registry.
