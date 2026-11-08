@@ -359,11 +359,16 @@ func (c *Command) ToV1Command() *commandv1.Command {
 }
 
 // ToV1Shell takes a *Command from the command service registry & returns a *shellv1.Shell.
-// The shell's private key is never included; see ShellPrivateKey.
+// The shell's private key is never included; see ShellPrivateKey. A shell without SSH keys, one
+// whose primary service is tensorboard, has an empty public key.
 func (c *Command) ToV1Shell() *shellv1.Shell {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	var publicKey string
+	if c.Metadata.PublicKey != nil {
+		publicKey = *c.Metadata.PublicKey
+	}
 	allo := c.refreshAllocationState()
 	return &shellv1.Shell{
 		Id:             c.stringID(),
@@ -371,7 +376,7 @@ func (c *Command) ToV1Shell() *shellv1.Shell {
 		Description:    c.Config.Description,
 		StartTime:      protoutils.ToTimestamp(c.registeredTime),
 		Container:      allo.SingleContainer().ToProto(),
-		PublicKey:      *c.Metadata.PublicKey,
+		PublicKey:      publicKey,
 		Username:       c.Base.Owner.Username,
 		UserId:         int32(c.Base.Owner.ID),
 		DisplayName:    c.Base.Owner.DisplayName.ValueOrZero(),
@@ -383,6 +388,8 @@ func (c *Command) ToV1Shell() *shellv1.Shell {
 		JobId:          c.jobID.String(),
 		WorkspaceId:    int32(c.GenericCommandSpec.Metadata.WorkspaceID),
 		Slots:          int32(c.Config.Resources.Slots),
+		ExperimentIds:  c.Metadata.ExperimentIDs,
+		TrialIds:       c.Metadata.TrialIDs,
 	}
 }
 

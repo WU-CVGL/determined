@@ -441,7 +441,7 @@ func TestPreviewShellRefusesAsLaunch(t *testing.T) {
 		},
 		"ssh disabled": {
 			config: servicesConfig(t, map[string]any{"ssh": map[string]any{"enabled": false}}),
-			msg:    "services: ssh cannot be disabled",
+			msg:    "services: ssh: can be disabled only for tensorboard with experiment_ids or trial_ids",
 		},
 		"vscode without code-server": {
 			config: servicesConfig(t, map[string]any{"vscode": map[string]any{}}),

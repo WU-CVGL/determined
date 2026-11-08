@@ -620,7 +620,7 @@ func TestLaunchRejectsServices(t *testing.T) {
 		"a list": {[]any{"jupyter"}, "services"},
 		"ssh disabled": {
 			map[string]any{"ssh": map[string]any{"enabled": false}},
-			"services: ssh cannot be disabled",
+			"services: ssh: can be disabled only for tensorboard with experiment_ids or trial_ids",
 		},
 		"unknown, disabled": {
 			map[string]any{"emacs": map[string]any{"enabled": false}},
@@ -628,7 +628,7 @@ func TestLaunchRejectsServices(t *testing.T) {
 		},
 		"tensorboard without logdir": {
 			map[string]any{"tensorboard": map[string]any{"args": []any{"--x"}}},
-			"services: tensorboard: logdir is required",
+			"services: tensorboard: logdir, experiment_ids or trial_ids is required",
 		},
 		"logdir on jupyter": {
 			map[string]any{"jupyter": map[string]any{"logdir": "runs"}},
@@ -936,8 +936,8 @@ func TestLaunchShellTensorBoardOff(t *testing.T) {
 	cfg := servicesConfig(t, map[string]any{"tensorboard": map[string]any{}})
 	_, err := api.PreviewShell(ctx, &apiv1.PreviewShellRequest{Config: cfg})
 	require.Equal(t, codes.InvalidArgument, status.Code(err), err)
-	require.ErrorContains(t, err, "services: tensorboard: logdir is required")
+	require.ErrorContains(t, err, "services: tensorboard: logdir, experiment_ids or trial_ids is required")
 	_, err = api.LaunchShell(ctx, &apiv1.LaunchShellRequest{Config: cfg})
 	require.Equal(t, codes.InvalidArgument, status.Code(err), err)
-	require.ErrorContains(t, err, "services: tensorboard: logdir is required")
+	require.ErrorContains(t, err, "services: tensorboard: logdir, experiment_ids or trial_ids is required")
 }
