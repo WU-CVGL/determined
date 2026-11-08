@@ -1,13 +1,10 @@
 package model
 
-import "github.com/uptrace/bun"
-
-// NotebookSession corresponds to a row in the "notebook_sessions" DB table.
+// NotebookSession is the claims of a JupyterLab token. ID is always 0.
 type NotebookSession struct {
-	bun.BaseModel `bun:"table:notebook_sessions"`
-	ID            SessionID `db:"id" bun:"id,pk,autoincrement" json:"id"`
-	TaskID        TaskID    `db:"task_id" bun:"task_id" json:"task_id"`
-	UserID        UserID    `db:"user_id" bun:"user_id" json:"user_id"`
+	ID     SessionID `json:"id"`
+	TaskID TaskID    `json:"task_id"`
+	UserID UserID    `json:"user_id"`
 }
 
 // NotebookSessionEnvVar is the environment variable name for notebook task tokens.

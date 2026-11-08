@@ -25,8 +25,7 @@ import (
 )
 
 // launchRows counts the rows that a launch by the user creates: jobs, tasks and allocations of
-// the user's jobs, the user's sessions and notebook sessions, and the shells that the command
-// service runs.
+// the user's jobs, the user's sessions, and the shells that the command service runs.
 func launchRows(t *testing.T, userID model.UserID) map[string]int {
 	t.Helper()
 	ctx := context.Background()
@@ -44,9 +43,8 @@ func launchRows(t *testing.T, userID model.UserID) map[string]int {
 		"allocations": count(`SELECT count(*) FROM allocations a
 			JOIN tasks t ON a.task_id = t.task_id JOIN jobs j ON t.job_id = j.job_id
 			WHERE j.owner_id = ?`),
-		"user_sessions":     count(`SELECT count(*) FROM user_sessions WHERE user_id = ?`),
-		"notebook_sessions": count(`SELECT count(*) FROM notebook_sessions WHERE user_id = ?`),
-		"shells":            len(shells.Shells),
+		"user_sessions": count(`SELECT count(*) FROM user_sessions WHERE user_id = ?`),
+		"shells":        len(shells.Shells),
 	}
 }
 
@@ -70,9 +68,9 @@ func setupPreviewTest(t *testing.T, altMockRM ...*mocks.ResourceManager) (
 	return api, curUser, ctx
 }
 
-// A shell's preview launches nothing: no job, task, allocation, session, notebook session or
-// shell, however many services it declares; the launch of the same request creates them, which
-// shows that the counts see them.
+// A shell's preview launches nothing: no job, task, allocation, session or shell, however many
+// services it declares; the launch of the same request creates them, which shows that the counts
+// see them.
 func TestPreviewShellLaunchesNothing(t *testing.T) {
 	api, curUser, ctx := setupPreviewTest(t)
 	cfg := previewConfig(t, map[string]any{

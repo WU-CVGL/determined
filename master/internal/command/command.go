@@ -257,13 +257,6 @@ func (c *Command) OnExit(ae *task.AllocationExited) {
 		c.syslog.WithError(err).Errorf(
 			"failure to delete user session for task: %v", c.taskID)
 	}
-	// Shells that run JupyterLab have a notebook session for its token.
-	if c.Base.ExtraEnvVars[model.NotebookSessionEnvVar] != "" {
-		if err := internaldb.DeleteNotebookSessionByTask(context.TODO(), c.taskID); err != nil {
-			c.syslog.WithError(err).Errorf(
-				"failure to delete notebook session for task: %v", c.taskID)
-		}
-	}
 
 	go func() {
 		time.Sleep(terminatedDuration)

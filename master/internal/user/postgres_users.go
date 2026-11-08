@@ -445,9 +445,10 @@ func ByToken(ctx context.Context, token string, ext *model.ExternalSessions) (
 	case err != nil:
 		return nil, nil, err
 	}
-	// The master signs allocation and notebook session tokens with the same key, and their IDs
-	// count rows of other tables. Such a token has no user_id claim, so it never names the user of
-	// the user session that happens to have the same ID.
+	// The master signs allocation and notebook tokens with the same key. An allocation token's ID
+	// counts rows of another table and it has no user_id claim, so it never names the user of the
+	// user session that happens to have the same ID. A notebook token has a user_id claim and ID 0,
+	// which matches no user session; an ID that counted rows would let it pass as a session.
 	if claims.UserID != session.UserID {
 		return nil, nil, db.ErrNotFound
 	}
