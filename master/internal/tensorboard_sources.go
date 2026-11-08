@@ -28,8 +28,10 @@ import (
 // The files and environment of a shell's tensorboard service that reads the TensorBoard logs of
 // experiments and trials. The service's loader reads tensorBoardSourcesFile, fetches each source
 // with the checkpoint storage of storageConfPath and publishes it under tensorBoardSourcesLogDir,
-// which TensorBoard reads.
+// which TensorBoard reads. The task's environment holds no storage credentials.
 const (
+	// tensorBoardSourcesDir holds the service's files and tensorBoardSourcesLogDir.
+	tensorBoardSourcesDir = "/run/determined/tensorboard"
 	// tensorBoardSourcesFile lists the sources of the service, without credentials.
 	tensorBoardSourcesFile = "/run/determined/tensorboard/sources.json"
 	// tensorBoardSourcesLogDir is the directory that TensorBoard reads in sources mode.
@@ -59,11 +61,9 @@ type tensorBoardSources struct {
 	// directory.
 	StorageType string
 	Sources     []tensorBoardSource
-	// StorageConfig is the JSON of one source experiment's checkpoint_storage. It may hold
-	// credentials: it is never logged or put in an error.
+	// StorageConfig is the JSON of one source experiment's checkpoint_storage, which the loader
+	// reads at storageConfPath. It may hold credentials: it is never logged or put in an error.
 	StorageConfig []byte
-	// StorageEnv is the environment of S3 storage, credentials included. It is never logged.
-	StorageEnv map[string]string
 }
 
 // tensorBoardLocation is where an experiment's checkpoint storage keeps its TensorBoard logs.
@@ -199,12 +199,6 @@ func (a *apiServer) resolveTensorBoardSources(
 		return nil, status.Error(codes.Internal,
 			"services: tensorboard: encoding the checkpoint storage")
 	}
-	storageEnv := map[string]string{}
-	if c, ok := storages[first].GetUnionMember().(expconf.S3Config); ok {
-		if storageEnv, err = tensorBoardS3Env(c); err != nil {
-			return nil, err
-		}
-	}
 
 	var sources []tensorBoardSource
 	for _, id := range exps {
@@ -240,7 +234,6 @@ func (a *apiServer) resolveTensorBoardSources(
 		StorageType:   loc.Type,
 		Sources:       sources,
 		StorageConfig: storageConfig,
-		StorageEnv:    storageEnv,
 	}, nil
 }
 
@@ -285,8 +278,8 @@ func canonicalTensorBoardIDs(
 
 // tensorBoardStorageLocation returns where a checkpoint storage keeps TensorBoard logs. An invalid
 // shared_fs storage returns its error as is, for the caller to name the experiment; an unknown
-// storage type returns an Internal status error. The save_* options are no part of the storage's
-// identity.
+// storage type returns an Internal status error. The save_* options and the credentials of the
+// endpoint_url and account_url (see tensorBoardURLParts) are no part of the storage's identity.
 func tensorBoardStorageLocation(cs expconf.CheckpointStorageConfig) (tensorBoardLocation, error) {
 	switch c := cs.GetUnionMember().(type) {
 	case expconf.SharedFSConfig:
@@ -309,6 +302,7 @@ func tensorBoardStorageLocation(cs expconf.CheckpointStorageConfig) (tensorBoard
 		}, nil
 
 	case expconf.S3Config:
+		endpoint, _ := tensorBoardURLParts(c.EndpointURL())
 		base := fmt.Sprintf("s3://%s", c.Bucket())
 		if prefix := c.Prefix(); prefix != nil {
 			base = fmt.Sprintf("s3://%s", filepath.Join(c.Bucket(), *prefix))
@@ -317,14 +311,15 @@ func tensorBoardStorageLocation(cs expconf.CheckpointStorageConfig) (tensorBoard
 			Type:     "s3",
 			BasePath: base,
 			Key: "s3\x00" + c.Bucket() + "\x00" + stringValue(c.Prefix()) + "\x00" +
-				stringValue(c.EndpointURL()),
+				endpoint,
 		}, nil
 
 	case expconf.AzureConfig:
+		account, _ := tensorBoardURLParts(c.AccountURL())
 		return tensorBoardLocation{
 			Type:     "azure",
 			BasePath: "azure://" + c.Container(),
-			Key:      "azure\x00" + c.Container() + "\x00" + stringValue(c.AccountURL()),
+			Key:      "azure\x00" + c.Container() + "\x00" + account,
 		}, nil
 
 	case expconf.GCSConfig:
@@ -369,62 +364,58 @@ func checkTensorBoardSourceCredentials(
 	return nil
 }
 
-// tensorBoardInlineCredentials returns the credentials that a checkpoint storage holds, S3's keys
-// or Azure's connection string and credential, or nil when it holds none. The endpoint_url and
-// account_url are not credentials, and the other storage types hold none.
-func tensorBoardInlineCredentials(cs expconf.CheckpointStorageConfig) *[4]string {
+// tensorBoardInlineCredentials returns the credentials that a checkpoint storage holds, or nil when
+// it holds none: S3's keys and the credential of its endpoint_url, or Azure's connection string,
+// credential and the credential of its account_url (see tensorBoardURLParts). The other storage
+// types hold none.
+func tensorBoardInlineCredentials(cs expconf.CheckpointStorageConfig) *[3]string {
+	var creds [3]string
 	switch c := cs.GetUnionMember().(type) {
 	case expconf.S3Config:
-		if c.AccessKey() == nil && c.SecretKey() == nil {
+		_, endpoint := tensorBoardURLParts(c.EndpointURL())
+		if c.AccessKey() == nil && c.SecretKey() == nil && endpoint == "" {
 			return nil
 		}
-		return &[4]string{stringValue(c.AccessKey()), stringValue(c.SecretKey()), "", ""}
+		creds = [3]string{stringValue(c.AccessKey()), stringValue(c.SecretKey()), endpoint}
 	case expconf.AzureConfig:
-		if c.ConnectionString() == nil && c.Credential() == nil {
+		_, account := tensorBoardURLParts(c.AccountURL())
+		if c.ConnectionString() == nil && c.Credential() == nil && account == "" {
 			return nil
 		}
-		return &[4]string{"", "", stringValue(c.ConnectionString()), stringValue(c.Credential())}
+		creds = [3]string{stringValue(c.ConnectionString()), stringValue(c.Credential()), account}
 	default:
 		return nil
 	}
+	return &creds
+}
+
+// tensorBoardURLParts splits an S3 endpoint_url or an Azure account_url into the storage's
+// identity, its scheme, host and path, and its credential, its userinfo and query string, which is
+// "" when it has neither. Azure takes a SAS token as the query string of account_url, with no other
+// credential, and a URL's userinfo may hold a password, so both are credentials, which the identity
+// leaves out. A URL that does not parse, or is opaque, as "host:port" without a scheme, is a
+// credential as a whole. A missing or empty URL has neither.
+func tensorBoardURLParts(raw *string) (key, credential string) {
+	if raw == nil || *raw == "" {
+		return "", ""
+	}
+	u, err := url.Parse(*raw)
+	if err != nil || u.Opaque != "" {
+		return *raw, *raw
+	}
+	if u.User != nil || u.RawQuery != "" {
+		credential = u.User.String() + "?" + u.RawQuery
+	}
+	return u.Scheme + "://" + u.Host + u.Path, credential
 }
 
 // equalTensorBoardCredentials returns whether two results of tensorBoardInlineCredentials are the
 // same: both none, or the same values.
-func equalTensorBoardCredentials(a, b *[4]string) bool {
+func equalTensorBoardCredentials(a, b *[3]string) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
 	return *a == *b
-}
-
-// tensorBoardS3Env returns the environment of S3 checkpoint storage that TensorBoard and its
-// loader read: the keys, when the storage sets them, the endpoint, when it sets one, and the
-// bucket.
-func tensorBoardS3Env(c expconf.S3Config) (map[string]string, error) {
-	env := map[string]string{}
-	if c.AccessKey() != nil {
-		env["AWS_ACCESS_KEY_ID"] = *c.AccessKey()
-	}
-	if c.SecretKey() != nil {
-		env["AWS_SECRET_ACCESS_KEY"] = *c.SecretKey()
-	}
-	if c.EndpointURL() != nil {
-		endpoint, err := url.Parse(*c.EndpointURL())
-		if err != nil {
-			return nil, status.Error(codes.Internal,
-				"unable to parse checkpoint_storage.s3.endpoint_url")
-		}
-		// TensorBoard needs the original URL and the URL in "host:port" form.
-		env["DET_S3_ENDPOINT_URL"] = *c.EndpointURL()
-		env["S3_ENDPOINT"] = endpoint.Host
-		env["S3_USE_HTTPS"] = "0"
-		if endpoint.Scheme == "https" {
-			env["S3_USE_HTTPS"] = "1"
-		}
-	}
-	env["AWS_BUCKET"] = c.Bucket()
-	return env, nil
 }
 
 // tensorBoardSourceRun returns the run name of an experiment's source, or of one of its trials
@@ -469,8 +460,9 @@ func tensorBoardSharedFSMount(mounts model.BindMountsConfig, hostPath string) (*
 }
 
 // tensorBoardSourceFiles returns the files of a tensorboard service's sources, owned by the task's
-// user and readable by it alone: the checkpoint storage at storageConfPath and the sources, which
-// hold no credentials, at tensorBoardSourcesFile.
+// user and readable by it alone: tensorBoardSourcesDir first, so that the task's user may create the
+// log directory in it, then the checkpoint storage at storageConfPath and the sources, which hold
+// no credentials, at tensorBoardSourcesFile.
 func tensorBoardSourceFiles(aug *model.AgentUserGroup, s *tensorBoardSources) (archive.Archive, error) {
 	content, err := json.Marshal(tensorBoardSourcesFileContent{
 		Version:       tensorBoardSourcesVersion,
@@ -482,6 +474,7 @@ func tensorBoardSourceFiles(aug *model.AgentUserGroup, s *tensorBoardSources) (a
 		return nil, status.Error(codes.Internal, "services: tensorboard: encoding the sources")
 	}
 	return archive.Archive{
+		aug.OwnedArchiveItem(tensorBoardSourcesDir, nil, 0o700, tar.TypeDir),
 		aug.OwnedArchiveItem(storageConfPath, s.StorageConfig, 0o600, tar.TypeReg),
 		aug.OwnedArchiveItem(tensorBoardSourcesFile, content, 0o600, tar.TypeReg),
 	}, nil

@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"archive/tar"
 	"encoding/json"
 	"os"
 	"strings"
@@ -164,13 +165,26 @@ func TestTensorBoardStorageLocation(t *testing.T) {
 		require.NotEqual(t, key(base), key(other), name)
 	}
 	require.NotEqual(t, key(sharedFSStorage("/a", nil)), key(sharedFSStorage("/b", nil)))
-	require.NotEqual(t,
-		key(azureStorage(expconf.AzureConfig{
-			RawContainer: ptrs.Ptr("c"), RawAccountURL: ptrs.Ptr("https://a"),
-		})),
-		key(azureStorage(expconf.AzureConfig{
-			RawContainer: ptrs.Ptr("c"), RawAccountURL: ptrs.Ptr("https://b"),
-		})))
+
+	// The userinfo and query string of the endpoint_url and account_url are credentials, no part of
+	// the key; another host is.
+	azure := func(accountURL string) expconf.CheckpointStorageConfig {
+		return azureStorage(expconf.AzureConfig{
+			RawContainer: ptrs.Ptr("c"), RawAccountURL: ptrs.Ptr(accountURL),
+		})
+	}
+	require.Equal(t, key(azure("https://a.example/")), key(azure("https://a.example/?sv=1&sig=s1")))
+	require.Equal(t, key(azure("https://a.example/?sv=1&sig=s1")), key(azure("https://a.example/?sig=s2")))
+	require.Equal(t, key(azure("https://a.example/")), key(azure("https://u:p@a.example/")))
+	require.NotEqual(t, key(azure("https://a.example/")), key(azure("https://b.example/")))
+	require.NotEqual(t, key(azure("https://a.example/?sig=s1")), key(azure("https://b.example/?sig=s1")))
+	s3 := func(endpoint string) expconf.CheckpointStorageConfig {
+		return s3Storage(expconf.S3Config{RawBucket: ptrs.Ptr("b"), RawEndpointURL: ptrs.Ptr(endpoint)})
+	}
+	require.Equal(t, key(s3("http://e:9000")), key(s3("http://u:p@e:9000")))
+	require.Equal(t, key(s3("http://e:9000")), key(s3("http://e:9000?token=t")))
+	require.NotEqual(t, key(s3("http://e:9000")), key(s3("http://e2:9000")))
+	require.NotEqual(t, key(s3("http://u:p@e:9000")), key(s3("http://u:p@e2:9000")))
 
 	// An invalid shared_fs storage returns its plain error, for the caller to name the experiment.
 	_, err := tensorBoardStorageLocation(expconf.CheckpointStorageConfig{
@@ -184,14 +198,14 @@ func TestTensorBoardInlineCredentials(t *testing.T) {
 	cases := []struct {
 		name    string
 		storage expconf.CheckpointStorageConfig
-		want    *[4]string
+		want    *[3]string
 	}{
 		{
 			name: "s3 keys",
 			storage: s3Storage(expconf.S3Config{
 				RawBucket: ptrs.Ptr("b"), RawAccessKey: ptrs.Ptr("a"), RawSecretKey: ptrs.Ptr("s"),
 			}),
-			want: &[4]string{"a", "s", "", ""},
+			want: &[3]string{"a", "s", ""},
 		},
 		{
 			name: "s3 endpoint only",
@@ -200,11 +214,25 @@ func TestTensorBoardInlineCredentials(t *testing.T) {
 			}),
 		},
 		{
+			name: "s3 endpoint with userinfo",
+			storage: s3Storage(expconf.S3Config{
+				RawBucket: ptrs.Ptr("b"), RawEndpointURL: ptrs.Ptr("http://u:p@e:9000"),
+			}),
+			want: &[3]string{"", "", "u:p?"},
+		},
+		{
+			name: "s3 endpoint with query",
+			storage: s3Storage(expconf.S3Config{
+				RawBucket: ptrs.Ptr("b"), RawEndpointURL: ptrs.Ptr("http://e:9000?token=t"),
+			}),
+			want: &[3]string{"", "", "?token=t"},
+		},
+		{
 			name: "azure connection_string",
 			storage: azureStorage(expconf.AzureConfig{
 				RawContainer: ptrs.Ptr("c"), RawConnectionString: ptrs.Ptr("cs"),
 			}),
-			want: &[4]string{"", "", "cs", ""},
+			want: &[3]string{"cs", "", ""},
 		},
 		{
 			name: "azure credential",
@@ -212,13 +240,35 @@ func TestTensorBoardInlineCredentials(t *testing.T) {
 				RawContainer: ptrs.Ptr("c"), RawAccountURL: ptrs.Ptr("https://a"),
 				RawCredential: ptrs.Ptr("cred"),
 			}),
-			want: &[4]string{"", "", "", "cred"},
+			want: &[3]string{"", "cred", ""},
 		},
 		{
 			name: "azure account_url only",
 			storage: azureStorage(expconf.AzureConfig{
-				RawContainer: ptrs.Ptr("c"), RawAccountURL: ptrs.Ptr("https://a"),
+				RawContainer: ptrs.Ptr("c"), RawAccountURL: ptrs.Ptr("https://a.blob.example/"),
 			}),
+		},
+		{
+			name: "azure account_url with a SAS",
+			storage: azureStorage(expconf.AzureConfig{
+				RawContainer:  ptrs.Ptr("c"),
+				RawAccountURL: ptrs.Ptr("https://a.blob.example/?sv=2022-11-02&sig=s"),
+			}),
+			want: &[3]string{"", "", "?sv=2022-11-02&sig=s"},
+		},
+		{
+			name: "azure account_url with userinfo",
+			storage: azureStorage(expconf.AzureConfig{
+				RawContainer: ptrs.Ptr("c"), RawAccountURL: ptrs.Ptr("https://u:p@a.blob.example/"),
+			}),
+			want: &[3]string{"", "", "u:p?"},
+		},
+		{
+			name: "azure account_url that does not parse",
+			storage: azureStorage(expconf.AzureConfig{
+				RawContainer: ptrs.Ptr("c"), RawAccountURL: ptrs.Ptr("https://a%zz"),
+			}),
+			want: &[3]string{"", "", "https://a%zz"},
 		},
 		{
 			name: "gcs",
@@ -320,14 +370,23 @@ func TestTensorBoardSourceFiles(t *testing.T) {
 		},
 		StorageConfig: storageConfig,
 	}
-	files, err := tensorBoardSourceFiles(&model.AgentUserGroup{UID: 1000, GID: 1000}, sources)
+	files, err := tensorBoardSourceFiles(&model.AgentUserGroup{UID: 1000, GID: 1001}, sources)
 	require.NoError(t, err)
-	require.Len(t, files, 2)
+	require.Len(t, files, 3)
 
+	// The directory first, owned by the task's user, then the files.
+	dir := files[0]
+	require.Equal(t, tensorBoardSourcesDir, dir.Path)
+	require.Equal(t, byte(tar.TypeDir), dir.Type)
+	require.Equal(t, os.FileMode(0o700), dir.FileMode)
+	require.Equal(t, 1000, dir.UserID)
+	require.Equal(t, 1001, dir.GroupID)
 	byPath := map[string][]byte{}
-	for _, f := range files {
+	for _, f := range files[1:] {
+		require.Equal(t, byte(tar.TypeReg), f.Type, f.Path)
 		require.Equal(t, os.FileMode(0o600), f.FileMode, f.Path)
 		require.Equal(t, 1000, f.UserID, f.Path)
+		require.Equal(t, 1001, f.GroupID, f.Path)
 		byPath[f.Path] = f.Content
 	}
 	require.Equal(t, storageConfig, byPath[storageConfPath])
@@ -346,26 +405,6 @@ func TestTensorBoardSourceFiles(t *testing.T) {
 			 "path": "s3://b/c1/tensorboard/experiment/13/trial/40/"}
 		]
 	}`, string(content))
-}
-
-func TestTensorBoardS3Env(t *testing.T) {
-	env, err := tensorBoardS3Env(expconf.S3Config{
-		RawBucket: ptrs.Ptr("b"), RawAccessKey: ptrs.Ptr("a"), RawSecretKey: ptrs.Ptr("s"),
-		RawEndpointURL: ptrs.Ptr("https://minio.example:9000"),
-	})
-	require.NoError(t, err)
-	require.Equal(t, map[string]string{
-		"AWS_ACCESS_KEY_ID":     "a",
-		"AWS_SECRET_ACCESS_KEY": "s",
-		"DET_S3_ENDPOINT_URL":   "https://minio.example:9000",
-		"S3_ENDPOINT":           "minio.example:9000",
-		"S3_USE_HTTPS":          "1",
-		"AWS_BUCKET":            "b",
-	}, env)
-
-	env, err = tensorBoardS3Env(expconf.S3Config{RawBucket: ptrs.Ptr("b")})
-	require.NoError(t, err)
-	require.Equal(t, map[string]string{"AWS_BUCKET": "b"}, env)
 }
 
 func TestRequestDisablesSSH(t *testing.T) {
@@ -435,8 +474,6 @@ func TestAddShellTensorBoardSources(t *testing.T) {
 	})
 	storageConfig, err := json.Marshal(storage)
 	require.NoError(t, err)
-	storageEnv, err := tensorBoardS3Env(*storage.RawS3Config)
-	require.NoError(t, err)
 	sources := &tensorBoardSources{
 		ExperimentIDs: []int32{12},
 		StorageType:   "s3",
@@ -445,7 +482,6 @@ func TestAddShellTensorBoardSources(t *testing.T) {
 			Path: tensorBoardSourcePath("s3://b", "c1", 12, nil),
 		}},
 		StorageConfig: storageConfig,
-		StorageEnv:    storageEnv,
 	}
 
 	spec := &tasks.GenericCommandSpec{}
@@ -456,7 +492,7 @@ func TestAddShellTensorBoardSources(t *testing.T) {
 	}
 	files, err := addShellTensorBoard(spec, sources)
 	require.NoError(t, err)
-	require.Len(t, files, 2)
+	require.Len(t, files, 3)
 
 	service, ok := spec.Service(model.ServiceTensorBoard)
 	require.True(t, ok)
@@ -465,8 +501,11 @@ func TestAddShellTensorBoardSources(t *testing.T) {
 	env := spec.Base.ExtraEnvVars
 	require.Equal(t, tensorBoardSourcesLogDir, env[tensorBoardLogDirEnvVar])
 	require.Equal(t, tensorBoardSourcesFile, env[tensorBoardSourcesEnvVar])
-	require.Equal(t, secretKey, env["AWS_SECRET_ACCESS_KEY"])
-	require.Equal(t, "b", env["AWS_BUCKET"])
+	// The storage's credentials are in its file alone, not in the environment.
+	for key, value := range env {
+		require.False(t, strings.HasPrefix(key, "AWS_") || strings.HasPrefix(key, "S3_"), key)
+		require.NotContains(t, value, secretKey, key)
+	}
 
 	// A logdir service has no sources: no files, no sources env, no sources check.
 	spec = &tasks.GenericCommandSpec{}

@@ -56,9 +56,9 @@ func tensorBoardService(port int, sources bool) tasks.InteractiveService {
 // keeps the code-server password, and the port, the log directory, the arguments of the config and
 // the token in the container's environment. Its unit and program come with the supervisor's. With
 // sources, resolved by resolveTensorBoardSources, TensorBoard reads tensorBoardSourcesLogDir, the
-// environment also holds the sources file's path and the storage's environment, and the service's
-// files are the sources' (see tensorBoardSourceFiles); otherwise it reads the config's logdir and
-// has no files of its own.
+// environment also holds the sources file's path, and the service's files are the sources' (see
+// tensorBoardSourceFiles), the storage's credentials included, which the environment does not hold;
+// otherwise it reads the config's logdir and has no files of its own.
 func addShellTensorBoard(
 	spec *tasks.GenericCommandSpec, sources *tensorBoardSources,
 ) (archive.Archive, error) {
@@ -99,7 +99,6 @@ func addShellTensorBoard(
 	if sources == nil {
 		return nil, nil
 	}
-	addExtraEnvVars(spec, sources.StorageEnv)
 	addExtraEnvVars(spec, map[string]string{tensorBoardSourcesEnvVar: tensorBoardSourcesFile})
 	return tensorBoardSourceFiles(spec.Base.AgentUserGroup, sources)
 }

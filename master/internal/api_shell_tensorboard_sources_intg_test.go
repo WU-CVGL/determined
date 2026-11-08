@@ -4,6 +4,7 @@
 package internal
 
 import (
+	"archive/tar"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -35,17 +36,20 @@ import (
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 )
 
-// The inline credentials of the S3 experiments of these tests. No response, error or log line may
-// hold them.
+// The inline credentials of the S3 and Azure experiments of these tests. No response, error or log
+// line may hold them.
 const (
 	tbSourcesAccessKey      = "SENTINEL-ACCESS-KEY"
 	tbSourcesSecretKey      = "SENTINEL-SECRET-KEY"
 	tbSourcesOtherSecretKey = "SENTINEL-OTHER-SECRET-KEY"
+	tbSourcesSAS            = "SENTINEL-SAS-15A"
 	tbSourcesClusterID      = "tb-sources-cluster"
 )
 
 // tbSourcesSentinels are the credentials that must not leak.
-var tbSourcesSentinels = []string{tbSourcesAccessKey, tbSourcesSecretKey, tbSourcesOtherSecretKey}
+var tbSourcesSentinels = []string{
+	tbSourcesAccessKey, tbSourcesSecretKey, tbSourcesOtherSecretKey, tbSourcesSAS,
+}
 
 // createTestExpWithStorage creates an experiment of owner whose checkpoint storage is storage in
 // place of minExpConfig's.
@@ -79,6 +83,15 @@ func tbSourcesS3(bucket, accessKey, secretKey string) expconf.CheckpointStorageC
 		s3.RawSecretKey = ptrs.Ptr(secretKey)
 	}
 	return expconf.CheckpointStorageConfig{RawS3Config: s3}
+}
+
+// tbSourcesAzureSAS returns Azure checkpoint storage whose account_url holds a SAS token with
+// signature sig, its only credential.
+func tbSourcesAzureSAS(sig string) expconf.CheckpointStorageConfig {
+	return expconf.CheckpointStorageConfig{RawAzureConfig: &expconf.AzureConfig{
+		RawContainer:  ptrs.Ptr("tb-container"),
+		RawAccountURL: ptrs.Ptr("https://tbsources.blob.core.windows.net/?sv=2022-11-02&sig=" + sig),
+	}}
 }
 
 // tbSourcesSharedFS returns shared_fs checkpoint storage at hostPath.
@@ -279,6 +292,9 @@ func TestLaunchShellTensorBoardSources(t *testing.T) {
 		tbSourcesS3("tb-bucket", tbSourcesAccessKey, tbSourcesOtherSecretKey))
 	s3Open := createTestExpWithStorage(t, api, alice, tbSourcesS3("tb-open", "", ""))
 	s3OpenTrial := db.RequireMockTrialID(t, api.m.db, s3Open)
+	// Experiments on one Azure account whose SAS tokens differ.
+	azureSAS := createTestExpWithStorage(t, api, alice, tbSourcesAzureSAS(tbSourcesSAS))
+	azureOtherSAS := createTestExpWithStorage(t, api, alice, tbSourcesAzureSAS(tbSourcesSAS+"-OTHER"))
 
 	// Both the preview and the launch of a request refuse it as check does.
 	requireBothRefuseBy := func(
@@ -377,6 +393,17 @@ func TestLaunchShellTensorBoardSources(t *testing.T) {
 		for key := range env {
 			require.False(t, strings.HasPrefix(key, "AWS_"), key)
 		}
+
+		// The sources' directory, before the files in it.
+		index := map[string]int{}
+		for i, item := range spec.AdditionalFiles {
+			index[item.Path] = i
+		}
+		dir := tbSourcesFile(t, spec, tensorBoardSourcesDir)
+		require.Equal(t, byte(tar.TypeDir), dir.Type)
+		require.Equal(t, 0o700, int(dir.FileMode))
+		require.Less(t, index[tensorBoardSourcesDir], index[storageConfPath])
+		require.Less(t, index[tensorBoardSourcesDir], index[tensorBoardSourcesFile])
 
 		// The storage of the lowest experiment and the sources, readable by the task's user alone.
 		storage := tbSourcesFile(t, spec, storageConfPath)
@@ -576,19 +603,22 @@ func TestLaunchShellTensorBoardSources(t *testing.T) {
 		taskID := resp.Shell.Id
 		spec := launchedSpec(t, taskID)
 
-		// The S3 environment, keys included, which only the owner's task gets.
+		// The environment holds no storage variable or credential.
 		env := spec.Base.ExtraEnvVars
-		require.Equal(t, tbSourcesAccessKey, env["AWS_ACCESS_KEY_ID"])
-		require.Equal(t, tbSourcesSecretKey, env["AWS_SECRET_ACCESS_KEY"])
-		require.Equal(t, "https://minio.example.com:9000", env["DET_S3_ENDPOINT_URL"])
-		require.Equal(t, "minio.example.com:9000", env["S3_ENDPOINT"])
-		require.Equal(t, "1", env["S3_USE_HTTPS"])
-		require.Equal(t, "tb-bucket", env["AWS_BUCKET"])
+		for key, value := range env {
+			require.False(t, strings.HasPrefix(key, "AWS_") || strings.HasPrefix(key, "S3_"), key)
+			requireNoSentinel(t, key, value)
+		}
 		require.Equal(t, tensorBoardSourcesFile, env[tensorBoardSourcesEnvVar])
-		// The storage file holds the keys; the sources file does not.
+		// The storage file holds the keys and the endpoint; the sources file does not.
 		storage := tbSourcesFile(t, spec, storageConfPath)
 		require.Equal(t, 0o600, int(storage.FileMode))
-		require.Contains(t, string(storage.Content), tbSourcesSecretKey)
+		var stored map[string]any
+		require.NoError(t, json.Unmarshal(storage.Content, &stored))
+		require.Equal(t, tbSourcesAccessKey, stored["access_key"])
+		require.Equal(t, tbSourcesSecretKey, stored["secret_key"])
+		require.Equal(t, "https://minio.example.com:9000", stored["endpoint_url"])
+		require.Equal(t, "tb-bucket", stored["bucket"])
 		sources := tbSourcesFile(t, spec, tensorBoardSourcesFile)
 		requireNoSentinel(t, "sources.json", string(sources.Content))
 		require.Equal(t, []tensorBoardSource{{
@@ -652,6 +682,67 @@ func TestLaunchShellTensorBoardSources(t *testing.T) {
 		require.Equal(t, []int32{int32(s3OpenTrial)}, spec.Metadata.TrialIDs)
 		_, ok := spec.Base.ExtraEnvVars["AWS_ACCESS_KEY_ID"]
 		require.False(t, ok)
+	})
+
+	t.Run("azure SAS", func(t *testing.T) {
+		// The same account with another SAS token is the same storage with other credentials.
+		requireBothRefuse(t, aliceCtx,
+			tbSourcesConfig(t, tbSourcesExperiments(azureOtherSAS.ID, azureSAS.ID), nil, nil),
+			codes.InvalidArgument, fmt.Sprintf(
+				"services: tensorboard: experiments %d and %d use different storage credentials",
+				azureSAS.ID, azureOtherSAS.ID))
+		// The SAS token is an inline credential.
+		requireBothRefuse(t, bobCtx, tbSourcesConfig(t, tbSourcesExperiments(azureSAS.ID), nil, nil),
+			codes.PermissionDenied, fmt.Sprintf(
+				"services: tensorboard: experiment %d: its checkpoint storage has credentials; "+
+					"only its owner or an admin may read its logs", azureSAS.ID))
+		// Its owner may; the storage file keeps the account_url as it is.
+		resp, err := api.LaunchShell(aliceCtx, &apiv1.LaunchShellRequest{
+			Config: tbSourcesConfig(t, tbSourcesExperiments(azureSAS.ID), nil, nil),
+		})
+		require.NoError(t, err)
+		requireNoSentinel(t, "launch", resp.String())
+		spec := launchedSpec(t, resp.Shell.Id)
+		for key, value := range spec.Base.ExtraEnvVars {
+			requireNoSentinel(t, key, value)
+		}
+		var stored map[string]any
+		require.NoError(t, json.Unmarshal(tbSourcesFile(t, spec, storageConfPath).Content, &stored))
+		require.Equal(t, *tbSourcesAzureSAS(tbSourcesSAS).RawAzureConfig.RawAccountURL,
+			stored["account_url"])
+		content := tbSourcesFileContent(t, spec)
+		require.Equal(t, "azure", content.StorageType)
+		requireNoSentinel(t, "sources.json", string(tbSourcesFile(t, spec, tensorBoardSourcesFile).Content))
+		listed, err := api.GetTaskServices(aliceCtx, &apiv1.GetTaskServicesRequest{TaskId: resp.Shell.Id})
+		require.NoError(t, err)
+		requireNoSentinel(t, "services", listed.String())
+	})
+
+	t.Run("non-root task user", func(t *testing.T) {
+		// The sources' directory and files are owned by the task's user, so that it may create
+		// the log directory.
+		carol := db.RequireMockUser(t, api.m.db)
+		_, err := db.Bun().NewInsert().Model(&model.AgentUserGroup{
+			UserID: carol.ID, User: "carol", UID: 12345, Group: "carol", GID: 12345,
+		}).Exec(context.Background())
+		require.NoError(t, err)
+		resp, err := api.LaunchShell(ntscUserCtx(t, carol), &apiv1.LaunchShellRequest{
+			Config: tbSourcesConfig(t, tbSourcesExperiments(fs1.ID), nil, nil),
+		})
+		require.NoError(t, err)
+		spec := launchedSpec(t, resp.Shell.Id)
+		var owned []string
+		for _, item := range spec.AdditionalFiles {
+			if item.Path != tensorBoardSourcesDir &&
+				!strings.HasPrefix(item.Path, tensorBoardSourcesDir+"/") {
+				continue
+			}
+			require.Equal(t, 12345, item.UserID, item.Path)
+			require.Equal(t, 12345, item.GroupID, item.Path)
+			owned = append(owned, item.Path)
+		}
+		require.Subset(t, owned, []string{tensorBoardSourcesDir, storageConfPath, tensorBoardSourcesFile})
+		require.Equal(t, tensorBoardSourcesDir, owned[0])
 	})
 
 	t.Run("unknown sources", func(t *testing.T) {
