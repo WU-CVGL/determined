@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/stretchr/testify/mock"
+	"github.com/o1egl/paseto"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/argon2"
 	"google.golang.org/grpc/codes"
@@ -27,7 +27,6 @@ import (
 	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/mocks"
-	"github.com/determined-ai/determined/master/internal/rm/rmevents"
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/tasks"
@@ -116,14 +115,6 @@ func containerFilePaths(spec tasks.GenericCommandSpec) map[string]int {
 	return paths
 }
 
-func notebookSessions(t *testing.T, taskID string) []model.NotebookSession {
-	t.Helper()
-	var sessions []model.NotebookSession
-	require.NoError(t, db.Bun().NewSelect().Model(&sessions).
-		Where("task_id = ?", taskID).Scan(context.Background()))
-	return sessions
-}
-
 func requireOncePerPath(t *testing.T, paths map[string]int) {
 	t.Helper()
 	for path, n := range paths {
@@ -133,21 +124,13 @@ func requireOncePerPath(t *testing.T, paths map[string]int) {
 
 // A shell that declares the jupyter service runs sshd and JupyterLab in one container: ssh is the
 // primary service at the bare task ID, jupyter is at "<task>:<port>" behind TLS, a master login and
-// the owner rule, with its own port, files, environment and notebook session. Its notebook session
-// ends with the shell.
+// the owner rule, with its own port, files, environment and token.
 func TestLaunchShellWithJupyterService(t *testing.T) {
 	api, curUser, ctx := setupAPITest(t, nil)
 	cs, err := command.NewService(api.m.db, api.m.rm)
 	require.NoError(t, err)
 	command.SetDefaultService(cs)
 	rm := api.m.rm.(*mocks.ResourceManager)
-	// The resource manager confirms the release, which ends the allocation.
-	rm.On("Release", mock.Anything).Return().Run(func(args mock.Arguments) {
-		release := args.Get(0).(sproto.ResourcesReleased)
-		if release.ResourcesID == nil {
-			rmevents.Publish(release.AllocationID, sproto.ResourcesReleasedEvent{})
-		}
-	})
 
 	resp, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
 		Config: shellConfig(t, map[string]any{"jupyter": map[string]any{}}, 8080),
@@ -202,11 +185,11 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 	require.NotContains(t, env, tasks.IdleTimeoutSecondsEnvVar)
 	require.NotContains(t, env, "DET_ACTIVITY_REPORT")
 
-	// JupyterLab's token is a notebook session of the owner.
-	require.NotEmpty(t, env[model.NotebookSessionEnvVar])
-	sessions := notebookSessions(t, taskID)
-	require.Len(t, sessions, 1)
-	require.Equal(t, curUser.ID, sessions[0].UserID)
+	// JupyterLab's token names the task and the owner.
+	var claims model.NotebookSession
+	require.NoError(t, paseto.NewV2().Verify(
+		env[model.NotebookSessionEnvVar], db.GetTokenKeys().PublicKey, &claims, nil))
+	require.Equal(t, model.NotebookSession{TaskID: model.TaskID(taskID), UserID: curUser.ID}, claims)
 
 	// The files of both services, each once.
 	paths := containerFilePaths(spec)
@@ -220,12 +203,6 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 	} {
 		require.Contains(t, paths, path)
 	}
-
-	// The shell's notebook session ends with it.
-	_, err = api.KillShell(ctx, &apiv1.KillShellRequest{ShellId: taskID})
-	require.NoError(t, err)
-	require.Eventually(t, func() bool { return len(notebookSessions(t, taskID)) == 0 },
-		10*time.Second, 50*time.Millisecond)
 }
 
 // A shell runs jupyter unless its config disables it: a config without services, with an empty
@@ -272,9 +249,9 @@ func TestLaunchShellDefaultServices(t *testing.T) {
 }
 
 // A shell whose config disables jupyter, and vscode where the master serves code-server, runs
-// sshd only, at the bare task ID, without a notebook session or JupyterLab's environment and
-// files; the disabled services stay in its config. Listing ssh changes nothing, and a disabled
-// vscode needs no code-server.
+// sshd only, at the bare task ID, without JupyterLab's token, environment and files; the disabled
+// services stay in its config. Listing ssh changes nothing, and a disabled vscode needs no
+// code-server.
 func TestLaunchShellWithServicesDisabled(t *testing.T) {
 	api, _, ctx := setupAPITest(t, nil)
 	cs, err := command.NewService(api.m.db, api.m.rm)
@@ -335,7 +312,6 @@ func TestLaunchShellWithServicesDisabled(t *testing.T) {
 			} {
 				require.NotContains(t, env, key)
 			}
-			require.Empty(t, notebookSessions(t, taskID))
 
 			paths := containerFilePaths(spec)
 			requireOncePerPath(t, paths)

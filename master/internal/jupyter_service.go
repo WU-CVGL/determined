@@ -16,8 +16,8 @@ import (
 )
 
 // The jupyter service of a shell: JupyterLab's files, its port and its launch, and its token. The
-// token is a notebook session of the task's owner (model.NotebookSession), which the container gets
-// as DET_NOTEBOOK_TOKEN; it logs in to the task's JupyterLab and to its proxied port.
+// token's claims (model.NotebookSession) name the task and its owner; the container gets it as
+// DET_NOTEBOOK_TOKEN, and it logs in to the task's JupyterLab and to its proxied port.
 
 const (
 	jupyterDir         = "/run/determined/jupyter/"
