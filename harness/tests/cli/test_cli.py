@@ -416,6 +416,156 @@ def test_task_open(requests_mock: requests_mock.Mocker, capsys: pytest.CaptureFi
     assert credential.call_count == 0
 
 
+def mock_tensorboard_session(requests_mock: requests_mock.Mocker, task_id: str) -> Any:
+    requests_mock.get(
+        f"/api/v1/tasks/{task_id}",
+        status_code=requests.codes.ok,
+        json={
+            "task": {
+                "allocations": [
+                    {
+                        "allocationId": f"{task_id}.1",
+                        "isReady": True,
+                        "slots": 0,
+                        "state": "STATE_RUNNING",
+                        "taskId": task_id,
+                    }
+                ],
+                "startTime": "2026-01-01T00:00:00Z",
+                "taskId": task_id,
+                "taskType": "TASK_TYPE_SHELL",
+            }
+        },
+    )
+    return requests_mock.post(
+        "/api/v1/shells",
+        status_code=requests.codes.ok,
+        json={
+            "config": {},
+            "shell": {
+                "description": "TensorBoard (x)",
+                "id": task_id,
+                "jobId": "j",
+                "resourcePool": "default",
+                "startTime": "2026-01-01T00:00:00Z",
+                "state": "STATE_QUEUED",
+                "username": "fakeuser",
+                "workspaceId": 1,
+            },
+        },
+    )
+
+
+def test_tensorboard_start_launches_viewing_session(
+    requests_mock: requests_mock.Mocker, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mock_cli_login(requests_mock)
+    task_id = str(uuid.uuid4())
+    launch = mock_tensorboard_session(requests_mock, task_id)
+    workspace = {
+        "archived": False,
+        "errorMessage": "",
+        "id": 7,
+        "immutable": False,
+        "name": "ws",
+        "numExperiments": 0,
+        "numProjects": 0,
+        "pinned": False,
+        "state": "WORKSPACE_STATE_UNSPECIFIED",
+        "userId": 1,
+        "username": "fakeuser",
+    }
+    requests_mock.get(
+        "/api/v1/workspaces",
+        status_code=requests.codes.ok,
+        json={"workspaces": [workspace], "pagination": {}},
+    )
+    requests_mock.get(
+        "/api/v1/workspaces/7", status_code=requests.codes.ok, json={"workspace": workspace}
+    )
+
+    # A shell whose tensorboard service reads the experiments and trials, without SSH.
+    cli.main(["tensorboard", "start", "1", "2", "-t", "3", "-d"])
+    body = launch.last_request.json()
+    assert body["config"] == {
+        "services": {
+            "tensorboard": {"experiment_ids": [1, 2], "trial_ids": [3]},
+            "ssh": {"enabled": False},
+        },
+        "idle_timeout": "5m",
+    }
+    assert "resources" not in body["config"]
+    assert "workspaceId" not in body
+    assert capsys.readouterr().out == f"{task_id}\n"
+
+    cli.main(["tensorboard", "start", "-t", "3", "-d", "-w", "ws"])
+    assert launch.last_request.json()["workspaceId"] == 7
+    assert launch.last_request.json()["config"]["services"]["tensorboard"] == {"trial_ids": [3]}
+
+    # The configuration's idle timeout is kept.
+    cli.main(["tensorboard", "start", "1", "-d", "--config", "idle_timeout=1h"])
+    assert launch.last_request.json()["config"]["idle_timeout"] == "1h"
+
+    # tensorboard_args become the service's args, unless the configuration sets them.
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("tensorboard_args: ['--samples_per_plugin=images=100']\n")
+    cli.main(["tensorboard", "start", "1", "-d", "--config-file", str(config_file)])
+    config = launch.last_request.json()["config"]
+    assert "tensorboard_args" not in config
+    assert config["services"]["tensorboard"] == {
+        "args": ["--samples_per_plugin=images=100"],
+        "experiment_ids": [1],
+    }
+    config_file.write_text(
+        "tensorboard_args: ['--a=1']\nservices: {tensorboard: {args: ['--b=2']}}\n"
+    )
+    cli.main(["tensorboard", "start", "1", "-d", "--config-file", str(config_file)])
+    config = launch.last_request.json()["config"]
+    assert "tensorboard_args" not in config
+    assert config["services"]["tensorboard"]["args"] == ["--b=2"]
+    cli.main(["tensorboard", "start", "1", "-d", "--config", "tensorboard_args=--a=1"])
+    config = launch.last_request.json()["config"]
+    assert config["services"]["tensorboard"]["args"] == ["--a=1"]
+
+    # SSH stays disabled, keeping its other options.
+    cli.main(["tensorboard", "start", "1", "-d", "--config", "services.ssh={enabled: true, x: 1}"])
+    services = launch.last_request.json()["config"]["services"]
+    assert services["ssh"] == {"enabled": False, "x": 1}
+
+    # A services value that is not a map goes to the master as it is.
+    cli.main(["tensorboard", "start", "1", "-d", "--config", "services=[1]"])
+    assert launch.last_request.json()["config"] == {"services": [1]}
+    cli.main(["tensorboard", "start", "1", "-d", "--config", "services.tensorboard=x"])
+    assert launch.last_request.json()["config"] == {"services": {"tensorboard": "x"}}
+    capsys.readouterr()
+
+    # Without --detach, it waits for the task and opens its TensorBoard page.
+    url = f"{MASTER_HOST}/det/tasks/{task_id}/interactive?tab=tensorboard"
+    with mock.patch("webbrowser.open") as browser_open:
+        cli.main(["tensorboard", "start", "1"])
+    browser_open.assert_called_once_with(url)
+    out = capsys.readouterr().out
+    assert f"Launched tensorboard (id: {task_id}, name: TensorBoard (x))." in out
+    assert f"Tensorboard is running at: {url}" in out
+
+    with mock.patch("webbrowser.open") as browser_open:
+        cli.main(["tensorboard", "start", "1", "--no-browser"])
+    browser_open.assert_not_called()
+    assert f"Tensorboard is running at: {url}" in capsys.readouterr().out
+
+    calls = launch.call_count
+    with pytest.raises(SystemExit) as e:
+        cli.main(["tensorboard", "start"])
+    assert e.value.code == 2
+    assert "Either experiment_ids or trial_ids must be specified." in capsys.readouterr().err
+    assert launch.call_count == calls
+
+    with pytest.raises(SystemExit) as e:
+        cli.main(["tensorboard", "start", "-h"])
+    assert e.value.code == 0
+    assert "100 trials" not in capsys.readouterr().out
+
+
 def test_create_reject_large_model_def(
     requests_mock: requests_mock.Mocker, tmp_path: pathlib.Path
 ) -> None:
