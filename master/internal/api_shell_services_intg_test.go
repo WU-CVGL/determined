@@ -216,7 +216,7 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 		"/run/determined/services/ssh.sh", "/run/determined/services/jupyter.sh",
 		"/run/determined/ssh/authorized_keys_unmodified", "/run/determined/ssh/sshd_config",
 		jupyterDir, jupyterConfigDir, jupyterDataDir, jupyterRuntimeDir, jupyterIdleCheck,
-		jupyterDefaultPage, jupyterKeyPath, jupyterCertPath,
+		jupyterKeyPath, jupyterCertPath,
 	} {
 		require.Contains(t, paths, path)
 	}

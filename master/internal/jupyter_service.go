@@ -20,14 +20,13 @@ import (
 // as DET_NOTEBOOK_TOKEN; it logs in to the task's JupyterLab and to its proxied port.
 
 const (
-	jupyterDir         = "/run/determined/jupyter/"
-	jupyterConfigDir   = "/run/determined/jupyter/config"
-	jupyterDataDir     = "/run/determined/jupyter/data"
-	jupyterRuntimeDir  = "/run/determined/jupyter/runtime"
-	jupyterIdleCheck   = "/run/determined/jupyter/check_idle.py"
-	jupyterCertPath    = "/run/determined/jupyter/jupyterCert.pem"
-	jupyterKeyPath     = "/run/determined/jupyter/jupyterKey.key"
-	jupyterDefaultPage = "/run/determined/workdir/README.ipynb"
+	jupyterDir        = "/run/determined/jupyter/"
+	jupyterConfigDir  = "/run/determined/jupyter/config"
+	jupyterDataDir    = "/run/determined/jupyter/data"
+	jupyterRuntimeDir = "/run/determined/jupyter/runtime"
+	jupyterIdleCheck  = "/run/determined/jupyter/check_idle.py"
+	jupyterCertPath   = "/run/determined/jupyter/jupyterCert.pem"
+	jupyterKeyPath    = "/run/determined/jupyter/jupyterKey.key"
 	// Agent ports 2600 - 3500 are split between TensorBoards, services, and sshd. The services of a
 	// shell other than ssh take their ports from this range.
 	minServicePort = 2900
@@ -35,7 +34,7 @@ const (
 )
 
 // jupyterFiles returns the run-dir files of the jupyter service: its directories, the idle check,
-// the default page, and the master-signed key and cert that JupyterLab serves HTTPS with.
+// and the master-signed key and cert that JupyterLab serves HTTPS with.
 func jupyterFiles(aug *model.AgentUserGroup, key, cert []byte) archive.Archive {
 	return archive.Archive{
 		aug.OwnedArchiveItem(jupyterDir, nil, 0o700, tar.TypeDir),
@@ -46,12 +45,6 @@ func jupyterFiles(aug *model.AgentUserGroup, key, cert []byte) archive.Archive {
 			jupyterIdleCheck,
 			etc.MustStaticFile(etc.NotebookIdleCheckResource),
 			0o700,
-			tar.TypeReg,
-		),
-		aug.OwnedArchiveItem(
-			jupyterDefaultPage,
-			etc.MustStaticFile(etc.NotebookTemplateResource),
-			0o644,
 			tar.TypeReg,
 		),
 		aug.OwnedArchiveItem(jupyterKeyPath, key, 0o600, tar.TypeReg),

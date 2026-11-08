@@ -23,8 +23,6 @@ const (
 	ShellEntrypointResource = "shell-entrypoint.sh"
 	// GCCheckpointsEntrypointResource is the script to run checkpoint GC.
 	GCCheckpointsEntrypointResource = "gc-checkpoints-entrypoint.sh"
-	// NotebookTemplateResource is the default page of the jupyter service, a notebook.
-	NotebookTemplateResource = "notebook-template.ipynb"
 	// NotebookIdleCheckResource is the jupyter service's idle check, which reports a busy
 	// JupyterLab.
 	NotebookIdleCheckResource = "check_idle.py"
