@@ -355,8 +355,7 @@ def test_start_tensorboard_without_detach() -> None:
 @pytest.mark.e2e_cpu
 def test_kill_tensorboard_session() -> None:
     """
-    After `det shell kill`, the session's TensorBoard answers 404 and the task log has the
-    supervisor's exit line.
+    After `det shell kill`, the session's TensorBoard answers 404 and the shell ends.
     """
     sess = api_utils.user_session()
     exp_ref = completed_experiment(sess, SHARED_FS_CONFIG)
@@ -386,14 +385,14 @@ def test_kill_tensorboard_session() -> None:
         with pytest.raises(errors.NotFoundException):
             get_runs(sess, url)
 
+        # A kill may end the container before the supervisor can write its exit lines, so the
+        # shell's state, not the task log, shows that the session ended.
         deadline = time.time() + 60
-        log: List[str] = []
-        while time.time() < deadline:
-            log = task_log(sess, task_id)
-            if any("[tensorboard] exited" in line for line in log):
-                break
+        state = bindings.get_GetShell(sess, shellId=task_id).shell.state
+        while time.time() < deadline and state != bindings.taskv1State.TERMINATED:
             time.sleep(2)
-        assert any("[tensorboard] exited" in line for line in log), log
+            state = bindings.get_GetShell(sess, shellId=task_id).shell.state
+        assert state == bindings.taskv1State.TERMINATED, state
     finally:
         if not killed:
             detproc.check_call(sess, ["det", "shell", "kill", task_id])
