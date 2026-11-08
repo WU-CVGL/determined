@@ -364,11 +364,17 @@ class FlagsTest(unittest.TestCase):
         environ["DET_TENSORBOARD_SOURCES"] = "/run/determined/tensorboard/sources.json"
         flags = tensorboard_service.service_flags(environ, "/logs")
         self.assertIs(True, flags["reload_multifile"])
+        self.assertEqual(86400, flags["reload_multifile_inactive_secs"])
+        self.assertNotIn(
+            "reload_multifile_inactive_secs", tensorboard_service.service_flags(self.environ, "/l")
+        )
         from tensorboard import default, program
 
         tb = program.TensorBoard(plugins=default.get_plugins())
-        tb.configure(tensorboard_service.tensorboard_argv(["--reload_multifile=false"]), **flags)
+        args = ["--reload_multifile=false", "--reload_multifile_inactive_secs=0"]
+        tb.configure(tensorboard_service.tensorboard_argv(args), **flags)
         self.assertIs(True, tb.flags.reload_multifile)
+        self.assertEqual(86400, tb.flags.reload_multifile_inactive_secs)
 
     def test_argv(self) -> None:
         self.assertEqual(["tensorboard"], tensorboard_service.tensorboard_argv([]))

@@ -61,9 +61,11 @@ RUN = re.compile(r"experiment/[1-9][0-9]*(/trial/[1-9][0-9]*)?")
 CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 # The storage config's keys whose values are never credentials.
 PLAIN_KEYS = {"type", "bucket", "prefix", "container", "host_path", "storage_path"}
-# The parameters of a signed URL whose values are credentials.
+# A URL, as opposed to a connection string that holds one.
+URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
 # The names, in "name=value" lists, of credentials.
 SECRET_NAME = re.compile(r"(?i)key|sig|token|secret|password|credential")
+# The parameters of a signed URL whose values are credentials.
 SIGNED = re.compile(
     r"(?i)\b(sig|signature|x-amz-signature|x-amz-credential|x-amz-security-token|accountkey)="
     r"[^&;\s'\"]+"
@@ -133,11 +135,11 @@ def find_secrets(config: Any, key: str = "") -> List[str]:
             found += find_secrets(v, key)
     elif isinstance(config, str) and key not in PLAIN_KEYS:
         parts = [config]
-        if "://" in config:
+        if URL.match(config):
             url = urllib.parse.urlsplit(config)
             userinfo = url.netloc.rpartition("@")[0]
             parts = [userinfo, userinfo.partition(":")[2], url.query]
-        for part in list(parts):
+        for part in parts + [config]:
             for item in re.split(r"[;&]", part):
                 name, _, value = item.partition("=")
                 if SECRET_NAME.search(name):
@@ -221,6 +223,8 @@ def valid_path(storage_type: str, path: Any) -> bool:
             path.startswith(SCHEMES[storage_type])
             and path.endswith("/")
             and not {".", ".."} & set(rest.split("/"))
+            and "?" not in path
+            and "#" not in path
         )
     local = path[:-1] if path.endswith("/") else path
     return local.startswith("/") and posixpath.normpath(local) == local

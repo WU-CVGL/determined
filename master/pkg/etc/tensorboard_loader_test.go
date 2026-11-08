@@ -15,16 +15,17 @@ import (
 
 // fetchersStandIn is a determined package, by path under the package's directory, with what
 // tensorboard_loader.py takes of determined.tensorboard.fetchers. Its build records its arguments
-// in STATE["built"], sleeps STATE["build_sleep"] seconds and raises STATE["build_error"] if set,
-// or returns a fetcher of the class named STATE["cls"]: StandInFetcher, OldFetcher, which has no
+// in STATE["built"], sleeps STATE["build_sleep"] seconds and raises STATE["build_error"] if set, or
+// returns a fetcher of the class named STATE["cls"]: StandInFetcher, OldFetcher, which has no
 // forget, or NoFetch, which has no _fetch. A fetcher serves STATE["objects"], [data, mtime] by key,
 // from its bucket, storage_config["bucket"]. Its _list asserts that it runs on the thread
 // STATE["lister_thread"] if that is set, records the fetcher's records in STATE["lists"], raises
 // STATE["list_error"] if set, and yields the keys under the path's prefix and the keys of
 // STATE["stray"] as s3.py does: only a newer mtime than the recorded one, which it records before
-// it yields. Its _fetch records (thread, key) in STATE["fetches"] and opens
-// <local_dir>/<bucket>/<key> "wb" as s3.py does; STATE["on_fetch"](fetcher, key, file, data), if
-// set, may write to the file, raise or block before the fetch writes the data.
+// it yields; STATE["after_yield"](key), if set, runs when the next key is asked for. Its _fetch
+// records (thread, key) in STATE["fetches"] and opens <local_dir>/<bucket>/<key> "wb" as s3.py
+// does; STATE["on_fetch"](fetcher, key, file, data), if set, may write to the file, raise or block
+// before the fetch writes the data.
 var fetchersStandIn = map[string]string{
 	"determined/__init__.py":             "",
 	"determined/tensorboard/__init__.py": "",
@@ -52,6 +53,7 @@ def reset():
         list_error=None,
         fetches=[],
         on_fetch=None,
+        after_yield=None,
     )
 
 
@@ -83,6 +85,8 @@ class OldFetcher:
                 continue
             self._file_records[key] = mtime
             yield key
+            if STATE["after_yield"] is not None:
+                STATE["after_yield"](key)
 
     def _fetch(self, filepath, new_file_callback):
         with lock:

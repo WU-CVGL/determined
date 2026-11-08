@@ -132,7 +132,7 @@ def completed_experiment(
 def test_start_tensorboard_for_shared_fs_experiment() -> None:
     """
     Start a TensorBoard viewing session on an experiment with shared_fs storage and check that
-    TensorBoard lists its trial, without a loader error.
+    TensorBoard lists its trial, without a loader line.
     """
     sess = api_utils.user_session()
     exp_ref = completed_experiment(sess, SHARED_FS_CONFIG)
@@ -142,9 +142,7 @@ def test_start_tensorboard_for_shared_fs_experiment() -> None:
         config = bindings.get_GetShell(sess, shellId=task_id).config
         assert config["services"]["tensorboard"]["experiment_ids"] == [exp_ref.id], config
         lines = loader_lines(sess, task_id)
-        assert lines, "no loader line in the task log"
-        for line in lines:
-            assert line.rstrip().endswith("loading 1 sources from shared_fs storage"), lines
+        assert not lines, lines
 
 
 @pytest.mark.slow

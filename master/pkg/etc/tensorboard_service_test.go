@@ -30,23 +30,23 @@ const tensorBoardTestToken = "test-token"
 // tensorboard_service.py takes of TensorBoard's. Its version is TB_STAND_IN_VERSION, 2.9.0 by
 // default. Its core plugin's loader defines --bind_all with the default TB_STAND_IN_BIND_ALL, true
 // by default as in some builds, and --host, --port, --path_prefix, --logdir, --load_fast,
-// --reuse_port and --reload_multifile, and refuses --host while --bind_all is true, as TensorBoard's
-// does. Its program.TensorBoard, without
-// server_class when TB_STAND_IN_NO_SERVER_CLASS is "yes", configures its flags as TensorBoard's
-// does: the command line, then the keyword arguments, then the loaders' checks. Its main records
-// its arguments NUL-separated in "$ORDER_FILE.tensorboard-args", its flags as JSON in
-// "$ORDER_FILE.tensorboard-flags", --reload_multifile only when it is set, its interpreter, TB_STAND_IN_PYTHON, in
-// "$ORDER_FILE.tensorboard-python", and "tensorboard" in the order file. Then it serves, until the
-// order file has "stop tensorboard", an application that answers 200 under the --path_prefix and
-// 404 elsewhere and that creates "$ORDER_FILE.tensorboard-saw-token" when a request reaches it
-// with the token's header. Its default server, a model of TensorBoard's werkzeug server, speaks
-// HTTP/1.1 with keep-alive, sends an application's headers as they are, so that "Connection: close"
-// closes the connection after the response, and leaves a body that the application does not read
-// on the connection. It builds its server with its server_class, once the order file has
-// the line TB_STAND_IN_WAIT if that is set, and serves the application through the server's, or
-// directly when TB_STAND_IN_SERVE is "unchecked", or not at all when TB_STAND_IN_SERVE is "no".
-// Like TensorBoard's, the server ends on SIGINT and main exits 0 on SIGTERM; otherwise main returns
-// TB_STAND_IN_EXIT, 0 by default.
+// --reuse_port, --reload_multifile and --reload_multifile_inactive_secs, and refuses --host while
+// --bind_all is true, as TensorBoard's does. Its program.TensorBoard, without server_class when
+// TB_STAND_IN_NO_SERVER_CLASS is "yes", configures its flags as TensorBoard's does: the command
+// line, then the keyword arguments, then the loaders' checks. Its main records its arguments
+// NUL-separated in "$ORDER_FILE.tensorboard-args", its flags as JSON in
+// "$ORDER_FILE.tensorboard-flags", --reload_multifile and --reload_multifile_inactive_secs only
+// when the first is set, its interpreter, TB_STAND_IN_PYTHON, in "$ORDER_FILE.tensorboard-python",
+// and "tensorboard" in the order file. Then it serves, until the order file has "stop tensorboard",
+// an application that answers 200 under the --path_prefix and 404 elsewhere and that creates
+// "$ORDER_FILE.tensorboard-saw-token" when a request reaches it with the token's header. Its
+// default server, a model of TensorBoard's werkzeug server, speaks HTTP/1.1 with keep-alive, sends
+// an application's headers as they are, so that "Connection: close" closes the connection after the
+// response, and leaves a body that the application does not read on the connection. It builds its
+// server with its server_class, once the order file has the line TB_STAND_IN_WAIT if that is set,
+// and serves the application through the server's, or directly when TB_STAND_IN_SERVE is
+// "unchecked", or not at all when TB_STAND_IN_SERVE is "no". Like TensorBoard's, the server ends on
+// SIGINT and main exits 0 on SIGTERM; otherwise main returns TB_STAND_IN_EXIT, 0 by default.
 var tensorBoardStandIn = map[string]string{
 	"tensorboard/__init__.py":              "",
 	"tensorboard/plugins/__init__.py":      "",
@@ -87,6 +87,7 @@ class CorePluginLoader:
             choices=[True, False],
             default=None,
         )
+        parser.add_argument("--reload_multifile_inactive_secs", type=int, default=86400)
 
     def fix_flags(self, flags):
         if flags.host is not None and flags.bind_all:
@@ -217,7 +218,7 @@ class TensorBoard:
         with open(order + ".tensorboard-flags", "w") as f:
             names = ["bind_all", "host", "port", "path_prefix", "logdir", "load_fast", "reuse_port"]
             if flags.reload_multifile is not None:
-                names.append("reload_multifile")
+                names += ["reload_multifile", "reload_multifile_inactive_secs"]
             json.dump({name: getattr(flags, name) for name in names}, f)
         with open(order + ".tensorboard-python", "w") as f:
             f.write(os.environ["TB_STAND_IN_PYTHON"])
@@ -921,6 +922,7 @@ func TestTensorBoardUnitLoader(t *testing.T) {
 			"tensorboard loader: loading 1 sources from s3 storage\n")
 		flags := v.serviceFlags(logdir)
 		flags["reload_multifile"] = true
+		flags["reload_multifile_inactive_secs"] = float64(86400)
 		require.Equal(t, flags, v.flags())
 		require.Equal(t, http.StatusOK, v.get(tensorBoardTestToken))
 		waitFor(t, "tensorboard READY", func() bool {

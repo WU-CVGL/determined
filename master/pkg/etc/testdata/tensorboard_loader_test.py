@@ -220,6 +220,18 @@ class CheckTest(unittest.TestCase):
                 "the sources are invalid: path of experiment/12",
             ),
             (
+                "object path with #",
+                lambda: f.write("s3", [{**s3[0], "path": "s3://bucket/c1#/x/"}]),
+                "",
+                "the sources are invalid: path of experiment/12",
+            ),
+            (
+                "object path with ?",
+                lambda: f.write("s3", [{**s3[0], "path": "s3://bucket/c1?/x/"}]),
+                "",
+                "the sources are invalid: path of experiment/12",
+            ),
+            (
                 "relative local path",
                 lambda: f.write("shared_fs", [{**fs[0], "path": "determined_shared_fs/x/"}]),
                 "",
@@ -305,6 +317,20 @@ class CheckTest(unittest.TestCase):
                 "fetchers.STATE['build_error'] = ValueError("
                 "'GET https://a.blob/c?sig=SIGNATURE-VALUE&comp=list failed')",
                 "azure storage: GET https://a.blob/c?sig=***&comp=list failed",
+            ),
+            (
+                "azure connection string",
+                lambda: f.write(
+                    "azure",
+                    [{**s3[0], "path": "azure://c/c1/x/"}],
+                    storage={
+                        "type": "azure",
+                        "container": "c",
+                        "connection_string": f"BlobEndpoint=https://a.blob/;AccountKey={SENTINEL};",
+                    },
+                ),
+                f"fetchers.STATE['build_error'] = ValueError('bad key {SENTINEL}')",
+                "azure storage: bad key ***",
             ),
             (
                 "no _fetch",
@@ -451,6 +477,7 @@ class LoaderTest(unittest.TestCase):
         self.put(key, data)
         work = os.path.join(self.files.staging, "0")
         empty_before = []
+        staged_inode = []
 
         def on_fetch(fetcher: Any, k: str, f: Any, d: bytes) -> None:
             empty_before.append(staged_files(work) == [(os.path.join(work, "bucket", k), 0)])
@@ -458,6 +485,7 @@ class LoaderTest(unittest.TestCase):
                 f.write(d[: len(d) // 2])
                 f.flush()
                 raise OSError("storage unreachable")
+            staged_inode.append(os.fstat(f.fileno()).st_ino)
 
         fetchers.STATE["on_fetch"] = on_fetch
         seen = []
@@ -478,6 +506,8 @@ class LoaderTest(unittest.TestCase):
         watching.set()
         watcher.join()
         self.assertEqual([], seen)
+        # Published by a rename: dest is the staged file.
+        self.assertEqual(staged_inode, [os.stat(dest).st_ino])
         self.assertEqual([True] * 6, empty_before)
         self.assertEqual(6, self.fetches(key))
         self.assertFalse(os.path.exists(work) and os.listdir(work))
@@ -610,19 +640,32 @@ class LoaderTest(unittest.TestCase):
         self.put(a, data_a)
         self.put(b, data_b)
         staging_empty = []
-        failed_at = []
+        listings_at = []  # The number of listings started at each fetch of a.
+        staged_inode = {}  # type: Dict[str, int]
 
         def on_fetch(fetcher: Any, k: str, f: Any, d: bytes) -> None:
             local = os.path.join(fetcher.local_dir, "bucket", k)
             staging_empty.append(staged_files(fetcher.local_dir) == [(local, 0)])
+            if k == a:
+                listings_at.append(self.listings())
             if k == a and self.fetches(a) <= 7:
                 f.write(d[: len(d) // 2])
                 f.flush()
-                if self.fetches(a) == 5:
-                    failed_at.append(self.listings())
                 raise OSError("storage unreachable")
+            staged_inode[k] = os.fstat(f.fileno()).st_ino
 
         fetchers.STATE["on_fetch"] = on_fetch
+        fetched_at_line = []
+        real_log = tl.log
+
+        def log(line: str) -> None:
+            if "not loaded" in line:
+                fetched_at_line.append(self.fetches(a))
+            real_log(line)
+
+        patch = mock.patch.object(tl, "log", log)
+        patch.start()
+        self.addCleanup(patch.stop)
         seen = []
         watching = threading.Event()
 
@@ -638,14 +681,16 @@ class LoaderTest(unittest.TestCase):
         loader = self.loader([s3_source("experiment/12/trial/40")], workers=2)
         loader.start()
 
-        # Cycle 1: five attempts on a, one line, b published whole.
-        wait_until("five attempts", lambda: len(failed_at) == 1)
+        # Cycle 1: exactly five attempts on a, one line, b published whole.
+        wait_until("five attempts", lambda: len(listings_at) >= 5)
         line = (
             "tensorboard loader: experiment/12/trial/40/events.out.tfevents.a: "
             "not loaded after 5 attempts: storage unreachable"
         )
         wait_until("the line", lambda: line in self.lines())
         wait_until("b", lambda: self.read(dest_b) == data_b)
+        self.assertEqual([5], fetched_at_line)
+        self.assertEqual(staged_inode[b], os.stat(dest_b).st_ino)
 
         # Cycle 2: a is forgotten before the listing, listed again and loaded on attempt 3.
         wait_until("a", lambda: self.read(dest_a) == data_a)
@@ -653,11 +698,23 @@ class LoaderTest(unittest.TestCase):
         watcher.join()
         self.assertEqual([], seen)
         self.assertEqual(8, self.fetches(a))
+        self.assertEqual(staged_inode[a], os.stat(dest_a).st_ino)
         with fetchers.lock:
             lists = list(fetchers.STATE["lists"])
-        forgotten = [records for _, records in lists[failed_at[0] :] if a not in records]
+        # The first listing after a was recorded whose records lack a, and its index.
+        forgotten = [
+            (i, records)
+            for i, (_, records) in enumerate(lists)
+            if i >= listings_at[0] and a not in records
+        ]
         self.assertTrue(forgotten)
-        self.assertIn(b, forgotten[0])
+        i, records = forgotten[0]
+        self.assertIn(b, records)
+        # Attempts 1 to 5 come before that listing, and a succeeds on attempt 3 of the next
+        # dequeue, 8 in total.
+        self.assertTrue(all(n <= i for n in listings_at[:5]), (i, listings_at))
+        self.assertTrue(all(n > i for n in listings_at[5:]), (i, listings_at))
+        self.assertEqual(8, len(listings_at))
 
         # Cycle 3: nothing more to fetch.
         self.wait_listings(3)
@@ -684,6 +741,43 @@ class LoaderTest(unittest.TestCase):
             [
                 "tensorboard loader: experiment/12: listing failed: storage unreachable",
                 "tensorboard loader: experiment/12: listing works again",
+            ],
+            self.lines(),
+        )
+
+    def test_errors_are_scrubbed(self) -> None:
+        account_key = "ACCOUNT-KEY-VALUE"
+        env = self.files.write(
+            "s3",
+            [{"run": "experiment/12", "experiment_id": 12, "path": "s3://bucket/c1/x/"}],
+            storage={
+                "type": "s3",
+                "bucket": "bucket",
+                "secret_key": SENTINEL,
+                "connection_string": f"BlobEndpoint=https://a.blob/;AccountKey={account_key};",
+            },
+        )
+        tl.read_plan(env)
+        key = PREFIX + "experiment/12/f"
+        fetchers.STATE["list_error"] = OSError(f"denied: {SENTINEL} {account_key}")
+        loader = self.loader([s3_source("experiment/12")])
+        loader.start()
+        self.wait_listings(2)
+        fetchers.STATE["list_error"] = None
+
+        def fail(*_: Any) -> None:
+            if self.fetches(key) <= 5:
+                raise OSError(f"bad key {account_key}, secret {SENTINEL}")
+
+        fetchers.STATE["on_fetch"] = fail
+        self.put(key, b"data")
+        wait_until("the file", lambda: self.read(self.files.logdir + "/experiment/12/f") == b"data")
+        self.assertEqual(
+            [
+                "tensorboard loader: experiment/12: listing failed: denied: *** ***",
+                "tensorboard loader: experiment/12: listing works again",
+                "tensorboard loader: experiment/12/f: not loaded after 5 attempts: "
+                "bad key ***, secret ***",
             ],
             self.lines(),
         )
@@ -748,6 +842,42 @@ class LoaderTest(unittest.TestCase):
             ["tensorboard loader: 1 downloads were still running at exit"], self.lines()
         )
         self.assertFalse(recording.after_stop)
+        # No publish after the stop.
+        staged = os.path.join(self.files.root, "staged")
+        with open(staged, "wb") as f:
+            f.write(b"data")
+        loader.publish(staged, dest, tl.Pending("experiment/12", "f"))
+        self.assertFalse(os.path.exists(dest))
+
+    def test_lister_stops_between_keys(self) -> None:
+        keys = [PREFIX + f"experiment/12/f{n}" for n in range(4)]
+        for key in keys:
+            self.put(key, b"data")
+        reached, release = threading.Event(), threading.Event()
+
+        def after_yield(key: str) -> None:
+            if not reached.is_set():
+                reached.set()
+                release.wait(10)
+
+        fetchers.STATE["after_yield"] = after_yield
+        loader = self.loader([s3_source("experiment/12")])
+        recording = RecordingQueue(loader)
+        loader.queue = recording
+        loader.start()
+        wait_until("the first key", reached.is_set)
+        stopped: List[int] = []
+        with mock.patch.object(tl, "STOP_SECONDS", 5):
+            stopping = threading.Thread(target=lambda: stopped.append(loader.stop()))
+            stopping.start()
+            wait_until("the stop", loader.stop_event.is_set)
+            release.set()
+            stopping.join(10)
+        self.assertEqual([0], stopped)
+        self.assertEqual(1, recording.puts)
+        self.assertFalse(recording.after_stop)
+        self.assertEqual([], [k for k in keys[1:] if k in loader.pending])
+        self.assertEqual([], [k for _, k in fetchers.STATE["fetches"] if k != keys[0]])
 
     def test_stop_in_a_pause(self) -> None:
         key = PREFIX + "experiment/12/f"
@@ -833,6 +963,8 @@ class RunTest(unittest.TestCase):
         os.makedirs(trial)
         os.makedirs(f.logdir + "/experiment/13/trial")
         os.symlink("/elsewhere", f.logdir + "/experiment/13/trial/40")
+        nested = os.path.join(f.root, "fs", "c1", "tensorboard", "experiment", "14", "trial", "41")
+        os.makedirs(nested)
         for d, _, _ in os.walk(os.path.join(f.root, "fs")):
             os.chmod(d, 0o555)
 
@@ -846,6 +978,7 @@ class RunTest(unittest.TestCase):
             {"run": "experiment/12", "experiment_id": 12, "path": source + "/"},
             {"run": "experiment/13/trial/40", "experiment_id": 13, "path": trial + "/"},
             {"run": "experiment/15", "experiment_id": 15, "path": missing + "/"},
+            {"run": "experiment/14/trial/41", "experiment_id": 14, "path": nested + "/"},
         ]
         for storage_type in ["shared_fs", "directory"]:
             with self.subTest(storage_type):
@@ -862,10 +995,12 @@ class RunTest(unittest.TestCase):
                         "/elsewhere", os.readlink(f.logdir + "/experiment/13/trial/40")
                     )
                     self.assertEqual(missing, os.readlink(f.logdir + "/experiment/15"))
+                    self.assertEqual(nested, os.readlink(f.logdir + "/experiment/14/trial/41"))
                     self.assertFalse(os.path.exists(f.logdir + "/experiment/15"))
                     self.assertFalse(os.path.exists(f.staging))
                 os.remove(f.logdir + "/experiment/12")
                 os.remove(f.logdir + "/experiment/15")
+                shutil.rmtree(f.logdir + "/experiment/14")
         self.assertEqual(
             tree, sorted((d, sorted(fs)) for d, _, fs in os.walk(os.path.join(f.root, "fs")))
         )
