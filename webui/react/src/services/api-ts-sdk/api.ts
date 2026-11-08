@@ -5114,6 +5114,18 @@ export interface V1GetTaskServicesResponse {
      * @memberof V1GetTaskServicesResponse
      */
     services: Array<V1TaskService>;
+    /**
+     * The experiments (all trials) whose TensorBoard logs the task's tensorboard service reads.
+     * @type {Array<number>}
+     * @memberof V1GetTaskServicesResponse
+     */
+    experimentIds?: Array<number>;
+    /**
+     * The trials whose TensorBoard logs the task's tensorboard service reads, beside experiment_ids.
+     * @type {Array<number>}
+     * @memberof V1GetTaskServicesResponse
+     */
+    trialIds?: Array<number>;
 }
 /**
  * Response to GetTasksRequest.
@@ -11376,6 +11388,18 @@ export interface V1Shell {
      * @memberof V1Shell
      */
     workspaceId: number;
+    /**
+     * The experiments (all trials) and other trials whose TensorBoard logs the shell's tensorboard service reads.
+     * @type {Array<number>}
+     * @memberof V1Shell
+     */
+    experimentIds?: Array<number>;
+    /**
+     * The trials whose TensorBoard logs the shell's tensorboard service reads, beside experiment_ids.
+     * @type {Array<number>}
+     * @memberof V1Shell
+     */
+    trialIds?: Array<number>;
     /**
      * The slot count the shell requests (resources.slots), 0 when it requests none.
      * @type {number}

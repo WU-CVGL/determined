@@ -45,6 +45,9 @@ type InteractiveService struct {
 	Exec bool `json:"exec"`
 	// StripPrefix makes the proxy remove /proxy/<service ID> from request paths.
 	StripPrefix bool `json:"strip_prefix"`
+	// SourcesCheck makes the proxy also check the viewer's permission on the task's sources
+	// (Metadata experiment and trial IDs) on every request.
+	SourcesCheck bool `json:"sources_check,omitempty"`
 }
 
 // ServiceID returns the proxy service ID of the service's port in the task taskID.

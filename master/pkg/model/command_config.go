@@ -38,8 +38,8 @@ type CommandConfig struct {
 	Debug           bool                `json:"debug"`
 	Pbs             expconf.PbsConfig   `json:"pbs,omitempty"`
 	Slurm           expconf.SlurmConfig `json:"slurm,omitempty"`
-	// Services are the services that a shell runs besides its sshd, by name. Only shells take
-	// them.
+	// Services are the services that a shell runs besides its sshd, by name, and ssh, which only
+	// a shell that views TensorBoard logs disables. Only shells take them.
 	Services map[string]ServiceConfig `json:"services,omitempty"`
 }
 
@@ -50,5 +50,16 @@ func (c *CommandConfig) Validate() []error {
 		check.GreaterThan(len(c.Entrypoint), 0, "entrypoint must be non-empty"),
 		check.True(c.Resources.IsSingleNode == nil, "resources.is_single_node cannot be set for NTSCs"),
 		check.True(c.IdleTimeout == nil || *c.IdleTimeout > 0, "idle_timeout must be positive"),
+		check.True(ShellRunsSSH(c.Services) || c.Resources.Slots == 0,
+			"services: ssh: can be disabled only with resources.slots 0"),
+		check.True(ShellRunsSSH(c.Services) || len(c.Resources.GPUGroupRequests()) == 0,
+			"services: ssh: can be disabled only without resources.gpu_groups"),
 	}, validateServices(c.Services)...)
+}
+
+// TensorBoardPrimary returns whether the config is of a shell whose tensorboard service is its
+// primary service: one that does not run ssh. Once validated, its tensorboard service runs with
+// experiment_ids or trial_ids.
+func (c CommandConfig) TensorBoardPrimary() bool {
+	return !ShellRunsSSH(c.Services)
 }

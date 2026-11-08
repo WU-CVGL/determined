@@ -11,7 +11,7 @@ import (
 // The services that the container supervisor of an interactive task can run. The master ships a
 // unit for each of them.
 const (
-	// ServiceSSH runs sshd. It is the primary service of every shell.
+	// ServiceSSH runs sshd. It is the primary service of every shell that runs it.
 	ServiceSSH = "ssh"
 	// ServiceJupyter runs JupyterLab.
 	ServiceJupyter = "jupyter"
@@ -50,8 +50,15 @@ type ServiceConfig struct {
 	IdleType string `json:"idle_type,omitempty"`
 	// LogDir is the directory that the tensorboard service reads, a path in the container; a
 	// relative one is resolved against the task's work directory when the service starts. An
-	// enabled tensorboard service requires it, and only the tensorboard service takes it.
+	// enabled tensorboard service requires it or ExperimentIDs or TrialIDs, and only the
+	// tensorboard service takes it.
 	LogDir string `json:"logdir,omitempty"`
+	// ExperimentIDs are experiments whose TensorBoard logs (all trials) the tensorboard service
+	// reads. Only the tensorboard service takes them; they exclude logdir.
+	ExperimentIDs []int32 `json:"experiment_ids,omitempty"`
+	// TrialIDs are trials whose TensorBoard logs the tensorboard service reads, beside
+	// ExperimentIDs.
+	TrialIDs []int32 `json:"trial_ids,omitempty"`
 	// Args are more arguments of TensorBoard, after the ones that the service sets. Only the
 	// tensorboard service takes them.
 	Args []string `json:"args,omitempty"`
@@ -60,14 +67,18 @@ type ServiceConfig struct {
 // MergeServiceConfig returns a request's entry for a service over a template's: the request's
 // enabled wins, unset meaning enabled, so that an explicit enabled: false is kept and an entry
 // without it runs the service; each other option that the request leaves unset is the template's.
-// An explicit empty args list clears the template's.
+// An explicit empty args list clears the template's. The logdir, experiment_ids and trial_ids are
+// one data source: a request that sets any of them, an explicit empty list included, replaces all
+// three of the template's.
 func MergeServiceConfig(template, request ServiceConfig) ServiceConfig {
 	merged := request
 	if merged.IdleType == "" {
 		merged.IdleType = template.IdleType
 	}
-	if merged.LogDir == "" {
+	if request.LogDir == "" && request.ExperimentIDs == nil && request.TrialIDs == nil {
 		merged.LogDir = template.LogDir
+		merged.ExperimentIDs = slices.Clone(template.ExperimentIDs)
+		merged.TrialIDs = slices.Clone(template.TrialIDs)
 	}
 	if merged.Args == nil {
 		merged.Args = slices.Clone(template.Args)
@@ -95,6 +106,18 @@ func MergeServices(template, request map[string]ServiceConfig) map[string]Servic
 // Runs returns whether the service runs: it is enabled unless the config says otherwise.
 func (c ServiceConfig) Runs() bool {
 	return c.Enabled == nil || *c.Enabled
+}
+
+// HasSources returns whether the service reads the TensorBoard logs of experiments or trials.
+func (c ServiceConfig) HasSources() bool {
+	return len(c.ExperimentIDs)+len(c.TrialIDs) > 0
+}
+
+// ShellRunsSSH returns whether a shell with services runs sshd: it does unless services disables
+// ssh.
+func ShellRunsSSH(services map[string]ServiceConfig) bool {
+	service, ok := services[ServiceSSH]
+	return !ok || service.Runs()
 }
 
 // JupyterIdleType returns the idle type of the jupyter service: the config's, or the default.
@@ -136,9 +159,10 @@ func configuredServiceNames(services map[string]ServiceConfig) []string {
 }
 
 // validateServices returns an error for each name in services that is not a known service, one
-// for ssh disabled: every shell runs its SSH server, one for each idle_type that is not on the
-// jupyter service or not one of JupyterIdleTypes, one for each logdir or args that is not on the
-// tensorboard service, and one for an enabled tensorboard service without a logdir.
+// for ssh disabled unless the tensorboard service runs with experiment_ids or trial_ids: only a
+// shell that views TensorBoard logs runs without its SSH server, one for each idle_type that is
+// not on the jupyter service or not one of JupyterIdleTypes, and those of
+// validateTensorBoardOptions.
 func validateServices(services map[string]ServiceConfig) []error {
 	var errs []error
 	for _, name := range configuredServiceNames(services) {
@@ -150,8 +174,10 @@ func validateServices(services map[string]ServiceConfig) []error {
 		case !slices.Contains(InteractiveServices, name):
 			errs = append(errs, fmt.Errorf("services: unknown service %q; known services: %s",
 				name, strings.Join(InteractiveServices, ", ")))
-		case name == ServiceSSH && !service.Runs():
-			errs = append(errs, fmt.Errorf("services: ssh cannot be disabled"))
+		case name == ServiceSSH && !service.Runs() &&
+			!(services[ServiceTensorBoard].Runs() && services[ServiceTensorBoard].HasSources()):
+			errs = append(errs, fmt.Errorf(
+				"services: ssh: can be disabled only for tensorboard with experiment_ids or trial_ids"))
 		case service.IdleType == "":
 		case name != ServiceJupyter:
 			errs = append(errs, fmt.Errorf("services: %s: only jupyter takes idle_type", name))
@@ -169,6 +195,10 @@ func validateServices(services map[string]ServiceConfig) []error {
 var tensorBoardServiceFlags = []string{
 	"--logdir", "--port", "--path_prefix", "--host", "--bind_all", "--reuse_port",
 }
+
+// tensorBoardMaxSources is the most experiment_ids and trial_ids that the tensorboard service takes
+// together.
+const tensorBoardMaxSources = 1000
 
 // tensorBoardFlagFile is TensorBoard's flag that reads more flags from a file, which the args may
 // not set either.
@@ -193,16 +223,24 @@ func tensorBoardRefusedFlag(arg string) string {
 	return ""
 }
 
-// validateTensorBoardOptions returns an error for a logdir or args on a service other than
-// tensorboard, and, on the tensorboard service, for a missing logdir when it runs, for a NUL
-// character, which the container's environment cannot hold, in the logdir or an argument, and for
-// an argument that sets a flag of tensorBoardRefusedFlag. The args are checked whether or not the
-// service runs, as the NUL characters are.
+// validateTensorBoardOptions returns an error for a logdir, experiment_ids, trial_ids or args on a
+// service other than tensorboard, and, on the tensorboard service, for neither a logdir nor
+// experiment_ids or trial_ids when it runs, for a logdir with experiment_ids or trial_ids, for the
+// first ID of each list that is not positive, for more than tensorBoardMaxSources of them, for a
+// NUL character, which the container's environment cannot hold, in the logdir or an argument, and
+// for an argument that sets a flag of tensorBoardRefusedFlag. All but the missing source are
+// checked whether or not the service runs.
 func validateTensorBoardOptions(name string, service ServiceConfig) []error {
 	if name != ServiceTensorBoard {
 		var errs []error
 		if service.LogDir != "" {
 			errs = append(errs, fmt.Errorf("services: %s: only tensorboard takes logdir", name))
+		}
+		if service.ExperimentIDs != nil {
+			errs = append(errs, fmt.Errorf("services: %s: only tensorboard takes experiment_ids", name))
+		}
+		if service.TrialIDs != nil {
+			errs = append(errs, fmt.Errorf("services: %s: only tensorboard takes trial_ids", name))
 		}
 		if service.Args != nil {
 			errs = append(errs, fmt.Errorf("services: %s: only tensorboard takes args", name))
@@ -210,8 +248,28 @@ func validateTensorBoardOptions(name string, service ServiceConfig) []error {
 		return errs
 	}
 	var errs []error
-	if service.Runs() && service.LogDir == "" {
-		errs = append(errs, fmt.Errorf("services: tensorboard: logdir is required"))
+	if service.Runs() && service.LogDir == "" && !service.HasSources() {
+		errs = append(errs,
+			fmt.Errorf("services: tensorboard: logdir, experiment_ids or trial_ids is required"))
+	}
+	if service.LogDir != "" && service.HasSources() {
+		errs = append(errs,
+			fmt.Errorf("services: tensorboard: logdir excludes experiment_ids and trial_ids"))
+	}
+	for _, list := range []struct {
+		name string
+		ids  []int32
+	}{{"experiment_ids", service.ExperimentIDs}, {"trial_ids", service.TrialIDs}} {
+		for _, id := range list.ids {
+			if id <= 0 {
+				errs = append(errs, fmt.Errorf("services: tensorboard: %s: %d is not an ID", list.name, id))
+				break
+			}
+		}
+	}
+	if len(service.ExperimentIDs)+len(service.TrialIDs) > tensorBoardMaxSources {
+		errs = append(errs, fmt.Errorf(
+			"services: tensorboard: at most %d experiment_ids and trial_ids", tensorBoardMaxSources))
 	}
 	if strings.ContainsRune(service.LogDir, 0) {
 		errs = append(errs, fmt.Errorf("services: tensorboard: logdir contains a NUL character"))
