@@ -354,6 +354,22 @@ class FlagsTest(unittest.TestCase):
                     {k: getattr(flags, k) for k in self.flag_names},
                 )
 
+    def test_reload_multifile_with_sources(self) -> None:
+        # Only a service that reads sources polls every event file of a run.
+        self.assertNotIn(
+            "reload_multifile", tensorboard_service.service_flags(self.environ, "/logs")
+        )
+        environ = {**self.environ, "DET_TENSORBOARD_SOURCES": ""}
+        self.assertNotIn("reload_multifile", tensorboard_service.service_flags(environ, "/logs"))
+        environ["DET_TENSORBOARD_SOURCES"] = "/run/determined/tensorboard/sources.json"
+        flags = tensorboard_service.service_flags(environ, "/logs")
+        self.assertIs(True, flags["reload_multifile"])
+        from tensorboard import default, program
+
+        tb = program.TensorBoard(plugins=default.get_plugins())
+        tb.configure(tensorboard_service.tensorboard_argv(["--reload_multifile=false"]), **flags)
+        self.assertIs(True, tb.flags.reload_multifile)
+
     def test_argv(self) -> None:
         self.assertEqual(["tensorboard"], tensorboard_service.tensorboard_argv([]))
         self.assertEqual(
