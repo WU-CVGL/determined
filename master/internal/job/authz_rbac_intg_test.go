@@ -77,9 +77,10 @@ func addTaskJobForTest(
 	jobID := model.NewJobID()
 	require.NoError(t, db.AddJob(&model.Job{JobID: jobID, JobType: jobType, OwnerID: &owner.ID}))
 	taskType := map[model.JobType]model.TaskType{
-		model.JobTypeShell:   model.TaskTypeShell,
-		model.JobTypeCommand: model.TaskTypeCommand,
-		model.JobTypeGeneric: model.TaskTypeGeneric,
+		model.JobTypeShell:       model.TaskTypeShell,
+		model.JobTypeCommand:     model.TaskTypeCommand,
+		model.JobTypeTensorboard: model.TaskTypeTensorboard,
+		model.JobTypeGeneric:     model.TaskTypeGeneric,
 	}[jobType]
 	task := &model.Task{
 		TaskID: model.NewTaskID(), JobID: &jobID, TaskType: taskType,
@@ -107,7 +108,7 @@ func addTaskJobForTest(
 
 // Under RBAC, a job queue update of a colleague's job needs the permission that changes the job on
 // its own page, in the job's workspace: UPDATE_EXPERIMENT for an experiment and UPDATE_NSC for a
-// shell, command or generic task.
+// shell, command, TensorBoard or generic task.
 func TestCanControlJobQueueUpdateRBAC(t *testing.T) {
 	pgDB, closeDB := db.MustResolveTestPostgres(t)
 	defer closeDB()
@@ -130,10 +131,11 @@ func TestCanControlJobQueueUpdateRBAC(t *testing.T) {
 
 	jobsIn := func(workspaceID, projectID int) map[string]model.JobID {
 		return map[string]model.JobID{
-			"experiment": db.RequireMockExperimentProject(t, pgDB, owner, projectID).JobID,
-			"shell":      addTaskJobForTest(t, pgDB, owner, model.JobTypeShell, workspaceID),
-			"command":    addTaskJobForTest(t, pgDB, owner, model.JobTypeCommand, workspaceID),
-			"generic":    addTaskJobForTest(t, pgDB, owner, model.JobTypeGeneric, workspaceID),
+			"experiment":  db.RequireMockExperimentProject(t, pgDB, owner, projectID).JobID,
+			"shell":       addTaskJobForTest(t, pgDB, owner, model.JobTypeShell, workspaceID),
+			"command":     addTaskJobForTest(t, pgDB, owner, model.JobTypeCommand, workspaceID),
+			"tensorboard": addTaskJobForTest(t, pgDB, owner, model.JobTypeTensorboard, workspaceID),
+			"generic":     addTaskJobForTest(t, pgDB, owner, model.JobTypeGeneric, workspaceID),
 		}
 	}
 	inA, inB := jobsIn(wsA, projectA), jobsIn(wsB, projectB)
