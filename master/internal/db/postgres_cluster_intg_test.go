@@ -347,12 +347,10 @@ func TestAggregationOpenAllocation(t *testing.T) {
 	allocID := addAggTestAllocation(ctx, t, task.TaskID, 1, "pool", aggTestDay(1, 20), nil)
 	// An open allocation that starts after the aggregated day adds nothing to that day.
 	addAggTestAllocation(ctx, t, task.TaskID, 1, "pool", aggTestDay(2, 6), nil)
-	userID := fmt.Sprint(user.ID)
 	rows := func(seconds float64) map[string]float64 {
 		return map[string]float64{
 			"total/total":               seconds,
 			"username/" + user.Username: seconds,
-			"user_id/" + userID:         seconds,
 			"resource_pool/pool":        seconds,
 			"queued/total":              0,
 		}
@@ -507,12 +505,7 @@ func TestAggregationTotalsAgree(t *testing.T) {
 			sums[typ] += v
 		}
 		requireSeconds(t, rows["total/total"], sums["username"], "day %d", d)
-		requireSeconds(t, rows["total/total"], sums["user_id"], "day %d", d)
 		requireSeconds(t, rows["total/total"], sums["resource_pool"], "day %d", d)
-		for _, u := range []model.User{u1, u2} {
-			requireSeconds(t, rows["username/"+u.Username], rows[fmt.Sprintf("user_id/%d", u.ID)],
-				"day %d", d)
-		}
 	}
 	hour := float64(3600)
 	requireSeconds(t, (4*2+2*2+1*6)*hour, aggTestRows(ctx, t, 1)["total/total"])

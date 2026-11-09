@@ -45,12 +45,11 @@ allocs_in_range AS (
         const.period && a.range
 ),
 
--- The allocations in range with the user that owns their job.
-user_allocs AS (
+user_agg AS (
     SELECT
-        users.id AS user_id,
-        users.username,
-        allocs_in_range.seconds
+        'username' AS aggregation_type,
+        users.username AS aggregation_key,
+        sum(allocs_in_range.seconds) AS seconds
     FROM
         allocs_in_range,
         tasks,
@@ -62,29 +61,8 @@ user_allocs AS (
         allocs_in_range.task_id = tasks.task_id
         AND tasks.job_id = jobs.job_id
         AND jobs.owner_id = users.id
-),
-
-user_agg AS (
-    SELECT
-        'username' AS aggregation_type,
-        user_allocs.username AS aggregation_key,
-        sum(user_allocs.seconds) AS seconds
-    FROM
-        user_allocs
     GROUP BY
-        user_allocs.username
-),
-
--- The same per user id, which stays the same when a user is renamed.
-user_id_agg AS (
-    SELECT
-        'user_id' AS aggregation_type,
-        user_allocs.user_id::text AS aggregation_key,
-        sum(user_allocs.seconds) AS seconds
-    FROM
-        user_allocs
-    GROUP BY
-        user_allocs.user_id
+        users.username
 ),
 
 label_agg AS (
@@ -135,10 +113,6 @@ all_aggs AS (
     SELECT *
     FROM
         user_agg
-    UNION ALL
-    SELECT *
-    FROM
-        user_id_agg
     UNION ALL
     SELECT *
     FROM
