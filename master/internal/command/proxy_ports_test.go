@@ -143,3 +143,33 @@ func TestProxyPortConfigsSkipCopiesOfRecords(t *testing.T) {
 		{ServiceID: "task-1:8080", Port: 8080},
 	}, proxyPortConfigs(spec, "task-1"))
 }
+
+// A tensorboard record that reads experiments and trials gets the sources check beside Exec and
+// the token; a logdir one, and a legacy TensorBoard, get none.
+func TestProxyPortConfigsSourcesCheck(t *testing.T) {
+	var spec tasks.GenericCommandSpec
+	spec.TaskType = model.TaskTypeShell
+	spec.Services = []tasks.InteractiveService{
+		{Name: model.ServiceTensorBoard, Port: 3000, Exec: true, SourcesCheck: true},
+		{Name: model.ServiceJupyter, Port: 2950, TLS: true, Exec: true},
+	}
+	token := testTensorBoardToken
+	spec.Metadata.TensorBoardToken = &token
+	require.Equal(t, []*sproto.ProxyPortConfig{
+		{ServiceID: "task-1:3000", Port: 3000, Exec: true, SourcesCheck: true, ServiceToken: token},
+		{ServiceID: "task-1:2950", Port: 2950, TLS: true, Exec: true},
+	}, proxyPortConfigs(spec, "task-1"))
+
+	spec.Services[0].SourcesCheck = false
+	require.Equal(t, &sproto.ProxyPortConfig{
+		ServiceID: "task-1:3000", Port: 3000, Exec: true, ServiceToken: token,
+	}, proxyPortConfigs(spec, "task-1")[0])
+
+	tensorBoard := legacySpec(model.TaskTypeTensorboard,
+		expconf.ProxyPort{RawProxyPort: 2700, RawDefaultServiceID: ptrs.Ptr(true)})
+	tensorBoard.Metadata.TensorBoardToken = &token
+	tensorBoard.Metadata.ExperimentIDs = []int32{1}
+	for _, port := range proxyPortConfigs(tensorBoard, "task-1") {
+		require.False(t, port.SourcesCheck)
+	}
+}

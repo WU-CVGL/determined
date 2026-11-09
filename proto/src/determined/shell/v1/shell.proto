@@ -58,6 +58,12 @@ message Shell {
   string job_id = 15;
   // The workspace id.
   int32 workspace_id = 18;
+  // The experiments (all trials) and other trials whose TensorBoard logs the
+  // shell's tensorboard service reads.
+  repeated int32 experiment_ids = 19;
+  // The trials whose TensorBoard logs the shell's tensorboard service reads,
+  // beside experiment_ids.
+  repeated int32 trial_ids = 20;
   // The slot count the shell requests (resources.slots), 0 when it
   // requests none.
   int32 slots = 100;

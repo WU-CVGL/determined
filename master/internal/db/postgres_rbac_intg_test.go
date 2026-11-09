@@ -959,3 +959,65 @@ func TestEditorVSEditorProjectRestricted(t *testing.T) {
 
 	require.Zero(t, num)
 }
+
+// The workspaces of TensorBoard sources: each workspace once, sorted, through the projects of the
+// experiments and of the trials' experiments; any ID that names nothing gives ErrNotFound.
+func TestTensorBoardSourceWorkspaceIDs(t *testing.T) {
+	ctx := context.Background()
+	pgDB, closeDB := MustResolveTestPostgres(t)
+	MustMigrateTestPostgres(t, pgDB, MigrationsFromDB)
+	t.Cleanup(closeDB)
+
+	user := RequireMockUser(t, pgDB)
+	workspace := func() (model.AccessScopeID, int) {
+		wsID, _ := RequireMockWorkspaceID(t, pgDB, "")
+		projectID, _ := RequireMockProjectID(t, pgDB, wsID, false)
+		return model.AccessScopeID(wsID), projectID
+	}
+	ws1, project1 := workspace()
+	ws2, project2 := workspace()
+	exp1 := RequireMockExperimentProject(t, pgDB, user, project1)
+	exp1b := RequireMockExperimentProject(t, pgDB, user, project1)
+	exp2 := RequireMockExperimentProject(t, pgDB, user, project2)
+	trial1 := int32(RequireMockTrialID(t, pgDB, exp1))
+	trial2 := int32(RequireMockTrialID(t, pgDB, exp2))
+	deleted := RequireMockExperimentProject(t, pgDB, user, project1)
+	_, err := Bun().NewDelete().Table("experiments").Where("id = ?", deleted.ID).Exec(ctx)
+	require.NoError(t, err)
+	want := []model.AccessScopeID{ws1, ws2}
+	if ws2 < ws1 {
+		want = []model.AccessScopeID{ws2, ws1}
+	}
+
+	for name, tc := range map[string]struct {
+		exps, trials []int32
+		want         []model.AccessScopeID
+	}{
+		"experiments": {[]int32{int32(exp1.ID), int32(exp1b.ID)}, nil, []model.AccessScopeID{ws1}},
+		"duplicates": {
+			[]int32{int32(exp1.ID), int32(exp1.ID)}, []int32{trial1, trial1}, []model.AccessScopeID{ws1},
+		},
+		"a trial":             {nil, []int32{trial2}, []model.AccessScopeID{ws2}},
+		"both workspaces":     {[]int32{int32(exp2.ID)}, []int32{trial1}, want},
+		"trials of each":      {nil, []int32{trial2, trial1}, want},
+		"experiments of each": {[]int32{int32(exp2.ID), int32(exp1.ID)}, nil, want},
+	} {
+		got, err := TensorBoardSourceWorkspaceIDs(ctx, tc.exps, tc.trials)
+		require.NoError(t, err, name)
+		require.Equal(t, tc.want, got, name)
+	}
+
+	for name, tc := range map[string]struct{ exps, trials []int32 }{
+		"deleted experiment":      {[]int32{int32(exp1.ID), int32(deleted.ID)}, nil},
+		"unknown experiment":      {[]int32{math.MaxInt32}, []int32{trial1}},
+		"unknown trial":           {[]int32{int32(exp1.ID)}, []int32{trial1, math.MaxInt32}},
+		"unknown trial, repeated": {nil, []int32{math.MaxInt32, math.MaxInt32}},
+	} {
+		_, err := TensorBoardSourceWorkspaceIDs(ctx, tc.exps, tc.trials)
+		require.ErrorIs(t, err, ErrNotFound, name)
+	}
+
+	got, err := TensorBoardSourceWorkspaceIDs(ctx, nil, nil)
+	require.NoError(t, err)
+	require.Empty(t, got)
+}

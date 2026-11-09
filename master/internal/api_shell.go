@@ -17,6 +17,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/determined-ai/determined/master/internal/api"
 	"github.com/determined-ai/determined/master/internal/api/apiutils"
@@ -37,6 +38,7 @@ import (
 	"github.com/determined-ai/determined/master/pkg/ssh"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
+	"github.com/determined-ai/determined/proto/pkg/shellv1"
 )
 
 const (
@@ -106,6 +108,12 @@ func (a *apiServer) GetShells(
 	if err = api.Paginate(&resp.Pagination, &resp.Shells, req.Offset, req.Limit); err != nil {
 		return nil, err
 	}
+	// A list checks no permission per shell: only the owner and admins see a shell's sources.
+	for _, shell := range resp.Shells {
+		if !canReadTaskCredential(*curUser, shell.UserId) {
+			redactShellSources(shell, nil)
+		}
+	}
 	starts := make([]allocationStartTarget, 0, len(resp.Shells))
 	for _, item := range resp.Shells {
 		starts = append(starts, allocationStartTarget{item.Id, &item.AllocationStartTime})
@@ -133,7 +141,59 @@ func (a *apiServer) GetShell(
 		logCredentialRead(*curUser, "shell private key", req.ShellId, resp.Shell.UserId)
 	}
 	redactTaskConfig(*curUser, resp.Shell.UserId, req.ShellId, resp.Config)
+	if err = checkShellSources(ctx, *curUser, req.ShellId, resp.Shell, resp.Config); err != nil {
+		return nil, err
+	}
 	return resp, nil
+}
+
+// mayReadTensorBoardSources reports whether user may see which experiments and trials a task's
+// tensorboard service reads: the task's owner and admins may, and anyone else with the permission
+// on every one of them. A refusal is false; any other error is returned.
+func mayReadTensorBoardSources(
+	ctx context.Context, user model.User, ownerID int32, experimentIDs, trialIDs []int32,
+) (bool, error) {
+	if canReadTaskCredential(user, ownerID) || len(experimentIDs)+len(trialIDs) == 0 {
+		return true, nil
+	}
+	err := command.AuthZProvider.Get().CanGetTensorBoardSources(ctx, user, experimentIDs, trialIDs)
+	switch {
+	case err == nil:
+		return true, nil
+	case authz.IsPermissionDenied(err):
+		return false, nil
+	default:
+		return false, err
+	}
+}
+
+// checkShellSources removes a shell's tensorboard sources from the shell and its config, if it
+// has one, unless user may see them (mayReadTensorBoardSources).
+func checkShellSources(
+	ctx context.Context, user model.User, shellID string, shell *shellv1.Shell,
+	config *structpb.Struct,
+) error {
+	ok, err := mayReadTensorBoardSources(audit.SupplyEntityID(ctx, shellID), user, shell.UserId,
+		shell.ExperimentIds, shell.TrialIds)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		redactShellSources(shell, config)
+	}
+	return nil
+}
+
+// redactShellSources removes the experiment and trial IDs of a shell's tensorboard service from
+// the shell and, when it is not nil, from its config.
+func redactShellSources(shell *shellv1.Shell, config *structpb.Struct) {
+	shell.ExperimentIds, shell.TrialIds = nil, nil
+	services := config.GetFields()["services"].GetStructValue()
+	tensorBoard := services.GetFields()[model.ServiceTensorBoard].GetStructValue()
+	if tensorBoard != nil {
+		delete(tensorBoard.Fields, "experiment_ids")
+		delete(tensorBoard.Fields, "trial_ids")
+	}
 }
 
 // getShell returns a shell, without its private key but with its full config, if the current user
@@ -187,7 +247,11 @@ func (a *apiServer) KillShell(
 	if err != nil {
 		return nil, err
 	}
-	return &apiv1.KillShellResponse{Shell: cmd.ToV1Shell()}, nil
+	shell := cmd.ToV1Shell()
+	if err = checkShellSources(ctx, *curUser, req.ShellId, shell, nil); err != nil {
+		return nil, err
+	}
+	return &apiv1.KillShellResponse{Shell: shell}, nil
 }
 
 func (a *apiServer) SetShellPriority(
@@ -220,7 +284,11 @@ func (a *apiServer) SetShellPriority(
 		return nil, err
 	}
 
-	return &apiv1.SetShellPriorityResponse{Shell: cmd.ToV1Shell()}, nil
+	shell := cmd.ToV1Shell()
+	if err = checkShellSources(ctx, *curUser, req.ShellId, shell, nil); err != nil {
+		return nil, err
+	}
+	return &apiv1.SetShellPriorityResponse{Shell: shell}, nil
 }
 
 // sshService is the ssh service of a shell, at sshd's port: the shell's primary service and its
@@ -274,42 +342,81 @@ func setShellSSHD(spec *tasks.GenericCommandSpec, port int) {
 }
 
 // prepareShellLaunch prepares the launch of a shell, without side effects: the preparation of every
-// NTSC launch with the shell's services, the launch authorization, the default services, and the
-// services and the config, checked as the launch runs them. LaunchShell and PreviewShell share it,
-// so that a preview refuses what a launch refuses and returns the config that a launch runs, but
-// for what the launch chooses afterwards: the description, the entrypoint and the services' ports.
+// NTSC launch with the shell's services, the launch authorization, the default services, the
+// services and the config, checked as the launch runs them, and last the tensorboard service's
+// sources, which it writes into the spec as their canonical IDs and mount (see
+// resolveTensorBoardSources). A request that disables ssh runs with resources.slots 0, which it
+// may not set to another value. LaunchShell and PreviewShell share it, so that a preview refuses
+// what a launch refuses and returns the config that a launch runs, but for what the launch chooses
+// afterwards: the description, the entrypoint and the services' ports.
 func (a *apiServer) prepareShellLaunch(
 	ctx context.Context, req *apiv1.LaunchShellRequest, user *model.User,
-) (*command.CreateGeneric, []pkgCommand.LaunchWarning, error) {
+) (*command.CreateGeneric, *tensorBoardSources, []pkgCommand.LaunchWarning, error) {
+	disablesSSH, err := requestDisablesSSH(req.Config)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	launchReq, launchWarnings, err := a.prepareCommandLaunch(ctx, &protoCommandParams{
 		TemplateName:  req.TemplateName,
 		WorkspaceID:   req.WorkspaceId,
 		Config:        req.Config,
 		Files:         req.Files,
+		MustZeroSlot:  disablesSSH,
 		AllowServices: true,
 	}, user)
 	if err != nil {
-		return nil, nil, api.WrapWithFallbackCode(err, codes.InvalidArgument,
+		return nil, nil, nil, api.WrapWithFallbackCode(err, codes.InvalidArgument,
 			"failed to prepare launch params")
 	}
 
 	if err = a.isNTSCPermittedToLaunch(ctx, launchReq.Spec, user); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	a.addDefaultShellServices(&launchReq.Spec.Config)
 	if err = validateShellConfig(launchReq.Spec.Config); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err = a.validateShellServices(launchReq.Spec); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return launchReq, launchWarnings, nil
+	sources, err := a.resolveTensorBoardSources(ctx, user, launchReq.Spec)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return launchReq, sources, launchWarnings, nil
+}
+
+// requestDisablesSSH returns whether a shell's request config sets services.ssh.enabled to false.
+// It refuses one that does and sets resources.slots to other than 0.
+func requestDisablesSSH(cfg *structpb.Struct) (bool, error) {
+	enabled := cfg.GetFields()["services"].GetStructValue().GetFields()[model.ServiceSSH].
+		GetStructValue().GetFields()["enabled"]
+	if _, ok := enabled.GetKind().(*structpb.Value_BoolValue); !ok || enabled.GetBoolValue() {
+		return false, nil
+	}
+	slots := cfg.GetFields()["resources"].GetStructValue().GetFields()["slots"]
+	switch slots.GetKind().(type) {
+	case nil, *structpb.Value_NullValue:
+	case *structpb.Value_NumberValue:
+		if slots.GetNumberValue() != 0 {
+			return false, status.Error(codes.InvalidArgument,
+				"services: ssh: can be disabled only with resources.slots 0")
+		}
+	default:
+		return false, status.Error(codes.InvalidArgument,
+			"services: ssh: can be disabled only with resources.slots 0")
+	}
+	return true, nil
 }
 
 // addDefaultShellServices adds the services that a shell runs by default, jupyter and, when the
 // master serves code-server, vscode, to a config that does not mention them. A template's or the
-// request's entry for one of them, enabled or not, is kept.
+// request's entry for one of them, enabled or not, is kept. A shell whose primary service is
+// tensorboard gets none.
 func (a *apiServer) addDefaultShellServices(config *model.CommandConfig) {
+	if config.TensorBoardPrimary() {
+		return
+	}
 	if config.Services == nil {
 		config.Services = map[string]model.ServiceConfig{}
 	}
@@ -335,14 +442,17 @@ func validateShellConfig(config model.CommandConfig) error {
 }
 
 // validateShellServices checks that the master can run a shell's enabled services, the ones that
-// run: that it knows each, that it serves code-server for vscode, and that each gets a port of its
-// range outside the spec's other ports, as the launch assigns them, on a copy of the spec's
-// services.
+// run, ssh included unless the config disables it: that it knows each, that it serves code-server
+// for vscode, and that each gets a port of its range outside the spec's other ports, as the launch
+// assigns them, on a copy of the spec's services.
 func (a *apiServer) validateShellServices(spec *tasks.GenericCommandSpec) error {
 	scratch := *spec
 	scratch.Services = slices.Clone(spec.Services)
-	for _, name := range append([]string{interactiveServiceSSH},
-		model.EnabledServiceNames(spec.Config.Services)...) {
+	names := model.EnabledServiceNames(spec.Config.Services)
+	if model.ShellRunsSSH(spec.Config.Services) {
+		names = append([]string{interactiveServiceSSH}, names...)
+	}
+	for _, name := range names {
 		switch name {
 		case interactiveServiceSSH, interactiveServiceJupyter, interactiveServiceTensorBoard:
 		case interactiveServiceVSCode:
@@ -385,7 +495,7 @@ func (a *apiServer) PreviewShell(
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get the user: %s", err)
 	}
-	launchReq, launchWarnings, err := a.prepareShellLaunch(ctx, &apiv1.LaunchShellRequest{
+	launchReq, _, launchWarnings, err := a.prepareShellLaunch(ctx, &apiv1.LaunchShellRequest{
 		Config:       req.Config,
 		TemplateName: req.TemplateName,
 		Files:        req.Files,
@@ -402,7 +512,8 @@ func (a *apiServer) PreviewShell(
 
 // LaunchShell launches a shell: the preparation that PreviewShell shares, then, in order, the
 // description, sshd's port and the supervisor, the idle watch, the files and environment of each
-// service, the SSH keys, the task's session and the launch itself.
+// service, the SSH keys, the task's session and the launch itself. A shell whose primary service is
+// tensorboard runs no sshd and has no SSH keys: its supervisor starts tensorboard first.
 func (a *apiServer) LaunchShell(
 	ctx context.Context, req *apiv1.LaunchShellRequest,
 ) (*apiv1.LaunchShellResponse, error) {
@@ -411,27 +522,37 @@ func (a *apiServer) LaunchShell(
 		return nil, status.Errorf(codes.Internal, "failed to get the user: %s", err)
 	}
 
-	launchReq, launchWarnings, err := a.prepareShellLaunch(ctx, req, user)
+	launchReq, sources, launchWarnings, err := a.prepareShellLaunch(ctx, req, user)
 	if err != nil {
 		return nil, err
 	}
+	tensorBoardPrimary := launchReq.Spec.Config.TensorBoardPrimary()
 
 	// Postprocess the launchReq.Spec.
 	if launchReq.Spec.Config.Description == "" {
+		kind := "Shell"
+		if tensorBoardPrimary {
+			kind = "TensorBoard"
+		}
 		launchReq.Spec.Config.Description = fmt.Sprintf(
-			"Shell (%s)",
+			"%s (%s)", kind,
 			petname.Generate(expconf.TaskNameGeneratorWords, expconf.TaskNameGeneratorSep),
 		)
 	}
 
-	// Selecting a random port mitigates the risk of multiple processes binding
-	// the same port on an agent in host mode.
-	lo, hi := servicePortRange(interactiveServiceSSH)
-	sshdPort, err := freeServicePort(launchReq.Spec, interactiveServiceSSH, lo, hi)
-	if err != nil {
-		return nil, err
+	if tensorBoardPrimary {
+		// The primary service, tensorboard, takes no arguments of the supervisor.
+		launchReq.Spec.Config.Entrypoint = interactiveSupervisorEntrypoint()
+	} else {
+		// Selecting a random port mitigates the risk of multiple processes binding
+		// the same port on an agent in host mode.
+		lo, hi := servicePortRange(interactiveServiceSSH)
+		sshdPort, err := freeServicePort(launchReq.Spec, interactiveServiceSSH, lo, hi)
+		if err != nil {
+			return nil, err
+		}
+		setShellSSHD(launchReq.Spec, sshdPort)
 	}
-	setShellSSHD(launchReq.Spec, sshdPort)
 	// A shell's idle time is watched only when its config sets idle_timeout.
 	launchReq.Spec.WatchTaskActivity = true
 
@@ -450,11 +571,16 @@ func (a *apiServer) LaunchShell(
 			tar.TypeReg,
 		),
 	}
-	// The enabled services after ssh, the primary one, in sorted order, which Command.Start
-	// passes on to the supervisor from their records. prepareShellLaunch checked them; a disabled
-	// service stays in the config and gets no record.
-	for _, name := range model.EnabledServiceNames(launchReq.Spec.Config.Services) {
-		files, err := a.addShellService(launchReq.Spec, name)
+	// The enabled services after the primary one, ssh or tensorboard, in sorted order, which
+	// Command.Start passes on to the supervisor from their records. prepareShellLaunch checked
+	// them; a disabled service stays in the config and gets no record.
+	names := model.EnabledServiceNames(launchReq.Spec.Config.Services)
+	if tensorBoardPrimary {
+		names = append([]string{interactiveServiceTensorBoard}, slices.DeleteFunc(names,
+			func(name string) bool { return name == interactiveServiceTensorBoard })...)
+	}
+	for _, name := range names {
+		files, err := a.addShellService(launchReq.Spec, name, sources)
 		if err != nil {
 			return nil, err
 		}
@@ -471,13 +597,15 @@ func (a *apiServer) LaunchShell(
 	}
 	addExtraEnvVars(launchReq.Spec, oidcPachydermEnvVars)
 
-	keys, err := ssh.GenerateKey(launchReq.Spec.Base.SSHConfig)
-	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+	if !tensorBoardPrimary {
+		keys, err := ssh.GenerateKey(launchReq.Spec.Base.SSHConfig)
+		if err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
+		launchReq.Spec.Metadata.PrivateKey = ptrs.Ptr(string(keys.PrivateKey))
+		launchReq.Spec.Metadata.PublicKey = ptrs.Ptr(string(keys.PublicKey))
+		launchReq.Spec.Keys = &keys
 	}
-	launchReq.Spec.Metadata.PrivateKey = ptrs.Ptr(string(keys.PrivateKey))
-	launchReq.Spec.Metadata.PublicKey = ptrs.Ptr(string(keys.PublicKey))
-	launchReq.Spec.Keys = &keys
 	if err = startTaskSession(ctx, user, launchReq.Spec); err != nil {
 		return nil, err
 	}
@@ -499,10 +627,10 @@ func (a *apiServer) LaunchShell(
 	}, nil
 }
 
-// addShellService adds an enabled service other than ssh, which every shell runs, to a shell
-// spec, and returns its files.
+// addShellService adds an enabled service other than ssh, which the launch adds itself, to a shell
+// spec, and returns its files. The tensorboard service reads sources when they are set.
 func (a *apiServer) addShellService(
-	spec *tasks.GenericCommandSpec, name string,
+	spec *tasks.GenericCommandSpec, name string, sources *tensorBoardSources,
 ) (archive.Archive, error) {
 	switch name {
 	case interactiveServiceJupyter:
@@ -510,7 +638,7 @@ func (a *apiServer) addShellService(
 	case interactiveServiceVSCode:
 		return addShellVSCode(spec, a.m.config.Interactive.CodeServer)
 	case interactiveServiceTensorBoard:
-		return addShellTensorBoard(spec)
+		return addShellTensorBoard(spec, sources)
 	default:
 		return nil, nil
 	}

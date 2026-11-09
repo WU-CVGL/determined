@@ -93,6 +93,12 @@ message GetTaskServicesResponse {
   // The services of the task, the primary one first. Commands and TensorBoards
   // have none.
   repeated determined.task.v1.TaskService services = 5;
+  // The experiments (all trials) whose TensorBoard logs the task's tensorboard
+  // service reads.
+  repeated int32 experiment_ids = 6;
+  // The trials whose TensorBoard logs the task's tensorboard service reads,
+  // beside experiment_ids.
+  repeated int32 trial_ids = 7;
 }
 
 // Get the credential of a service of a task.

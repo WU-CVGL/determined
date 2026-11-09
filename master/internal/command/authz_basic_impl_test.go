@@ -58,3 +58,13 @@ func TestCanControlGenericTaskBasic(t *testing.T) {
 		})
 	}
 }
+
+func TestCanGetTensorBoardSourcesBasic(t *testing.T) {
+	ctx := context.Background()
+	user := model.User{ID: 1}
+	for _, impl := range []NSCAuthZ{&NSCAuthZBasic{}, &NSCAuthZPermissive{}} {
+		require.True(t, authz.IsPermissionDenied(impl.CanGetTensorBoardSources(ctx, user, nil, nil)))
+		require.True(t, authz.IsPermissionDenied(
+			impl.CanGetTensorBoardSources(ctx, user, []int32{}, []int32{})))
+	}
+}

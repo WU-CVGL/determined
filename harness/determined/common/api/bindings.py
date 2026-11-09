@@ -6707,6 +6707,8 @@ class v1GetTaskServiceCredentialResponse(Printable):
 
 class v1GetTaskServicesResponse(Printable):
     """Response to GetTaskServicesRequest."""
+    experimentIds: "typing.Optional[typing.Sequence[int]]" = None
+    trialIds: "typing.Optional[typing.Sequence[int]]" = None
 
     def __init__(
         self,
@@ -6716,12 +6718,18 @@ class v1GetTaskServicesResponse(Printable):
         taskId: str,
         userId: int,
         workspaceId: int,
+        experimentIds: "typing.Union[typing.Sequence[int], None, Unset]" = _unset,
+        trialIds: "typing.Union[typing.Sequence[int], None, Unset]" = _unset,
     ):
         self.primary = primary
         self.services = services
         self.taskId = taskId
         self.userId = userId
         self.workspaceId = workspaceId
+        if not isinstance(experimentIds, Unset):
+            self.experimentIds = experimentIds
+        if not isinstance(trialIds, Unset):
+            self.trialIds = trialIds
 
     @classmethod
     def from_json(cls, obj: Json) -> "v1GetTaskServicesResponse":
@@ -6732,6 +6740,10 @@ class v1GetTaskServicesResponse(Printable):
             "userId": obj["userId"],
             "workspaceId": obj["workspaceId"],
         }
+        if "experimentIds" in obj:
+            kwargs["experimentIds"] = obj["experimentIds"]
+        if "trialIds" in obj:
+            kwargs["trialIds"] = obj["trialIds"]
         return cls(**kwargs)
 
     def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
@@ -6742,6 +6754,10 @@ class v1GetTaskServicesResponse(Printable):
             "userId": self.userId,
             "workspaceId": self.workspaceId,
         }
+        if not omit_unset or "experimentIds" in vars(self):
+            out["experimentIds"] = self.experimentIds
+        if not omit_unset or "trialIds" in vars(self):
+            out["trialIds"] = self.trialIds
         return out
 
 class v1GetTasksResponse(Printable):
@@ -15382,9 +15398,11 @@ class v1Shell(Printable):
     displayName: "typing.Optional[str]" = None
     endTime: "typing.Optional[str]" = None
     exitStatus: "typing.Optional[str]" = None
+    experimentIds: "typing.Optional[typing.Sequence[int]]" = None
     privateKey: "typing.Optional[str]" = None
     publicKey: "typing.Optional[str]" = None
     slots: "typing.Optional[int]" = None
+    trialIds: "typing.Optional[typing.Sequence[int]]" = None
     userId: "typing.Optional[int]" = None
 
     def __init__(
@@ -15405,9 +15423,11 @@ class v1Shell(Printable):
         displayName: "typing.Union[str, None, Unset]" = _unset,
         endTime: "typing.Union[str, None, Unset]" = _unset,
         exitStatus: "typing.Union[str, None, Unset]" = _unset,
+        experimentIds: "typing.Union[typing.Sequence[int], None, Unset]" = _unset,
         privateKey: "typing.Union[str, None, Unset]" = _unset,
         publicKey: "typing.Union[str, None, Unset]" = _unset,
         slots: "typing.Union[int, None, Unset]" = _unset,
+        trialIds: "typing.Union[typing.Sequence[int], None, Unset]" = _unset,
         userId: "typing.Union[int, None, Unset]" = _unset,
     ):
         self.description = description
@@ -15432,12 +15452,16 @@ class v1Shell(Printable):
             self.endTime = endTime
         if not isinstance(exitStatus, Unset):
             self.exitStatus = exitStatus
+        if not isinstance(experimentIds, Unset):
+            self.experimentIds = experimentIds
         if not isinstance(privateKey, Unset):
             self.privateKey = privateKey
         if not isinstance(publicKey, Unset):
             self.publicKey = publicKey
         if not isinstance(slots, Unset):
             self.slots = slots
+        if not isinstance(trialIds, Unset):
+            self.trialIds = trialIds
         if not isinstance(userId, Unset):
             self.userId = userId
 
@@ -15467,12 +15491,16 @@ class v1Shell(Printable):
             kwargs["endTime"] = obj["endTime"]
         if "exitStatus" in obj:
             kwargs["exitStatus"] = obj["exitStatus"]
+        if "experimentIds" in obj:
+            kwargs["experimentIds"] = obj["experimentIds"]
         if "privateKey" in obj:
             kwargs["privateKey"] = obj["privateKey"]
         if "publicKey" in obj:
             kwargs["publicKey"] = obj["publicKey"]
         if "slots" in obj:
             kwargs["slots"] = obj["slots"]
+        if "trialIds" in obj:
+            kwargs["trialIds"] = obj["trialIds"]
         if "userId" in obj:
             kwargs["userId"] = obj["userId"]
         return cls(**kwargs)
@@ -15502,12 +15530,16 @@ class v1Shell(Printable):
             out["endTime"] = self.endTime
         if not omit_unset or "exitStatus" in vars(self):
             out["exitStatus"] = self.exitStatus
+        if not omit_unset or "experimentIds" in vars(self):
+            out["experimentIds"] = self.experimentIds
         if not omit_unset or "privateKey" in vars(self):
             out["privateKey"] = self.privateKey
         if not omit_unset or "publicKey" in vars(self):
             out["publicKey"] = self.publicKey
         if not omit_unset or "slots" in vars(self):
             out["slots"] = self.slots
+        if not omit_unset or "trialIds" in vars(self):
+            out["trialIds"] = self.trialIds
         if not omit_unset or "userId" in vars(self):
             out["userId"] = self.userId
         return out

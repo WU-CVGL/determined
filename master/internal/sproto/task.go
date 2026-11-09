@@ -88,6 +88,9 @@ type (
 		// Exec marks a port whose service runs code as the task's owner, such as a browser
 		// editor: only the owner and admins may reach it through the proxy.
 		Exec bool `json:"exec"`
+		// SourcesCheck makes the proxy also check, on every request, the viewer's permission on the
+		// experiments and trials whose TensorBoard logs the task reads.
+		SourcesCheck bool `json:"sources_check"`
 		// StripPrefix makes the proxy remove /proxy/<service ID> from the request path before it
 		// reaches the upstream, on HTTP and WebSocket requests. TCP proxies ignore it.
 		StripPrefix bool `json:"strip_prefix"`

@@ -54,6 +54,13 @@ type NSCAuthZ interface {
 		experimentIDs []int32, trialIDs []int32,
 	) error
 
+	// CanGetTensorBoardSources returns nil if the user may read the TensorBoard logs of every
+	// experiment in experimentIDs and every trial in trialIDs. It refuses empty lists and IDs that
+	// name nothing.
+	CanGetTensorBoardSources(
+		ctx context.Context, curUser model.User, experimentIDs, trialIDs []int32,
+	) error
+
 	// POST /api/v1/tensorboards/:tb_id/kill
 	CanTerminateTensorboard(
 		ctx context.Context, curUser model.User, workspaceID model.AccessScopeID,

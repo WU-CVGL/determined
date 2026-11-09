@@ -76,6 +76,14 @@ func (a *NSCAuthZPermissive) CanGetTensorboard(
 	return (&NSCAuthZBasic{}).CanGetTensorboard(ctx, curUser, workspaceID, experimentIDs, trialIDs)
 }
 
+// CanGetTensorBoardSources audits RBAC authorization but enforces basic authorization.
+func (a *NSCAuthZPermissive) CanGetTensorBoardSources(
+	ctx context.Context, curUser model.User, experimentIDs, trialIDs []int32,
+) error {
+	_ = (&NSCAuthZRBAC{}).CanGetTensorBoardSources(ctx, curUser, experimentIDs, trialIDs)
+	return (&NSCAuthZBasic{}).CanGetTensorBoardSources(ctx, curUser, experimentIDs, trialIDs)
+}
+
 // CanTerminateTensorboard always returns nil.
 func (a *NSCAuthZPermissive) CanTerminateTensorboard(
 	ctx context.Context, curUser model.User, workspaceID model.AccessScopeID,

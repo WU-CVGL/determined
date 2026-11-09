@@ -30,6 +30,7 @@ import (
 	"github.com/determined-ai/determined/master/pkg/ssh"
 	"github.com/determined-ai/determined/master/pkg/syncx/queue"
 	"github.com/determined-ai/determined/master/pkg/tasks"
+	"github.com/determined-ai/determined/proto/pkg/apiv1"
 	"github.com/determined-ai/determined/proto/pkg/taskv1"
 )
 
@@ -510,4 +511,65 @@ func TestRestoreQueuedShellKeepsIdleWatcher(t *testing.T) {
 			require.Equal(t, 1, calls)
 		})
 	}
+}
+
+// A restored TensorBoard-viewing shell, without sshd or SSH keys, keeps its tensorboard service as
+// its primary one, with the sources check and the token on its proxy, and its sources in its
+// metadata; the shell lists without its keys.
+func TestRestoreTensorBoardViewingSession(t *testing.T) {
+	if proxy.DefaultProxy == nil {
+		proxy.InitProxy(nil, nil)
+	}
+	exps, trials := []int32{3, 5}, []int32{8}
+	shell, restartedRM, q := restartWithQueuedShell(t, time.Now().UTC().Add(-time.Hour),
+		func(req *CreateGeneric) {
+			req.Spec.Metadata.PrivateKey, req.Spec.Metadata.PublicKey, req.Spec.Keys = nil, nil, nil
+			req.Spec.AddService(tasks.InteractiveService{
+				Name: model.ServiceTensorBoard, Port: 3000, Exec: true, SourcesCheck: true,
+			})
+			req.Spec.Metadata.TensorBoardToken = ptrs.Ptr(testTensorBoardToken)
+			req.Spec.Metadata.ExperimentIDs, req.Spec.Metadata.TrialIDs = exps, trials
+			req.Spec.Base.ExtraEnvVars = map[string]string{"DET_TENSORBOARD_TOKEN": testTensorBoardToken}
+		})
+	taskID := string(shell.taskID)
+
+	calls := 0
+	for _, call := range restartedRM.Calls {
+		if call.Method == "Allocate" {
+			calls++
+			require.Equal(t, []*sproto.ProxyPortConfig{{
+				ServiceID: taskID + ":3000", Port: 3000, Exec: true, SourcesCheck: true,
+				ServiceToken: testTensorBoardToken,
+			}}, call.Arguments.Get(0).(sproto.AllocateRequest).ProxyPorts)
+		}
+	}
+	require.Equal(t, 1, calls)
+	require.Equal(t, model.ServiceTensorBoard, shell.Base.ExtraEnvVars[tasks.ServicesEnvVar])
+	_, ok := shell.Service(model.ServiceSSH)
+	require.False(t, ok)
+	require.Nil(t, shell.Metadata.PublicKey)
+	require.Nil(t, shell.Keys)
+
+	metadata, err := IdentifyTask(context.Background(), shell.taskID)
+	require.NoError(t, err)
+	require.Equal(t, exps, metadata.ExperimentIDs)
+	require.Equal(t, trials, metadata.TrialIDs)
+	shells, err := DefaultCmdService.GetShells(&apiv1.GetShellsRequest{})
+	require.NoError(t, err)
+	require.Len(t, shells.Shells, 1)
+	require.Empty(t, shells.Shells[0].PublicKey)
+	require.Equal(t, exps, shells.Shells[0].ExperimentIds)
+	require.Equal(t, trials, shells.Shells[0].TrialIds)
+
+	runRestoredShell(t, shell, q, []cproto.Address{
+		{ContainerIP: "172.17.0.2", ContainerPort: 3000, HostIP: "10.0.0.7", HostPort: 40004},
+	})
+	var service *proxy.Service
+	require.Eventually(t, func() bool {
+		service = proxy.DefaultProxy.GetService(taskID + ":3000")
+		return service != nil
+	}, 5*time.Second, 10*time.Millisecond)
+	require.True(t, service.Exec)
+	require.True(t, service.SourcesCheck)
+	require.Equal(t, testTensorBoardToken, service.ServiceToken)
 }

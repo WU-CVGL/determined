@@ -199,6 +199,12 @@ func processProxyAuthentication(c echo.Context, service *proxy.Service) (done bo
 	if err == nil && exec {
 		err = authorizeExecPort(ctx, *usr, session, jupyterSession != nil, taskID)
 	}
+	// A service that shows the logs of the task's experiments and trials needs the viewer's
+	// permission on all of them, checked again on every request.
+	if err == nil && service != nil && service.SourcesCheck {
+		err = command.AuthZProvider.Get().CanGetTensorBoardSources(
+			ctx, *usr, spec.ExperimentIDs, spec.TrialIDs)
+	}
 	return err != nil, authz.SubIfUnauthorized(err, serviceNotFoundErr)
 }
 

@@ -6,12 +6,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/determined-ai/determined/master/internal/sproto"
+	"github.com/determined-ai/determined/master/internal/task"
 	"github.com/determined-ai/determined/master/pkg/cproto"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/master/pkg/ssh"
 	"github.com/determined-ai/determined/master/pkg/tasks"
+	"github.com/determined-ai/determined/proto/pkg/shellv1"
 )
 
 func TestShellSSHDAddr(t *testing.T) {
@@ -98,4 +100,25 @@ func TestHasSSHD(t *testing.T) {
 		withPort(s)
 		s.Metadata.PublicKey = nil
 	}).hasSSHD())
+}
+
+// A shell whose primary service is tensorboard has no SSH keys: it has no sshd, and its shell
+// view has an empty public key and the experiments and trials it reads.
+func TestKeylessShell(t *testing.T) {
+	var spec tasks.GenericCommandSpec
+	spec.Base.Owner = &model.User{ID: 1, Username: "owner"}
+	spec.Metadata.ExperimentIDs = []int32{12}
+	spec.Metadata.TrialIDs = []int32{40}
+	spec.AddService(tasks.InteractiveService{
+		Name: model.ServiceTensorBoard, Port: 3000, Exec: true, SourcesCheck: true,
+	})
+	c := servicesCommand(spec, model.TaskTypeShell)
+	c.exitStatus = &task.AllocationExited{}
+
+	require.False(t, c.hasSSHD())
+	var shell *shellv1.Shell
+	require.NotPanics(t, func() { shell = c.ToV1Shell() })
+	require.Empty(t, shell.PublicKey)
+	require.Equal(t, []int32{12}, shell.ExperimentIds)
+	require.Equal(t, []int32{40}, shell.TrialIds)
 }

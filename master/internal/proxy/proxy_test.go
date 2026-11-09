@@ -379,3 +379,48 @@ func TestProxyAuthenticatesExecServices(t *testing.T) {
 		})
 	}
 }
+
+// TestServiceSourcesCheck checks that Clone keeps SourcesCheck and that a service with it goes
+// through HTTPAuth even when it allows unauthenticated requests.
+func TestServiceSourcesCheck(t *testing.T) {
+	serviceURL := &url.URL{Scheme: "http", Host: "127.0.0.1:1"}
+	require.True(t, Service{URL: serviceURL, SourcesCheck: true}.Clone().SourcesCheck)
+
+	for _, refuse := range []bool{false, true} {
+		var sawAuthCookie string
+		p, base := newTestProxy(t, &sawAuthCookie)
+		authCalls := 0
+		p.HTTPAuth = func(c echo.Context, service *Service) (bool, error) {
+			authCalls++
+			require.True(t, service.SourcesCheck)
+			if refuse {
+				return true, c.NoContent(http.StatusNotFound)
+			}
+			return false, nil
+		}
+		reached := false
+		upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			reached = true
+		}))
+		upstreamURL, err := url.Parse(upstream.URL)
+		require.NoError(t, err)
+		p.RegisterService("svc:1", Service{
+			URL: upstreamURL, AllowUnauthenticated: true, SourcesCheck: true,
+		})
+
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+			base+"/proxy/svc:1/", nil)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		upstream.Close()
+		require.Equal(t, 1, authCalls)
+		require.Equal(t, !refuse, reached)
+		if refuse {
+			require.Equal(t, http.StatusNotFound, resp.StatusCode)
+		} else {
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+		}
+	}
+}

@@ -1249,6 +1249,7 @@ func (a *allocation) registerProxies(addresses []cproto.Address) {
 			ProxyTCP:             pcfg.ProxyTCP,
 			AllowUnauthenticated: pcfg.Unauthenticated,
 			Exec:                 pcfg.Exec,
+			SourcesCheck:         pcfg.SourcesCheck,
 			StripPrefix:          pcfg.StripPrefix,
 			ServiceToken:         pcfg.ServiceToken,
 			// Every port of an allocation is a service of its task.
