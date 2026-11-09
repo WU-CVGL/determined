@@ -60,14 +60,22 @@ func usageRow(pool string, slots int, start time.Time, end *time.Time) userAlloc
 // testPools has a CUDA, a CPU, an unspecified and a Kubernetes pool.
 func testPools() map[string]poolKind {
 	return poolKinds(&apiv1.GetResourcePoolsResponse{ResourcePools: []*resourcepoolv1.ResourcePool{
-		{Name: "gpu", Type: resourcepoolv1.ResourcePoolType_RESOURCE_POOL_TYPE_STATIC,
-			SlotType: devicev1.Type_TYPE_CUDA},
-		{Name: "cpu", Type: resourcepoolv1.ResourcePoolType_RESOURCE_POOL_TYPE_STATIC,
-			SlotType: devicev1.Type_TYPE_CPU},
-		{Name: "mixed", Type: resourcepoolv1.ResourcePoolType_RESOURCE_POOL_TYPE_STATIC,
-			SlotType: devicev1.Type_TYPE_UNSPECIFIED},
-		{Name: "k8s", Type: resourcepoolv1.ResourcePoolType_RESOURCE_POOL_TYPE_K8S,
-			SlotType: devicev1.Type_TYPE_CUDA},
+		{
+			Name: "gpu", Type: resourcepoolv1.ResourcePoolType_RESOURCE_POOL_TYPE_STATIC,
+			SlotType: devicev1.Type_TYPE_CUDA,
+		},
+		{
+			Name: "cpu", Type: resourcepoolv1.ResourcePoolType_RESOURCE_POOL_TYPE_STATIC,
+			SlotType: devicev1.Type_TYPE_CPU,
+		},
+		{
+			Name: "mixed", Type: resourcepoolv1.ResourcePoolType_RESOURCE_POOL_TYPE_STATIC,
+			SlotType: devicev1.Type_TYPE_UNSPECIFIED,
+		},
+		{
+			Name: "k8s", Type: resourcepoolv1.ResourcePoolType_RESOURCE_POOL_TYPE_K8S,
+			SlotType: devicev1.Type_TYPE_CUDA,
+		},
 	}})
 }
 
@@ -444,18 +452,31 @@ func TestCurrentResources(t *testing.T) {
 		resources []sproto.ResourcesSummary
 		want      *counts
 	}{
-		{"4 cuda", "gpu", []sproto.ResourcesSummary{containerSummary("a1", devices(device.CUDA, 4)...)},
-			ptrs.Ptr(agentrm(4, 0, 0))},
-		{"2 rocm", "gpu", []sproto.ResourcesSummary{containerSummary("a1", devices(device.ROCM, 2)...)},
-			ptrs.Ptr(agentrm(2, 0, 0))},
-		{"1 cpu", "cpu", []sproto.ResourcesSummary{containerSummary("a1", devices(device.CPU, 1)...)},
-			ptrs.Ptr(agentrm(0, 1, 0))},
-		{"typeless in a CPU pool", "cpu",
+		{
+			"4 cuda", "gpu",
+			[]sproto.ResourcesSummary{containerSummary("a1", devices(device.CUDA, 4)...)},
+			ptrs.Ptr(agentrm(4, 0, 0)),
+		},
+		{
+			"2 rocm", "gpu",
+			[]sproto.ResourcesSummary{containerSummary("a1", devices(device.ROCM, 2)...)},
+			ptrs.Ptr(agentrm(2, 0, 0)),
+		},
+		{
+			"1 cpu", "cpu",
+			[]sproto.ResourcesSummary{containerSummary("a1", devices(device.CPU, 1)...)},
+			ptrs.Ptr(agentrm(0, 1, 0)),
+		},
+		{
+			"typeless in a CPU pool", "cpu",
 			[]sproto.ResourcesSummary{containerSummary("a1", devices(device.ZeroSlot, 2)...)},
-			ptrs.Ptr(agentrm(0, 2, 0))},
-		{"typeless in an unknown pool", "removed",
+			ptrs.Ptr(agentrm(0, 2, 0)),
+		},
+		{
+			"typeless in an unknown pool", "removed",
 			[]sproto.ResourcesSummary{containerSummary("a1", devices(device.ZeroSlot, 2)...)},
-			ptrs.Ptr(agentrm(2, 0, 0))},
+			ptrs.Ptr(agentrm(2, 0, 0)),
+		},
 		{"0 devices", "gpu", []sproto.ResourcesSummary{containerSummary("a1")}, ptrs.Ptr(agentrm(0, 0, 1))},
 		{"distributed", "gpu", distributed, ptrs.Ptr(agentrm(8, 0, 0))},
 		{"distributed after one container is released", "gpu", distributed[1:], ptrs.Ptr(agentrm(4, 0, 0))},
