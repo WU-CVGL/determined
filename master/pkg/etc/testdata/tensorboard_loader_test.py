@@ -898,6 +898,62 @@ class LoaderTest(unittest.TestCase):
         self.assertEqual(1, self.fetches(key))
         self.assertEqual([], self.lines())
 
+    def test_stop_during_a_publish(self) -> None:
+        key = PREFIX + "experiment/12/f"
+        dest = self.files.logdir + "/experiment/12/f"
+        v1, v2 = b"data", b"data and more"
+        self.put(key, v1)
+        loader = self.loader([s3_source("experiment/12")])
+        loader.start()
+        wait_until("v1", lambda: self.read(dest) == v1)
+        reached, release = threading.Event(), threading.Event()
+        real_same_start = tl.same_start
+
+        def same_start(a: str, b: str, size: int) -> bool:
+            same = real_same_start(a, b, size)
+            reached.set()
+            release.wait(30)
+            return same
+
+        with mock.patch.object(tl, "same_start", same_start):
+            self.put(key, v2)
+            wait_until("the publish", reached.is_set)
+            with mock.patch.object(tl, "STOP_SECONDS", 0.2):
+                started = time.monotonic()
+                alive = loader.stop()
+                elapsed = time.monotonic() - started
+            self.assertLess(elapsed, 0.4)
+            self.assertGreaterEqual(alive, 1)
+            self.assertFalse(loader.publishing_closed)
+            release.set()
+            for t in loader.threads:
+                t.join(5)
+                self.assertFalse(t.is_alive(), t.name)
+        self.assertEqual(v1, self.read(dest))
+        self.assertEqual(
+            ["tensorboard loader: 1 downloads were still running at exit"], self.lines()
+        )
+
+    def test_no_append_after_a_stop_in_the_comparison(self) -> None:
+        dest = self.files.logdir + "/experiment/12/f"
+        os.makedirs(os.path.dirname(dest))
+        with open(dest, "wb") as f:
+            f.write(b"data")
+        staged = os.path.join(self.files.root, "staged")
+        with open(staged, "wb") as f:
+            f.write(b"data and more")
+        loader = self.loader([s3_source("experiment/12")])
+        real_same_start = tl.same_start
+
+        def same_start(a: str, b: str, size: int) -> bool:
+            loader.stop_event.set()
+            return real_same_start(a, b, size)
+
+        with mock.patch.object(tl, "same_start", same_start):
+            loader.publish(staged, dest, tl.Pending("experiment/12", "f"))
+        self.assertEqual(b"data", self.read(dest))
+        self.assertEqual([], self.lines())
+
 
 class RecordingQueue(queue.Queue):  # type: ignore[type-arg]
     """A queue that records its puts and whether a key was ever in it twice, or put after stop."""
@@ -925,13 +981,19 @@ class RecordingLock:
         self.loader = loader
         self.events = events
 
-    def __enter__(self) -> None:
-        self.lock.acquire()
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+        return self.lock.acquire(blocking, timeout)
 
-    def __exit__(self, *_: Any) -> None:
+    def release(self) -> None:
         if self.loader.publishing_closed and "publishing closed" not in self.events:
             self.events.append("publishing closed")
         self.lock.release()
+
+    def __enter__(self) -> None:
+        self.acquire()
+
+    def __exit__(self, *_: Any) -> None:
+        self.release()
 
 
 def recording_join(t: threading.Thread, events: List[str]) -> Callable[..., None]:

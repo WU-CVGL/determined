@@ -16,7 +16,8 @@ its storage_config names.
   workers into its own staging directory beside LOGDIR, on the same file system. A new file is
   published by a rename, and a grown one by appending its new bytes once its old bytes are
   checked. A file that changed in any other way is not published, so that a published file only
-  grows. A SIGTERM, SIGINT or SIGHUP stops the loader within STOP_SECONDS.
+  grows. On a SIGTERM, SIGINT or SIGHUP the loader waits up to STOP_SECONDS for its threads,
+  then exits, which ends those still running.
 
 With --check, the loader checks, without contacting the storage, that it can run: it exits 0, or
 2 after one line that says why.
@@ -363,13 +364,16 @@ class Loader:
 
     def stop(self) -> int:
         """
-        Stops the threads within STOP_SECONDS, removes the staging directory and returns the
-        number of threads still running.
+        Stops the threads, removes the staging directory and returns the number of threads still
+        running. STOP_SECONDS bounds the wait for the publish lock and the joins together. A
+        thread still running afterwards, such as one in a long publish, is ended by the process
+        exit in run().
         """
-        self.stop_event.set()
-        with self.publish_lock:
-            self.publishing_closed = True
         deadline = time.monotonic() + STOP_SECONDS
+        self.stop_event.set()
+        if self.publish_lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
+            self.publishing_closed = True
+            self.publish_lock.release()
         for t in self.threads:
             t.join(max(0.0, deadline - time.monotonic()))
         alive = [t for t in self.threads if t.is_alive()]
@@ -506,7 +510,7 @@ class Loader:
         its new bytes. A stale download is dropped, and a file changed otherwise is not published.
         """
         with self.publish_lock:
-            if self.publishing_closed:
+            if self.publishing_closed or self.stop_event.is_set():
                 return
             try:
                 published = os.stat(dest).st_size
@@ -516,7 +520,12 @@ class Loader:
                 return
             size = os.stat(staged).st_size
             if size >= published and same_start(staged, dest, published):
-                if size > published:
+                # No append starts after a stop, which may have come during same_start. One
+                # that the process exit cuts leaves dest the old bytes and a part of the new
+                # ones, still a start of the object; the next listing, in the next run of the
+                # loader, lists the key again, and same_start, over all of dest, lets the
+                # missing bytes be appended.
+                if size > published and not self.stop_event.is_set():
                     with open(staged, "rb") as src, open(dest, "ab") as out:
                         src.seek(published)
                         shutil.copyfileobj(src, out, CHUNK)
