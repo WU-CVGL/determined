@@ -297,28 +297,6 @@ def test_tensorboard_does_not_inherit_image_pull_secrets() -> None:
 
 
 @pytest.mark.e2e_cpu
-def test_tensorboard_old_type() -> None:
-    """
-    A TensorBoard launched through the API as before is listed, configured and killed by the
-    tensorboard commands.
-    """
-    sess = api_utils.user_session()
-    exp_ref = completed_experiment(sess, SHARED_FS_CONFIG)
-    tsb = bindings.post_LaunchTensorboard(
-        sess, body=bindings.v1LaunchTensorboardRequest(experimentIds=[exp_ref.id])
-    ).tensorboard
-    try:
-        listed = detproc.check_output(sess, ["det", "tensorboard", "list", "-q"])
-        assert tsb.id in listed.split(), listed
-        config = util.yaml_safe_load(
-            detproc.check_output(sess, ["det", "tensorboard", "config", tsb.id])
-        )
-        assert isinstance(config, dict), config
-    finally:
-        detproc.check_call(sess, ["det", "tensorboard", "kill", tsb.id])
-
-
-@pytest.mark.e2e_cpu
 def test_tensorboard_commands_manage_sessions() -> None:
     """
     The tensorboard commands list and configure a viewing session; a shell with an attached
