@@ -231,8 +231,10 @@ func TestCurrentResources(t *testing.T) {
 		},
 		{"0 devices", "gpu", []sproto.ResourcesSummary{containerSummary("a1")}, ptrs.Ptr(agentrm(0, 0, 1))},
 		{
-			"0 devices in an unreported pool", "removed",
-			[]sproto.ResourcesSummary{containerSummary("a1")}, ptrs.Ptr(agentrm(0, 0, 1)),
+			"0 devices in an unreported pool",
+			"removed",
+			[]sproto.ResourcesSummary{containerSummary("a1")},
+			ptrs.Ptr(agentrm(0, 0, 1)),
 		},
 		{"distributed", "gpu", distributed, ptrs.Ptr(agentrm(8, 0, 0))},
 		{"distributed after one container is released", "gpu", distributed[1:], ptrs.Ptr(agentrm(4, 0, 0))},
@@ -240,8 +242,10 @@ func TestCurrentResources(t *testing.T) {
 		{"k8s cuda", "k8s", []sproto.ResourcesSummary{k8sSummary(device.CUDA, 8)}, ptrs.Ptr(k8s(8, 0))},
 		{"k8s cpu", "k8s", []sproto.ResourcesSummary{k8sSummary(device.CPU, 8)}, ptrs.Ptr(k8s(0, 8))},
 		{
-			"k8s job in an unreported pool", "removed",
-			[]sproto.ResourcesSummary{k8sSummary(device.CUDA, 2)}, ptrs.Ptr(k8s(2, 0)),
+			"k8s job in an unreported pool",
+			"removed",
+			[]sproto.ResourcesSummary{k8sSummary(device.CUDA, 2)},
+			ptrs.Ptr(k8s(2, 0)),
 		},
 		{"k8s without devices", "k8s", []sproto.ResourcesSummary{k8sSummary(device.CUDA, 0)}, nil},
 	}
