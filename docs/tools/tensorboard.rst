@@ -148,11 +148,6 @@ See :func:`PyTorchTrialContext.get_tensorboard_writer()
  TensorBoard Lifecycle Management
 **********************************
 
-``det tensorboard start`` ends the task after 5 minutes without requests through the master, unless
-the configuration sets ``idle_timeout``, as in ``--config idle_timeout=30m``. A browser tab kept
-open on TensorBoard does not by itself count; with its **Reload data** setting on, TensorBoard's
-page sends requests periodically.
-
 To manage it, use ``det tensorboard list``, ``det tensorboard open <task-id>``, ``det tensorboard
 logs <task-id>``, ``det tensorboard config <task-id>`` and ``det tensorboard kill <task-id>``; they
 do not manage a shell with a ``tensorboard`` service. As the task is a shell, the ``det shell`` and

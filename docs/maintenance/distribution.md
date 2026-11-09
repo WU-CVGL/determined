@@ -34,12 +34,8 @@ send their token. 0.44.0 removes the TensorBoard task type. Its two migrations
 delete the TensorBoard task records and move `tensorboard_args` to
 `services.tensorboard.args` in templates, so a rollback to 0.43.1 restores the
 database backup taken before the upgrade; end the TensorBoard tasks before
-taking the backup. 0.44.0 also drops the `notebook_sessions` table, which a
-0.43.1 master writes for a shell with JupyterLab, so a rollback across that
-migration also needs the backup. End the TensorBoard viewing sessions, shells
-without SSH, before a rollback to 0.43.1, since a 0.43.1 master panics on a
-shell without SSH keys. The 0.44.0 master refuses a master configuration that
-sets `tensorboard_timeout`.
+taking the backup. The 0.44.0 master refuses a master configuration that sets
+`tensorboard_timeout`.
 
 ## Install the CLI from the repository
 
