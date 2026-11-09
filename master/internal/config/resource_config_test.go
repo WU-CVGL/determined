@@ -185,9 +185,8 @@ resource_manager:
   cluster_name: a
 resource_pools:
   - pool_name: a
-  - pool_name: a`, nil, "Check Failed! 2 errors found:\n\terror found at root.ResourceConfig: " +
-				"resource pool has a duplicate name: a\n\terror found at root: resource pool has " +
-				"a duplicate name: a",
+  - pool_name: a`, nil, "Check Failed! 1 errors found:\n\terror found at root.ResourceConfig: " +
+				"resource pool has a duplicate name: a",
 		},
 
 		{
@@ -205,10 +204,9 @@ additional_resource_managers:
       name: b
       cluster_name: b
     resource_pools:
-      - pool_name: a`, nil, "Check Failed! 2 errors found:\n\terror found at root.ResourceConfig: " +
+      - pool_name: a`, nil, "Check Failed! 1 errors found:\n\terror found at root.ResourceConfig: " +
 				"resource pool has a duplicate name: a They must be unique across even different " +
-				"resource managers\n\terror found at root: resource pool has a duplicate name: a " +
-				"They must be unique across even different resource managers",
+				"resource managers",
 		},
 
 		{"dupe rm names", `
@@ -223,9 +221,8 @@ additional_resource_managers:
       cluster_name: a
       max_slots_per_pod: 2
     resource_pools:
-    - pool_name: a`, nil, "Check Failed! 2 errors found:\n\terror found at " +
-			"root.ResourceConfig: resource manager has a duplicate name: a\n\terror " +
-			"found at root: resource manager has a duplicate name: a"},
+    - pool_name: a`, nil, "Check Failed! 1 errors found:\n\terror found at " +
+			"root.ResourceConfig: resource manager has a duplicate name: a"},
 
 		{"more than one agent", `
 resource_manager:
@@ -238,10 +235,9 @@ additional_resource_managers:
       name: b
       cluster_name: b
     resource_pools:
-    - pool_name: a`, nil, "Check Failed! 2 errors found:\n\terror found at root.ResourceConfig: " +
+    - pool_name: a`, nil, "Check Failed! 1 errors found:\n\terror found at root.ResourceConfig: " +
 			"additional_resource_managers only supports resource managers of type: " +
-			"kubernetes\n\terror found at root: additional_resource_managers only supports " +
-			"resource managers of type: kubernetes"},
+			"kubernetes"},
 
 		{"k8s name not specified", `
 resource_manager:
@@ -267,10 +263,9 @@ additional_resource_managers:
       type: kubernetes
       name: test
       cluster_name: test
-      max_slots_per_pod: 12`, nil, "Check Failed! 2 errors found:\n\terror found at " +
+      max_slots_per_pod: 12`, nil, "Check Failed! 1 errors found:\n\terror found at " +
 			"root.ResourceConfig: for additional_resource_managers, you must specify at " +
-			"least one resource pool\n\terror found at root: for additional_resource_managers, " +
-			"you must specify at least one resource pool"},
+			"least one resource pool"},
 
 		{"k8s negative cpu", `
 resource_manager:

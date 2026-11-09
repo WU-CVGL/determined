@@ -543,6 +543,22 @@ WHERE run_id_task_id.task_id = ?`, taskID).Scan(ctx, &experiment); err != nil {
 	return &experiment, nil
 }
 
+// ExperimentByJobID looks up the experiment of a given job, returning ErrNotFound if the job is
+// not an experiment's.
+func ExperimentByJobID(ctx context.Context, jobID model.JobID) (*model.Experiment, error) {
+	var experiment model.Experiment
+	if err := Bun().NewRaw(`
+SELECT e.id, e.state, e.config, e.start_time, e.end_time, e.archived,
+       e.owner_id, e.notes, e.job_id, u.username as username, e.project_id, e.unmanaged, external_experiment_id
+FROM experiments e
+JOIN users u ON e.owner_id = u.id
+WHERE e.job_id = ?`, jobID).Scan(ctx, &experiment); err != nil {
+		return nil, MatchSentinelError(err)
+	}
+
+	return &experiment, nil
+}
+
 // ExperimentByExternalIDTx looks up an experiment by a given external experiment id.
 func ExperimentByExternalIDTx(ctx context.Context, idb bun.IDB, externalExperimentID string) (
 	*model.Experiment, error,

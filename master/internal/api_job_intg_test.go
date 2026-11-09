@@ -14,21 +14,24 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/determined-ai/determined/master/internal/command"
+	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/configpolicy"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/job"
 	"github.com/determined-ai/determined/master/internal/job/jobservice"
 	"github.com/determined-ai/determined/master/internal/poolaccess"
+	"github.com/determined-ai/determined/master/internal/rbac"
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/internal/user"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 	"github.com/determined-ai/determined/proto/pkg/jobv1"
+	"github.com/determined-ai/determined/proto/pkg/rbacv1"
 )
 
 func TestJobQueueUpdatesPreflightEveryOwner(t *testing.T) {
-	_, _, ctx := setupAPITest(t, nil)
+	api, _, ctx := setupAPITest(t, nil)
 	owner := db.RequireMockUser(t, db.SingleDB())
 	other := db.RequireMockUser(t, db.SingleDB())
 	ownedJob := db.RequireMockJob(t, db.SingleDB(), &owner.ID)
@@ -63,9 +66,84 @@ func TestJobQueueUpdatesPreflightEveryOwner(t *testing.T) {
 	require.NoError(t, updateJobQueueAuthorized(ctx, admin,
 		[]*jobv1.QueueControl{priority(ownedJob), resourcePool(ownerlessJob)}, authorize, apply))
 	require.Equal(t, 2, applied)
-	// The RBAC provider still relies on the existing queue-level permission.
-	require.NoError(t, (&job.JobAuthZRBAC{}).CanControlJobQueueUpdate(
-		context.Background(), owner, foreignJob))
+
+	// Under RBAC, a user without UPDATE_EXPERIMENT in the workspace of another user's experiment
+	// may not change its job.
+	useRBACForJobQueueTest(t)
+	foreignExp := createTestExpWithProjectID(t, api, other, 1)
+	err := updateJobQueueAuthorized(ctx, owner, []*jobv1.QueueControl{priority(foreignExp.JobID)},
+		job.AuthZProvider.Get().CanControlJobQueueUpdate, apply)
+	require.Equal(t, codes.PermissionDenied, status.Code(err), "%v", err)
+	require.Equal(t, 2, applied)
+}
+
+// useRBACForJobQueueTest makes every authz provider the RBAC one for the rest of the test.
+func useRBACForJobQueueTest(t *testing.T) {
+	t.Helper()
+	previous := config.GetMasterConfig().Security.AuthZ
+	config.GetMasterConfig().Security.AuthZ = config.AuthZConfig{Type: "rbac"}
+	t.Cleanup(func() { config.GetMasterConfig().Security.AuthZ = previous })
+}
+
+// Under RBAC, the Editor role in a workspace allows priority, weight and pool updates of a
+// colleague's jobs in that workspace only, and a batch with a job outside it applies nothing.
+func TestUpdateJobQueueRBACChecksEachJobWorkspace(t *testing.T) {
+	api, admin, ctx := setupAPITest(t, nil)
+	open := accessTestPool(t, "open", admin, false)
+	useRBACForJobQueueTest(t)
+	colleague := db.RequireMockUser(t, db.SingleDB())
+	editor := db.RequireMockUser(t, db.SingleDB())
+	wsA, _ := db.RequireMockWorkspaceID(t, db.SingleDB(), "")
+	wsB, _ := db.RequireMockWorkspaceID(t, db.SingleDB(), "")
+	projectA, _ := db.RequireMockProjectID(t, db.SingleDB(), wsA, false)
+	projectB, _ := db.RequireMockProjectID(t, db.SingleDB(), wsB, false)
+	var editorRole int32
+	require.NoError(t, db.Bun().NewRaw("SELECT id FROM roles WHERE role_name = 'Editor'").
+		Scan(ctx, &editorRole))
+	require.NoError(t, rbac.AddRoleAssignments(ctx, nil, []*rbacv1.UserRoleAssignment{{
+		UserId: int32(editor.ID),
+		RoleAssignment: &rbacv1.RoleAssignment{
+			Role: &rbacv1.Role{RoleId: editorRole}, ScopeWorkspaceId: ptrs.Ptr(int32(wsA)),
+		},
+	}}))
+	genericJob := func(workspaceID int) model.JobID {
+		taskID := addGenericTaskForAuthZTest(ctx, t, colleague, workspaceID, nil, model.TaskStateActive)
+		task, err := db.TaskByID(ctx, taskID)
+		require.NoError(t, err)
+		return *task.JobID
+	}
+	expA := createTestExpWithProjectID(t, api, colleague, projectA).JobID
+	expB := createTestExpWithProjectID(t, api, colleague, projectB).JobID
+	genericA, genericB := genericJob(wsA), genericJob(wsB)
+
+	priority := func(id model.JobID) *jobv1.QueueControl {
+		return &jobv1.QueueControl{JobId: id.String(), Action: &jobv1.QueueControl_Priority{Priority: 10}}
+	}
+	weight := func(id model.JobID) *jobv1.QueueControl {
+		return &jobv1.QueueControl{JobId: id.String(), Action: &jobv1.QueueControl_Weight{Weight: 2}}
+	}
+	move := func(id model.JobID) *jobv1.QueueControl {
+		return &jobv1.QueueControl{JobId: id.String(), Action: &jobv1.QueueControl_ResourcePool{ResourcePool: open}}
+	}
+	authorize := job.AuthZProvider.Get().CanControlJobQueueUpdate
+	var applied [][]*jobv1.QueueControl
+	apply := func(updates []*jobv1.QueueControl) error {
+		applied = append(applied, updates)
+		return nil
+	}
+
+	for _, action := range []func(model.JobID) *jobv1.QueueControl{priority, weight, move} {
+		for _, denied := range []model.JobID{expB, genericB} {
+			err := updateJobQueueAuthorized(ctx, editor,
+				[]*jobv1.QueueControl{action(expA), action(genericA), action(denied)}, authorize, apply)
+			require.Equal(t, codes.PermissionDenied, status.Code(err), "%v", err)
+			require.Empty(t, applied, "no update of a refused batch is applied")
+		}
+	}
+	require.NoError(t, updateJobQueueAuthorized(ctx, editor, []*jobv1.QueueControl{
+		priority(expA), weight(expA), move(expA), priority(genericA), weight(genericA), move(genericA),
+	}, authorize, apply))
+	require.Len(t, applied, 1)
 }
 
 // Moving a job to another pool is an admission into the target pool; priority and weight changes

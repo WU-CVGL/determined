@@ -369,6 +369,23 @@ resource_pools: []
 	assert.ErrorContains(t, err, "you must specify at least one resource pool")
 }
 
+// The master refuses the streaming_updates feature switch with an authz type other than basic.
+func TestStreamingUpdatesNeedsBasicAuthZ(t *testing.T) {
+	// Merges accumulate in the global viper instance, so each config starts from a fresh one.
+	original := v
+	t.Cleanup(func() { v = original })
+	v = viper.NewWithOptions(viper.KeyDelimiter(viperKeyDelimiter))
+	conf, err := mergeConfigIntoViper([]byte(`
+feature_switches: [streaming_updates]
+security:
+  authz:
+    type: rbac
+`))
+	assert.NilError(t, err)
+	assert.ErrorContains(t, check.Validate(conf),
+		`feature switch "streaming_updates" requires security.authz.type "basic"`)
+}
+
 // A master configuration that sets notebook_timeout, which the master does not take, fails to load
 // and names the key; tensorboard_timeout loads.
 func TestGetConfigRefusesNotebookTimeout(t *testing.T) {
