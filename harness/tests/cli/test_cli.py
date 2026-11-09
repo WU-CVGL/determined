@@ -717,10 +717,12 @@ def test_tensorboard_kill_sessions(
     # A full ID that the master does not know goes to the TensorBoard API, which answers.
     unknown = str(uuid.uuid4())
     requests_mock.get(f"/api/v1/tasks/{unknown}/services", status_code=404, json={})
-    requests_mock.post(f"/api/v1/tensorboards/{unknown}/kill", status_code=404, json={})
+    tsb_kill = requests_mock.post(f"/api/v1/tensorboards/{unknown}/kill", status_code=404, json={})
+    shell_kill = requests_mock.post(f"/api/v1/shells/{unknown}/kill", status_code=404, json={})
     with pytest.raises(SystemExit) as e:
         cli.main(["tensorboard", "kill", unknown])
     assert e.value.code == 1
+    assert tsb_kill.call_count == 1 and shell_kill.call_count == 0
 
 
 def test_tensorboard_session_prefixes(

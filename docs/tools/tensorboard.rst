@@ -74,7 +74,7 @@ For detailed configuration settings, refer to the :ref:`job-configuration-refere
 To launch TensorBoard with a configuration file, use ``det tensorboard start <experiment-id>
 --config-file=my_config.yaml``.
 
-To view the configuration of a running TensorBoard task, use ``det shell config <task-id>``.
+To view the configuration of a running TensorBoard task, use ``det tensorboard config <task-id>``.
 
 Logs on ``shared_fs`` storage are read in place, read-only. For ``type: directory`` storage, give
 the TensorBoard the experiment's ``bind_mounts``.
