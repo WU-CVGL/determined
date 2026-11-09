@@ -152,6 +152,21 @@ describe('Decoder', () => {
         expect(map(wire('2026-01-01T01:00:00Z')).endTime).toBe('2026-01-01T01:00:00Z');
       });
     });
+
+    it('should carry the sources of a shell that has them', () => {
+      expect(decoder.mapV1Shell({ ...wire(), experimentIds: [4], trialIds: [] }).misc).toEqual({
+        experimentIds: [4],
+        trialIds: [],
+      });
+      expect(decoder.mapV1Shell({ ...wire(), trialIds: [9] }).misc).toEqual({
+        experimentIds: [],
+        trialIds: [9],
+      });
+      expect(decoder.mapV1Shell(wire())).not.toHaveProperty('misc');
+      expect(decoder.mapV1Shell({ ...wire(), experimentIds: [], trialIds: [] })).not.toHaveProperty(
+        'misc',
+      );
+    });
   });
 
   describe('generic tasks', () => {

@@ -12,13 +12,11 @@ import useUI from 'components/ThemeProvider';
 import { terminalRunStates } from 'constants/states';
 import useFeature from 'hooks/useFeature';
 import TrialsComparisonModalComponent from 'pages/ExperimentDetails/TrialsComparisonModal';
-import { openOrCreateTensorBoard } from 'services/api';
 import { V1TrialsSnapshotResponse } from 'services/api-ts-sdk';
 import { detApi } from 'services/apiConfig';
 import { readStream } from 'services/utils';
 import {
   ExperimentAction as Action,
-  CommandResponse,
   ExperimentBase,
   HpTrialData,
   Hyperparameter,
@@ -36,7 +34,7 @@ import { flattenObject, isPrimitive } from 'utils/data';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import { metricToStr } from 'utils/metric';
 import { numericSorter } from 'utils/sort';
-import { openCommandResponse } from 'utils/wait';
+import { handleTensorBoardError, openTensorBoardSession } from 'utils/tensorBoardSession';
 
 import css from './HpParallelCoordinates.module.scss';
 import HpTrialTable, { TrialHParams } from './HpTrialTable';
@@ -325,7 +323,7 @@ const HpParallelCoordinates: React.FC<Props> = ({
   const sendBatchActions = useCallback(
     async (action: Action) => {
       if (action === Action.OpenTensorBoard) {
-        return await openOrCreateTensorBoard({
+        return await openTensorBoardSession({
           trialIds: selectedRowKeys,
           workspaceId: experiment.workspaceId,
         });
@@ -339,20 +337,17 @@ const HpParallelCoordinates: React.FC<Props> = ({
   const submitBatchAction = useCallback(
     async (action: Action) => {
       try {
-        const result = await sendBatchActions(action);
-        if (action === Action.OpenTensorBoard && result) {
-          openCommandResponse(result as CommandResponse);
-        }
+        await sendBatchActions(action);
       } catch (e) {
         const entityName = f_flat_runs ? 'Runs' : 'Trials';
-        const publicSubject =
-          action === Action.OpenTensorBoard
-            ? `Unable to View TensorBoard for Selected ${entityName}'`
-            : `Unable to ${action} Selected ${entityName}`;
+        if (action === Action.OpenTensorBoard) {
+          handleTensorBoardError(e, `Unable to View TensorBoard for Selected ${entityName}`);
+          return;
+        }
         handleError(e, {
           level: ErrorLevel.Error,
           publicMessage: 'Please try again later.',
-          publicSubject,
+          publicSubject: `Unable to ${action} Selected ${entityName}`,
           silent: false,
           type: ErrorType.Server,
         });
