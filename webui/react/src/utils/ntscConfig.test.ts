@@ -2,6 +2,7 @@ import { cloneDeep } from 'lodash';
 
 import {
   configFromForm,
+  draftFromEditedConfig,
   formFieldsFromConfig,
   minimalDiff,
   redactSensitiveEnv,
@@ -77,6 +78,44 @@ describe('ntscConfig', () => {
     it('does not change its input', () => {
       const input = cloneDeep(mergedShellConfig);
       relaunchConfig(input);
+      expect(input).toEqual(mergedShellConfig);
+    });
+  });
+
+  describe('draftFromEditedConfig', () => {
+    it('drops the previewed priority and registry_auth that the user left as they were', () => {
+      const edited = {
+        ...mergedShellConfig,
+        environment: { ...mergedShellConfig.environment, environment_variables: ['EDITED=1'] },
+      };
+      const out = draftFromEditedConfig(edited, mergedShellConfig);
+      expect(out.environment).toEqual({
+        environment_variables: ['EDITED=1'],
+        image: mergedShellConfig.environment.image,
+      });
+      expect(out.resources).toEqual({ resource_pool: 'gpu', slots: 2 });
+      expect(out.entrypoint).toEqual(mergedShellConfig.entrypoint);
+    });
+
+    it('keeps a priority and registry_auth that the user changed or added', () => {
+      const registryAuth = { password: 'other', username: 'you' };
+      const edited = {
+        ...mergedShellConfig,
+        environment: { ...mergedShellConfig.environment, registry_auth: registryAuth },
+        resources: { ...mergedShellConfig.resources, priority: 7 },
+      };
+      const out = draftFromEditedConfig(edited, mergedShellConfig);
+      expect(out.environment.registry_auth).toEqual(registryAuth);
+      expect(out.resources.priority).toBe(7);
+      const previewed = { resources: { resource_pool: 'gpu' } };
+      expect(draftFromEditedConfig(mergedShellConfig, previewed)).toEqual(mergedShellConfig);
+    });
+
+    it('takes a config without environment or resources and does not change its input', () => {
+      const edited = { description: 'my shell' };
+      expect(draftFromEditedConfig(edited, undefined)).toEqual(edited);
+      const input = cloneDeep(mergedShellConfig);
+      draftFromEditedConfig(input, mergedShellConfig);
       expect(input).toEqual(mergedShellConfig);
     });
   });

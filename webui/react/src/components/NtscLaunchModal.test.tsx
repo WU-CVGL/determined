@@ -1724,7 +1724,7 @@ describe('NtscLaunchModal', () => {
       expect(trip.request).toEqual({
         config: {
           environment: { environment_variables: ['EDITED=1'], image: { cuda: 'default:1' } },
-          resources: { priority: 42, resource_pool: 'default', slots: 1 },
+          resources: { resource_pool: 'default', slots: 1 },
           services,
         },
         templateName: undefined,
@@ -1749,6 +1749,64 @@ describe('NtscLaunchModal', () => {
       expect(screen.getByRole('button', { name: 'Show Simple Config' })).toBeInTheDocument();
       expect(launchButton()).toBeDisabled();
       expect(mocks.previewShell).toHaveBeenCalledTimes(calls);
+    });
+
+    it.each(['- a', 'foo'])(
+      'keeps the full config and shows the error when its YAML is no mapping: %s',
+      async (value) => {
+        const { user } = await setup();
+        await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+        await waitFor(() => expect(editorText()).toContain('resource_pool'));
+        const calls = mocks.previewShell.mock.calls.length;
+        fireEvent.change(screen.getByTestId('code-editor'), { target: { value } });
+        await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
+        expect(await screen.findByText('Shell config required')).toBeInTheDocument();
+        expect(screen.getByTestId('code-editor')).toHaveValue(value);
+        expect(screen.getByRole('button', { name: 'Show Simple Config' })).toBeInTheDocument();
+        expect(launchButton()).toBeDisabled();
+        expect(mocks.previewShell).toHaveBeenCalledTimes(calls);
+      },
+    );
+
+    it('lets the pool chosen after an edit of the full config set the default priority', async () => {
+      const pool = { auxContainerCapacityPerAgent: 1, slotsAvailable: 0, slotsPerAgent: 0 };
+      mocks.pools = [
+        { ...pool, name: 'a-pool', usable: true },
+        { ...pool, name: 'b-pool', usable: true },
+      ];
+      mocks.availablePools = ['a-pool', 'b-pool'];
+      clusterStore.fetchResourcePools();
+      await waitFor(() =>
+        expect(Loadable.getOrElse([], clusterStore.resourcePools.get())).toHaveLength(2),
+      );
+      try {
+        const { onLaunched, user } = await setup();
+        const picker = screen.getByRole('combobox', { name: 'Resource Pool' });
+        await waitFor(() => expect(picker.closest('.ant-select')).toHaveTextContent('a-pool'));
+        await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+        await waitFor(() => expect(editorText()).toContain('priority: 42'));
+        editConfig((config) => ({
+          ...config,
+          environment: { ...config.environment, environment_variables: ['EDITED=1'] },
+        }));
+        await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
+        await user.click(screen.getByRole('combobox', { name: 'Resource Pool' }));
+        await user.click(await screen.findByTitle('b-pool'));
+
+        await launch(user);
+        await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+        const { config } = mocks.launchShell.mock.lastCall?.[0] ?? {};
+        expect(config.environment.environment_variables).toEqual(['EDITED=1']);
+        expect(config.resources.resource_pool).toBe('b-pool');
+        expect(config.resources).not.toHaveProperty('priority');
+      } finally {
+        mocks.pools = [];
+        mocks.availablePools = [];
+        clusterStore.fetchResourcePools();
+        await waitFor(() =>
+          expect(Loadable.getOrElse([], clusterStore.resourcePools.get())).toHaveLength(0),
+        );
+      }
     });
 
     it('launches the same edited config from the full config and after the simple form', async () => {

@@ -121,7 +121,7 @@ export const simpleLaunchConfig = (options: NtscLaunchOptions): RawJson => {
 /**
  * Prepares a past task's merged config (from the master) for another launch, as a "Start from" of
  * it does and as templates and this browser's history save it. A config the user edits in the
- * launch form is not cleaned up: it is launched as written.
+ * launch form is not cleaned up this way (see draftFromEditedConfig).
  * - entrypoint: the master sets it on every launch (for a shell it holds the
  *   sshd command line with a random port).
  * - an auto-generated description, so the next launch gets a new pet name.
@@ -139,6 +139,25 @@ export const relaunchConfig = (config: RawJson): RawJson => {
   if (environment) delete environment.registry_auth;
   const resources = asObject(out.resources);
   if (resources) delete resources.priority;
+  return out;
+};
+
+/**
+ * Makes the full config the user edited the launch form's draft. The master fills in
+ * resources.priority (the pool's default) and environment.registry_auth (the task container
+ * defaults') when it previews; where the edited config still holds the previewed value, it is
+ * dropped, so the defaults of the pool chosen at launch apply. A value the user changed stays.
+ */
+export const draftFromEditedConfig = (edited: RawJson, previewed: unknown): RawJson => {
+  const out = cloneDeep(edited);
+  const shown = asObject(previewed);
+  const environment = asObject(out.environment);
+  const shownAuth = asObject(shown?.environment)?.registry_auth;
+  if (environment && isEqual(environment.registry_auth, shownAuth))
+    delete environment.registry_auth;
+  const resources = asObject(out.resources);
+  const shownPriority = asObject(shown?.resources)?.priority;
+  if (resources && isEqual(resources.priority, shownPriority)) delete resources.priority;
   return out;
 };
 

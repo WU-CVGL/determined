@@ -29,6 +29,7 @@ import { isUsablePool } from 'utils/cluster';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import {
   configFromForm,
+  draftFromEditedConfig,
   formFieldsFromConfig,
   NtscLaunchOptions,
   relaunchConfig,
@@ -364,9 +365,9 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   }, [form, simpleOptions]);
 
   /**
-   * Makes a full config whose YAML was edited the simple form's config as written, its fields
-   * filled from it, and its services confirmed. A YAML that does not parse to a config changes
-   * nothing.
+   * Makes a full config whose YAML was edited the simple form's config, without the defaults that
+   * the master filled in and the user left as they were, its fields filled from it, and its
+   * services confirmed. A YAML that does not parse to a config changes nothing.
    */
   const applyEditedConfig = useCallback(() => {
     let edited: unknown;
@@ -376,7 +377,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       return;
     }
     if (!isPlainObject(edited) || isEqual(edited, previewedConfig.current)) return;
-    const base = edited as RawJson;
+    const base = draftFromEditedConfig(edited as RawJson, previewedConfig.current);
     const fields = formFieldsFromConfig(base);
     const services = serviceChecks(fields.services);
     setBaseConfig(base);
