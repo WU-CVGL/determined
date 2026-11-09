@@ -954,6 +954,19 @@ class LoaderTest(unittest.TestCase):
         self.assertEqual(b"data", self.read(dest))
         self.assertEqual([], self.lines())
 
+    def test_no_rename_after_a_stop(self) -> None:
+        # A stop that gave up on the publish lock leaves publishing_closed False.
+        dest = self.files.logdir + "/experiment/12/new"
+        staged = os.path.join(self.files.root, "staged")
+        with open(staged, "wb") as f:
+            f.write(b"data")
+        loader = self.loader([s3_source("experiment/12")])
+        loader.stop_event.set()
+        self.assertFalse(loader.publishing_closed)
+        loader.publish(staged, dest, tl.Pending("experiment/12", "new"))
+        self.assertFalse(os.path.exists(dest))
+        self.assertEqual([], self.lines())
+
 
 class RecordingQueue(queue.Queue):  # type: ignore[type-arg]
     """A queue that records its puts and whether a key was ever in it twice, or put after stop."""
