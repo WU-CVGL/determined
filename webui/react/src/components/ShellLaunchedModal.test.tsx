@@ -215,7 +215,7 @@ describe('ShellLaunchedModal', () => {
     await setup();
     const logs = screen.getByText('View Logs').closest('a');
     const resources = screen.getByText('View Resources').closest('a');
-    expect(logs).toHaveAttribute('href', expect.stringContaining('/shell/shell-123/logs'));
+    expect(logs).toHaveAttribute('href', expect.stringMatching(/\/shell\/shell-123\/logs$/));
     expect(resources).toHaveAttribute(
       'href',
       expect.stringContaining('/tasks/shell-123/resources'),
