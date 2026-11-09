@@ -90,7 +90,7 @@ describe('ShellButton', () => {
     expect(screen.getByRole('button', { name: 'Open Terminal' })).toBeInTheDocument();
     expect(screen.getByText('View Logs').closest('a')).toHaveAttribute(
       'href',
-      expect.stringContaining('/shell/shell-123/logs'),
+      expect.stringMatching(/\/shell\/shell-123\/logs$/),
     );
     expect(screen.getByText('View Resources').closest('a')).toHaveAttribute(
       'href',
