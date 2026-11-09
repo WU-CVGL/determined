@@ -28,6 +28,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/mocks"
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/pkg/archive"
+	"github.com/determined-ai/determined/master/pkg/etc"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/master/pkg/schemas"
@@ -405,6 +406,13 @@ func TestLaunchShellTensorBoardSources(t *testing.T) {
 		require.Less(t, index[tensorBoardSourcesDir], index[storageConfPath])
 		require.Less(t, index[tensorBoardSourcesDir], index[tensorBoardSourcesFile])
 
+		// The loader, after the sources, executable by the task's user alone.
+		loader := tbSourcesFile(t, spec, tensorBoardLoaderProgram)
+		require.Equal(t, byte(tar.TypeReg), loader.Type)
+		require.Equal(t, 0o700, int(loader.FileMode))
+		require.Equal(t, etc.MustStaticFile(etc.TensorBoardLoaderResource), []byte(loader.Content))
+		require.Less(t, index[tensorBoardSourcesFile], index[tensorBoardLoaderProgram])
+
 		// The storage of the lowest experiment and the sources, readable by the task's user alone.
 		storage := tbSourcesFile(t, spec, storageConfPath)
 		require.Equal(t, 0o600, int(storage.FileMode))
@@ -741,7 +749,9 @@ func TestLaunchShellTensorBoardSources(t *testing.T) {
 			require.Equal(t, 12345, item.GroupID, item.Path)
 			owned = append(owned, item.Path)
 		}
-		require.Subset(t, owned, []string{tensorBoardSourcesDir, storageConfPath, tensorBoardSourcesFile})
+		require.Subset(t, owned, []string{
+			tensorBoardSourcesDir, storageConfPath, tensorBoardSourcesFile, tensorBoardLoaderProgram,
+		})
 		require.Equal(t, tensorBoardSourcesDir, owned[0])
 	})
 

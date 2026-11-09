@@ -31,7 +31,6 @@ import {
   getExperiment,
   getExpTrials,
   killExperiment,
-  openOrCreateTensorBoard,
   pauseExperiment,
   unarchiveExperiment,
 } from 'services/api';
@@ -46,7 +45,7 @@ import {
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import { getActionsForExperiment, isSingleTrialExperiment } from 'utils/experiment';
 import { capitalize } from 'utils/string';
-import { openCommandResponse } from 'utils/wait';
+import { handleTensorBoardError, openTensorBoardSession } from 'utils/tensorBoardSession';
 
 interface Props {
   children?: React.ReactNode;
@@ -301,11 +300,10 @@ const ExperimentActionDropdown: React.FC<Props> = ({
             });
             break;
           case Action.OpenTensorBoard: {
-            const commandResponse = await openOrCreateTensorBoard({
+            await openTensorBoardSession({
               experimentIds: [experiment.id],
               workspaceId: experiment.workspaceId,
             });
-            openCommandResponse(commandResponse);
             break;
           }
           case Action.ViewLogs: {
@@ -395,6 +393,10 @@ const ExperimentActionDropdown: React.FC<Props> = ({
             break;
         }
       } catch (e) {
+        if (action === Action.OpenTensorBoard) {
+          handleTensorBoardError(e, `${capitalize(action)} failed.`);
+          return;
+        }
         handleError(e, {
           level: ErrorLevel.Error,
           publicMessage: `Unable to ${action} ${entityName} ${experiment.id}.`,

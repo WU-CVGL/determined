@@ -2,17 +2,24 @@ import { cloneDeep } from 'lodash';
 
 import {
   configFromForm,
+  dataSourceFromEntry,
+  DEFAULT_SOURCE_MODE,
   draftFromEditedConfig,
   formFieldsFromConfig,
+  isAutoDescription,
   minimalDiff,
   redactSensitiveEnv,
   relaunchConfig,
   sensitiveEnvNames,
   ShellServiceChoices,
   simpleLaunchConfig,
+  sourceIds,
+  sshDisabled,
   stableStringify,
   templateFromConfig,
   templateResources,
+  TensorBoardDataSource,
+  withDataSource,
 } from './ntscConfig';
 
 const mergedShellConfig = {
@@ -218,6 +225,7 @@ describe('ntscConfig', () => {
   describe('form fields', () => {
     it('reads name, pool, slots and services, ignoring a generated name', () => {
       expect(formFieldsFromConfig(mergedShellConfig)).toEqual({
+        dataSource: { mode: DEFAULT_SOURCE_MODE },
         name: '',
         pool: 'gpu',
         services: {},
@@ -297,39 +305,50 @@ describe('ntscConfig', () => {
     });
 
     it('carries the log directory of the tensorboard service', () => {
+      const logdir = (dir: string): TensorBoardDataSource => ({ logdir: dir, mode: 'logdir' });
       expect(
         formFieldsFromConfig({ services: { tensorboard: { args: ['--x'], logdir: 'runs' } } }),
-      ).toMatchObject({ logdir: 'runs', services: { tensorboard: true } });
+      ).toMatchObject({ dataSource: logdir('runs'), services: { tensorboard: true } });
       expect(
         formFieldsFromConfig({ services: { tensorboard: { enabled: false, logdir: 'runs' } } }),
-      ).toMatchObject({ logdir: 'runs', services: { tensorboard: false } });
-      expect(formFieldsFromConfig({ services: { jupyter: {} } }).logdir).toBeUndefined();
+      ).toMatchObject({ dataSource: logdir('runs'), services: { tensorboard: false } });
+      expect(formFieldsFromConfig({ services: { jupyter: {} } }).dataSource).toEqual({
+        mode: DEFAULT_SOURCE_MODE,
+      });
 
       // Sent with the service that runs, never on its own or with one that does not.
       expect(
-        simpleLaunchConfig({ logdir: 'runs', services: { jupyter: true, tensorboard: true } })
-          .services,
+        simpleLaunchConfig({
+          dataSource: logdir('runs'),
+          services: { jupyter: true, tensorboard: true },
+        }).services,
       ).toEqual({ jupyter: {}, tensorboard: { logdir: 'runs' } });
       expect(
-        simpleLaunchConfig({ logdir: 'runs', services: { tensorboard: false } }).services,
+        simpleLaunchConfig({ dataSource: logdir('runs'), services: { tensorboard: false } })
+          .services,
       ).toEqual({ tensorboard: { enabled: false } });
-      expect(simpleLaunchConfig({ logdir: 'runs' })).not.toHaveProperty('services');
-      expect(simpleLaunchConfig({ logdir: 'runs', services: { jupyter: true } }).services).toEqual({
-        jupyter: {},
-      });
+      expect(simpleLaunchConfig({ dataSource: logdir('runs') })).not.toHaveProperty('services');
+      expect(
+        simpleLaunchConfig({ dataSource: logdir('runs'), services: { jupyter: true } }).services,
+      ).toEqual({ jupyter: {} });
 
       // Over a base config: the field replaces the entry's logdir, the entry's args stay.
       const base = { services: { tensorboard: { args: ['--x'], enabled: false, logdir: 'old' } } };
       expect(
-        configFromForm(base, { logdir: 'new', services: { tensorboard: true } }).services,
+        configFromForm(base, { dataSource: logdir('new'), services: { tensorboard: true } })
+          .services,
       ).toEqual({ tensorboard: { args: ['--x'], logdir: 'new' } });
       expect(configFromForm(base, { services: { tensorboard: true } }).services).toEqual({
         tensorboard: { args: ['--x'], logdir: 'old' },
       });
       expect(
-        configFromForm(base, { logdir: 'new', services: { tensorboard: false } }).services,
+        configFromForm(base, { dataSource: logdir(''), services: { tensorboard: true } }).services,
+      ).toEqual({ tensorboard: { args: ['--x'], logdir: 'old' } });
+      expect(
+        configFromForm(base, { dataSource: logdir('new'), services: { tensorboard: false } })
+          .services,
       ).toEqual(base.services);
-      expect(configFromForm(base, { logdir: 'new' }).services).toEqual(base.services);
+      expect(configFromForm(base, { dataSource: logdir('new') }).services).toEqual(base.services);
     });
 
     it('keeps the tensorboard service and its options in a template', () => {
@@ -374,6 +393,166 @@ describe('ntscConfig', () => {
         slots: 4,
       });
       expect(templateResources(undefined)).toEqual({ pool: undefined, slots: undefined });
+      // A template that turns ssh off runs with 0 slots, with or without slots of its own.
+      expect(templateResources({ services: { ssh: { enabled: false } } })).toEqual({
+        pool: undefined,
+        slots: 0,
+      });
+      expect(
+        templateResources({
+          resources: { resource_pool: 'aux', slots: 2 },
+          services: { ssh: { enabled: false } },
+        }),
+      ).toEqual({ pool: 'aux', slots: 0 });
+    });
+  });
+
+  describe('tensorboard data source', () => {
+    const experiments = (
+      experimentIds: (number | string)[] = [],
+      trialIds: (number | string)[] = [],
+    ): TensorBoardDataSource => ({ experimentIds, mode: 'experiments', trialIds });
+    const logdir = (dir: string): TensorBoardDataSource => ({ logdir: dir, mode: 'logdir' });
+
+    /** A TensorBoard viewing session's merged config, as the master returns it. */
+    const sessionConfig = {
+      description: 'TensorBoard (brave-cat)',
+      entrypoint: ['/run/determined/ssh/shell-entrypoint.sh'],
+      environment: { image: { cpu: 'cpu-image:1' } },
+      idle_timeout: '5m',
+      resources: { priority: 42, resource_pool: 'aux', slots: 0 },
+      services: { ssh: { enabled: false }, tensorboard: { experiment_ids: [3, 7] } },
+    };
+
+    it('reads positive integer IDs, sorted numerically, without duplicates', () => {
+      expect(sourceIds([10, '9', 9, ' 3 ', '0', '-1', '1.5', '12a', ''])).toEqual([3, 9, 10]);
+      expect(sourceIds(undefined)).toEqual([]);
+    });
+
+    it('tells whether a config turns ssh off', () => {
+      expect(sshDisabled({ services: { ssh: { enabled: false } } })).toBe(true);
+      expect(sshDisabled({ services: { ssh: {} } })).toBe(false);
+      expect(sshDisabled({ services: { ssh: null } })).toBe(false);
+      expect(sshDisabled({})).toBe(false);
+      expect(sshDisabled(undefined)).toBe(false);
+    });
+
+    it('reads the source of an entry: experiments with IDs, a log directory, or the default', () => {
+      expect(dataSourceFromEntry({ experiment_ids: [1], trial_ids: [2] })).toEqual(
+        experiments([1], [2]),
+      );
+      expect(dataSourceFromEntry({ trial_ids: [2] })).toEqual(experiments([], [2]));
+      expect(dataSourceFromEntry({ args: ['--x'], logdir: 'runs' })).toEqual(logdir('runs'));
+      expect(dataSourceFromEntry({})).toEqual({ mode: DEFAULT_SOURCE_MODE });
+      expect(dataSourceFromEntry(null)).toEqual({ mode: DEFAULT_SOURCE_MODE });
+      expect(dataSourceFromEntry(undefined)).toEqual({ mode: 'experiments' });
+    });
+
+    it('keeps exactly one source in an entry, and its other options', () => {
+      const ids = { args: ['--x'], experiment_ids: [1], trial_ids: [2] };
+      expect(withDataSource(ids, logdir('runs'))).toEqual({ args: ['--x'], logdir: 'runs' });
+      expect(withDataSource({ args: ['--x'], logdir: 'old' }, experiments([7, 3, 7]))).toEqual({
+        args: ['--x'],
+        experiment_ids: [3, 7],
+      });
+      expect(withDataSource(ids, experiments([], ['5']))).toEqual({
+        args: ['--x'],
+        trial_ids: [5],
+      });
+      expect(withDataSource(ids, experiments())).toEqual({ args: ['--x'] });
+      // A blank log directory keeps the entry's.
+      expect(withDataSource({ logdir: 'old' }, logdir(' '))).toEqual({ logdir: 'old' });
+      // The input is not changed.
+      expect(ids).toEqual({ args: ['--x'], experiment_ids: [1], trial_ids: [2] });
+    });
+
+    it('keeps the source of a tensorboard service that does not run', () => {
+      const base = { services: { tensorboard: { experiment_ids: [1] } } };
+      expect(
+        configFromForm(base, { dataSource: logdir('runs'), services: { tensorboard: false } })
+          .services,
+      ).toEqual({ tensorboard: { enabled: false, experiment_ids: [1] } });
+    });
+
+    it('sends exactly one source for every base and form mode', () => {
+      const bases: Record<string, unknown> = {
+        experiments: { args: ['--x'], experiment_ids: [1], trial_ids: [2] },
+        logdir: { args: ['--x'], logdir: 'old' },
+        none: undefined,
+      };
+      const forms: Record<string, TensorBoardDataSource> = {
+        experiments: experiments(['7']),
+        logdir: logdir('new'),
+      };
+      Object.entries(bases).forEach(([, entry]) => {
+        const base = entry === undefined ? {} : { services: { tensorboard: entry } };
+        expect(
+          configFromForm(base, { dataSource: forms.logdir, services: { tensorboard: true } })
+            .services.tensorboard,
+        ).toEqual(entry === undefined ? { logdir: 'new' } : { args: ['--x'], logdir: 'new' });
+        expect(
+          configFromForm(base, { dataSource: forms.experiments, services: { tensorboard: true } })
+            .services.tensorboard,
+        ).toEqual(
+          entry === undefined ? { experiment_ids: [7] } : { args: ['--x'], experiment_ids: [7] },
+        );
+      });
+      expect(
+        simpleLaunchConfig({ dataSource: forms.experiments, services: { tensorboard: true } })
+          .services,
+      ).toEqual({ tensorboard: { experiment_ids: [7] } });
+      expect(
+        simpleLaunchConfig({ dataSource: forms.logdir, services: { tensorboard: true } }).services,
+      ).toEqual({ tensorboard: { logdir: 'new' } });
+    });
+
+    it('runs a config that turns ssh off with 0 slots', () => {
+      const base = { resources: { slots: 2 }, services: { ssh: { enabled: false } } };
+      expect(configFromForm(base, { slots: 4 }).resources).toEqual({ slots: 0 });
+      expect(configFromForm(base, {}).resources).toEqual({ slots: 0 });
+      expect(configFromForm({ resources: { slots: 2 } }, { slots: 4 }).resources).toEqual({
+        slots: 4,
+      });
+    });
+
+    it('drops the name the master gave a TensorBoard session, not one a user gave', () => {
+      expect(isAutoDescription('TensorBoard (brave-cat)')).toBe(true);
+      expect(isAutoDescription('Shell (gently-brave-otter)')).toBe(true);
+      expect(isAutoDescription('TensorBoard of exp 7')).toBe(false);
+      expect(relaunchConfig(sessionConfig)).not.toHaveProperty('description');
+      expect(formFieldsFromConfig(sessionConfig).name).toBe('');
+    });
+
+    it('launches a session, a log directory shell and a plain shell again as they were', () => {
+      const logdirShell = {
+        ...mergedShellConfig,
+        services: { jupyter: {}, tensorboard: { args: ['--x'], logdir: 'runs' } },
+      };
+      [sessionConfig, logdirShell, mergedShellConfig].forEach((config) => {
+        const base = relaunchConfig(config);
+        expect(configFromForm(base, formFieldsFromConfig(base))).toEqual(base);
+      });
+      expect(formFieldsFromConfig(relaunchConfig(sessionConfig))).toEqual({
+        dataSource: experiments([3, 7], []),
+        name: '',
+        pool: 'aux',
+        services: { tensorboard: true },
+        slots: 0,
+      });
+    });
+
+    it('keeps ssh off, the sources, 0 slots and the idle timeout of a session in a template', () => {
+      const defaults = {
+        environment: { image: { cpu: 'cpu-image:1' } },
+        idle_timeout: null,
+        resources: { priority: 42, resource_pool: 'aux', slots: 0 },
+        services: { jupyter: {} },
+      };
+      expect(templateFromConfig(sessionConfig, defaults)).toEqual({
+        idle_timeout: '5m',
+        resources: { resource_pool: 'aux', slots: 0 },
+        services: { ssh: { enabled: false }, tensorboard: { experiment_ids: [3, 7] } },
+      });
     });
   });
 

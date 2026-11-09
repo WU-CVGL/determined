@@ -17,7 +17,9 @@ the service's own flags, which win over them: --logdir, --port DET_TENSORBOARD_P
 address, --path_prefix DET_TENSORBOARD_PATH_PREFIX, --load_fast=false, which keeps TensorBoard's
 data server, a listener without the check, from starting, and --reuse_port=false, so that no other
 process can share the port. --bind_all is false, whatever its default, which some builds set to
-true.
+true. With DET_TENSORBOARD_SOURCES, --reload_multifile=true and
+--reload_multifile_inactive_secs=86400, TensorBoard's default, so that TensorBoard polls every
+event file of a run, which the loader may publish in any order.
 
 Once TensorBoard's server has bound the port, and only then, a probe asks it on 127.0.0.1 under the
 prefix, without and with the token, every half second, and writes "tensorboard: http ready" to
@@ -108,7 +110,7 @@ def service_flags(environ: Mapping[str, str], logdir: str) -> Dict[str, Any]:
     The service's flags, which TensorBoard's configure sets after it has parsed the command line
     and before it checks the flags, so that they win over the config's arguments.
     """
-    return {
+    flags: Dict[str, Any] = {
         "logdir": logdir,
         "port": int(environ["DET_TENSORBOARD_PORT"]),
         "path_prefix": environ["DET_TENSORBOARD_PATH_PREFIX"].rstrip("/"),
@@ -117,6 +119,10 @@ def service_flags(environ: Mapping[str, str], logdir: str) -> Dict[str, Any]:
         "load_fast": "false",
         "reuse_port": False,
     }
+    if environ.get("DET_TENSORBOARD_SOURCES"):
+        flags["reload_multifile"] = True
+        flags["reload_multifile_inactive_secs"] = 86400
+    return flags
 
 
 def check_token(app: WSGIApp, token: bytes) -> WSGIApp:

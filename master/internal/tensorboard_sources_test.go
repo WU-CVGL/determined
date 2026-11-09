@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/determined-ai/determined/master/pkg/etc"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
@@ -370,26 +371,41 @@ func TestTensorBoardSourceFiles(t *testing.T) {
 		},
 		StorageConfig: storageConfig,
 	}
+	require.NoError(t, etc.SetRootPath("../static/srv"))
 	files, err := tensorBoardSourceFiles(&model.AgentUserGroup{UID: 1000, GID: 1001}, sources)
 	require.NoError(t, err)
-	require.Len(t, files, 3)
+	require.Len(t, files, 4)
 
-	// The directory first, owned by the task's user, then the files.
+	// The directory first, owned by the task's user, then the files, the loader after the sources.
 	dir := files[0]
 	require.Equal(t, tensorBoardSourcesDir, dir.Path)
 	require.Equal(t, byte(tar.TypeDir), dir.Type)
 	require.Equal(t, os.FileMode(0o700), dir.FileMode)
 	require.Equal(t, 1000, dir.UserID)
 	require.Equal(t, 1001, dir.GroupID)
+	modes := map[string]os.FileMode{
+		storageConfPath:          0o600,
+		tensorBoardSourcesFile:   0o600,
+		tensorBoardLoaderProgram: 0o700,
+	}
+	paths := []string{}
 	byPath := map[string][]byte{}
 	for _, f := range files[1:] {
 		require.Equal(t, byte(tar.TypeReg), f.Type, f.Path)
-		require.Equal(t, os.FileMode(0o600), f.FileMode, f.Path)
+		require.Equal(t, modes[f.Path], f.FileMode, f.Path)
 		require.Equal(t, 1000, f.UserID, f.Path)
 		require.Equal(t, 1001, f.GroupID, f.Path)
+		paths = append(paths, f.Path)
 		byPath[f.Path] = f.Content
 	}
+	require.Equal(t, []string{storageConfPath, tensorBoardSourcesFile, tensorBoardLoaderProgram}, paths)
 	require.Equal(t, storageConfig, byPath[storageConfPath])
+	require.Equal(t, etc.MustStaticFile(etc.TensorBoardLoaderResource), byPath[tensorBoardLoaderProgram])
+	for path, content := range byPath {
+		if path != storageConfPath {
+			require.NotContains(t, string(content), secretKey, path)
+		}
+	}
 
 	content := byPath[tensorBoardSourcesFile]
 	require.NotContains(t, string(content), accessKey)
@@ -490,9 +506,10 @@ func TestAddShellTensorBoardSources(t *testing.T) {
 		model.ServiceSSH:         {Enabled: ptrs.Ptr(false)},
 		model.ServiceTensorBoard: {ExperimentIDs: []int32{12}},
 	}
+	require.NoError(t, etc.SetRootPath("../static/srv"))
 	files, err := addShellTensorBoard(spec, sources)
 	require.NoError(t, err)
-	require.Len(t, files, 3)
+	require.Len(t, files, 4)
 
 	service, ok := spec.Service(model.ServiceTensorBoard)
 	require.True(t, ok)

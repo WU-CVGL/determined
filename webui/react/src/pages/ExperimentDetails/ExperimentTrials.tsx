@@ -24,13 +24,12 @@ import usePermissions from 'hooks/usePermissions';
 import usePolling from 'hooks/usePolling';
 import { useSettings } from 'hooks/useSettings';
 import { paths } from 'routes/utils';
-import { getExpTrials, openOrCreateTensorBoard } from 'services/api';
+import { getExpTrials } from 'services/api';
 import { Experimentv1State, V1GetExperimentTrialsRequestSortBy } from 'services/api-ts-sdk';
 import { encodeExperimentState } from 'services/decoder';
 import {
   ExperimentAction as Action,
   CheckpointWorkloadExtended,
-  CommandResponse,
   ExperimentBase,
   MetricsWorkload,
   RunState,
@@ -42,7 +41,7 @@ import { getMetricValue } from 'utils/metric';
 import { routeToReactUrl } from 'utils/routes';
 import { validateDetApiEnum, validateDetApiEnumList } from 'utils/service';
 import { humanReadableBytes, pluralizer } from 'utils/string';
-import { openCommandResponse } from 'utils/wait';
+import { handleTensorBoardError, openTensorBoardSession } from 'utils/tensorBoardSession';
 
 import css from './ExperimentTrials.module.scss';
 import { configForExperiment, isOfSortKey, Settings } from './ExperimentTrials.settings';
@@ -124,9 +123,11 @@ const ExperimentTrials: React.FC<Props> = ({ experiment, pageRef }: Props) => {
 
   const handleOpenTensorBoard = useCallback(
     async (trial: TrialItem) => {
-      openCommandResponse(
-        await openOrCreateTensorBoard({ trialIds: [trial.id], workspaceId: workspace.id }),
-      );
+      try {
+        await openTensorBoardSession({ trialIds: [trial.id], workspaceId: workspace.id });
+      } catch (e) {
+        handleTensorBoardError(e, 'Unable to View TensorBoard');
+      }
     },
     [workspace.id],
   );
@@ -353,7 +354,7 @@ const ExperimentTrials: React.FC<Props> = ({ experiment, pageRef }: Props) => {
       if (!settings.row) return;
 
       if (action === Action.OpenTensorBoard) {
-        return await openOrCreateTensorBoard({ trialIds: settings.row, workspaceId: workspace.id });
+        return await openTensorBoardSession({ trialIds: settings.row, workspaceId: workspace.id });
       } else if (action === Action.CompareTrials) {
         return updateSettings({ compare: true });
       }
@@ -364,22 +365,19 @@ const ExperimentTrials: React.FC<Props> = ({ experiment, pageRef }: Props) => {
   const submitBatchAction = useCallback(
     async (action: Action) => {
       try {
-        const result = await sendBatchActions(action);
-        if (action === Action.OpenTensorBoard && result) {
-          openCommandResponse(result as CommandResponse);
-        }
+        await sendBatchActions(action);
 
         // Refetch experiment list to get updates based on batch action.
         await fetchExperimentTrials();
       } catch (e) {
-        const publicSubject =
-          action === Action.OpenTensorBoard
-            ? 'Unable to View TensorBoard for Selected Trials'
-            : `Unable to ${action} Selected Trials`;
+        if (action === Action.OpenTensorBoard) {
+          handleTensorBoardError(e, 'Unable to View TensorBoard for Selected Trials');
+          return;
+        }
         handleError(e, {
           level: ErrorLevel.Error,
           publicMessage: 'Please try again later.',
-          publicSubject,
+          publicSubject: `Unable to ${action} Selected Trials`,
           silent: false,
           type: ErrorType.Server,
         });

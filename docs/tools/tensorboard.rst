@@ -15,46 +15,36 @@ experiments or compare multiple experiments.
 Launch TensorBoard instances via the WebUI or the Determined CLI. Before launching TensorBoard
 instances from the CLI, :ref:`install the CLI <install-cli>` on your development machine.
 
+In the WebUI, **TensorBoard** on an experiment's or trial's page, and **View in TensorBoard** for
+experiments or trials selected in a list or a comparison view, start a TensorBoard task without GPUs
+that ends 5 minutes after its last request, and open it on the task page's **TensorBoard** tab. Your
+own running TensorBoard of the same experiments or trials in the same workspace opens instead of a
+new one. When the default resource pool or the workspace cannot be used, start it from **Launch
+Interactive Task** with **TensorBoard** and **Determined experiments**.
+
 ***********************
  Analyzing Experiments
 ***********************
 
-Single Experiment Analysis
-==========================
-
-To analyze a single Determined experiment using TensorBoard, use ``det tensorboard start
-<experiment-id>``:
+To analyze one or more experiments, use ``det tensorboard start <experiment-id> [<experiment-id>
+...]``. It starts a TensorBoard task without GPUs that reads the experiments' TensorBoard logs,
+waits until TensorBoard answers, and opens the task's TensorBoard page:
 
 .. code::
 
    $ det tensorboard start 7
-   Scheduling TensorBoard (rarely-cute-man) (id: aab49ba5-3357-4145-861c-7e6ff2d702c5)...
-   TensorBoard (rarely-cute-man) was assigned to an agent...
-   Scheduling tensorboard tensorboard (id: c68c9fc9-7eed-475b-a50f-fd78406d7c83)...
-   TensorBoard is running at: http://localhost:8080/proxy/c68c9fc9-7eed-475b-a50f-fd78406d7c83/
-   disconnecting websocket
+   Launched tensorboard (id: <task-id>, name: TensorBoard (<name>)).
+   tensorboard (id: <task-id>) is ready.
+   Tensorboard is running at: http://<master>/det/tasks/<task-id>/interactive?tab=tensorboard
 
-The Determined master schedules a TensorBoard instance within the cluster. Once the TensorBoard
-instance is running, The Determined CLI opens the TensorBoard web interface in your local browser.
+Each trial is a run named ``experiment/<id>/trial/<trial-id>``. The experiments must use the same
+checkpoint storage; otherwise the start is refused. When the checkpoint storage configuration holds
+credentials, only the experiment's owner or an administrator can start a TensorBoard on it.
 
-To view information about scheduled and running TensorBoard instances, use:
+TensorBoard opens while the logs load and shows new logs as the experiments write them.
 
-.. code::
-
-   $ det tensorboard list
-    Id                                   | Owner      | Description                         | State      | Experiment Id   | Trial Ids   | Exit Status
-   --------------------------------------+------------+-------------------------------------+------------+-----------------+-------------+--------------
-    aab49ba5-3357-4145-861c-7e6ff2d702c5 | determined | TensorBoard (rarely-cute-man)       | RUNNING    | 7               | N/A         | N/A
-
-Multiple Experiment Analysis
-============================
-
-To analyze multiple experiments, use ``det tensorboard start <experiment-id> <experiment-id> ...``.
-
-.. note::
-
-   Metrics might not be immediately available in TensorBoard upon opening the browser window. It
-   usually takes up to five minutes for TensorBoard to receive data and display visualizations.
+Only the user who started a TensorBoard and administrators can open it, and only while they may view
+the artifacts of every selected experiment.
 
 ***********************************
  Customizing TensorBoard Instances
@@ -64,7 +54,9 @@ Determined allows you to initialize TensorBoard with a job configuration (YAML) 
 useful for running TensorBoard with a specific container image or for enabling access to additional
 data through a bind-mount.
 
-Example job configuration file:
+``--config-file`` and ``--config`` set the task's configuration, such as ``environment.image``,
+``bind_mounts``, ``resources.resource_pool`` and ``services.tensorboard.args``. Example job
+configuration file:
 
 .. code:: yaml
 
@@ -74,30 +66,30 @@ Example job configuration file:
      - host_path: /my/agent/path
        container_path: /my/container/path
        read_only: true
-   tensorboard_args: ['--samples_per_plugin=images=100']
+   services:
+     tensorboard:
+       args: ['--samples_per_plugin=images=100']
 
-The tensorboard_args field allows you to provide optional TensorBoard arguments. In the example
-above, we set the maximum number of image to display to 100, overriding TensorBoard's default value.
+``services.tensorboard.args`` provides optional TensorBoard arguments. In the example above, we set
+the maximum number of images to display to 100, overriding TensorBoard's default value.
 
-The TensorBoard task needs TensorBoard 2.9 or later; with an earlier release in the image, the task
-fails and its log says why. The task installs ``tensorboard`` with pip when the image lacks it,
-keeping the image's ``numpy``, ``protobuf``, ``requests`` and ``tensorboard`` at their versions. The
-profile plugin (``tensorboard-plugin-profile``) is installed only when the environment variable
-``DET_TENSORBOARD_PLUGIN_PROFILE`` is set to a non-empty value:
-
-.. code:: yaml
-
-   environment:
-     environment_variables:
-       - DET_TENSORBOARD_PLUGIN_PROFILE=1
+The image needs TensorBoard 2.9 or later; the task does not install it. Without it, the task ends
+and its log says why.
 
 For detailed configuration settings, refer to the :ref:`job-configuration-reference`.
 
-To launch TensorBoard with an experiment configuration file, use ``det tensorboard start
-<experiment-id> --config-file=my_config.yaml``.
+To launch TensorBoard with a configuration file, use ``det tensorboard start <experiment-id>
+--config-file=my_config.yaml``.
 
-To view the configuration of a running TensorBoard instance, use ``det tensorboard config
-<tensorboard_id>``.
+To manage the task, use the **Jobs** page, or ``det tensorboard list``, ``det tensorboard open
+<task-id>``, ``det tensorboard logs <task-id>``, ``det tensorboard config <task-id>`` and ``det
+tensorboard kill <task-id>``; they also manage TensorBoard tasks, but not a shell with a
+``tensorboard`` service. As the task is a shell, the ``det shell`` and ``det task`` commands also
+manage it. ``det tensorboard list --json`` prints TensorBoard tasks as ``/api/v1/tensorboards``
+returns them and viewing sessions as ``/api/v1/shells`` does.
+
+Logs on ``shared_fs`` storage are read in place, read-only. For ``type: directory`` storage, give
+the TensorBoard the experiment's ``bind_mounts``.
 
 ***************************
  Analyzing Specific Trials
@@ -107,7 +99,8 @@ Determined also supports analyzing specific trials from one or more experiments.
 for comparing a small number of trials from an experiment with many trials, or for comparing trials
 from different experiments.
 
-To analyze specific trials, use ``det tensorboard start --trial-ids <trial_id 1> <trial_id 2> ...``.
+To analyze specific trials, use ``det tensorboard start --trial-ids <trial-id> [<trial-id> ...]``,
+alone or with experiment IDs. A trial of a listed experiment is read with its experiment.
 
 .. _data-in-tensorboard:
 
@@ -162,31 +155,20 @@ See :func:`PyTorchTrialContext.get_tensorboard_writer()
  TensorBoard Lifecycle Management
 **********************************
 
-Determined automatically terminates idle TensorBoard instances. The idle time counts from the last
-request that reached TensorBoard through the master. A browser tab kept open on TensorBoard does not
-by itself count; with its **Reload data** setting on, TensorBoard's page sends requests
-periodically. TensorBoards are terminated after 5 minutes by default; however, you can change the
-timeout duration by editing ``tensorboard_timeout`` in the :ref:`master config file
-<master-config-reference>`.
-
-You can also terminate TensorBoard instances manually by using ``det tensorboard kill
-<tensorboard-id>``:
-
-.. code::
-
-   $ det tensorboard kill aab49ba5-3357-4145-861c-7e6ff2d702c5
-
-To open a web browser window connected to a previously launched TensorBoard instance, use ``det
-tensorboard open``. To view the logs of an existing TensorBoard instance, use ``det tensorboard
-logs``.
+To manage the task, use the **Jobs** page, or ``det tensorboard list``, ``det tensorboard open
+<task-id>``, ``det tensorboard logs <task-id>``, ``det tensorboard config <task-id>`` and ``det
+tensorboard kill <task-id>``; they also manage TensorBoard tasks, but not a shell with a
+``tensorboard`` service. As the task is a shell, the ``det shell`` and ``det task`` commands also
+manage it. ``det tensorboard list --json`` prints TensorBoard tasks as ``/api/v1/tensorboards``
+returns them and viewing sessions as ``/api/v1/shells`` does.
 
 ************************
  Implementation Details
 ************************
 
-Determined schedules TensorBoard instances in containers that run on agent machines. The Determined
-master will proxy HTTP requests to and from the TensorBoard container. TensorBoard instances are
-hosted on agent machines but they do not occupy GPUs.
+Determined runs TensorBoard in a task without GPUs; the master proxies its requests. Logs in S3, GCS
+or Azure storage are copied into the task's container; logs on ``shared_fs`` or ``directory``
+storage are read in place.
 
 TensorBoard listens behind the master's proxy: the proxy adds a token that the task was given to the
 requests that it passes on, and TensorBoard refuses requests without it, in every network mode.

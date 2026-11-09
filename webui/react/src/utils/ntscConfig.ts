@@ -20,10 +20,24 @@ export const SHELL_SERVICE_LABELS: Record<ShellService, string> = {
  */
 export type ShellServiceChoices = Partial<Record<ShellService, boolean>>;
 
+export type TensorBoardSourceMode = 'experiments' | 'logdir';
+
+/** The tensorboard service's data source as the form holds it. */
+export interface TensorBoardDataSource {
+  mode: TensorBoardSourceMode;
+  logdir?: string;
+  /** IDs as the tag inputs hold them: numbers from a config, strings as typed. */
+  experimentIds?: (number | string)[];
+  trialIds?: (number | string)[];
+}
+
+/** The mode a config without a source starts in. */
+export const DEFAULT_SOURCE_MODE: TensorBoardSourceMode = 'experiments';
+
 /** The simple launch form's fields, as the launch helpers take them. */
 export interface NtscLaunchOptions {
-  /** The log directory of the tensorboard service, sent when the service runs. */
-  logdir?: string;
+  /** The data source of the tensorboard service, sent when the service runs. */
+  dataSource?: TensorBoardDataSource;
   name?: string;
   pool?: string;
   /** The services to send. Undefined or empty sends no services: the master runs its defaults. */
@@ -35,10 +49,10 @@ export interface NtscLaunchOptions {
 
 export interface LaunchFormFields {
   /**
-   * The log directory of the tensorboard service: read from a config's entry, and set in one that
+   * The data source of the tensorboard service: read from a config's entry, and set in one that
    * runs the service when given; unset keeps the entry's.
    */
-  logdir?: string;
+  dataSource?: TensorBoardDataSource;
   name?: string;
   pool?: string;
   /**
@@ -48,14 +62,77 @@ export interface LaunchFormFields {
   slots?: number;
 }
 
-/** The master names a shell "Shell (<pet name>)" when no description is given. */
-const AUTO_DESCRIPTION = /^Shell \([a-z]+(-[a-z]+)*\)$/;
+/**
+ * The master names a shell "Shell (<pet name>)", or "TensorBoard (<pet name>)" when TensorBoard is
+ * its primary service, when no description is given.
+ */
+const AUTO_DESCRIPTION = /^(Shell|TensorBoard) \([a-z]+(-[a-z]+)*\)$/;
 
 /** Environment variable names that probably hold a credential. */
 const SECRET_ENV_NAME = /TOKEN|SECRET|PASSW|KEY|AUTH|CRED/i;
 
 const asObject = (value: unknown): RawJson | undefined =>
   isPlainObject(value) ? (value as RawJson) : undefined;
+
+/** Whether a config turns the ssh service off. */
+export const sshDisabled = (config?: RawJson): boolean =>
+  asObject(asObject(config?.services)?.ssh)?.enabled === false;
+
+const ID_PATTERN = /^[1-9]\d*$/;
+
+/** Positive integer IDs, sorted numerically and deduplicated. */
+export const sourceIds = (ids?: (number | string)[]): number[] => {
+  const valid = (ids ?? [])
+    .map((id) => String(id).trim())
+    .filter((id) => ID_PATTERN.test(id))
+    .map(Number);
+  return [...new Set(valid)].sort((a, b) => a - b);
+};
+
+/** Whether an ID as the tag inputs hold it is a positive integer. */
+export const isSourceId = (id: number | string): boolean => ID_PATTERN.test(String(id).trim());
+
+const idList = (value: unknown): number[] | undefined =>
+  Array.isArray(value) ? value.filter((id): id is number => typeof id === 'number') : undefined;
+
+/**
+ * A tensorboard entry's source: experiments when it lists IDs, logdir when it has one, else the
+ * default mode.
+ */
+export const dataSourceFromEntry = (entry: unknown): TensorBoardDataSource => {
+  const options = asObject(entry);
+  const experimentIds = idList(options?.experiment_ids) ?? [];
+  const trialIds = idList(options?.trial_ids) ?? [];
+  if (experimentIds.length !== 0 || trialIds.length !== 0) {
+    return { experimentIds, mode: 'experiments', trialIds };
+  }
+  const logdir = options?.logdir;
+  if (typeof logdir === 'string' && logdir !== '') return { logdir, mode: 'logdir' };
+  return { mode: DEFAULT_SOURCE_MODE };
+};
+
+/**
+ * The entry with exactly one data source. logdir: deletes experiment_ids and trial_ids and sets
+ * logdir when non-blank (else keeps the entry's logdir). experiments: deletes logdir and sets each
+ * non-empty list, deleting an empty one. Other options (args, enabled) stay.
+ */
+export const withDataSource = (options: RawJson, source: TensorBoardDataSource): RawJson => {
+  const out = { ...options };
+  if (source.mode === 'logdir') {
+    delete out.experiment_ids;
+    delete out.trial_ids;
+    if (source.logdir?.trim()) out.logdir = source.logdir;
+    return out;
+  }
+  delete out.logdir;
+  const experimentIds = sourceIds(source.experimentIds);
+  const trialIds = sourceIds(source.trialIds);
+  if (experimentIds.length !== 0) out.experiment_ids = experimentIds;
+  else delete out.experiment_ids;
+  if (trialIds.length !== 0) out.trial_ids = trialIds;
+  else delete out.trial_ids;
+  return out;
+};
 
 /**
  * Whether a config's entry for a service runs it: a service runs unless its entry sets
@@ -67,18 +144,18 @@ const serviceRuns = (entry: unknown): boolean =>
 
 /**
  * Sets a service's entry to run the service or not, keeping its other options; the tensorboard
- * service that runs gets the log directory, when one is given.
+ * service that runs gets the data source, when one is given.
  */
 const serviceEntry = (
   name: ShellService,
   entry: unknown,
   runs: boolean,
-  logdir: string | undefined,
+  dataSource: TensorBoardDataSource | undefined,
 ): RawJson => {
   const options = { ...asObject(entry) };
   if (runs) delete options.enabled;
   else options.enabled = false;
-  if (name === 'tensorboard' && runs && logdir) options.logdir = logdir;
+  if (name === 'tensorboard' && runs && dataSource) return withDataSource(options, dataSource);
   return options;
 };
 
@@ -94,8 +171,8 @@ const serviceChoices = (choices: ShellServiceChoices = {}): [ShellService, boole
 
 /**
  * The config the simple form sends: a description, the resources and an entry per service with a
- * choice: `{}` for one to run, `{logdir}` for the tensorboard service, `{enabled: false}` for one
- * not to.
+ * choice: `{}` for one to run, its data source for the tensorboard service, `{enabled: false}` for
+ * one not to.
  */
 export const simpleLaunchConfig = (options: NtscLaunchOptions): RawJson => {
   const services = serviceChoices(options.services);
@@ -111,7 +188,7 @@ export const simpleLaunchConfig = (options: NtscLaunchOptions): RawJson => {
           services: Object.fromEntries(
             services.map(([name, runs]) => [
               name,
-              serviceEntry(name, undefined, runs, options.logdir),
+              serviceEntry(name, undefined, runs, options.dataSource),
             ]),
           ),
         }),
@@ -236,15 +313,14 @@ export const templateFromConfig = (config: RawJson, defaults: RawJson): RawJson 
 
 /**
  * Reads the simple form's fields out of a config: whether each service with an entry runs, and the
- * log directory of the tensorboard service's entry.
+ * data source of the tensorboard service's entry.
  */
 export const formFieldsFromConfig = (config: RawJson): LaunchFormFields => {
   const resources = asObject(config.resources);
   const description = config.description;
   const services = asObject(config.services);
-  const logdir = asObject(services?.tensorboard)?.logdir;
   return {
-    logdir: typeof logdir === 'string' ? logdir : undefined,
+    dataSource: dataSourceFromEntry(services?.tensorboard),
     name: typeof description === 'string' && !isAutoDescription(description) ? description : '',
     pool: typeof resources?.resource_pool === 'string' ? resources.resource_pool : undefined,
     services: Object.fromEntries(
@@ -279,19 +355,25 @@ export const configFromForm = (base: RawJson, fields: LaunchFormFields): RawJson
   if (choices.length !== 0) {
     const services: RawJson = { ...asObject(out.services) };
     choices.forEach(([name, runs]) => {
-      services[name] = serviceEntry(name, services[name], runs, fields.logdir);
+      services[name] = serviceEntry(name, services[name], runs, fields.dataSource);
     });
     out.services = services;
   }
+  // The master runs a shell without ssh only with 0 slots.
+  if (sshDisabled(out)) resources.slots = 0;
   return out;
 };
 
-/** Pool and slots a template sets, if any. */
+/** Pool and slots a template sets, if any; 0 slots for one that turns ssh off. */
 export const templateResources = (config?: RawJson): LaunchFormFields => {
   const resources = asObject(config?.resources);
   return {
     pool: typeof resources?.resource_pool === 'string' ? resources.resource_pool : undefined,
-    slots: typeof resources?.slots === 'number' ? resources.slots : undefined,
+    slots: sshDisabled(config)
+      ? 0
+      : typeof resources?.slots === 'number'
+        ? resources.slots
+        : undefined,
   };
 };
 

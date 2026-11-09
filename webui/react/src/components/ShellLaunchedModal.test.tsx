@@ -175,6 +175,30 @@ describe('ShellLaunchedModal', () => {
     expect(screen.queryByRole('button', { name: 'Open VS Code' })).not.toBeInTheDocument();
   });
 
+  it('offers Open TensorBoard without the terminal and its CLI command for a shell with ssh off', async () => {
+    const session: CommandResponse = {
+      command: { ...RESPONSE.command, name: 'TensorBoard (brave-cat)' },
+      config: {
+        resources: { slots: 0 },
+        services: { ssh: { enabled: false }, tensorboard: { experiment_ids: [7] } },
+      },
+      warnings: [],
+    };
+    await setup(session, [service('tensorboard')]);
+    expect(screen.getByRole('button', { name: 'Open TensorBoard' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open Terminal' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Start an interactive SSH session in the terminal:'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('det shell open shell-123')).not.toBeInTheDocument();
+  });
+
+  it('offers the terminal and its CLI command for a shell whose config keeps ssh', async () => {
+    await setup({ ...RESPONSE, config: { services: { jupyter: {}, ssh: {} } } });
+    expect(screen.getByRole('button', { name: 'Open Terminal' })).toBeInTheDocument();
+    expect(screen.getByText('det shell open shell-123')).toBeInTheDocument();
+  });
+
   it('shows no service buttons for a service the user may not connect to', async () => {
     await setup(RESPONSE, [
       service('ssh', false),

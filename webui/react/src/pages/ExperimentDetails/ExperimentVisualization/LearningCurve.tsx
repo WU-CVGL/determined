@@ -14,13 +14,11 @@ import { UPlotPoint } from 'components/UPlot/types';
 import { terminalRunStates } from 'constants/states';
 import TrialsComparisonModalComponent from 'pages/ExperimentDetails/TrialsComparisonModal';
 import { paths } from 'routes/utils';
-import { openOrCreateTensorBoard } from 'services/api';
 import { V1TrialsSampleResponse } from 'services/api-ts-sdk';
 import { detApi } from 'services/apiConfig';
 import { readStream } from 'services/utils';
 import {
   ExperimentAction as Action,
-  CommandResponse,
   ExperimentBase,
   ExperimentSearcherName,
   Hyperparameter,
@@ -36,7 +34,7 @@ import { flattenObject, isPrimitive } from 'utils/data';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import { metricToStr } from 'utils/metric';
 import { isNewTabClickEvent, openBlank, routeToReactUrl } from 'utils/routes';
-import { openCommandResponse } from 'utils/wait';
+import { handleTensorBoardError, openTensorBoardSession } from 'utils/tensorBoardSession';
 
 import HpTrialTable, { TrialHParams } from './HpTrialTable';
 import css from './LearningCurve.module.scss';
@@ -267,7 +265,7 @@ const LearningCurve: React.FC<Props> = ({
   const sendBatchActions = useCallback(
     async (action: Action) => {
       if (action === Action.OpenTensorBoard) {
-        return await openOrCreateTensorBoard({
+        return await openTensorBoardSession({
           trialIds: selectedRowKeys,
           workspaceId: experiment.workspaceId,
         });
@@ -281,19 +279,16 @@ const LearningCurve: React.FC<Props> = ({
   const submitBatchAction = useCallback(
     async (action: Action) => {
       try {
-        const result = await sendBatchActions(action);
-        if (action === Action.OpenTensorBoard && result) {
-          openCommandResponse(result as CommandResponse);
-        }
+        await sendBatchActions(action);
       } catch (e) {
-        const publicSubject =
-          action === Action.OpenTensorBoard
-            ? 'Unable to View TensorBoard for Selected Trials'
-            : `Unable to ${action} Selected Trials`;
+        if (action === Action.OpenTensorBoard) {
+          handleTensorBoardError(e, 'Unable to View TensorBoard for Selected Trials');
+          return;
+        }
         handleError(e, {
           level: ErrorLevel.Error,
           publicMessage: 'Please try again later.',
-          publicSubject,
+          publicSubject: `Unable to ${action} Selected Trials`,
           silent: false,
           type: ErrorType.Server,
         });

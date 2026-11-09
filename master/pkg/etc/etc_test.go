@@ -13,6 +13,7 @@ func TestMustStaticFileStaysInRoot(t *testing.T) {
 	require.NotEmpty(t, MustStaticFile(InteractiveSupervisorResource))
 	require.NotEmpty(t, MustStaticFile(TensorBoardServiceResource))
 	require.NotEmpty(t, MustStaticFile(TensorBoardServiceProgramResource))
+	require.NotEmpty(t, MustStaticFile(TensorBoardLoaderResource))
 	for _, name := range []string{"..", ".", "", "../../../go.mod", "services/../../../../go.mod"} {
 		require.Panics(t, func() { MustStaticFile(name) }, name)
 	}

@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import UIProvider, { DefaultTheme } from 'hew/Theme';
+import { makeToast } from 'hew/Toast';
 import { ConfirmationProvider } from 'hew/useConfirm';
 
 import type { ValidFeature } from 'hooks/useFeature';
@@ -16,6 +17,9 @@ import {
   unarchiveExperiment,
 } from 'services/api';
 import { ProjectExperiment, RunState } from 'types';
+import { DetError } from 'utils/error';
+import { capitalize } from 'utils/string';
+import { openTensorBoardSession } from 'utils/tensorBoardSession';
 import { isDangerMenuItem, menuLabels } from 'utils/tests/menu';
 
 import ExperimentActionDropdown, { Action } from './ExperimentActionDropdown';
@@ -71,6 +75,16 @@ vi.mock('services/api', () => ({
   patchExperiment: vi.fn(),
   pauseExperiment: vi.fn(),
   unarchiveExperiment: vi.fn(),
+}));
+
+vi.mock('utils/tensorBoardSession', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('utils/tensorBoardSession')>()),
+  openTensorBoardSession: vi.fn(),
+}));
+
+vi.mock('hew/Toast', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('hew/Toast')>()),
+  makeToast: vi.fn(),
 }));
 
 const mocks = vi.hoisted(() => {
@@ -356,6 +370,44 @@ describe('ExperimentActionDropdown', () => {
     mocks.canViewExperimentArtifacts.mockImplementation(() => false);
     setup();
     expect(screen.queryByText(Action.OpenTensorBoard)).not.toBeInTheDocument();
+  });
+
+  it("should open the experiment's TensorBoard session", async () => {
+    mocks.canViewExperimentArtifacts.mockImplementation(() => true);
+    vi.mocked(openTensorBoardSession)
+      .mockReset()
+      .mockResolvedValue({
+        command: { id: 'shell-1' } as never,
+        warnings: [],
+      });
+    setup();
+    await user.click(screen.getByText(Action.OpenTensorBoard));
+    expect(openTensorBoardSession).toHaveBeenCalledWith({
+      experimentIds: [experiment.id],
+      workspaceId: experiment.workspaceId,
+    });
+  });
+
+  it("should show the master's text when the TensorBoard session is refused", async () => {
+    mocks.canViewExperimentArtifacts.mockImplementation(() => true);
+    vi.mocked(makeToast).mockReset();
+    vi.mocked(openTensorBoardSession)
+      .mockReset()
+      .mockRejectedValue(
+        new DetError(new Error('refused'), {
+          publicMessage: "experiment '7261' not found",
+          publicSubject: 'Request launchShell failed.',
+        }),
+      );
+    setup();
+    await user.click(screen.getByText(Action.OpenTensorBoard));
+    await waitFor(() =>
+      expect(makeToast).toHaveBeenCalledWith({
+        description: "experiment '7261' not found",
+        severity: 'Error',
+        title: `${capitalize(Action.OpenTensorBoard)} failed.`,
+      }),
+    );
   });
 });
 

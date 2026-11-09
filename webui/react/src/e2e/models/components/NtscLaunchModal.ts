@@ -38,10 +38,29 @@ export class NtscLaunchModal extends Modal {
       parent: this,
       selector: `.ant-form-item:has(label[title="Services"]) label.ant-checkbox-wrapper:has(span:text-is("${SERVICE_LABELS[name]}"))`,
     });
-  /** The tensorboard service's log directory, under Data source while TensorBoard is checked. */
+  // The tensorboard service's data source, shown while TensorBoard is checked.
+  /** The data source's mode radio by its label, such as "Determined experiments". */
+  readonly mode = (label: string): BaseComponent =>
+    new BaseComponent({
+      parent: this,
+      selector: `.ant-form-item:has(label[title="Data source"]) label.ant-radio-wrapper:has(span:text-is("${label}"))`,
+    });
+  /** The tag input of the experiments to read, in the "Determined experiments" mode. */
+  readonly experimentIds = new BaseComponent({
+    parent: this,
+    selector:
+      '.ant-form-item-row:has(> .ant-form-item-label label[title="Experiments"]) .ant-select input',
+  });
+  /** The tag input of the trials to read, in the "Determined experiments" mode. */
+  readonly trialIds = new BaseComponent({
+    parent: this,
+    selector:
+      '.ant-form-item-row:has(> .ant-form-item-label label[title="Trials"]) .ant-select input',
+  });
+  /** The log directory, in the "Log directory in the task" mode. */
   readonly logdir = new BaseComponent({
     parent: this,
-    selector: '.ant-form-item:has(label[title="Log directory in the task"]) input',
+    selector: '.ant-form-item:has(label[title="Data source"]) input[placeholder="runs"]',
   });
 }
 

@@ -1,30 +1,25 @@
 import { Modal } from 'hew/Modal';
 
 import { UNMANAGED_EXPERIMENT_ANNOTATION_MESSAGE } from 'constant';
-import { openOrCreateTensorBoard } from 'services/api';
-import { V1BulkExperimentFilters } from 'services/api-ts-sdk';
 import { ProjectExperiment } from 'types';
 import handleError from 'utils/error';
-import { openCommandResponse } from 'utils/wait';
+import { handleTensorBoardError, openTensorBoardSession } from 'utils/tensorBoardSession';
 
 interface Props {
   selectedExperiments: ProjectExperiment[];
-  filters?: V1BulkExperimentFilters;
   workspaceId?: number;
 }
 
-const ExperimentTensorBoardModal = ({
-  workspaceId,
-  selectedExperiments,
-  filters,
-}: Props): JSX.Element => {
+const ExperimentTensorBoardModal = ({ workspaceId, selectedExperiments }: Props): JSX.Element => {
   const handleSubmit = async () => {
     const managedExperimentIds = selectedExperiments
       .filter((exp) => !exp.unmanaged)
       .map((exp) => exp.id);
-    openCommandResponse(
-      await openOrCreateTensorBoard({ experimentIds: managedExperimentIds, filters, workspaceId }),
-    );
+    try {
+      await openTensorBoardSession({ experimentIds: managedExperimentIds, workspaceId });
+    } catch (e) {
+      handleTensorBoardError(e, 'Unable to View TensorBoard for Selected Experiments');
+    }
   };
 
   return (
