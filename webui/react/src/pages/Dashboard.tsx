@@ -24,13 +24,7 @@ import useFeature from 'hooks/useFeature';
 import usePermissions from 'hooks/usePermissions';
 import usePolling from 'hooks/usePolling';
 import { paths } from 'routes/utils';
-import {
-  getCommands,
-  getExperiments,
-  getProjectsByUserActivity,
-  getShells,
-  getTensorBoards,
-} from 'services/api';
+import { getCommands, getExperiments, getProjectsByUserActivity, getShells } from 'services/api';
 import userStore from 'stores/users';
 import workspaceStore from 'stores/workspaces';
 import { BulkExperimentItem, CommandTask, DetailedUser, Project } from 'types';
@@ -69,13 +63,6 @@ const Dashboard: React.FC = () => {
           users: [user.id.toString()],
         }),
         getShells({
-          limit: SUBMISSIONS_FETCH_LIMIT,
-          orderBy: 'ORDER_BY_DESC',
-          signal: canceler.signal,
-          sortBy: 'SORT_BY_START_TIME',
-          users: [user.id.toString()],
-        }),
-        getTensorBoards({
           limit: SUBMISSIONS_FETCH_LIMIT,
           orderBy: 'ORDER_BY_DESC',
           signal: canceler.signal,

@@ -32,7 +32,6 @@ vi.mock('services/api', () => ({
   getProjectsByUserActivity: mocks.getProjectsByUserActivity,
   getShells: mocks.getShells,
   getTaskTemplates: () => Promise.resolve([]),
-  getTensorBoards: () => Promise.resolve([]),
   getWorkspaces: () => Promise.resolve({ workspaces: [] }),
   updateUserSetting: () => Promise.resolve(),
 }));

@@ -1,4 +1,4 @@
-import { activeRunStates, terminalCommandStates, terminalRunStatesKeys } from 'constants/states';
+import { activeRunStates, terminalRunStatesKeys } from 'constants/states';
 import { parseIds, visitAction } from 'omnibar/tree-extension/trees/actions';
 import dev from 'omnibar/tree-extension/trees/dev';
 import locations from 'omnibar/tree-extension/trees/goto';
@@ -8,9 +8,7 @@ import {
   activateExperiment,
   archiveExperiment,
   getExperiments,
-  getTensorBoards,
   killExperiment,
-  killTensorBoard,
   pauseExperiment,
 } from 'services/api';
 import { handleTensorBoardError, openTensorBoardSession } from 'utils/tensorBoardSession';
@@ -69,23 +67,6 @@ const root: NonLeafNode = {
     {
       aliases: ['stop', 'cancel'],
       options: [
-        {
-          options: async (): Promise<Children> => {
-            const cmds = await getTensorBoards({
-              orderBy: 'ORDER_BY_DESC',
-              sortBy: 'SORT_BY_START_TIME',
-            });
-
-            const options: LeafNode[] = cmds
-              .filter((cmd) => !terminalCommandStates.has(cmd.state))
-              .map((cmd) => ({
-                onAction: () => killTensorBoard({ commandId: cmd.id }),
-                title: `${cmd.name}`,
-              }));
-            return options;
-          },
-          title: 'tensorBoard',
-        },
         {
           label: 'experiement <id>',
           options: async (): Promise<Children> => {

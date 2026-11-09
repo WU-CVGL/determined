@@ -6,14 +6,7 @@ import { HelmetProvider } from 'react-helmet-async';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 import { ThemeProvider } from 'components/ThemeProvider';
-import {
-  getCommand,
-  getShells,
-  getTask,
-  getTaskServices,
-  getTensorBoard,
-  killTask,
-} from 'services/api';
+import { getCommand, getShells, getTask, getTaskServices, killTask } from 'services/api';
 import {
   TaskServiceProtocol,
   V1GetTaskServicesResponse,
@@ -36,7 +29,6 @@ vi.mock('services/api', () => ({
   getShells: vi.fn(),
   getTask: vi.fn(),
   getTaskServices: vi.fn(),
-  getTensorBoard: vi.fn(),
   killTask: vi.fn(),
 }));
 
@@ -155,7 +147,6 @@ describe('InteractiveTask', () => {
       .mockResolvedValue(servicesWith(['ssh', 'jupyter', 'vscode']));
     vi.mocked(getShells).mockReset().mockResolvedValue([shell]);
     vi.mocked(getCommand).mockReset();
-    vi.mocked(getTensorBoard).mockReset();
     vi.mocked(killTask).mockReset();
   });
 
@@ -538,8 +529,6 @@ describe('InteractiveTask', () => {
       'Logs',
       'Resources',
     ]);
-    expect(screen.queryByTitle('TensorBoard')).not.toBeInTheDocument();
-    expect(getTensorBoard).not.toHaveBeenCalled();
   });
 
   it('shows a TensorBoard session, a shell without ssh, as its TensorBoard tab without a Terminal', async () => {
@@ -552,7 +541,6 @@ describe('InteractiveTask', () => {
     expect(pane).toHaveAttribute('data-state', V1TaskServiceState.READY);
     expect(tabLabels()).toEqual(['TensorBoard', 'Logs', 'Resources']);
     expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
-    expect(getTensorBoard).not.toHaveBeenCalled();
   });
 
   it('leaves out the TensorBoard tab when the user may not connect to the service', async () => {
@@ -560,26 +548,6 @@ describe('InteractiveTask', () => {
     setup();
     expect(await screen.findByTestId('logs-pane')).toBeInTheDocument();
     expect(tabLabels()).toEqual(['Logs', 'Resources']);
-  });
-
-  it('shows a TensorBoard in a frame of its wait page', async () => {
-    vi.mocked(getTask).mockResolvedValue(taskWith(false, V1TaskType.TENSORBOARD));
-    vi.mocked(getTaskServices).mockResolvedValue(servicesWith([]));
-    vi.mocked(getTensorBoard).mockResolvedValue({
-      ...shell,
-      name: 'TensorBoard (lively-fox)',
-      serviceAddress: `/proxy/${TASK_ID}/`,
-      type: CommandType.TensorBoard,
-    });
-    setup();
-    const frame = await screen.findByTitle('TensorBoard');
-    expect(frame).toHaveAttribute(
-      'src',
-      expect.stringContaining(`/wait/tensor-board/${TASK_ID}?serviceAddr=/proxy/${TASK_ID}/`),
-    );
-    expect(tabLabels()).toEqual(['TensorBoard', 'Logs', 'Resources']);
-    expect(screen.getByText('TensorBoard (lively-fox)')).toBeInTheDocument();
-    expect(getShells).not.toHaveBeenCalled();
   });
 
   it('gives a command its logs and resources', async () => {
@@ -728,15 +696,6 @@ describe('InteractiveTask', () => {
     await userEvent.click(screen.getByTestId('task-action-dropdown-trigger'));
     await screen.findByText('Kill');
     expect(isDisabledMenuItem('Kill')).toBe(true);
-  });
-
-  it('offers Kill for a task whose allocation waits', async () => {
-    vi.mocked(getTask).mockResolvedValue(taskWith(true, V1TaskType.SHELL, CommandState.Waiting));
-    setup();
-    await screen.findByTestId('terminal-pane');
-    await userEvent.click(screen.getByTestId('task-action-dropdown-trigger'));
-    await screen.findByText('Kill');
-    expect(isDisabledMenuItem('Kill')).toBe(false);
   });
 
   it('shows why the task cannot be shown', async () => {

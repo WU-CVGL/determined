@@ -9,9 +9,7 @@ import * as utils from './wait';
 const UUID = {
   [CommandType.Command]: generateUUID(),
   [CommandType.Shell]: generateUUID(),
-  [CommandType.TensorBoard]: generateUUID(),
 };
-const UUID_REGEX = '[a-z\\d-]+';
 const SHARED_TASK: Partial<CommandTask> = {
   misc: undefined,
   url: undefined,
@@ -43,22 +41,9 @@ const COMMAND_TASK: Record<RecordKey, CommandTask> = {
     userId: 34,
     workspaceId: 0,
   },
-  [CommandType.TensorBoard]: {
-    ...SHARED_TASK,
-    displayName: 'racer kim',
-    id: UUID[CommandType.TensorBoard],
-    name: 'TensorBoard (ambiguously-happy-ear)',
-    resourcePool: 'aux-pool',
-    serviceAddress: `/proxy/${UUID[CommandType.TensorBoard]}`,
-    startTime: '2022-08-02T12:24:00Z',
-    state: CommandState.Running,
-    type: CommandType.TensorBoard,
-    userId: 16,
-    workspaceId: 0,
-  },
 };
 
-describe('Wait Page Utilities', () => {
+describe('Task Page Openers', () => {
   describe('openCommand', () => {
     let windowOpen: MaybeMocked<typeof global.open>;
 
@@ -73,7 +58,7 @@ describe('Wait Page Utilities', () => {
       vi.mocked(global.open).mockRestore();
     });
 
-    it.each([CommandType.Command, CommandType.Shell, CommandType.TensorBoard])(
+    it.each([CommandType.Command, CommandType.Shell])(
       'opens the task page of a %s task in a tab named after the task',
       (type) => {
         const task = COMMAND_TASK[type];
@@ -115,22 +100,5 @@ describe('Wait Page Utilities', () => {
         '',
       );
     });
-  });
-
-  describe('waitPageUrl', () => {
-    it('should convert task to wait page url', () => {
-      expect(utils.waitPageUrl(COMMAND_TASK[CommandType.TensorBoard])).toMatch(
-        new RegExp(`wait/${CommandType.TensorBoard}/${UUID_REGEX}`, 'i'),
-      );
-    });
-
-    it.each([CommandType.Command, CommandType.Shell])(
-      'should throw error for a %s task, which is not a TensorBoard',
-      (type) => {
-        expect(() => {
-          utils.waitPageUrl(COMMAND_TASK[type]);
-        }).toThrow(utils.CANNOT_OPEN_COMMAND_ERROR);
-      },
-    );
   });
 });

@@ -413,18 +413,18 @@ describe('JobQueue', () => {
         shellJob,
         {
           ...shellJob,
-          entityId: 'tb-1',
+          entityId: 'cmd-1',
           jobId: 'job-3',
-          name: 'TensorBoard',
-          type: JobType.TENSORBOARD,
+          name: 'Command',
+          type: JobType.COMMAND,
         },
       ];
       setup();
       await waitForShells();
       await userEvent.click(await screen.findByText('Shell (lively-calm-fox) (shell)'));
       expect(open).toHaveBeenCalledWith('/tasks/shell-1/interactive', 'shell-1', '');
-      await userEvent.click(screen.getByText('TensorBoard (tb)'));
-      expect(open).toHaveBeenCalledWith('/tasks/tb-1/interactive', 'tb-1', '');
+      await userEvent.click(screen.getByText('Command (cmd)'));
+      expect(open).toHaveBeenCalledWith('/tasks/cmd-1/interactive', 'cmd-1', '');
     } finally {
       open.mockRestore();
     }

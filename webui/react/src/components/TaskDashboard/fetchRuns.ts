@@ -1,10 +1,4 @@
-import {
-  getCommands,
-  getExperiments,
-  getGenericTasks,
-  getShells,
-  getTensorBoards,
-} from 'services/api';
+import { getCommands, getExperiments, getGenericTasks, getShells } from 'services/api';
 import { CommandTask, ExperimentPagination, GenericTaskPagination } from 'types';
 
 import {
@@ -59,15 +53,14 @@ export interface RunPage {
 const commandListers: Record<ListedCommandKind, typeof getCommands> = {
   [RunKind.Command]: getCommands,
   [RunKind.Shell]: getShells,
-  [RunKind.TensorBoard]: getTensorBoards,
 };
 
 /**
  * Fetches one page of the dashboard, of the kinds asked for only.
  * - Experiments and generic tasks are sorted, filtered and paged by the master: each is fetched
  *   with offset 0 and limit offset + limit.
- * - Shells, commands and TensorBoards are listed whole by the master, and filtered and sorted here
- *   in the same order.
+ * - Shells and commands are listed whole by the master, and filtered and sorted here in the same
+ *   order.
  * - The sorted lists are merged and the page's rows cut out; the total is the sum of the three.
  * Each list that fails is left out and reported in `errors`.
  */
@@ -140,7 +133,7 @@ export const fetchRunPage = async (query: RunQuery, signal?: AbortSignal): Promi
   const errors: RunPage['errors'] = {};
   let total = 0;
 
-  // Shells, commands and TensorBoards.
+  // Shells and commands.
   const commandTasks: CommandTask[] = [];
   commandResults.forEach((result, i) => {
     if (result.status === 'rejected') errors[commandKinds[i]] = result.reason;

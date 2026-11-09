@@ -16,7 +16,6 @@ import {
   getExperiments,
   getGenericTasks,
   getShells,
-  getTensorBoards,
   getUsers,
   getUserSetting,
   killExperiment,
@@ -57,7 +56,7 @@ const CURRENT_USER_ID = 3;
 /* The states the list APIs report for the generic task and the experiment. */
 const listed = vi.hoisted(() => ({ experimentState: 'ACTIVE', genericState: 'ACTIVE' }));
 
-/* With a user ID, the user may control only their own shells, commands and TensorBoards. */
+/* With a user ID, the user may control only their own shells and commands. */
 const access = vi.hoisted(() => ({ onlyOwnRunsOf: undefined as number | undefined }));
 
 /* The real fetchRunPage, which a test may replace for some queries. */
@@ -152,7 +151,6 @@ vi.mock('services/api', () => ({
       workspaceId: 0,
     }),
   ),
-  getTensorBoards: vi.fn(() => Promise.resolve([])),
   getUsers: vi.fn(() => Promise.resolve({ users: [] })),
   getUserSetting: vi.fn(() => Promise.resolve({ settings: [] })),
   getWorkspaceProjects: () => Promise.resolve({ pagination: { total: 0 }, projects: [] }),
@@ -580,7 +578,6 @@ describe('TaskDashboard', () => {
       'Generic Task',
       'Shell',
       'Command',
-      'TensorBoard',
     ]);
   });
 
@@ -1439,14 +1436,13 @@ describe('TaskDashboard', () => {
     expect(screen.getByText('bert-finetune')).toBeInTheDocument();
   });
 
-  it('shows the sources of a TensorBoard: with flat runs, its searches and runs', async () => {
-    vi.mocked(getTensorBoards).mockResolvedValue([
+  it('shows the sources of a viewing session: with flat runs, its searches and runs', async () => {
+    vi.mocked(getShells).mockResolvedValue([
       {
         ...SHELL,
-        id: 'tb-1',
+        id: 'shell-tb',
         misc: { experimentIds: [5, 2], trialIds: [7] },
         name: 'loss-curves',
-        type: CommandType.TensorBoard,
       },
     ]);
     setup();

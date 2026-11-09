@@ -28,7 +28,6 @@ const TaskLogsWrapper = React.lazy(() =>
 );
 const TemplatesPage = React.lazy(() => import('pages/Templates/TemplatesPage'));
 const TrialDetails = React.lazy(() => import('pages/TrialDetails'));
-const Wait = React.lazy(() => import('pages/Wait'));
 const Webhooks = React.lazy(() => import('pages/WebhookList'));
 const WorkspaceDetails = React.lazy(() => import('pages/WorkspaceDetails'));
 const WorkspaceList = React.lazy(() => import('pages/WorkspaceList'));
@@ -49,7 +48,6 @@ const routeComponentMap: Record<string, React.ReactNode> = {
   experimentDetails: <ExperimentDetails />,
   experimentResources: <ExperimentResources />,
   genericTaskDetails: <GenericTaskDetails />,
-  interactive: <InteractiveTaskRedirect />,
   interactiveTask: <InteractiveTask />,
   jobs: <JobsPage key="jobs" />,
   modelDetails: <ModelDetails />,
@@ -69,7 +67,6 @@ const routeComponentMap: Record<string, React.ReactNode> = {
   templates: <TemplatesPage />,
   trialDetails: <TrialDetails />,
   uncategorized: <ProjectDetails key="uncategorized" />,
-  wait: <Wait />,
   webhooks: <Webhooks />,
   workspaceDetails: <WorkspaceDetails />,
   workspaceList: <WorkspaceList />,
