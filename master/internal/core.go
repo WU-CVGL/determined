@@ -295,6 +295,11 @@ func (m *Master) getRawResourceAllocation(c echo.Context) error {
 	); err != nil {
 		return errors.Wrap(err, "error fetching allocation data")
 	}
+	curUser := c.(*detContext.DetContext).MustGetUser()
+	if err := redactRawAllocationLabels(
+		c.Request().Context(), curUser, resp.ResourceEntries); err != nil {
+		return err
+	}
 
 	c.Response().Header().Set("Content-Type", "text/csv")
 

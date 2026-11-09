@@ -41,7 +41,6 @@ import (
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 	"github.com/determined-ai/determined/proto/pkg/commandv1"
-	"github.com/determined-ai/determined/proto/pkg/jobv1"
 	"github.com/determined-ai/determined/proto/pkg/rbacv1"
 	"github.com/determined-ai/determined/proto/pkg/utilv1"
 	"github.com/determined-ai/determined/proto/pkg/workspacev1"
@@ -339,7 +338,8 @@ func (a *apiServer) GetCommands(
 		return limitedScopes[model.AccessScopeID(resp.Commands[i].WorkspaceId)]
 	})
 
-	if err = setCommandCapabilities(ctx, *curUser, resp.Commands...); err != nil {
+	// Hidden descriptions are cleared before the sort, so a hidden row sorts as an empty one.
+	if _, err = setCommandCapabilities(ctx, *curUser, resp.Commands...); err != nil {
 		return nil, err
 	}
 	api.Sort(resp.Commands, req.OrderBy, req.SortBy, apiv1.GetCommandsRequest_SORT_BY_ID)
@@ -364,23 +364,36 @@ func (a *apiServer) GetCommand(
 		return nil, err
 	}
 	redactTaskConfig(*curUser, resp.Command.UserId, req.CommandId, resp.Config)
-	if err = setCommandCapabilities(ctx, *curUser, resp.Command); err != nil {
+	caps, err := setCommandCapabilities(ctx, *curUser, resp.Command)
+	if err != nil {
 		return nil, err
+	}
+	if !caps[resp.Command.Id].ViewConfig {
+		resp.Config = nil
 	}
 	return resp, nil
 }
 
-// setCommandCapabilities sets the user's job privacy capabilities on the commands.
+// setCommandCapabilities sets the user's job privacy capabilities on the commands, clears the
+// description of a command whose title the user may not read, and returns the capabilities by
+// command ID.
 func setCommandCapabilities(
 	ctx context.Context, curUser model.User, commands ...*commandv1.Command,
-) error {
+) (map[string]jobprivacy.Caps, error) {
 	v, err := jobprivacy.NewViewer(ctx, curUser)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return setJobCapabilities(ctx, v, commands,
+	byID := make(map[string]jobprivacy.Caps, len(commands))
+	return byID, applyJobPrivacy(ctx, v, commands,
 		func(c *commandv1.Command) string { return c.JobId },
-		func(c *commandv1.Command, caps *jobv1.JobCapabilities) { c.Capabilities = caps })
+		func(c *commandv1.Command, caps jobprivacy.Caps) {
+			if !caps.ViewTitle {
+				c.Description = ""
+			}
+			c.Capabilities = caps.Proto()
+			byID[c.Id] = caps
+		})
 }
 
 // getCommand returns a command, with its full config, if the current user may see it.

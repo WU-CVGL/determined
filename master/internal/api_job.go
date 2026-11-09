@@ -128,15 +128,21 @@ func (a *apiServer) GetJobsV2(
 	return resp, nil
 }
 
-// setQueueJobCapabilities sets the user's job privacy capabilities on the queue's jobs.
+// setQueueJobCapabilities sets the user's job privacy capabilities on the queue's jobs and clears
+// the name of a job whose title the user may not read.
 func setQueueJobCapabilities(ctx context.Context, curUser model.User, jobs []*jobv1.Job) error {
 	v, err := jobprivacy.NewViewer(ctx, curUser)
 	if err != nil {
 		return err
 	}
-	return setJobCapabilities(ctx, v, jobs,
+	return applyJobPrivacy(ctx, v, jobs,
 		func(j *jobv1.Job) string { return j.JobId },
-		func(j *jobv1.Job, c *jobv1.JobCapabilities) { j.Capabilities = c })
+		func(j *jobv1.Job, c jobprivacy.Caps) {
+			if !c.ViewTitle {
+				j.Name = ""
+			}
+			j.Capabilities = c.Proto()
+		})
 }
 
 func (a *apiServer) enrichJobAllocationStartTimes(ctx context.Context, jobs []*jobv1.Job) error {

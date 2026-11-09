@@ -535,7 +535,11 @@ func (a *apiServer) getTensorBoardConfigsFromReq(
 	if req.Filters == nil {
 		originalExpIDs = req.ExperimentIds
 	} else {
-		originalExpIDs, err = exputil.FilterToExperimentIds(ctx, req.Filters)
+		filterUser, _, err := grpcutil.GetUser(ctx)
+		if err != nil {
+			return nil, err
+		}
+		originalExpIDs, err = exputil.FilterToExperimentIds(ctx, *filterUser, req.Filters)
 		if err != nil {
 			return nil, err
 		}

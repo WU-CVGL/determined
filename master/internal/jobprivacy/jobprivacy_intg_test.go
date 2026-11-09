@@ -144,7 +144,7 @@ func TestSQLMatchesEffective(t *testing.T) {
 				TableExpr("unnest(?::text[]) AS ids(job_id)", pgdialect.Array(ids)).
 				ColumnExpr("ids.job_id").
 				Join(e.JoinSQL()).
-				Where("?", e.Title).
+				Where(e.Title).
 				Scan(ctx, &titled))
 			want := 0
 			for _, f := range facts {
@@ -153,6 +153,22 @@ func TestSQLMatchesEffective(t *testing.T) {
 				}
 			}
 			require.Len(t, titled, want)
+
+			// So does the form without joins, row by row.
+			var noJoin []struct {
+				JobID model.JobID `bun:"job_id"`
+				Visible
+			}
+			nj := e.NoJoin()
+			require.NoError(t, nj.Columns(db.Bun().NewSelect().
+				TableExpr("unnest(?::text[]) AS ids(job_id)", pgdialect.Array(ids)).
+				ColumnExpr("ids.job_id")).
+				Scan(ctx, &noJoin))
+			require.Len(t, noJoin, len(jobIDs))
+			for _, r := range noJoin {
+				name := fmt.Sprintf("no join: viewer %+v, policy %+v, job %+v", v, p, facts[r.JobID])
+				require.Equal(t, Effective(v, facts[r.JobID], p), r.Caps(), name)
+			}
 		}
 	}
 }

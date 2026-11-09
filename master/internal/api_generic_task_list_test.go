@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
+	"github.com/determined-ai/determined/proto/pkg/jobv1"
 	"github.com/determined-ai/determined/proto/pkg/taskv1"
 )
 
@@ -102,10 +103,11 @@ func jobsSortFixtureGenericTasks(fixture jobsSortFixture) []*taskv1.GenericTask 
 	out := make([]*taskv1.GenericTask, 0, len(fixture.Rows))
 	for i, row := range fixture.Rows {
 		task := &taskv1.GenericTask{
-			TaskId:    fmt.Sprintf("task-%02d", i),
-			Name:      row.Name,
-			Slots:     int32(row.Slots),
-			StartTime: timestamppb.New(row.Start),
+			TaskId:       fmt.Sprintf("task-%02d", i),
+			Name:         row.Name,
+			Slots:        int32(row.Slots),
+			StartTime:    timestamppb.New(row.Start),
+			Capabilities: &jobv1.JobCapabilities{ViewTitle: true},
 		}
 		if row.Owner != nil {
 			task.DisplayName = *row.Owner
@@ -187,6 +189,38 @@ func TestGenericTaskLessMatchesJobsSortFixture(t *testing.T) {
 			}
 			require.Equal(t, want, got, "%s %s", key, orderBy)
 		}
+	}
+}
+
+// TestGenericTaskLessHiddenNames checks that tasks whose names are hidden sort after the others in
+// either direction, by start time then ID, whatever their names were.
+func TestGenericTaskLessHiddenNames(t *testing.T) {
+	at := func(sec int) *timestamppb.Timestamp {
+		return timestamppb.New(time.Date(2026, 1, 1, 0, 0, sec, 0, time.UTC))
+	}
+	visible := &jobv1.JobCapabilities{ViewTitle: true}
+	sorted := func(orderBy apiv1.OrderBy, hiddenA, hiddenZ string) []string {
+		tasks := []*taskv1.GenericTask{
+			{TaskId: "h1", Name: hiddenA, StartTime: at(1), Capabilities: &jobv1.JobCapabilities{}},
+			{TaskId: "v1", Name: "beta", StartTime: at(2), Capabilities: visible},
+			{TaskId: "h2", Name: hiddenZ, StartTime: at(3), Capabilities: &jobv1.JobCapabilities{}},
+			{TaskId: "v2", Name: "alpha", StartTime: at(4), Capabilities: visible},
+		}
+		less, err := genericTaskLess(apiv1.GetGenericTasksRequest_SORT_BY_NAME, orderBy)
+		require.NoError(t, err)
+		sort.SliceStable(tasks, func(i, j int) bool { return less(tasks[i], tasks[j]) })
+		var ids []string
+		for _, task := range tasks {
+			ids = append(ids, task.TaskId)
+		}
+		return ids
+	}
+	// The handler clears hidden names; their values here show that the order ignores them.
+	for _, names := range [][2]string{{"", ""}, {"a-secret", "z-secret"}, {"z-secret", "a-secret"}} {
+		require.Equal(t, []string{"v2", "v1", "h2", "h1"},
+			sorted(apiv1.OrderBy_ORDER_BY_ASC, names[0], names[1]), "asc %v", names)
+		require.Equal(t, []string{"v1", "v2", "h2", "h1"},
+			sorted(apiv1.OrderBy_ORDER_BY_DESC, names[0], names[1]), "desc %v", names)
 	}
 }
 

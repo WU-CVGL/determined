@@ -268,20 +268,14 @@ func (a *apiServer) GetExperiment(
 		return nil, err
 	}
 
-	v, err := jobprivacy.NewViewer(ctx, *user)
-	if err != nil {
-		return nil, err
-	}
-	caps, err := jobprivacy.ForJobs(ctx, v, []model.JobID{model.JobID(exp.JobId)})
-	if err != nil {
-		return nil, err
-	}
-	exp.Capabilities = caps[model.JobID(exp.JobId)].Proto()
-
 	// Update this when we remove the proto type.
 	resp := apiv1.GetExperimentResponse{
 		Experiment: exp,
 		Config:     exp.Config, //nolint:staticcheck
+	}
+	// The job summary below reads exp.ResourcePool and exp.State, which are never hidden.
+	if err = redactExperimentForViewer(ctx, *user, exp, &resp.Config); err != nil { //nolint:staticcheck
+		return nil, err
 	}
 
 	// Only continue to add a job summary if it's an active experiment.
@@ -473,11 +467,23 @@ func (a *apiServer) deleteExperiments(exps []*model.Experiment) error {
 	return nil
 }
 
-func getExperimentColumns(q *bun.SelectQuery) *bun.SelectQuery {
+// experimentColumns selects the columns of experiments e as the viewer whose job privacy rule is
+// privacy may read them: a hidden title gives a NULL name, description, labels and notes marker,
+// and a hidden config gives only the slots and pool of the config. The capabilities column carries
+// the rule's values for the row.
+func experimentColumns(privacy jobprivacy.Exprs) func(q *bun.SelectQuery) *bun.SelectQuery {
+	return func(q *bun.SelectQuery) *bun.SelectQuery {
+		return privacy.Join(experimentColumnsOf(q, privacy)).
+			ColumnExpr(privacy.CapabilitiesJSON() + " AS capabilities")
+	}
+}
+
+// experimentColumnsOf selects the columns of experimentColumns, without the joins of privacy.
+func experimentColumnsOf(q *bun.SelectQuery, privacy jobprivacy.Exprs) *bun.SelectQuery {
 	return q.
 		Column("e.id").
-		ColumnExpr("e.config->>'description' AS description").
-		ColumnExpr("e.config->>'labels' AS labels").
+		ColumnExpr(privacy.ExpDescription() + " AS description").
+		ColumnExpr(privacy.ExpLabelsText() + " AS labels").
 		ColumnExpr("proto_time(e.start_time) AS start_time").
 		ColumnExpr("proto_time(e.end_time) AS end_time").
 		ColumnExpr("extract(epoch FROM coalesce(e.end_time, now()) - e.start_time)::int AS duration").
@@ -494,9 +500,8 @@ func getExperimentColumns(q *bun.SelectQuery) *bun.SelectQuery {
 		ColumnExpr("e.config->'searcher'->>'name' AS searcher_type").
 		ColumnExpr("e.config->'searcher'->>'metric' AS searcher_metric").
 		ColumnExpr("e.config->'hyperparameters' AS hyperparameters").
-		ColumnExpr("e.config->>'name' as NAME").
-		ColumnExpr(
-			"CASE WHEN NULLIF(e.notes, '') IS NULL THEN NULL ELSE 'omitted' END AS notes").
+		ColumnExpr(privacy.ExpName() + " AS name").
+		ColumnExpr(privacy.ExpNotesMarker() + " AS notes").
 		Column("e.job_id").
 		ColumnExpr("CASE WHEN e.parent_id IS NULL THEN NULL ELSE " +
 			"json_build_object('value', e.parent_id) END AS forked_from").
@@ -508,33 +513,17 @@ func getExperimentColumns(q *bun.SelectQuery) *bun.SelectQuery {
 		ColumnExpr("w.name AS workspace_name").
 		ColumnExpr("(w.archived OR p.archived) AS parent_archived").
 		ColumnExpr("p.user_id AS project_owner_id").
-		Column("e.config").
+		ColumnExpr(privacy.ExpConfig() + " AS config").
 		Column("e.checkpoint_size").
 		Column("e.checkpoint_count").
 		Column("e.unmanaged").
 		Column("e.external_experiment_id").
 		ColumnExpr(`r.external_run_id AS external_trial_id`).
-		ColumnExpr("NULLIF(e.config#>'{integrations, pachyderm}', 'null') AS pachyderm_integration").
+		ColumnExpr(privacy.ExpPachyderm() + " AS pachyderm_integration").
 		Join("LEFT JOIN users u ON e.owner_id = u.id").
 		Join("LEFT JOIN projects p ON e.project_id = p.id").
 		Join("LEFT JOIN workspaces w ON p.workspace_id = w.id").
 		Join("LEFT JOIN runs AS r ON r.id = e.best_trial_id")
-}
-
-// experimentCapabilities selects the user's job privacy capabilities on each experiment of a
-// query over experiments e, as the column capabilities.
-func experimentCapabilities(
-	ctx context.Context, curUser model.User, q *bun.SelectQuery,
-) (*bun.SelectQuery, error) {
-	v, err := jobprivacy.NewViewer(ctx, curUser)
-	if err != nil {
-		return nil, err
-	}
-	exprs, err := jobPrivacyExprs(ctx, v, "e.job_id")
-	if err != nil {
-		return nil, err
-	}
-	return exprs.Join(q).ColumnExpr("? AS capabilities", exprs.CapabilitiesJSON()), nil
 }
 
 // experimentSlotsPerTrialExpr is the slot count each trial of an experiment asks for, with
@@ -555,14 +544,13 @@ type jobsSortKey struct {
 }
 
 // experimentJobsSortKeys are the experiment sorts of the Jobs page. The expressions are written
-// out in full: a column alias does not bind inside lower().
+// out in full: a column alias does not bind inside lower(). The name's expression depends on the
+// viewer (a hidden title is NULL and sorts last); GetExperiments sets it from the job privacy rule.
 var experimentJobsSortKeys = map[apiv1.GetExperimentsRequest_SortBy]jobsSortKey{
 	apiv1.GetExperimentsRequest_SORT_BY_ALLOCATION_START_TIME: {expr: "assignment.start"},
 	apiv1.GetExperimentsRequest_SORT_BY_START_TIME:            {expr: "e.start_time"},
 	apiv1.GetExperimentsRequest_SORT_BY_END_TIME:              {expr: "e.end_time"},
-	apiv1.GetExperimentsRequest_SORT_BY_NAME: {
-		expr: "COALESCE(e.config->>'name', '')", text: true,
-	},
+	apiv1.GetExperimentsRequest_SORT_BY_NAME:                  {text: true},
 	apiv1.GetExperimentsRequest_SORT_BY_USER: {
 		expr: "COALESCE(NULLIF(u.display_name, ''), u.username)", text: true,
 	},
@@ -605,11 +593,20 @@ func applySlotsFilter(
 func (a *apiServer) GetExperiments(
 	ctx context.Context, req *apiv1.GetExperimentsRequest,
 ) (*apiv1.GetExperimentsResponse, error) {
+	curUser, _, err := grpcutil.GetUser(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get the user: %s", err)
+	}
+	privacy, err := jobprivacy.ForUser(ctx, *curUser, "e.job_id")
+	if err != nil {
+		return nil, err
+	}
+
 	resp := &apiv1.GetExperimentsResponse{Experiments: []*experimentv1.Experiment{}}
 	query := db.Bun().NewSelect().
 		Model(&resp.Experiments).
 		ModelTableExpr("experiments as e").
-		Apply(getExperimentColumns)
+		Apply(experimentColumns(privacy))
 
 	if req.ShowTrialData {
 		query.ColumnExpr(`
@@ -646,6 +643,9 @@ func (a *apiServer) GetExperiments(
 	}
 	orderExpr := ""
 	jobsKey, isJobsKey := experimentJobsSortKeys[req.SortBy]
+	if req.SortBy == apiv1.GetExperimentsRequest_SORT_BY_NAME {
+		jobsKey.expr = privacy.ExpNameSortKey()
+	}
 	sortByAssignment := req.SortBy == apiv1.GetExperimentsRequest_SORT_BY_ALLOCATION_START_TIME
 	if sortByAssignment {
 		if agentOnlyAllocationStarts(a.m.config.ResourceConfig) {
@@ -674,21 +674,18 @@ func (a *apiServer) GetExperiments(
 	}
 	query = query.OrderExpr(orderExpr)
 
-	// Filtering
+	// Filtering. A hidden title is NULL, so it matches no name, description or labels filter.
 	if req.Description != "" {
-		query = query.Where("e.config->>'description' ILIKE ('%%' || ? || '%%')", req.Description)
+		query = query.Where(privacy.ExpDescription()+" ILIKE ('%%' || ? || '%%')", req.Description)
 	}
 	if req.Name != "" {
-		query = query.Where("e.config->>'name' ILIKE ('%%' || ? || '%%')", req.Name)
+		query = query.Where(privacy.ExpName()+" ILIKE ('%%' || ? || '%%')", req.Name)
 	}
 	if len(req.Labels) > 0 {
 		// In the event labels were removed, if all were removed we insert null,
 		// which previously broke this query.
-		query = query.Where(`string_to_array(?, ',') <@ ARRAY(SELECT jsonb_array_elements_text(
-				CASE WHEN e.config->'labels'::text = 'null'
-				THEN NULL
-				ELSE e.config->'labels' END
-			))`, strings.Join(req.Labels, ",")) // Trying bun.In doesn't work.
+		query = query.Where(`string_to_array(?, ',') <@ ARRAY(SELECT jsonb_array_elements_text(`+
+			privacy.ExpLabelsJSON()+`))`, strings.Join(req.Labels, ",")) // bun.In doesn't work.
 	}
 	if req.Archived != nil {
 		query = query.Where("e.archived = ?", req.Archived.Value)
@@ -720,13 +717,6 @@ func (a *apiServer) GetExperiments(
 		}
 	}
 
-	curUser, _, err := grpcutil.GetUser(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get the user: %s", err)
-	}
-	if query, err = experimentCapabilities(ctx, *curUser, query); err != nil {
-		return nil, err
-	}
 	var proj *projectv1.Project
 	if req.ProjectId != 0 {
 		proj, err = a.GetProjectByID(ctx, req.ProjectId, *curUser)
@@ -853,12 +843,21 @@ func (a *apiServer) GetExperimentLabels(ctx context.Context,
 		return nil, status.Errorf(codes.Internal, "failed to get the user: %s", err)
 	}
 
+	privacy, err := jobprivacy.ForUser(ctx, *curUser, "e.job_id")
+	if err != nil {
+		return nil, err
+	}
+	privacy = privacy.NoJoin()
+
+	// The labels of experiments whose title the user may not read are left out, and so are not
+	// counted.
 	resp := &apiv1.GetExperimentLabelsResponse{}
 	var labels [][]string
 	query := db.Bun().NewSelect().
-		Table("experiments").
+		TableExpr("experiments AS e").
 		Model(&labels).
-		ColumnExpr("config->'labels' AS labels").
+		ColumnExpr(privacy.ExpLabelsJSON() + " AS labels").
+		Where(privacy.Title).
 		Distinct()
 
 	var proj *projectv1.Project
@@ -1395,6 +1394,9 @@ func (a *apiServer) PatchExperiment(
 	if err = a.enrichExperimentState(exp); err != nil {
 		return nil, err
 	}
+	if err = redactExperimentForViewer(ctx, *curUser, exp, nil); err != nil {
+		return nil, err
+	}
 
 	return &apiv1.PatchExperimentResponse{Experiment: exp}, nil
 }
@@ -1404,7 +1406,7 @@ func (a *apiServer) GetExperimentCheckpoints(
 ) (*apiv1.GetExperimentCheckpointsResponse, error) {
 	experimentID := int(req.Id)
 	useSearcherSortBy := req.GetSortByAttr() == checkpointv1.SortBy_SORT_BY_SEARCHER_METRIC
-	exp, _, err := a.getExperimentAndCheckCanDoActions(ctx, experimentID,
+	exp, curUser, err := a.getExperimentAndCheckCanDoActions(ctx, experimentID,
 		experiment.AuthZProvider.Get().CanGetExperimentArtifacts)
 	if err != nil {
 		return nil, err
@@ -1428,6 +1430,9 @@ func (a *apiServer) GetExperimentCheckpoints(
 	case err != nil:
 		return nil,
 			errors.Wrapf(err, "error fetching checkpoints for experiment %d from database", req.Id)
+	}
+	if err = redactCheckpointTraining(ctx, curUser, resp.Checkpoints...); err != nil {
+		return nil, err
 	}
 
 	api.Where(&resp.Checkpoints, func(i int) bool {
@@ -1501,10 +1506,15 @@ func (a *apiServer) createUnmanagedExperimentTx(
 	if err != nil {
 		return nil, fmt.Errorf("failed to get experiment: %w", err)
 	}
-	return &apiv1.CreateExperimentResponse{
+	resp := &apiv1.CreateExperimentResponse{
 		Experiment: protoExp,
 		Config:     protoutils.ToStruct(activeConfig),
-	}, nil
+	}
+	// The creator owns the experiment, so this omits nothing; it sets the capabilities.
+	if err = redactExperimentForViewer(ctx, *user, protoExp, &resp.Config); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func getWorkspaceByConfig(config expconf.ExperimentConfig) (*model.Workspace, error) {
@@ -1618,11 +1628,16 @@ func (a *apiServer) CreateExperiment(
 	if err != nil {
 		return nil, err
 	}
-	return &apiv1.CreateExperimentResponse{
+	resp := &apiv1.CreateExperimentResponse{
 		Experiment: protoExp,
 		Config:     protoutils.ToStruct(activeConfig),
 		Warnings:   command.LaunchWarningToProto(launchWarnings),
-	}, nil
+	}
+	// The creator owns the experiment, so this omits nothing; it sets the capabilities.
+	if err = redactExperimentForViewer(ctx, *user, protoExp, &resp.Config); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (a *apiServer) PutExperimentRetainLogs(
@@ -2472,20 +2487,21 @@ func (a *apiServer) SearchExperiments(
 	resp := &apiv1.SearchExperimentsResponse{}
 	var experiments []*experimentv1.Experiment
 	var trials []*trialv1.Trial
+	curUser, _, err := grpcutil.GetUser(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get the user: %s", err)
+	}
+	privacy, err := jobprivacy.ForUser(ctx, *curUser, "e.job_id")
+	if err != nil {
+		return nil, err
+	}
 	experimentQuery := db.Bun().NewSelect().
 		Model(&experiments).
 		ModelTableExpr("experiments as e").
 		Column("e.best_trial_id").
 		Where("e.state != ?", model.DeletingState).
-		Apply(getExperimentColumns)
+		Apply(experimentColumns(privacy))
 
-	curUser, _, err := grpcutil.GetUser(ctx)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to get the user: %s", err)
-	}
-	if experimentQuery, err = experimentCapabilities(ctx, *curUser, experimentQuery); err != nil {
-		return nil, err
-	}
 	var proj *projectv1.Project
 	if req.ProjectId != nil {
 		proj, err = a.GetProjectByID(ctx, *req.ProjectId, *curUser)
@@ -2508,6 +2524,7 @@ func (a *apiServer) SearchExperiments(
 		if err != nil {
 			return nil, err
 		}
+		efr.privacy = privacy
 		experimentQuery = experimentQuery.WhereGroup(" AND ", func(q *bun.SelectQuery) *bun.SelectQuery {
 			_, err = efr.toSQL(q)
 			return q
@@ -2848,6 +2865,9 @@ func (a *apiServer) PatchTrial(ctx context.Context, req *apiv1.PatchTrialRequest
 	); err != nil {
 		return nil, fmt.Errorf("failed to get trial %d: %w", trialID, err)
 	}
+	if err = redactTrialsLogPolicy(ctx, *curUser, resp.Trial); err != nil {
+		return nil, err
+	}
 
 	return resp, nil
 }
@@ -2874,7 +2894,8 @@ func (a *apiServer) PutExperimentLabel(ctx context.Context,
 	query := db.Bun().NewSelect().
 		ModelTableExpr("experiments as e").
 		Model(exp).
-		Apply(getExperimentColumns).
+		// The labels are written back, so they are read as stored, whoever asks.
+		Apply(experimentColumns(jobprivacy.Unrestricted("e.job_id"))).
 		Where("e.id = ?", req.ExperimentId)
 	if err = query.Scan(ctx); err != nil {
 		return nil, err
@@ -2890,7 +2911,11 @@ func (a *apiServer) PutExperimentLabel(ctx context.Context,
 	}
 
 	if slices.Contains(exp.Labels, req.Label) {
-		return &apiv1.PutExperimentLabelResponse{Labels: exp.Labels}, nil
+		labels, err := labelsForViewer(ctx, *curUser, exp)
+		if err != nil {
+			return nil, err
+		}
+		return &apiv1.PutExperimentLabelResponse{Labels: labels}, nil
 	}
 	exp.Labels = append(exp.Labels, req.Label)
 
@@ -2906,7 +2931,11 @@ func (a *apiServer) PutExperimentLabel(ctx context.Context,
 		return nil, fmt.Errorf("could not commit patch experiment labels transaction %w", err)
 	}
 
-	return &apiv1.PutExperimentLabelResponse{Labels: exp.Labels}, nil
+	labels, err := labelsForViewer(ctx, *curUser, exp)
+	if err != nil {
+		return nil, err
+	}
+	return &apiv1.PutExperimentLabelResponse{Labels: labels}, nil
 }
 
 func (a *apiServer) DeleteExperimentLabel(ctx context.Context,
@@ -2931,7 +2960,8 @@ func (a *apiServer) DeleteExperimentLabel(ctx context.Context,
 	query := db.Bun().NewSelect().
 		ModelTableExpr("experiments as e").
 		Model(exp).
-		Apply(getExperimentColumns).
+		// The labels are written back, so they are read as stored, whoever asks.
+		Apply(experimentColumns(jobprivacy.Unrestricted("e.job_id"))).
 		Where("e.id = ?", req.ExperimentId).
 		For("UPDATE")
 	if err = query.Scan(ctx); err != nil {
@@ -2950,7 +2980,11 @@ func (a *apiServer) DeleteExperimentLabel(ctx context.Context,
 
 	i := slices.Index(exp.Labels, req.Label)
 	if i == -1 {
-		return &apiv1.DeleteExperimentLabelResponse{Labels: exp.Labels}, nil
+		labels, err := labelsForViewer(ctx, *curUser, exp)
+		if err != nil {
+			return nil, err
+		}
+		return &apiv1.DeleteExperimentLabelResponse{Labels: labels}, nil
 	}
 	exp.Labels = slices.Delete(exp.Labels, i, i+1)
 
@@ -2966,7 +3000,11 @@ func (a *apiServer) DeleteExperimentLabel(ctx context.Context,
 		return nil, fmt.Errorf("could not commit delete experiment labels transaction: %w", err)
 	}
 
-	return &apiv1.DeleteExperimentLabelResponse{Labels: exp.Labels}, nil
+	labels, err := labelsForViewer(ctx, *curUser, exp)
+	if err != nil {
+		return nil, err
+	}
+	return &apiv1.DeleteExperimentLabelResponse{Labels: labels}, nil
 }
 
 func (a *apiServer) DeleteTensorboardFiles(

@@ -3,32 +3,16 @@ package internal
 import (
 	"context"
 
-	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/jobprivacy"
 	"github.com/determined-ai/determined/master/pkg/model"
-	"github.com/determined-ai/determined/proto/pkg/jobv1"
 )
 
-// jobPrivacyExprs returns the job privacy rule for the viewer as SQL over the job ID column
-// jobIDCol. The policy is read only for non-admins, whose expressions depend on it.
-func jobPrivacyExprs(
-	ctx context.Context, v jobprivacy.Viewer, jobIDCol string,
-) (jobprivacy.Exprs, error) {
-	var p jobprivacy.Policy
-	if !v.Admin {
-		var err error
-		if p, err = jobprivacy.ReadPolicy(ctx, db.Bun()); err != nil {
-			return jobprivacy.Exprs{}, err
-		}
-	}
-	return jobprivacy.SQL(v, p, jobIDCol), nil
-}
-
-// setJobCapabilities sets the viewer's capabilities on each item, from its job ID, with one
-// ForJobs call. An item without a job gets all of them for an admin and none for anyone else.
-func setJobCapabilities[T any](
+// applyJobPrivacy computes the viewer's capabilities on each item's job with one ForJobs call and
+// passes them to apply, which sets them on the item and clears what they hide. An item without a
+// job gets all capabilities for an admin and none for anyone else.
+func applyJobPrivacy[T any](
 	ctx context.Context, v jobprivacy.Viewer, items []T,
-	jobID func(T) string, set func(T, *jobv1.JobCapabilities),
+	jobID func(T) string, apply func(T, jobprivacy.Caps),
 ) error {
 	ids := make([]model.JobID, 0, len(items))
 	for _, item := range items {
@@ -45,7 +29,7 @@ func setJobCapabilities[T any](
 		if !ok && v.Admin {
 			c = jobprivacy.AllCaps
 		}
-		set(item, c.Proto())
+		apply(item, c)
 	}
 	return nil
 }

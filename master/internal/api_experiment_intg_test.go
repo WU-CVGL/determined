@@ -2133,6 +2133,7 @@ func TestExperimentSearchApiFilterParsing(t *testing.T) {
 		var efr experimentFilterRoot
 		err := json.Unmarshal([]byte(c), &efr)
 		require.NoError(t, err)
+		efr.privacy = jobprivacy.Unrestricted("e.job_id")
 		_, err = efr.toSQL(q)
 		require.Error(t, err)
 	}
@@ -2269,6 +2270,7 @@ func TestExperimentSearchApiFilterParsing(t *testing.T) {
 		var efr experimentFilterRoot
 		err := json.Unmarshal([]byte(c[0]), &efr)
 		require.NoError(t, err)
+		efr.privacy = jobprivacy.Unrestricted("e.job_id")
 		q = q.WhereGroup(" AND ", func(q *bun.SelectQuery) *bun.SelectQuery {
 			_, err = efr.toSQL(q)
 			return q

@@ -19,6 +19,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/db/bunutils"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
+	"github.com/determined-ai/determined/master/internal/jobprivacy"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
@@ -69,28 +70,43 @@ func nonTerminalExperiments(
 	return refs, results
 }
 
-// Apply filters to a query.
+// bulkPrivacy is the user's job privacy rule over experiments e, for the name, description and
+// labels filters of bulk actions, which do not join the job. Without those filters it reads
+// nothing.
+func bulkPrivacy(
+	ctx context.Context, user model.User, filters *apiv1.BulkExperimentFilters,
+) (jobprivacy.Exprs, error) {
+	if filters == nil || filters.Name == "" && filters.Description == "" && len(filters.Labels) == 0 {
+		return jobprivacy.Unrestricted("e.job_id"), nil
+	}
+	privacy, err := jobprivacy.ForUser(ctx, user, "e.job_id")
+	if err != nil {
+		return jobprivacy.Exprs{}, err
+	}
+	return privacy.NoJoin(), nil
+}
+
+// Apply filters to a query. The name, description and labels filters read the experiment by the
+// job privacy rule privacy, so an experiment whose title the user may not read matches none of
+// them.
 func queryBulkExperiments(query *bun.SelectQuery,
-	filters *apiv1.BulkExperimentFilters,
+	filters *apiv1.BulkExperimentFilters, privacy jobprivacy.Exprs,
 ) *bun.SelectQuery {
 	if len(filters.ExcludedExperimentIds) > 0 {
 		query = query.Where("e.id NOT IN (?)", bun.In(filters.ExcludedExperimentIds))
 	}
 
 	if filters.Description != "" {
-		query = query.Where("e.config->>'description' ILIKE ('%%' || ? || '%%')", filters.Description)
+		query = query.Where(privacy.ExpDescription()+" ILIKE ('%%' || ? || '%%')",
+			filters.Description)
 	}
 	if filters.Name != "" {
-		query = query.Where("e.config->>'name' ILIKE ('%%' || ? || '%%')",
-			filters.Name)
+		query = query.Where(privacy.ExpName()+" ILIKE ('%%' || ? || '%%')", filters.Name)
 	}
 
 	if len(filters.Labels) > 0 {
-		query = query.Where(`string_to_array(?, ',') <@ ARRAY(SELECT jsonb_array_elements_text(
-				CASE WHEN e.config->'labels'::text = 'null'
-				THEN NULL
-				ELSE e.config->'labels' END
-			))`, strings.Join(filters.Labels, ","))
+		query = query.Where(`string_to_array(?, ',') <@ ARRAY(SELECT jsonb_array_elements_text(`+
+			privacy.ExpLabelsJSON()+`))`, strings.Join(filters.Labels, ","))
 	}
 
 	if filters.Archived != nil {
@@ -112,16 +128,21 @@ func queryBulkExperiments(query *bun.SelectQuery,
 	return query
 }
 
-// FilterToExperimentIds applies a request's filters to get a list of matching experiment IDs.
-func FilterToExperimentIds(ctx context.Context, filters *apiv1.BulkExperimentFilters) ([]int32,
-	error,
-) {
+// FilterToExperimentIds applies a request's filters to get a list of matching experiment IDs, as
+// the user may match them.
+func FilterToExperimentIds(
+	ctx context.Context, user model.User, filters *apiv1.BulkExperimentFilters,
+) ([]int32, error) {
+	privacy, err := bulkPrivacy(ctx, user, filters)
+	if err != nil {
+		return nil, err
+	}
 	var experimentIDList []int32
 	query := db.Bun().NewSelect().
 		Model(&experimentIDList).
 		ModelTableExpr("experiments as e").
 		Column("e.id")
-	query = queryBulkExperiments(query, filters)
+	query = queryBulkExperiments(query, filters, privacy)
 
 	if err := query.Scan(ctx); err != nil {
 		return nil, err
@@ -162,7 +183,7 @@ func getExperimentsEditableByUser(
 	if filters == nil {
 		filteredExperimentIDs = experimentIDs
 	} else {
-		filteredExperimentIDs, err = FilterToExperimentIds(ctx, filters)
+		filteredExperimentIDs, err = FilterToExperimentIds(ctx, *user, filters)
 	}
 	if err != nil {
 		return nil, err
@@ -412,6 +433,10 @@ func DeleteExperiments(
 	if err != nil {
 		return nil, nil, err
 	}
+	privacy, err := bulkPrivacy(ctx, *curUser, filters)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	var expChecks []deleteExperimentOKResult
 	query := db.Bun().NewSelect().
@@ -433,7 +458,7 @@ func DeleteExperiments(
 	case filters == nil:
 		query = query.Where("e.id IN (?)", bun.In(experimentIds))
 	default:
-		query = queryBulkExperiments(query, filters).
+		query = queryBulkExperiments(query, filters, privacy).
 			Where("e.state IN (?)", bun.In(model.StatesToStrings(model.TerminalStates)))
 	}
 
@@ -516,6 +541,10 @@ func ArchiveExperiments(
 	if err != nil {
 		return nil, err
 	}
+	privacy, err := bulkPrivacy(ctx, *curUser, filters)
+	if err != nil {
+		return nil, err
+	}
 
 	var expChecks []archiveExperimentOKResult
 	query := db.Bun().NewSelect().
@@ -534,7 +563,7 @@ func ArchiveExperiments(
 	case filters == nil:
 		query = query.Where("e.id IN (?)", bun.In(experimentIds))
 	default:
-		query = queryBulkExperiments(query, filters).
+		query = queryBulkExperiments(query, filters, privacy).
 			Where("NOT e.archived").
 			Where("e.state IN (?)", bun.In(model.StatesToStrings(model.TerminalStates)))
 	}
@@ -617,6 +646,10 @@ func UnarchiveExperiments(
 	if err != nil {
 		return nil, err
 	}
+	privacy, err := bulkPrivacy(ctx, *curUser, filters)
+	if err != nil {
+		return nil, err
+	}
 
 	var expChecks []archiveExperimentOKResult
 	query := db.Bun().NewSelect().
@@ -635,7 +668,7 @@ func UnarchiveExperiments(
 	case filters == nil:
 		query = query.Where("e.id IN (?)", bun.In(experimentIds))
 	default:
-		query = queryBulkExperiments(query, filters).
+		query = queryBulkExperiments(query, filters, privacy).
 			Where("archived").
 			Where("e.state IN (?)", bun.In(model.StatesToStrings(model.TerminalStates)))
 	}
@@ -719,6 +752,10 @@ func MoveExperiments(
 	if err != nil {
 		return nil, err
 	}
+	privacy, err := bulkPrivacy(ctx, *curUser, filters)
+	if err != nil {
+		return nil, err
+	}
 
 	var expChecks []archiveExperimentOKResult
 	getQ := db.Bun().NewSelect().
@@ -738,14 +775,14 @@ func MoveExperiments(
 	case filters == nil:
 		getQ = getQ.Where("e.id IN (?)", bun.In(experimentIds))
 	default:
-		getQ = queryBulkExperiments(getQ, filters).
+		getQ = queryBulkExperiments(getQ, filters, privacy).
 			Where("NOT (e.archived OR p.archived OR w.archived)")
 	}
 
 	if filters == nil {
 		getQ = getQ.Where("e.id IN (?)", bun.In(experimentIds))
 	} else {
-		getQ = queryBulkExperiments(getQ, filters).
+		getQ = queryBulkExperiments(getQ, filters, privacy).
 			Where("NOT (e.archived OR p.archived OR w.archived)")
 	}
 

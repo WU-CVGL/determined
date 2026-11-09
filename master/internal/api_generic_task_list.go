@@ -186,7 +186,12 @@ func (a *apiServer) GetGenericTasks(
 			continue
 		}
 		task := row.toProto()
-		task.Capabilities = jobprivacy.Effective(viewer, row.privacyFacts(), policy).Proto()
+		caps := jobprivacy.Effective(viewer, row.privacyFacts(), policy)
+		task.Capabilities = caps.Proto()
+		// A hidden title is cleared before the search, so the task matches only by its ID.
+		if !caps.ViewTitle {
+			task.Name, task.Description = "", ""
+		}
 		// The name shown for a task without one is made from its ID, so search what clients see.
 		if search != "" && !strings.Contains(strings.ToLower(task.Name), search) &&
 			!strings.Contains(strings.ToLower(task.TaskId), search) {
@@ -304,8 +309,10 @@ func genericTaskLess(
 				a.AllocationStartTime != nil, b.AllocationStartTime != nil
 		}
 	case apiv1.GetGenericTasksRequest_SORT_BY_NAME:
+		// A hidden name is a missing key, so hidden tasks sort last in either direction.
 		compareKey = func(a, b *taskv1.GenericTask) (int, bool, bool) {
-			return compareJobsText(a.Name, b.Name), true, true
+			return compareJobsText(a.Name, b.Name),
+				a.GetCapabilities().GetViewTitle(), b.GetCapabilities().GetViewTitle()
 		}
 	case apiv1.GetGenericTasksRequest_SORT_BY_STATE_GROUP:
 		compareKey = func(a, b *taskv1.GenericTask) (int, bool, bool) {

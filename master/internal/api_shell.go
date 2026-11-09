@@ -39,7 +39,6 @@ import (
 	"github.com/determined-ai/determined/master/pkg/ssh"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
-	"github.com/determined-ai/determined/proto/pkg/jobv1"
 	"github.com/determined-ai/determined/proto/pkg/shellv1"
 )
 
@@ -106,7 +105,8 @@ func (a *apiServer) GetShells(
 		return nil, err
 	}
 
-	if err = setShellCapabilities(ctx, *curUser, resp.Shells...); err != nil {
+	// Hidden descriptions are cleared before the sort, so a hidden row sorts as an empty one.
+	if _, err = setShellCapabilities(ctx, *curUser, resp.Shells...); err != nil {
 		return nil, err
 	}
 	api.Sort(resp.Shells, req.OrderBy, req.SortBy, apiv1.GetShellsRequest_SORT_BY_ID)
@@ -149,21 +149,36 @@ func (a *apiServer) GetShell(
 	if err = checkShellSources(ctx, *curUser, req.ShellId, resp.Shell, resp.Config); err != nil {
 		return nil, err
 	}
-	if err = setShellCapabilities(ctx, *curUser, resp.Shell); err != nil {
+	caps, err := setShellCapabilities(ctx, *curUser, resp.Shell)
+	if err != nil {
 		return nil, err
+	}
+	if !caps[resp.Shell.Id].ViewConfig {
+		resp.Config = nil
 	}
 	return resp, nil
 }
 
-// setShellCapabilities sets the user's job privacy capabilities on the shells.
-func setShellCapabilities(ctx context.Context, curUser model.User, shells ...*shellv1.Shell) error {
+// setShellCapabilities sets the user's job privacy capabilities on the shells, clears the
+// description of a shell whose title the user may not read, and returns the capabilities by shell
+// ID.
+func setShellCapabilities(
+	ctx context.Context, curUser model.User, shells ...*shellv1.Shell,
+) (map[string]jobprivacy.Caps, error) {
 	v, err := jobprivacy.NewViewer(ctx, curUser)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return setJobCapabilities(ctx, v, shells,
+	byID := make(map[string]jobprivacy.Caps, len(shells))
+	return byID, applyJobPrivacy(ctx, v, shells,
 		func(s *shellv1.Shell) string { return s.JobId },
-		func(s *shellv1.Shell, caps *jobv1.JobCapabilities) { s.Capabilities = caps })
+		func(s *shellv1.Shell, caps jobprivacy.Caps) {
+			if !caps.ViewTitle {
+				s.Description = ""
+			}
+			s.Capabilities = caps.Proto()
+			byID[s.Id] = caps
+		})
 }
 
 // mayReadTensorBoardSources reports whether user may see which experiments and trials a task's
