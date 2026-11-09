@@ -1,3 +1,12 @@
+from typing import Optional
+
+from determined.common.api import bindings
+from determined.common.api import errors as api_errors
+
+# The master's refusals of a job's logs or config that are not shared with the user.
+NOT_SHARED_MESSAGES = ("logs not shared", "config not shared")
+
+
 class FeatureFlagDisabled(Exception):
     """
     Exception indicating that there is a currently disabled feature flag
@@ -24,3 +33,16 @@ class CliError(Exception):
         self.name = "Error"
         self.exit_code = exit_code
         self.message = message
+
+
+def not_shared_message(e: BaseException) -> Optional[str]:
+    """The master's text when it refused a job's logs or config as not shared, else None."""
+    if isinstance(e, api_errors.ForbiddenException):
+        # ForbiddenException.message is "Forbidden(<the master's text>): ...".
+        for message in NOT_SHARED_MESSAGES:
+            if e.message.startswith(f"Forbidden({message})"):
+                return message
+    elif isinstance(e, bindings.APIHttpStreamError):
+        if e.error.message in NOT_SHARED_MESSAGES:
+            return e.error.message
+    return None

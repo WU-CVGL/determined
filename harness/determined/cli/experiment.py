@@ -346,11 +346,11 @@ def describe(args: argparse.Namespace) -> None:
             render.format_percent(exp.progress),
             render.format_time(exp.startTime),
             render.format_time(exp.endTime),
-            exp.name,
-            exp.description,
+            render.title_or_omitted(exp.name, exp.capabilities),
+            render.title_or_omitted(exp.description, exp.capabilities),
             exp.archived,
             exp.resourcePool,
-            ", ".join(sorted(exp.labels or [])),
+            render.title_or_omitted(", ".join(sorted(exp.labels or [])), exp.capabilities),
         ]
         for exp in exps
     ]
@@ -557,7 +557,9 @@ def experiment_logs(args: argparse.Namespace) -> None:
     if len(trials) == 0:
         raise api.not_found_errs("experiment", args.experiment_id, sess)
     first_trial_id = sorted(t_id.id for t_id in trials)[0]
-    try:
+    with cli.log_stream_ended(
+        f"Trial log stream ended. To reopen log stream, run: det trial logs -f {first_trial_id}"
+    ):
         logs = api.trial_logs(
             sess,
             first_trial_id,
@@ -578,14 +580,6 @@ def experiment_logs(args: argparse.Namespace) -> None:
                 render.print_json(log.to_json())
         else:
             api.pprint_logs(logs)
-    finally:
-        print(
-            termcolor.colored(
-                "Trial log stream ended. To reopen log stream, run: "
-                "det trial logs -f {}".format(first_trial_id),
-                "green",
-            )
-        )
 
 
 def set_log_retention(args: argparse.Namespace) -> None:
@@ -610,10 +604,12 @@ def set_log_retention(args: argparse.Namespace) -> None:
 
 
 def config(args: argparse.Namespace) -> None:
-    result = bindings.get_GetExperiment(
+    exp = bindings.get_GetExperiment(
         cli.setup_session(args), experimentId=args.experiment_id
-    ).experiment.config
-    util.yaml_safe_dump(result, stream=sys.stdout, default_flow_style=False)
+    ).experiment
+    if not render.config_shared(exp.capabilities):
+        raise cli.CliError(render.CONFIG_NOT_SHARED)
+    util.yaml_safe_dump(exp.config, stream=sys.stdout, default_flow_style=False)
 
 
 def download_model_def(args: argparse.Namespace) -> None:
@@ -682,7 +678,7 @@ def list_experiments(args: argparse.Namespace, sess: api.Session) -> None:
         result = [
             e.id,
             e.username,
-            e.name,
+            render.title_or_omitted(e.name, e.capabilities),
             e.forkedFrom,
             e.state.value.replace("STATE_", ""),
             render.format_percent(e.progress),

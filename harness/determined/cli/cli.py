@@ -263,7 +263,7 @@ def main(
         except KeyboardInterrupt as e:
             raise e
         except (api.errors.BadRequestException, api.errors.BadResponseException) as e:
-            die(f"Failed to {parsed_args.func.__name__}: {e}")
+            die(errors.not_shared_message(e) or f"Failed to {parsed_args.func.__name__}: {e}")
         except api.errors.CorruptTokenCacheException:
             die(
                 "Failed to login: Attempted to read a corrupted token cache. "
@@ -278,7 +278,10 @@ def main(
         except argparse.ArgumentError as e:
             die(e.message, exit_code=2)
         except bindings.APIHttpError as e:
-            die(f"Failed on operation {e.operation_name}: {e.message}")
+            die(
+                errors.not_shared_message(e)
+                or f"Failed on operation {e.operation_name}: {e.message}"
+            )
         except Exception:
             die(f"Failed to {parsed_args.func.__name__}", always_print_traceback=True)
     except KeyboardInterrupt:
