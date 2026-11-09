@@ -99,8 +99,11 @@ func (db *PgDB) UpdateResourceAllocationAggregation() error {
 // day are always computed. An allocation that is still running counts until the end of each day it
 // overlaps, so the rows of a day it overlaps are recomputed on every run until it has ended: the
 // computation also starts at the day of the earliest start among the allocations that are still
-// running or that ended after the last aggregated day. A recomputed day replaces all its rows in
-// one transaction, so readers see either the previous or the new rows of a day.
+// running or that ended on or after the last aggregated day. The last aggregated day is included
+// because an allocation counted there as running can get an end time inside that day afterwards:
+// a restart closes the allocations of a failed master at its last heartbeat. A recomputed day
+// replaces all its rows in one transaction, so readers see either the previous or the new rows of
+// a day.
 func (db *PgDB) updateResourceAllocationAggregation(now time.Time) error {
 	var lastDatePtr *time.Time
 	err := db.sql.QueryRow(
@@ -111,8 +114,8 @@ func (db *PgDB) updateResourceAllocationAggregation(now time.Time) error {
 	}
 
 	// The earliest day with an allocation that has to be (re)aggregated: all allocations when
-	// nothing was aggregated yet, otherwise those still running or that ended after the last
-	// aggregated day.
+	// nothing was aggregated yet, otherwise those still running or that ended on or after the
+	// start of the last aggregated day.
 	var firstDatePtr *time.Time
 	if lastDatePtr == nil {
 		err = db.sql.QueryRow(
@@ -122,7 +125,7 @@ func (db *PgDB) updateResourceAllocationAggregation(now time.Time) error {
 		err = db.sql.QueryRow(`
 SELECT date_trunc('day', min(start_time)) FROM allocations
 WHERE start_time IS NOT NULL AND (end_time IS NULL OR end_time >= $1)`,
-			lastDatePtr.UTC().AddDate(0, 0, 1),
+			lastDatePtr.UTC(),
 		).Scan(&firstDatePtr)
 	}
 	if err != nil {

@@ -345,34 +345,67 @@ func TestAggregationOpenAllocation(t *testing.T) {
 	user := RequireMockUser(t, db)
 	task := RequireMockTask(t, db, &user.ID)
 	allocID := addAggTestAllocation(ctx, t, task.TaskID, 1, "pool", aggTestDay(1, 20), nil)
+	// An open allocation that starts after the aggregated day adds nothing to that day.
+	addAggTestAllocation(ctx, t, task.TaskID, 1, "pool", aggTestDay(2, 6), nil)
 	userID := fmt.Sprint(user.ID)
-	hours4 := float64(4 * 3600)
+	rows := func(seconds float64) map[string]float64 {
+		return map[string]float64{
+			"total/total":               seconds,
+			"username/" + user.Username: seconds,
+			"user_id/" + userID:         seconds,
+			"resource_pool/pool":        seconds,
+			"queued/total":              0,
+		}
+	}
+	hour := float64(3600)
 
 	// Day 1 is aggregated while the allocation is still running: it counts until the end of day 1.
 	aggTestRun(t, db, 2)
-	day1 := map[string]float64{
-		"total/total":               hours4,
-		"username/" + user.Username: hours4,
-		"user_id/" + userID:         hours4,
-		"resource_pool/pool":        hours4,
-		"queued/total":              0,
-	}
+	day1 := rows(4 * hour)
 	require.Equal(t, day1, aggTestRows(ctx, t, 1))
 	require.Empty(t, aggTestRows(ctx, t, 2))
 
-	// The allocation ends on day 2: day 1 keeps its usage and day 2 gets the rest.
+	// The first allocation ends on day 2: day 1 keeps its usage and day 2 gets the rest, plus the
+	// second allocation from 06:00.
 	end := aggTestDay(2, 4)
 	_, err := Bun().NewUpdate().Table("allocations").Set("end_time = ?", end).
 		Where("allocation_id = ?", allocID).Exec(ctx)
 	require.NoError(t, err)
 	aggTestRun(t, db, 3)
+	day2 := rows((4 + 18) * hour)
 	require.Equal(t, day1, aggTestRows(ctx, t, 1))
-	require.Equal(t, day1, aggTestRows(ctx, t, 2))
+	require.Equal(t, day2, aggTestRows(ctx, t, 2))
 
 	// Aggregating again changes nothing.
 	aggTestRun(t, db, 3)
 	require.Equal(t, day1, aggTestRows(ctx, t, 1))
-	require.Equal(t, day1, aggTestRows(ctx, t, 2))
+	require.Equal(t, day2, aggTestRows(ctx, t, 2))
+}
+
+func TestAggregationRecomputesDayOfRestartClose(t *testing.T) {
+	db, cleanup := newAggTestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	user := RequireMockUser(t, db)
+	task := RequireMockTask(t, db, &user.ID)
+	allocID := addAggTestAllocation(ctx, t, task.TaskID, 1, "pool", aggTestDay(1, 20), nil)
+	hour := float64(3600)
+
+	aggTestRun(t, db, 2)
+	requireSeconds(t, 4*hour, aggTestRows(ctx, t, 1)["total/total"])
+
+	// A restart after the run closes the allocation at the last heartbeat, before the end of
+	// day 1: the last aggregated day is recomputed.
+	_, err := Bun().NewUpdate().Table("allocations").
+		Set("end_time = ?", aggTestDay(1, 23).Add(55*time.Minute)).
+		Where("allocation_id = ?", allocID).Exec(ctx)
+	require.NoError(t, err)
+	aggTestRun(t, db, 2)
+	requireSeconds(t, 3*hour+55*60, aggTestRows(ctx, t, 1)["total/total"])
+	aggTestRun(t, db, 3)
+	requireSeconds(t, 3*hour+55*60, aggTestRows(ctx, t, 1)["total/total"])
+	requireSeconds(t, 0, aggTestRows(ctx, t, 2)["total/total"])
 }
 
 func TestAggregationRecomputesOpenDays(t *testing.T) {
@@ -409,14 +442,15 @@ func TestAggregationRecomputesOpenDays(t *testing.T) {
 		require.NotContains(t, rows, "resource_pool/a", "day %d", d)
 	}
 
-	// Once it has ended and its days are aggregated, they are not recomputed.
+	// Once it has ended and a day after its end is aggregated, its days are not recomputed.
 	setAlloc("end_time", aggTestDay(4, 6))
 	aggTestRun(t, db, 5)
 	requireSeconds(t, 3*6*hour, aggTestRows(ctx, t, 4)["total/total"])
-	setAlloc("slots", 5)
 	aggTestRun(t, db, 6)
+	setAlloc("slots", 5)
+	aggTestRun(t, db, 7)
 	for d, want := range map[int]float64{
-		1: 3 * 12 * hour, 2: 3 * 24 * hour, 3: 3 * 24 * hour, 4: 3 * 6 * hour, 5: 0,
+		1: 3 * 12 * hour, 2: 3 * 24 * hour, 3: 3 * 24 * hour, 4: 3 * 6 * hour, 5: 0, 6: 0,
 	} {
 		requireSeconds(t, want, aggTestRows(ctx, t, d)["total/total"], "day %d", d)
 	}
@@ -436,14 +470,19 @@ func TestAggregationClosedAllocationNotRecomputed(t *testing.T) {
 	day1 := aggTestRows(ctx, t, 1)
 	requireSeconds(t, float64(2*3600), day1["total/total"])
 
-	// A change to the records of an aggregated day of a closed allocation does not show.
+	// Once a day after its end is aggregated, a change to the records of a closed allocation does
+	// not show.
+	aggTestRun(t, db, 3)
+	require.Equal(t, day1, aggTestRows(ctx, t, 1))
 	_, err := Bun().NewUpdate().Table("allocations").Set("slots = 4").
 		Where("allocation_id = ?", allocID).Exec(ctx)
 	require.NoError(t, err)
-	aggTestRun(t, db, 3)
-	aggTestRun(t, db, 3)
+	aggTestRun(t, db, 4)
+	aggTestRun(t, db, 4)
 	require.Equal(t, day1, aggTestRows(ctx, t, 1))
-	requireSeconds(t, float64(0), aggTestRows(ctx, t, 2)["total/total"])
+	for _, d := range []int{2, 3} {
+		requireSeconds(t, float64(0), aggTestRows(ctx, t, d)["total/total"], "day %d", d)
+	}
 }
 
 func TestAggregationTotalsAgree(t *testing.T) {
