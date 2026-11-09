@@ -20,12 +20,24 @@ allocs_in_range AS (
     FROM
         (
             SELECT
-                *,
-                tsrange(start_time, greatest(start_time, end_time)) AS range
+                allocations.*,
+                tsrange(
+                    allocations.start_time,
+                    -- An allocation that is still running (no end time) counts until the end of the
+                    -- period: days are aggregated once they have ended, so it ran for the rest of the
+                    -- period. Unlike now(), the end of the period does not depend on when or in which
+                    -- session time zone this runs. `greatest` keeps the range valid for an
+                    -- allocation that starts after the period.
+                    greatest(
+                        allocations.start_time,
+                        coalesce(allocations.end_time, upper(const.period))
+                    )
+                ) AS range
             FROM
-                allocations
+                allocations,
+                const
             WHERE
-                start_time IS NOT NULL
+                allocations.start_time IS NOT NULL
         ) AS a,
         const
     WHERE
@@ -33,11 +45,12 @@ allocs_in_range AS (
         const.period && a.range
 ),
 
-user_agg AS (
+-- The allocations in range with the user that owns their job.
+user_allocs AS (
     SELECT
-        'username' AS aggregation_type,
-        users.username AS aggregation_key,
-        sum(allocs_in_range.seconds) AS seconds
+        users.id AS user_id,
+        users.username,
+        allocs_in_range.seconds
     FROM
         allocs_in_range,
         tasks,
@@ -49,8 +62,29 @@ user_agg AS (
         allocs_in_range.task_id = tasks.task_id
         AND tasks.job_id = jobs.job_id
         AND jobs.owner_id = users.id
+),
+
+user_agg AS (
+    SELECT
+        'username' AS aggregation_type,
+        user_allocs.username AS aggregation_key,
+        sum(user_allocs.seconds) AS seconds
+    FROM
+        user_allocs
     GROUP BY
-        users.username
+        user_allocs.username
+),
+
+-- The same per user id, which stays the same when a user is renamed.
+user_id_agg AS (
+    SELECT
+        'user_id' AS aggregation_type,
+        user_allocs.user_id::text AS aggregation_key,
+        sum(user_allocs.seconds) AS seconds
+    FROM
+        user_allocs
+    GROUP BY
+        user_allocs.user_id
 ),
 
 label_agg AS (
@@ -101,6 +135,10 @@ all_aggs AS (
     SELECT *
     FROM
         user_agg
+    UNION ALL
+    SELECT *
+    FROM
+        user_id_agg
     UNION ALL
     SELECT *
     FROM

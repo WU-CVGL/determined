@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -89,6 +90,18 @@ SELECT jsonb_build_object(
 
 // UpdateResourceAllocationAggregation updates the aggregated resource allocation table.
 func (db *PgDB) UpdateResourceAllocationAggregation() error {
+	return db.updateResourceAllocationAggregation(time.Now())
+}
+
+// updateResourceAllocationAggregation aggregates each full UTC day that has ended before now.
+//
+// A day is aggregated for the first time once it has ended: the days after the last aggregated
+// day are always computed. An allocation that is still running counts until the end of each day it
+// overlaps, so the rows of a day it overlaps are recomputed on every run until it has ended: the
+// computation also starts at the day of the earliest start among the allocations that are still
+// running or that ended after the last aggregated day. A recomputed day replaces all its rows in
+// one transaction, so readers see either the previous or the new rows of a day.
+func (db *PgDB) updateResourceAllocationAggregation(now time.Time) error {
 	var lastDatePtr *time.Time
 	err := db.sql.QueryRow(
 		`SELECT date_trunc('day', max(date)::timestamp) FROM resource_aggregates`,
@@ -97,44 +110,60 @@ func (db *PgDB) UpdateResourceAllocationAggregation() error {
 		return errors.Wrap(err, "failed to find last aggregate")
 	}
 
-	// The values periodStart takes on are all midnight UTC (because of date_trunc) for each day that
-	// is to be aggregated.
-	var periodStart time.Time
+	// The earliest day with an allocation that has to be (re)aggregated: all allocations when
+	// nothing was aggregated yet, otherwise those still running or that ended after the last
+	// aggregated day.
+	var firstDatePtr *time.Time
 	if lastDatePtr == nil {
-		var firstDatePtr *time.Time
-		err := db.sql.QueryRow(
+		err = db.sql.QueryRow(
 			`SELECT date_trunc('day', min(start_time)) FROM allocations`,
 		).Scan(&firstDatePtr)
-		if err != nil {
-			return errors.Wrap(err, "failed to find first step")
-		}
-		if firstDatePtr == nil {
-			// No steps found; nothing to do.
-			return nil
-		}
-
-		periodStart = firstDatePtr.UTC()
 	} else {
-		periodStart = lastDatePtr.UTC().AddDate(0, 0, 1)
+		err = db.sql.QueryRow(`
+SELECT date_trunc('day', min(start_time)) FROM allocations
+WHERE start_time IS NOT NULL AND (end_time IS NULL OR end_time >= $1)`,
+			lastDatePtr.UTC().AddDate(0, 0, 1),
+		).Scan(&firstDatePtr)
+	}
+	if err != nil {
+		return errors.Wrap(err, "failed to find first allocation to aggregate")
+	}
+
+	// The values periodStart takes on are all midnight UTC (because of date_trunc) for each day that
+	// is to be aggregated.
+	periodStart, ok := aggregationStart(lastDatePtr, firstDatePtr)
+	if !ok {
+		// No allocations found; nothing to do.
+		return nil
 	}
 
 	// targetDate is some time during the day before today, which is the last full day that has ended
 	// and can therefore be aggregated; the Before check means that the last value of periodStart is
 	// midnight at the beginning of that day.
-	targetDate := time.Now().UTC().AddDate(0, 0, -1)
+	targetDate := now.UTC().AddDate(0, 0, -1)
 	for ; periodStart.Before(targetDate); periodStart = periodStart.AddDate(0, 0, 1) {
 		t0 := time.Now()
 
-		if _, err := db.sql.Exec(
-			db.queries.GetOrLoad("update_aggregated_allocation"), periodStart,
-		); err != nil {
-			return errors.Wrap(err, "failed to add aggregate allocation")
-		}
-
-		if _, err := db.sql.Exec(
-			db.queries.GetOrLoad("update_aggregated_queued_time"), periodStart,
-		); err != nil {
-			return errors.Wrap(err, "failed to add aggregate queued time")
+		if err := db.withTransaction("aggregate resource allocation", func(tx *sqlx.Tx) error {
+			// The day's rows are replaced: keys that no longer have usage on that day go away.
+			if _, err := tx.Exec(
+				`DELETE FROM resource_aggregates WHERE date = $1::date`, periodStart,
+			); err != nil {
+				return errors.Wrap(err, "failed to delete aggregates")
+			}
+			if _, err := tx.Exec(
+				db.queries.GetOrLoad("update_aggregated_allocation"), periodStart,
+			); err != nil {
+				return errors.Wrap(err, "failed to add aggregate allocation")
+			}
+			if _, err := tx.Exec(
+				db.queries.GetOrLoad("update_aggregated_queued_time"), periodStart,
+			); err != nil {
+				return errors.Wrap(err, "failed to add aggregate queued time")
+			}
+			return nil
+		}); err != nil {
+			return err
 		}
 
 		log.Infof(
@@ -143,4 +172,21 @@ func (db *PgDB) UpdateResourceAllocationAggregation() error {
 		)
 	}
 	return nil
+}
+
+// aggregationStart returns the first day to aggregate, given the last aggregated day (nil when
+// there is none) and the day of the earliest allocation that has to be aggregated (nil when there
+// is none). It returns false when there is nothing to aggregate.
+func aggregationStart(lastDate, firstDate *time.Time) (time.Time, bool) {
+	switch {
+	case lastDate == nil && firstDate == nil:
+		return time.Time{}, false
+	case lastDate == nil:
+		return firstDate.UTC(), true
+	}
+	next := lastDate.UTC().AddDate(0, 0, 1)
+	if firstDate != nil && firstDate.Before(next) {
+		return firstDate.UTC(), true
+	}
+	return next, true
 }
