@@ -17,6 +17,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/db/bunutils"
 	"github.com/determined-ai/determined/master/internal/experiment"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
+	"github.com/determined-ai/determined/master/internal/jobprivacy"
 	"github.com/determined-ai/determined/master/internal/run"
 	"github.com/determined-ai/determined/master/internal/storage"
 	"github.com/determined-ai/determined/master/internal/trials"
@@ -84,13 +85,21 @@ func (a *apiServer) SearchRuns(
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get the user: %s", err)
 	}
+	viewer, err := jobprivacy.NewViewer(ctx, *curUser)
+	if err != nil {
+		return nil, err
+	}
+	privacy, err := jobPrivacyExprs(ctx, viewer, "e.job_id")
+	if err != nil {
+		return nil, err
+	}
 
 	resp := &apiv1.SearchRunsResponse{}
 	var runs []*runv1.FlatRun
 	query := db.Bun().NewSelect().
 		Model(&runs).
 		ModelTableExpr("runs AS r").
-		Apply(getRunsColumns)
+		Apply(getRunsColumns(privacy))
 
 	var proj *projectv1.Project
 	if req.ProjectId != nil {
@@ -133,7 +142,16 @@ func (a *apiServer) SearchRuns(
 	return resp, nil
 }
 
-func getRunsColumns(q *bun.SelectQuery) *bun.SelectQuery {
+// getRunsColumns selects the columns of runs r, with each run's experiment and the viewer's job
+// privacy capabilities on it, from the rule privacy over e.job_id.
+func getRunsColumns(privacy jobprivacy.Exprs) func(q *bun.SelectQuery) *bun.SelectQuery {
+	return func(q *bun.SelectQuery) *bun.SelectQuery {
+		return privacy.Join(runsColumns(q, privacy))
+	}
+}
+
+// runsColumns selects the columns of getRunsColumns, without the joins of privacy.
+func runsColumns(q *bun.SelectQuery, privacy jobprivacy.Exprs) *bun.SelectQuery {
 	return q.
 		Column("r.id").
 		ColumnExpr("proto_time(r.start_time) AS start_time").
@@ -168,7 +186,8 @@ func getRunsColumns(q *bun.SelectQuery) *bun.SelectQuery {
 			'external_experiment_id', e.external_experiment_id,
 			'is_multitrial', (e.config->'searcher'->>'name' != 'single'),
 			'pachyderm_integration', NULLIF(e.config#>'{integrations,pachyderm}', 'null'),
-			'id', e.id) AS experiment`).
+			'capabilities', ?,
+			'id', e.id) AS experiment`, privacy.CapabilitiesJSON()).
 		ColumnExpr("rm.metadata AS metadata").
 		ColumnExpr("r.log_policy_matched AS log_policy_matched").
 		Join("LEFT JOIN experiments AS e ON r.experiment_id=e.id").

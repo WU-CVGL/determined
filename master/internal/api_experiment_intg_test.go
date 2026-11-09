@@ -39,6 +39,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/configpolicy"
 	"github.com/determined-ai/determined/master/internal/db"
 	expauth "github.com/determined-ai/determined/master/internal/experiment"
+	"github.com/determined-ai/determined/master/internal/jobprivacy"
 	"github.com/determined-ai/determined/master/internal/mocks"
 	modelauth "github.com/determined-ai/determined/master/internal/model"
 	"github.com/determined-ai/determined/master/internal/poolaccess"
@@ -1133,6 +1134,10 @@ func testGetExperiments(ctx context.Context, t *testing.T, api *apiServer, pid i
 
 		// Don't compare hyperparameters.
 		res.Experiments[i].Hyperparameters = nil
+
+		// The requests are an admin's, who may do everything with every job.
+		require.True(t, proto.Equal(jobprivacy.AllCaps.Proto(), res.Experiments[i].Capabilities))
+		res.Experiments[i].Capabilities = nil
 
 		// Compare time seperatly due to millisecond precision in postgres.
 		require.WithinDuration(t,

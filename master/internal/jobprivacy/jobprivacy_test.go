@@ -209,3 +209,45 @@ func TestCapsProto(t *testing.T) {
 	require.False(t, c.Allows(Logs))
 	require.True(t, c.Allows(Config))
 }
+
+func TestAudienceConversions(t *testing.T) {
+	require.Equal(t, audAll, Audience(true))
+	require.Equal(t, audNone, Audience(false))
+	require.Nil(t, AudienceProto(audNull))
+	require.True(t, proto.Equal(&jobv1.JobAudience{}, AudienceProto(audNone)))
+	require.True(t, proto.Equal(&jobv1.JobAudience{AllUsers: true}, AudienceProto(audAll)))
+}
+
+func TestPolicyRules(t *testing.T) {
+	// A missing row is forbidden with an audience of nobody else.
+	p, err := policyFromRows([]policyRow{
+		{Kind: "config", SharingAllowed: true, NewJobAudience: audAll},
+		{Kind: "title", SharingAllowed: true, NewJobAudience: audNone},
+	}, nil)
+	require.NoError(t, err)
+	got := p.Rules()
+	want := []*jobv1.JobPrivacyRule{
+		{
+			Kind: jobv1.JobContentKind_JOB_CONTENT_KIND_TITLE, SharingAllowed: true,
+			NewJobAudience: &jobv1.JobAudience{},
+		},
+		{Kind: jobv1.JobContentKind_JOB_CONTENT_KIND_LOGS, NewJobAudience: &jobv1.JobAudience{}},
+		{
+			Kind: jobv1.JobContentKind_JOB_CONTENT_KIND_CONFIG, SharingAllowed: true,
+			NewJobAudience: &jobv1.JobAudience{AllUsers: true},
+		},
+	}
+	require.Len(t, got, len(want))
+	for i := range want {
+		require.True(t, proto.Equal(want[i], got[i]), "rule %d: %v", i, got[i])
+	}
+}
+
+func TestRequireAllowed(t *testing.T) {
+	yes, no := true, false
+	p := Policy{Title: KindPolicy{Allowed: true}, Logs: KindPolicy{}, Config: KindPolicy{}}
+	require.NoError(t, requireAllowed(p, map[Kind]*bool{Title: &yes, Logs: &no, Config: nil}))
+	err := requireAllowed(p, map[Kind]*bool{Title: &yes, Logs: &yes, Config: &yes})
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
+	require.Equal(t, "sharing of logs is forbidden", status.Convert(err).Message())
+}

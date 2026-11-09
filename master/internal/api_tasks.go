@@ -25,6 +25,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/db"
 	expauth "github.com/determined-ai/determined/master/internal/experiment"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
+	"github.com/determined-ai/determined/master/internal/jobprivacy"
 	"github.com/determined-ai/determined/master/internal/logpattern"
 	"github.com/determined-ai/determined/master/internal/task"
 	"github.com/determined-ai/determined/master/internal/task/idle"
@@ -891,8 +892,34 @@ func (a *apiServer) GetTasks(
 
 		pbAllocationIDToSummary[string(allocationID)] = allocationSummary.Proto()
 	}
+	if err = setAllocationSummaryCapabilities(ctx, *curUser, pbAllocationIDToSummary); err != nil {
+		return nil, err
+	}
 
 	return &apiv1.GetTasksResponse{AllocationIdToSummary: pbAllocationIDToSummary}, nil
+}
+
+// setAllocationSummaryCapabilities sets the user's job privacy capabilities on each summary, from
+// its task's job.
+func setAllocationSummaryCapabilities(
+	ctx context.Context, curUser model.User, summaries map[string]*taskv1.AllocationSummary,
+) error {
+	v, err := jobprivacy.NewViewer(ctx, curUser)
+	if err != nil {
+		return err
+	}
+	taskIDs := make([]model.TaskID, 0, len(summaries))
+	for _, s := range summaries {
+		taskIDs = append(taskIDs, model.TaskID(s.TaskId))
+	}
+	caps, err := jobprivacy.ForTasks(ctx, v, taskIDs)
+	if err != nil {
+		return err
+	}
+	for _, s := range summaries {
+		s.Capabilities = caps[model.TaskID(s.TaskId)].Proto()
+	}
+	return nil
 }
 
 func (a *apiServer) taskLogs(

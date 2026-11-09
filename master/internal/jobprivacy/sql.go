@@ -101,3 +101,11 @@ func (r Visible) Caps() Caps {
 		ManageSharing: r.ManageSharing,
 	}
 }
+
+// CapabilitiesJSON is the expressions as a JSON object with the fields of jobv1.JobCapabilities,
+// for queries that scan a column into that message.
+func (e Exprs) CapabilitiesJSON() schema.QueryWithArgs {
+	return schema.SafeQuery(`jsonb_build_object(
+		'view_title', ?, 'view_logs', ?, 'view_config', ?, 'manage_sharing', ?)`,
+		[]any{e.Title, e.Logs, e.Config, e.ManageSharing})
+}

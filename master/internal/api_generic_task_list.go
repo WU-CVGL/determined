@@ -16,6 +16,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/command"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
+	"github.com/determined-ai/determined/master/internal/jobprivacy"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
@@ -41,6 +42,33 @@ type genericTaskListRow struct {
 	DisplayName  *string                `bun:"display_name"`
 	AllocationID *string                `bun:"allocation_id"`
 	Spec         *tasks.GenericTaskSpec `bun:"generic_task_spec"`
+
+	// The job's audiences and its owner's switches, for job privacy.
+	TitleAudience  []string `bun:"title_audience,array"`
+	LogsAudience   []string `bun:"logs_audience,array"`
+	ConfigAudience []string `bun:"config_audience,array"`
+	ShareTitles    bool     `bun:"share_titles"`
+	ShareLogs      bool     `bun:"share_logs"`
+}
+
+// privacyFacts are the job privacy facts of the row's job, which the list joins.
+func (row genericTaskListRow) privacyFacts() jobprivacy.JobFacts {
+	f := jobprivacy.JobFacts{
+		Exists:      true,
+		Title:       row.TitleAudience,
+		Logs:        row.LogsAudience,
+		Config:      row.ConfigAudience,
+		ShareTitles: row.ShareTitles,
+		ShareLogs:   row.ShareLogs,
+	}
+	if row.JobID != nil {
+		f.JobID = *row.JobID
+	}
+	if row.OwnerID != nil {
+		owner := model.UserID(*row.OwnerID)
+		f.OwnerID = &owner
+	}
+	return f
 }
 
 // genericTaskSlotsExpr is the slot count a generic task asks for. Creating a task always
@@ -64,7 +92,7 @@ func (a *apiServer) GetGenericTasks(
 	if err != nil {
 		return nil, err
 	}
-	curUser, _, err := grpcutil.GetUser(ctx)
+	curUser, viewer, err := jobPrivacyViewer(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -93,8 +121,13 @@ func (a *apiServer) GetGenericTasks(
 		ColumnExpr("t.parent_id, t.forked_from, t.no_pause").
 		ColumnExpr("j.owner_id, u.username, u.display_name").
 		ColumnExpr("cs.allocation_id, cs.generic_task_spec").
+		ColumnExpr("j.title_audience, j.logs_audience, j.config_audience").
+		// An owner without a preference row has both switches on.
+		ColumnExpr("COALESCE(pu.share_titles, TRUE) AS share_titles").
+		ColumnExpr("COALESCE(pu.share_logs, TRUE) AS share_logs").
 		Join("JOIN jobs AS j ON j.job_id = t.job_id").
 		Join("LEFT JOIN users AS u ON u.id = j.owner_id").
+		Join("LEFT JOIN user_job_privacy AS pu ON pu.user_id = j.owner_id").
 		Join("LEFT JOIN command_state AS cs ON cs.task_id = t.task_id").
 		Where("t.task_type = ?", model.TaskTypeGeneric)
 	if len(req.Users) > 0 {
@@ -135,6 +168,13 @@ func (a *apiServer) GetGenericTasks(
 	if err := query.Scan(ctx, &rows); err != nil {
 		return nil, err
 	}
+	// The policy is read once for the list; an admin's capabilities do not depend on it.
+	var policy jobprivacy.Policy
+	if !viewer.Admin {
+		if policy, err = jobprivacy.ReadPolicy(ctx, db.Bun()); err != nil {
+			return nil, err
+		}
+	}
 
 	search := strings.ToLower(req.Search)
 	resp := &apiv1.GetGenericTasksResponse{Tasks: make([]*taskv1.GenericTask, 0, len(rows))}
@@ -146,6 +186,7 @@ func (a *apiServer) GetGenericTasks(
 			continue
 		}
 		task := row.toProto()
+		task.Capabilities = jobprivacy.Effective(viewer, row.privacyFacts(), policy).Proto()
 		// The name shown for a task without one is made from its ID, so search what clients see.
 		if search != "" && !strings.Contains(strings.ToLower(task.Name), search) &&
 			!strings.Contains(strings.ToLower(task.TaskId), search) {

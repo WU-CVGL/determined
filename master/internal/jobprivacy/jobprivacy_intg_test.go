@@ -36,7 +36,14 @@ func TestMain(m *testing.M) {
 		log.Panicln(err)
 	}
 	config.GetMasterConfig().Security.AuthZ = config.AuthZConfig{Type: "basic"}
-	os.Exit(m.Run())
+	// The tests need the seeded policy, which tests of other packages may change.
+	unlock, err := db.LockJobPrivacyPolicyForTests(context.Background())
+	if err != nil {
+		log.Panicln(err)
+	}
+	code := m.Run()
+	unlock()
+	os.Exit(code)
 }
 
 // setPreferences writes a user's preference row.

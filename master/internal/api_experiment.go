@@ -37,6 +37,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/experiment"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
 	"github.com/determined-ai/determined/master/internal/job/jobservice"
+	"github.com/determined-ai/determined/master/internal/jobprivacy"
 	"github.com/determined-ai/determined/master/internal/poolaccess"
 	"github.com/determined-ai/determined/master/internal/prom"
 	"github.com/determined-ai/determined/master/internal/rm"
@@ -266,6 +267,16 @@ func (a *apiServer) GetExperiment(
 	if err != nil {
 		return nil, err
 	}
+
+	v, err := jobprivacy.NewViewer(ctx, *user)
+	if err != nil {
+		return nil, err
+	}
+	caps, err := jobprivacy.ForJobs(ctx, v, []model.JobID{model.JobID(exp.JobId)})
+	if err != nil {
+		return nil, err
+	}
+	exp.Capabilities = caps[model.JobID(exp.JobId)].Proto()
 
 	// Update this when we remove the proto type.
 	resp := apiv1.GetExperimentResponse{
@@ -510,6 +521,22 @@ func getExperimentColumns(q *bun.SelectQuery) *bun.SelectQuery {
 		Join("LEFT JOIN runs AS r ON r.id = e.best_trial_id")
 }
 
+// experimentCapabilities selects the user's job privacy capabilities on each experiment of a
+// query over experiments e, as the column capabilities.
+func experimentCapabilities(
+	ctx context.Context, curUser model.User, q *bun.SelectQuery,
+) (*bun.SelectQuery, error) {
+	v, err := jobprivacy.NewViewer(ctx, curUser)
+	if err != nil {
+		return nil, err
+	}
+	exprs, err := jobPrivacyExprs(ctx, v, "e.job_id")
+	if err != nil {
+		return nil, err
+	}
+	return exprs.Join(q).ColumnExpr("? AS capabilities", exprs.CapabilitiesJSON()), nil
+}
+
 // experimentSlotsPerTrialExpr is the slot count each trial of an experiment asks for, with
 // the config default of 1 for a config that has none.
 const experimentSlotsPerTrialExpr = "COALESCE((e.config->'resources'->>'slots_per_trial')::int, 1)"
@@ -696,6 +723,9 @@ func (a *apiServer) GetExperiments(
 	curUser, _, err := grpcutil.GetUser(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get the user: %s", err)
+	}
+	if query, err = experimentCapabilities(ctx, *curUser, query); err != nil {
+		return nil, err
 	}
 	var proj *projectv1.Project
 	if req.ProjectId != 0 {
@@ -2452,6 +2482,9 @@ func (a *apiServer) SearchExperiments(
 	curUser, _, err := grpcutil.GetUser(ctx)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get the user: %s", err)
+	}
+	if experimentQuery, err = experimentCapabilities(ctx, *curUser, experimentQuery); err != nil {
+		return nil, err
 	}
 	var proj *projectv1.Project
 	if req.ProjectId != nil {

@@ -26,6 +26,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
+	"github.com/determined-ai/determined/master/internal/jobprivacy"
 	"github.com/determined-ai/determined/master/internal/rbac/audit"
 	"github.com/determined-ai/determined/master/pkg/archive"
 	"github.com/determined-ai/determined/master/pkg/check"
@@ -38,6 +39,7 @@ import (
 	"github.com/determined-ai/determined/master/pkg/ssh"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
+	"github.com/determined-ai/determined/proto/pkg/jobv1"
 	"github.com/determined-ai/determined/proto/pkg/shellv1"
 )
 
@@ -104,6 +106,9 @@ func (a *apiServer) GetShells(
 		return nil, err
 	}
 
+	if err = setShellCapabilities(ctx, *curUser, resp.Shells...); err != nil {
+		return nil, err
+	}
 	api.Sort(resp.Shells, req.OrderBy, req.SortBy, apiv1.GetShellsRequest_SORT_BY_ID)
 	if err = api.Paginate(&resp.Pagination, &resp.Shells, req.Offset, req.Limit); err != nil {
 		return nil, err
@@ -144,7 +149,21 @@ func (a *apiServer) GetShell(
 	if err = checkShellSources(ctx, *curUser, req.ShellId, resp.Shell, resp.Config); err != nil {
 		return nil, err
 	}
+	if err = setShellCapabilities(ctx, *curUser, resp.Shell); err != nil {
+		return nil, err
+	}
 	return resp, nil
+}
+
+// setShellCapabilities sets the user's job privacy capabilities on the shells.
+func setShellCapabilities(ctx context.Context, curUser model.User, shells ...*shellv1.Shell) error {
+	v, err := jobprivacy.NewViewer(ctx, curUser)
+	if err != nil {
+		return err
+	}
+	return setJobCapabilities(ctx, v, shells,
+		func(s *shellv1.Shell) string { return s.JobId },
+		func(s *shellv1.Shell, caps *jobv1.JobCapabilities) { s.Capabilities = caps })
 }
 
 // mayReadTensorBoardSources reports whether user may see which experiments and trials a task's
