@@ -126,6 +126,34 @@ export const mapV1ResourcePool = (data: Sdk.V1ResourcePool): types.ResourcePool 
   return { ...data, slotType: mapV1DeviceType(data.slotType) };
 };
 
+const optionalNumber = (value?: number | null): number | undefined =>
+  isNumber(value) ? value : undefined;
+
+export const mapV1UserResources = (data: Sdk.V1GetUserResourcesResponse): types.UserResources => ({
+  asOf: data.asOf ? new Date(data.asOf) : undefined,
+  pools: (data.pools ?? []).map((pool) => ({
+    counts: {
+      auxContainers: optionalNumber(pool.counts?.auxContainers),
+      cpuSlots: pool.counts?.cpuSlots ?? 0,
+      gpus: pool.counts?.gpus ?? 0,
+    },
+    resourcePool: pool.resourcePool ?? '',
+  })),
+});
+
+export const mapV1UserUsage = (data: Sdk.V1GetUserUsageResponse): types.UserUsage => ({
+  asOf: data.asOf ? new Date(data.asOf) : undefined,
+  coverageStart: data.coverageStart || undefined,
+  entries: (data.entries ?? []).map((entry) => ({
+    activeDays: entry.activeDays ?? 0,
+    activeSeconds: entry.activeSeconds ?? 0,
+    auxContainerSeconds: optionalNumber(entry.auxContainerSeconds),
+    cpuSlotSeconds: entry.cpuSlotSeconds ?? 0,
+    gpuSeconds: entry.gpuSeconds ?? 0,
+    periodStart: entry.periodStart ?? '',
+  })),
+});
+
 export const jsonToAgents = (agents: Array<Sdk.V1Agent>): types.Agent[] => {
   return agents.map((agent) => {
     const agentSlots = agent.slots || {};

@@ -321,4 +321,81 @@ describe('Decoder', () => {
       );
     });
   });
+
+  describe('user pages', () => {
+    it('decodes the resources a user holds, Aux undefined where unset', () => {
+      expect(
+        decoder.mapV1UserResources({
+          asOf: '2026-11-10T15:00:00Z' as DateString,
+          pools: [
+            { counts: { auxContainers: 1, cpuSlots: 2, gpus: 4 }, resourcePool: 'default' },
+            { counts: { gpus: 8 }, resourcePool: 'k8s' },
+          ],
+        }),
+      ).toEqual({
+        asOf: new Date('2026-11-10T15:00:00Z'),
+        pools: [
+          { counts: { auxContainers: 1, cpuSlots: 2, gpus: 4 }, resourcePool: 'default' },
+          { counts: { auxContainers: undefined, cpuSlots: 0, gpus: 8 }, resourcePool: 'k8s' },
+        ],
+      });
+      expect(decoder.mapV1UserResources({})).toEqual({ asOf: undefined, pools: [] });
+    });
+
+    it('decodes the usage in seconds, with UTC days as given', () => {
+      const usage = decoder.mapV1UserUsage({
+        asOf: '2026-11-10T15:00:00Z' as DateString,
+        coverageStart: '2025-01-02',
+        entries: [
+          {
+            activeDays: 1,
+            activeSeconds: 7200,
+            auxContainerSeconds: 0,
+            cpuSlotSeconds: 3600,
+            gpuSeconds: 14400,
+            periodStart: '2026-11-09',
+          },
+          // A day without anything held, from a master that leaves zeros and Aux out.
+          { periodStart: '2026-11-10' },
+          { auxContainerSeconds: null as unknown as undefined, periodStart: '2026-11-11' },
+        ],
+      });
+      expect(usage.asOf?.toISOString()).toBe('2026-11-10T15:00:00.000Z');
+      expect(usage.coverageStart).toBe('2025-01-02');
+      expect(usage.entries).toEqual([
+        {
+          activeDays: 1,
+          activeSeconds: 7200,
+          auxContainerSeconds: 0,
+          cpuSlotSeconds: 3600,
+          gpuSeconds: 14400,
+          periodStart: '2026-11-09',
+        },
+        {
+          activeDays: 0,
+          activeSeconds: 0,
+          auxContainerSeconds: undefined,
+          cpuSlotSeconds: 0,
+          gpuSeconds: 0,
+          periodStart: '2026-11-10',
+        },
+        {
+          activeDays: 0,
+          activeSeconds: 0,
+          auxContainerSeconds: undefined,
+          cpuSlotSeconds: 0,
+          gpuSeconds: 0,
+          periodStart: '2026-11-11',
+        },
+      ]);
+    });
+
+    it('decodes an empty coverage start as none', () => {
+      expect(decoder.mapV1UserUsage({ coverageStart: '', entries: [] })).toEqual({
+        asOf: undefined,
+        coverageStart: undefined,
+        entries: [],
+      });
+    });
+  });
 });

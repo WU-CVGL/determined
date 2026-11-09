@@ -1352,6 +1352,52 @@ describe('TaskDashboard', () => {
     }
   });
 
+  it("links each owner to the owner's page", async () => {
+    vi.mocked(getUsers).mockResolvedValue({
+      pagination: { total: 3 },
+      // The users of the owner filter test, and the signed-in user.
+      users: [
+        { displayName: 'Zoe', id: 9, isActive: true, isAdmin: false, username: 'zoe' },
+        { displayName: 'alice', id: 11, isActive: true, isAdmin: false, username: 'al' },
+        { id: CURRENT_USER_ID, isActive: true, isAdmin: false, username: 'me' },
+      ],
+    });
+    userStore.fetchUsers();
+    // A medium screen or wider, which shows the Owner column.
+    vi.stubGlobal('matchMedia', (media: string) => ({
+      addEventListener: vi.fn(),
+      addListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      matches: true,
+      media,
+      onchange: null,
+      removeEventListener: vi.fn(),
+      removeListener: vi.fn(),
+    }));
+    try {
+      setup();
+      expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+      await settingsLoaded();
+      const owner = (name: string) => {
+        const at = screen
+          .getAllByRole('columnheader')
+          .findIndex((th) => th.textContent?.trim().startsWith('Owner'));
+        return screen.getByText(name).closest('tr')?.children[at] as HTMLElement;
+      };
+      await waitFor(() => expect(owner('eval-sweep')).toHaveTextContent('bob'), AFTER_LOAD);
+      // A user with a record: the avatar; without one: the owner's name.
+      await waitFor(() =>
+        expect(owner('gpu-shell').querySelector('a')).toHaveAttribute('href', '/users/3'),
+      );
+      expect(owner('eval-sweep').querySelector('a')).toHaveAttribute('href', '/users/4');
+      expect(owner('eval-sweep')).toHaveAttribute('title', 'bob');
+      // No owner, no link.
+      expect(owner('bert-finetune').querySelector('a')).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('keeps the filters of the Jobs page and of the tasks-only view apart', async () => {
     const jobs = setup();
     expect(await screen.findByText('bert-finetune')).toBeInTheDocument();

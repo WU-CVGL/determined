@@ -1,0 +1,44 @@
+.base {
+  max-width: 100%;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.months,
+.grid {
+  column-gap: 3px;
+  display: grid;
+  grid-auto-columns: 11px;
+  width: max-content;
+}
+.months {
+  color: var(--theme-surface-on-weak);
+  font-size: 11px;
+  grid-auto-flow: column;
+  height: 16px;
+  white-space: nowrap;
+}
+.grid {
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 11px);
+  row-gap: 3px;
+}
+.cell {
+  border-radius: 2px;
+  height: 11px;
+  width: 11px;
+}
+.notCovered {
+  border: 1px solid var(--theme-surface-border);
+}
+.level0 {
+  background-color: var(--theme-surface-strong);
+}
+.level1 {
+  background-color: var(--theme-status-active-weak);
+}
+.level2 {
+  background-color: var(--theme-status-active);
+}
+.level3 {
+  background-color: var(--theme-status-active-strong);
+}

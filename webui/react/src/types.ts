@@ -1134,6 +1134,43 @@ export interface ResourcePool extends Omit<Api.V1ResourcePool, 'slotType'> {
   slotType: ResourceType;
 }
 
+/* User pages (/api/v1/users/{user_id}/resources and /usage) */
+
+export interface UserResourceCounts {
+  /** Containers without slots; undefined where not available (Kubernetes). */
+  auxContainers?: number;
+  cpuSlots: number;
+  gpus: number;
+}
+
+export interface UserPoolResources {
+  counts: UserResourceCounts;
+  resourcePool: string;
+}
+
+export interface UserResources {
+  asOf?: Date;
+  pools: UserPoolResources[];
+}
+
+/** A UTC day (YYYY-MM-DD) or month (YYYY-MM) of a user's usage, in seconds. */
+export interface UserUsageEntry {
+  activeDays: number;
+  activeSeconds: number;
+  /** Undefined where not available (no pool but Kubernetes). */
+  auxContainerSeconds?: number;
+  cpuSlotSeconds: number;
+  gpuSeconds: number;
+  periodStart: string;
+}
+
+export interface UserUsage {
+  asOf?: Date;
+  /** The first UTC day (YYYY-MM-DD) with records; undefined without any. */
+  coverageStart?: string;
+  entries: UserUsageEntry[];
+}
+
 /* Resource pool access (/api/v1/resource-pool-access, Echo routes without a proto) */
 
 export const ResourcePoolAccessMode = {
