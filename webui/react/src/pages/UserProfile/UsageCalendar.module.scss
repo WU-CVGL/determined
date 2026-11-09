@@ -24,8 +24,20 @@
 }
 .cell {
   border-radius: 2px;
+  cursor: pointer;
   height: 11px;
   width: 11px;
+
+  &:focus-visible {
+    box-shadow: var(--theme-focus-shadow);
+    outline: none;
+  }
+}
+.day {
+  column-gap: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 8px;
 }
 .notCovered {
   border: 1px solid var(--theme-surface-border);

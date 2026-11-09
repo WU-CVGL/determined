@@ -16,7 +16,7 @@ export const USAGE_DAYS = 31;
 export const USAGE_MONTHS = 13;
 
 const HOUR_SECONDS = 3600;
-/** The active hours at which a day reaches calendar levels 2 and 3. */
+/** The active hours above which a day reaches calendar levels 2 and 3. */
 const LEVEL_HOURS = [4, 12];
 
 export type ActivityLevel = 0 | 1 | 2 | 3;
@@ -60,8 +60,8 @@ export const usageRange = (now: number = Date.now()): { endDate: string; startDa
 export const activityLevel = (activeSeconds: number): ActivityLevel => {
   if (activeSeconds <= 0) return 0;
   const hours = activeSeconds / HOUR_SECONDS;
-  if (hours >= LEVEL_HOURS[1]) return 3;
-  if (hours >= LEVEL_HOURS[0]) return 2;
+  if (hours > LEVEL_HOURS[1]) return 3;
+  if (hours > LEVEL_HOURS[0]) return 2;
   return 1;
 };
 

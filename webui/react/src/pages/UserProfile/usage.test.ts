@@ -50,10 +50,10 @@ describe('user usage', () => {
   it('levels a day by its active hours at 4 h and 12 h', () => {
     expect(activityLevel(0)).toBe(0);
     expect(activityLevel(1)).toBe(1);
-    expect(activityLevel(4 * HOUR - 1)).toBe(1);
-    expect(activityLevel(4 * HOUR)).toBe(2);
-    expect(activityLevel(12 * HOUR - 1)).toBe(2);
-    expect(activityLevel(12 * HOUR)).toBe(3);
+    expect(activityLevel(4 * HOUR)).toBe(1);
+    expect(activityLevel(4 * HOUR + 1)).toBe(2);
+    expect(activityLevel(12 * HOUR)).toBe(2);
+    expect(activityLevel(12 * HOUR + 1)).toBe(3);
     expect(activityLevel(24 * HOUR)).toBe(3);
   });
 

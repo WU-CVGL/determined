@@ -105,8 +105,8 @@ page lists the user's jobs.
    now. Kubernetes pools do not report auxiliary containers.
 
 -  **Active days (UTC)**: a calendar of the last 53 weeks with a cell for each UTC day, shaded by
-   how long the user's tasks held resources that day: any time, 4 hours or more, or 12 hours or
-   more.
+   how long the user's tasks held resources that day: any time, more than 4 hours, or more than 12
+   hours.
 
 -  **Usage**: the user's GPU, CPU slot and auxiliary container hours for each of the last 31 days
    (**Day**) or the last 13 months (**Month**).
@@ -114,11 +114,6 @@ page lists the user's jobs.
 The pages do not count checkpoint garbage collection, and count each allocation from when its
 resources were assigned, where the cluster usage charts count from when its containers started
 pulling their images. See :ref:`user-pages`.
-
-.. image:: /assets/images/webui-user-page.png
-   :alt: A user's page with the user's current resources, a calendar of active days and a chart and table of daily usage
-
-|
 
 **************************
  Viewing Cluster Topology

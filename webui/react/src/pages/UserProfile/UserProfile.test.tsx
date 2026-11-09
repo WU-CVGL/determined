@@ -43,6 +43,7 @@ vi.mock('pages/Cluster/ClusterHistoricalUsageChart', () => ({
       <span data-testid="chart-series">{Object.keys(props.hoursByLabel).join(',')}</span>
       <span data-testid="chart-time">{props.time.join(',')}</span>
       <span data-testid="chart-label">{props.label}</span>
+      <span data-testid="chart-values">{JSON.stringify(props.hoursByLabel)}</span>
     </div>
   ),
 }));
@@ -84,18 +85,18 @@ const day = (periodStart: string, gpuHours: number, auxHours?: number): UserUsag
   periodStart,
 });
 
-/** Covered daily from 2025-11-01 to today, with GPU hours on two days. */
-const USAGE: UserUsage = {
-  coverageStart: '2025-11-01',
-  entries: (() => {
-    const entries: UserUsageEntry[] = [];
-    for (let t = Date.parse('2025-11-01T00:00:00Z'); t <= NOW.getTime(); t += 24 * HOUR * 1000) {
-      const date = new Date(t).toISOString().slice(0, 10);
-      entries.push(day(date, date === '2026-11-09' ? 6 : date === '2026-10-02' ? 2 : 0, 0));
-    }
-    return entries;
-  })(),
+/** Covered daily from 2025-11-01 to today, with the GPU hours of each day. */
+const coveredUsage = (gpuHours: (date: string) => number): UserUsage => {
+  const entries: UserUsageEntry[] = [];
+  for (let t = Date.parse('2025-11-01T00:00:00Z'); t <= NOW.getTime(); t += 24 * HOUR * 1000) {
+    const date = new Date(t).toISOString().slice(0, 10);
+    entries.push(day(date, gpuHours(date), 0));
+  }
+  return { coverageStart: '2025-11-01', entries };
 };
+
+/** GPU hours on two days. */
+const USAGE = coveredUsage((date) => (date === '2026-11-09' ? 6 : date === '2026-10-02' ? 2 : 0));
 
 /* App keeps the page's visibility in the UI store; the page alone does not. */
 const PageVisibility = () => {
@@ -253,10 +254,24 @@ describe('UserProfile', () => {
 
   it('shows zeros and flat lines without any usage', async () => {
     vi.mocked(getUserResources).mockResolvedValue({ pools: [] });
-    vi.mocked(getUserUsage).mockResolvedValue({ coverageStart: undefined, entries: [] });
+    vi.mocked(getUserUsage).mockResolvedValue(coveredUsage(() => 0));
     await setup('4');
     await waitFor(() => expect(stat('GPUs')).toHaveTextContent('0'));
     expect(stat('Aux containers')).toHaveTextContent('0');
+    expect(await screen.findByTestId('usage-calendar')).toBeInTheDocument();
+    expect(screen.getByLabelText('2026-11-10')).toHaveClass('level0');
+    expect(screen.getByLabelText('2026-11-10')).not.toHaveClass('notCovered');
+    expect(screen.getByLabelText('2025-11-10')).toHaveClass('level0');
+    expect(screen.getByTestId('chart-time').textContent?.split(',')).toHaveLength(31);
+    const values = JSON.parse(screen.getByTestId('chart-values').textContent ?? '{}');
+    expect(values.GPU).toEqual(Array(31).fill(0));
+    expect(values.Aux).toEqual(Array(31).fill(0));
+    expect(within(screen.getAllByRole('row')[1]).getAllByRole('cell')[1]).toHaveTextContent('0.0');
+  });
+
+  it('outlines the calendar when the cluster has no records', async () => {
+    vi.mocked(getUserUsage).mockResolvedValue({ coverageStart: undefined, entries: [] });
+    await setup('4');
     expect(await screen.findByTestId('usage-calendar')).toBeInTheDocument();
     expect(screen.getByLabelText('2026-11-10')).toHaveClass('notCovered');
     expect(screen.getByTestId('chart-series')).toHaveTextContent('GPU');

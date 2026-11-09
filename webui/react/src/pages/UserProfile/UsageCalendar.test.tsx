@@ -47,7 +47,7 @@ describe('UsageCalendar', () => {
 
   it('shows 53 weeks of 7 days, Monday first, ending with today', () => {
     setup({ usage: usage([]) });
-    const cells = screen.getAllByRole('img');
+    const cells = screen.getAllByRole('button');
     // 52 whole weeks and Monday and Tuesday of this one.
     expect(cells).toHaveLength(52 * 7 + 2);
     expect(cells[0]).toHaveAttribute('data-date', '2025-11-10');
@@ -56,37 +56,54 @@ describe('UsageCalendar', () => {
   });
 
   it('levels the covered days by active hours and outlines the days without records', () => {
-    const entries = ['2026-11-01', '2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05'].map(
-      (date, index) => day(date, [0, 1, 4, 12, 24][index]),
-    );
+    const hours = [0, 1, 4, 5, 12, 13, 24];
+    const entries = hours.map((active, index) => day(`2026-11-0${index + 1}`, active));
     setup({ usage: usage(entries) });
     expect(cell('2026-11-01')).toHaveClass('level0');
     expect(cell('2026-11-02')).toHaveClass('level1');
-    expect(cell('2026-11-03')).toHaveClass('level2');
-    expect(cell('2026-11-04')).toHaveClass('level3');
-    expect(cell('2026-11-05')).toHaveClass('level3');
+    expect(cell('2026-11-03')).toHaveClass('level1');
+    expect(cell('2026-11-04')).toHaveClass('level2');
+    expect(cell('2026-11-05')).toHaveClass('level2');
+    expect(cell('2026-11-06')).toHaveClass('level3');
+    expect(cell('2026-11-07')).toHaveClass('level3');
     expect(cell('2026-10-31')).toHaveClass('notCovered');
     expect(cell('2026-10-31')).not.toHaveClass('level0');
   });
 
-  it("shows a day's hours in its tooltip", async () => {
-    const user = userEvent.setup();
-    setup({ showCpuSlots: true, usage: usage([day('2026-11-03', 3, 1.5)]) });
-    await act(() => user.hover(cell('2026-11-03')));
-    expect(await screen.findByText('GPU hours 6.0')).toBeInTheDocument();
-    expect(screen.getByText('CPU slot hours 0.5')).toBeInTheDocument();
-    expect(screen.getByText(/^Aux container hours/)).toHaveTextContent('Aux container hours 1.5');
-  });
-
-  it('shows Aux as not available where it is unset, and no CPU slots unless shown', async () => {
+  it("shows a day's date in its tooltip", async () => {
     const user = userEvent.setup();
     setup({ usage: usage([day('2026-11-03', 3)]) });
     await act(() => user.hover(cell('2026-11-03')));
-    expect(await screen.findByText('GPU hours 6.0')).toBeInTheDocument();
-    expect(screen.queryByText(/CPU slot hours/)).not.toBeInTheDocument();
-    expect(screen.getByText(/^Aux container hours/)).toHaveTextContent(
-      'Aux container hours Not available',
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('2026-11-03');
+    expect(screen.queryByTestId('usage-calendar-day')).not.toBeInTheDocument();
+  });
+
+  it("shows a day's hours under the grid when clicked", async () => {
+    const user = userEvent.setup();
+    setup({ showCpuSlots: true, usage: usage([day('2026-11-03', 3, 1.5)]) });
+    await act(() => user.click(cell('2026-11-03')));
+    const line = screen.getByTestId('usage-calendar-day');
+    expect(line).toHaveTextContent(
+      '2026-11-03GPU hours 6.0CPU slot hours 0.5Aux container hours 1.5',
     );
+  });
+
+  it("shows a day's hours on Enter, Aux as not available where it is unset, and no CPU slots unless shown", async () => {
+    const user = userEvent.setup();
+    setup({ usage: usage([day('2026-11-03', 3)]) });
+    act(() => cell('2026-11-03').focus());
+    expect(cell('2026-11-03')).toHaveFocus();
+    await act(() => user.keyboard('{Enter}'));
+    expect(screen.getByTestId('usage-calendar-day')).toHaveTextContent(
+      '2026-11-03GPU hours 6.0Aux container hours Not available',
+    );
+  });
+
+  it('shows only the date of a day without records', async () => {
+    const user = userEvent.setup();
+    setup({ usage: usage([]) });
+    await act(() => user.click(cell('2026-10-31')));
+    expect(screen.getByTestId('usage-calendar-day')).toHaveTextContent(/^2026-10-31$/);
   });
 
   it('labels the month columns', () => {
