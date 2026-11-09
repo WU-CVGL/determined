@@ -1561,6 +1561,136 @@ describe('NtscLaunchModal', () => {
     });
   });
 
+  describe('switching between the simple and the full config', () => {
+    /**
+     * Shows the full config and the simple form again. Returns the number of previews sent before,
+     * the full config's preview request and its YAML.
+     */
+    const roundTrip = async (user: ReturnType<typeof userEvent.setup>) => {
+      const calls = mocks.previewShell.mock.calls.length;
+      await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+      await waitFor(() => expect(editorText()).toContain('resource_pool'));
+      const request = mocks.previewShell.mock.calls[calls][0];
+      const config = yaml.load(editorText()) as RawJson;
+      await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return { calls, config, request };
+    };
+
+    it('keeps a changed checkbox of a template', async () => {
+      mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, NO_JUPYTER_TEMPLATE]);
+      const { onLaunched, user } = await setup();
+      await openStartFrom(user);
+      await user.click(await screen.findByText('no-jupyter'));
+      await waitFor(() => expect(serviceBox('vscode')).toBeChecked());
+      await user.click(serviceBox('jupyter'));
+      await user.click(serviceBox('vscode'));
+
+      const request = {
+        config: {
+          description: undefined,
+          resources: { resource_pool: undefined, slots: 1 },
+          services: { jupyter: {}, vscode: { enabled: false } },
+        },
+        templateName: 'no-jupyter',
+        workspaceId: WORKSPACE.id,
+      };
+      for (let i = 0; i < 2; i++) {
+        const trip = await roundTrip(user);
+        expect(trip.request).toEqual(request);
+        expect(trip.config.services).toEqual({ jupyter: {}, vscode: { enabled: false } });
+        expect(serviceBox('jupyter')).toBeChecked();
+        expect(serviceBox('vscode')).not.toBeChecked();
+        // Only the full config was previewed.
+        expect(mocks.previewShell).toHaveBeenCalledTimes(trip.calls + 1);
+      }
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell).toHaveBeenCalledWith(request);
+    });
+
+    it('keeps a changed log directory of a template', async () => {
+      mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, TENSORBOARD_TEMPLATE]);
+      const { onLaunched, user } = await setup();
+      await openStartFrom(user);
+      await user.click(await screen.findByText('tensorboard'));
+      await waitFor(() => expect(serviceBox('tensorboard')).toBeChecked());
+      const field = screen.getByLabelText('Log directory in the task');
+      expect(field).toHaveValue('runs');
+      await user.clear(field);
+      await user.type(field, 'logs/b');
+
+      const trip = await roundTrip(user);
+      expect(trip.request.config.services.tensorboard).toEqual({ logdir: 'logs/b' });
+      expect(trip.config.services.tensorboard).toEqual({
+        args: ['--reload_interval=5'],
+        logdir: 'logs/b',
+      });
+      expect(serviceBox('tensorboard')).toBeChecked();
+      expect(screen.getByLabelText('Log directory in the task')).toHaveValue('logs/b');
+      expect(mocks.previewShell).toHaveBeenCalledTimes(trip.calls + 1);
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell).toHaveBeenCalledWith(trip.request);
+      expect(trip.request.templateName).toBe('tensorboard');
+    });
+
+    it('keeps the edits of a blank start', async () => {
+      const { onLaunched, user } = await setup();
+      await user.type(screen.getByPlaceholderText('Name (optional)'), 'lab');
+      await user.click(serviceBox('vscode'));
+      await user.click(serviceBox('tensorboard'));
+      await user.type(screen.getByLabelText('Log directory in the task'), 'logs/a');
+
+      const trip = await roundTrip(user);
+      expect(trip.request).toEqual({
+        config: {
+          description: 'lab',
+          resources: { resource_pool: undefined, slots: 1 },
+          services: { jupyter: {}, tensorboard: { logdir: 'logs/a' }, vscode: { enabled: false } },
+        },
+        templateName: undefined,
+        workspaceId: WORKSPACE.id,
+      });
+      expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('lab');
+      expect(serviceBox('vscode')).not.toBeChecked();
+      expect(screen.getByLabelText('Log directory in the task')).toHaveValue('logs/a');
+      expect(mocks.previewShell).toHaveBeenCalledTimes(trip.calls + 1);
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell).toHaveBeenCalledWith(trip.request);
+    });
+
+    it('keeps the edits of a "Launch Again" start', async () => {
+      mocks.getShellConfig.mockResolvedValue({
+        ...clusterShellConfig,
+        services: { jupyter: {}, tensorboard: { args: ['--x'], logdir: 'runs' } },
+      });
+      const { onLaunched, user } = await setup({ initialTask: task(CommandType.Shell) });
+      await waitFor(() => expect(serviceBox('vscode')).toBeChecked());
+      await user.click(serviceBox('jupyter'));
+      const field = screen.getByLabelText('Log directory in the task');
+      await user.clear(field);
+      await user.type(field, '/data/runs');
+
+      const trip = await roundTrip(user);
+      const services = {
+        jupyter: { enabled: false },
+        tensorboard: { args: ['--x'], logdir: '/data/runs' },
+        vscode: {},
+      };
+      expect(trip.request.config.services).toEqual(services);
+      expect(trip.config.services).toEqual(services);
+      expect(serviceBox('jupyter')).not.toBeChecked();
+      expect(serviceBox('tensorboard')).toBeChecked();
+      expect(screen.getByLabelText('Log directory in the task')).toHaveValue('/data/runs');
+      expect(mocks.previewShell).toHaveBeenCalledTimes(trip.calls + 1);
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell).toHaveBeenCalledWith(trip.request);
+    });
+  });
+
   describe('a refused preview', () => {
     /**
      * Opens the form, whose preview on open is refused with status and message: Launch and the full

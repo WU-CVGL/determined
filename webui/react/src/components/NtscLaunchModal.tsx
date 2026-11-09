@@ -257,8 +257,9 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   // tensorboard service's log directory follows the same rule as its checkbox. Launch and the full
   // config wait for a successful preview of the current start-from: a refused one shows its
   // message with Retry, keeps them disabled, and is sent again when the pool or the workspace
-  // changes. Showing the simple form again after the full config previews nothing, so that the
-  // checkboxes keep their changes.
+  // changes. Switching between the simple form and the full config previews nothing, so that the
+  // form keeps its changes: the watched fields read undefined while the simple form is replaced,
+  // which is no start-from change.
   const [simpleFormShown, setSimpleFormShown] = useState(false);
   const source = Form.useWatch('source', form);
   const pool = Form.useWatch('pool', form);
@@ -277,7 +278,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     servicesResult.source === source &&
     servicesResult.baseConfig === baseConfig;
   useEffect(() => {
-    if (!simpleFormShown || startFromLoading) return;
+    if (showFullConfig || !simpleFormShown || startFromLoading) return;
     const last = servicesPreview.current;
     const sameStart = last.seq !== 0 && last.source === source && last.baseConfig === baseConfig;
     if (last.status !== 'error' && sameStart) return;
@@ -330,6 +331,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     pool,
     servicesRetry,
     setServicesPreview,
+    showFullConfig,
     simpleFormShown,
     simpleOptions,
     source,
