@@ -229,6 +229,74 @@ func TestPutDeleteExperimentLabel(t *testing.T) {
 	require.ElementsMatch(t, []string{keep, label}, getLabels(other.ID))
 }
 
+// A label edit that starts while another transaction holds the experiment row reads the labels
+// that transaction commits, so neither edit is lost.
+func TestExperimentLabelEditsWaitForRowLock(t *testing.T) {
+	api, curUser, ctx := setupAPITest(t, nil)
+
+	keep, added, label := uuid.New().String(), uuid.New().String(), uuid.New().String()
+
+	// editWhileLocked appends `added` in an open transaction, runs edit while that transaction
+	// holds the row, then commits it and returns the labels the edit wrote.
+	editWhileLocked := func(id int, edit func() ([]string, error)) []string {
+		tx, err := db.Bun().BeginTx(ctx, nil)
+		require.NoError(t, err)
+		defer func() { _ = tx.Rollback() }()
+		_, err = tx.NewUpdate().Table("experiments").
+			Set("config = jsonb_set(config, '{labels}', (config->'labels') || to_jsonb(?::text))",
+				added).
+			Where("id = ?", id).
+			Exec(ctx)
+		require.NoError(t, err)
+
+		type result struct {
+			labels []string
+			err    error
+		}
+		done := make(chan result, 1)
+		go func() {
+			labels, err := edit()
+			done <- result{labels, err}
+		}()
+		select {
+		case r := <-done:
+			t.Fatalf("label edit finished while the row was locked: %v, %v", r.labels, r.err)
+		case <-time.After(500 * time.Millisecond):
+		}
+		require.NoError(t, tx.Commit())
+
+		r := <-done
+		require.NoError(t, r.err)
+		return r.labels
+	}
+
+	exp := createTestExp(t, api, curUser, keep)
+	labels := editWhileLocked(exp.ID, func() ([]string, error) {
+		resp, err := api.PutExperimentLabel(ctx,
+			&apiv1.PutExperimentLabelRequest{ExperimentId: int32(exp.ID), Label: label})
+		if err != nil {
+			return nil, err
+		}
+		return resp.Labels, nil
+	})
+	require.ElementsMatch(t, []string{keep, added, label}, labels)
+
+	exp = createTestExp(t, api, curUser, keep, label)
+	labels = editWhileLocked(exp.ID, func() ([]string, error) {
+		resp, err := api.DeleteExperimentLabel(ctx,
+			&apiv1.DeleteExperimentLabelRequest{ExperimentId: int32(exp.ID), Label: label})
+		if err != nil {
+			return nil, err
+		}
+		return resp.Labels, nil
+	})
+	require.ElementsMatch(t, []string{keep, added}, labels)
+
+	resp, err := api.GetExperiment(ctx, &apiv1.GetExperimentRequest{ExperimentId: int32(exp.ID)})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{keep, added}, resp.Experiment.Labels)
+}
+
 func TestGetExperimentConfig(t *testing.T) {
 	api, curUser, ctx := setupAPITest(t, nil)
 
