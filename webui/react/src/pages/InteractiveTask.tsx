@@ -7,6 +7,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Helmet } from 'react-helmet-async';
 import { useParams, useSearchParams } from 'react-router-dom';
 
+import { useJobSharingModal } from 'components/JobSharingModal';
 import ShellTerminalPane from 'components/ShellTerminalPane';
 import TaskBar from 'components/TaskBar';
 import TaskResourcesPanel from 'components/TaskResourcesPanel';
@@ -135,6 +136,11 @@ export const InteractiveTask: React.FC = () => {
   // Whether the lookup of the task's name and pool has answered, with or without a record.
   const [lookedUp, setLookedUp] = useState(false);
   const [error, setError] = useState<string>();
+  // Counts the saves of the task's sharing, to look the task up again after one.
+  const [sharingSaves, setSharingSaves] = useState(0);
+  const { modal: sharingModal, open: openSharing } = useJobSharingModal(
+    useCallback(() => setSharingSaves((count) => count + 1), []),
+  );
 
   const requestedTab = searchParams.get('tab');
   const slotsExceeded = searchParams.get('currentSlotsExceeded') === 'true';
@@ -323,7 +329,7 @@ export const InteractiveTask: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [taskId, commandType, loaded]);
+  }, [taskId, commandType, loaded, sharingSaves]);
 
   const selectTab = useCallback(
     (tab: string) =>
@@ -342,6 +348,7 @@ export const InteractiveTask: React.FC = () => {
       ? jobDisplayName(commandTypeToLabel[command.type], taskId)
       : command?.name || taskId;
   const phase = task ? taskPhase(task) : 'waiting';
+  const sharingJobId = command?.capabilities?.manageSharing ? command.jobId : undefined;
   const services = useMemo(() => taskServices?.services ?? [], [taskServices]);
 
   // The tabs the task has: its services first, then the logs and resources of every task.
@@ -487,10 +494,12 @@ export const InteractiveTask: React.FC = () => {
             resourcePool={command?.resourcePool ?? ''}
             state={killState}
             type={commandType}
+            onSharing={sharingJobId ? () => openSharing(sharingJobId) : undefined}
           />
         </div>
         <div className={css.contentContainer}>{content}</div>
       </div>
+      {sharingModal}
     </>
   );
 };

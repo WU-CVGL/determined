@@ -1,12 +1,20 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { DefaultTheme, UIProvider } from 'hew/Theme';
 import { ConfirmationProvider } from 'hew/useConfirm';
 import { HelmetProvider } from 'react-helmet-async';
 import { BrowserRouter } from 'react-router-dom';
 
 import { ThemeProvider } from 'components/ThemeProvider';
-import { getGenericTask, getGenericTaskConfig, getGenericTasks, getTask } from 'services/api';
-import { V1TaskType } from 'services/api-ts-sdk';
+import {
+  getGenericTask,
+  getGenericTaskConfig,
+  getGenericTasks,
+  getJobSharing,
+  getTask,
+  patchJobSharing,
+} from 'services/api';
+import { V1JobContentKind, V1TaskType } from 'services/api-ts-sdk';
 import { CommandState, GenericTask, GenericTaskState, JobCapabilities, TaskItem } from 'types';
 import { DetError } from 'utils/error';
 
@@ -28,7 +36,9 @@ vi.mock('services/api', () => ({
   getGenericTasks: vi.fn(() =>
     Promise.resolve({ pagination: { limit: 0, offset: 0, total: 0 }, tasks: [] }),
   ),
+  getJobSharing: vi.fn(),
   getTask: vi.fn(),
+  patchJobSharing: vi.fn(),
 }));
 
 const taskItem = (taskState: GenericTaskState): TaskItem => ({
@@ -111,6 +121,39 @@ describe('GenericTaskDetails', () => {
       setup();
       const name = await screen.findByTestId('generic-task-name');
       await waitFor(() => expect(name).toHaveTextContent('Generic Task task'));
+    });
+
+    it('offers Sharing only when the master lets the user manage it', async () => {
+      vi.mocked(getTask).mockResolvedValue(taskItem(GenericTaskState.Active));
+      setup();
+      await screen.findByTestId('generic-task-pause');
+      expect(screen.queryByTestId('generic-task-sharing')).not.toBeInTheDocument();
+    });
+
+    it('looks the task up again after its sharing was saved', async () => {
+      const rule = { newJobAudience: { allUsers: true }, sharingAllowed: true };
+      vi.mocked(getTask).mockResolvedValue(taskItem(GenericTaskState.Active));
+      vi.mocked(getGenericTask).mockResolvedValue({
+        ...summary,
+        capabilities: { manageSharing: true, viewConfig: true, viewLogs: true, viewTitle: true },
+      });
+      vi.mocked(getJobSharing).mockResolvedValue({
+        rules: [
+          { ...rule, kind: V1JobContentKind.TITLE },
+          { ...rule, kind: V1JobContentKind.LOGS },
+          { ...rule, kind: V1JobContentKind.CONFIG },
+        ],
+        sharing: {},
+      });
+      vi.mocked(patchJobSharing).mockResolvedValue({});
+      setup();
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      await user.click(await screen.findByTestId('generic-task-sharing'));
+      await screen.findByTestId('job-sharing-title');
+      expect(vi.mocked(getJobSharing).mock.calls[0][0]).toEqual({ jobId: 'job-1' });
+      expect(getGenericTask).toHaveBeenCalledTimes(1);
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(getGenericTask).toHaveBeenCalledTimes(2));
     });
 
     it('shows a config that the master refuses as not shared', async () => {

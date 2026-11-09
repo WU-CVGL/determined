@@ -10,6 +10,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import css from 'components/ActionDropdown/ActionDropdown.module.scss';
+import { useJobSharingModal } from 'components/JobSharingModal';
 import TaskConnectModalComponent, { TaskConnectField } from 'components/TaskConnectModal';
 import { commandTypeToLabel } from 'constants/states';
 import useFeature from 'hooks/useFeature';
@@ -57,6 +58,7 @@ const TaskActionDropdown: React.FC<Props> = ({
   const currentUser = Loadable.getOrElse(undefined, useObservable(userStore.currentUser));
   const { openToast } = useToast();
   const TaskConnectModal = useModal(TaskConnectModalComponent);
+  const sharing = useJobSharingModal(() => onComplete?.(Action.Sharing));
 
   const confirm = useConfirm();
 
@@ -103,6 +105,9 @@ const TaskActionDropdown: React.FC<Props> = ({
     const items: MenuItem[] = [{ key: Action.ViewLogs, label: 'View Logs' }];
     if (resourcesEnabled) items.push({ key: Action.ViewResources, label: 'View Resources' });
     items.push({ key: Action.CopyTaskID, label: 'Copy Task ID' });
+    if (task.capabilities?.manageSharing && task.jobId) {
+      items.push({ key: Action.Sharing, label: 'Sharing' });
+    }
     // Only the owner or an admin gets the shell's key from the master; a task that has ended
     // has no session to connect to.
     if (canBeOpened(task) && canConnectToTask(services ?? [])) {
@@ -184,6 +189,9 @@ const TaskActionDropdown: React.FC<Props> = ({
         case Action.ManageJob:
           onManageJob?.();
           break;
+        case Action.Sharing:
+          if (task.jobId) sharing.open(task.jobId);
+          break;
         case Action.Kill:
           confirm({
             content: 'Are you sure you want to kill this task?',
@@ -236,6 +244,7 @@ const TaskActionDropdown: React.FC<Props> = ({
         {children}
       </Dropdown>
       {taskConnectModal}
+      {sharing.modal}
     </>
   ) : (
     <div className={css.base} title="Open actions menu">
@@ -250,6 +259,7 @@ const TaskActionDropdown: React.FC<Props> = ({
         />
       </Dropdown>
       {taskConnectModal}
+      {sharing.modal}
     </div>
   );
 };

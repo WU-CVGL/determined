@@ -6,6 +6,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import Page from 'components/Page';
 import usePermissions from 'hooks/usePermissions';
 import GroupManagement from 'pages/Admin/GroupManagement';
+import JobPrivacy from 'pages/Admin/JobPrivacy';
 import PoolAccess from 'pages/Admin/PoolAccess';
 import UserManagement from 'pages/Admin/UserManagement';
 import { paths } from 'routes/utils';
@@ -16,6 +17,7 @@ import { useObservable } from 'utils/observable';
 
 export const TabType = {
   GroupManagement: 'Groups',
+  JobPrivacy: 'Job Privacy',
   PoolAccess: 'Pool Access',
   UserManagement: 'Users',
 } as const;
@@ -30,6 +32,7 @@ const TAB_KEYS = {
   [TabType.UserManagement]: 'user-management',
   [TabType.GroupManagement]: 'group-management',
   [TabType.PoolAccess]: 'pool-access',
+  [TabType.JobPrivacy]: 'job-privacy',
 } as const;
 const DEFAULT_TAB_KEY = TabType.UserManagement;
 
@@ -102,6 +105,15 @@ const SettingsContent: React.FC = () => {
         children: <PoolAccess />,
         key: TAB_KEYS[TabType.PoolAccess],
         label: TabType.PoolAccess,
+      });
+    }
+
+    // The job privacy policy is written by the same admins as the resource pool access.
+    if (canManageResourcePoolAccess) {
+      items.push({
+        children: <JobPrivacy />,
+        key: TAB_KEYS[TabType.JobPrivacy],
+        label: TabType.JobPrivacy,
       });
     }
 

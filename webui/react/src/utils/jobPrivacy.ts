@@ -1,3 +1,4 @@
+import { V1JobAudience, V1JobContentKind, V1JobPrivacyRule } from 'services/api-ts-sdk';
 import { JobCapabilities } from 'types';
 
 import { isObject } from './data';
@@ -62,3 +63,41 @@ export const isLogsNotShared = (e: unknown): boolean => isRefusal(e, 'logs not s
 
 /** Whether the master refused a job's config because it is not shared with the viewer. */
 export const isConfigNotShared = (e: unknown): boolean => isRefusal(e, 'config not shared');
+
+/** The kinds of job content whose sharing a policy rule or a job's sharing sets. */
+export const JOB_CONTENT_KINDS = [
+  V1JobContentKind.TITLE,
+  V1JobContentKind.LOGS,
+  V1JobContentKind.CONFIG,
+] as const;
+export type JobContentKind = (typeof JOB_CONTENT_KINDS)[number];
+
+/**
+ * Whether an audience is all users: true or false when it is set, undefined when it is not (a
+ * job created before job privacy, which is public, or a user's new-job default left to the
+ * cluster's).
+ */
+export const audienceAllUsers = (audience?: V1JobAudience | null): boolean | undefined =>
+  audience === undefined || audience === null ? undefined : !!audience.allUsers;
+
+/** The policy rule of a kind; a kind without a rule is forbidden, as the master treats it. */
+export const policyRule = (rules: V1JobPrivacyRule[], kind: JobContentKind): V1JobPrivacyRule =>
+  rules.find((rule) => rule.kind === kind) ?? {
+    kind,
+    newJobAudience: { allUsers: false },
+    sharingAllowed: false,
+  };
+
+/** Whether the policy allows sharing a kind. */
+export const sharingAllowed = (rules: V1JobPrivacyRule[], kind: JobContentKind): boolean =>
+  policyRule(rules, kind).sharingAllowed === true;
+
+/** The master's text of a failed request, as it sent it. */
+export const masterErrorText = (e: unknown): string => {
+  if (e instanceof DetError) {
+    const text = e.publicMessage || e.message;
+    if (text) return text;
+  }
+  if (e instanceof Error) return e.message;
+  return String(e);
+};

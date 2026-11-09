@@ -40,13 +40,13 @@ const QUEUED: ExperimentBase = {
   state: RunState.Queued,
 };
 
-const setup = () =>
+const setup = (experiment: ExperimentBase = QUEUED) =>
   render(
     <UIProvider theme={DefaultTheme.Light}>
       <ThemeProvider>
         <ConfirmationProvider>
           <BrowserRouter>
-            <ExperimentDetailsHeader experiment={QUEUED} fetchExperimentDetails={vi.fn()} />
+            <ExperimentDetailsHeader experiment={experiment} fetchExperimentDetails={vi.fn()} />
           </BrowserRouter>
         </ConfirmationProvider>
       </ThemeProvider>
@@ -59,6 +59,19 @@ describe('ExperimentDetailsHeader', () => {
   beforeEach(() => {
     vi.mocked(openTensorBoardSession).mockReset();
     vi.mocked(makeToast).mockReset();
+  });
+
+  it('offers Sharing when the master lets the user manage it', async () => {
+    const capabilities = { manageSharing: true, viewConfig: true, viewLogs: true, viewTitle: true };
+    const { unmount } = setup({ ...QUEUED, capabilities });
+    await userEvent.click(screen.getByRole('button', { name: 'Action menu' }));
+    expect(await screen.findByRole('menuitem', { name: 'Sharing' })).toBeInTheDocument();
+    unmount();
+
+    setup({ ...QUEUED, capabilities: { ...capabilities, manageSharing: false } });
+    await userEvent.click(screen.getByRole('button', { name: 'Action menu' }));
+    await screen.findAllByRole('menuitem');
+    expect(screen.queryByText('Sharing')).not.toBeInTheDocument();
   });
 
   it("links a queued experiment's job info to the cluster page", async () => {

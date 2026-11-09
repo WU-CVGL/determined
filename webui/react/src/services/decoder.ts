@@ -211,6 +211,7 @@ const mapCommonV1Task = (
     displayName: task.displayName || '',
     endTime: (task.endTime as string | undefined) || undefined,
     id: task.id,
+    jobId: task.jobId || undefined,
     name: titleHidden(capabilities) ? undefined : task.description ?? '',
     resourcePool: task.resourcePool,
     slots: task.slots,

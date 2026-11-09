@@ -79,6 +79,7 @@ vi.mock('services/api', () => ({
         total: 10,
       },
     }),
+  getJobPrivacyPolicy: () => Promise.resolve([]),
   getResourcePoolAccess: () => Promise.resolve([]),
   getUsers: () => {
     const users: Array<DetailedUser> = [CURRENT_USER];
@@ -86,6 +87,7 @@ vi.mock('services/api', () => ({
   },
   grantResourcePoolAccess: vi.fn(),
   listRoles: mocks.listRoles,
+  putJobPrivacyPolicy: vi.fn(),
   revokeResourcePoolAccess: vi.fn(),
   setResourcePoolAccessMode: vi.fn(),
 }));
@@ -183,5 +185,18 @@ describe('Admin page', () => {
     mocks.canManageResourcePoolAccess = true;
     setup();
     expect(await screen.findByText('Pool Access')).toBeInTheDocument();
+  });
+
+  it('shows the Job Privacy tab only to users who may update the master configuration', async () => {
+    mocks.canAdministrateUsers = true;
+    const { unmount } = setup();
+    expect(await screen.findByText('Users (1)')).toBeInTheDocument();
+    expect(screen.queryByText('Job Privacy')).not.toBeInTheDocument();
+    unmount();
+
+    mocks.canManageResourcePoolAccess = true;
+    setup();
+    await user.click(await screen.findByText('Job Privacy'));
+    expect(await screen.findByText('New jobs')).toBeInTheDocument();
   });
 });

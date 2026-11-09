@@ -27,6 +27,7 @@ import ExperimentMoveModalComponent from 'components/ExperimentMoveModal';
 import ExperimentRetainLogsModalComponent from 'components/ExperimentRetainLogsModal';
 import ExperimentStopModalComponent from 'components/ExperimentStopModal';
 import HyperparameterSearchModalComponent from 'components/HyperparameterSearchModal';
+import { useJobSharingModal } from 'components/JobSharingModal';
 import Link from 'components/Link';
 import PageHeaderFoldable, { Option, renderOptionLabel } from 'components/PageHeaderFoldable';
 import TimeAgo from 'components/TimeAgo';
@@ -142,6 +143,7 @@ const headerActions = [
   Action.OpenTensorBoard,
   Action.HyperparameterSearch,
   Action.DownloadCode,
+  Action.Sharing,
   Action.Edit,
   Action.Archive,
   Action.Unarchive,
@@ -216,6 +218,7 @@ const ExperimentDetailsHeader: React.FC<Props> = ({
   const ExperimentEditModal = useModal(ExperimentEditModalComponent);
   const ContinueTrialModal = useModal(ExperimentCreateModalComponent);
   const HyperparameterSearchModal = useModal(HyperparameterSearchModalComponent);
+  const { modal: sharingModal, open: openSharing } = useJobSharingModal(fetchExperimentDetails);
 
   const disabled =
     experiment?.parentArchived ||
@@ -478,6 +481,16 @@ const ExperimentDetailsHeader: React.FC<Props> = ({
           },
         ],
       },
+      [Action.Sharing]: {
+        key: 'sharing',
+        menuOptions: [
+          {
+            key: 'sharing',
+            label: 'Sharing',
+            onClick: () => openSharing(experiment.jobId),
+          },
+        ],
+      },
       [Action.Edit]: {
         key: 'edit',
         menuOptions: [
@@ -579,6 +592,7 @@ const ExperimentDetailsHeader: React.FC<Props> = ({
     ExperimentEditModal.open,
     ExperimentMoveModal.open,
     ExperimentRetainLogsModal.open,
+    openSharing,
     isRunningTensorBoard,
     isRunningUnarchive,
     expPermissions,
@@ -810,6 +824,7 @@ const ExperimentDetailsHeader: React.FC<Props> = ({
         closeModal={HyperparameterSearchModal.close}
         experiment={experiment}
       />
+      {sharingModal}
     </>
   );
 };

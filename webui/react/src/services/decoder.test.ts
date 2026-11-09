@@ -157,6 +157,10 @@ describe('Decoder', () => {
       });
     });
 
+    it('should carry the job, whose sharing the Sharing action opens', () => {
+      mappers.forEach((map) => expect(map(wire()).jobId).toBe('job-1'));
+    });
+
     it('should carry the sources of a shell that has them', () => {
       expect(decoder.mapV1Shell({ ...wire(), experimentIds: [4], trialIds: [] }).misc).toEqual({
         experimentIds: [4],

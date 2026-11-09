@@ -519,6 +519,7 @@ export const ExperimentAction = {
   Pause: 'Pause',
   RetainLogs: 'Retain Logs',
   Retry: 'Retry',
+  Sharing: 'Sharing',
   SwitchPin: 'Switch Pin',
   Unarchive: 'Unarchive',
   ViewLogs: 'View Logs',
@@ -1026,6 +1027,8 @@ export interface CommandTask extends Task {
   capabilities?: JobCapabilities;
   displayName?: string;
   endTime?: string;
+  /** The task's job, whose sharing the Sharing action changes. */
+  jobId?: string;
   misc?: CommandMisc;
   resourcePool: string;
   /** The slots the task asks for: 0 for a CPU-only task; unset if the master does not say. */
@@ -1047,6 +1050,7 @@ export const TaskAction = {
   OpenTensorBoard: 'Open TensorBoard',
   OpenTerminal: 'Open Terminal',
   OpenVSCode: 'Open VS Code',
+  Sharing: 'Sharing',
   ViewLogs: 'View Logs',
   ViewResources: 'View Resources',
 } as const;

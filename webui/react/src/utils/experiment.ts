@@ -223,6 +223,9 @@ const experimentCheckers: Record<ExperimentAction, ExperimentChecker> = {
   [ExperimentAction.SwitchPin]: alwaysTrueExperimentChecker,
 
   [ExperimentAction.RetainLogs]: alwaysTrueExperimentChecker,
+
+  // The master says whether the viewer manages the experiment's sharing: its owner or an admin.
+  [ExperimentAction.Sharing]: (experiment) => !!experiment.capabilities?.manageSharing,
 };
 
 export const canActionExperiment = (

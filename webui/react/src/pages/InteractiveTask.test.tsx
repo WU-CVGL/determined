@@ -8,15 +8,18 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { ThemeProvider } from 'components/ThemeProvider';
 import {
   getCommand,
+  getJobSharing,
   getShells,
   getTask,
   getTaskServices,
   getTensorBoard,
   killTask,
+  patchJobSharing,
 } from 'services/api';
 import {
   TaskServiceProtocol,
   V1GetTaskServicesResponse,
+  V1JobContentKind,
   V1TaskServiceState,
   V1TaskType,
 } from 'services/api-ts-sdk';
@@ -33,11 +36,13 @@ const TASK_ID = 'task-1';
 // loads. Vitest throws if a module uses an export that the mock does not define.
 vi.mock('services/api', () => ({
   getCommand: vi.fn(),
+  getJobSharing: vi.fn(),
   getShells: vi.fn(),
   getTask: vi.fn(),
   getTaskServices: vi.fn(),
   getTensorBoard: vi.fn(),
   killTask: vi.fn(),
+  patchJobSharing: vi.fn(),
 }));
 
 vi.mock('components/ShellTerminalPane', () => ({
@@ -516,6 +521,38 @@ describe('InteractiveTask', () => {
     const pane = await screen.findByTestId('logs-pane');
     await waitFor(() => expect(pane).toHaveAttribute('data-logs-hidden', 'true'));
     await waitFor(() => expect(document.title).toBe('Shell task'));
+  });
+
+  it('offers Sharing only when the master lets the user manage it', async () => {
+    setup();
+    expect(await screen.findByText(shell.name)).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('task-action-dropdown-trigger'));
+    await screen.findByText('Kill');
+    expect(screen.queryByText('Sharing')).not.toBeInTheDocument();
+  });
+
+  it('looks the shell up again after its sharing was saved', async () => {
+    const capabilities = { manageSharing: true, viewConfig: true, viewLogs: true, viewTitle: true };
+    const rule = { newJobAudience: { allUsers: true }, sharingAllowed: true };
+    vi.mocked(getShells).mockResolvedValue([{ ...shell, capabilities, jobId: 'job-7' }]);
+    vi.mocked(getJobSharing).mockResolvedValue({
+      rules: [
+        { ...rule, kind: V1JobContentKind.TITLE },
+        { ...rule, kind: V1JobContentKind.LOGS },
+        { ...rule, kind: V1JobContentKind.CONFIG },
+      ],
+      sharing: {},
+    });
+    vi.mocked(patchJobSharing).mockResolvedValue({});
+    setup();
+    expect(await screen.findByText(shell.name)).toBeInTheDocument();
+    expect(getShells).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByTestId('task-action-dropdown-trigger'));
+    await userEvent.click(await screen.findByText('Sharing'));
+    await screen.findByTestId('job-sharing-title');
+    expect(vi.mocked(getJobSharing).mock.calls[0][0]).toEqual({ jobId: 'job-7' });
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(getShells).toHaveBeenCalledTimes(2));
   });
 
   it('lands on the tab of the query, or the first tab', async () => {

@@ -6,6 +6,7 @@ import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import css from 'components/ActionDropdown/ActionDropdown.module.scss';
+import { useJobSharingModal } from 'components/JobSharingModal';
 import useGenericTaskActions from 'hooks/useGenericTaskActions';
 import usePermissions from 'hooks/usePermissions';
 import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
@@ -19,6 +20,7 @@ export const GenericTaskAction = {
   CopyTaskID: 'Copy Task ID',
   Kill: 'Kill',
   Pause: 'Pause',
+  Sharing: 'Sharing',
   Unpause: 'Unpause',
   ViewLogs: 'View Logs',
   ViewResources: 'View Resources',
@@ -36,7 +38,7 @@ interface Props {
 
 /**
  * The menu of a generic task in the generic task list, in the order of the task menu: viewing
- * first, then Copy Task ID, Pause or Unpause, and the destructive Kill last, in red. Pause, Unpause
+ * first, then Copy Task ID, Sharing, Pause or Unpause, and the destructive Kill last, in red. Pause, Unpause
  * and Kill are offered as the task's page offers them, to the task's owner or an admin, and ask the
  * same confirmations (useGenericTaskActions). Kill kills the task and its descendants, as the
  * page's Kill does. In the generic task list, the two menus of a row share the task's running
@@ -47,6 +49,7 @@ const GenericTaskActionDropdown: React.FC<Props> = ({ children, onComplete, task
   const resourcesEnabled = useTaskResourcesEnabled();
   const navigate = useNavigate();
   const { openToast } = useToast();
+  const sharing = useJobSharingModal(onComplete);
   const canControl = canModifyWorkspaceNSC({
     userId: task.userId,
     workspace: { id: task.workspaceId },
@@ -70,6 +73,9 @@ const GenericTaskActionDropdown: React.FC<Props> = ({ children, onComplete, task
       items.push({ key: GenericTaskAction.ViewResources, label: 'View Resources' });
     }
     items.push({ key: GenericTaskAction.CopyTaskID, label: 'Copy Task ID' });
+    if (task.capabilities?.manageSharing) {
+      items.push({ key: GenericTaskAction.Sharing, label: 'Sharing' });
+    }
     if (canPause) items.push({ disabled: isBusy, key: GenericTaskAction.Pause, label: 'Pause' });
     if (canUnpause) {
       items.push({
@@ -82,7 +88,15 @@ const GenericTaskActionDropdown: React.FC<Props> = ({ children, onComplete, task
       items.push({ danger: true, disabled: isBusy, key: GenericTaskAction.Kill, label: 'Kill' });
     }
     return items;
-  }, [canKill, canPause, canUnpause, isBusy, isUnpauseRetry, resourcesEnabled]);
+  }, [
+    canKill,
+    canPause,
+    canUnpause,
+    isBusy,
+    isUnpauseRetry,
+    resourcesEnabled,
+    task.capabilities?.manageSharing,
+  ]);
 
   const handleDropdown = async (key: string) => {
     try {
@@ -96,6 +110,9 @@ const GenericTaskActionDropdown: React.FC<Props> = ({ children, onComplete, task
         case GenericTaskAction.CopyTaskID:
           await copyToClipboard(task.taskId);
           openToast({ severity: 'Confirm', title: 'Task ID has been copied to clipboard.' });
+          break;
+        case GenericTaskAction.Sharing:
+          sharing.open(task.jobId);
           break;
         case GenericTaskAction.Pause:
           pause();
@@ -118,9 +135,12 @@ const GenericTaskActionDropdown: React.FC<Props> = ({ children, onComplete, task
   };
 
   return children ? (
-    <Dropdown isContextMenu menu={menuItems} onClick={handleDropdown}>
-      {children}
-    </Dropdown>
+    <>
+      <Dropdown isContextMenu menu={menuItems} onClick={handleDropdown}>
+        {children}
+      </Dropdown>
+      {sharing.modal}
+    </>
   ) : (
     <div className={css.base} title="Open actions menu">
       <Dropdown menu={menuItems} placement="bottomRight" onClick={handleDropdown}>
@@ -129,6 +149,7 @@ const GenericTaskActionDropdown: React.FC<Props> = ({ children, onComplete, task
           type="text"
         />
       </Dropdown>
+      {sharing.modal}
     </div>
   );
 };

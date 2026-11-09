@@ -4,7 +4,7 @@ import UIProvider, { DefaultTheme } from 'hew/Theme';
 import { ConfirmationProvider } from 'hew/useConfirm';
 import { MemoryRouter } from 'react-router-dom';
 
-import { getTaskServices } from 'services/api';
+import { getJobSharing, getTaskServices } from 'services/api';
 import userStore from 'stores/users';
 import { CommandState, CommandTask, CommandType, DetailedUser, TaskAction } from 'types';
 import { isDangerMenuItem, menuLabels } from 'utils/tests/menu';
@@ -33,6 +33,7 @@ vi.mock('routes/utils', () => ({
 /** The task's services as the master reports them when the menu opens: a shell's SSH by default. */
 const services = vi.hoisted(() => ({ list: [{ mayConnect: true, name: 'ssh' }] }));
 vi.mock('services/api', () => ({
+  getJobSharing: vi.fn(() => new Promise(() => undefined)),
   getTaskServices: vi.fn(() => Promise.resolve({ services: services.list })),
   killTask: vi.fn(),
 }));
@@ -146,6 +147,46 @@ describe('TaskActionDropdown', () => {
   it('shows Kill for the user’s own task', async () => {
     await openMenu(101);
     expect(screen.getByText('Kill')).toBeInTheDocument();
+  });
+
+  describe('Sharing', () => {
+    const capabilities = {
+      manageSharing: true,
+      viewConfig: true,
+      viewLogs: true,
+      viewTitle: true,
+    };
+
+    beforeEach(() => {
+      vi.mocked(getJobSharing).mockClear();
+    });
+
+    it('is offered after Copy Task ID when the master lets the user manage it', async () => {
+      await openMenu(101, { capabilities, jobId: 'job-1' });
+      const labels = menuLabels();
+      expect(labels.indexOf('Sharing')).toBe(labels.indexOf('Copy Task ID') + 1);
+    });
+
+    it('is left out when the master does not let the user manage it', async () => {
+      await openMenu(101, { capabilities: { ...capabilities, manageSharing: false }, jobId: 'j' });
+      await screen.findByText('View Logs');
+      expect(screen.queryByText('Sharing')).not.toBeInTheDocument();
+    });
+
+    it('is left out without capabilities or a job', async () => {
+      await openMenu(101, { capabilities });
+      await screen.findByText('View Logs');
+      expect(screen.queryByText('Sharing')).not.toBeInTheDocument();
+    });
+
+    it('opens the sharing of the task’s job', async () => {
+      await openMenu(101, { capabilities, jobId: 'job-1' });
+      expect(getJobSharing).not.toHaveBeenCalled();
+      await userEvent.click(screen.getByText('Sharing'));
+      await waitFor(() => expect(getJobSharing).toHaveBeenCalledTimes(1));
+      expect(vi.mocked(getJobSharing).mock.calls[0][0]).toEqual({ jobId: 'job-1' });
+      expect(await screen.findByRole('dialog', { name: 'Sharing' })).toBeInTheDocument();
+    });
   });
 
   describe('Connect', () => {

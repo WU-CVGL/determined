@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom';
 
 import GenericTaskStateBadge from 'components/GenericTaskStateBadge';
+import { useJobSharingModal } from 'components/JobSharingModal';
 import Page from 'components/Page';
 import TaskResourcesPanel from 'components/TaskResourcesPanel';
 import { terminalGenericTaskStates } from 'constants/states';
@@ -58,6 +59,11 @@ const GenericTaskDetails: React.FC = () => {
   const [config, setConfig] = useState<RawJson>();
   const [configError, setConfigError] = useState<string>();
   const [configRefused, setConfigRefused] = useState(false);
+  // Counts the saves of the task's sharing, to look the task up again after one.
+  const [sharingSaves, setSharingSaves] = useState(0);
+  const { modal: sharingModal, open: openSharing } = useJobSharingModal(
+    useCallback(() => setSharingSaves((count) => count + 1), []),
+  );
 
   const tabKey: TabType = tab && TAB_KEYS.includes(tab) ? (tab as TabType) : DEFAULT_TAB_KEY;
   // The task shown now; responses for a task navigated away from are dropped.
@@ -158,7 +164,7 @@ const GenericTaskDetails: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [isGeneric, taskId]);
+  }, [isGeneric, sharingSaves, taskId]);
 
   useEffect(() => {
     if (!isGeneric) return;
@@ -289,7 +295,11 @@ const GenericTaskDetails: React.FC = () => {
               canControl={canControl}
               task={{ name, noPause, parentId, state, taskId }}
               onComplete={handleActionComplete}
+              onSharing={
+                summary?.capabilities?.manageSharing ? () => openSharing(summary.jobId) : undefined
+              }
             />
+            {sharingModal}
           </div>
         )
       }
