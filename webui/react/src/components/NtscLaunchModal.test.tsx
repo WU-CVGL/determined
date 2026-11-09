@@ -1689,6 +1689,73 @@ describe('NtscLaunchModal', () => {
       await waitFor(() => expect(onLaunched).toHaveBeenCalled());
       expect(mocks.launchShell).toHaveBeenCalledWith(trip.request);
     });
+    it('makes an edited full config the simple form’s config', async () => {
+      mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, TENSORBOARD_TEMPLATE]);
+      const { onLaunched, user } = await setup();
+      await openStartFrom(user);
+      await user.click(await screen.findByText('tensorboard'));
+      await waitFor(() => expect(serviceBox('tensorboard')).toBeChecked());
+      await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+      await waitFor(() => expect(editorText()).toContain('resource_pool'));
+      editConfig((config) => ({
+        ...config,
+        environment: { ...config.environment, environment_variables: ['EDITED=1'] },
+        services: {
+          ...config.services,
+          tensorboard: { args: ['--reload_interval=30'], logdir: 'logs/c' },
+          vscode: { enabled: false },
+        },
+      }));
+      const calls = mocks.previewShell.mock.calls.length;
+      await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(serviceBox('jupyter')).toBeChecked();
+      expect(serviceBox('vscode')).not.toBeChecked();
+      expect(serviceBox('tensorboard')).toBeChecked();
+      expect(screen.getByLabelText('Log directory in the task')).toHaveValue('logs/c');
+      expect(mocks.previewShell).toHaveBeenCalledTimes(calls);
+
+      const services = {
+        jupyter: {},
+        tensorboard: { args: ['--reload_interval=30'], logdir: 'logs/c' },
+        vscode: { enabled: false },
+      };
+      const trip = await roundTrip(user);
+      expect(trip.request).toEqual({
+        config: {
+          environment: { environment_variables: ['EDITED=1'], image: { cuda: 'default:1' } },
+          resources: { resource_pool: 'default', slots: 1 },
+          services,
+        },
+        templateName: undefined,
+        workspaceId: WORKSPACE.id,
+      });
+      expect(trip.config.services).toEqual(services);
+      expect(mocks.previewShell).toHaveBeenCalledTimes(trip.calls + 1);
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell).toHaveBeenCalledWith(trip.request);
+    });
+
+    it('keeps the simple form when the full config’s YAML does not parse', async () => {
+      mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, NO_JUPYTER_TEMPLATE]);
+      const { onLaunched, user } = await setup();
+      await openStartFrom(user);
+      await user.click(await screen.findByText('no-jupyter'));
+      await waitFor(() => expect(serviceBox('vscode')).toBeChecked());
+      await user.click(serviceBox('jupyter'));
+      await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+      await waitFor(() => expect(editorText()).toContain('resource_pool'));
+      const request = mocks.previewShell.mock.lastCall?.[0];
+      fireEvent.change(screen.getByTestId('code-editor'), { target: { value: 'services: [' } });
+      await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
+      expect(serviceBox('jupyter')).toBeChecked();
+      expect(serviceBox('vscode')).toBeChecked();
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell).toHaveBeenCalledWith(request);
+      expect(request.templateName).toBe('no-jupyter');
+    });
   });
 
   describe('a refused preview', () => {

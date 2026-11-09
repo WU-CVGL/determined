@@ -11,7 +11,7 @@ import Spinner from 'hew/Spinner';
 import { Loadable, Loaded, NotLoaded } from 'hew/utils/loadable';
 import { number, string, undefined as undefinedType, union } from 'io-ts';
 import yaml from 'js-yaml';
-import { isPlainObject } from 'lodash';
+import { isEqual, isPlainObject } from 'lodash';
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import Link from 'components/Link';
@@ -259,7 +259,8 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   // message with Retry, keeps them disabled, and is sent again when the pool or the workspace
   // changes. Switching between the simple form and the full config previews nothing, so that the
   // form keeps its changes: the watched fields read undefined while the simple form is replaced,
-  // which is no start-from change.
+  // which is no start-from change. An edited full config becomes the start-from's config when the
+  // simple form shows again, as a config start-from does, without a preview.
   const [simpleFormShown, setSimpleFormShown] = useState(false);
   const source = Form.useWatch('source', form);
   const pool = Form.useWatch('pool', form);
@@ -341,8 +342,10 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
 
   const handleServicesRetry = useCallback(() => setServicesRetry((count) => count + 1), []);
 
-  // Previewed each time the full config opens, numbered so that a late answer is dropped.
+  // Previewed each time the full config opens, numbered so that a late answer is dropped, and the
+  // config as the editor first shows it, to tell an edited one.
   const configSeq = useRef(0);
+  const previewedConfig = useRef<unknown>();
   const fetchConfig = useCallback(async () => {
     const seq = ++configSeq.current;
     setConfig(NotLoaded);
@@ -351,15 +354,53 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     const fields: LaunchFormValues = form.getFieldsValue(true);
     try {
       const newConfig = await previewShell(simpleOptions(fields));
-      if (seq === configSeq.current) setConfig(Loaded(yaml.dump(newConfig)));
+      if (seq !== configSeq.current) return;
+      const text = yaml.dump(newConfig);
+      previewedConfig.current = yaml.load(text);
+      setConfig(Loaded(text));
     } catch (e) {
       if (seq === configSeq.current) setConfigError(e instanceof Error ? e.message : PREVIEW_ERROR);
     }
   }, [form, simpleOptions]);
 
+  /**
+   * Makes a full config whose YAML was edited the simple form's config, its fields filled from it,
+   * and its services confirmed. A YAML that does not parse to a config changes nothing.
+   */
+  const applyEditedConfig = useCallback(() => {
+    let edited: unknown;
+    try {
+      edited = yaml.load(Loadable.isLoaded(config) ? config.data : '');
+    } catch {
+      return;
+    }
+    if (!isPlainObject(edited) || isEqual(edited, previewedConfig.current)) return;
+    const base = sanitizeConfig(edited as RawJson);
+    const fields = formFieldsFromConfig(base);
+    const services = serviceChecks(fields.services);
+    setBaseConfig(base);
+    offered.current = offeredServices(fields.services);
+    form.setFieldsValue({
+      logdir: fields.logdir,
+      name: fields.name,
+      pool: fields.pool,
+      services,
+      slots: fields.slots,
+    });
+    setServicesPreview({
+      baseConfig: base,
+      sent: services,
+      sentLogdir: fields.logdir,
+      seq: servicesPreview.current.seq + 1,
+      source: form.getFieldValue('source'),
+      status: 'success',
+    });
+  }, [config, form, setServicesPreview]);
+
   const handleSecondary = useCallback(async () => {
     if (showFullConfig) {
       configSeq.current++;
+      applyEditedConfig();
       setFullConfigFormInvalid(false);
     } else if (servicesConfirmed) {
       // The full config is the simple form's: a checked service's required field comes first.
@@ -371,7 +412,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       fetchConfig();
     } else return;
     setShowFullConfig((show) => !show);
-  }, [fetchConfig, form, servicesConfirmed, showFullConfig]);
+  }, [applyEditedConfig, fetchConfig, form, servicesConfirmed, showFullConfig]);
 
   const launch = useCallback(
     async (options: NtscLaunchOptions & { config?: RawJson }) => {
