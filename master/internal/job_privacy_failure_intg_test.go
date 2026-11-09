@@ -67,6 +67,35 @@ func useJobPrivacyEditorAuthZ(t *testing.T) {
 	t.Cleanup(func() { config.GetMasterConfig().Security.AuthZ = oldAuthZ })
 }
 
+// jobPrivacyNSCControlAuthZ is a command and shell authorization in which every user may control
+// every command and shell, as a workspace editor who is not the owner may under RBAC.
+type jobPrivacyNSCControlAuthZ struct {
+	*command.NSCAuthZBasic
+}
+
+// CanControlGenericTask allows every user.
+func (jobPrivacyNSCControlAuthZ) CanControlGenericTask(
+	context.Context, model.User, model.AccessScopeID, *model.UserID,
+) error {
+	return nil
+}
+
+var registerJobPrivacyNSCControlAuthZ sync.Once
+
+// useJobPrivacyNSCControlAuthZ lets every user kill every command and shell and set its priority
+// until the test ends. Everything else, the admin predicate included, stays basic.
+func useJobPrivacyNSCControlAuthZ(t *testing.T) {
+	registerJobPrivacyNSCControlAuthZ.Do(func() {
+		command.AuthZProvider.Register("jobprivacy-nsc-control",
+			jobPrivacyNSCControlAuthZ{&command.NSCAuthZBasic{}})
+	})
+	oldAuthZ := config.GetMasterConfig().Security.AuthZ
+	config.GetMasterConfig().Security.AuthZ = config.AuthZConfig{
+		Type: "jobprivacy-nsc-control", FallbackType: ptrs.Ptr(config.BasicAuthZType),
+	}
+	t.Cleanup(func() { config.GetMasterConfig().Security.AuthZ = oldAuthZ })
+}
+
 // TestJobPrivacyTrialUpsert checks that a PUT of an existing external trial, which returns the
 // stored trial, redacts its log policy match as GetTrial does: an editor who may not read the
 // logs gets no match from either, while the owner and an admin get it from both.
@@ -335,19 +364,31 @@ func TestJobPrivacyFailureReasons(t *testing.T) {
 			require.NoError(t, err)
 			requireMarker("GetShell", getShell)
 
-			// Only the owner and admins change a command or shell under basic authorization.
-			if vw.full {
-				prio, err := api.SetCommandPriority(ctx, &apiv1.SetCommandPriorityRequest{
-					CommandId: cmd.Command.Id, Priority: 10,
-				})
-				require.NoError(t, err)
-				requireMarker("SetCommandPriority", prio)
-				shellPrio, err := api.SetShellPriority(ctx, &apiv1.SetShellPriorityRequest{
-					ShellId: shell.Shell.Id, Priority: 10,
-				})
-				require.NoError(t, err)
-				requireMarker("SetShellPriority", shellPrio)
+			// Under basic authorization only the owner and admins control a command or shell;
+			// the other user controls them as a workspace editor may under RBAC.
+			if !vw.full {
+				useJobPrivacyNSCControlAuthZ(t)
 			}
+			prio, err := api.SetCommandPriority(ctx, &apiv1.SetCommandPriorityRequest{
+				CommandId: cmd.Command.Id, Priority: 10,
+			})
+			require.NoError(t, err)
+			requireMarker("SetCommandPriority", prio)
+			require.Equal(t, getCmd.Command.Capabilities, prio.Command.Capabilities)
+			shellPrio, err := api.SetShellPriority(ctx, &apiv1.SetShellPriorityRequest{
+				ShellId: shell.Shell.Id, Priority: 10,
+			})
+			require.NoError(t, err)
+			requireMarker("SetShellPriority", shellPrio)
+			require.Equal(t, getShell.Shell.Capabilities, shellPrio.Shell.Capabilities)
+			killed, err := api.KillCommand(ctx, &apiv1.KillCommandRequest{CommandId: cmd.Command.Id})
+			require.NoError(t, err)
+			requireMarker("KillCommand", killed)
+			require.Equal(t, getCmd.Command.Capabilities, killed.Command.Capabilities)
+			killedShell, err := api.KillShell(ctx, &apiv1.KillShellRequest{ShellId: shell.Shell.Id})
+			require.NoError(t, err)
+			requireMarker("KillShell", killedShell)
+			require.Equal(t, getShell.Shell.Capabilities, killedShell.Shell.Capabilities)
 		})
 	}
 

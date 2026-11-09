@@ -70,10 +70,10 @@ var jobPrivacyCheckedRPCs = map[string]string{
 	"TaskLogsFields":           "TestJobPrivacyLogReadPaths",
 	"TrialLogs":                "TestJobPrivacyLogReadPaths",
 	"TrialLogsFields":          "TestJobPrivacyLogReadPaths",
-	"KillCommand":              "TestJobPrivacyControlResponses",
-	"SetCommandPriority":       "TestJobPrivacyControlResponses",
-	"KillShell":                "TestJobPrivacyControlResponses",
-	"SetShellPriority":         "TestJobPrivacyControlResponses",
+	"KillCommand":              "TestJobPrivacyFailureReasons",
+	"SetCommandPriority":       "TestJobPrivacyFailureReasons",
+	"KillShell":                "TestJobPrivacyFailureReasons",
+	"SetShellPriority":         "TestJobPrivacyFailureReasons",
 	"PatchExperiment":          "TestJobPrivacyControlResponses",
 }
 
