@@ -275,20 +275,33 @@ describe('tensorBoardSession', () => {
       expect(launchShell).not.toHaveBeenCalled();
     });
 
-    it('skips a session whose services cannot be read', async () => {
-      const unread = shell({ id: 'shell-unread' });
+    it('skips a session that is no longer found', async () => {
+      const gone = shell({ id: 'shell-gone' });
       const session = shell({ id: 'shell-session' });
-      vi.mocked(getShells).mockResolvedValue([unread, session]);
+      vi.mocked(getShells).mockResolvedValue([gone, session]);
+      const notFound = await processApiError(
+        'getTaskServices',
+        new Response(JSON.stringify({ error: { code: 5, error: 'task not found' } }), {
+          status: 404,
+        }),
+      );
       vi.mocked(getTaskServices).mockImplementation(({ taskId }) =>
-        taskId === 'shell-unread'
-          ? Promise.reject(new Error('unavailable'))
-          : Promise.resolve(taskServices(taskId)),
+        taskId === 'shell-gone' ? Promise.reject(notFound) : Promise.resolve(taskServices(taskId)),
       );
       const response = await openOrCreateTensorBoard({
         experimentIds: [1, 3],
         workspaceId: WORKSPACE,
       });
       expect(response).toEqual({ command: session, warnings: [] });
+      expect(launchShell).not.toHaveBeenCalled();
+    });
+
+    it('creates nothing when the services of a matching shell cannot be read', async () => {
+      vi.mocked(getShells).mockResolvedValue([shell({ id: 'shell-old' })]);
+      vi.mocked(getTaskServices).mockRejectedValue(new Error('unavailable'));
+      await expect(
+        openOrCreateTensorBoard({ experimentIds: [1, 3], workspaceId: WORKSPACE }),
+      ).rejects.toThrow('unavailable');
       expect(launchShell).not.toHaveBeenCalled();
     });
 

@@ -7,6 +7,7 @@ import { V1GetTaskServicesResponse, V1TaskServiceState } from 'services/api-ts-s
 import userStore from 'stores/users';
 import { CommandResponse, CommandTask, InteractiveTaskTab, RawJson } from 'types';
 import handleError, { ErrorLevel } from 'utils/error';
+import { isNotFound } from 'utils/service';
 import { openInteractiveTask } from 'utils/wait';
 
 /** The idle timeout of a session started from the pages: the one `det tensorboard start` sends. */
@@ -66,7 +67,7 @@ export const isOpenableTensorBoardSession = (r: V1GetTaskServicesResponse): bool
  * The newest of the viewer's own unended shells in the selection's workspace with the same sources
  * that is a viewing session whose TensorBoard can be opened, else a new viewing session. Only the
  * shells with the same sources have their services read, newest first, until one qualifies; one
- * whose services cannot be read is skipped.
+ * no longer found is skipped, and any other failed read throws, so nothing is created.
  */
 export const openOrCreateTensorBoard = async (
   s: TensorBoardSelection,
@@ -97,6 +98,7 @@ export const openOrCreateTensorBoard = async (
         const services = await getTaskServices({ taskId: candidate.id });
         if (isOpenableTensorBoardSession(services)) return { command: candidate, warnings: [] };
       } catch (e) {
+        if (!isNotFound(e as Error)) throw e;
         handleError(e, { level: ErrorLevel.Warn, silent: true });
       }
     }
