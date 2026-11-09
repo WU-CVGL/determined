@@ -328,10 +328,6 @@ stringData:
     cluster_name: {{ .Values.clusterName }}
     {{- end }}
 
-    {{- if .Values.tensorboardTimeout }}
-    tensorboard_timeout: {{ .Values.tensorboardTimeout }}
-    {{- end }}
-
     {{- if .Values.logging }}
     logging:
       {{- if .Values.logging.type }}

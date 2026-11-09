@@ -259,14 +259,13 @@ export const Jobv1State = {
 } as const
 export type Jobv1State = ValueOf<typeof Jobv1State>
 /**
- * Job type.   - TYPE_UNSPECIFIED: Unspecified state.  - TYPE_EXPERIMENT: Experiement Job.  - TYPE_TENSORBOARD: TensorBoard Job.  - TYPE_SHELL: Shell Job.  - TYPE_COMMAND: Command Job.  - TYPE_CHECKPOINT_GC: CheckpointGC Job.  - TYPE_EXTERNAL: External Job.  - TYPE_GENERIC: Generic Job.
+ * Job type.   - TYPE_UNSPECIFIED: Unspecified state.  - TYPE_EXPERIMENT: Experiement Job.  - TYPE_SHELL: Shell Job.  - TYPE_COMMAND: Command Job.  - TYPE_CHECKPOINT_GC: CheckpointGC Job.  - TYPE_EXTERNAL: External Job.  - TYPE_GENERIC: Generic Job.
  * @export
  * @enum {string}
  */
 export const Jobv1Type = {
     UNSPECIFIED: 'TYPE_UNSPECIFIED',
     EXPERIMENT: 'TYPE_EXPERIMENT',
-    TENSORBOARD: 'TYPE_TENSORBOARD',
     SHELL: 'TYPE_SHELL',
     COMMAND: 'TYPE_COMMAND',
     CHECKPOINTGC: 'TYPE_CHECKPOINT_GC',
@@ -756,7 +755,7 @@ export const TaskServiceProtocol = {
 } as const
 export type TaskServiceProtocol = ValueOf<typeof TaskServiceProtocol>
 /**
- * The current state of the task.   - STATE_UNSPECIFIED: The task state is unknown.  - STATE_PULLING: The task's base image is being pulled from the Docker registry.  - STATE_STARTING: The image has been pulled and the task is being started, but the task is not ready yet.  - STATE_RUNNING: The service in the task is running.  - STATE_TERMINATED: The task has exited or has been aborted.  - STATE_TERMINATING: The task has begun to exit.  - STATE_WAITING: The task is waiting on something to complete.  - STATE_QUEUED: Additional state to cover queueing operations.
+ * The current state of the task.   - STATE_UNSPECIFIED: The task state is unknown.  - STATE_PULLING: The task's base image is being pulled from the Docker registry.  - STATE_STARTING: The image has been pulled and the task is being started, but the task is not ready yet.  - STATE_RUNNING: The service in the task is running.  - STATE_TERMINATED: The task has exited or has been aborted.  - STATE_TERMINATING: The task has begun to exit.  - STATE_QUEUED: Additional state to cover queueing operations.
  * @export
  * @enum {string}
  */
@@ -767,7 +766,6 @@ export const Taskv1State = {
     RUNNING: 'STATE_RUNNING',
     TERMINATED: 'STATE_TERMINATED',
     TERMINATING: 'STATE_TERMINATING',
-    WAITING: 'STATE_WAITING',
     QUEUED: 'STATE_QUEUED',
 } as const
 export type Taskv1State = ValueOf<typeof Taskv1State>
@@ -1478,26 +1476,6 @@ export interface V1AllocationSummary {
      * @memberof V1AllocationSummary
      */
     proxyPorts?: Array<V1ProxyPortConfig>;
-}
-/**
- * Mark the given task as waiting.
- * @export
- * @interface V1AllocationWaitingRequest
- */
-export interface V1AllocationWaitingRequest {
-    /**
-     * The id of the allocation.
-     * @type {string}
-     * @memberof V1AllocationWaitingRequest
-     */
-    allocationId?: string;
-}
-/**
- * Response to AllocationWaitingRequest.
- * @export
- * @interface V1AllocationWaitingResponse
- */
-export interface V1AllocationWaitingResponse {
 }
 /**
  * Response to ArchiveExperimentRequest.
@@ -3850,12 +3828,6 @@ export interface V1GetActiveTasksCountResponse {
      * @memberof V1GetActiveTasksCountResponse
      */
     shells: number;
-    /**
-     * The count of TensorBoards.
-     * @type {number}
-     * @memberof V1GetActiveTasksCountResponse
-     */
-    tensorboards: number;
 }
 /**
  * Response to GetAgentRequest.
@@ -5109,7 +5081,7 @@ export interface V1GetTaskServicesResponse {
      */
     primary: string;
     /**
-     * The services of the task, the primary one first. Commands and TensorBoards have none.
+     * The services of the task, the primary one first. Commands have none.
      * @type {Array<V1TaskService>}
      * @memberof V1GetTaskServicesResponse
      */
@@ -5200,57 +5172,6 @@ export interface V1GetTemplatesResponse {
      * @memberof V1GetTemplatesResponse
      */
     pagination: V1Pagination;
-}
-/**
- * Response to GetTensorboardRequest.
- * @export
- * @interface V1GetTensorboardResponse
- */
-export interface V1GetTensorboardResponse {
-    /**
-     * The requested tensorboard.
-     * @type {V1Tensorboard}
-     * @memberof V1GetTensorboardResponse
-     */
-    tensorboard: V1Tensorboard;
-    /**
-     * The config;
-     * @type {any}
-     * @memberof V1GetTensorboardResponse
-     */
-    config: any;
-}
-/**
- * Sorts tensorboards by the given field.   - SORT_BY_UNSPECIFIED: Returns tensorboards in an unsorted list.  - SORT_BY_ID: Returns tensorboards sorted by id.  - SORT_BY_DESCRIPTION: Returns tensorboards sorted by description.  - SORT_BY_START_TIME: Return tensorboards sorted by start time.  - SORT_BY_WORKSPACE_ID: Return tensorboards sorted by workspace_id.
- * @export
- * @enum {string}
- */
-export const V1GetTensorboardsRequestSortBy = {
-    UNSPECIFIED: 'SORT_BY_UNSPECIFIED',
-    ID: 'SORT_BY_ID',
-    DESCRIPTION: 'SORT_BY_DESCRIPTION',
-    STARTTIME: 'SORT_BY_START_TIME',
-    WORKSPACEID: 'SORT_BY_WORKSPACE_ID',
-} as const
-export type V1GetTensorboardsRequestSortBy = ValueOf<typeof V1GetTensorboardsRequestSortBy>
-/**
- * Response to GetTensorboardsRequest.
- * @export
- * @interface V1GetTensorboardsResponse
- */
-export interface V1GetTensorboardsResponse {
-    /**
-     * The list of returned tensorboards.
-     * @type {Array<V1Tensorboard>}
-     * @memberof V1GetTensorboardsResponse
-     */
-    tensorboards: Array<V1Tensorboard>;
-    /**
-     * Pagination information of the full dataset.
-     * @type {V1Pagination}
-     * @memberof V1GetTensorboardsResponse
-     */
-    pagination?: V1Pagination;
 }
 /**
  * Response to GetTrainingMetricsRequest.
@@ -6334,19 +6255,6 @@ export interface V1KillShellResponse {
     shell?: V1Shell;
 }
 /**
- * Response to KillTensorboardRequest.
- * @export
- * @interface V1KillTensorboardResponse
- */
-export interface V1KillTensorboardResponse {
-    /**
-     * The requested tensorboard.
-     * @type {V1Tensorboard}
-     * @memberof V1KillTensorboardResponse
-     */
-    tensorboard?: V1Tensorboard;
-}
-/**
  * Response to KillTrialRequest.
  * @export
  * @interface V1KillTrialResponse
@@ -6474,80 +6382,6 @@ export interface V1LaunchShellResponse {
      * List of any related warnings.
      * @type {Array<V1LaunchWarning>}
      * @memberof V1LaunchShellResponse
-     */
-    warnings?: Array<V1LaunchWarning>;
-}
-/**
- * Request to launch a tensorboard.
- * @export
- * @interface V1LaunchTensorboardRequest
- */
-export interface V1LaunchTensorboardRequest {
-    /**
-     * List of source experiment ids.
-     * @type {Array<number>}
-     * @memberof V1LaunchTensorboardRequest
-     */
-    experimentIds?: Array<number>;
-    /**
-     * List of source trial ids.
-     * @type {Array<number>}
-     * @memberof V1LaunchTensorboardRequest
-     */
-    trialIds?: Array<number>;
-    /**
-     * Tensorboard config (JSON).
-     * @type {any}
-     * @memberof V1LaunchTensorboardRequest
-     */
-    config?: any;
-    /**
-     * Tensorboard template name.
-     * @type {string}
-     * @memberof V1LaunchTensorboardRequest
-     */
-    templateName?: string;
-    /**
-     * The files to run with the command.
-     * @type {Array<V1File>}
-     * @memberof V1LaunchTensorboardRequest
-     */
-    files?: Array<V1File>;
-    /**
-     * Workspace in which to launch tensorboard. Defaults to 'Uncategorized'.
-     * @type {number}
-     * @memberof V1LaunchTensorboardRequest
-     */
-    workspaceId?: number;
-    /**
-     * Targets all experiments matching filters.
-     * @type {V1BulkExperimentFilters}
-     * @memberof V1LaunchTensorboardRequest
-     */
-    filters?: V1BulkExperimentFilters;
-}
-/**
- * Response to LaunchTensorboardRequest.
- * @export
- * @interface V1LaunchTensorboardResponse
- */
-export interface V1LaunchTensorboardResponse {
-    /**
-     * The requested tensorboard.
-     * @type {V1Tensorboard}
-     * @memberof V1LaunchTensorboardResponse
-     */
-    tensorboard: V1Tensorboard;
-    /**
-     * The config;
-     * @type {any}
-     * @memberof V1LaunchTensorboardResponse
-     */
-    config: any;
-    /**
-     * List of any related warnings.
-     * @type {Array<V1LaunchWarning>}
-     * @memberof V1LaunchTensorboardResponse
      */
     warnings?: Array<V1LaunchWarning>;
 }
@@ -11185,38 +11019,6 @@ export interface V1SetShellPriorityResponse {
     shell?: V1Shell;
 }
 /**
- * Set the priority of the requested TensorBoard.
- * @export
- * @interface V1SetTensorboardPriorityRequest
- */
-export interface V1SetTensorboardPriorityRequest {
-    /**
-     * The id of the TensorBoard.
-     * @type {string}
-     * @memberof V1SetTensorboardPriorityRequest
-     */
-    tensorboardId?: string;
-    /**
-     * The new priority.
-     * @type {number}
-     * @memberof V1SetTensorboardPriorityRequest
-     */
-    priority?: number;
-}
-/**
- * Response to SetTensorboardPriorityRequest.
- * @export
- * @interface V1SetTensorboardPriorityResponse
- */
-export interface V1SetTensorboardPriorityResponse {
-    /**
-     * The requested Tensorboard.
-     * @type {V1Tensorboard}
-     * @memberof V1SetTensorboardPriorityResponse
-     */
-    tensorboard?: V1Tensorboard;
-}
-/**
  * Set the requested user's passwords.
  * @export
  * @interface V1SetUserPasswordRequest
@@ -11987,7 +11789,7 @@ export const V1TaskServiceState = {
 } as const
 export type V1TaskServiceState = ValueOf<typeof V1TaskServiceState>
 /**
- * Type of the task - TASK_TYPE_UNSPECIFIED: The task type is unknown  - TASK_TYPE_TRIAL: "TRIAL" task type for the enum public.task_type in Postgres.  - TASK_TYPE_SHELL: "SHELL" task type for the enum public.task_type in Postgres.  - TASK_TYPE_COMMAND: "COMMAND" task type for the enum public.task_type in Postgres.  - TASK_TYPE_TENSORBOARD: "TENSORBOARD" task type for the enum public.task_type in Postgres.  - TASK_TYPE_CHECKPOINT_GC: "CHECKPOINT_GC" task type for the enum public.task_type in Postgres.  - TASK_TYPE_GENERIC: "GENERIC" task type for the enum public.task_type in Postgres.
+ * Type of the task - TASK_TYPE_UNSPECIFIED: The task type is unknown  - TASK_TYPE_TRIAL: "TRIAL" task type for the enum public.task_type in Postgres.  - TASK_TYPE_SHELL: "SHELL" task type for the enum public.task_type in Postgres.  - TASK_TYPE_COMMAND: "COMMAND" task type for the enum public.task_type in Postgres.  - TASK_TYPE_CHECKPOINT_GC: "CHECKPOINT_GC" task type for the enum public.task_type in Postgres.  - TASK_TYPE_GENERIC: "GENERIC" task type for the enum public.task_type in Postgres.
  * @export
  * @enum {string}
  */
@@ -11996,7 +11798,6 @@ export const V1TaskType = {
     TRIAL: 'TASK_TYPE_TRIAL',
     SHELL: 'TASK_TYPE_SHELL',
     COMMAND: 'TASK_TYPE_COMMAND',
-    TENSORBOARD: 'TASK_TYPE_TENSORBOARD',
     CHECKPOINTGC: 'TASK_TYPE_CHECKPOINT_GC',
     GENERIC: 'TASK_TYPE_GENERIC',
 } as const
@@ -12025,121 +11826,6 @@ export interface V1Template {
      * @memberof V1Template
      */
     workspaceId: number;
-}
-/**
- * Tensorboard is a tensorboard instance in a containerized environment.
- * @export
- * @interface V1Tensorboard
- */
-export interface V1Tensorboard {
-    /**
-     * The id of the tensorboard.
-     * @type {string}
-     * @memberof V1Tensorboard
-     */
-    id: string;
-    /**
-     * The description of the tensorboard.
-     * @type {string}
-     * @memberof V1Tensorboard
-     */
-    description: string;
-    /**
-     * The state of the tensorboard.
-     * @type {Taskv1State}
-     * @memberof V1Tensorboard
-     */
-    state: Taskv1State;
-    /**
-     * The time the tensorboard was submitted (registered with the master).
-     * @type {Date | DateString}
-     * @memberof V1Tensorboard
-     */
-    startTime: Date | DateString;
-    /**
-     * The container running the tensorboard.
-     * @type {V1Container}
-     * @memberof V1Tensorboard
-     */
-    container?: V1Container;
-    /**
-     * The experiment ids loaded into this tensorboard instance.
-     * @type {Array<number>}
-     * @memberof V1Tensorboard
-     */
-    experimentIds?: Array<number>;
-    /**
-     * The trial ids loaded into this tensorboard instance.
-     * @type {Array<number>}
-     * @memberof V1Tensorboard
-     */
-    trialIds?: Array<number>;
-    /**
-     * The display name of the user that created the tensorboard.
-     * @type {string}
-     * @memberof V1Tensorboard
-     */
-    displayName?: string;
-    /**
-     * The id of the user that created the tensorboard.
-     * @type {number}
-     * @memberof V1Tensorboard
-     */
-    userId?: number;
-    /**
-     * The username of the user that created the tensorboard.
-     * @type {string}
-     * @memberof V1Tensorboard
-     */
-    username: string;
-    /**
-     * The service address.
-     * @type {string}
-     * @memberof V1Tensorboard
-     */
-    serviceAddress?: string;
-    /**
-     * The name of the resource pool the command was created in
-     * @type {string}
-     * @memberof V1Tensorboard
-     */
-    resourcePool: string;
-    /**
-     * The exit status;
-     * @type {string}
-     * @memberof V1Tensorboard
-     */
-    exitStatus?: string;
-    /**
-     * The associated job id.
-     * @type {string}
-     * @memberof V1Tensorboard
-     */
-    jobId: string;
-    /**
-     * The workspace id.
-     * @type {number}
-     * @memberof V1Tensorboard
-     */
-    workspaceId: number;
-    /**
-     * The slot count the TensorBoard requests (resources.slots), 0 when it requests none.
-     * @type {number}
-     * @memberof V1Tensorboard
-     */
-    slots?: number;
-    /**
-     * The time the TensorBoard ended; unset while it runs.
-     * @type {Date | DateString}
-     * @memberof V1Tensorboard
-     */
-    endTime?: Date | DateString;
-    /**
-     * First resource assignment time, provided by the list API; unset if never assigned. Available only in Agent-only clusters; omitted on other or mixed backends.
-     * @type {Date | DateString}
-     * @memberof V1Tensorboard
-     */
-    allocationStartTime?: Date | DateString;
 }
 /**
  * Response to TestWebhookRequest.
@@ -16081,7 +15767,7 @@ export const CommandsApiFetchParamCreator = function (configuration?: Configurat
         /**
          * 
          * @summary Get a list of commands.
-         * @param {V1GetTensorboardsRequestSortBy} [sortBy] Sort commands by the given field.   - SORT_BY_UNSPECIFIED: Returns commands in an unsorted list.  - SORT_BY_ID: Returns commands sorted by id.  - SORT_BY_DESCRIPTION: Returns commands sorted by description.  - SORT_BY_START_TIME: Return commands sorted by start time.  - SORT_BY_WORKSPACE_ID: Return commands sorted by workspace_id.
+         * @param {V1GetShellsRequestSortBy} [sortBy] Sort commands by the given field.   - SORT_BY_UNSPECIFIED: Returns commands in an unsorted list.  - SORT_BY_ID: Returns commands sorted by id.  - SORT_BY_DESCRIPTION: Returns commands sorted by description.  - SORT_BY_START_TIME: Return commands sorted by start time.  - SORT_BY_WORKSPACE_ID: Return commands sorted by workspace_id.
          * @param {V1OrderBy} [orderBy] Order commands in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
          * @param {number} [offset] Skip the number of commands before returning results. Negative values denote number of commands to skip from the end before returning results.
          * @param {number} [limit] Limit the number of commands. A value of 0 denotes no limit.
@@ -16091,7 +15777,7 @@ export const CommandsApiFetchParamCreator = function (configuration?: Configurat
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getCommands(sortBy?: V1GetTensorboardsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options: any = {}): FetchArgs {
+        getCommands(sortBy?: V1GetShellsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options: any = {}): FetchArgs {
             const localVarPath = `/api/v1/commands`;
             const localVarUrlObj = new URL(localVarPath, BASE_PATH);
             const localVarRequestOptions = { method: 'GET', ...options };
@@ -16292,7 +15978,7 @@ export const CommandsApiFp = function (configuration?: Configuration) {
         /**
          * 
          * @summary Get a list of commands.
-         * @param {V1GetTensorboardsRequestSortBy} [sortBy] Sort commands by the given field.   - SORT_BY_UNSPECIFIED: Returns commands in an unsorted list.  - SORT_BY_ID: Returns commands sorted by id.  - SORT_BY_DESCRIPTION: Returns commands sorted by description.  - SORT_BY_START_TIME: Return commands sorted by start time.  - SORT_BY_WORKSPACE_ID: Return commands sorted by workspace_id.
+         * @param {V1GetShellsRequestSortBy} [sortBy] Sort commands by the given field.   - SORT_BY_UNSPECIFIED: Returns commands in an unsorted list.  - SORT_BY_ID: Returns commands sorted by id.  - SORT_BY_DESCRIPTION: Returns commands sorted by description.  - SORT_BY_START_TIME: Return commands sorted by start time.  - SORT_BY_WORKSPACE_ID: Return commands sorted by workspace_id.
          * @param {V1OrderBy} [orderBy] Order commands in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
          * @param {number} [offset] Skip the number of commands before returning results. Negative values denote number of commands to skip from the end before returning results.
          * @param {number} [limit] Limit the number of commands. A value of 0 denotes no limit.
@@ -16302,7 +15988,7 @@ export const CommandsApiFp = function (configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getCommands(sortBy?: V1GetTensorboardsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetCommandsResponse> {
+        getCommands(sortBy?: V1GetShellsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetCommandsResponse> {
             const localVarFetchArgs = CommandsApiFetchParamCreator(configuration).getCommands(sortBy, orderBy, offset, limit, users, userIds, workspaceId, options);
             return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
                 return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
@@ -16394,7 +16080,7 @@ export const CommandsApiFactory = function (configuration?: Configuration, fetch
         /**
          * 
          * @summary Get a list of commands.
-         * @param {V1GetTensorboardsRequestSortBy} [sortBy] Sort commands by the given field.   - SORT_BY_UNSPECIFIED: Returns commands in an unsorted list.  - SORT_BY_ID: Returns commands sorted by id.  - SORT_BY_DESCRIPTION: Returns commands sorted by description.  - SORT_BY_START_TIME: Return commands sorted by start time.  - SORT_BY_WORKSPACE_ID: Return commands sorted by workspace_id.
+         * @param {V1GetShellsRequestSortBy} [sortBy] Sort commands by the given field.   - SORT_BY_UNSPECIFIED: Returns commands in an unsorted list.  - SORT_BY_ID: Returns commands sorted by id.  - SORT_BY_DESCRIPTION: Returns commands sorted by description.  - SORT_BY_START_TIME: Return commands sorted by start time.  - SORT_BY_WORKSPACE_ID: Return commands sorted by workspace_id.
          * @param {V1OrderBy} [orderBy] Order commands in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
          * @param {number} [offset] Skip the number of commands before returning results. Negative values denote number of commands to skip from the end before returning results.
          * @param {number} [limit] Limit the number of commands. A value of 0 denotes no limit.
@@ -16404,7 +16090,7 @@ export const CommandsApiFactory = function (configuration?: Configuration, fetch
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getCommands(sortBy?: V1GetTensorboardsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options?: any) {
+        getCommands(sortBy?: V1GetShellsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options?: any) {
             return CommandsApiFp(configuration).getCommands(sortBy, orderBy, offset, limit, users, userIds, workspaceId, options)(fetch, basePath);
         },
         /**
@@ -16463,7 +16149,7 @@ export class CommandsApi extends BaseAPI {
     /**
      * 
      * @summary Get a list of commands.
-     * @param {V1GetTensorboardsRequestSortBy} [sortBy] Sort commands by the given field.   - SORT_BY_UNSPECIFIED: Returns commands in an unsorted list.  - SORT_BY_ID: Returns commands sorted by id.  - SORT_BY_DESCRIPTION: Returns commands sorted by description.  - SORT_BY_START_TIME: Return commands sorted by start time.  - SORT_BY_WORKSPACE_ID: Return commands sorted by workspace_id.
+     * @param {V1GetShellsRequestSortBy} [sortBy] Sort commands by the given field.   - SORT_BY_UNSPECIFIED: Returns commands in an unsorted list.  - SORT_BY_ID: Returns commands sorted by id.  - SORT_BY_DESCRIPTION: Returns commands sorted by description.  - SORT_BY_START_TIME: Return commands sorted by start time.  - SORT_BY_WORKSPACE_ID: Return commands sorted by workspace_id.
      * @param {V1OrderBy} [orderBy] Order commands in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
      * @param {number} [offset] Skip the number of commands before returning results. Negative values denote number of commands to skip from the end before returning results.
      * @param {number} [limit] Limit the number of commands. A value of 0 denotes no limit.
@@ -16474,7 +16160,7 @@ export class CommandsApi extends BaseAPI {
      * @throws {RequiredError}
      * @memberof CommandsApi
      */
-    public getCommands(sortBy?: V1GetTensorboardsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options?: any) {
+    public getCommands(sortBy?: V1GetShellsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options?: any) {
         return CommandsApiFp(this.configuration).getCommands(sortBy, orderBy, offset, limit, users, userIds, workspaceId, options)(this.fetch, this.basePath)
     }
     
@@ -20585,50 +20271,6 @@ export const InternalApiFetchParamCreator = function (configuration?: Configurat
         },
         /**
          * 
-         * @summary Set allocation to waiting state.
-         * @param {string} allocationId The id of the allocation.
-         * @param {V1AllocationWaitingRequest} body
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        allocationWaiting(allocationId: string, body: V1AllocationWaitingRequest, options: any = {}): FetchArgs {
-            // verify required parameter 'allocationId' is not null or undefined
-            if (allocationId === null || allocationId === undefined) {
-                throw new RequiredError('allocationId','Required parameter allocationId was null or undefined when calling allocationWaiting.');
-            }
-            // verify required parameter 'body' is not null or undefined
-            if (body === null || body === undefined) {
-                throw new RequiredError('body','Required parameter body was null or undefined when calling allocationWaiting.');
-            }
-            const localVarPath = `/api/v1/allocations/{allocationId}/waiting`
-                .replace(`{${"allocationId"}}`, encodeURIComponent(String(allocationId)));
-            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
-            const localVarRequestOptions = { method: 'POST', ...options };
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-            
-            // authentication BearerToken required
-            if (configuration && configuration.apiKey) {
-                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
-                    ? configuration.apiKey("Authorization")
-                    : configuration.apiKey;
-                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
-            }
-            
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            
-            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
-            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
-            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
-            localVarRequestOptions.body = JSON.stringify(body)
-            
-            return {
-                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * 
          * @summary Archive runs.
          * @param {V1ArchiveRunsRequest} body
          * @param {*} [options] Override http request option.
@@ -23770,26 +23412,6 @@ export const InternalApiFp = function (configuration?: Configuration) {
         },
         /**
          * 
-         * @summary Set allocation to waiting state.
-         * @param {string} allocationId The id of the allocation.
-         * @param {V1AllocationWaitingRequest} body
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        allocationWaiting(allocationId: string, body: V1AllocationWaitingRequest, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1AllocationWaitingResponse> {
-            const localVarFetchArgs = InternalApiFetchParamCreator(configuration).allocationWaiting(allocationId, body, options);
-            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
-                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-                    if (response.status >= 200 && response.status < 300) {
-                        return response.json();
-                    } else {
-                        throw response;
-                    }
-                });
-            };
-        },
-        /**
-         * 
          * @summary Archive runs.
          * @param {V1ArchiveRunsRequest} body
          * @param {*} [options] Override http request option.
@@ -25282,17 +24904,6 @@ export const InternalApiFactory = function (configuration?: Configuration, fetch
         },
         /**
          * 
-         * @summary Set allocation to waiting state.
-         * @param {string} allocationId The id of the allocation.
-         * @param {V1AllocationWaitingRequest} body
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        allocationWaiting(allocationId: string, body: V1AllocationWaitingRequest, options?: any) {
-            return InternalApiFp(configuration).allocationWaiting(allocationId, body, options)(fetch, basePath);
-        },
-        /**
-         * 
          * @summary Archive runs.
          * @param {V1ArchiveRunsRequest} body
          * @param {*} [options] Override http request option.
@@ -26155,19 +25766,6 @@ export class InternalApi extends BaseAPI {
      */
     public allocationRendezvousInfo(allocationId: string, resourcesId: string, options?: any) {
         return InternalApiFp(this.configuration).allocationRendezvousInfo(allocationId, resourcesId, options)(this.fetch, this.basePath)
-    }
-    
-    /**
-     * 
-     * @summary Set allocation to waiting state.
-     * @param {string} allocationId The id of the allocation.
-     * @param {V1AllocationWaitingRequest} body
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     * @memberof InternalApi
-     */
-    public allocationWaiting(allocationId: string, body: V1AllocationWaitingRequest, options?: any) {
-        return InternalApiFp(this.configuration).allocationWaiting(allocationId, body, options)(this.fetch, this.basePath)
     }
     
     /**
@@ -30835,7 +30433,7 @@ export const ShellsApiFetchParamCreator = function (configuration?: Configuratio
         /**
          * 
          * @summary Get a list of shells.
-         * @param {V1GetTensorboardsRequestSortBy} [sortBy] Sort shells by the given field.   - SORT_BY_UNSPECIFIED: Returns shells in an unsorted list.  - SORT_BY_ID: Returns shells sorted by id.  - SORT_BY_DESCRIPTION: Returns shells sorted by description.  - SORT_BY_START_TIME: Return shells sorted by start time.  - SORT_BY_WORKSPACE_ID: Return shells sorted by workspace_id.
+         * @param {V1GetShellsRequestSortBy} [sortBy] Sort shells by the given field.   - SORT_BY_UNSPECIFIED: Returns shells in an unsorted list.  - SORT_BY_ID: Returns shells sorted by id.  - SORT_BY_DESCRIPTION: Returns shells sorted by description.  - SORT_BY_START_TIME: Return shells sorted by start time.  - SORT_BY_WORKSPACE_ID: Return shells sorted by workspace_id.
          * @param {V1OrderBy} [orderBy] Order shells in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
          * @param {number} [offset] Skip the number of shells before returning results. Negative values denote number of shells to skip from the end before returning results.
          * @param {number} [limit] Limit the number of shells. A value of 0 denotes no limit.
@@ -30845,7 +30443,7 @@ export const ShellsApiFetchParamCreator = function (configuration?: Configuratio
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getShells(sortBy?: V1GetTensorboardsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options: any = {}): FetchArgs {
+        getShells(sortBy?: V1GetShellsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options: any = {}): FetchArgs {
             const localVarPath = `/api/v1/shells`;
             const localVarUrlObj = new URL(localVarPath, BASE_PATH);
             const localVarRequestOptions = { method: 'GET', ...options };
@@ -31084,7 +30682,7 @@ export const ShellsApiFp = function (configuration?: Configuration) {
         /**
          * 
          * @summary Get a list of shells.
-         * @param {V1GetTensorboardsRequestSortBy} [sortBy] Sort shells by the given field.   - SORT_BY_UNSPECIFIED: Returns shells in an unsorted list.  - SORT_BY_ID: Returns shells sorted by id.  - SORT_BY_DESCRIPTION: Returns shells sorted by description.  - SORT_BY_START_TIME: Return shells sorted by start time.  - SORT_BY_WORKSPACE_ID: Return shells sorted by workspace_id.
+         * @param {V1GetShellsRequestSortBy} [sortBy] Sort shells by the given field.   - SORT_BY_UNSPECIFIED: Returns shells in an unsorted list.  - SORT_BY_ID: Returns shells sorted by id.  - SORT_BY_DESCRIPTION: Returns shells sorted by description.  - SORT_BY_START_TIME: Return shells sorted by start time.  - SORT_BY_WORKSPACE_ID: Return shells sorted by workspace_id.
          * @param {V1OrderBy} [orderBy] Order shells in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
          * @param {number} [offset] Skip the number of shells before returning results. Negative values denote number of shells to skip from the end before returning results.
          * @param {number} [limit] Limit the number of shells. A value of 0 denotes no limit.
@@ -31094,7 +30692,7 @@ export const ShellsApiFp = function (configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getShells(sortBy?: V1GetTensorboardsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetShellsResponse> {
+        getShells(sortBy?: V1GetShellsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetShellsResponse> {
             const localVarFetchArgs = ShellsApiFetchParamCreator(configuration).getShells(sortBy, orderBy, offset, limit, users, userIds, workspaceId, options);
             return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
                 return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
@@ -31205,7 +30803,7 @@ export const ShellsApiFactory = function (configuration?: Configuration, fetch?:
         /**
          * 
          * @summary Get a list of shells.
-         * @param {V1GetTensorboardsRequestSortBy} [sortBy] Sort shells by the given field.   - SORT_BY_UNSPECIFIED: Returns shells in an unsorted list.  - SORT_BY_ID: Returns shells sorted by id.  - SORT_BY_DESCRIPTION: Returns shells sorted by description.  - SORT_BY_START_TIME: Return shells sorted by start time.  - SORT_BY_WORKSPACE_ID: Return shells sorted by workspace_id.
+         * @param {V1GetShellsRequestSortBy} [sortBy] Sort shells by the given field.   - SORT_BY_UNSPECIFIED: Returns shells in an unsorted list.  - SORT_BY_ID: Returns shells sorted by id.  - SORT_BY_DESCRIPTION: Returns shells sorted by description.  - SORT_BY_START_TIME: Return shells sorted by start time.  - SORT_BY_WORKSPACE_ID: Return shells sorted by workspace_id.
          * @param {V1OrderBy} [orderBy] Order shells in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
          * @param {number} [offset] Skip the number of shells before returning results. Negative values denote number of shells to skip from the end before returning results.
          * @param {number} [limit] Limit the number of shells. A value of 0 denotes no limit.
@@ -31215,7 +30813,7 @@ export const ShellsApiFactory = function (configuration?: Configuration, fetch?:
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getShells(sortBy?: V1GetTensorboardsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options?: any) {
+        getShells(sortBy?: V1GetShellsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options?: any) {
             return ShellsApiFp(configuration).getShells(sortBy, orderBy, offset, limit, users, userIds, workspaceId, options)(fetch, basePath);
         },
         /**
@@ -31284,7 +30882,7 @@ export class ShellsApi extends BaseAPI {
     /**
      * 
      * @summary Get a list of shells.
-     * @param {V1GetTensorboardsRequestSortBy} [sortBy] Sort shells by the given field.   - SORT_BY_UNSPECIFIED: Returns shells in an unsorted list.  - SORT_BY_ID: Returns shells sorted by id.  - SORT_BY_DESCRIPTION: Returns shells sorted by description.  - SORT_BY_START_TIME: Return shells sorted by start time.  - SORT_BY_WORKSPACE_ID: Return shells sorted by workspace_id.
+     * @param {V1GetShellsRequestSortBy} [sortBy] Sort shells by the given field.   - SORT_BY_UNSPECIFIED: Returns shells in an unsorted list.  - SORT_BY_ID: Returns shells sorted by id.  - SORT_BY_DESCRIPTION: Returns shells sorted by description.  - SORT_BY_START_TIME: Return shells sorted by start time.  - SORT_BY_WORKSPACE_ID: Return shells sorted by workspace_id.
      * @param {V1OrderBy} [orderBy] Order shells in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
      * @param {number} [offset] Skip the number of shells before returning results. Negative values denote number of shells to skip from the end before returning results.
      * @param {number} [limit] Limit the number of shells. A value of 0 denotes no limit.
@@ -31295,7 +30893,7 @@ export class ShellsApi extends BaseAPI {
      * @throws {RequiredError}
      * @memberof ShellsApi
      */
-    public getShells(sortBy?: V1GetTensorboardsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options?: any) {
+    public getShells(sortBy?: V1GetShellsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options?: any) {
         return ShellsApiFp(this.configuration).getShells(sortBy, orderBy, offset, limit, users, userIds, workspaceId, options)(this.fetch, this.basePath)
     }
     
@@ -33533,487 +33131,6 @@ export class TemplatesApi extends BaseAPI {
      */
     public putTemplate(templateName: string, body: V1Template, options?: any) {
         return TemplatesApiFp(this.configuration).putTemplate(templateName, body, options)(this.fetch, this.basePath)
-    }
-    
-}
-
-/**
- * TensorboardsApi - fetch parameter creator
- * @export
- */
-export const TensorboardsApiFetchParamCreator = function (configuration?: Configuration) {
-    return {
-        /**
-         * 
-         * @summary Get the requested tensorboard.
-         * @param {string} tensorboardId The id of the tensorboard.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        getTensorboard(tensorboardId: string, options: any = {}): FetchArgs {
-            // verify required parameter 'tensorboardId' is not null or undefined
-            if (tensorboardId === null || tensorboardId === undefined) {
-                throw new RequiredError('tensorboardId','Required parameter tensorboardId was null or undefined when calling getTensorboard.');
-            }
-            const localVarPath = `/api/v1/tensorboards/{tensorboardId}`
-                .replace(`{${"tensorboardId"}}`, encodeURIComponent(String(tensorboardId)));
-            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
-            const localVarRequestOptions = { method: 'GET', ...options };
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-            
-            // authentication BearerToken required
-            if (configuration && configuration.apiKey) {
-                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
-                    ? configuration.apiKey("Authorization")
-                    : configuration.apiKey;
-                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
-            }
-            
-            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
-            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
-            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
-            
-            return {
-                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * 
-         * @summary Get a list of tensorboards.
-         * @param {V1GetTensorboardsRequestSortBy} [sortBy] Sort tensorboards by the given field.   - SORT_BY_UNSPECIFIED: Returns tensorboards in an unsorted list.  - SORT_BY_ID: Returns tensorboards sorted by id.  - SORT_BY_DESCRIPTION: Returns tensorboards sorted by description.  - SORT_BY_START_TIME: Return tensorboards sorted by start time.  - SORT_BY_WORKSPACE_ID: Return tensorboards sorted by workspace_id.
-         * @param {V1OrderBy} [orderBy] Order tensorboards in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
-         * @param {number} [offset] Skip the number of tensorboards before returning results. Negative values denote number of tensorboards to skip from the end before returning results.
-         * @param {number} [limit] Limit the number of tensorboards. A value of 0 denotes no limit.
-         * @param {Array<string>} [users] Limit tensorboards to those that are owned by users with the specified usernames.
-         * @param {Array<number>} [userIds] Limit tensorboards to those that are owned by users with the specified userIds.
-         * @param {number} [workspaceId] Limit tensorboards to those that are in a specific workspace, or 0 for all accessible workspaces.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        getTensorboards(sortBy?: V1GetTensorboardsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options: any = {}): FetchArgs {
-            const localVarPath = `/api/v1/tensorboards`;
-            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
-            const localVarRequestOptions = { method: 'GET', ...options };
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-            
-            // authentication BearerToken required
-            if (configuration && configuration.apiKey) {
-                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
-                    ? configuration.apiKey("Authorization")
-                    : configuration.apiKey;
-                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
-            }
-            
-            if (sortBy !== undefined) {
-                localVarQueryParameter['sortBy'] = sortBy
-            }
-            
-            if (orderBy !== undefined) {
-                localVarQueryParameter['orderBy'] = orderBy
-            }
-            
-            if (offset !== undefined) {
-                localVarQueryParameter['offset'] = offset
-            }
-            
-            if (limit !== undefined) {
-                localVarQueryParameter['limit'] = limit
-            }
-            
-            if (users) {
-                localVarQueryParameter['users'] = users
-            }
-            
-            if (userIds) {
-                localVarQueryParameter['userIds'] = userIds
-            }
-            
-            if (workspaceId !== undefined) {
-                localVarQueryParameter['workspaceId'] = workspaceId
-            }
-            
-            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
-            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
-            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
-            
-            return {
-                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * 
-         * @summary Kill the requested tensorboard.
-         * @param {string} tensorboardId The id of the tensorboard.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        killTensorboard(tensorboardId: string, options: any = {}): FetchArgs {
-            // verify required parameter 'tensorboardId' is not null or undefined
-            if (tensorboardId === null || tensorboardId === undefined) {
-                throw new RequiredError('tensorboardId','Required parameter tensorboardId was null or undefined when calling killTensorboard.');
-            }
-            const localVarPath = `/api/v1/tensorboards/{tensorboardId}/kill`
-                .replace(`{${"tensorboardId"}}`, encodeURIComponent(String(tensorboardId)));
-            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
-            const localVarRequestOptions = { method: 'POST', ...options };
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-            
-            // authentication BearerToken required
-            if (configuration && configuration.apiKey) {
-                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
-                    ? configuration.apiKey("Authorization")
-                    : configuration.apiKey;
-                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
-            }
-            
-            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
-            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
-            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
-            
-            return {
-                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * 
-         * @summary Launch a tensorboard.
-         * @param {V1LaunchTensorboardRequest} body
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        launchTensorboard(body: V1LaunchTensorboardRequest, options: any = {}): FetchArgs {
-            // verify required parameter 'body' is not null or undefined
-            if (body === null || body === undefined) {
-                throw new RequiredError('body','Required parameter body was null or undefined when calling launchTensorboard.');
-            }
-            const localVarPath = `/api/v1/tensorboards`;
-            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
-            const localVarRequestOptions = { method: 'POST', ...options };
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-            
-            // authentication BearerToken required
-            if (configuration && configuration.apiKey) {
-                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
-                    ? configuration.apiKey("Authorization")
-                    : configuration.apiKey;
-                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
-            }
-            
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            
-            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
-            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
-            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
-            localVarRequestOptions.body = JSON.stringify(body)
-            
-            return {
-                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * 
-         * @summary Set the priority of the requested TensorBoard.
-         * @param {string} tensorboardId The id of the TensorBoard.
-         * @param {V1SetTensorboardPriorityRequest} body
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        setTensorboardPriority(tensorboardId: string, body: V1SetTensorboardPriorityRequest, options: any = {}): FetchArgs {
-            // verify required parameter 'tensorboardId' is not null or undefined
-            if (tensorboardId === null || tensorboardId === undefined) {
-                throw new RequiredError('tensorboardId','Required parameter tensorboardId was null or undefined when calling setTensorboardPriority.');
-            }
-            // verify required parameter 'body' is not null or undefined
-            if (body === null || body === undefined) {
-                throw new RequiredError('body','Required parameter body was null or undefined when calling setTensorboardPriority.');
-            }
-            const localVarPath = `/api/v1/tensorboards/{tensorboardId}/set_priority`
-                .replace(`{${"tensorboardId"}}`, encodeURIComponent(String(tensorboardId)));
-            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
-            const localVarRequestOptions = { method: 'POST', ...options };
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-            
-            // authentication BearerToken required
-            if (configuration && configuration.apiKey) {
-                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
-                    ? configuration.apiKey("Authorization")
-                    : configuration.apiKey;
-                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
-            }
-            
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            
-            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
-            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
-            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
-            localVarRequestOptions.body = JSON.stringify(body)
-            
-            return {
-                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
-                options: localVarRequestOptions,
-            };
-        },
-    }
-};
-
-/**
- * TensorboardsApi - functional programming interface
- * @export
- */
-export const TensorboardsApiFp = function (configuration?: Configuration) {
-    return {
-        /**
-         * 
-         * @summary Get the requested tensorboard.
-         * @param {string} tensorboardId The id of the tensorboard.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        getTensorboard(tensorboardId: string, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetTensorboardResponse> {
-            const localVarFetchArgs = TensorboardsApiFetchParamCreator(configuration).getTensorboard(tensorboardId, options);
-            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
-                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-                    if (response.status >= 200 && response.status < 300) {
-                        return response.json();
-                    } else {
-                        throw response;
-                    }
-                });
-            };
-        },
-        /**
-         * 
-         * @summary Get a list of tensorboards.
-         * @param {V1GetTensorboardsRequestSortBy} [sortBy] Sort tensorboards by the given field.   - SORT_BY_UNSPECIFIED: Returns tensorboards in an unsorted list.  - SORT_BY_ID: Returns tensorboards sorted by id.  - SORT_BY_DESCRIPTION: Returns tensorboards sorted by description.  - SORT_BY_START_TIME: Return tensorboards sorted by start time.  - SORT_BY_WORKSPACE_ID: Return tensorboards sorted by workspace_id.
-         * @param {V1OrderBy} [orderBy] Order tensorboards in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
-         * @param {number} [offset] Skip the number of tensorboards before returning results. Negative values denote number of tensorboards to skip from the end before returning results.
-         * @param {number} [limit] Limit the number of tensorboards. A value of 0 denotes no limit.
-         * @param {Array<string>} [users] Limit tensorboards to those that are owned by users with the specified usernames.
-         * @param {Array<number>} [userIds] Limit tensorboards to those that are owned by users with the specified userIds.
-         * @param {number} [workspaceId] Limit tensorboards to those that are in a specific workspace, or 0 for all accessible workspaces.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        getTensorboards(sortBy?: V1GetTensorboardsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetTensorboardsResponse> {
-            const localVarFetchArgs = TensorboardsApiFetchParamCreator(configuration).getTensorboards(sortBy, orderBy, offset, limit, users, userIds, workspaceId, options);
-            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
-                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-                    if (response.status >= 200 && response.status < 300) {
-                        return response.json();
-                    } else {
-                        throw response;
-                    }
-                });
-            };
-        },
-        /**
-         * 
-         * @summary Kill the requested tensorboard.
-         * @param {string} tensorboardId The id of the tensorboard.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        killTensorboard(tensorboardId: string, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1KillTensorboardResponse> {
-            const localVarFetchArgs = TensorboardsApiFetchParamCreator(configuration).killTensorboard(tensorboardId, options);
-            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
-                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-                    if (response.status >= 200 && response.status < 300) {
-                        return response.json();
-                    } else {
-                        throw response;
-                    }
-                });
-            };
-        },
-        /**
-         * 
-         * @summary Launch a tensorboard.
-         * @param {V1LaunchTensorboardRequest} body
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        launchTensorboard(body: V1LaunchTensorboardRequest, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1LaunchTensorboardResponse> {
-            const localVarFetchArgs = TensorboardsApiFetchParamCreator(configuration).launchTensorboard(body, options);
-            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
-                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-                    if (response.status >= 200 && response.status < 300) {
-                        return response.json();
-                    } else {
-                        throw response;
-                    }
-                });
-            };
-        },
-        /**
-         * 
-         * @summary Set the priority of the requested TensorBoard.
-         * @param {string} tensorboardId The id of the TensorBoard.
-         * @param {V1SetTensorboardPriorityRequest} body
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        setTensorboardPriority(tensorboardId: string, body: V1SetTensorboardPriorityRequest, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1SetTensorboardPriorityResponse> {
-            const localVarFetchArgs = TensorboardsApiFetchParamCreator(configuration).setTensorboardPriority(tensorboardId, body, options);
-            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
-                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
-                    if (response.status >= 200 && response.status < 300) {
-                        return response.json();
-                    } else {
-                        throw response;
-                    }
-                });
-            };
-        },
-    }
-};
-
-/**
- * TensorboardsApi - factory interface
- * @export
- */
-export const TensorboardsApiFactory = function (configuration?: Configuration, fetch?: FetchAPI, basePath?: string) {
-    return {
-        /**
-         * 
-         * @summary Get the requested tensorboard.
-         * @param {string} tensorboardId The id of the tensorboard.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        getTensorboard(tensorboardId: string, options?: any) {
-            return TensorboardsApiFp(configuration).getTensorboard(tensorboardId, options)(fetch, basePath);
-        },
-        /**
-         * 
-         * @summary Get a list of tensorboards.
-         * @param {V1GetTensorboardsRequestSortBy} [sortBy] Sort tensorboards by the given field.   - SORT_BY_UNSPECIFIED: Returns tensorboards in an unsorted list.  - SORT_BY_ID: Returns tensorboards sorted by id.  - SORT_BY_DESCRIPTION: Returns tensorboards sorted by description.  - SORT_BY_START_TIME: Return tensorboards sorted by start time.  - SORT_BY_WORKSPACE_ID: Return tensorboards sorted by workspace_id.
-         * @param {V1OrderBy} [orderBy] Order tensorboards in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
-         * @param {number} [offset] Skip the number of tensorboards before returning results. Negative values denote number of tensorboards to skip from the end before returning results.
-         * @param {number} [limit] Limit the number of tensorboards. A value of 0 denotes no limit.
-         * @param {Array<string>} [users] Limit tensorboards to those that are owned by users with the specified usernames.
-         * @param {Array<number>} [userIds] Limit tensorboards to those that are owned by users with the specified userIds.
-         * @param {number} [workspaceId] Limit tensorboards to those that are in a specific workspace, or 0 for all accessible workspaces.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        getTensorboards(sortBy?: V1GetTensorboardsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options?: any) {
-            return TensorboardsApiFp(configuration).getTensorboards(sortBy, orderBy, offset, limit, users, userIds, workspaceId, options)(fetch, basePath);
-        },
-        /**
-         * 
-         * @summary Kill the requested tensorboard.
-         * @param {string} tensorboardId The id of the tensorboard.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        killTensorboard(tensorboardId: string, options?: any) {
-            return TensorboardsApiFp(configuration).killTensorboard(tensorboardId, options)(fetch, basePath);
-        },
-        /**
-         * 
-         * @summary Launch a tensorboard.
-         * @param {V1LaunchTensorboardRequest} body
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        launchTensorboard(body: V1LaunchTensorboardRequest, options?: any) {
-            return TensorboardsApiFp(configuration).launchTensorboard(body, options)(fetch, basePath);
-        },
-        /**
-         * 
-         * @summary Set the priority of the requested TensorBoard.
-         * @param {string} tensorboardId The id of the TensorBoard.
-         * @param {V1SetTensorboardPriorityRequest} body
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        setTensorboardPriority(tensorboardId: string, body: V1SetTensorboardPriorityRequest, options?: any) {
-            return TensorboardsApiFp(configuration).setTensorboardPriority(tensorboardId, body, options)(fetch, basePath);
-        },
-    }
-};
-
-/**
- * TensorboardsApi - object-oriented interface
- * @export
- * @class
- * @extends {BaseAPI}
- */
-export class TensorboardsApi extends BaseAPI {
-    /**
-     * 
-     * @summary Get the requested tensorboard.
-     * @param {string} tensorboardId The id of the tensorboard.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     * @memberof TensorboardsApi
-     */
-    public getTensorboard(tensorboardId: string, options?: any) {
-        return TensorboardsApiFp(this.configuration).getTensorboard(tensorboardId, options)(this.fetch, this.basePath)
-    }
-    
-    /**
-     * 
-     * @summary Get a list of tensorboards.
-     * @param {V1GetTensorboardsRequestSortBy} [sortBy] Sort tensorboards by the given field.   - SORT_BY_UNSPECIFIED: Returns tensorboards in an unsorted list.  - SORT_BY_ID: Returns tensorboards sorted by id.  - SORT_BY_DESCRIPTION: Returns tensorboards sorted by description.  - SORT_BY_START_TIME: Return tensorboards sorted by start time.  - SORT_BY_WORKSPACE_ID: Return tensorboards sorted by workspace_id.
-     * @param {V1OrderBy} [orderBy] Order tensorboards in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
-     * @param {number} [offset] Skip the number of tensorboards before returning results. Negative values denote number of tensorboards to skip from the end before returning results.
-     * @param {number} [limit] Limit the number of tensorboards. A value of 0 denotes no limit.
-     * @param {Array<string>} [users] Limit tensorboards to those that are owned by users with the specified usernames.
-     * @param {Array<number>} [userIds] Limit tensorboards to those that are owned by users with the specified userIds.
-     * @param {number} [workspaceId] Limit tensorboards to those that are in a specific workspace, or 0 for all accessible workspaces.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     * @memberof TensorboardsApi
-     */
-    public getTensorboards(sortBy?: V1GetTensorboardsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, users?: Array<string>, userIds?: Array<number>, workspaceId?: number, options?: any) {
-        return TensorboardsApiFp(this.configuration).getTensorboards(sortBy, orderBy, offset, limit, users, userIds, workspaceId, options)(this.fetch, this.basePath)
-    }
-    
-    /**
-     * 
-     * @summary Kill the requested tensorboard.
-     * @param {string} tensorboardId The id of the tensorboard.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     * @memberof TensorboardsApi
-     */
-    public killTensorboard(tensorboardId: string, options?: any) {
-        return TensorboardsApiFp(this.configuration).killTensorboard(tensorboardId, options)(this.fetch, this.basePath)
-    }
-    
-    /**
-     * 
-     * @summary Launch a tensorboard.
-     * @param {V1LaunchTensorboardRequest} body
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     * @memberof TensorboardsApi
-     */
-    public launchTensorboard(body: V1LaunchTensorboardRequest, options?: any) {
-        return TensorboardsApiFp(this.configuration).launchTensorboard(body, options)(this.fetch, this.basePath)
-    }
-    
-    /**
-     * 
-     * @summary Set the priority of the requested TensorBoard.
-     * @param {string} tensorboardId The id of the TensorBoard.
-     * @param {V1SetTensorboardPriorityRequest} body
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     * @memberof TensorboardsApi
-     */
-    public setTensorboardPriority(tensorboardId: string, body: V1SetTensorboardPriorityRequest, options?: any) {
-        return TensorboardsApiFp(this.configuration).setTensorboardPriority(tensorboardId, body, options)(this.fetch, this.basePath)
     }
     
 }

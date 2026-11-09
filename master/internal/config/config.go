@@ -120,7 +120,6 @@ func DefaultConfig() *Config {
 		Log:                   *logger.DefaultConfig(),
 		DB:                    *DefaultDBConfig(),
 		TaskContainerDefaults: *model.DefaultTaskContainerDefaults(),
-		TensorBoardTimeout:    5 * 60,
 		Security: SecurityConfig{
 			DefaultTask: model.AgentUserGroup{
 				UID:   0,
@@ -180,7 +179,6 @@ type Config struct {
 	ConfigFile            string                            `json:"config_file"`
 	Log                   logger.Config                     `json:"log"`
 	DB                    DBConfig                          `json:"db"`
-	TensorBoardTimeout    int                               `json:"tensorboard_timeout"`
 	Security              SecurityConfig                    `json:"security"`
 	CheckpointStorage     expconf.CheckpointStorageConfig   `json:"checkpoint_storage"`
 	TaskContainerDefaults model.TaskContainerDefaultsConfig `json:"task_container_defaults"`

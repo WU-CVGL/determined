@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"slices"
 	"strconv"
 
 	petname "github.com/dustinkirkland/golang-petname"
@@ -63,17 +64,25 @@ type protoCommandParams struct {
 	AllowServices bool
 }
 
-// notebookIdleTypeKey is the config key that services.jupyter.idle_type replaces. A request config
-// or a template that sets it is refused with a message that names the new key.
-const notebookIdleTypeKey = "notebook_idle_type"
+// removedConfigKeys are the config keys that other keys replace, with the key that replaces each. A
+// request config or a template that sets one is refused with a message that names the new key.
+var removedConfigKeys = map[string]string{
+	"notebook_idle_type": "services.jupyter.idle_type",
+	"tensorboard_args":   "services.tensorboard.args",
+}
 
-// refuseNotebookIdleType refuses a config, as its top-level keys, that sets notebook_idle_type.
-func refuseNotebookIdleType[V any](config map[string]V, source string) error {
-	if _, ok := config[notebookIdleTypeKey]; !ok {
-		return nil
+// refuseRemovedKeys refuses a config, as its top-level keys, that sets a key of removedConfigKeys.
+// It checks the keys in sorted order, so that the message names the same key on every call.
+func refuseRemovedKeys[V any](config map[string]V, source string) error {
+	keys := maps.Keys(removedConfigKeys)
+	slices.Sort(keys)
+	for _, key := range keys {
+		if _, ok := config[key]; ok {
+			return status.Errorf(codes.InvalidArgument, "%s%s: use %s",
+				source, key, removedConfigKeys[key])
+		}
 	}
-	return status.Errorf(codes.InvalidArgument, "%s%s: use services.jupyter.idle_type",
-		source, notebookIdleTypeKey)
+	return nil
 }
 
 // prepareCommandLaunch prepares the launch of an NTSC task from a request, without side effects:
@@ -107,7 +116,7 @@ func (a *apiServer) prepareCommandLaunch(ctx context.Context, req *protoCommandP
 		return nil, nil, err
 	}
 
-	if err := refuseNotebookIdleType(req.Config.GetFields(), ""); err != nil {
+	if err := refuseRemovedKeys(req.Config.GetFields(), ""); err != nil {
 		return nil, nil, err
 	}
 	var configBytes []byte
@@ -150,7 +159,7 @@ func (a *apiServer) prepareCommandLaunch(ctx context.Context, req *protoCommandP
 		if err != nil {
 			return nil, launchWarnings, err
 		}
-		if err := refuseNotebookIdleType(template,
+		if err := refuseRemovedKeys(template,
 			fmt.Sprintf("template %s: ", req.TemplateName)); err != nil {
 			return nil, launchWarnings, err
 		}
