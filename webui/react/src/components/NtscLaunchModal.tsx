@@ -272,7 +272,8 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
 
   /**
    * The values to keep for the next launch. A start-from without ssh keeps the previous slots and
-   * template: its 0 slots are not the user's default, and its template is restored without them.
+   * template: its 0 slots are not the user's default, and the last template is restored on open
+   * as the picker's value only, without handleStartFrom, so it would be previewed with ssh on.
    */
   const saveFormDefaults = useCallback(
     (fields: LaunchFormValues) => {
@@ -368,10 +369,11 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
         const current: LaunchFormValues['services'] = form.getFieldValue('services');
         const currentDataSource: TensorBoardDataSource | undefined =
           form.getFieldValue('dataSource');
+        // setFieldValue replaces the data source; setFieldsValue would merge in stale keys.
+        if (isEqual(currentDataSource, sentDataSource)) {
+          form.setFieldValue('dataSource', previewedFields.dataSource);
+        }
         form.setFieldsValue({
-          dataSource: isEqual(currentDataSource, sentDataSource)
-            ? previewedFields.dataSource
-            : currentDataSource,
           services: Object.fromEntries(
             SHELL_SERVICES.map((name) => [
               name,
@@ -499,12 +501,13 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
         setSshOff(sshDisabled(base));
         offered.current = offeredServices(fields.services);
         form.setFieldsValue({
-          dataSource: fields.dataSource,
           name: fields.name,
           pool: fields.pool,
           services: serviceChecks(fields.services),
           slots: fields.slots,
         });
+        // Replaced, not merged: the previous start-from's source does not carry over.
+        form.setFieldValue('dataSource', fields.dataSource);
         if (!workspace) {
           const sourceWorkspace = workspaces.find((w) => w.id === start.workspaceId);
           if (sourceWorkspace) setCurrentWorkspace(sourceWorkspace);
@@ -513,7 +516,10 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       }
       setBaseConfig(undefined);
       setRedactedEnv([]);
-      setSshOff(start.kind === 'template' && sshDisabled(start.template.config));
+      const nextSshOff = start.kind === 'template' && sshDisabled(start.template.config);
+      setSshOff(nextSshOff);
+      // The 0 slots of a start-from without ssh do not carry over to one with ssh.
+      if (sshOff && !nextSshOff) form.setFieldValue('slots', defaults.slots ?? DEFAULT_SLOT_COUNT);
       if (start.kind === 'template') {
         // The master ignores a template's resources for shells, so they are
         // copied into the form, which always sends them; a template that turns
@@ -523,7 +529,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
         if (slots !== undefined) form.setFieldValue('slots', slots);
       }
     },
-    [form, workspace, workspaces],
+    [defaults.slots, form, sshOff, workspace, workspaces],
   );
 
   const canSaveTemplate =

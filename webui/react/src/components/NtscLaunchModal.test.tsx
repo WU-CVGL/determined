@@ -970,6 +970,34 @@ describe('NtscLaunchModal', () => {
       });
     });
 
+    it('gives back the last slots when a start-from with ssh follows one without', async () => {
+      mocks.getTaskTemplates.mockResolvedValue([NO_JUPYTER_TEMPLATE, SESSION_TEMPLATE]);
+      await withLoadedSettings(async () => {
+        const { onLaunched, user } = await setup();
+        await openStartFrom(user);
+        await user.click(await screen.findByText('session'));
+        await waitFor(() => expect(serviceBox('tensorboard')).toBeChecked());
+        expect(screen.getByLabelText('Slots')).toHaveValue('0');
+
+        await openStartFrom(user);
+        await user.click(await screen.findByText('no-jupyter'));
+        await waitFor(() => expect(serviceBox('tensorboard')).not.toBeChecked());
+        expect(screen.getByLabelText('Slots')).toHaveValue('2');
+        expect(screen.getByLabelText('Slots')).toBeEnabled();
+        await launch(user);
+
+        await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+        expect(mocks.launchShell.mock.calls[0][0].config.resources.slots).toBe(2);
+        expect(mocks.launchShell.mock.calls[0][0].templateName).toBe('no-jupyter');
+        await waitFor(() =>
+          expect(savedSettings('shell-launch')).toMatchObject({
+            slots: 2,
+            template: 'no-jupyter',
+          }),
+        );
+      });
+    });
+
     it('saves the values on Cancel', async () => {
       await withLoadedSettings(async () => {
         const { user } = await setup();
@@ -1677,6 +1705,28 @@ describe('NtscLaunchModal', () => {
         ...DEFAULT_SERVICES,
         tensorboard: { experiment_ids: [7] },
       });
+    });
+
+    it('drops the source of the previous start-from when a config without one is picked', async () => {
+      mocks.getShells.mockResolvedValue([task(CommandType.Shell)]);
+      const { user } = await setup();
+      await user.click(serviceBox('tensorboard'));
+      await addId(user, 'Experiments', '7');
+
+      await openStartFrom(user);
+      await user.click(await screen.findByText(/^Shell · cluster task ·/));
+      await waitFor(() =>
+        expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('old shell'),
+      );
+      await waitFor(() => expect(launchButton()).toBeEnabled());
+      expect(serviceBox('tensorboard')).not.toBeChecked();
+      await user.click(serviceBox('tensorboard'));
+      expect(modeRadio(EXPERIMENTS_MODE)).toBeChecked();
+      expect(idTag('7')).not.toBeInTheDocument();
+
+      await user.click(launchButton());
+      expect(await screen.findByText('An experiment or trial is required')).toBeInTheDocument();
+      expect(mocks.launchShell).not.toHaveBeenCalled();
     });
 
     it('requires an experiment or trial given by ID before Launch and the full config', async () => {
