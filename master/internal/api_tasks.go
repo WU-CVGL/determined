@@ -75,20 +75,94 @@ func expFromTaskID(
 	return true, exp, nil
 }
 
+// canAccessNTSCTask reports whether curUser may see a task that is not a trial, and the workspace
+// it is in. A task with command state takes CanGetNSC in its workspace. Any other task is checked
+// by canAccessUnidentifiedTask. A denial is a PermissionDeniedError, which callers either return
+// or map to NotFound.
 func canAccessNTSCTask(
 	ctx context.Context, curUser model.User, taskID model.TaskID,
 ) (bool, model.AccessScopeID, error) {
 	spec, err := command.IdentifyTask(ctx, taskID)
 	if errors.Is(err, db.ErrNotFound) {
-		// Non NTSC case like checkpointGC case or the task just does not exist.
-		// TODO(nick) eventually control access to checkpointGC.
-		return true, spec.WorkspaceID, nil
+		return canAccessUnidentifiedTask(ctx, curUser, taskID)
 	} else if err != nil {
 		return false, spec.WorkspaceID, err
 	}
 	err = command.AuthZProvider.Get().CanGetNSC(
 		ctx, curUser, spec.WorkspaceID)
 	return !authz.IsPermissionDenied(err), spec.WorkspaceID, err
+}
+
+// canAccessUnidentifiedTask is the read rule for a task without command state. A task that does
+// not exist is denied. A checkpoint GC task in an experiment's job may be seen by those who may
+// see the experiment, and is in the experiment's workspace. A checkpoint GC task in a job of its
+// own, which DeleteCheckpoints starts, may be seen by everyone. Any other task, such as a command
+// whose command state was not written or a GC task whose experiment was deleted, may be seen only
+// by the owner of its job and admins, as canReadTaskCredential allows. A task without a job may
+// be seen only by admins.
+func canAccessUnidentifiedTask(
+	ctx context.Context, curUser model.User, taskID model.TaskID,
+) (bool, model.AccessScopeID, error) {
+	t, err := db.TaskByID(ctx, taskID)
+	if errors.Is(err, db.ErrNotFound) {
+		return false, 0, authz.PermissionDeniedError{}
+	} else if err != nil {
+		return false, 0, err
+	}
+
+	var job *model.Job
+	if t.JobID != nil {
+		if job, err = db.JobByID(ctx, *t.JobID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return false, 0, err
+		}
+	}
+
+	if t.TaskType == model.TaskTypeCheckpointGC && job != nil {
+		switch job.JobType {
+		case model.JobTypeExperiment:
+			exp, err := db.ExperimentByJobID(ctx, job.JobID)
+			if err == nil {
+				return canAccessExperimentGCTask(ctx, curUser, exp)
+			} else if !errors.Is(err, db.ErrNotFound) {
+				return false, 0, err
+			}
+		case model.JobTypeCheckpointGC:
+			return true, 0, nil
+		}
+	}
+
+	if curUser.Admin || job != nil && job.OwnerID != nil && *job.OwnerID == curUser.ID {
+		return true, 0, nil
+	}
+	return false, 0, authz.PermissionDeniedError{}
+}
+
+// missingTaskAsNotFound returns notFound in place of the denial of a task that does not exist, for
+// the callers of canAccessNTSCTask that do not load the task first. Any other error is returned as
+// is.
+func missingTaskAsNotFound(ctx context.Context, taskID model.TaskID, err, notFound error) error {
+	if !authz.IsPermissionDenied(err) {
+		return err
+	}
+	if _, tErr := db.TaskByID(ctx, taskID); errors.Is(tErr, db.ErrNotFound) {
+		return notFound
+	}
+	return err
+}
+
+// canAccessExperimentGCTask allows a checkpoint GC task of an experiment to those who may see the
+// experiment, and returns the experiment's workspace.
+func canAccessExperimentGCTask(
+	ctx context.Context, curUser model.User, exp *model.Experiment,
+) (bool, model.AccessScopeID, error) {
+	if err := expauth.AuthZProvider.Get().CanGetExperiment(ctx, curUser, exp); err != nil {
+		return false, 0, err
+	}
+	workspaceID, err := expauth.GetWorkspaceFromExperiment(ctx, exp)
+	if err != nil {
+		return false, 0, err
+	}
+	return true, model.AccessScopeID(workspaceID), nil
 }
 
 func (a *apiServer) canDoActionsOnTask(
@@ -183,7 +257,8 @@ func (a *apiServer) canGetTaskAcceleration(ctx context.Context, taskID string) e
 	if !isExp {
 		var ok bool
 		if ok, _, err = canAccessNTSCTask(ctx, *curUser, model.TaskID(taskID)); err != nil {
-			return err
+			return missingTaskAsNotFound(ctx, model.TaskID(taskID), err,
+				api.NotFoundErrs("task", taskID, true))
 		} else if !ok {
 			return api.NotFoundErrs("task", taskID, true)
 		}
@@ -215,7 +290,8 @@ func (a *apiServer) canGetAllocation(ctx context.Context, allocationID string) e
 	if !isExp {
 		var ok bool
 		if ok, _, err = canAccessNTSCTask(ctx, *curUser, taskID); err != nil {
-			return err
+			return missingTaskAsNotFound(ctx, taskID, err,
+				api.NotFoundErrs("allocation", allocationID, true))
 		} else if !ok {
 			return api.NotFoundErrs("allocation", allocationID, true)
 		}
@@ -248,7 +324,8 @@ func (a *apiServer) canEditAllocation(ctx context.Context, allocationID string) 
 	if !isExp {
 		var ok bool
 		if ok, _, err = canAccessNTSCTask(ctx, *curUser, taskID); err != nil {
-			return err
+			return missingTaskAsNotFound(ctx, taskID, err,
+				api.NotFoundErrs("allocation", allocationID, true))
 		} else if !ok {
 			return api.NotFoundErrs("allocation", allocationID, true)
 		}
