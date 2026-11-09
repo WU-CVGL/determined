@@ -143,6 +143,9 @@ type Master struct {
 
 	// userUsageCoverage caches the first day with allocation records for GetUserUsage.
 	userUsageCoverage userUsageCoverage
+
+	// bootTime is when this master started, before any allocation could get resources.
+	bootTime time.Time
 }
 
 // New creates an instance of the Determined master.
@@ -1001,7 +1004,7 @@ func (m *Master) restoreGenericTasks(ctx context.Context) error {
 
 func (m *Master) closeOpenAllocations(ctx context.Context) error {
 	allocationIds := task.DefaultService.GetAllAllocationIDs()
-	if err := db.CloseOpenAllocations(ctx, allocationIds); err != nil {
+	if err := db.CloseOpenAllocations(ctx, allocationIds, m.bootTime); err != nil {
 		return err
 	}
 	return nil
@@ -1423,6 +1426,7 @@ func (m *Master) Run(ctx context.Context, gRPCLogInitDone chan struct{}) error {
 	}
 
 	// Resource Manager.
+	m.bootTime = time.Now().UTC()
 	if m.rm, err = m.buildRM(poolWorkerCtx, m.db, m.echo, m.config.ResourceManagers(),
 		&m.config.TaskContainerDefaults,
 		&aproto.MasterSetAgentOptions{
@@ -1494,6 +1498,7 @@ func (m *Master) Run(ctx context.Context, gRPCLogInitDone chan struct{}) error {
 	// This ensures that in the scenario where a cluster fails the allocations that
 	// CloseOpenAllocations closes are set to the last cluster heartbeat when the cluster was running.
 	go updateClusterHeartbeat(ctx, m.db)
+	go newLegacyClassifier(m.rm, m.config.ResourceManagers()).run(ctx, legacyClassifyInterval)
 	go trials.MarkLostTrialsWorker(ctx)
 
 	// Docs and WebUI.

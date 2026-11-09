@@ -14,6 +14,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/determined-ai/determined/master/internal/api"
+	"github.com/determined-ai/determined/master/internal/userusage"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 )
@@ -160,13 +161,130 @@ func KillGenericTask(tID model.TaskID, endTime time.Time) error {
 
 // AddAllocation upserts the existence of an allocation. Allocation IDs may conflict in the event
 // the master restarts and the trial run ID increment is not persisted, but it is the same
-// allocation so this is OK.
+// allocation so this is OK. A reused ID starts without the earlier allocation's metering.
 func AddAllocation(ctx context.Context, a *model.Allocation) error {
 	_, err := Bun().NewInsert().Model(a).On("CONFLICT (allocation_id) DO UPDATE").
 		Set("task_id=EXCLUDED.task_id, slots=EXCLUDED.slots").
 		Set("resource_pool=EXCLUDED.resource_pool,start_time=EXCLUDED.start_time").
-		Set("state=EXCLUDED.state, ports=EXCLUDED.ports").Exec(ctx)
+		Set("state=EXCLUDED.state, ports=EXCLUDED.ports").
+		Set("assigned_time=EXCLUDED.assigned_time, released_time=EXCLUDED.released_time").
+		Set("metered_kind=EXCLUDED.metered_kind, metered_quantity=EXCLUDED.metered_quantity").
+		Exec(ctx)
 	return err
+}
+
+// AssignAllocation records when the resource manager assigned an allocation's resources and what
+// they are metered as. It records only the first assignment.
+func AssignAllocation(
+	ctx context.Context, id model.AllocationID, at time.Time, kind userusage.Kind, quantity int,
+) error {
+	// The times are timestamp without time zone in UTC.
+	_, err := Bun().NewUpdate().Table("allocations").
+		Set("assigned_time = ?, metered_kind = ?, metered_quantity = ?", at.UTC(), kind, quantity).
+		Where("allocation_id = ?", id).
+		Where("assigned_time IS NULL").
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("recording the assignment of allocation %s: %w", id, err)
+	}
+	return nil
+}
+
+// ReleaseAllocation records when an allocation's resources were released. It records only the
+// first release, never one before the assignment, and nothing for an allocation without one.
+func ReleaseAllocation(ctx context.Context, id model.AllocationID, at time.Time) error {
+	_, err := Bun().NewUpdate().Table("allocations").
+		Set("released_time = greatest(?, assigned_time)", at.UTC()).
+		Where("allocation_id = ?", id).
+		Where("assigned_time IS NOT NULL").
+		Where("released_time IS NULL").
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("recording the release of allocation %s: %w", id, err)
+	}
+	return nil
+}
+
+// ClearAllocationAssignment removes an allocation's assignment and metering, for an allocation
+// that requests resources again under its ID.
+func ClearAllocationAssignment(ctx context.Context, id model.AllocationID) error {
+	_, err := Bun().NewUpdate().Table("allocations").
+		Set("assigned_time = NULL, released_time = NULL").
+		Set("metered_kind = NULL, metered_quantity = NULL").
+		Where("allocation_id = ?", id).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("clearing the assignment of allocation %s: %w", id, err)
+	}
+	return nil
+}
+
+// UnclassifiedAllocationPools returns the resource pools of the allocations from before metering
+// whose kind is not known yet.
+func UnclassifiedAllocationPools(ctx context.Context) ([]string, error) {
+	var pools []string
+	// Served by the partial index ix_allocations_unclassified_pool.
+	err := Bun().NewSelect().Table("allocations").
+		ColumnExpr("DISTINCT resource_pool").
+		Where("metered_kind = ?", userusage.KindUnclassified).
+		Where("assigned_time IS NULL").
+		Scan(ctx, &pools)
+	if err != nil {
+		return nil, fmt.Errorf("reading the pools of unclassified allocations: %w", err)
+	}
+	return pools, nil
+}
+
+// ClassifyLegacyAllocations sets the kind of a pool's unclassified allocations from before
+// metering: zeroSlots for those without slots (one unit for aux, none otherwise) and withSlots for
+// the others (one unit per slot). An empty kind leaves those allocations unclassified. An
+// allocation that has a kind keeps it. It returns how many allocations it classified.
+func ClassifyLegacyAllocations(
+	ctx context.Context, pool string, zeroSlots, withSlots userusage.Kind,
+) (int64, error) {
+	var n int64
+	if zeroSlots != "" {
+		quantity := 0
+		if zeroSlots == userusage.KindAux {
+			quantity = 1
+		}
+		// Legacy allocations without slots.
+		res, err := Bun().NewUpdate().Table("allocations").
+			Set("metered_kind = ?, metered_quantity = ?", zeroSlots, quantity).
+			Where("resource_pool = ?", pool).
+			Where("metered_kind = ?", userusage.KindUnclassified).
+			Where("assigned_time IS NULL").
+			Where("slots = 0").
+			Exec(ctx)
+		if err != nil {
+			return n, fmt.Errorf("classifying allocations without slots of pool %s: %w", pool, err)
+		}
+		n += rowsAffected(res)
+	}
+	if withSlots != "" {
+		// Legacy allocations with slots, one unit per slot.
+		res, err := Bun().NewUpdate().Table("allocations").
+			Set("metered_kind = ?, metered_quantity = slots", withSlots).
+			Where("resource_pool = ?", pool).
+			Where("metered_kind = ?", userusage.KindUnclassified).
+			Where("assigned_time IS NULL").
+			Where("slots > 0").
+			Exec(ctx)
+		if err != nil {
+			return n, fmt.Errorf("classifying allocations with slots of pool %s: %w", pool, err)
+		}
+		n += rowsAffected(res)
+	}
+	return n, nil
+}
+
+// rowsAffected returns the rows a statement changed, or 0 when the driver does not tell.
+func rowsAffected(res sql.Result) int64 {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // AddAllocationExitStatus adds the allocation exit status to the allocations table.
@@ -284,8 +402,11 @@ func UpdateAllocationProxyAddress(ctx context.Context, a model.Allocation) error
 }
 
 // CloseOpenAllocations finds all allocations that were open when the master crashed
-// and adds an end time.
-func CloseOpenAllocations(ctx context.Context, exclude []model.AllocationID) error {
+// and adds an end time. The allocations in exclude are live; so are those assigned resources at or
+// after boot, the time this master started.
+func CloseOpenAllocations(
+	ctx context.Context, exclude []model.AllocationID, boot time.Time,
+) error {
 	excludedFilter := ""
 	if len(exclude) > 0 {
 		excludeStr := make([]string, 0, len(exclude))
@@ -293,6 +414,23 @@ func CloseOpenAllocations(ctx context.Context, exclude []model.AllocationID) err
 			excludeStr = append(excludeStr, v.String())
 		}
 		excludedFilter = strings.Join(excludeStr, ",")
+	}
+
+	// This runs before the statement below terminates the open allocations. Resources that an
+	// earlier master assigned and had not released when it stopped are released at its last
+	// heartbeat. A terminated allocation whose release was not written is released at its end, or,
+	// without one, at its assignment, so that it meters nothing (greatest ignores NULL); a later
+	// start never releases it at a later heartbeat.
+	if _, err := Bun().NewRaw(`UPDATE allocations a SET released_time = CASE
+		WHEN a.state IS DISTINCT FROM 'TERMINATED' THEN greatest(c.cluster_heartbeat, a.assigned_time)
+		ELSE greatest(a.end_time, a.assigned_time)
+	END
+	FROM cluster_id c
+	WHERE a.assigned_time IS NOT NULL AND a.released_time IS NULL
+	AND a.assigned_time < ?
+	AND (? = '' OR a.allocation_id NOT IN (SELECT unnest(string_to_array(?, ','))))`,
+		boot.UTC(), excludedFilter, excludedFilter).Exec(ctx); err != nil {
+		return errors.Wrap(err, "releasing the resources of old allocations")
 	}
 
 	// Excluded allocations are still live and set their start time when they get resources.

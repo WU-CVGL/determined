@@ -463,6 +463,7 @@ func (k *kubernetesResourcePool) createResources(
 		req:              req,
 		jobsService:      k.jobsService,
 		slots:            slotsPerPod,
+		slotType:         k.jobsService.slotType,
 		group:            k.groups[req.JobID],
 		initialPosition:  k.queuePositions[k.allocationIDToJobID[req.AllocationID]],
 		defaultNamespace: k.defaultNamespace,
@@ -485,9 +486,11 @@ func (k *kubernetesResourcePool) restoreResources(
 	}
 
 	return &k8sJobResource{
+		numPods:          numPods,
 		req:              req,
 		jobsService:      k.jobsService,
 		slots:            slotsPerPod,
+		slotType:         k.jobsService.slotType,
 		group:            k.groups[req.JobID],
 		initialPosition:  k.queuePositions[k.allocationIDToJobID[req.AllocationID]],
 		defaultNamespace: k.defaultNamespace,
@@ -565,11 +568,13 @@ func (k *kubernetesResourcePool) admitPendingTasks() {
 }
 
 type k8sJobResource struct {
-	req              *sproto.AllocateRequest
-	jobsService      *jobsService
-	group            *tasklist.Group
-	slots            int
-	numPods          int
+	req         *sproto.AllocateRequest
+	jobsService *jobsService
+	group       *tasklist.Group
+	slots       int
+	numPods     int
+	// slotType is the resource manager's slot type, the type of every device.
+	slotType         device.Type
 	initialPosition  decimal.Decimal
 	defaultNamespace string
 	clusterName      string
@@ -579,13 +584,17 @@ type k8sJobResource struct {
 
 // Summary summarizes a container allocation.
 func (p k8sJobResource) Summary() sproto.ResourcesSummary {
+	// TODO: Make it more obvious k8s can't be trusted. The devices carry only a type.
+	devices := make([]device.Device, p.slots*p.numPods)
+	for i := range devices {
+		devices[i].Type = p.slotType
+	}
 	return sproto.ResourcesSummary{
 		AllocationID:  p.req.AllocationID,
 		ResourcesID:   sproto.ResourcesID(p.req.AllocationID),
 		ResourcesType: sproto.ResourcesTypeK8sJob,
 		AgentDevices: map[aproto.ID][]device.Device{
-			// TODO: Make it more obvious k8s can't be trusted.
-			aproto.ID("pods"): make([]device.Device, p.slots*p.numPods),
+			aproto.ID("pods"): devices,
 		},
 
 		Started: p.started,
