@@ -15,6 +15,13 @@ experiments or compare multiple experiments.
 Launch TensorBoard instances via the WebUI or the Determined CLI. Before launching TensorBoard
 instances from the CLI, :ref:`install the CLI <install-cli>` on your development machine.
 
+In the WebUI, **TensorBoard** on an experiment's or trial's page, and **View in TensorBoard** for
+experiments or trials selected in a list or a comparison view, start a TensorBoard task without GPUs
+that ends 5 minutes after its last request, and open it on the task page's **TensorBoard** tab. Your
+own running TensorBoard of the same experiments or trials in the same workspace opens instead of a
+new one. When the default resource pool or the workspace cannot be used, start it from **Launch
+Interactive Task** with **TensorBoard** and **Determined experiments**.
+
 ***********************
  Analyzing Experiments
 ***********************
@@ -74,7 +81,12 @@ For detailed configuration settings, refer to the :ref:`job-configuration-refere
 To launch TensorBoard with a configuration file, use ``det tensorboard start <experiment-id>
 --config-file=my_config.yaml``.
 
-To view the configuration of a running TensorBoard task, use ``det tensorboard config <task-id>``.
+To manage the task, use the **Jobs** page, or ``det tensorboard list``, ``det tensorboard open
+<task-id>``, ``det tensorboard logs <task-id>``, ``det tensorboard config <task-id>`` and ``det
+tensorboard kill <task-id>``; they also manage TensorBoard tasks, but not a shell with a
+``tensorboard`` service. As the task is a shell, the ``det shell`` and ``det task`` commands also
+manage it. ``det tensorboard list --json`` prints TensorBoard tasks as ``/api/v1/tensorboards``
+returns them and viewing sessions as ``/api/v1/shells`` does.
 
 Logs on ``shared_fs`` storage are read in place, read-only. For ``type: directory`` storage, give
 the TensorBoard the experiment's ``bind_mounts``.
@@ -143,17 +155,12 @@ See :func:`PyTorchTrialContext.get_tensorboard_writer()
  TensorBoard Lifecycle Management
 **********************************
 
-``det tensorboard start`` ends the task after 5 minutes without requests through the master, unless
-the configuration sets ``idle_timeout``, as in ``--config idle_timeout=30m``. A browser tab kept
-open on TensorBoard does not by itself count; with its **Reload data** setting on, TensorBoard's
-page sends requests periodically.
-
-To manage it, use ``det tensorboard list``, ``det tensorboard open <task-id>``, ``det tensorboard
-logs <task-id>``, ``det tensorboard config <task-id>`` and ``det tensorboard kill <task-id>``; they
-also manage TensorBoard tasks, but not a shell with a ``tensorboard`` service. As the task is a
-shell, the ``det shell`` and ``det task`` commands also manage it. ``det tensorboard list --json``
-prints TensorBoard tasks as ``/api/v1/tensorboards`` returns them and viewing sessions as
-``/api/v1/shells`` does.
+To manage the task, use the **Jobs** page, or ``det tensorboard list``, ``det tensorboard open
+<task-id>``, ``det tensorboard logs <task-id>``, ``det tensorboard config <task-id>`` and ``det
+tensorboard kill <task-id>``; they also manage TensorBoard tasks, but not a shell with a
+``tensorboard`` service. As the task is a shell, the ``det shell`` and ``det task`` commands also
+manage it. ``det tensorboard list --json`` prints TensorBoard tasks as ``/api/v1/tensorboards``
+returns them and viewing sessions as ``/api/v1/shells`` does.
 
 ************************
  Implementation Details

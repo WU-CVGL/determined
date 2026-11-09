@@ -54,7 +54,7 @@ import clusterStore from 'stores/cluster';
 import projectStore from 'stores/projects';
 import userStore from 'stores/users';
 import workspaceStore from 'stores/workspaces';
-import { CommandTask, CommandType, DetailedUser, ExperimentAction, Workspace } from 'types';
+import { CommandTask, DetailedUser, ExperimentAction, Workspace } from 'types';
 import handleError, { ErrorLevel, ErrorType, isDetError } from 'utils/error';
 import { getActionsForExperiment } from 'utils/experiment';
 import { alphaNumericSorter, numericSorter } from 'utils/sort';
@@ -821,7 +821,7 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
               {taskNameRenderer(row.name, row.task, index)}
             </div>
           );
-          if (row.task.type !== CommandType.TensorBoard || !row.task.misc) return name;
+          if (!row.task.misc) return name;
           const sources = sourcesOf(row.task);
           return (
             <div className={css.sourceName}>

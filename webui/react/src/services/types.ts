@@ -326,14 +326,6 @@ export interface PatchExperimentParams extends ExperimentIdParams {
   }>;
 }
 
-export interface LaunchTensorBoardParams {
-  excludedExperimentIds?: Array<number>;
-  experimentIds?: Array<number>;
-  trialIds?: Array<number>;
-  workspaceId?: number;
-  filters?: Api.V1BulkExperimentFilters;
-}
-
 export interface LaunchShellParams {
   config?: RawJson;
   templateName?: string;

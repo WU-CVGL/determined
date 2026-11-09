@@ -13,7 +13,7 @@ import { terminalRunStates } from 'constants/states';
 import useFeature from 'hooks/useFeature';
 import { ActionOptions } from 'pages/ExperimentDetails/ExperimentDetailsHeader';
 import TrialHeaderLeft from 'pages/TrialDetails/Header/TrialHeaderLeft';
-import { getTrialWorkloads, openOrCreateTensorBoard } from 'services/api';
+import { getTrialWorkloads } from 'services/api';
 import {
   ExperimentAction as Action,
   ExperimentAction,
@@ -22,7 +22,7 @@ import {
   TrialWorkloadFilter,
 } from 'types';
 import { canActionExperiment } from 'utils/experiment';
-import { openCommandResponse } from 'utils/wait';
+import { handleTensorBoardError, openTensorBoardSession } from 'utils/tensorBoardSession';
 interface Props {
   experiment: ExperimentBase;
   fetchTrialDetails: () => void;
@@ -71,13 +71,17 @@ const TrialDetailsHeader: React.FC<Props> = ({ experiment, fetchTrialDetails, tr
             label: 'TensorBoard',
             onClick: async () => {
               setIsRunningTensorBoard(true);
-              const commandResponse = await openOrCreateTensorBoard({
-                trialIds: [trial.id],
-                workspaceId: experiment.workspaceId,
-              });
-              openCommandResponse(commandResponse);
-              await fetchTrialDetails();
-              setIsRunningTensorBoard(false);
+              try {
+                await openTensorBoardSession({
+                  trialIds: [trial.id],
+                  workspaceId: experiment.workspaceId,
+                });
+                await fetchTrialDetails();
+              } catch (e) {
+                handleTensorBoardError(e, 'Unable to View TensorBoard');
+              } finally {
+                setIsRunningTensorBoard(false);
+              }
             },
           },
         ],

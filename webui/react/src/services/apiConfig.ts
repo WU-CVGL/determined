@@ -2304,22 +2304,6 @@ export const launchShell: DetApi<
   request: (params: Service.LaunchShellParams) => detApi.Shells.launchShell(params),
 };
 
-export const launchTensorBoard: DetApi<
-  Service.LaunchTensorBoardParams,
-  Api.V1LaunchTensorboardResponse,
-  Type.CommandResponse
-> = {
-  name: 'launchTensorBoard',
-  postProcess: (response) => {
-    return {
-      command: decoder.mapV1TensorBoard(response.tensorboard),
-      warnings: response.warnings || [],
-    };
-  },
-  request: (params: Service.LaunchTensorBoardParams) =>
-    detApi.TensorBoards.launchTensorboard(params),
-};
-
 /* Jobs */
 
 export const getJobQueue: DetApi<

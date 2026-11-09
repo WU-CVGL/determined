@@ -1462,6 +1462,23 @@ describe('TaskDashboard', () => {
     ).toEqual(['Run 7', 'Search 2', 'Search 5']);
   });
 
+  it('shows the sources of a TensorBoard viewing session', async () => {
+    vi.mocked(getShells).mockResolvedValue([
+      {
+        ...CPU_SHELL,
+        id: 'shell-tb',
+        misc: { experimentIds: [5], trialIds: [7] },
+        name: 'TensorBoard (brave-cat)',
+      },
+    ]);
+    setup();
+
+    await user.click(await screen.findByRole('button', { name: 'Show 2 Sources' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('2 TensorBoard Sources')).toBeInTheDocument();
+  });
+
   it('searches after typing stops', async () => {
     setup();
     expect(await screen.findByText('bert-finetune')).toBeInTheDocument();

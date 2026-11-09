@@ -225,7 +225,11 @@ export const mapV1Command = (command: Sdk.V1Command): types.CommandTask => {
 };
 
 export const mapV1Shell = (shell: Sdk.V1Shell): types.CommandTask => {
-  return { ...mapCommonV1Task(shell, types.CommandType.Shell) };
+  const task = mapCommonV1Task(shell, types.CommandType.Shell);
+  const experimentIds = shell.experimentIds ?? [];
+  const trialIds = shell.trialIds ?? [];
+  if (experimentIds.length === 0 && trialIds.length === 0) return task;
+  return { ...task, misc: { experimentIds, trialIds } };
 };
 
 export const mapV1TensorBoard = (tensorboard: Sdk.V1Tensorboard): types.CommandTask => {
