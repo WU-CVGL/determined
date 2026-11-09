@@ -7210,6 +7210,40 @@ class v1GetUserByUsernameResponse(Printable):
         }
         return out
 
+class v1GetUserResourcesResponse(Printable):
+    asOf: "typing.Optional[str]" = None
+    pools: "typing.Optional[typing.Sequence[v1UserPoolResources]]" = None
+
+    def __init__(
+        self,
+        *,
+        asOf: "typing.Union[str, None, Unset]" = _unset,
+        pools: "typing.Union[typing.Sequence[v1UserPoolResources], None, Unset]" = _unset,
+    ):
+        if not isinstance(asOf, Unset):
+            self.asOf = asOf
+        if not isinstance(pools, Unset):
+            self.pools = pools
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1GetUserResourcesResponse":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+        }
+        if "asOf" in obj:
+            kwargs["asOf"] = obj["asOf"]
+        if "pools" in obj:
+            kwargs["pools"] = [v1UserPoolResources.from_json(x) for x in obj["pools"]] if obj["pools"] is not None else None
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+        }
+        if not omit_unset or "asOf" in vars(self):
+            out["asOf"] = self.asOf
+        if not omit_unset or "pools" in vars(self):
+            out["pools"] = None if self.pools is None else [x.to_json(omit_unset) for x in self.pools]
+        return out
+
 class v1GetUserResponse(Printable):
     """Response to GetUserRequest."""
 
@@ -7254,6 +7288,48 @@ class v1GetUserSettingResponse(Printable):
         out: "typing.Dict[str, typing.Any]" = {
             "settings": [x.to_json(omit_unset) for x in self.settings],
         }
+        return out
+
+class v1GetUserUsageResponse(Printable):
+    asOf: "typing.Optional[str]" = None
+    coverageStart: "typing.Optional[str]" = None
+    entries: "typing.Optional[typing.Sequence[v1UserUsageEntry]]" = None
+
+    def __init__(
+        self,
+        *,
+        asOf: "typing.Union[str, None, Unset]" = _unset,
+        coverageStart: "typing.Union[str, None, Unset]" = _unset,
+        entries: "typing.Union[typing.Sequence[v1UserUsageEntry], None, Unset]" = _unset,
+    ):
+        if not isinstance(asOf, Unset):
+            self.asOf = asOf
+        if not isinstance(coverageStart, Unset):
+            self.coverageStart = coverageStart
+        if not isinstance(entries, Unset):
+            self.entries = entries
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1GetUserUsageResponse":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+        }
+        if "asOf" in obj:
+            kwargs["asOf"] = obj["asOf"]
+        if "coverageStart" in obj:
+            kwargs["coverageStart"] = obj["coverageStart"]
+        if "entries" in obj:
+            kwargs["entries"] = [v1UserUsageEntry.from_json(x) for x in obj["entries"]] if obj["entries"] is not None else None
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+        }
+        if not omit_unset or "asOf" in vars(self):
+            out["asOf"] = self.asOf
+        if not omit_unset or "coverageStart" in vars(self):
+            out["coverageStart"] = self.coverageStart
+        if not omit_unset or "entries" in vars(self):
+            out["entries"] = None if self.entries is None else [x.to_json(omit_unset) for x in self.entries]
         return out
 
 class v1GetUsersRequestSortBy(DetEnum):
@@ -17602,6 +17678,82 @@ class v1UserFilters(Printable):
             out["name"] = self.name
         return out
 
+class v1UserPoolResources(Printable):
+    counts: "typing.Optional[v1UserResourceCounts]" = None
+    resourcePool: "typing.Optional[str]" = None
+
+    def __init__(
+        self,
+        *,
+        counts: "typing.Union[v1UserResourceCounts, None, Unset]" = _unset,
+        resourcePool: "typing.Union[str, None, Unset]" = _unset,
+    ):
+        if not isinstance(counts, Unset):
+            self.counts = counts
+        if not isinstance(resourcePool, Unset):
+            self.resourcePool = resourcePool
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1UserPoolResources":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+        }
+        if "counts" in obj:
+            kwargs["counts"] = v1UserResourceCounts.from_json(obj["counts"]) if obj["counts"] is not None else None
+        if "resourcePool" in obj:
+            kwargs["resourcePool"] = obj["resourcePool"]
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+        }
+        if not omit_unset or "counts" in vars(self):
+            out["counts"] = None if self.counts is None else self.counts.to_json(omit_unset)
+        if not omit_unset or "resourcePool" in vars(self):
+            out["resourcePool"] = self.resourcePool
+        return out
+
+class v1UserResourceCounts(Printable):
+    auxContainers: "typing.Optional[int]" = None
+    cpuSlots: "typing.Optional[int]" = None
+    gpus: "typing.Optional[int]" = None
+
+    def __init__(
+        self,
+        *,
+        auxContainers: "typing.Union[int, None, Unset]" = _unset,
+        cpuSlots: "typing.Union[int, None, Unset]" = _unset,
+        gpus: "typing.Union[int, None, Unset]" = _unset,
+    ):
+        if not isinstance(auxContainers, Unset):
+            self.auxContainers = auxContainers
+        if not isinstance(cpuSlots, Unset):
+            self.cpuSlots = cpuSlots
+        if not isinstance(gpus, Unset):
+            self.gpus = gpus
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1UserResourceCounts":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+        }
+        if "auxContainers" in obj:
+            kwargs["auxContainers"] = obj["auxContainers"]
+        if "cpuSlots" in obj:
+            kwargs["cpuSlots"] = obj["cpuSlots"]
+        if "gpus" in obj:
+            kwargs["gpus"] = obj["gpus"]
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+        }
+        if not omit_unset or "auxContainers" in vars(self):
+            out["auxContainers"] = self.auxContainers
+        if not omit_unset or "cpuSlots" in vars(self):
+            out["cpuSlots"] = self.cpuSlots
+        if not omit_unset or "gpus" in vars(self):
+            out["gpus"] = self.gpus
+        return out
+
 class v1UserRoleAssignment(Printable):
     """UserRoleAssignment contains information about the users
     belonging to a role.
@@ -17629,6 +17781,72 @@ class v1UserRoleAssignment(Printable):
             "roleAssignment": self.roleAssignment.to_json(omit_unset),
             "userId": self.userId,
         }
+        return out
+
+class v1UserUsageEntry(Printable):
+    activeDays: "typing.Optional[int]" = None
+    activeSeconds: "typing.Optional[float]" = None
+    auxContainerSeconds: "typing.Optional[float]" = None
+    cpuSlotSeconds: "typing.Optional[float]" = None
+    gpuSeconds: "typing.Optional[float]" = None
+    periodStart: "typing.Optional[str]" = None
+
+    def __init__(
+        self,
+        *,
+        activeDays: "typing.Union[int, None, Unset]" = _unset,
+        activeSeconds: "typing.Union[float, None, Unset]" = _unset,
+        auxContainerSeconds: "typing.Union[float, None, Unset]" = _unset,
+        cpuSlotSeconds: "typing.Union[float, None, Unset]" = _unset,
+        gpuSeconds: "typing.Union[float, None, Unset]" = _unset,
+        periodStart: "typing.Union[str, None, Unset]" = _unset,
+    ):
+        if not isinstance(activeDays, Unset):
+            self.activeDays = activeDays
+        if not isinstance(activeSeconds, Unset):
+            self.activeSeconds = activeSeconds
+        if not isinstance(auxContainerSeconds, Unset):
+            self.auxContainerSeconds = auxContainerSeconds
+        if not isinstance(cpuSlotSeconds, Unset):
+            self.cpuSlotSeconds = cpuSlotSeconds
+        if not isinstance(gpuSeconds, Unset):
+            self.gpuSeconds = gpuSeconds
+        if not isinstance(periodStart, Unset):
+            self.periodStart = periodStart
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1UserUsageEntry":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+        }
+        if "activeDays" in obj:
+            kwargs["activeDays"] = obj["activeDays"]
+        if "activeSeconds" in obj:
+            kwargs["activeSeconds"] = float(obj["activeSeconds"]) if obj["activeSeconds"] is not None else None
+        if "auxContainerSeconds" in obj:
+            kwargs["auxContainerSeconds"] = float(obj["auxContainerSeconds"]) if obj["auxContainerSeconds"] is not None else None
+        if "cpuSlotSeconds" in obj:
+            kwargs["cpuSlotSeconds"] = float(obj["cpuSlotSeconds"]) if obj["cpuSlotSeconds"] is not None else None
+        if "gpuSeconds" in obj:
+            kwargs["gpuSeconds"] = float(obj["gpuSeconds"]) if obj["gpuSeconds"] is not None else None
+        if "periodStart" in obj:
+            kwargs["periodStart"] = obj["periodStart"]
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+        }
+        if not omit_unset or "activeDays" in vars(self):
+            out["activeDays"] = self.activeDays
+        if not omit_unset or "activeSeconds" in vars(self):
+            out["activeSeconds"] = None if self.activeSeconds is None else dump_float(self.activeSeconds)
+        if not omit_unset or "auxContainerSeconds" in vars(self):
+            out["auxContainerSeconds"] = None if self.auxContainerSeconds is None else dump_float(self.auxContainerSeconds)
+        if not omit_unset or "cpuSlotSeconds" in vars(self):
+            out["cpuSlotSeconds"] = None if self.cpuSlotSeconds is None else dump_float(self.cpuSlotSeconds)
+        if not omit_unset or "gpuSeconds" in vars(self):
+            out["gpuSeconds"] = None if self.gpuSeconds is None else dump_float(self.gpuSeconds)
+        if not omit_unset or "periodStart" in vars(self):
+            out["periodStart"] = self.periodStart
         return out
 
 class v1UserWebSetting(Printable):
@@ -22264,6 +22482,30 @@ def get_GetUserByUsername(
         return v1GetUserByUsernameResponse.from_json(_resp.json())
     raise APIHttpError("get_GetUserByUsername", _resp)
 
+def get_GetUserResources(
+    session: "api.BaseSession",
+    *,
+    userId: int,
+) -> "v1GetUserResourcesResponse":
+    """Get the resources a user's tasks hold now.
+
+    - userId: The id of the user.
+    """
+    _params = None
+    _resp = session._do_request(
+        method="GET",
+        path=f"/api/v1/users/{userId}/resources",
+        params=_params,
+        json=None,
+        data=None,
+        headers=None,
+        timeout=None,
+        stream=False,
+    )
+    if _resp.status_code == 200:
+        return v1GetUserResourcesResponse.from_json(_resp.json())
+    raise APIHttpError("get_GetUserResources", _resp)
+
 def get_GetUserSetting(
     session: "api.BaseSession",
 ) -> "v1GetUserSettingResponse":
@@ -22282,6 +22524,45 @@ def get_GetUserSetting(
     if _resp.status_code == 200:
         return v1GetUserSettingResponse.from_json(_resp.json())
     raise APIHttpError("get_GetUserSetting", _resp)
+
+def get_GetUserUsage(
+    session: "api.BaseSession",
+    *,
+    userId: int,
+    endDate: "typing.Optional[str]" = None,
+    period: "typing.Optional[v1ResourceAllocationAggregationPeriod]" = None,
+    startDate: "typing.Optional[str]" = None,
+) -> "v1GetUserUsageResponse":
+    """Get a user's daily or monthly resource usage.
+
+    - userId: The id of the user.
+    - endDate: Last day (YYYY-MM-DD) or month (YYYY-MM), UTC, inclusive.
+    - period: Daily or monthly entries.
+
+ - RESOURCE_ALLOCATION_AGGREGATION_PERIOD_UNSPECIFIED: Unspecified. This value will never actually be returned by the API, it is
+just an artifact of using protobuf.
+ - RESOURCE_ALLOCATION_AGGREGATION_PERIOD_DAILY: Aggregation by day.
+ - RESOURCE_ALLOCATION_AGGREGATION_PERIOD_MONTHLY: Aggregation by month.
+    - startDate: First day (YYYY-MM-DD) or month (YYYY-MM), UTC, inclusive.
+    """
+    _params = {
+        "endDate": endDate,
+        "period": period.value if period is not None else None,
+        "startDate": startDate,
+    }
+    _resp = session._do_request(
+        method="GET",
+        path=f"/api/v1/users/{userId}/usage",
+        params=_params,
+        json=None,
+        data=None,
+        headers=None,
+        timeout=None,
+        stream=False,
+    )
+    if _resp.status_code == 200:
+        return v1GetUserUsageResponse.from_json(_resp.json())
+    raise APIHttpError("get_GetUserUsage", _resp)
 
 def get_GetUsers(
     session: "api.BaseSession",

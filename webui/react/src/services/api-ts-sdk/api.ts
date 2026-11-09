@@ -5408,6 +5408,25 @@ export interface V1GetUserByUsernameResponse {
     user: V1User;
 }
 /**
+ * 
+ * @export
+ * @interface V1GetUserResourcesResponse
+ */
+export interface V1GetUserResourcesResponse {
+    /**
+     * Pools where the user holds resources.
+     * @type {Array<V1UserPoolResources>}
+     * @memberof V1GetUserResourcesResponse
+     */
+    pools?: Array<V1UserPoolResources>;
+    /**
+     * When the counts were read.
+     * @type {Date | DateString}
+     * @memberof V1GetUserResourcesResponse
+     */
+    asOf?: Date | DateString;
+}
+/**
  * Response to GetUserRequest.
  * @export
  * @interface V1GetUserResponse
@@ -5468,6 +5487,31 @@ export interface V1GetUsersResponse {
      * @memberof V1GetUsersResponse
      */
     pagination?: V1Pagination;
+}
+/**
+ * 
+ * @export
+ * @interface V1GetUserUsageResponse
+ */
+export interface V1GetUserUsageResponse {
+    /**
+     * Covered entries in order; an absent period is not covered.
+     * @type {Array<V1UserUsageEntry>}
+     * @memberof V1GetUserUsageResponse
+     */
+    entries?: Array<V1UserUsageEntry>;
+    /**
+     * The cut for running allocations.
+     * @type {Date | DateString}
+     * @memberof V1GetUserUsageResponse
+     */
+    asOf?: Date | DateString;
+    /**
+     * The first day (YYYY-MM-DD) with records.
+     * @type {string}
+     * @memberof V1GetUserUsageResponse
+     */
+    coverageStart?: string;
 }
 /**
  * Response to GetTrainingMetricsRequest.
@@ -13016,6 +13060,50 @@ export interface V1UserFilters {
     admin?: boolean;
 }
 /**
+ * 
+ * @export
+ * @interface V1UserPoolResources
+ */
+export interface V1UserPoolResources {
+    /**
+     * The resource pool.
+     * @type {string}
+     * @memberof V1UserPoolResources
+     */
+    resourcePool?: string;
+    /**
+     * The counts in this pool.
+     * @type {V1UserResourceCounts}
+     * @memberof V1UserPoolResources
+     */
+    counts?: V1UserResourceCounts;
+}
+/**
+ * 
+ * @export
+ * @interface V1UserResourceCounts
+ */
+export interface V1UserResourceCounts {
+    /**
+     * GPUs the user's tasks hold.
+     * @type {number}
+     * @memberof V1UserResourceCounts
+     */
+    gpus?: number;
+    /**
+     * CPU slots the user's tasks hold.
+     * @type {number}
+     * @memberof V1UserResourceCounts
+     */
+    cpuSlots?: number;
+    /**
+     * Containers without slots; unset when not available (Kubernetes).
+     * @type {number}
+     * @memberof V1UserResourceCounts
+     */
+    auxContainers?: number;
+}
+/**
  * UserRoleAssignment contains information about the users belonging to a role.
  * @export
  * @interface V1UserRoleAssignment
@@ -13033,6 +13121,49 @@ export interface V1UserRoleAssignment {
      * @memberof V1UserRoleAssignment
      */
     roleAssignment: V1RoleAssignment;
+}
+/**
+ * 
+ * @export
+ * @interface V1UserUsageEntry
+ */
+export interface V1UserUsageEntry {
+    /**
+     * The day (YYYY-MM-DD) or month (YYYY-MM), UTC.
+     * @type {string}
+     * @memberof V1UserUsageEntry
+     */
+    periodStart?: string;
+    /**
+     * GPU-seconds held.
+     * @type {number}
+     * @memberof V1UserUsageEntry
+     */
+    gpuSeconds?: number;
+    /**
+     * CPU-slot-seconds held.
+     * @type {number}
+     * @memberof V1UserUsageEntry
+     */
+    cpuSlotSeconds?: number;
+    /**
+     * Aux-container-seconds held; unset when not available.
+     * @type {number}
+     * @memberof V1UserUsageEntry
+     */
+    auxContainerSeconds?: number;
+    /**
+     * Seconds with any resource held (union of intervals).
+     * @type {number}
+     * @memberof V1UserUsageEntry
+     */
+    activeSeconds?: number;
+    /**
+     * Days with any resource held (0 or 1 for a day).
+     * @type {number}
+     * @memberof V1UserUsageEntry
+     */
+    activeDays?: number;
 }
 /**
  * UserWebSetting represents user web setting.
@@ -35509,6 +35640,42 @@ export const UsersApiFetchParamCreator = function (configuration?: Configuration
         },
         /**
          * 
+         * @summary Get the resources a user's tasks hold now.
+         * @param {number} userId The id of the user.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getUserResources(userId: number, options: any = {}): FetchArgs {
+            // verify required parameter 'userId' is not null or undefined
+            if (userId === null || userId === undefined) {
+                throw new RequiredError('userId','Required parameter userId was null or undefined when calling getUserResources.');
+            }
+            const localVarPath = `/api/v1/users/{userId}/resources`
+                .replace(`{${"userId"}}`, encodeURIComponent(String(userId)));
+            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
+            const localVarRequestOptions = { method: 'GET', ...options };
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+            
+            // authentication BearerToken required
+            if (configuration && configuration.apiKey) {
+                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
+                    ? configuration.apiKey("Authorization")
+                    : configuration.apiKey;
+                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
+            }
+            
+            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
+            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
+            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
+            
+            return {
+                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @summary Get a list of users.
          * @param {V1GetUsersRequestSortBy} [sortBy] Sort users by the given field.   - SORT_BY_UNSPECIFIED: Returns users in an unsorted list.  - SORT_BY_DISPLAY_NAME: Returns users sorted by display name.  - SORT_BY_USER_NAME: Returns users sorted by user name.  - SORT_BY_ADMIN: Returns users sorted by if they are admin.  - SORT_BY_ACTIVE: Returns users sorted by if they are active.  - SORT_BY_MODIFIED_TIME: Returns users sorted by modified time.  - SORT_BY_NAME: Returns users sorted by username unless display name exist.  - SORT_BY_LAST_AUTH_TIME: Returns users sorted by last authenticated time.  - SORT_BY_REMOTE: Returns users sorted by local or remote auth.
          * @param {V1OrderBy} [orderBy] Order users in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
@@ -35596,6 +35763,57 @@ export const UsersApiFetchParamCreator = function (configuration?: Configuration
                     ? configuration.apiKey("Authorization")
                     : configuration.apiKey;
                 localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
+            }
+            
+            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
+            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
+            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
+            
+            return {
+                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary Get a user's daily or monthly resource usage.
+         * @param {number} userId The id of the user.
+         * @param {string} [startDate] First day (YYYY-MM-DD) or month (YYYY-MM), UTC, inclusive.
+         * @param {string} [endDate] Last day (YYYY-MM-DD) or month (YYYY-MM), UTC, inclusive.
+         * @param {V1ResourceAllocationAggregationPeriod} [period] Daily or monthly entries.   - RESOURCE_ALLOCATION_AGGREGATION_PERIOD_UNSPECIFIED: Unspecified. This value will never actually be returned by the API, it is just an artifact of using protobuf.  - RESOURCE_ALLOCATION_AGGREGATION_PERIOD_DAILY: Aggregation by day.  - RESOURCE_ALLOCATION_AGGREGATION_PERIOD_MONTHLY: Aggregation by month.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getUserUsage(userId: number, startDate?: string, endDate?: string, period?: V1ResourceAllocationAggregationPeriod, options: any = {}): FetchArgs {
+            // verify required parameter 'userId' is not null or undefined
+            if (userId === null || userId === undefined) {
+                throw new RequiredError('userId','Required parameter userId was null or undefined when calling getUserUsage.');
+            }
+            const localVarPath = `/api/v1/users/{userId}/usage`
+                .replace(`{${"userId"}}`, encodeURIComponent(String(userId)));
+            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
+            const localVarRequestOptions = { method: 'GET', ...options };
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+            
+            // authentication BearerToken required
+            if (configuration && configuration.apiKey) {
+                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
+                    ? configuration.apiKey("Authorization")
+                    : configuration.apiKey;
+                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
+            }
+            
+            if (startDate !== undefined) {
+                localVarQueryParameter['startDate'] = startDate
+            }
+            
+            if (endDate !== undefined) {
+                localVarQueryParameter['endDate'] = endDate
+            }
+            
+            if (period !== undefined) {
+                localVarQueryParameter['period'] = period
             }
             
             objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
@@ -35906,6 +36124,25 @@ export const UsersApiFp = function (configuration?: Configuration) {
         },
         /**
          * 
+         * @summary Get the resources a user's tasks hold now.
+         * @param {number} userId The id of the user.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getUserResources(userId: number, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetUserResourcesResponse> {
+            const localVarFetchArgs = UsersApiFetchParamCreator(configuration).getUserResources(userId, options);
+            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
+                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                        return response.json();
+                    } else {
+                        throw response;
+                    }
+                });
+            };
+        },
+        /**
+         * 
          * @summary Get a list of users.
          * @param {V1GetUsersRequestSortBy} [sortBy] Sort users by the given field.   - SORT_BY_UNSPECIFIED: Returns users in an unsorted list.  - SORT_BY_DISPLAY_NAME: Returns users sorted by display name.  - SORT_BY_USER_NAME: Returns users sorted by user name.  - SORT_BY_ADMIN: Returns users sorted by if they are admin.  - SORT_BY_ACTIVE: Returns users sorted by if they are active.  - SORT_BY_MODIFIED_TIME: Returns users sorted by modified time.  - SORT_BY_NAME: Returns users sorted by username unless display name exist.  - SORT_BY_LAST_AUTH_TIME: Returns users sorted by last authenticated time.  - SORT_BY_REMOTE: Returns users sorted by local or remote auth.
          * @param {V1OrderBy} [orderBy] Order users in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
@@ -35938,6 +36175,28 @@ export const UsersApiFp = function (configuration?: Configuration) {
          */
         getUserSetting(options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetUserSettingResponse> {
             const localVarFetchArgs = UsersApiFetchParamCreator(configuration).getUserSetting(options);
+            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
+                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                        return response.json();
+                    } else {
+                        throw response;
+                    }
+                });
+            };
+        },
+        /**
+         * 
+         * @summary Get a user's daily or monthly resource usage.
+         * @param {number} userId The id of the user.
+         * @param {string} [startDate] First day (YYYY-MM-DD) or month (YYYY-MM), UTC, inclusive.
+         * @param {string} [endDate] Last day (YYYY-MM-DD) or month (YYYY-MM), UTC, inclusive.
+         * @param {V1ResourceAllocationAggregationPeriod} [period] Daily or monthly entries.   - RESOURCE_ALLOCATION_AGGREGATION_PERIOD_UNSPECIFIED: Unspecified. This value will never actually be returned by the API, it is just an artifact of using protobuf.  - RESOURCE_ALLOCATION_AGGREGATION_PERIOD_DAILY: Aggregation by day.  - RESOURCE_ALLOCATION_AGGREGATION_PERIOD_MONTHLY: Aggregation by month.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getUserUsage(userId: number, startDate?: string, endDate?: string, period?: V1ResourceAllocationAggregationPeriod, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetUserUsageResponse> {
+            const localVarFetchArgs = UsersApiFetchParamCreator(configuration).getUserUsage(userId, startDate, endDate, period, options);
             return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
                 return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
                     if (response.status >= 200 && response.status < 300) {
@@ -36103,6 +36362,16 @@ export const UsersApiFactory = function (configuration?: Configuration, fetch?: 
         },
         /**
          * 
+         * @summary Get the resources a user's tasks hold now.
+         * @param {number} userId The id of the user.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getUserResources(userId: number, options?: any) {
+            return UsersApiFp(configuration).getUserResources(userId, options)(fetch, basePath);
+        },
+        /**
+         * 
          * @summary Get a list of users.
          * @param {V1GetUsersRequestSortBy} [sortBy] Sort users by the given field.   - SORT_BY_UNSPECIFIED: Returns users in an unsorted list.  - SORT_BY_DISPLAY_NAME: Returns users sorted by display name.  - SORT_BY_USER_NAME: Returns users sorted by user name.  - SORT_BY_ADMIN: Returns users sorted by if they are admin.  - SORT_BY_ACTIVE: Returns users sorted by if they are active.  - SORT_BY_MODIFIED_TIME: Returns users sorted by modified time.  - SORT_BY_NAME: Returns users sorted by username unless display name exist.  - SORT_BY_LAST_AUTH_TIME: Returns users sorted by last authenticated time.  - SORT_BY_REMOTE: Returns users sorted by local or remote auth.
          * @param {V1OrderBy} [orderBy] Order users in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
@@ -36126,6 +36395,19 @@ export const UsersApiFactory = function (configuration?: Configuration, fetch?: 
          */
         getUserSetting(options?: any) {
             return UsersApiFp(configuration).getUserSetting(options)(fetch, basePath);
+        },
+        /**
+         * 
+         * @summary Get a user's daily or monthly resource usage.
+         * @param {number} userId The id of the user.
+         * @param {string} [startDate] First day (YYYY-MM-DD) or month (YYYY-MM), UTC, inclusive.
+         * @param {string} [endDate] Last day (YYYY-MM-DD) or month (YYYY-MM), UTC, inclusive.
+         * @param {V1ResourceAllocationAggregationPeriod} [period] Daily or monthly entries.   - RESOURCE_ALLOCATION_AGGREGATION_PERIOD_UNSPECIFIED: Unspecified. This value will never actually be returned by the API, it is just an artifact of using protobuf.  - RESOURCE_ALLOCATION_AGGREGATION_PERIOD_DAILY: Aggregation by day.  - RESOURCE_ALLOCATION_AGGREGATION_PERIOD_MONTHLY: Aggregation by month.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getUserUsage(userId: number, startDate?: string, endDate?: string, period?: V1ResourceAllocationAggregationPeriod, options?: any) {
+            return UsersApiFp(configuration).getUserUsage(userId, startDate, endDate, period, options)(fetch, basePath);
         },
         /**
          * 
@@ -36235,6 +36517,18 @@ export class UsersApi extends BaseAPI {
     
     /**
      * 
+     * @summary Get the resources a user's tasks hold now.
+     * @param {number} userId The id of the user.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof UsersApi
+     */
+    public getUserResources(userId: number, options?: any) {
+        return UsersApiFp(this.configuration).getUserResources(userId, options)(this.fetch, this.basePath)
+    }
+    
+    /**
+     * 
      * @summary Get a list of users.
      * @param {V1GetUsersRequestSortBy} [sortBy] Sort users by the given field.   - SORT_BY_UNSPECIFIED: Returns users in an unsorted list.  - SORT_BY_DISPLAY_NAME: Returns users sorted by display name.  - SORT_BY_USER_NAME: Returns users sorted by user name.  - SORT_BY_ADMIN: Returns users sorted by if they are admin.  - SORT_BY_ACTIVE: Returns users sorted by if they are active.  - SORT_BY_MODIFIED_TIME: Returns users sorted by modified time.  - SORT_BY_NAME: Returns users sorted by username unless display name exist.  - SORT_BY_LAST_AUTH_TIME: Returns users sorted by last authenticated time.  - SORT_BY_REMOTE: Returns users sorted by local or remote auth.
      * @param {V1OrderBy} [orderBy] Order users in either ascending or descending order.   - ORDER_BY_UNSPECIFIED: Returns records in no specific order.  - ORDER_BY_ASC: Returns records in ascending order.  - ORDER_BY_DESC: Returns records in descending order.
@@ -36261,6 +36555,21 @@ export class UsersApi extends BaseAPI {
      */
     public getUserSetting(options?: any) {
         return UsersApiFp(this.configuration).getUserSetting(options)(this.fetch, this.basePath)
+    }
+    
+    /**
+     * 
+     * @summary Get a user's daily or monthly resource usage.
+     * @param {number} userId The id of the user.
+     * @param {string} [startDate] First day (YYYY-MM-DD) or month (YYYY-MM), UTC, inclusive.
+     * @param {string} [endDate] Last day (YYYY-MM-DD) or month (YYYY-MM), UTC, inclusive.
+     * @param {V1ResourceAllocationAggregationPeriod} [period] Daily or monthly entries.   - RESOURCE_ALLOCATION_AGGREGATION_PERIOD_UNSPECIFIED: Unspecified. This value will never actually be returned by the API, it is just an artifact of using protobuf.  - RESOURCE_ALLOCATION_AGGREGATION_PERIOD_DAILY: Aggregation by day.  - RESOURCE_ALLOCATION_AGGREGATION_PERIOD_MONTHLY: Aggregation by month.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof UsersApi
+     */
+    public getUserUsage(userId: number, startDate?: string, endDate?: string, period?: V1ResourceAllocationAggregationPeriod, options?: any) {
+        return UsersApiFp(this.configuration).getUserUsage(userId, startDate, endDate, period, options)(this.fetch, this.basePath)
     }
     
     /**

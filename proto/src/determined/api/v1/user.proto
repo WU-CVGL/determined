@@ -6,6 +6,8 @@ option go_package = "github.com/determined-ai/determined/proto/pkg/apiv1";
 import "determined/user/v1/user.proto";
 import "determined/api/v1/pagination.proto";
 import "protoc-gen-swagger/options/annotations.proto";
+import "google/protobuf/timestamp.proto";
+import "determined/master/v1/master.proto";
 
 // Message for results of individual users in a multi-user action.
 message UserActionResult {
@@ -229,3 +231,61 @@ message PostUserActivityRequest {
 
 // Response to PostUserActivityRequest.
 message PostUserActivityResponse {}
+
+message GetUserResourcesRequest {
+  // The id of the user.
+  int32 user_id = 1;
+}
+message UserResourceCounts {
+  // GPUs the user's tasks hold.
+  int32 gpus = 1;
+  // CPU slots the user's tasks hold.
+  int32 cpu_slots = 2;
+  // Containers without slots; unset when not available (Kubernetes).
+  optional int32 aux_containers = 3;
+}
+message UserPoolResources {
+  // The resource pool.
+  string resource_pool = 1;
+  // The counts in this pool.
+  UserResourceCounts counts = 2;
+}
+message GetUserResourcesResponse {
+  // Pools where the user holds resources.
+  repeated UserPoolResources pools = 1;
+  // When the counts were read.
+  google.protobuf.Timestamp as_of = 2;
+}
+
+message GetUserUsageRequest {
+  // The id of the user.
+  int32 user_id = 1;
+  // First day (YYYY-MM-DD) or month (YYYY-MM), UTC, inclusive.
+  string start_date = 2;
+  // Last day (YYYY-MM-DD) or month (YYYY-MM), UTC, inclusive.
+  string end_date = 3;
+  // Daily or monthly entries.
+  determined.master.v1.ResourceAllocationAggregationPeriod period = 4;
+}
+message UserUsageEntry {
+  // The day (YYYY-MM-DD) or month (YYYY-MM), UTC.
+  string period_start = 1;
+  // GPU-seconds held.
+  double gpu_seconds = 2;
+  // CPU-slot-seconds held.
+  double cpu_slot_seconds = 3;
+  // Aux-container-seconds held; unset when not available.
+  optional double aux_container_seconds = 4;
+  // Seconds with any resource held (union of intervals).
+  double active_seconds = 5;
+  // Days with any resource held (0 or 1 for a day).
+  int32 active_days = 6;
+}
+message GetUserUsageResponse {
+  // Covered entries in order; an absent period is not covered.
+  repeated UserUsageEntry entries = 1;
+  // The cut for running allocations.
+  google.protobuf.Timestamp as_of = 2;
+  // The first day (YYYY-MM-DD) with records.
+  string coverage_start = 3;
+}
