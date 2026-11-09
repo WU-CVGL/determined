@@ -499,3 +499,159 @@ func TestPostTaskLogsLogSignalDataSaving(t *testing.T) {
 
 	require.Equal(t, "test", *tasksOut.LogPolicyMatched)
 }
+
+// addTaskWithoutCommandState persists a task in a job that owner owns, with its allocation, as
+// Command.registerJobAndTask does, but without the command state that Command.persist writes.
+func addTaskWithoutCommandState(
+	ctx context.Context, t *testing.T, owner model.User, taskType model.TaskType,
+	jobType model.JobType,
+) logWriteTask {
+	t.Helper()
+	jobID := model.NewJobID()
+	require.NoError(t, db.AddJob(&model.Job{JobID: jobID, JobType: jobType, OwnerID: &owner.ID}))
+	taskID := model.NewTaskID()
+	require.NoError(t, db.AddTask(ctx, &model.Task{
+		TaskID: taskID, TaskType: taskType, JobID: &jobID, StartTime: time.Now().UTC(),
+		LogVersion: model.CurrentTaskLogVersion,
+	}))
+	allocationID := model.AllocationID(taskID.String() + ".1")
+	require.NoError(t, db.AddAllocation(ctx, &model.Allocation{
+		TaskID: taskID, AllocationID: allocationID,
+	}))
+	return logWriteTask{name: string(taskType), taskID: taskID, allocationID: allocationID}
+}
+
+// readTaskErr returns the errors of reading the task, its logs and its allocation as the user of
+// ctx.
+func readTaskErr(
+	ctx context.Context, api *apiServer, task logWriteTask,
+) (getTask, taskLogs, getAllocation error) {
+	_, getTask = api.GetTask(ctx, &apiv1.GetTaskRequest{TaskId: task.taskID.String()})
+	taskLogs = api.TaskLogs(&apiv1.TaskLogsRequest{TaskId: task.taskID.String()},
+		&mockStream[*apiv1.TaskLogsResponse]{ctx: ctx})
+	getAllocation = api.canGetAllocation(ctx, string(task.allocationID))
+	return getTask, taskLogs, getAllocation
+}
+
+// TestUnidentifiedTaskRead checks who may read a task without command state under basic
+// authorization: a checkpoint GC task as its experiment, or by everyone in a job of its own, and
+// any other task only by its owner and admins.
+func TestUnidentifiedTaskRead(t *testing.T) {
+	var allocations map[model.AllocationID]sproto.AllocationSummary
+	mockRM := MockRM()
+	mockRM.On("GetAllocationSummaries", mock.Anything).Return(
+		func() map[model.AllocationID]sproto.AllocationSummary { return allocations }, nil)
+
+	api, admin, adminCtx := setupAPITest(t, nil, mockRM)
+	owner := db.RequireMockUser(t, api.m.db)
+	other := db.RequireMockUser(t, api.m.db)
+	ownerCtx, otherCtx := sessionContext(t, owner), sessionContext(t, other)
+
+	cmd := addTaskWithoutCommandState(adminCtx, t, owner, model.TaskTypeCommand,
+		model.JobTypeCommand)
+	t.Run("command without command state", func(t *testing.T) {
+		notFound := apiPkg.NotFoundErrs("task", cmd.taskID.String(), true)
+		getTask, taskLogs, getAllocation := readTaskErr(otherCtx, api, cmd)
+		require.ErrorIs(t, getTask, notFound)
+		require.ErrorIs(t, taskLogs, notFound)
+		require.True(t, authz2.IsPermissionDenied(getAllocation), getAllocation)
+
+		for _, ctx := range []context.Context{ownerCtx, adminCtx} {
+			getTask, taskLogs, getAllocation := readTaskErr(ctx, api, cmd)
+			require.NoError(t, getTask)
+			require.NoError(t, taskLogs)
+			require.NoError(t, getAllocation)
+		}
+	})
+
+	exp := createTestExpWithProjectID(t, api, owner, 1)
+	expGC := addCheckpointGCTaskForLogsTest(adminCtx, t, "experiment GC", exp.JobID,
+		expGCTaskID(exp.ID))
+	t.Run("experiment GC", func(t *testing.T) {
+		var workspaceID int
+		require.NoError(t, db.Bun().NewSelect().Table("projects").Column("workspace_id").
+			Where("id = ?", exp.ProjectID).Scan(adminCtx, &workspaceID))
+		ok, scope, err := canAccessNTSCTask(adminCtx, other, expGC.taskID)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, model.AccessScopeID(workspaceID), scope)
+
+		getTask, taskLogs, getAllocation := readTaskErr(otherCtx, api, expGC)
+		require.NoError(t, getTask)
+		require.NoError(t, taskLogs)
+		require.NoError(t, getAllocation)
+	})
+
+	gcJobID := model.NewJobID()
+	require.NoError(t, db.AddJob(&model.Job{
+		JobID: gcJobID, JobType: model.JobTypeCheckpointGC, OwnerID: &admin.ID,
+	}))
+	deleteCheckpointsGC := addCheckpointGCTaskForLogsTest(adminCtx, t, "DeleteCheckpoints GC",
+		gcJobID, model.NewTaskID())
+	t.Run("DeleteCheckpoints GC", func(t *testing.T) {
+		getTask, taskLogs, getAllocation := readTaskErr(otherCtx, api, deleteCheckpointsGC)
+		require.NoError(t, getTask)
+		require.NoError(t, taskLogs)
+		require.NoError(t, getAllocation)
+	})
+
+	t.Run("GetTasks", func(t *testing.T) {
+		allocations = map[model.AllocationID]sproto.AllocationSummary{
+			cmd.allocationID:                 {TaskID: cmd.taskID},
+			expGC.allocationID:               {TaskID: expGC.taskID},
+			deleteCheckpointsGC.allocationID: {TaskID: deleteCheckpointsGC.taskID},
+		}
+		all := []string{
+			string(cmd.allocationID), string(expGC.allocationID),
+			string(deleteCheckpointsGC.allocationID),
+		}
+		for _, c := range []struct {
+			user model.User
+			want []string
+		}{
+			{other, all[1:]},
+			{owner, all},
+			{admin, all},
+		} {
+			resp, err := api.GetTasks(sessionContext(t, c.user), &apiv1.GetTasksRequest{})
+			require.NoError(t, err)
+			require.ElementsMatch(t, c.want, maps.Keys(resp.AllocationIdToSummary))
+		}
+	})
+
+	t.Run("nonexistent task", func(t *testing.T) {
+		missing := model.NewTaskID()
+		ok, _, err := canAccessNTSCTask(adminCtx, admin, missing)
+		require.False(t, ok)
+		require.True(t, authz2.IsPermissionDenied(err), err)
+		_, err = api.GetTask(adminCtx, &apiv1.GetTaskRequest{TaskId: missing.String()})
+		require.ErrorIs(t, err, apiPkg.NotFoundErrs("task", missing.String(), true))
+		require.ErrorIs(t, api.canGetTaskAcceleration(adminCtx, missing.String()),
+			apiPkg.NotFoundErrs("task", missing.String(), true))
+		allocationID := missing.String() + ".1"
+		require.ErrorIs(t, api.canGetAllocation(adminCtx, allocationID),
+			apiPkg.NotFoundErrs("allocation", allocationID, true))
+		require.ErrorIs(t, api.canEditAllocation(adminCtx, allocationID),
+			apiPkg.NotFoundErrs("allocation", allocationID, true))
+	})
+}
+
+// TestExperimentGCTaskReadFollowsExperiment checks that a checkpoint GC task of an experiment may
+// be read exactly when the experiment may be.
+func TestExperimentGCTaskReadFollowsExperiment(t *testing.T) {
+	api, authZExp, _, curUser, ctx := setupExpAuthTest(t, nil)
+	exp := createTestExp(t, api, curUser)
+	gc := addCheckpointGCTaskForLogsTest(ctx, t, "experiment GC", exp.JobID, expGCTaskID(exp.ID))
+	isExp := mock.MatchedBy(func(e *model.Experiment) bool { return e.ID == exp.ID })
+
+	authZExp.On("CanGetExperiment", mock.Anything, curUser, isExp).
+		Return(authz2.PermissionDeniedError{}).Once()
+	ok, _, err := canAccessNTSCTask(ctx, curUser, gc.taskID)
+	require.False(t, ok)
+	require.True(t, authz2.IsPermissionDenied(err), err)
+
+	authZExp.On("CanGetExperiment", mock.Anything, curUser, isExp).Return(nil).Once()
+	ok, _, err = canAccessNTSCTask(ctx, curUser, gc.taskID)
+	require.NoError(t, err)
+	require.True(t, ok)
+}
