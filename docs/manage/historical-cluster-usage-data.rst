@@ -51,6 +51,8 @@ allocation data for analysis:
 -  ``det resources aggregated <start date> <end date>``: Get aggregated allocation information.
    Dates are in the format yyyy-mm-dd.
 
+.. _user-pages:
+
 ************
  User Pages
 ************

@@ -82,6 +82,7 @@ export class NavigationSideBar extends BaseReactFragment {
  * Represents the HeaderDropdown in the NavigationSideBar component
  */
 class HeaderDropdown extends DropdownMenu {
+  readonly profile = this.menuItem('profile');
   readonly admin = this.menuItem('admin');
   readonly settings = this.menuItem('settings');
   readonly theme = this.menuItem('theme-toggle');

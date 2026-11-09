@@ -91,6 +91,35 @@ use the WebUI to edit model metadata. To find out more, visit :ref:`organizing-m
 
 You can use the WebUI to view :ref:`historical-cluster-usage-data`.
 
+.. _web-ui-user-pages:
+
+************
+ User Pages
+************
+
+Each user has a page, which every signed-in user can open: **My Profile** in the user menu opens
+yours, and the owner of a job in the :ref:`Jobs <web-ui-jobs>` list opens theirs. **Jobs** on the
+page lists the user's jobs.
+
+-  **Current resources**: the GPUs, CPU slots and auxiliary containers that the user's tasks hold
+   now. Kubernetes pools do not report auxiliary containers.
+
+-  **Active days (UTC)**: a calendar of the last 53 weeks with a cell for each UTC day, shaded by
+   how long the user's tasks held resources that day: any time, 4 hours or more, or 12 hours or
+   more.
+
+-  **Usage**: the user's GPU, CPU slot and auxiliary container hours for each of the last 31 days
+   (**Day**) or the last 13 months (**Month**).
+
+The pages do not count checkpoint garbage collection, and count each allocation from when its
+resources were assigned, where the cluster usage charts count from when its containers started
+pulling their images. See :ref:`user-pages`.
+
+.. image:: /assets/images/webui-user-page.png
+   :alt: A user's page with the user's current resources, a calendar of active days and a chart and table of daily usage
+
+|
+
 **************************
  Viewing Cluster Topology
 **************************
