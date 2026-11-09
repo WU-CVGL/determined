@@ -18,6 +18,7 @@ import (
 	exputil "github.com/determined-ai/determined/master/internal/experiment"
 	"github.com/determined-ai/determined/master/internal/trials"
 	"github.com/determined-ai/determined/master/pkg/archive"
+	"github.com/determined-ai/determined/master/pkg/etc"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/master/pkg/schemas"
@@ -26,12 +27,15 @@ import (
 )
 
 // The files and environment of a shell's tensorboard service that reads the TensorBoard logs of
-// experiments and trials. The service's loader reads tensorBoardSourcesFile, fetches each source
-// with the checkpoint storage of storageConfPath and publishes it under tensorBoardSourcesLogDir,
-// which TensorBoard reads. The task's environment holds no storage credentials.
+// experiments and trials. The service's loader, tensorBoardLoaderProgram, reads
+// tensorBoardSourcesFile, fetches each source with the checkpoint storage of storageConfPath, or
+// links it when the storage is mounted, and publishes it under tensorBoardSourcesLogDir, which
+// TensorBoard reads. The task's environment holds no storage credentials.
 const (
-	// tensorBoardSourcesDir holds the service's files and tensorBoardSourcesLogDir.
+	// tensorBoardSourcesDir holds the sources' files, the log directory and the loader's staging.
 	tensorBoardSourcesDir = "/run/determined/tensorboard"
+	// tensorBoardLoaderProgram publishes the sources under tensorBoardSourcesLogDir.
+	tensorBoardLoaderProgram = "/run/determined/tensorboard/tensorboard_loader.py"
 	// tensorBoardSourcesFile lists the sources of the service, without credentials.
 	tensorBoardSourcesFile = "/run/determined/tensorboard/sources.json"
 	// tensorBoardSourcesLogDir is the directory that TensorBoard reads in sources mode.
@@ -461,8 +465,9 @@ func tensorBoardSharedFSMount(mounts model.BindMountsConfig, hostPath string) (*
 
 // tensorBoardSourceFiles returns the files of a tensorboard service's sources, owned by the task's
 // user and readable by it alone: tensorBoardSourcesDir first, so that the task's user may create the
-// log directory in it, then the checkpoint storage at storageConfPath and the sources, which hold
-// no credentials, at tensorBoardSourcesFile.
+// log directory and the loader's staging in it, then the checkpoint storage at storageConfPath, the
+// sources, which hold no credentials, at tensorBoardSourcesFile, and the loader at
+// tensorBoardLoaderProgram.
 func tensorBoardSourceFiles(aug *model.AgentUserGroup, s *tensorBoardSources) (archive.Archive, error) {
 	content, err := json.Marshal(tensorBoardSourcesFileContent{
 		Version:       tensorBoardSourcesVersion,
@@ -477,5 +482,7 @@ func tensorBoardSourceFiles(aug *model.AgentUserGroup, s *tensorBoardSources) (a
 		aug.OwnedArchiveItem(tensorBoardSourcesDir, nil, 0o700, tar.TypeDir),
 		aug.OwnedArchiveItem(storageConfPath, s.StorageConfig, 0o600, tar.TypeReg),
 		aug.OwnedArchiveItem(tensorBoardSourcesFile, content, 0o600, tar.TypeReg),
+		aug.OwnedArchiveItem(tensorBoardLoaderProgram,
+			etc.MustStaticFile(etc.TensorBoardLoaderResource), 0o700, tar.TypeReg),
 	}, nil
 }

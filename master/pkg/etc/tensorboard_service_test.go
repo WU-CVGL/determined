@@ -3,6 +3,7 @@
 package etc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net"
@@ -28,23 +29,24 @@ const tensorBoardTestToken = "test-token"
 // tensorBoardStandIn is a tensorboard package, by path under the package's directory, with what
 // tensorboard_service.py takes of TensorBoard's. Its version is TB_STAND_IN_VERSION, 2.9.0 by
 // default. Its core plugin's loader defines --bind_all with the default TB_STAND_IN_BIND_ALL, true
-// by default as in some builds, and --host, --port, --path_prefix, --logdir, --load_fast and
-// --reuse_port, and refuses --host while --bind_all is true, as TensorBoard's does. Its program.TensorBoard, without
-// server_class when TB_STAND_IN_NO_SERVER_CLASS is "yes", configures its flags as TensorBoard's
-// does: the command line, then the keyword arguments, then the loaders' checks. Its main records
-// its arguments NUL-separated in "$ORDER_FILE.tensorboard-args", its flags as JSON in
-// "$ORDER_FILE.tensorboard-flags", its interpreter, TB_STAND_IN_PYTHON, in
-// "$ORDER_FILE.tensorboard-python", and "tensorboard" in the order file. Then it serves, until the
-// order file has "stop tensorboard", an application that answers 200 under the --path_prefix and
-// 404 elsewhere and that creates "$ORDER_FILE.tensorboard-saw-token" when a request reaches it
-// with the token's header. Its default server, a model of TensorBoard's werkzeug server, speaks
-// HTTP/1.1 with keep-alive, sends an application's headers as they are, so that "Connection: close"
-// closes the connection after the response, and leaves a body that the application does not read
-// on the connection. It builds its server with its server_class, once the order file has
-// the line TB_STAND_IN_WAIT if that is set, and serves the application through the server's, or
-// directly when TB_STAND_IN_SERVE is "unchecked", or not at all when TB_STAND_IN_SERVE is "no".
-// Like TensorBoard's, the server ends on SIGINT and main exits 0 on SIGTERM; otherwise main returns
-// TB_STAND_IN_EXIT, 0 by default.
+// by default as in some builds, and --host, --port, --path_prefix, --logdir, --load_fast,
+// --reuse_port, --reload_multifile and --reload_multifile_inactive_secs, and refuses --host while
+// --bind_all is true, as TensorBoard's does. Its program.TensorBoard, without server_class when
+// TB_STAND_IN_NO_SERVER_CLASS is "yes", configures its flags as TensorBoard's does: the command
+// line, then the keyword arguments, then the loaders' checks. Its main records its arguments
+// NUL-separated in "$ORDER_FILE.tensorboard-args", its flags as JSON in
+// "$ORDER_FILE.tensorboard-flags", --reload_multifile and --reload_multifile_inactive_secs only
+// when the first is set, its interpreter, TB_STAND_IN_PYTHON, in "$ORDER_FILE.tensorboard-python",
+// and "tensorboard" in the order file. Then it serves, until the order file has "stop tensorboard",
+// an application that answers 200 under the --path_prefix and 404 elsewhere and that creates
+// "$ORDER_FILE.tensorboard-saw-token" when a request reaches it with the token's header. Its
+// default server, a model of TensorBoard's werkzeug server, speaks HTTP/1.1 with keep-alive, sends
+// an application's headers as they are, so that "Connection: close" closes the connection after the
+// response, and leaves a body that the application does not read on the connection. It builds its
+// server with its server_class, once the order file has the line TB_STAND_IN_WAIT if that is set,
+// and serves the application through the server's, or directly when TB_STAND_IN_SERVE is
+// "unchecked", or not at all when TB_STAND_IN_SERVE is "no". Like TensorBoard's, the server ends on
+// SIGINT and main exits 0 on SIGTERM; otherwise main returns TB_STAND_IN_EXIT, 0 by default.
 var tensorBoardStandIn = map[string]string{
 	"tensorboard/__init__.py":              "",
 	"tensorboard/plugins/__init__.py":      "",
@@ -79,6 +81,13 @@ class CorePluginLoader:
             choices=[True, False],
             default=False,
         )
+        parser.add_argument(
+            "--reload_multifile",
+            type=lambda v: {"true": True, "false": False}.get(v.lower(), v),
+            choices=[True, False],
+            default=None,
+        )
+        parser.add_argument("--reload_multifile_inactive_secs", type=int, default=86400)
 
     def fix_flags(self, flags):
         if flags.host is not None and flags.bind_all:
@@ -208,6 +217,8 @@ class TensorBoard:
             f.write("".join(arg + "\0" for arg in self.argv[1:]))
         with open(order + ".tensorboard-flags", "w") as f:
             names = ["bind_all", "host", "port", "path_prefix", "logdir", "load_fast", "reuse_port"]
+            if flags.reload_multifile is not None:
+                names += ["reload_multifile", "reload_multifile_inactive_secs"]
             json.dump({name: getattr(flags, name) for name in names}, f)
         with open(order + ".tensorboard-python", "w") as f:
             f.write(os.environ["TB_STAND_IN_PYTHON"])
@@ -827,4 +838,174 @@ func TestTensorBoardUnitUnavailable(t *testing.T) {
 			require.Equal(t, 0, v.wait())
 		})
 	}
+}
+
+// tensorBoardLoaderStandIn stands in for the loader at <run>/tensorboard/tensorboard_loader.py,
+// which loaderPython runs with bash. With --check it records "check <logdir> <python>" in
+// "$ORDER_FILE.loader" and "loader check" in the order file, prints LOADER_CHECK_OUTPUT and exits
+// with LOADER_CHECK_EXIT, 0 by default. Otherwise it records its descriptors, its pid in
+// "$ORDER_FILE.loader-pid" and "loader <logdir>" in the order file, logs a line and exits with
+// LOADER_EXIT if that is set, or else waits until a SIGTERM, which it records as "loader stopped".
+const tensorBoardLoaderStandIn = `
+if [[ $1 == --check ]]; then
+    printf 'check %s %s\n' "$2" "$DET_PYTHON_EXECUTABLE" >>"$ORDER_FILE.loader"
+    echo "loader check" >>"$ORDER_FILE"
+    printf '%b' "${LOADER_CHECK_OUTPUT-}"
+    exit "${LOADER_CHECK_EXIT:-0}"
+fi
+RECORD_FDS
+echo "$$" >"$ORDER_FILE.loader-pid"
+echo "loader $1" >>"$ORDER_FILE"
+echo "tensorboard loader: loading 1 sources from s3 storage" >&2
+[[ -z ${LOADER_EXIT-} ]] || exit "$LOADER_EXIT"
+trap 'echo "loader stopped" >>"$ORDER_FILE"; kill "$!"; wait "$!"; exit 0' TERM
+sleep 300 &
+wait
+`
+
+// newTensorBoardLoaderTask is a tensorboard task with sources, whose DET_PYTHON_EXECUTABLE runs
+// the stand-in loader and passes everything else to the supervisor's python stand-in.
+func newTensorBoardLoaderTask(t *testing.T) *tensorBoardTask {
+	t.Helper()
+	v := newTensorBoardTask(t, "runs")
+	v.standIn()
+	loaderDir := filepath.Join(v.run, "tensorboard")
+	require.NoError(t, os.MkdirAll(loaderDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(loaderDir, "tensorboard_loader.py"),
+		[]byte(strings.Replace(tensorBoardLoaderStandIn, "RECORD_FDS\n", recordFDs("loader"), 1)), 0o600))
+	python := filepath.Join(v.dir, "loader-python")
+	writeScript(t, python, `if [[ ${1-} == "$RUN_DIR"/tensorboard/tensorboard_loader.py ]]; then
+    exec bash "$@"
+fi
+exec `+strconv.Quote(filepath.Join(v.dir, "python"))+` "$@"
+`)
+	v.env = append(v.env, "DET_PYTHON_EXECUTABLE="+python,
+		"DET_TENSORBOARD_SOURCES="+filepath.Join(loaderDir, "sources.json"))
+	return v
+}
+
+// loaderGone tells whether the stand-in loader has exited: its process is gone or a zombie.
+func (v *tensorBoardTask) loaderGone() bool {
+	v.t.Helper()
+	pid, err := os.ReadFile(v.order + ".loader-pid")
+	require.NoError(v.t, err)
+	stat, err := os.ReadFile(filepath.Join("/proc", strings.TrimSpace(string(pid)), "stat"))
+	if err != nil {
+		return true
+	}
+	fields := strings.Fields(string(stat[bytes.LastIndexByte(stat, ')')+1:]))
+	return len(fields) > 0 && fields[0] == "Z"
+}
+
+// With sources, the unit runs the loader's check with the task's python on the absolute log
+// directory before TensorBoard, then the loader in the background, without the readiness pipe or
+// the service's own descriptors, with its lines in the task log. Loading does not gate readiness:
+// the service is READY once TensorBoard answers, with --reload_multifile=true, and stays READY
+// when the loader exits. When TensorBoard exits, or the task stops, the loader gets SIGTERM and is
+// gone by the time the service's exit is logged.
+func TestTensorBoardUnitLoader(t *testing.T) {
+	t.Run("runs", func(t *testing.T) {
+		v := newTensorBoardLoaderTask(t)
+		v.start()
+		v.waitForLog("[tensorboard] ready")
+		v.waitForOrder("loader " + filepath.Join(v.work, "runs"))
+		logdir := filepath.Join(v.work, "runs")
+		check, err := os.ReadFile(v.order + ".loader")
+		require.NoError(t, err)
+		require.Equal(t, "check "+logdir+" "+filepath.Join(v.dir, "loader-python")+"\n",
+			string(check))
+		lines := v.orderLines()
+		require.Less(t, slices.Index(lines, "loader check"), slices.Index(lines, "tensorboard"))
+		require.Less(t, slices.Index(lines, "loader check"), slices.Index(lines, "loader "+logdir))
+		requireProgramFDs(t, v.order, "loader")
+		require.Contains(t, v.stderr.String(),
+			"tensorboard loader: loading 1 sources from s3 storage\n")
+		flags := v.serviceFlags(logdir)
+		flags["reload_multifile"] = true
+		flags["reload_multifile_inactive_secs"] = float64(86400)
+		require.Equal(t, flags, v.flags())
+		require.Equal(t, http.StatusOK, v.get(tensorBoardTestToken))
+		waitFor(t, "tensorboard READY", func() bool {
+			return slices.Contains(statesOf(v.master.received(), "tensorboard"), "READY")
+		})
+
+		// TensorBoard exits by itself: the loader gets SIGTERM within the grace.
+		v.addOrder("stop tensorboard")
+		v.waitForLog("[tensorboard] exited 0")
+		require.Contains(t, v.orderLines(), "loader stopped")
+		require.True(t, v.loaderGone())
+		v.addOrder("sshd done")
+		require.Equal(t, 0, v.wait())
+	})
+
+	t.Run("task stop", func(t *testing.T) {
+		v := newTensorBoardLoaderTask(t)
+		v.start()
+		v.waitForLog("[tensorboard] ready")
+		v.waitForOrder("loader " + filepath.Join(v.work, "runs"))
+		v.signal(syscall.SIGTERM)
+		require.Equal(t, 128+int(syscall.SIGTERM), v.wait())
+		require.Contains(t, v.logLines(), "[tensorboard] exited 0")
+		require.Contains(t, v.orderLines(), "loader stopped")
+		require.True(t, v.loaderGone())
+	})
+
+	t.Run("loader exits", func(t *testing.T) {
+		v := newTensorBoardLoaderTask(t)
+		v.env = append(v.env, "LOADER_EXIT=1")
+		v.start()
+		v.waitForLog("[tensorboard] ready")
+		v.waitForOrder("loader " + filepath.Join(v.work, "runs"))
+		waitFor(t, "the loader's exit", v.loaderGone)
+		time.Sleep(500 * time.Millisecond)
+		require.Equal(t, http.StatusOK, v.get(tensorBoardTestToken))
+		require.Equal(t, []string{"STARTING", "READY"}, statesOf(v.master.received(), "tensorboard"))
+		v.addOrder("stop tensorboard")
+		v.waitForLog("[tensorboard] exited 0")
+		v.addOrder("sshd done")
+		require.Equal(t, 0, v.wait())
+	})
+
+	for _, tc := range []struct{ name, output, line string }{
+		{
+			name: "check fails", output: `first\nthe reason\n`,
+			line: "tensorboard service: the reason",
+		},
+		{
+			name: "check fails without a message",
+			line: "tensorboard service: the loader's check failed without a message",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := newTensorBoardLoaderTask(t)
+			v.env = append(v.env, "LOADER_CHECK_EXIT=2", "LOADER_CHECK_OUTPUT="+tc.output)
+			v.start()
+			v.waitForLog("[tensorboard] exited 127")
+			require.Contains(t, v.stderr.String(), tc.line+"\n[tensorboard] exited 127\n")
+			require.Equal(t, 1, strings.Count(v.stderr.String(), "tensorboard service: "))
+			waitFor(t, "tensorboard UNAVAILABLE", func() bool {
+				return slices.Contains(statesOf(v.master.received(), "tensorboard"), "UNAVAILABLE")
+			})
+			require.Equal(t, []string{"loader check"}, slices.DeleteFunc(v.orderLines(),
+				func(line string) bool { return line == "setup" || line == "hook" || line == "prep" }))
+			v.addOrder("sshd done")
+			require.Equal(t, 0, v.wait())
+		})
+	}
+
+	t.Run("without sources", func(t *testing.T) {
+		v := newTensorBoardLoaderTask(t)
+		v.env = append(v.env, "DET_TENSORBOARD_SOURCES=")
+		v.start()
+		v.waitForLog("[tensorboard] ready")
+		require.Equal(t, v.serviceFlags(filepath.Join(v.work, "runs")), v.flags())
+		v.addOrder("stop tensorboard")
+		v.waitForLog("[tensorboard] exited 0")
+		v.addOrder("sshd done")
+		require.Equal(t, 0, v.wait())
+		require.NoFileExists(t, v.order+".loader")
+		for _, line := range v.orderLines() {
+			require.False(t, strings.HasPrefix(line, "loader"), line)
+		}
+	})
 }

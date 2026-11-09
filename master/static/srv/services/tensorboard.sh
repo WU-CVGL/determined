@@ -18,6 +18,9 @@
 #   never READY.
 # - The task's activity record, which the master's proxy feeds, is the idle signal: the unit has
 #   no idle timer of its own.
+# - With DET_TENSORBOARD_SOURCES, the loader, /run/determined/tensorboard/tensorboard_loader.py,
+#   runs with the task's python: first its check, whose failure makes the service UNAVAILABLE,
+#   then in the background, where it publishes the sources' logs in the log directory.
 #
 # When TensorBoard, or what the service needs, is missing, the unit or the program says why in one
 # line and exits 127.
@@ -80,6 +83,20 @@ if [[ $tensorboard_logdir != /* ]]; then
 fi
 if ! tensorboard_error=$(mkdir -p -- "$tensorboard_logdir" 2>&1); then
     tensorboard_unavailable "cannot create the log directory $tensorboard_logdir: ${tensorboard_error##*: }"
+fi
+
+# With sources, the loader publishes their logs in the log directory while TensorBoard reads
+# it, in the background. Its check runs first: a loader that cannot run makes the service
+# UNAVAILABLE with the check's last line.
+if [[ -n ${DET_TENSORBOARD_SOURCES-} ]]; then
+    tensorboard_loader=/run/determined/tensorboard/tensorboard_loader.py
+    if ! tensorboard_error=$("$DET_PYTHON_EXECUTABLE" "$tensorboard_loader" --check \
+        "$tensorboard_logdir" 2>&1); then
+        [[ -n $tensorboard_error ]] || tensorboard_error="the loader's check failed without a message"
+        tensorboard_unavailable "${tensorboard_error##*$'\n'}"
+    fi
+    "$DET_PYTHON_EXECUTABLE" "$tensorboard_loader" "$tensorboard_logdir" \
+        {service_stdout}>&- {service_stderr}>&- &
 fi
 
 # The readiness check is a child of this shell rather than of the program, which gets the check's

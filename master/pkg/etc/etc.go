@@ -43,6 +43,10 @@ const (
 	// TensorBoardServiceProgramResource is the program that the tensorboard service's unit runs
 	// with TensorBoard's python: TensorBoard behind the master proxy's token.
 	TensorBoardServiceProgramResource = "services/tensorboard_service.py"
+	// TensorBoardLoaderResource is the program that the tensorboard unit runs, with the task's
+	// python, when the service reads experiments' and trials' logs: it publishes them in the
+	// service's log directory.
+	TensorBoardLoaderResource = "services/tensorboard_loader.py"
 	// ServiceStateReporterResource is the interactive task supervisor's reporter, which posts the
 	// snapshot of the states of the task's services to the master.
 	ServiceStateReporterResource = "report_service_states.py"

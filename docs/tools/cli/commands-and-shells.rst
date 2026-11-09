@@ -235,9 +235,11 @@ default service: a shell runs it when its configuration sets the directory:
    det shell start --config services.tensorboard.logdir=runs
    det task open <shell id> tensorboard
 
+To view experiments' logs, see :ref:`tensorboards`.
+
 The same entry as a map is ``--config "services={tensorboard: {logdir: runs}}"``. ``--service
-tensorboard`` alone is refused, since the service needs a ``logdir``; it turns on a service whose
-``logdir`` a template sets.
+tensorboard`` alone is refused, since the service needs a ``logdir``, ``experiment_ids`` or
+``trial_ids``; it turns on a service whose ``logdir`` a template sets.
 
 A relative ``logdir`` is resolved against the shell's working directory. The service creates the
 directory when it is missing, so that a training run in the shell can write its event files there

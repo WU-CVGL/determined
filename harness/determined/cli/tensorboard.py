@@ -1,15 +1,51 @@
 import argparse
 import functools
+import os
 import pathlib
 import typing
+import urllib.parse
 import webbrowser
 
 import termcolor
 
 from determined import cli
 from determined.cli import ntsc, render, task
-from determined.common import api, check, context
+from determined.common import api, check
 from determined.common.api import bindings
+
+# The idle timeout of a viewing session whose configuration sets none.
+VIEWING_SESSION_IDLE_TIMEOUT = "5m"
+
+
+def viewing_session_config(
+    config: typing.Dict[str, typing.Any],
+    experiment_ids: typing.List[int],
+    trial_ids: typing.Optional[typing.List[int]],
+) -> typing.Dict[str, typing.Any]:
+    """
+    Returns the shell configuration of a viewing session: config with a tensorboard service that
+    reads the experiments and trials, without SSH, and with an idle timeout. A services or
+    services.tensorboard entry that is not a map leaves config unchanged, for the master to refuse.
+    """
+    services = config.get("services") or {}
+    if not isinstance(services, dict):
+        return config
+    tb = services.get("tensorboard") or {}
+    if not isinstance(tb, dict):
+        return config
+    if "tensorboard_args" in config:
+        legacy = config.pop("tensorboard_args")
+        tb.setdefault("args", [legacy] if isinstance(legacy, str) else legacy)
+    if experiment_ids:
+        tb["experiment_ids"] = experiment_ids
+    if trial_ids:
+        tb["trial_ids"] = trial_ids
+    services["tensorboard"] = tb
+    ssh = services.get("ssh")
+    services["ssh"] = {**(ssh if isinstance(ssh, dict) else {}), "enabled": False}
+    config["services"] = services
+    config.setdefault("idle_timeout", VIEWING_SESSION_IDLE_TIMEOUT)
+    return config
 
 
 def start_tensorboard(args: argparse.Namespace) -> None:
@@ -18,42 +54,36 @@ def start_tensorboard(args: argparse.Namespace) -> None:
         raise argparse.ArgumentError(None, "Either experiment_ids or trial_ids must be specified.")
 
     config = ntsc.parse_config(args.config_file, None, args.config, [])
+    config = viewing_session_config(config, args.experiment_ids, args.trial_ids)
 
     workspace_id = cli.workspace.get_workspace_id_from_args(args)
 
-    body = bindings.v1LaunchTensorboardRequest(
-        config=config,
-        trialIds=args.trial_ids,
-        experimentIds=args.experiment_ids,
-        files=context.read_v1_context(args.context, args.include),
-        workspaceId=workspace_id,
+    resp = bindings.v1LaunchShellResponse.from_json(
+        ntsc.launch_command(
+            sess,
+            "api/v1/shells",
+            config,
+            "",
+            context_path=args.context,
+            includes=args.include,
+            workspace_id=workspace_id,
+        )
     )
-
-    resp = bindings.post_LaunchTensorboard(sess, body=body)
-    tsb = resp.tensorboard
+    shell = resp.shell
 
     if args.detach:
-        print(resp.tensorboard.id)
+        print(shell.id)
         return
 
-    render.report_job_launched("tensorboard", tsb.id, tsb.description)
+    render.report_job_launched("tensorboard", shell.id, shell.description)
 
     if resp.warnings:
         cli.print_launch_warnings(resp.warnings)
-    currentSlotsExceeded = (resp.warnings is not None) and (
-        bindings.v1LaunchWarning.CURRENT_SLOTS_EXCEEDED in resp.warnings
-    )
-    cli.wait_ntsc_ready(sess, api.NTSC_Kind.tensorboard, tsb.id)
+    cli.wait_ntsc_ready(sess, api.NTSC_Kind.tensorboard, shell.id)
 
-    assert tsb.serviceAddress is not None, "missing tensorboard serviceAddress"
-    tb_path = ntsc.make_interactive_task_url(
-        task_id=tsb.id,
-        service_address=tsb.serviceAddress,
-        description=tsb.description,
-        resource_pool=tsb.resourcePool,
-        currentSlotsExceeded=currentSlotsExceeded,
-    )
-    url = f"{args.master}/{tb_path}"
+    public_url = os.environ.get("PUBLIC_URL", "/det")
+    task_id = urllib.parse.quote(shell.id, safe="")
+    url = f"{args.master.rstrip('/')}{public_url}/tasks/{task_id}/interactive?tab=tensorboard"
     if not args.no_browser:
         webbrowser.open(url)
     print(termcolor.colored(f"Tensorboard is running at: {url}", "green"))
@@ -111,18 +141,14 @@ args_description: cli.ArgsDescription = [
                         "experiment_ids",
                         type=int,
                         nargs="*",
-                        help="experiment IDs to load into TensorBoard. At most 100 trials from "
-                        "the specified experiment will be loaded into TensorBoard. If the "
-                        "experiment has more trials, the 100 best-performing trials will "
-                        "be used.",
+                        help="experiment IDs to load into TensorBoard",
                     ),
                     cli.Arg(
                         "-t",
                         "--trial-ids",
                         nargs=argparse.ONE_OR_MORE,
                         type=int,
-                        help="trial IDs to load into TensorBoard; at most 100 trials are "
-                        "allowed per TensorBoard instance",
+                        help="trial IDs to load into TensorBoard",
                     ),
                     cli.workspace.workspace_arg,
                     cli.Arg(
