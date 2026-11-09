@@ -194,6 +194,41 @@ func TestGetExperimentLabels(t *testing.T) {
 	require.Subset(t, resp.Labels, labels)
 }
 
+func TestPutDeleteExperimentLabel(t *testing.T) {
+	api, curUser, ctx := setupAPITest(t, nil)
+
+	keep, label := uuid.New().String(), uuid.New().String()
+	exp := createTestExp(t, api, curUser, keep)
+	other := createTestExp(t, api, curUser, keep, label)
+
+	getLabels := func(id int) []string {
+		resp, err := api.GetExperiment(ctx, &apiv1.GetExperimentRequest{ExperimentId: int32(id)})
+		require.NoError(t, err)
+		return resp.Experiment.Labels
+	}
+
+	putResp, err := api.PutExperimentLabel(ctx,
+		&apiv1.PutExperimentLabelRequest{ExperimentId: int32(exp.ID), Label: label})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{keep, label}, putResp.Labels)
+	require.ElementsMatch(t, []string{keep, label}, getLabels(exp.ID))
+
+	delResp, err := api.DeleteExperimentLabel(ctx,
+		&apiv1.DeleteExperimentLabelRequest{ExperimentId: int32(exp.ID), Label: label})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{keep}, delResp.Labels)
+	require.ElementsMatch(t, []string{keep}, getLabels(exp.ID))
+
+	// Removing a label the experiment does not have changes nothing.
+	delResp, err = api.DeleteExperimentLabel(ctx,
+		&apiv1.DeleteExperimentLabelRequest{ExperimentId: int32(exp.ID), Label: label})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{keep}, delResp.Labels)
+	require.ElementsMatch(t, []string{keep}, getLabels(exp.ID))
+
+	require.ElementsMatch(t, []string{keep, label}, getLabels(other.ID))
+}
+
 func TestGetExperimentConfig(t *testing.T) {
 	api, curUser, ctx := setupAPITest(t, nil)
 

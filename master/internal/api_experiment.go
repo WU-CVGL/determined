@@ -2895,12 +2895,13 @@ func (a *apiServer) DeleteExperimentLabel(ctx context.Context,
 	}()
 
 	exp := &experimentv1.Experiment{}
-	query := db.Bun().NewSelect().
+	// Locks the experiment row only: Postgres cannot lock the nullable side of the outer joins.
+	query := tx.NewSelect().
 		ModelTableExpr("experiments as e").
 		Model(exp).
 		Apply(getExperimentColumns).
 		Where("e.id = ?", req.ExperimentId).
-		For("UPDATE")
+		For("UPDATE OF e")
 	if err = query.Scan(ctx); err != nil {
 		return nil, err
 	}
