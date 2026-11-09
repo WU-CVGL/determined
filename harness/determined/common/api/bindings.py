@@ -7212,16 +7212,20 @@ class v1GetUserByUsernameResponse(Printable):
 
 class v1GetUserResourcesResponse(Printable):
     asOf: "typing.Optional[str]" = None
+    auxMetered: "typing.Optional[bool]" = None
     pools: "typing.Optional[typing.Sequence[v1UserPoolResources]]" = None
 
     def __init__(
         self,
         *,
         asOf: "typing.Union[str, None, Unset]" = _unset,
+        auxMetered: "typing.Union[bool, None, Unset]" = _unset,
         pools: "typing.Union[typing.Sequence[v1UserPoolResources], None, Unset]" = _unset,
     ):
         if not isinstance(asOf, Unset):
             self.asOf = asOf
+        if not isinstance(auxMetered, Unset):
+            self.auxMetered = auxMetered
         if not isinstance(pools, Unset):
             self.pools = pools
 
@@ -7231,6 +7235,8 @@ class v1GetUserResourcesResponse(Printable):
         }
         if "asOf" in obj:
             kwargs["asOf"] = obj["asOf"]
+        if "auxMetered" in obj:
+            kwargs["auxMetered"] = obj["auxMetered"]
         if "pools" in obj:
             kwargs["pools"] = [v1UserPoolResources.from_json(x) for x in obj["pools"]] if obj["pools"] is not None else None
         return cls(**kwargs)
@@ -7240,6 +7246,8 @@ class v1GetUserResourcesResponse(Printable):
         }
         if not omit_unset or "asOf" in vars(self):
             out["asOf"] = self.asOf
+        if not omit_unset or "auxMetered" in vars(self):
+            out["auxMetered"] = self.auxMetered
         if not omit_unset or "pools" in vars(self):
             out["pools"] = None if self.pools is None else [x.to_json(omit_unset) for x in self.pools]
         return out
@@ -17784,69 +17792,109 @@ class v1UserRoleAssignment(Printable):
         return out
 
 class v1UserUsageEntry(Printable):
-    activeDays: "typing.Optional[int]" = None
-    activeSeconds: "typing.Optional[float]" = None
+    auxActiveDays: "typing.Optional[int]" = None
+    auxActiveSeconds: "typing.Optional[float]" = None
     auxContainerSeconds: "typing.Optional[float]" = None
     cpuSlotSeconds: "typing.Optional[float]" = None
+    gpuActiveDays: "typing.Optional[int]" = None
+    gpuActiveSeconds: "typing.Optional[float]" = None
+    gpuOrAuxActiveDays: "typing.Optional[int]" = None
+    gpuOrAuxActiveSeconds: "typing.Optional[float]" = None
     gpuSeconds: "typing.Optional[float]" = None
     periodStart: "typing.Optional[str]" = None
+    unclassifiedSlotSeconds: "typing.Optional[float]" = None
 
     def __init__(
         self,
         *,
-        activeDays: "typing.Union[int, None, Unset]" = _unset,
-        activeSeconds: "typing.Union[float, None, Unset]" = _unset,
+        auxActiveDays: "typing.Union[int, None, Unset]" = _unset,
+        auxActiveSeconds: "typing.Union[float, None, Unset]" = _unset,
         auxContainerSeconds: "typing.Union[float, None, Unset]" = _unset,
         cpuSlotSeconds: "typing.Union[float, None, Unset]" = _unset,
+        gpuActiveDays: "typing.Union[int, None, Unset]" = _unset,
+        gpuActiveSeconds: "typing.Union[float, None, Unset]" = _unset,
+        gpuOrAuxActiveDays: "typing.Union[int, None, Unset]" = _unset,
+        gpuOrAuxActiveSeconds: "typing.Union[float, None, Unset]" = _unset,
         gpuSeconds: "typing.Union[float, None, Unset]" = _unset,
         periodStart: "typing.Union[str, None, Unset]" = _unset,
+        unclassifiedSlotSeconds: "typing.Union[float, None, Unset]" = _unset,
     ):
-        if not isinstance(activeDays, Unset):
-            self.activeDays = activeDays
-        if not isinstance(activeSeconds, Unset):
-            self.activeSeconds = activeSeconds
+        if not isinstance(auxActiveDays, Unset):
+            self.auxActiveDays = auxActiveDays
+        if not isinstance(auxActiveSeconds, Unset):
+            self.auxActiveSeconds = auxActiveSeconds
         if not isinstance(auxContainerSeconds, Unset):
             self.auxContainerSeconds = auxContainerSeconds
         if not isinstance(cpuSlotSeconds, Unset):
             self.cpuSlotSeconds = cpuSlotSeconds
+        if not isinstance(gpuActiveDays, Unset):
+            self.gpuActiveDays = gpuActiveDays
+        if not isinstance(gpuActiveSeconds, Unset):
+            self.gpuActiveSeconds = gpuActiveSeconds
+        if not isinstance(gpuOrAuxActiveDays, Unset):
+            self.gpuOrAuxActiveDays = gpuOrAuxActiveDays
+        if not isinstance(gpuOrAuxActiveSeconds, Unset):
+            self.gpuOrAuxActiveSeconds = gpuOrAuxActiveSeconds
         if not isinstance(gpuSeconds, Unset):
             self.gpuSeconds = gpuSeconds
         if not isinstance(periodStart, Unset):
             self.periodStart = periodStart
+        if not isinstance(unclassifiedSlotSeconds, Unset):
+            self.unclassifiedSlotSeconds = unclassifiedSlotSeconds
 
     @classmethod
     def from_json(cls, obj: Json) -> "v1UserUsageEntry":
         kwargs: "typing.Dict[str, typing.Any]" = {
         }
-        if "activeDays" in obj:
-            kwargs["activeDays"] = obj["activeDays"]
-        if "activeSeconds" in obj:
-            kwargs["activeSeconds"] = float(obj["activeSeconds"]) if obj["activeSeconds"] is not None else None
+        if "auxActiveDays" in obj:
+            kwargs["auxActiveDays"] = obj["auxActiveDays"]
+        if "auxActiveSeconds" in obj:
+            kwargs["auxActiveSeconds"] = float(obj["auxActiveSeconds"]) if obj["auxActiveSeconds"] is not None else None
         if "auxContainerSeconds" in obj:
             kwargs["auxContainerSeconds"] = float(obj["auxContainerSeconds"]) if obj["auxContainerSeconds"] is not None else None
         if "cpuSlotSeconds" in obj:
             kwargs["cpuSlotSeconds"] = float(obj["cpuSlotSeconds"]) if obj["cpuSlotSeconds"] is not None else None
+        if "gpuActiveDays" in obj:
+            kwargs["gpuActiveDays"] = obj["gpuActiveDays"]
+        if "gpuActiveSeconds" in obj:
+            kwargs["gpuActiveSeconds"] = float(obj["gpuActiveSeconds"]) if obj["gpuActiveSeconds"] is not None else None
+        if "gpuOrAuxActiveDays" in obj:
+            kwargs["gpuOrAuxActiveDays"] = obj["gpuOrAuxActiveDays"]
+        if "gpuOrAuxActiveSeconds" in obj:
+            kwargs["gpuOrAuxActiveSeconds"] = float(obj["gpuOrAuxActiveSeconds"]) if obj["gpuOrAuxActiveSeconds"] is not None else None
         if "gpuSeconds" in obj:
             kwargs["gpuSeconds"] = float(obj["gpuSeconds"]) if obj["gpuSeconds"] is not None else None
         if "periodStart" in obj:
             kwargs["periodStart"] = obj["periodStart"]
+        if "unclassifiedSlotSeconds" in obj:
+            kwargs["unclassifiedSlotSeconds"] = float(obj["unclassifiedSlotSeconds"]) if obj["unclassifiedSlotSeconds"] is not None else None
         return cls(**kwargs)
 
     def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
         out: "typing.Dict[str, typing.Any]" = {
         }
-        if not omit_unset or "activeDays" in vars(self):
-            out["activeDays"] = self.activeDays
-        if not omit_unset or "activeSeconds" in vars(self):
-            out["activeSeconds"] = None if self.activeSeconds is None else dump_float(self.activeSeconds)
+        if not omit_unset or "auxActiveDays" in vars(self):
+            out["auxActiveDays"] = self.auxActiveDays
+        if not omit_unset or "auxActiveSeconds" in vars(self):
+            out["auxActiveSeconds"] = None if self.auxActiveSeconds is None else dump_float(self.auxActiveSeconds)
         if not omit_unset or "auxContainerSeconds" in vars(self):
             out["auxContainerSeconds"] = None if self.auxContainerSeconds is None else dump_float(self.auxContainerSeconds)
         if not omit_unset or "cpuSlotSeconds" in vars(self):
             out["cpuSlotSeconds"] = None if self.cpuSlotSeconds is None else dump_float(self.cpuSlotSeconds)
+        if not omit_unset or "gpuActiveDays" in vars(self):
+            out["gpuActiveDays"] = self.gpuActiveDays
+        if not omit_unset or "gpuActiveSeconds" in vars(self):
+            out["gpuActiveSeconds"] = None if self.gpuActiveSeconds is None else dump_float(self.gpuActiveSeconds)
+        if not omit_unset or "gpuOrAuxActiveDays" in vars(self):
+            out["gpuOrAuxActiveDays"] = self.gpuOrAuxActiveDays
+        if not omit_unset or "gpuOrAuxActiveSeconds" in vars(self):
+            out["gpuOrAuxActiveSeconds"] = None if self.gpuOrAuxActiveSeconds is None else dump_float(self.gpuOrAuxActiveSeconds)
         if not omit_unset or "gpuSeconds" in vars(self):
             out["gpuSeconds"] = None if self.gpuSeconds is None else dump_float(self.gpuSeconds)
         if not omit_unset or "periodStart" in vars(self):
             out["periodStart"] = self.periodStart
+        if not omit_unset or "unclassifiedSlotSeconds" in vars(self):
+            out["unclassifiedSlotSeconds"] = None if self.unclassifiedSlotSeconds is None else dump_float(self.unclassifiedSlotSeconds)
         return out
 
 class v1UserWebSetting(Printable):

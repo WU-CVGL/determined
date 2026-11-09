@@ -5425,6 +5425,12 @@ export interface V1GetUserResourcesResponse {
      * @memberof V1GetUserResourcesResponse
      */
     asOf?: Date | DateString;
+    /**
+     * Whether containers without slots are metered on this cluster.
+     * @type {boolean}
+     * @memberof V1GetUserResourcesResponse
+     */
+    auxMetered?: boolean;
 }
 /**
  * Response to GetUserRequest.
@@ -13097,7 +13103,7 @@ export interface V1UserResourceCounts {
      */
     cpuSlots?: number;
     /**
-     * Containers without slots; unset when not available (Kubernetes).
+     * Containers without slots; unset on Kubernetes pools.
      * @type {number}
      * @memberof V1UserResourceCounts
      */
@@ -13147,23 +13153,53 @@ export interface V1UserUsageEntry {
      */
     cpuSlotSeconds?: number;
     /**
-     * Aux-container-seconds held; unset when not available.
+     * Aux-container-seconds held.
      * @type {number}
      * @memberof V1UserUsageEntry
      */
     auxContainerSeconds?: number;
     /**
-     * Seconds with any resource held (union of intervals).
+     * Slot-seconds held of an unknown kind.
      * @type {number}
      * @memberof V1UserUsageEntry
      */
-    activeSeconds?: number;
+    unclassifiedSlotSeconds?: number;
     /**
-     * Days with any resource held (0 or 1 for a day).
+     * Seconds with any GPU held.
      * @type {number}
      * @memberof V1UserUsageEntry
      */
-    activeDays?: number;
+    gpuActiveSeconds?: number;
+    /**
+     * Seconds with any aux container held.
+     * @type {number}
+     * @memberof V1UserUsageEntry
+     */
+    auxActiveSeconds?: number;
+    /**
+     * Seconds with any GPU or aux container held.
+     * @type {number}
+     * @memberof V1UserUsageEntry
+     */
+    gpuOrAuxActiveSeconds?: number;
+    /**
+     * Days with any GPU held.
+     * @type {number}
+     * @memberof V1UserUsageEntry
+     */
+    gpuActiveDays?: number;
+    /**
+     * Days with any aux container held.
+     * @type {number}
+     * @memberof V1UserUsageEntry
+     */
+    auxActiveDays?: number;
+    /**
+     * Days with any GPU or aux container held.
+     * @type {number}
+     * @memberof V1UserUsageEntry
+     */
+    gpuOrAuxActiveDays?: number;
 }
 /**
  * UserWebSetting represents user web setting.

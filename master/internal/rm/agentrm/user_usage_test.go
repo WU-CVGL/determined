@@ -14,7 +14,7 @@ import (
 	"github.com/determined-ai/determined/master/pkg/model"
 )
 
-// TestUserUsageCountMatchesPoolSummary checks that the user pages' counts of the containers that
+// TestUserUsageCountMatchesPoolSummary checks that the user pages' counts of the allocations that
 // the pool holds, summed over their owners, equal the pool summary: the Aux containers equal
 // numActiveAuxContainers (the agents' numUsedZeroSlots), and the GPUs or CPU slots equal
 // numActiveSlots.
@@ -50,48 +50,60 @@ func TestUserUsageCountMatchesPoolSummary(t *testing.T) {
 		"t8": {"b", []container{{"cpu", "p1", 0}}},
 	}
 
-	// The pool reserves the devices and makes the resources as allocateResources does.
-	counts := map[string]map[string]userusage.Counts{}
+	// The pool reserves the devices and makes the resources as allocateResources does; each
+	// allocation is metered as the allocation records its assignment.
+	type counts struct{ gpus, cpuSlots, aux int }
+	owned := map[string]map[string]counts{}
 	for taskID, tk := range tasks {
 		req := &sproto.AllocateRequest{TaskID: taskID, AllocationID: model.AllocationID(taskID + ".1")}
+		var summaries []sproto.ResourcesSummary
+		slots := 0
 		for _, c := range tk.containers {
 			agent := pools[c.pool][aproto.ID(c.agent)]
 			cid := cproto.NewID()
 			res, err := agent.allocateFreeDevices(c.slots, cid, deviceSelection{})
 			require.NoError(t, err)
 			r := containerResources{req: req, agent: agent, containerID: cid, devices: res.devices}
-
-			rc := userusage.Count(r.Summary(), false, c.pool == "cpu")
-			if counts[tk.owner] == nil {
-				counts[tk.owner] = map[string]userusage.Counts{}
-			}
-			sum := counts[tk.owner][c.pool]
-			sum.GPUs += rc.GPUs
-			sum.CPUSlots += rc.CPUSlots
-			sum.Aux += rc.Aux
-			counts[tk.owner][c.pool] = sum
+			summaries = append(summaries, r.Summary())
+			slots += c.slots
 		}
+		pool := tk.containers[0].pool
+		if owned[tk.owner] == nil {
+			owned[tk.owner] = map[string]counts{}
+		}
+		sum := owned[tk.owner][pool]
+		switch kind, n := userusage.Assigned(summaries, slots); kind {
+		case userusage.KindGPU:
+			sum.gpus += n
+		case userusage.KindCPU:
+			sum.cpuSlots += n
+		case userusage.KindAux:
+			sum.aux += n
+		default:
+			t.Fatalf("task %s is metered as %s", taskID, kind)
+		}
+		owned[tk.owner][pool] = sum
 	}
 
 	rp := &resourcePool{syslog: logrus.WithField("component", "test")}
 	for name, agents := range pools {
-		var got userusage.Counts
-		for _, owned := range counts {
-			got.GPUs += owned[name].GPUs
-			got.CPUSlots += owned[name].CPUSlots
-			got.Aux += owned[name].Aux
+		var got counts
+		for _, o := range owned {
+			got.gpus += o[name].gpus
+			got.cpuSlots += o[name].cpuSlots
+			got.aux += o[name].aux
 		}
 		numUsedZeroSlots := 0
 		for _, a := range agents {
 			numUsedZeroSlots += a.numUsedZeroSlots()
 		}
 		summary := rp.resourceSummaryFromAgentStates(agents)
-		require.Equal(t, summary.numActiveAuxContainers, got.Aux, name)
-		require.Equal(t, numUsedZeroSlots, got.Aux, name)
-		require.Equal(t, summary.numActiveSlots, got.GPUs+got.CPUSlots, name)
+		require.Equal(t, summary.numActiveAuxContainers, got.aux, name)
+		require.Equal(t, numUsedZeroSlots, got.aux, name)
+		require.Equal(t, summary.numActiveSlots, got.gpus+got.cpuSlots, name)
 	}
-	require.Equal(t, userusage.Counts{GPUs: 2, Aux: 1}, counts["a"]["gpu"])
-	require.Equal(t, userusage.Counts{GPUs: 3, Aux: 2}, counts["b"]["gpu"])
-	require.Equal(t, userusage.Counts{CPUSlots: 4, Aux: 1}, counts["a"]["cpu"])
-	require.Equal(t, userusage.Counts{Aux: 1}, counts["b"]["cpu"])
+	require.Equal(t, counts{gpus: 2, aux: 1}, owned["a"]["gpu"])
+	require.Equal(t, counts{gpus: 3, aux: 2}, owned["b"]["gpu"])
+	require.Equal(t, counts{cpuSlots: 4, aux: 1}, owned["a"]["cpu"])
+	require.Equal(t, counts{aux: 1}, owned["b"]["cpu"])
 }

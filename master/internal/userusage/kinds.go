@@ -1,3 +1,6 @@
+// Package userusage meters the resources that a user's allocations hold: what an allocation's
+// resources are metered as, and its usage by day and by month. It is pure: the callers read the
+// records and the resource managers' state.
 package userusage
 
 import (
