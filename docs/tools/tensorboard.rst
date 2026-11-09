@@ -81,13 +81,6 @@ For detailed configuration settings, refer to the :ref:`job-configuration-refere
 To launch TensorBoard with a configuration file, use ``det tensorboard start <experiment-id>
 --config-file=my_config.yaml``.
 
-To manage the task, use the **Jobs** page, or ``det tensorboard list``, ``det tensorboard open
-<task-id>``, ``det tensorboard logs <task-id>``, ``det tensorboard config <task-id>`` and ``det
-tensorboard kill <task-id>``; they also manage TensorBoard tasks, but not a shell with a
-``tensorboard`` service. As the task is a shell, the ``det shell`` and ``det task`` commands also
-manage it. ``det tensorboard list --json`` prints TensorBoard tasks as ``/api/v1/tensorboards``
-returns them and viewing sessions as ``/api/v1/shells`` does.
-
 Logs on ``shared_fs`` storage are read in place, read-only. For ``type: directory`` storage, give
 the TensorBoard the experiment's ``bind_mounts``.
 
@@ -155,12 +148,16 @@ See :func:`PyTorchTrialContext.get_tensorboard_writer()
  TensorBoard Lifecycle Management
 **********************************
 
-To manage the task, use the **Jobs** page, or ``det tensorboard list``, ``det tensorboard open
-<task-id>``, ``det tensorboard logs <task-id>``, ``det tensorboard config <task-id>`` and ``det
-tensorboard kill <task-id>``; they also manage TensorBoard tasks, but not a shell with a
-``tensorboard`` service. As the task is a shell, the ``det shell`` and ``det task`` commands also
-manage it. ``det tensorboard list --json`` prints TensorBoard tasks as ``/api/v1/tensorboards``
-returns them and viewing sessions as ``/api/v1/shells`` does.
+``det tensorboard start`` ends the task after 5 minutes without requests through the master, unless
+the configuration sets ``idle_timeout``, as in ``--config idle_timeout=30m``. A browser tab kept
+open on TensorBoard does not by itself count; with its **Reload data** setting on, TensorBoard's
+page sends requests periodically.
+
+To manage it, use ``det tensorboard list``, ``det tensorboard open <task-id>``, ``det tensorboard
+logs <task-id>``, ``det tensorboard config <task-id>`` and ``det tensorboard kill <task-id>``; they
+do not manage a shell with a ``tensorboard`` service. As the task is a shell, the ``det shell`` and
+``det task`` commands also manage it. ``det tensorboard list --json`` prints the viewing sessions as
+``/api/v1/shells`` returns them.
 
 ************************
  Implementation Details
