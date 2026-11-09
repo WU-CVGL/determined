@@ -110,9 +110,9 @@ To leave one out, set its ``enabled`` to ``false`` there, or pass ``--no-service
 This is the same as ``det shell start --config "services={jupyter: {enabled: false}}"``.
 ``--service`` turns a service on again, for example one that a template turns off; for a service
 named by both, the last flag wins. TensorBoard runs only when the configuration asks for it, with a
-log directory (see :ref:`tensorboard-service`). The WebUI's **Launch Interactive Task** form has
-**JupyterLab**, **VS Code** and **TensorBoard** boxes under **Services**, checked for the services
-the shell would run.
+log directory, or experiment and trial IDs (see :ref:`tensorboard-service`). The WebUI's **Launch
+Interactive Task** form has **JupyterLab**, **VS Code** and **TensorBoard** boxes under
+**Services**, checked for the services the shell would run, and **Data source** for TensorBoard.
 
 A task restored after a master restart keeps the services it was started with. The default does not
 install JupyterLab into the image: without it, the ``jupyter`` service is ``UNAVAILABLE`` and the

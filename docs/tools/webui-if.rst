@@ -258,12 +258,14 @@ To find out how to view and modify the Job Queue in the WebUI, start with :ref:`
 An interactive task is a shell, which runs JupyterLab by default. To start one, select **Launch
 Interactive Task** on the **Jobs** page or a workspace's **Jobs** tab; under **Services**,
 **JupyterLab** and, when the master serves code-server, **VS Code** are checked, and unchecking a
-service leaves it out. Checking **TensorBoard** adds **Data source**, where **Log directory in the
-task** is the directory that TensorBoard reads, relative to the shell's working directory unless it
-starts with ``/``; see :ref:`tensorboard-service`.
+service leaves it out. Checking **TensorBoard** adds **Data source**: **Determined experiments**
+reads the TensorBoard logs of the experiments and trials given by ID, a trial of a listed experiment
+with its experiment; **Log directory in the task** is the directory that TensorBoard reads, relative
+to the shell's working directory unless it starts with ``/``; see :ref:`tensorboard-service`. A
+start from a TensorBoard task, or from a template whose ``ssh`` service is off, runs with 0 slots.
 
 .. image:: /assets/images/launch-interactive-task.png
-   :alt: The Launch Interactive Task form with a resource pool, slots, and the JupyterLab and VS Code services checked under Services
+   :alt: The Launch Interactive Task form with TensorBoard checked under Services and Determined experiments selected under Data source
 
 |
 
@@ -287,7 +289,9 @@ from the CLI. A service that stops while the page is open shows its state in its
  Launching TensorBoard
 ***********************
 
-You can launch TensorBoard from the WebUI. To learn how, visit :ref:`tensorboards`.
+**TensorBoard** on an experiment's or trial's page, and **View in TensorBoard** for experiments or
+trials selected in a list or a comparison view, open your TensorBoard of the same selection in that
+workspace, or start one; see :ref:`tensorboards`.
 
 *****************************
  Displaying a Banner Message
