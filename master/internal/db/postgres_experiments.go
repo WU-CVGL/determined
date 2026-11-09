@@ -484,6 +484,22 @@ WHERE e.id = ?`, expID).Scan(ctx, &experiment); err != nil {
 	return &experiment, nil
 }
 
+// ExperimentByJobID looks up the experiment of a job, returning an error if none exists.
+func ExperimentByJobID(ctx context.Context, jobID model.JobID) (*model.Experiment, error) {
+	var experiment model.Experiment
+
+	if err := Bun().NewRaw(`
+SELECT e.id, state, config, start_time, end_time, archived,
+	   owner_id, notes, job_id, u.username as username, project_id, unmanaged, external_experiment_id
+FROM experiments e
+JOIN users u ON (e.owner_id = u.id)
+WHERE e.job_id = ?`, jobID).Scan(ctx, &experiment); err != nil {
+		return nil, MatchSentinelError(err)
+	}
+
+	return &experiment, nil
+}
+
 // ExperimentByTrialID looks up an experiment by a given trialID, returning an error
 // if none exists.
 func ExperimentByTrialID(ctx context.Context, trialID int) (*model.Experiment, error) {
