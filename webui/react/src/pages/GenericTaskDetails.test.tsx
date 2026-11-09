@@ -5,17 +5,19 @@ import { HelmetProvider } from 'react-helmet-async';
 import { BrowserRouter } from 'react-router-dom';
 
 import { ThemeProvider } from 'components/ThemeProvider';
-import { getGenericTask, getGenericTasks, getTask } from 'services/api';
+import { getGenericTask, getGenericTaskConfig, getGenericTasks, getTask } from 'services/api';
 import { V1TaskType } from 'services/api-ts-sdk';
-import { CommandState, GenericTask, GenericTaskState, TaskItem } from 'types';
+import { CommandState, GenericTask, GenericTaskState, JobCapabilities, TaskItem } from 'types';
+import { DetError } from 'utils/error';
 
 import GenericTaskDetails from './GenericTaskDetails';
 
 const TASK_ID = 'task-1';
 
+const params = vi.hoisted(() => ({ tab: undefined as string | undefined }));
 vi.mock('react-router-dom', async (importOriginal) => ({
   ...(await importOriginal<typeof import('react-router-dom')>()),
-  useParams: () => ({ taskId: TASK_ID }),
+  useParams: () => ({ tab: params.tab, taskId: TASK_ID }),
 }));
 
 vi.mock('hooks/useTaskResourcesEnabled', () => ({ default: () => false }));
@@ -87,6 +89,44 @@ describe('GenericTaskDetails', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    params.tab = undefined;
+  });
+
+  describe('job privacy', () => {
+    const hidden: JobCapabilities = {
+      manageSharing: false,
+      viewConfig: false,
+      viewLogs: false,
+      viewTitle: false,
+    };
+
+    it('names a task whose title is not shared by its kind and short ID', async () => {
+      vi.mocked(getTask).mockResolvedValue(taskItem(GenericTaskState.Active));
+      vi.mocked(getGenericTask).mockResolvedValue({
+        ...summary,
+        capabilities: hidden,
+        description: '',
+        name: undefined,
+      });
+      setup();
+      const name = await screen.findByTestId('generic-task-name');
+      await waitFor(() => expect(name).toHaveTextContent('Generic Task task'));
+    });
+
+    it('shows a config that the master refuses as not shared', async () => {
+      params.tab = 'config';
+      vi.mocked(getTask).mockResolvedValue(taskItem(GenericTaskState.Active));
+      vi.mocked(getGenericTaskConfig).mockRejectedValueOnce(
+        // As processApiError wraps the master's refusal.
+        new DetError(new Response(null, { status: 403 }), {
+          publicMessage: 'config not shared',
+          publicSubject: 'Request getGenericTaskConfig failed.',
+        }),
+      );
+      setup();
+      expect(await screen.findByText('Config not shared')).toBeInTheDocument();
+      expect(screen.queryByText('Unable to load config')).not.toBeInTheDocument();
+    });
   });
 
   it('looks the task up by its ID once', async () => {

@@ -13,6 +13,7 @@ import { paths } from 'routes/utils';
 import { GenericTask, ValueOf } from 'types';
 import { copyToClipboard } from 'utils/dom';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
+import { jobDisplayName } from 'utils/jobPrivacy';
 
 export const GenericTaskAction = {
   CopyTaskID: 'Copy Task ID',
@@ -55,7 +56,7 @@ const GenericTaskActionDropdown: React.FC<Props> = ({ children, onComplete, task
       canControl,
       onComplete,
       task: {
-        name: task.name,
+        name: jobDisplayName('Generic Task', task.taskId, task.name, task.capabilities),
         noPause: task.noPause,
         parentId: task.parentId,
         state: task.state,

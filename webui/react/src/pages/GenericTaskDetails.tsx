@@ -22,8 +22,8 @@ import { getGenericTask, getGenericTaskConfig, getGenericTasks, getTask } from '
 import { V1TaskType } from 'services/api-ts-sdk';
 import { GenericTask, RawJson, TaskItem, ValueOf } from 'types';
 import handleError, { ErrorType } from 'utils/error';
+import { configHidden, isConfigNotShared, jobDisplayName, logsHidden } from 'utils/jobPrivacy';
 import { isAborted, isNotFound } from 'utils/service';
-import { shortTaskId } from 'utils/task';
 
 import css from './GenericTaskDetails.module.scss';
 
@@ -57,6 +57,7 @@ const GenericTaskDetails: React.FC = () => {
   const [childTasks, setChildTasks] = useState<GenericTask[]>();
   const [config, setConfig] = useState<RawJson>();
   const [configError, setConfigError] = useState<string>();
+  const [configRefused, setConfigRefused] = useState(false);
 
   const tabKey: TabType = tab && TAB_KEYS.includes(tab) ? (tab as TabType) : DEFAULT_TAB_KEY;
   // The task shown now; responses for a task navigated away from are dropped.
@@ -72,6 +73,7 @@ const GenericTaskDetails: React.FC = () => {
     setChildTasks(undefined);
     setConfig(undefined);
     setConfigError(undefined);
+    setConfigRefused(false);
   }, [taskId]);
 
   useEffect(() => {
@@ -167,6 +169,10 @@ const GenericTaskDetails: React.FC = () => {
       })
       .catch((e) => {
         if (!active || isAborted(e)) return;
+        if (isConfigNotShared(e)) {
+          setConfigRefused(true);
+          return;
+        }
         setConfigError((e as Error).message);
         handleError(e, { publicSubject: 'Unable to fetch config.', silent: true });
       });
@@ -184,7 +190,8 @@ const GenericTaskDetails: React.FC = () => {
 
   const state = task?.taskState ?? summary?.state;
   const noPause = task?.noPause ?? summary?.noPause;
-  const name = summary?.name ?? `Generic Task ${shortTaskId(taskId)}`;
+  const name = jobDisplayName('Generic Task', taskId, summary?.name, summary?.capabilities);
+  const configNotShared = configRefused || configHidden(summary?.capabilities);
   /*
    * Owners and admins can control a task. Without the task's owner, e.g. when the lookup fails,
    * the actions stay enabled and the master decides.
@@ -202,12 +209,16 @@ const GenericTaskDetails: React.FC = () => {
         label: 'Overview',
       },
       {
-        children: <GenericTaskConfig config={config} error={configError} />,
+        children: (
+          <GenericTaskConfig config={config} error={configError} notShared={configNotShared} />
+        ),
         key: TabType.Config,
         label: 'Configuration',
       },
       {
-        children: <GenericTaskLogs taskId={taskId} />,
+        children: (
+          <GenericTaskLogs logsHidden={logsHidden(summary?.capabilities)} taskId={taskId} />
+        ),
         key: TabType.Logs,
         label: 'Logs',
       },
@@ -227,7 +238,17 @@ const GenericTaskDetails: React.FC = () => {
       });
     }
     return tabs;
-  }, [childTasks, config, configError, resourcesEnabled, tabKey, task, taskId]);
+  }, [
+    childTasks,
+    config,
+    configError,
+    configNotShared,
+    resourcesEnabled,
+    summary?.capabilities,
+    tabKey,
+    task,
+    taskId,
+  ]);
 
   if (taskError && !isNotFound(taskError)) {
     return (

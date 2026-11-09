@@ -34,6 +34,7 @@ import {
 } from 'services/api';
 import { ExperimentBase, Note, TrialDetails, TrialItem, ValueOf } from 'types';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
+import { logsHidden } from 'utils/jobPrivacy';
 
 import ExperimentCheckpoints from './ExperimentCheckpoints';
 import ExperimentCodeViewer from './ExperimentCodeViewer';
@@ -356,6 +357,7 @@ const ExperimentSingleTrialTabs: React.FC<Props> = ({
   return (
     <TrialLogPreview
       hidePreview={tabKey === TabType.Logs}
+      logsHidden={logsHidden(experiment.capabilities)}
       trial={trialDetails}
       onViewLogs={handleViewLogs}>
       <div className={css.pivoter}>

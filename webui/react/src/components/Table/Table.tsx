@@ -33,6 +33,7 @@ import {
   Workspace,
 } from 'types';
 import { getDuration } from 'utils/datetime';
+import { jobDisplayName, titleHidden } from 'utils/jobPrivacy';
 import { canBeOpened } from 'utils/task';
 import { openCommand } from 'utils/wait';
 
@@ -156,12 +157,29 @@ export const taskIdRenderer: TaskRenderer = (_, record) => (
 export const taskTypeRenderer: TaskRenderer = (_, record) => (
   <Tooltip content={commandTypeToLabel[record.type as unknown as CommandType]} placement="topLeft">
     <div className={css.centerVertically}>
-      <Icon name={record.type} title={record.displayName || record.name} />
+      <Icon
+        name={record.type}
+        title={
+          record.displayName ||
+          jobDisplayName(
+            commandTypeToLabel[record.type],
+            record.id,
+            record.name,
+            record.capabilities,
+          )
+        }
+      />
     </div>
   </Tooltip>
 );
 
 export const taskNameRenderer: TaskRenderer = (_id, record) => {
+  const name = jobDisplayName(
+    commandTypeToLabel[record.type],
+    record.id,
+    record.name,
+    record.capabilities,
+  );
   return (
     <div>
       <ConditionalWrapper
@@ -170,11 +188,11 @@ export const taskNameRenderer: TaskRenderer = (_id, record) => {
           <a
             href={`${process.env.PUBLIC_URL}${paths.interactiveTask(record.id)}`}
             target={record.id}
-            title={record.name}>
+            title={name}>
             {ch}
           </a>
         )}>
-        <span>{record.name}</span>
+        <span>{name}</span>
       </ConditionalWrapper>
     </div>
   );
@@ -206,21 +224,26 @@ export const experimentDurationRenderer: ExperimentRenderer = (_, record) => (
   <TimeDuration duration={getDuration(record)} />
 );
 
+/** An experiment's name, or its kind and ID when the name is not shared with the viewer. */
 export const experimentNameRenderer = (
   value: string | number | undefined,
   record: BulkExperimentItem,
-): React.ReactNode => (
-  <Label truncate={{ tooltip: true }}>
-    <Link path={paths.experimentDetails(record.id)}>
-      {value === undefined ? '' : value}&nbsp;&nbsp;
-      {record.unmanaged && (
-        <Badge tooltip="Workload not managed by Determined" type="Header">
-          Unmanaged
-        </Badge>
-      )}
-    </Link>
-  </Label>
-);
+): React.ReactNode => {
+  const name =
+    value ?? (titleHidden(record.capabilities) ? jobDisplayName('Experiment', record.id) : '');
+  return (
+    <Label truncate={{ tooltip: true }}>
+      <Link path={paths.experimentDetails(record.id)}>
+        {name}&nbsp;&nbsp;
+        {record.unmanaged && (
+          <Badge tooltip="Workload not managed by Determined" type="Header">
+            Unmanaged
+          </Badge>
+        )}
+      </Link>
+    </Label>
+  );
+};
 
 /* Model Table Column Renderers */
 

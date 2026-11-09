@@ -435,7 +435,7 @@ const ExperimentActionDropdown: React.FC<Props> = ({
       <ExperimentEditModal.Component
         description={experiment.description ?? ''}
         experimentId={experiment.id}
-        experimentName={experiment.name}
+        experimentName={experiment.name ?? ''}
         onEditComplete={handleEditComplete}
       />
       <ExperimentMoveModal.Component

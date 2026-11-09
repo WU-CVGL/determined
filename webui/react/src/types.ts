@@ -768,6 +768,18 @@ export interface TrialSummary extends TrialItem {
   metrics: MetricContainer[];
 }
 
+/**
+ * What the viewer may do with a job's content, as the master computes it. Unset where the master
+ * does not send it: an older master, or a job the list leaves out.
+ */
+export const JobCapabilities: t.Type<Api.V1JobCapabilities> = t.type({
+  manageSharing: t.boolean,
+  viewConfig: t.boolean,
+  viewLogs: t.boolean,
+  viewTitle: t.boolean,
+});
+export type JobCapabilities = t.TypeOf<typeof JobCapabilities>;
+
 // we're declaring the type here so if/when the types drift we know to fix it
 export const JobSummary: t.Type<Api.V1JobSummary> = t.type({
   jobsAhead: t.number,
@@ -780,6 +792,7 @@ export type JobSummary = t.TypeOf<typeof JobSummary>;
 export const BulkExperimentItem = t.intersection([
   t.partial({
     allocationStartTime: t.string,
+    capabilities: JobCapabilities,
     checkpoints: t.number,
     checkpointSize: t.number,
     config: ExperimentConfig,
@@ -793,6 +806,8 @@ export const BulkExperimentItem = t.intersection([
     forkedFrom: t.number,
     jobSummary: JobSummary,
     modelDefinitionSize: t.number,
+    /** Unset when the experiment's title is not shared with the viewer. */
+    name: t.string,
     notes: t.string,
     parentArchived: t.boolean,
     progress: t.number,
@@ -812,7 +827,6 @@ export const BulkExperimentItem = t.intersection([
     id: t.number,
     jobId: t.string,
     labels: t.array(t.string),
-    name: t.string,
     numTrials: t.number,
     projectId: t.number,
     resourcePool: t.string,
@@ -828,8 +842,7 @@ export const FullExperimentItem = t.intersection([
   BulkExperimentItem,
   t.partial({
     config: ExperimentConfig,
-  }),
-  t.type({
+    /** Unset when the experiment's config is not shared with the viewer. */
     configRaw: JsonObject,
   }),
 ]);
@@ -854,10 +867,11 @@ export interface CreateExperimentResponse {
 }
 
 export interface ExperimentBase extends ProjectExperiment {
-  config: ExperimentConfig;
-  configRaw: RawJson; // Readonly unparsed config object.
+  /** Unset, as configRaw and originalConfig, when the config is not shared with the viewer. */
+  config?: ExperimentConfig;
+  configRaw?: RawJson; // Readonly unparsed config object.
   hyperparameters: HyperparametersFlattened; // nested hp keys are flattened, eg) foo.bar
-  originalConfig: string;
+  originalConfig?: string;
 }
 
 interface Allocation {
@@ -903,13 +917,15 @@ export type GenericTaskState = ValueOf<typeof GenericTaskState>;
 export interface GenericTask {
   allocationStartTime?: string;
   allocationId?: string;
+  capabilities?: JobCapabilities;
   description: string;
   /** The owner's display name; unset without one. */
   displayName?: string;
   endTime?: string;
   forkedFrom?: string;
   jobId: string;
-  name: string;
+  /** Unset when the task's title is not shared with the viewer. */
+  name?: string;
   noPause: boolean;
   parentId?: string;
   projectId: number;
@@ -975,7 +991,8 @@ export interface ModelWithVersions extends WithPagination {
 
 export interface Task {
   id: string;
-  name: string;
+  /** Unset when the task's title is not shared with the viewer. */
+  name?: string;
   resourcePool: string;
   serviceAddress?: string;
   startTime: string;
@@ -1006,6 +1023,7 @@ export interface CommandResponse {
 
 export interface CommandTask extends Task {
   allocationStartTime?: string;
+  capabilities?: JobCapabilities;
   displayName?: string;
   endTime?: string;
   misc?: CommandMisc;
@@ -1183,6 +1201,12 @@ export interface FullJob extends Api.V1Job {
   summary: Api.V1JobSummary;
 }
 export type Job = LimitedJob | FullJob;
+
+/** A job's own sharing and the cluster's job privacy policy, which limits it. */
+export interface JobSharingSettings {
+  rules: Api.V1JobPrivacyRule[];
+  sharing: Api.V1JobSharing;
+}
 export const JobType = Api.Jobv1Type;
 export type JobType = Api.Jobv1Type;
 export const JobState = Api.Jobv1State;
@@ -1429,9 +1453,11 @@ export interface FlatRunExperiment {
   resourcePool: string;
   progress: number;
   description: string;
-  name: string;
+  /** Unset when the experiment's title is not shared with the viewer. */
+  name?: string;
   unmanaged: boolean;
   isMultitrial: boolean;
+  capabilities?: JobCapabilities;
 }
 export interface SearchFlatRunPagination extends WithPagination {
   runs: FlatRun[];

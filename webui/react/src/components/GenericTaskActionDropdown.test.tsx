@@ -43,7 +43,7 @@ vi.mock('react-router-dom', async (importOriginal) => ({
   useNavigate: () => mocks.navigate,
 }));
 
-const TASK: GenericTask = {
+const TASK = {
   description: '',
   jobId: 'job-1',
   name: 'eval-sweep',
@@ -57,7 +57,7 @@ const TASK: GenericTask = {
   userId: 4,
   username: 'bob',
   workspaceId: 7,
-};
+} satisfies GenericTask;
 
 const FULL_MENU = ['View Logs', 'View Resources', 'Copy Task ID', 'Pause', 'Kill'];
 

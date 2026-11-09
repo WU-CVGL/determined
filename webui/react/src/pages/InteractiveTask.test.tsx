@@ -65,7 +65,11 @@ vi.mock('components/TaskServicePane', () => ({
   ),
 }));
 
-vi.mock('pages/TaskLogs', () => ({ TaskLogsViewer: () => <div data-testid="logs-pane" /> }));
+vi.mock('pages/TaskLogs', () => ({
+  TaskLogsViewer: ({ logsHidden }: { logsHidden?: boolean }) => (
+    <div data-logs-hidden={String(!!logsHidden)} data-testid="logs-pane" />
+  ),
+}));
 vi.mock('components/TaskResourcesPanel', () => ({
   default: () => <div data-testid="resources-pane" />,
 }));
@@ -83,7 +87,7 @@ vi.mock('utils/routes', async (importOriginal) => ({
   routeToReactUrl: vi.fn(),
 }));
 
-const shell: CommandTask = {
+const shell = {
   id: TASK_ID,
   name: 'Shell (brave-otter)',
   resourcePool: 'default',
@@ -92,7 +96,7 @@ const shell: CommandTask = {
   type: CommandType.Shell,
   userId: 7,
   workspaceId: 1,
-};
+} satisfies CommandTask;
 
 const taskWith = (
   isReady: boolean,
@@ -498,6 +502,20 @@ describe('InteractiveTask', () => {
       expect(screen.getByTestId('terminal-pane')).toHaveAttribute('data-active', 'true'),
     );
     expect(screen.getByTestId('service-pane-jupyter')).toBeInTheDocument();
+  });
+
+  it('names a shell whose title is not shared by its kind and short ID, without its logs', async () => {
+    const capabilities = {
+      manageSharing: false,
+      viewConfig: false,
+      viewLogs: false,
+      viewTitle: false,
+    };
+    vi.mocked(getShells).mockResolvedValue([{ ...shell, capabilities, name: undefined }]);
+    setup('?tab=logs');
+    const pane = await screen.findByTestId('logs-pane');
+    await waitFor(() => expect(pane).toHaveAttribute('data-logs-hidden', 'true'));
+    await waitFor(() => expect(document.title).toBe('Shell task'));
   });
 
   it('lands on the tab of the query, or the first tab', async () => {

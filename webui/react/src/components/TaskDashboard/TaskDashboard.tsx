@@ -72,6 +72,7 @@ import {
   mostAgentSlots,
   MULTI_NODE,
   RUN_KINDS,
+  runDisplayName,
   RunKind,
   runKindLabel,
   runKindPluralLabel,
@@ -814,11 +815,13 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
           if (row.kind === RunKind.Experiment)
             return experimentNameRenderer(row.name, row.experiment);
           if (row.kind === RunKind.GenericTask) {
-            return <Link path={paths.genericTaskDetails(row.task.taskId)}>{row.name}</Link>;
+            return (
+              <Link path={paths.genericTaskDetails(row.task.taskId)}>{runDisplayName(row)}</Link>
+            );
           }
           const name = (
-            <div className={css.name} title={row.name}>
-              {taskNameRenderer(row.name, row.task, index)}
+            <div className={css.name} title={runDisplayName(row)}>
+              {taskNameRenderer(row.id, row.task, index)}
             </div>
           );
           if (!row.task.misc) return name;

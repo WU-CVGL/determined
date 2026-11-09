@@ -12,6 +12,7 @@ import TaskBar from 'components/TaskBar';
 import TaskResourcesPanel from 'components/TaskResourcesPanel';
 import TaskServicePane from 'components/TaskServicePane';
 import useUI from 'components/ThemeProvider';
+import { commandTypeToLabel } from 'constants/states';
 import useFeature from 'hooks/useFeature';
 import { useSettings } from 'hooks/useSettings';
 import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
@@ -21,6 +22,7 @@ import { V1TaskService, V1TaskServiceState } from 'services/api-ts-sdk';
 import { errorText } from 'services/taskService';
 import { CommandState, CommandTask, CommandType, InteractiveTaskTab, TaskItem } from 'types';
 import handleError, { ErrorLevel, ErrorType, handleWarning } from 'utils/error';
+import { jobDisplayName, logsHidden, titleHidden } from 'utils/jobPrivacy';
 import { isNotFound } from 'utils/service';
 import {
   canOpenShellTerminal,
@@ -96,12 +98,13 @@ const lookupCommand = async (
   }
 };
 
-const LogsPane: React.FC<{ taskId: string }> = ({ taskId }) => {
+const LogsPane: React.FC<{ hidden?: boolean; taskId: string }> = ({ hidden, taskId }) => {
   const taskSettingsConfig = useMemo(() => settingsConfigForTask(taskId), [taskId]);
   const { resetSettings, settings, updateSettings } = useSettings<Settings>(taskSettingsConfig);
   return (
     <div className={css.pane}>
       <TaskLogsViewer
+        logsHidden={hidden}
         resetSettings={resetSettings}
         settings={settings}
         taskId={taskId}
@@ -334,7 +337,10 @@ export const InteractiveTask: React.FC = () => {
     [setSearchParams],
   );
 
-  const name = command?.name || taskId;
+  const name =
+    command && titleHidden(command.capabilities)
+      ? jobDisplayName(commandTypeToLabel[command.type], taskId)
+      : command?.name || taskId;
   const phase = task ? taskPhase(task) : 'waiting';
   const services = useMemo(() => taskServices?.services ?? [], [taskServices]);
 
@@ -416,7 +422,7 @@ export const InteractiveTask: React.FC = () => {
             />
           );
         case InteractiveTaskTab.Logs:
-          return <LogsPane taskId={taskId} />;
+          return <LogsPane hidden={logsHidden(command?.capabilities)} taskId={taskId} />;
         case InteractiveTaskTab.Resources:
           return (
             <TaskResourcesPanel endTime={task.endTime} startTime={task.startTime} taskId={taskId} />

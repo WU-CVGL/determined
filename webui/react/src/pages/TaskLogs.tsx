@@ -1,6 +1,7 @@
 import LogViewer, { FetchConfig, FetchDirection, FetchType } from 'hew/LogViewer/LogViewer';
 import LogViewerSelect, { Filters } from 'hew/LogViewer/LogViewerSelect';
 import { Settings, settingsConfigForTask } from 'hew/LogViewer/LogViewerSelect.settings';
+import Message from 'hew/Message';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 
@@ -16,6 +17,7 @@ import { mapV1LogsResponse } from 'services/decoder';
 import { readStream } from 'services/utils';
 import { CommandTask, CommandType, TaskItem } from 'types';
 import handleError from 'utils/error';
+import { isLogsNotShared, LOGS_NOT_SHARED } from 'utils/jobPrivacy';
 
 import css from './TaskLogs.module.scss';
 
@@ -37,6 +39,8 @@ export const TaskLogsWrapper: React.FC = () => {
   return <TaskLogs taskId={taskId ?? ''} taskType={taskType ?? ''} />;
 };
 interface ViewerProps {
+  /** The task's logs are not shared with the viewer, as its capabilities say. */
+  logsHidden?: boolean;
   onCloseLogs?: () => void;
   resetSettings: ResetSettings;
   settings: Settings;
@@ -46,9 +50,11 @@ interface ViewerProps {
 
 /*
  * The log viewer of a task with its filters, without a page around it. The caller owns the log
- * settings so that it can also read them, e.g. for the selected allocation.
+ * settings so that it can also read them, e.g. for the selected allocation. Logs that are not
+ * shared with the viewer, by the task's capabilities or by the master's refusal, are not read.
  */
 export const TaskLogsViewer: React.FC<ViewerProps> = ({
+  logsHidden,
   onCloseLogs,
   resetSettings,
   settings,
@@ -56,6 +62,20 @@ export const TaskLogsViewer: React.FC<ViewerProps> = ({
   updateSettings,
 }: ViewerProps) => {
   const [filterOptions, setFilterOptions] = useState<Filters>({});
+  // The task whose logs the master refused as not shared.
+  const [refusedTaskId, setRefusedTaskId] = useState<string>();
+  const notShared = !!logsHidden || refusedTaskId === taskId;
+
+  const handleLogsError = useCallback(
+    (e: unknown) => {
+      if (isLogsNotShared(e)) {
+        setRefusedTaskId(taskId);
+        return;
+      }
+      handleError(e);
+    },
+    [taskId],
+  );
 
   const filterValues: Filters = useMemo(
     () => ({
@@ -133,15 +153,21 @@ export const TaskLogsViewer: React.FC<ViewerProps> = ({
   );
 
   useEffect(() => {
+    if (notShared) return;
     const canceler = new AbortController();
 
     readStream(
       detApi.StreamingJobs.taskLogsFields(taskId, true, { signal: canceler.signal }),
       (event) => setFilterOptions(event as Filters),
+      (e) => {
+        if (isLogsNotShared(e)) setRefusedTaskId(taskId);
+      },
     );
 
     return () => canceler.abort();
-  }, [taskId]);
+  }, [notShared, taskId]);
+
+  if (notShared) return <Message title={LOGS_NOT_SHARED} />;
 
   const logFilters = (
     <div className={css.filters}>
@@ -161,7 +187,7 @@ export const TaskLogsViewer: React.FC<ViewerProps> = ({
       handleCloseLogs={onCloseLogs}
       serverAddress={serverAddress}
       title={logFilters}
-      onError={handleError}
+      onError={handleLogsError}
       onFetch={handleFetch}
     />
   );

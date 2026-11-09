@@ -134,4 +134,74 @@ describe('Experiment Utilities', () => {
       expect(utils.upgradeConfig(oldConfig)).toStrictEqual(newConfig);
     });
   });
+  describe('job privacy', () => {
+    const experiment: Type.ProjectExperiment = {
+      archived: false,
+      hyperparameters: {},
+      id: 12,
+      jobId: 'job-12',
+      labels: [],
+      numTrials: 1,
+      parentArchived: false,
+      projectId: 1,
+      projectName: 'Uncategorized',
+      projectOwnerId: 1,
+      resourcePool: 'default',
+      searcherMetric: 'loss',
+      searcherType: 'grid',
+      startTime: '2026-01-01T00:00:00Z',
+      state: Type.RunState.Error,
+      userId: 2,
+      workspaceId: 1,
+      workspaceName: 'Uncategorized',
+    };
+    const caps = (viewTitle: boolean, viewConfig: boolean): Type.JobCapabilities => ({
+      manageSharing: false,
+      viewConfig,
+      viewLogs: viewTitle,
+      viewTitle,
+    });
+    const permissions = {
+      canCreateExperiment: () => true,
+      canDeleteExperiment: () => true,
+      canModifyExperiment: () => true,
+      canModifyExperimentMetadata: () => true,
+      canMoveExperiment: () => true,
+      canViewExperimentArtifacts: () => true,
+    };
+    const configActions = [
+      Type.ExperimentAction.ContinueTrial,
+      Type.ExperimentAction.Fork,
+      Type.ExperimentAction.HyperparameterSearch,
+    ];
+
+    it('hides the actions that start from the config when it is not shared', () => {
+      const hidden = { ...experiment, capabilities: caps(true, false) };
+      configActions.forEach((action) => {
+        expect(utils.canActionExperiment(action, experiment)).toBe(true);
+        expect(utils.canActionExperiment(action, hidden)).toBe(false);
+      });
+      const targets = [...configActions, Type.ExperimentAction.Delete];
+      expect(utils.getActionsForExperiment(hidden, targets, permissions)).toEqual([
+        Type.ExperimentAction.Delete,
+      ]);
+    });
+
+    it('hides Edit when the title is not shared', () => {
+      const hidden = { ...experiment, capabilities: caps(false, false) };
+      expect(utils.canActionExperiment(Type.ExperimentAction.Edit, experiment)).toBe(true);
+      expect(utils.canActionExperiment(Type.ExperimentAction.Edit, hidden)).toBe(false);
+    });
+
+    it("reads the searcher from the experiment when the list's config has resources only", () => {
+      const reduced = {
+        ...experiment,
+        capabilities: caps(true, false),
+        config: { resources: { slots_per_trial: 2 } } as unknown as Type.ExperimentConfig,
+      };
+      expect(utils.experimentSearcherName(reduced)).toBe('grid');
+      expect(utils.experimentSearcherMetric(reduced)).toBe('loss');
+      expect(utils.experimentSearcherName(experiment)).toBe('grid');
+    });
+  });
 });

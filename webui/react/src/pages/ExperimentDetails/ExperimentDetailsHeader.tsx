@@ -60,6 +60,7 @@ import { getDuration } from 'utils/datetime';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import {
   canActionExperiment,
+  experimentSearcherName,
   getActionsForExperiment,
   isSingleTrialExperiment,
 } from 'utils/experiment';
@@ -177,7 +178,7 @@ const ExperimentDetailsHeader: React.FC<Props> = ({
   const f_flat_runs = useFeature().isOn('flat_runs');
   const copyMap = f_flat_runs ? RunEntityCopyMap : ExperimentEntityCopyMap;
 
-  const maxRestarts = experiment.config.maxRestarts;
+  const maxRestarts = experiment.config?.maxRestarts;
   const autoRestarts = trial?.autoRestarts ?? 0;
 
   const isPausable = pausableRunStates.has(experiment.state);
@@ -303,7 +304,7 @@ const ExperimentDetailsHeader: React.FC<Props> = ({
 
   const continueExperimentOption = useMemo(
     () =>
-      experiment?.config.searcher.name === 'single'
+      experimentSearcherName(experiment) === 'single'
         ? {
           content: (
             <Dropdown
@@ -357,7 +358,7 @@ const ExperimentDetailsHeader: React.FC<Props> = ({
               ) : (
                 `Continue ${capitalize(isSingleTrialExperiment(experiment) ? copyMap.trial : copyMap.experiment)}`
               ),
-              onClick: ContinuableNonSingleSearcherName.has(experiment.config.searcher.name) ? onClickContinueMultiTrialExp : ContinueTrialModal.open,
+              onClick: ContinuableNonSingleSearcherName.has(experimentSearcherName(experiment)) ? onClickContinueMultiTrialExp : ContinueTrialModal.open,
             },
           ],
         },
@@ -623,18 +624,19 @@ const ExperimentDetailsHeader: React.FC<Props> = ({
         value: <Body truncate={{ rows: 1, tooltip: true }}>{experiment.description || 'N/A'}</Body>,
       },
     ];
-    if (experiment.forkedFrom && experiment.config.searcher.sourceTrialId) {
+    const sourceTrialId = experiment.config?.searcher.sourceTrialId;
+    if (experiment.forkedFrom && sourceTrialId) {
       rows.push({
         label: 'Continued from',
         value: (
           <Link
-            path={paths.trialDetails(experiment.config.searcher.sourceTrialId)}>
-            {capitalize(copyMap.trial)} {experiment.config.searcher.sourceTrialId}
+            path={paths.trialDetails(sourceTrialId)}>
+            {capitalize(copyMap.trial)} {sourceTrialId}
           </Link>
         ),
       });
     }
-    if (experiment.forkedFrom && !experiment.config.searcher.sourceTrialId) {
+    if (experiment.forkedFrom && !sourceTrialId) {
       rows.push({
         label: 'Forked from',
         value: (
@@ -676,10 +678,10 @@ const ExperimentDetailsHeader: React.FC<Props> = ({
         <Tags
           disabled={disabled}
           ghost={true}
-          tags={experiment.config.labels || []}
+          tags={experiment.config?.labels ?? experiment.labels}
           onAction={experimentTags.handleTagListChange(
             experiment.id,
-            experiment.config.labels || [],
+            experiment.config?.labels ?? experiment.labels,
           )}
         />
       ),
@@ -801,7 +803,7 @@ const ExperimentDetailsHeader: React.FC<Props> = ({
       <ExperimentEditModal.Component
         description={experiment.description ?? ''}
         experimentId={experiment.id}
-        experimentName={experiment.name}
+        experimentName={experiment.name ?? ''}
         onEditComplete={fetchExperimentDetails}
       />
       <HyperparameterSearchModal.Component

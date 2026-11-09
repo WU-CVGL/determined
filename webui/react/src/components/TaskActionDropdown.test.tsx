@@ -397,6 +397,18 @@ describe('TaskActionDropdown', () => {
       expect(onLaunchAgain).toHaveBeenCalledTimes(1);
     });
 
+    it('is not offered on a shell whose config is not shared', async () => {
+      const capabilities = {
+        manageSharing: false,
+        viewConfig: false,
+        viewLogs: true,
+        viewTitle: true,
+      };
+      await openLaunchAgainMenu({ capabilities, type: CommandType.Shell }, admin);
+      await screen.findByText('View Logs');
+      expect(screen.queryByText('Launch Again')).not.toBeInTheDocument();
+    });
+
     it('is not offered on another user’s shell', async () => {
       await openLaunchAgainMenu({ type: CommandType.Shell }, other);
       await screen.findByText('View Logs');

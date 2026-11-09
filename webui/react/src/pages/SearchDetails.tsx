@@ -19,6 +19,7 @@ import workspaceStore from 'stores/workspaces';
 import { ExperimentBase, Note, TrialItem, ValueOf, Workspace } from 'types';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import { isSingleTrialExperiment } from 'utils/experiment';
+import { jobDisplayName } from 'utils/jobPrivacy';
 import { isAborted, isNotFound } from 'utils/service';
 
 import ExperimentCodeViewer from './ExperimentDetails/ExperimentCodeViewer';
@@ -254,7 +255,9 @@ const SearchDetails: React.FC = () => {
     });
 
   pageBreadcrumb.push({
-    breadcrumbName: experiment?.name ?? '',
+    breadcrumbName: experiment
+      ? jobDisplayName('Search', experiment.id, experiment.name, experiment.capabilities)
+      : '',
     path: paths.searchDetails(id),
   });
 

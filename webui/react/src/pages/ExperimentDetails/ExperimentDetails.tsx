@@ -19,6 +19,7 @@ import userSettings from 'stores/userSettings';
 import workspaceStore from 'stores/workspaces';
 import { ExperimentBase, TrialItem, Workspace } from 'types';
 import { isSingleTrialExperiment } from 'utils/experiment';
+import { jobDisplayName } from 'utils/jobPrivacy';
 import { useObservable } from 'utils/observable';
 import { isAborted, isNotFound } from 'utils/service';
 
@@ -118,7 +119,9 @@ const ExperimentDetails: React.FC = () => {
     });
 
   pageBreadcrumb.push({
-    breadcrumbName: experiment?.name ?? '',
+    breadcrumbName: experiment
+      ? jobDisplayName('Experiment', experiment.id, experiment.name, experiment.capabilities)
+      : '',
     path: paths.experimentDetails(id),
   });
 

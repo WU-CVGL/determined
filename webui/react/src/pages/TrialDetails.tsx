@@ -33,6 +33,7 @@ import workspaceStore from 'stores/workspaces';
 import { ApiState, ExperimentBase, TrialDetails, ValueOf, Workspace } from 'types';
 import handleError, { ErrorType } from 'utils/error';
 import { isSingleTrialExperiment } from 'utils/experiment';
+import { jobDisplayName, logsHidden } from 'utils/jobPrivacy';
 import { useObservable } from 'utils/observable';
 import { isAborted, isNotFound } from 'utils/service';
 import { capitalize } from 'utils/string';
@@ -342,7 +343,12 @@ const TrialDetailsComp: React.FC = () => {
               path: paths.projectDetails(1),
             },
         {
-          breadcrumbName: experiment?.name ?? '',
+          breadcrumbName: jobDisplayName(
+            capitalize(copyMap.experiment),
+            experiment.id,
+            experiment.name,
+            experiment.capabilities,
+          ),
           path: paths.experimentDetails(experiment.id),
         },
         {
@@ -363,6 +369,7 @@ const TrialDetailsComp: React.FC = () => {
       title={`${capitalize(copyMap.trial)} ${trialId}`}>
       <TrialLogPreview
         hidePreview={tabKey === TabType.Logs}
+        logsHidden={logsHidden(experiment?.capabilities)}
         trial={trial}
         onViewLogs={handleViewLogs}>
         <Spinner spinning={isFetching}>

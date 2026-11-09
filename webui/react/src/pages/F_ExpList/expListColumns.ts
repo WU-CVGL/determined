@@ -22,6 +22,7 @@ import { Loadable } from 'hew/utils/loadable';
 import { handlePath, paths } from 'routes/utils';
 import { CompoundRunState, DetailedUser, ExperimentWithTrial, JobState, RunState } from 'types';
 import { getDurationInEnglish, getTimeInEnglish } from 'utils/datetime';
+import { jobDisplayName } from 'utils/jobPrivacy';
 import { humanReadableNumber } from 'utils/number';
 import { AnyMouseEvent } from 'utils/routes';
 import { floatToPercent, humanReadableBytes } from 'utils/string';
@@ -277,28 +278,36 @@ export const getColumnDefs = ({
   },
   name: {
     id: 'name',
-    renderer: (record: ExperimentWithTrial) => ({
-      allowOverlay: false,
-      copyData: String(record.experiment.name),
-      cursor: 'pointer',
-      data: {
-        kind: LINK_CELL,
-        link: {
-          href: paths.experimentDetails(record.experiment.id),
-          title: String(record.experiment.name),
-          unmanaged: record.experiment.unmanaged,
+    renderer: (record: ExperimentWithTrial) => {
+      const name = jobDisplayName(
+        'Experiment',
+        record.experiment.id,
+        record.experiment.name,
+        record.experiment.capabilities,
+      );
+      return {
+        allowOverlay: false,
+        copyData: name,
+        cursor: 'pointer',
+        data: {
+          kind: LINK_CELL,
+          link: {
+            href: paths.experimentDetails(record.experiment.id),
+            title: name,
+            unmanaged: record.experiment.unmanaged,
+          },
+          navigateOn: 'click',
+          onClick: (e: CellClickedEventArgs) => {
+            handlePath(e as unknown as AnyMouseEvent, {
+              path: paths.experimentDetails(record.experiment.id),
+            });
+          },
+          underlineOffset: 6,
         },
-        navigateOn: 'click',
-        onClick: (e: CellClickedEventArgs) => {
-          handlePath(e as unknown as AnyMouseEvent, {
-            path: paths.experimentDetails(record.experiment.id),
-          });
-        },
-        underlineOffset: 6,
-      },
-      kind: GridCellKind.Custom,
-      readonly: true,
-    }),
+        kind: GridCellKind.Custom,
+        readonly: true,
+      };
+    },
     title: 'Name',
     tooltip: () => undefined,
     width: columnWidths.name ?? defaultColumnWidths.name ?? MIN_COLUMN_WIDTH,

@@ -181,7 +181,7 @@ const ExperimentTrials: React.FC<Props> = ({ experiment, pageRef }: Props) => {
     );
 
     const autoRestartsRenderer = (_: string, record: TrialItem): React.ReactNode => {
-      const maxRestarts = experiment.config.maxRestarts ?? 0;
+      const maxRestarts = experiment.config?.maxRestarts ?? 0;
       const className = record.autoRestarts ? css.hasRestarts : undefined;
       return (
         <span className={className}>
@@ -281,7 +281,7 @@ const ExperimentTrials: React.FC<Props> = ({ experiment, pageRef }: Props) => {
     return newColumns;
   }, [
     experiment.id,
-    experiment.config.maxRestarts,
+    experiment.config?.maxRestarts,
     experiment.searcherMetric,
     handleOpenCheckpoint,
     dropDownOnTrigger,
