@@ -120,7 +120,7 @@ describe('ntscConfig', () => {
       edited: RawJson,
       previewed: RawJson = mergedShellConfig,
       base: RawJson = request,
-    ) => applyConfigEdits(base, configEdits(edited, previewed));
+    ) => applyConfigEdits(base, edited, previewed);
 
     it('leaves the request as it is when nothing was edited', () => {
       expect(configEdits(mergedShellConfig, mergedShellConfig)).toEqual({
@@ -220,23 +220,48 @@ describe('ntscConfig', () => {
       });
     });
 
-    it('sets a null that clears a value and leaves out one that clears nothing', () => {
-      const edited = { ...mergedShellConfig, debug: null, work_dir: null, x: null };
+    it('sets a null that the user typed, changed or added', () => {
+      const edited = {
+        ...mergedShellConfig,
+        debug: null,
+        services: { jupyter: null, vscode: { opt: null } },
+        work_dir: null,
+      };
       expect(configEdits(edited, mergedShellConfig)).toEqual({
-        changed: { debug: null },
+        changed: { debug: null, services: { jupyter: null, vscode: { opt: null } } },
         removed: [],
       });
-      expect(draft(edited).debug).toBeNull();
+      const out = draft(edited);
+      expect(out.debug).toBeNull();
+      expect(out.services).toEqual({ jupyter: null, vscode: { opt: null } });
+      // The previewed null is no edit.
+      expect(draft(edited, mergedShellConfig, {})).not.toHaveProperty('work_dir');
       // A null the user removes is removed where the request has it.
       const { idle_timeout: _timeout, ...withoutTimeout } = mergedShellConfig;
       expect(draft(withoutTimeout, mergedShellConfig, { idle_timeout: null })).toEqual({});
     });
 
+    it('sets an edited object whole where the request holds a value that is no object', () => {
+      // The master expands an image given as one string into one per runtime.
+      const base = { environment: { image: 'my/img:1' } };
+      const previewed = {
+        environment: { image: { cpu: 'my/img:1', cuda: 'my/img:1', rocm: 'my/img:1' } },
+      };
+      const edited = cloneDeep(previewed);
+      edited.environment.image.cuda = 'my/img:2';
+      expect(draft(edited, previewed, base)).toEqual(edited);
+      // Where the request has none, only the changed key is set.
+      expect(draft(edited, previewed, {})).toEqual({
+        environment: { image: { cuda: 'my/img:2' } },
+      });
+    });
+
     it('does not change its inputs', () => {
       const base = cloneDeep(request);
-      const edits = configEdits({ ...mergedShellConfig, debug: true }, mergedShellConfig);
-      const out = applyConfigEdits(base, edits);
+      const edited = { ...mergedShellConfig, debug: true };
+      const out = applyConfigEdits(base, edited, mergedShellConfig);
       expect(base).toEqual(request);
+      expect(edited.debug).toBe(true);
       out.resources.slots = 9;
       expect(base.resources.slots).toBe(2);
     });
@@ -334,6 +359,16 @@ describe('ntscConfig', () => {
           { a: 'x', b: null, d: { e: 2, f: 1 } },
         ),
       ).toEqual({ a: null, d: { e: null }, g: { i: 1 } });
+    });
+
+    it('keeps every null but one where the default is null, with keepNulls', () => {
+      expect(
+        minimalDiff(
+          { a: null, b: null, c: null, d: { e: null, f: 1 }, g: { h: null, i: 1 } },
+          { a: 'x', b: null, d: { e: 2, f: 1 } },
+          { keepNulls: true },
+        ),
+      ).toEqual({ a: null, c: null, d: { e: null }, g: { h: null, i: 1 } });
     });
   });
 
@@ -659,7 +694,7 @@ describe('ntscConfig', () => {
     it('applies the edits of a session config and reads its source back unchanged', () => {
       const edited = { ...sessionConfig, description: 'my session', idle_timeout: '10m' };
       const base = relaunchConfig(sessionConfig);
-      const draft = applyConfigEdits(base, configEdits(edited, sessionConfig));
+      const draft = applyConfigEdits(base, edited, sessionConfig);
       expect(draft).toEqual({ ...base, description: 'my session', idle_timeout: '10m' });
       const fields = formFieldsFromConfig(draft);
       expect(fields.dataSource).toEqual(experiments([3, 7], []));
@@ -667,7 +702,7 @@ describe('ntscConfig', () => {
       expect(configFromForm(draft, fields)).toEqual(draft);
       // Another round trip without edits changes nothing.
       const request = configFromForm(draft, fields);
-      const again = applyConfigEdits(request, configEdits(edited, edited));
+      const again = applyConfigEdits(request, edited, edited);
       expect(configFromForm(again, formFieldsFromConfig(again))).toEqual(draft);
       // An ID added in the form joins the draft's; ssh stays off with 0 slots.
       const added = configFromForm(draft, { ...fields, dataSource: experiments([3, 7, '12']) });
@@ -684,7 +719,7 @@ describe('ntscConfig', () => {
         services: { tensorboard: { args: ['--x'], logdir: 'runs' } },
       };
       const edited = { ...previewed, services: { tensorboard: { args: ['--x'], trial_ids: [5] } } };
-      const draft = applyConfigEdits(relaunchConfig(previewed), configEdits(edited, previewed));
+      const draft = applyConfigEdits(relaunchConfig(previewed), edited, previewed);
       const fields = formFieldsFromConfig(draft);
       expect(fields.dataSource).toEqual(experiments([], [5]));
       expect(configFromForm(draft, fields).services).toEqual(edited.services);
@@ -693,7 +728,7 @@ describe('ntscConfig', () => {
         tensorboard: { args: ['--x'], logdir: 'logs' },
       });
       // From a log directory draft to IDs: no log directory is left.
-      const logdirDraft = applyConfigEdits(relaunchConfig(edited), configEdits(previewed, edited));
+      const logdirDraft = applyConfigEdits(relaunchConfig(edited), previewed, edited);
       const logdirFields = formFieldsFromConfig(logdirDraft);
       expect(logdirFields.dataSource).toEqual(logdir('runs'));
       expect(

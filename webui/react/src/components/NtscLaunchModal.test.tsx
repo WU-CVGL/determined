@@ -2089,18 +2089,25 @@ describe('NtscLaunchModal', () => {
       /**
        * previewFor, with what the master fills in where the request sets nothing: a generated
        * description, a default bind mount and the registry credentials of the task container
-       * defaults, and an image for the slots.
+       * defaults, and an image for the slots; an image given as one string is one per runtime.
        */
       const previewWithDefaults = async (params: { config?: RawJson; templateName?: string }) => {
         const previewed: RawJson = await previewFor(params);
         const config = params.config ?? {};
+        const image = config.environment?.image;
         return {
           ...previewed,
           bind_mounts: config.bind_mounts ?? [DEFAULT_MOUNT],
           description: config.description ?? 'Shell (lively-calm-fox)',
           environment: {
             ...previewed.environment,
-            image: config.resources?.slots === 0 ? { cpu: 'cpu:1' } : { cuda: 'cuda:1' },
+            image:
+              typeof image === 'string'
+                ? { cpu: image, cuda: image, rocm: image }
+                : {
+                    ...(config.resources?.slots === 0 ? { cpu: 'cpu:1' } : { cuda: 'cuda:1' }),
+                    ...image,
+                  },
             registry_auth: config.environment?.registry_auth ?? { password: 'pw', username: 'det' },
           },
         };
@@ -2222,6 +2229,26 @@ describe('NtscLaunchModal', () => {
         const request = await launched(user, onLaunched);
         expect(request.config.bind_mounts).toEqual([DEFAULT_MOUNT, mount]);
         expect(request.config.bind_mounts).toEqual(trip.config.bind_mounts);
+      }, 15_000);
+
+      it('sends an image edited in one runtime whole where the request gave it as one string', async () => {
+        const { onLaunched, user } = await setup();
+        await roundTrip(user, (config) => ({
+          ...config,
+          environment: { ...config.environment, image: 'my/img:1' },
+        }));
+        const second = await roundTrip(user, (config) => ({
+          ...config,
+          environment: {
+            ...config.environment,
+            image: { ...config.environment.image, cuda: 'my/img:2' },
+          },
+        }));
+        expect(second.request.config.environment).toEqual({ image: 'my/img:1' });
+        const request = await launched(user, onLaunched);
+        expect(request.config.environment).toEqual({
+          image: { cpu: 'my/img:1', cuda: 'my/img:2', rocm: 'my/img:1' },
+        });
       }, 15_000);
 
       it('keeps a template without ssh locked after an edit of something else', async () => {

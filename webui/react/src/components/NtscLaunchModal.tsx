@@ -30,7 +30,6 @@ import { isUsablePool } from 'utils/cluster';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import {
   applyConfigEdits,
-  configEdits,
   configFromForm,
   DEFAULT_SOURCE_MODE,
   formFieldsFromConfig,
@@ -458,7 +457,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       return;
     }
     if (!shown || !isPlainObject(edited)) return;
-    const base = applyConfigEdits(shown.request, configEdits(edited as RawJson, shown.config));
+    const base = applyConfigEdits(shown.request, edited as RawJson, shown.config);
     if (isEqual(base, shown.request)) return;
     const fields = formFieldsFromConfig(base);
     const services = serviceChecks(fields.services);

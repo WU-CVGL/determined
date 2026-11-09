@@ -261,30 +261,35 @@ const dropNulls = (value: RawJson): RawJson => {
  *
  * A null clears a setting, so it is kept where the default sets one. Where the
  * default is null or missing too, it changes nothing and is dropped, as are
- * the nulls inside an object that has no default object to compare with.
+ * the nulls inside an object that has no default object to compare with;
+ * with `keepNulls`, only a null where the default is null is dropped.
  */
-export const minimalDiff = (config: RawJson, defaults: RawJson): RawJson => {
+export const minimalDiff = (
+  config: RawJson,
+  defaults: RawJson,
+  { keepNulls = false } = {},
+): RawJson => {
   const out: RawJson = {};
   Object.entries(config).forEach(([key, value]) => {
     const base = defaults[key];
     if (value === undefined || isEqual(value, base)) return;
-    if (value === null && isNil(base)) return;
+    if (value === null && isNil(base) && !keepNulls) return;
     const valueObject = asObject(value);
     const baseObject = asObject(base);
     if (valueObject && baseObject) {
-      const diff = minimalDiff(valueObject, baseObject);
+      const diff = minimalDiff(valueObject, baseObject, { keepNulls });
       if (Object.keys(diff).length !== 0) out[key] = diff;
       return;
     }
-    out[key] = valueObject ? dropNulls(valueObject) : value;
+    out[key] = valueObject && !keepNulls ? dropNulls(valueObject) : cloneDeep(value);
   });
   return out;
 };
 
 /**
- * The edits that turn `before` into `after`: `changed` is minimalDiff(after, before), and
- * `removed` the paths of the keys of `before` that `after` lacks. Objects are compared key by key,
- * everything else (including arrays) as a whole.
+ * The edits that turn `before` into `after`: `changed` is minimalDiff(after, before) with the
+ * nulls `after` adds, and `removed` the paths of the keys of `before` that `after` lacks. Objects
+ * are compared key by key, everything else (including arrays) as a whole.
  */
 export interface ConfigEdits {
   changed: RawJson;
@@ -303,26 +308,35 @@ const removedPaths = (after: RawJson, before: RawJson, path: string[] = []): str
   });
 
 export const configEdits = (after: RawJson, before: RawJson): ConfigEdits => ({
-  changed: minimalDiff(after, before),
+  changed: minimalDiff(after, before, { keepNulls: true }),
   removed: removedPaths(after, before),
 });
 
-const withChanges = (config: RawJson, changed: RawJson): RawJson => {
+/**
+ * Sets the changed keys of `after` in `config`, objects key by key. Where `config` holds a value
+ * that is no object, such as an image the master expands into one per runtime, an object of
+ * `after` is set whole.
+ */
+const withChanges = (config: RawJson, changed: RawJson, after: RawJson): RawJson => {
   const out = cloneDeep(config);
   Object.entries(changed).forEach(([key, value]) => {
     const change = asObject(value);
     const current = asObject(out[key]);
-    out[key] = change && current ? withChanges(current, change) : cloneDeep(value);
+    if (change && current) out[key] = withChanges(current, change, asObject(after[key]) ?? {});
+    else if (change && out[key] !== undefined) out[key] = cloneDeep(after[key]);
+    else out[key] = cloneDeep(value);
   });
   return out;
 };
 
 /**
- * Applies edits (see configEdits) to a config: a changed or added key is set, objects key by key;
- * a removed key is deleted where the config has it, and ignored where it does not.
+ * Applies the edits that turn `before` into `after` (see configEdits) to a config: a changed or
+ * added key is set; a removed key is deleted where the config has it, and ignored where it does
+ * not.
  */
-export const applyConfigEdits = (config: RawJson, edits: ConfigEdits): RawJson => {
-  const out = withChanges(config, edits.changed);
+export const applyConfigEdits = (config: RawJson, after: RawJson, before: RawJson): RawJson => {
+  const edits = configEdits(after, before);
+  const out = withChanges(config, edits.changed, after);
   edits.removed.forEach((path) => unset(out, path));
   return out;
 };
