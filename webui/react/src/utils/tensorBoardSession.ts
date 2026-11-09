@@ -2,7 +2,8 @@ import { Loadable } from 'hew/utils/loadable';
 import { isEqual } from 'lodash';
 
 import { terminalCommandStates } from 'constants/states';
-import { getCurrentUser, getShells, launchShell } from 'services/api';
+import { getCurrentUser, getShells, getTaskServices, launchShell } from 'services/api';
+import { V1GetTaskServicesResponse, V1TaskServiceState } from 'services/api-ts-sdk';
 import userStore from 'stores/users';
 import { CommandResponse, CommandTask, InteractiveTaskTab, RawJson } from 'types';
 import handleError, { ErrorLevel } from 'utils/error';
@@ -45,7 +46,28 @@ export const sameTensorBoardSources = (
   isEqual(canonicalTensorBoardIds(task.misc?.experimentIds), exps) &&
   isEqual(canonicalTensorBoardIds(task.misc?.trialIds), trials);
 
-/** The viewer's own running session of the selection in its workspace, else a new one. */
+/**
+ * Whether a task is a viewing session whose TensorBoard can be opened: TensorBoard is its primary
+ * service (not one attached to a development shell), it has not exited and can run (starting or
+ * not reported yet counts, so that a session still queued or starting is found again), and the
+ * viewer may connect to it.
+ */
+export const isOpenableTensorBoardSession = (r: V1GetTaskServicesResponse): boolean =>
+  r.primary === 'tensorboard' &&
+  r.services.some(
+    (service) =>
+      service.name === 'tensorboard' &&
+      service.mayConnect &&
+      service.state !== V1TaskServiceState.EXITED &&
+      service.state !== V1TaskServiceState.UNAVAILABLE,
+  );
+
+/**
+ * The newest of the viewer's own unended shells in the selection's workspace with the same sources
+ * that is a viewing session whose TensorBoard can be opened, else a new viewing session. Only the
+ * shells with the same sources have their services read, newest first, until one qualifies; one
+ * whose services cannot be read is skipped.
+ */
 export const openOrCreateTensorBoard = async (
   s: TensorBoardSelection,
 ): Promise<CommandResponse> => {
@@ -62,14 +84,22 @@ export const openOrCreateTensorBoard = async (
       users: [String(me.id)],
       workspaceId,
     });
-    const match = shells.find(
+    const candidates = shells.filter(
       (shell) =>
         shell.userId === me.id &&
         shell.workspaceId === workspaceId &&
         !terminalCommandStates.has(shell.state) &&
         sameTensorBoardSources(shell, experimentIds, trialIds),
     );
-    if (match) return { command: match, warnings: [] };
+    for (const candidate of candidates) {
+      try {
+        // One at a time: the first that qualifies ends the reads.
+        const services = await getTaskServices({ taskId: candidate.id });
+        if (isOpenableTensorBoardSession(services)) return { command: candidate, warnings: [] };
+      } catch (e) {
+        handleError(e, { level: ErrorLevel.Warn, silent: true });
+      }
+    }
   }
   return launchShell({
     config: tensorBoardSessionConfig({ experimentIds, trialIds }),
