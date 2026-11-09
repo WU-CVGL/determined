@@ -160,8 +160,8 @@ func (a *apiServer) GetShell(
 }
 
 // setShellCapabilities sets the user's job privacy capabilities on the shells, clears the
-// description of a shell whose title the user may not read, and returns the capabilities by shell
-// ID.
+// description of a shell whose title the user may not read and the exit status of one whose logs
+// the user may not read, and returns the capabilities by shell ID.
 func setShellCapabilities(
 	ctx context.Context, curUser model.User, shells ...*shellv1.Shell,
 ) (map[string]jobprivacy.Caps, error) {
@@ -175,6 +175,10 @@ func setShellCapabilities(
 		func(s *shellv1.Shell, caps jobprivacy.Caps) {
 			if !caps.ViewTitle {
 				s.Description = ""
+			}
+			// The exit status is a free-text failure reason, which follows the logs.
+			if !caps.ViewLogs {
+				s.ExitStatus = ""
 			}
 			s.Capabilities = caps.Proto()
 			byID[s.Id] = caps

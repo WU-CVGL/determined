@@ -67,7 +67,11 @@ task without such a record is readable only by administrators.
   empty. Searches and filters match such a job only by ID, sorting by name or
   description does not depend on its title, and its labels are left out of the
   label list.
-- Hidden logs are refused with `logs not shared`.
+- Hidden logs are refused with `logs not shared`. Free-text failure reasons
+  follow the logs, because they carry startup diagnostics that are also in the
+  task log: the exit reasons of allocations, the exit statuses of commands and
+  shells, and the error messages of resource failures are empty. States,
+  failure types, exit codes, resources, and times stay.
 - A hidden config is left out of a job's details, and a generic task's config
   is refused with `config not shared`, also as the parent of a fork. Experiment
   lists keep only `resources.slots_per_trial` and `resources.resource_pool` of
@@ -91,7 +95,9 @@ permission check, within five minutes.
   traces. Shared logs with a hidden config show them.
 - **Code**: model definitions, context directories, and the copy of the model
   definition made by forking an experiment follow the permission to read
-  experiment artifacts, not the config. Code often contains config files.
+  experiment artifacts, not the config. The model definition download still
+  contains the experiment's configuration file when the context directory has
+  it.
 - **Master logs**: they carry job names.
 - **Prometheus**: `/prom/det-state-metrics` exports task names in `task_actor`
   of `det_allocation_id_task_id_task_actor` and experiment labels in
@@ -156,4 +162,5 @@ Fields left out stay as they are.
 The policy is stored in `job_privacy_policy`, the user switches in
 `user_job_privacy`, and the job audiences in the `jobs` table. If the policy
 row of a kind is missing, sharing of that kind is forbidden. Rolling back to a
-master without job privacy shares everything.
+master without job privacy shares everything again; the database needs no
+restore.

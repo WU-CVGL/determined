@@ -2,7 +2,10 @@ package internal
 
 import (
 	"context"
+	"errors"
+	"net/http"
 
+	"github.com/labstack/echo/v4"
 	"github.com/uptrace/bun"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -10,11 +13,14 @@ import (
 
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/jobprivacy"
+	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/pkg/model"
+	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/proto/pkg/checkpointv1"
 	"github.com/determined-ai/determined/proto/pkg/experimentv1"
 	"github.com/determined-ai/determined/proto/pkg/masterv1"
 	"github.com/determined-ai/determined/proto/pkg/modelv1"
+	"github.com/determined-ai/determined/proto/pkg/taskv1"
 	"github.com/determined-ai/determined/proto/pkg/trialv1"
 )
 
@@ -237,4 +243,116 @@ func redactRawAllocationLabels(
 		}
 	}
 	return nil
+}
+
+// taskCaps returns the viewer's capabilities on the job of a task: the task's own job, the
+// experiment's job for a trial task without one, and otherwise what jobprivacy.ForTasks decides,
+// as canReadTaskLogs does. An unknown task is NotFound.
+func taskCaps(
+	ctx context.Context, v jobprivacy.Viewer, taskID model.TaskID,
+) (jobprivacy.Caps, error) {
+	if v.Admin {
+		return jobprivacy.AllCaps, nil
+	}
+	t, err := taskForAction(ctx, taskID)
+	if err != nil {
+		return jobprivacy.Caps{}, err
+	}
+	if t.JobID != nil {
+		caps, err := jobprivacy.ForJobs(ctx, v, []model.JobID{*t.JobID})
+		if err != nil {
+			return jobprivacy.Caps{}, err
+		}
+		return caps[*t.JobID], nil
+	}
+	if t.TaskType == model.TaskTypeTrial {
+		expID, err := experimentIDFromTrialTaskID(taskID)
+		switch {
+		case err == nil:
+			caps, err := experimentCaps(ctx, v, []int32{int32(expID)})
+			if err != nil {
+				return jobprivacy.Caps{}, err
+			}
+			return caps[int32(expID)], nil
+		case !errors.Is(err, errIsNotTrialTaskID):
+			return jobprivacy.Caps{}, status.Errorf(codes.Unavailable,
+				"could not read job privacy: %s; try again", err)
+		}
+	}
+	caps, err := jobprivacy.ForTasks(ctx, v, []model.TaskID{taskID})
+	if err != nil {
+		return jobprivacy.Caps{}, err
+	}
+	return caps[taskID], nil
+}
+
+// The free-text failure reasons of tasks, allocations, commands and shells carry startup
+// diagnostics that are also written to the task log, so they follow the logs: for a user who may
+// not read the logs they are empty. States, failure types, exit codes, resources and times stay.
+
+// redactTask clears the exit reason of each of the task's allocations unless caps allow the logs.
+func redactTask(t *taskv1.Task, caps jobprivacy.Caps) {
+	if caps.ViewLogs {
+		return
+	}
+	for _, a := range t.Allocations {
+		redactAllocation(a, caps)
+	}
+}
+
+// redactAllocation clears the allocation's exit reason unless caps allow the logs.
+func redactAllocation(a *taskv1.Allocation, caps jobprivacy.Caps) {
+	if !caps.ViewLogs && a.ExitReason != nil {
+		a.ExitReason = ptrs.Ptr("")
+	}
+}
+
+// redactAllocationSummary clears the summary's name unless caps allow the title, and the error
+// messages of its resources' failures unless caps allow the logs.
+func redactAllocationSummary(s *taskv1.AllocationSummary, caps jobprivacy.Caps) {
+	if !caps.ViewTitle {
+		s.Name = ""
+	}
+	if caps.ViewLogs {
+		return
+	}
+	for _, r := range s.Resources {
+		if f := r.GetExited().GetFailure(); f != nil {
+			f.ErrMsg = ""
+		}
+	}
+}
+
+// redactAllocationSummaryCopy is redactAllocationSummary for the resource manager's summary, which
+// the HTTP route returns as it is. It returns a redacted copy and never writes through the
+// summary's pointers, which the resource manager shares.
+func redactAllocationSummaryCopy(
+	s sproto.AllocationSummary, caps jobprivacy.Caps,
+) sproto.AllocationSummary {
+	if !caps.ViewTitle {
+		s.Name = ""
+	}
+	if caps.ViewLogs || len(s.Resources) == 0 {
+		return s
+	}
+	resources := make([]sproto.ResourcesSummary, len(s.Resources))
+	for i, r := range s.Resources {
+		if r.Exited != nil && r.Exited.Failure != nil {
+			failure := *r.Exited.Failure
+			failure.ErrMsg = ""
+			r.Exited = &sproto.ResourcesStopped{Failure: &failure}
+		}
+		resources[i] = r
+	}
+	s.Resources = resources
+	return s
+}
+
+// echoJobPrivacyError answers a job privacy error on an HTTP route with the status its gRPC code
+// has on the gRPC routes: Unavailable is 503. Any other error is returned as it is.
+func echoJobPrivacyError(err error) error {
+	if s, ok := status.FromError(err); ok && s.Code() == codes.Unavailable {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, s.Message())
+	}
+	return err
 }

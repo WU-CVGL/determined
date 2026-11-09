@@ -375,8 +375,8 @@ func (a *apiServer) GetCommand(
 }
 
 // setCommandCapabilities sets the user's job privacy capabilities on the commands, clears the
-// description of a command whose title the user may not read, and returns the capabilities by
-// command ID.
+// description of a command whose title the user may not read and the exit status of one whose
+// logs the user may not read, and returns the capabilities by command ID.
 func setCommandCapabilities(
 	ctx context.Context, curUser model.User, commands ...*commandv1.Command,
 ) (map[string]jobprivacy.Caps, error) {
@@ -390,6 +390,10 @@ func setCommandCapabilities(
 		func(c *commandv1.Command, caps jobprivacy.Caps) {
 			if !caps.ViewTitle {
 				c.Description = ""
+			}
+			// The exit status is a free-text failure reason, which follows the logs.
+			if !caps.ViewLogs {
+				c.ExitStatus = ""
 			}
 			c.Capabilities = caps.Proto()
 			byID[c.Id] = caps

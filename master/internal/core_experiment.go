@@ -127,7 +127,7 @@ func (m *Master) getExperimentCheckpointsToGC(c echo.Context) (interface{}, erro
 	}
 	caps, err := experimentJobCaps(c.Request().Context(), user, exp)
 	if err != nil {
-		return nil, err
+		return nil, echoJobPrivacyError(err)
 	}
 
 	checkpointUUIDs, err := expauth.ExperimentCheckpointsToGCRaw(
@@ -219,7 +219,7 @@ func (m *Master) getExperimentModelDefinition(c echo.Context) error {
 	}
 	caps, err := experimentJobCaps(c.Request().Context(), user, exp)
 	if err != nil {
-		return err
+		return echoJobPrivacyError(err)
 	}
 
 	modelDef, err := m.db.ExperimentModelDefinitionRaw(args.ExperimentID)

@@ -71,15 +71,9 @@ func ReadPolicy(ctx context.Context, idb bun.IDB) (Policy, error) {
 	return policyFromRows(rows, err)
 }
 
-// policyReadFault, when set, is the error of every policy read.
+// policyReadFault, when set, is the error of every policy read. Only FailPolicyReadsForTests, which
+// integration builds alone have, sets it; in a running master it is always nil.
 var policyReadFault atomic.Pointer[error]
-
-// FailPolicyReadsForTests makes every policy read in this process fail with err until restore is
-// called, so that tests can check that each read path fails closed. It is for tests only.
-func FailPolicyReadsForTests(err error) (restore func()) {
-	policyReadFault.Store(&err)
-	return func() { policyReadFault.Store(nil) }
-}
 
 // policyFromRows builds the policy from the rows of job_privacy_policy and the error of reading
 // them.

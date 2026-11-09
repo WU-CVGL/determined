@@ -36,22 +36,19 @@ func (m *Master) getTasks(c echo.Context) (interface{}, error) {
 		}
 	}
 
-	// The name of a task whose title the user may not read is omitted, as in GetTasks. The
-	// response is a copy, so the resource manager's summaries are never changed.
+	// What the user may not read is omitted, as in GetTasks. The response is a copy, so the
+	// resource manager's summaries are never changed.
 	taskIDs := make([]model.TaskID, 0, len(summary))
 	for _, s := range summary {
 		taskIDs = append(taskIDs, s.TaskID)
 	}
 	caps, err := allocationSummaryCaps(ctx, curUser, taskIDs)
 	if err != nil {
-		return nil, err
+		return nil, echoJobPrivacyError(err)
 	}
 	resp := make(map[model.AllocationID]sproto.AllocationSummary, len(summary))
 	for allocationID, s := range summary {
-		if !caps[s.TaskID].ViewTitle {
-			s.Name = ""
-		}
-		resp[allocationID] = s
+		resp[allocationID] = redactAllocationSummaryCopy(s, caps[s.TaskID])
 	}
 	return resp, nil
 }
