@@ -285,6 +285,9 @@ func (a *apiServer) KillShell(
 	if err = checkShellSources(ctx, *curUser, req.ShellId, shell, nil); err != nil {
 		return nil, err
 	}
+	if _, err = setShellCapabilities(ctx, *curUser, shell); err != nil {
+		return nil, err
+	}
 	return &apiv1.KillShellResponse{Shell: shell}, nil
 }
 
@@ -320,6 +323,9 @@ func (a *apiServer) SetShellPriority(
 
 	shell := cmd.ToV1Shell()
 	if err = checkShellSources(ctx, *curUser, req.ShellId, shell, nil); err != nil {
+		return nil, err
+	}
+	if _, err = setShellCapabilities(ctx, *curUser, shell); err != nil {
 		return nil, err
 	}
 	return &apiv1.SetShellPriorityResponse{Shell: shell}, nil

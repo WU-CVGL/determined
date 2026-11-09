@@ -6,10 +6,20 @@ package internal
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"sort"
+	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/labstack/echo/v4"
+	"golang.org/x/exp/maps"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -19,11 +29,16 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
+	"github.com/determined-ai/determined/master/internal/api"
+	"github.com/determined-ai/determined/master/internal/cluster"
 	"github.com/determined-ai/determined/master/internal/command"
+	"github.com/determined-ai/determined/master/internal/config"
+	detContext "github.com/determined-ai/determined/master/internal/context"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/experiment"
 	"github.com/determined-ai/determined/master/internal/job/jobservice"
 	"github.com/determined-ai/determined/master/internal/jobprivacy"
+	"github.com/determined-ai/determined/master/internal/rm"
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/internal/task"
 	"github.com/determined-ai/determined/master/pkg/model"
@@ -31,7 +46,9 @@ import (
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 	"github.com/determined-ai/determined/proto/pkg/checkpointv1"
 	"github.com/determined-ai/determined/proto/pkg/commonv1"
+	"github.com/determined-ai/determined/proto/pkg/experimentv1"
 	"github.com/determined-ai/determined/proto/pkg/jobv1"
+	"github.com/determined-ai/determined/proto/pkg/logv1"
 	"github.com/determined-ai/determined/proto/pkg/masterv1"
 	"github.com/determined-ai/determined/proto/pkg/modelv1"
 )
@@ -40,6 +57,8 @@ import (
 const (
 	secretJobName            = "secret-job"
 	secretCommandDescription = "secret-command"
+	secretShellDescription   = "secret-shell"
+	secretAllocationName     = "secret-allocation"
 )
 
 // setExperimentTitle sets an experiment's name, description and labels in its config, and notes.
@@ -94,6 +113,26 @@ func requireResourcesOnly(t *testing.T, config *structpb.Struct, msg string) {
 	for _, k := range structKeys(resources) {
 		require.Contains(t, []string{"resource_pool", "slots_per_trial"}, k, msg)
 	}
+}
+
+// echoContextAs is the context of an Echo GET of target by user, with the route's path
+// parameters, and the recorder of its response.
+func echoContextAs(
+	user model.User, target string, params map[string]string,
+) (echo.Context, *httptest.ResponseRecorder) {
+	rec := httptest.NewRecorder()
+	c := &detContext.DetContext{
+		Context: echo.New().NewContext(httptest.NewRequest(http.MethodGet, target, nil), rec),
+	}
+	c.SetUser(user)
+	var names, values []string
+	for k, v := range params {
+		names = append(names, k)
+		values = append(values, v)
+	}
+	c.SetParamNames(names...)
+	c.SetParamValues(values...)
+	return c, rec
 }
 
 // TestJobPrivacyExperimentReadPaths checks every experiment and run read path against an owner's
@@ -209,6 +248,43 @@ func TestJobPrivacyExperimentReadPaths(t *testing.T) {
 						&jobv1.JobCapabilities{ViewTitle: true, ViewLogs: true}, e.Capabilities)
 				default:
 					require.NotEmpty(t, e.Name)
+					require.Contains(t, structKeys(e.Config), "searcher") //nolint:staticcheck
+				}
+			}
+
+			// The project's search returns the same columns.
+			searched, err := api.SearchExperiments(ctx, &apiv1.SearchExperimentsRequest{
+				ProjectId: ptrs.Ptr(int32(projectID)),
+			})
+			require.NoError(t, err)
+			require.Len(t, searched.Experiments, 5)
+			for _, se := range searched.Experiments {
+				e := se.Experiment
+				require.Equal(t, int32(owner.ID), e.UserId)
+				require.Equal(t, "kubernetes", e.ResourcePool)
+				switch {
+				case vw.full:
+					require.NotEmpty(t, e.Name)
+					require.NotEmpty(t, e.Description)
+					require.NotEmpty(t, e.Labels)
+					require.Contains(t, structKeys(e.Config), "searcher") //nolint:staticcheck
+					require.Equal(t, full, e.Capabilities)
+				case slices.Contains(hidden, e.Id):
+					require.Empty(t, e.Name)
+					require.Empty(t, e.Description)
+					require.Empty(t, e.Labels)
+					require.Empty(t, e.Notes)
+					requireResourcesOnly(t, e.Config, "search hidden") //nolint:staticcheck
+					require.Equal(t, none, e.Capabilities)
+				case e.Id == int32(configHidden.ID):
+					require.Equal(t, "c-shared", e.Name)
+					require.Equal(t, "shared-desc", e.Description)
+					requireResourcesOnly(t, e.Config, "search config hidden") //nolint:staticcheck
+					require.Equal(t,
+						&jobv1.JobCapabilities{ViewTitle: true, ViewLogs: true}, e.Capabilities)
+				default:
+					require.NotEmpty(t, e.Name)
+					require.NotEmpty(t, e.Labels)
 					require.Contains(t, structKeys(e.Config), "searcher") //nolint:staticcheck
 				}
 			}
@@ -366,6 +442,20 @@ func TestJobPrivacyExperimentReadPaths(t *testing.T) {
 	require.Equal(t, before, orders(t))
 }
 
+// countingTaskLogBackend counts the task log counts that reach the backend.
+type countingTaskLogBackend struct {
+	TaskLogBackend
+	counts atomic.Int64
+}
+
+// TaskLogsCount counts the call and passes it on.
+func (b *countingTaskLogBackend) TaskLogsCount(
+	taskID model.TaskID, filters []api.Filter,
+) (int, error) {
+	b.counts.Add(1)
+	return b.TaskLogBackend.TaskLogsCount(taskID, filters)
+}
+
 // TestJobPrivacyLogReadPaths checks that every log read of a job whose logs another user may not
 // read refuses that user with "logs not shared", whatever the request, while the owner and an
 // admin read them; and that an open stream ends at the next recheck once the owner stops sharing.
@@ -399,6 +489,17 @@ func TestJobPrivacyLogReadPaths(t *testing.T) {
 		StartTime: time.Now(), LogVersion: model.CurrentTaskLogVersion,
 	}
 	require.NoError(t, db.AddTask(adminCtx, gcTask))
+	// A trial from before task logs, whose logs are in trial_logs.
+	v0Trial, v0Task := db.RequireMockTrial(t, db.SingleDB(), exp)
+	_, err = db.Bun().NewRaw(`UPDATE tasks SET job_id = ?, log_version = 0 WHERE task_id = ?`,
+		exp.JobID, v0Task.TaskID).Exec(adminCtx)
+	require.NoError(t, err)
+	_, err = db.Bun().NewRaw(`INSERT INTO trial_logs (trial_id, message, level, timestamp)
+		VALUES (?, convert_to('a secret v0 line', 'UTF8'), 'INFO', now())`, v0Trial.ID).
+		Exec(adminCtx)
+	require.NoError(t, err)
+	counting := &countingTaskLogBackend{TaskLogBackend: api.m.taskLogBackend}
+	api.m.taskLogBackend = counting
 
 	cmd, err := api.LaunchCommand(ownerCtx, &apiv1.LaunchCommandRequest{})
 	require.NoError(t, err)
@@ -452,60 +553,111 @@ func TestJobPrivacyLogReadPaths(t *testing.T) {
 			fields := &mockStream[*apiv1.TaskLogsFieldsResponse]{ctx: otherCtx}
 			err := api.TaskLogsFields(&apiv1.TaskLogsFieldsRequest{TaskId: string(id)}, fields)
 			requireStatus(t, err, codes.PermissionDenied, "logs not shared")
+			// No log work ran for the refused requests, the count included.
+			require.Zero(t, counting.counts.Load())
 
 			for _, ctx := range []context.Context{ownerCtx, adminCtx} {
 				n, err := readTask(ctx, &apiv1.TaskLogsRequest{TaskId: string(id)})
 				require.NoError(t, err)
 				require.Equal(t, 1, n)
 			}
+			counting.counts.Store(0)
 		})
 	}
 
-	trialLogs := &mockStream[*apiv1.TrialLogsResponse]{ctx: otherCtx}
-	err = api.TrialLogs(&apiv1.TrialLogsRequest{TrialId: int32(trial.ID)}, trialLogs)
-	requireStatus(t, err, codes.PermissionDenied, "logs not shared")
-	trialFields := &mockStream[*apiv1.TrialLogsFieldsResponse]{ctx: otherCtx}
-	err = api.TrialLogsFields(&apiv1.TrialLogsFieldsRequest{TrialId: int32(trial.ID)}, trialFields)
-	requireStatus(t, err, codes.PermissionDenied, "logs not shared")
-	ownerTrialLogs := &mockStream[*apiv1.TrialLogsResponse]{ctx: ownerCtx}
-	require.NoError(t, api.TrialLogs(&apiv1.TrialLogsRequest{TrialId: int32(trial.ID)},
-		ownerTrialLogs))
-	require.NotEmpty(t, ownerTrialLogs.getData())
+	// Trial logs, on the current and the legacy path, whatever the request.
+	for _, trialID := range []int{trial.ID, v0Trial.ID} {
+		for _, req := range []*apiv1.TrialLogsRequest{
+			{TrialId: int32(trialID)},
+			{TrialId: int32(trialID), Follow: true},
+			{TrialId: int32(trialID), SearchText: "secret"},
+			{TrialId: int32(trialID), SearchText: "no such text"},
+			{TrialId: int32(trialID), Limit: 1, OrderBy: apiv1.OrderBy_ORDER_BY_DESC},
+			{TrialId: int32(trialID), Levels: []logv1.LogLevel{logv1.LogLevel_LOG_LEVEL_INFO}},
+		} {
+			stream := &mockStream[*apiv1.TrialLogsResponse]{ctx: otherCtx}
+			err = api.TrialLogs(req, stream)
+			requireStatus(t, err, codes.PermissionDenied, "logs not shared")
+			require.Empty(t, stream.getData())
+		}
+		for _, follow := range []bool{false, true} {
+			fields := &mockStream[*apiv1.TrialLogsFieldsResponse]{ctx: otherCtx}
+			err = api.TrialLogsFields(&apiv1.TrialLogsFieldsRequest{
+				TrialId: int32(trialID), Follow: follow,
+			}, fields)
+			requireStatus(t, err, codes.PermissionDenied, "logs not shared")
+		}
+		require.Zero(t, counting.counts.Load())
+		for _, ctx := range []context.Context{ownerCtx, adminCtx} {
+			stream := &mockStream[*apiv1.TrialLogsResponse]{ctx: ctx}
+			require.NoError(t, api.TrialLogs(&apiv1.TrialLogsRequest{TrialId: int32(trialID)},
+				stream))
+			require.Len(t, stream.getData(), 1, trialID)
+		}
+		counting.counts.Store(0)
+	}
 
-	// An open stream ends at the next recheck once the owner stops sharing logs.
+	// An open stream ends at the next recheck once the owner stops sharing logs: task logs, trial
+	// logs on the legacy path and trial log fields.
 	t.Run("recheck", func(t *testing.T) {
 		shareJob(ownerCtx, t, api, exp.JobID.String(), true, true, true)
-		oldPeriod := recheckAuthPeriod
+		oldPeriod, oldWait := recheckAuthPeriod, distinctFieldBatchWaitTime
 		recheckAuthPeriod = 100 * time.Millisecond
-		t.Cleanup(func() { recheckAuthPeriod = oldPeriod })
+		distinctFieldBatchWaitTime = 100 * time.Millisecond
+		t.Cleanup(func() { recheckAuthPeriod, distinctFieldBatchWaitTime = oldPeriod, oldWait })
 
 		ctx, cancel := context.WithCancel(otherCtx)
 		defer cancel()
-		stream := &mockStream[*apiv1.TaskLogsResponse]{ctx: ctx}
-		done := make(chan error, 1)
-		go func() {
-			done <- api.TaskLogs(&apiv1.TaskLogsRequest{
-				TaskId: string(trialTask.TaskID), Follow: true,
-			}, stream)
-		}()
-		require.Eventually(t, func() bool { return len(stream.getData()) > 0 },
-			10*time.Second, 50*time.Millisecond)
-		select {
-		case err := <-done:
-			require.FailNow(t, "the stream ended while shared", "%v", err)
-		case <-time.After(300 * time.Millisecond):
+		taskStream := &mockStream[*apiv1.TaskLogsResponse]{ctx: ctx}
+		v0Stream := &mockStream[*apiv1.TrialLogsResponse]{ctx: ctx}
+		fieldsStream := &mockStream[*apiv1.TrialLogsFieldsResponse]{ctx: ctx}
+		streams := map[string]func() error{
+			"task logs": func() error {
+				return api.TaskLogs(&apiv1.TaskLogsRequest{
+					TaskId: string(trialTask.TaskID), Follow: true,
+				}, taskStream)
+			},
+			"legacy trial logs": func() error {
+				return api.TrialLogs(&apiv1.TrialLogsRequest{
+					TrialId: int32(v0Trial.ID), Follow: true,
+				}, v0Stream)
+			},
+			"trial log fields": func() error {
+				return api.TrialLogsFields(&apiv1.TrialLogsFieldsRequest{
+					TrialId: int32(trial.ID), Follow: true,
+				}, fieldsStream)
+			},
+		}
+		done := map[string]chan error{}
+		for name, run := range streams {
+			done[name] = make(chan error, 1)
+			go func() { done[name] <- run() }()
+		}
+		require.Eventually(t, func() bool {
+			return len(taskStream.getData()) > 0 && len(v0Stream.getData()) > 0 &&
+				len(fieldsStream.getData()) > 0
+		}, 10*time.Second, 50*time.Millisecond)
+		time.Sleep(300 * time.Millisecond)
+		for name, ch := range done {
+			select {
+			case err := <-ch:
+				require.FailNow(t, "a stream ended while shared", "%s: %v", name, err)
+			default:
+			}
 		}
 
 		_, err := api.PatchMyJobPrivacy(ownerCtx, &apiv1.PatchMyJobPrivacyRequest{
 			ShareLogs: ptrs.Ptr(false),
 		})
 		require.NoError(t, err)
-		select {
-		case err := <-done:
-			require.Equal(t, codes.PermissionDenied, status.Code(err), "%v", err)
-			require.Contains(t, err.Error(), "logs not shared")
-		case <-time.After(10 * time.Second):
-			require.FailNow(t, "the stream did not end")
+		for name, ch := range done {
+			select {
+			case err := <-ch:
+				require.Equal(t, codes.PermissionDenied, status.Code(err), "%s: %v", name, err)
+				require.Contains(t, err.Error(), "logs not shared", name)
+			case <-time.After(10 * time.Second):
+				require.FailNow(t, "the stream did not end", name)
+			}
 		}
 	})
 }
@@ -535,6 +687,9 @@ func TestJobPrivacyTaskListsAndConfigs(t *testing.T) {
 	// An experiment with a checkpoint whose config is hidden, and a trial task whose title is.
 	exp, ckptUUID := createGCTestExperiment(adminCtx, t, api, owner)
 	shareJob(ownerCtx, t, api, exp.JobID.String(), true, true, false)
+	// Another, whose checkpoint is in no model, so that the GC preview lists it.
+	gcExp, _ := createGCTestExperiment(adminCtx, t, api, owner)
+	shareJob(ownerCtx, t, api, gcExp.JobID.String(), true, true, false)
 	hiddenExp := createTestExp(t, api, owner)
 	shareJob(ownerCtx, t, api, hiddenExp.JobID.String(), false, false, false)
 	_, hiddenTrialTask := db.RequireMockTrial(t, db.SingleDB(), hiddenExp)
@@ -557,6 +712,12 @@ func TestJobPrivacyTaskListsAndConfigs(t *testing.T) {
 	})
 	require.NoError(t, err)
 	shareJob(ownerCtx, t, api, shell.Shell.JobId, true, true, false)
+	hiddenShell, err := api.LaunchShell(ownerCtx, &apiv1.LaunchShellRequest{
+		Config: descConfig(secretShellDescription),
+	})
+	require.NoError(t, err)
+	shareJob(ownerCtx, t, api, hiddenShell.Shell.JobId, false, false, false)
+	setExperimentTitle(adminCtx, t, hiddenExp.ID, "secret-model-def", "secret-desc")
 	oldService := task.DefaultService
 	task.DefaultService = &captureAllocationService{AllocationService: oldService}
 	t.Cleanup(func() { task.DefaultService = oldService })
@@ -566,14 +727,19 @@ func TestJobPrivacyTaskListsAndConfigs(t *testing.T) {
 	require.NoError(t, err)
 	shareJob(ownerCtx, t, api, taskJobID(adminCtx, t, generic.TaskId).String(), false, false, false)
 
-	mockRM.On("GetExternalJobs", mock.Anything).Return([]*jobv1.Job{{
-		JobId: hiddenExp.JobID.String(), Name: secretJobName, SubmissionTime: timestamppb.Now(),
-		UserId: int32(owner.ID),
-	}}, nil)
+	// Each call gets jobs of its own, as the job service builds them, so that one viewer's
+	// redaction never reaches another's response.
+	mockRM.On("GetExternalJobs", mock.Anything).Return(
+		func(rm.ResourcePoolName) []*jobv1.Job {
+			return []*jobv1.Job{{
+				JobId: hiddenExp.JobID.String(), Name: secretJobName,
+				SubmissionTime: timestamppb.Now(), UserId: int32(owner.ID),
+			}}
+		}, nil)
 	summaries = map[model.AllocationID]sproto.AllocationSummary{
 		model.AllocationID(hiddenTrialTask.TaskID + ".1"): {
 			TaskID: hiddenTrialTask.TaskID, AllocationID: model.AllocationID(hiddenTrialTask.TaskID + ".1"),
-			Name: "secret-allocation", RegisteredTime: time.Now(), ResourcePool: "default",
+			Name: secretAllocationName, RegisteredTime: time.Now(), ResourcePool: "default",
 		},
 	}
 
@@ -611,17 +777,31 @@ func TestJobPrivacyTaskListsAndConfigs(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, tasks.AllocationIdToSummary, 1)
 			for _, s := range tasks.AllocationIdToSummary {
-				require.Equal(t, vw.full, s.Name == "secret-allocation")
+				require.Equal(t, vw.full, s.Name == secretAllocationName)
+				require.Equal(t, "default", s.ResourcePool)
+			}
+
+			// The Echo twin of GetTasks omits the same names.
+			tasksCtx, _ := echoContextAs(vw.user, "/tasks", nil)
+			echoTasks, err := api.m.getTasks(tasksCtx)
+			require.NoError(t, err)
+			echoSummaries := echoTasks.(map[model.AllocationID]sproto.AllocationSummary)
+			require.Len(t, echoSummaries, 1)
+			for _, s := range echoSummaries {
+				require.Equal(t, vw.full, s.Name == secretAllocationName)
 				require.Equal(t, "default", s.ResourcePool)
 			}
 
 			cmds, err := api.GetCommands(ctx, &apiv1.GetCommandsRequest{})
 			require.NoError(t, err)
+			found := false
 			for _, c := range cmds.Commands {
 				if c.Id == cmd.Command.Id {
+					found = true
 					require.Equal(t, vw.full, c.Description == secretCommandDescription)
 				}
 			}
+			require.True(t, found)
 			getCmd, err := api.GetCommand(ctx, &apiv1.GetCommandRequest{CommandId: cmd.Command.Id})
 			require.NoError(t, err)
 			require.Equal(t, vw.full, getCmd.Command.Description == secretCommandDescription)
@@ -632,6 +812,28 @@ func TestJobPrivacyTaskListsAndConfigs(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "shared-shell", getShell.Shell.Description)
 			require.Equal(t, vw.full, getShell.Config != nil)
+			getHiddenShell, err := api.GetShell(ctx, &apiv1.GetShellRequest{
+				ShellId: hiddenShell.Shell.Id,
+			})
+			require.NoError(t, err)
+			require.Equal(t, vw.full, getHiddenShell.Shell.Description == secretShellDescription)
+			require.Equal(t, vw.full, getHiddenShell.Shell.Description != "")
+			require.Equal(t, vw.full, getHiddenShell.Config != nil)
+			require.Equal(t, int32(owner.ID), getHiddenShell.Shell.UserId)
+			shells, err := api.GetShells(ctx, &apiv1.GetShellsRequest{})
+			require.NoError(t, err)
+			found = false
+			for _, s := range shells.Shells {
+				switch s.Id {
+				case hiddenShell.Shell.Id:
+					found = true
+					require.Equal(t, vw.full, s.Description == secretShellDescription)
+					require.Equal(t, vw.full, s.Description != "")
+				case shell.Shell.Id:
+					require.Equal(t, "shared-shell", s.Description)
+				}
+			}
+			require.True(t, found)
 
 			generics, err := api.GetGenericTasks(ctx, &apiv1.GetGenericTasksRequest{
 				TaskIds: []string{generic.TaskId},
@@ -705,6 +907,45 @@ func TestJobPrivacyTaskListsAndConfigs(t *testing.T) {
 			require.Len(t, mvs.ModelVersions, 1)
 			requireCheckpointConfig(mvs.ModelVersions[0].Checkpoint.Training.ExperimentConfig,
 				"GetModelVersions")
+
+			// The checkpoint GC preview reduces the config as the checkpoint RPCs do.
+			previewCtx, _ := echoContextAs(vw.user,
+				fmt.Sprintf("/experiments/%d/preview_gc?save_experiment_best=0&"+
+					"save_trial_best=0&save_trial_latest=0", gcExp.ID),
+				map[string]string{"experiment_id": strconv.Itoa(gcExp.ID)})
+			preview, err := api.m.getExperimentCheckpointsToGC(previewCtx)
+			require.NoError(t, err)
+			previewJSON, err := json.Marshal(preview)
+			require.NoError(t, err)
+			var previewed struct {
+				Checkpoints []struct {
+					ExperimentConfig map[string]any `json:"ExperimentConfig"`
+				} `json:"checkpoints"`
+			}
+			require.NoError(t, json.Unmarshal(previewJSON, &previewed), string(previewJSON))
+			require.Len(t, previewed.Checkpoints, 1, string(previewJSON))
+			previewKeys := maps.Keys(previewed.Checkpoints[0].ExperimentConfig)
+			sort.Strings(previewKeys)
+			require.Contains(t, previewKeys, "checkpoint_storage", "preview_gc")
+			if vw.full {
+				require.Contains(t, previewKeys, "searcher", "preview_gc")
+			} else {
+				require.Equal(t, []string{"checkpoint_storage"}, previewKeys, "preview_gc")
+			}
+
+			// The model definition's file is named after the experiment only for those who may
+			// read its title.
+			defCtx, rec := echoContextAs(vw.user,
+				fmt.Sprintf("/experiments/%d/model_def", hiddenExp.ID),
+				map[string]string{"experiment_id": strconv.Itoa(hiddenExp.ID)})
+			require.NoError(t, api.m.getExperimentModelDefinition(defCtx))
+			disposition := rec.Header().Get("Content-Disposition")
+			if vw.full {
+				require.Contains(t, disposition, "secret-model-def")
+			} else {
+				require.Equal(t, fmt.Sprintf(`attachment; filename="exp%d_model_def.tar.gz"`,
+					hiddenExp.ID), disposition)
+			}
 		})
 	}
 
@@ -815,4 +1056,308 @@ func TestJobPrivacyListSQLMatchesGo(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestJobPrivacyCommandAndShellSort checks that a command or shell whose title another user may
+// not read sorts, for that user, where a row with an empty description would: before the others
+// in ascending order and after them in descending order, ties by ID, whatever its title.
+func TestJobPrivacyCommandAndShellSort(t *testing.T) {
+	var aux, compute string
+	mockRM := mockRMWithResolver(resolveOmittedPoolTo(&aux, &compute))
+	api, admin, _ := setupAPITest(t, nil, mockRM)
+	lockJobPrivacyPolicy(t)
+	cs, err := command.NewService(api.m.db, api.m.rm)
+	require.NoError(t, err)
+	command.SetDefaultService(cs)
+	aux = accessTestPool(t, "aux", admin, false)
+	compute = accessTestPool(t, "compute", admin, false)
+	owner := addGCTestOwner(t)
+	other := addGCTestOwner(t)
+	ownerCtx, otherCtx := userContext(t, owner), userContext(t, other)
+
+	descConfig := func(description string) *structpb.Struct {
+		s, err := structpb.NewStruct(map[string]any{"description": description})
+		require.NoError(t, err)
+		return s
+	}
+	// Two hidden rows whose titles would sort first and last, and a shared one between them.
+	var cmdHidden, shellHidden []string
+	var cmdShared, shellShared string
+	for _, title := range []string{"a-secret", "m-shared", "z-secret"} {
+		hidden := title != "m-shared"
+		cmd, err := api.LaunchCommand(ownerCtx, &apiv1.LaunchCommandRequest{
+			Config: descConfig(title),
+		})
+		require.NoError(t, err)
+		shell, err := api.LaunchShell(ownerCtx, &apiv1.LaunchShellRequest{
+			Config: descConfig(title),
+		})
+		require.NoError(t, err)
+		shareJob(ownerCtx, t, api, cmd.Command.JobId, !hidden, !hidden, !hidden)
+		shareJob(ownerCtx, t, api, shell.Shell.JobId, !hidden, !hidden, !hidden)
+		if hidden {
+			cmdHidden = append(cmdHidden, cmd.Command.Id)
+			shellHidden = append(shellHidden, shell.Shell.Id)
+		} else {
+			cmdShared, shellShared = cmd.Command.Id, shell.Shell.Id
+		}
+	}
+	// want is the order of rows with empty descriptions, ties by ID, around the shared row.
+	want := func(hidden []string, shared string, order apiv1.OrderBy) []string {
+		ids := slices.Clone(hidden)
+		sort.Strings(ids)
+		if order == apiv1.OrderBy_ORDER_BY_DESC {
+			slices.Reverse(ids)
+			return append([]string{shared}, ids...)
+		}
+		return append(ids, shared)
+	}
+	ours := func(ids []string, keep ...string) []string {
+		var out []string
+		for _, id := range ids {
+			if slices.Contains(keep, id) {
+				out = append(out, id)
+			}
+		}
+		return out
+	}
+	for _, order := range []apiv1.OrderBy{apiv1.OrderBy_ORDER_BY_ASC, apiv1.OrderBy_ORDER_BY_DESC} {
+		cmds, err := api.GetCommands(otherCtx, &apiv1.GetCommandsRequest{
+			SortBy: apiv1.GetCommandsRequest_SORT_BY_DESCRIPTION, OrderBy: order,
+		})
+		require.NoError(t, err)
+		var cmdOrder []string
+		for _, c := range cmds.Commands {
+			cmdOrder = append(cmdOrder, c.Id)
+		}
+		require.Equal(t, want(cmdHidden, cmdShared, order),
+			ours(cmdOrder, append(cmdHidden, cmdShared)...), order)
+
+		shells, err := api.GetShells(otherCtx, &apiv1.GetShellsRequest{
+			SortBy: apiv1.GetShellsRequest_SORT_BY_DESCRIPTION, OrderBy: order,
+		})
+		require.NoError(t, err)
+		var shellOrder []string
+		for _, s := range shells.Shells {
+			shellOrder = append(shellOrder, s.Id)
+		}
+		require.Equal(t, want(shellHidden, shellShared, order),
+			ours(shellOrder, append(shellHidden, shellShared)...), order)
+	}
+}
+
+// TestJobPrivacyControlResponses checks that the responses of the RPCs that change a job carry
+// the caller's capabilities and omit what they hide. In basic authorization only the owner and
+// admins reach them, so both get everything; under RBAC a workspace editor gets the redaction of
+// the read paths.
+func TestJobPrivacyControlResponses(t *testing.T) {
+	var aux, compute string
+	mockRM := mockRMWithResolver(resolveOmittedPoolTo(&aux, &compute))
+	mockRM.On("Release", mock.Anything).Return()
+	api, admin, _ := setupAPITest(t, nil, mockRM)
+	lockJobPrivacyPolicy(t)
+	cs, err := command.NewService(api.m.db, api.m.rm)
+	require.NoError(t, err)
+	command.SetDefaultService(cs)
+	aux = accessTestPool(t, "aux", admin, false)
+	compute = accessTestPool(t, "compute", admin, false)
+	owner := addGCTestOwner(t)
+	ownerCtx := userContext(t, owner)
+	full := jobprivacy.AllCaps.Proto()
+
+	descConfig, err := structpb.NewStruct(map[string]any{"description": "secret-control"})
+	require.NoError(t, err)
+	exp := createTestExp(t, api, owner)
+	shareJob(ownerCtx, t, api, exp.JobID.String(), false, false, false)
+
+	for name, u := range map[string]model.User{"owner": owner, "admin": admin} {
+		t.Run(name, func(t *testing.T) {
+			ctx := userContext(t, u)
+			cmd, err := api.LaunchCommand(ownerCtx, &apiv1.LaunchCommandRequest{Config: descConfig})
+			require.NoError(t, err)
+			shareJob(ownerCtx, t, api, cmd.Command.JobId, false, false, false)
+			shell, err := api.LaunchShell(ownerCtx, &apiv1.LaunchShellRequest{Config: descConfig})
+			require.NoError(t, err)
+			shareJob(ownerCtx, t, api, shell.Shell.JobId, false, false, false)
+
+			prio, err := api.SetCommandPriority(ctx, &apiv1.SetCommandPriorityRequest{
+				CommandId: cmd.Command.Id, Priority: 10,
+			})
+			require.NoError(t, err)
+			require.Equal(t, "secret-control", prio.Command.Description)
+			require.Equal(t, full, prio.Command.Capabilities, "SetCommandPriority")
+			killed, err := api.KillCommand(ctx, &apiv1.KillCommandRequest{CommandId: cmd.Command.Id})
+			require.NoError(t, err)
+			require.Equal(t, "secret-control", killed.Command.Description)
+			require.Equal(t, full, killed.Command.Capabilities, "KillCommand")
+
+			shellPrio, err := api.SetShellPriority(ctx, &apiv1.SetShellPriorityRequest{
+				ShellId: shell.Shell.Id, Priority: 10,
+			})
+			require.NoError(t, err)
+			require.Equal(t, "secret-control", shellPrio.Shell.Description)
+			require.Equal(t, full, shellPrio.Shell.Capabilities, "SetShellPriority")
+			killedShell, err := api.KillShell(ctx, &apiv1.KillShellRequest{ShellId: shell.Shell.Id})
+			require.NoError(t, err)
+			require.Equal(t, "secret-control", killedShell.Shell.Description)
+			require.Equal(t, full, killedShell.Shell.Capabilities, "KillShell")
+
+			patched, err := api.PatchExperiment(ctx, &apiv1.PatchExperimentRequest{
+				Experiment: &experimentv1.PatchExperiment{
+					Id: int32(exp.ID), Notes: wrapperspb.String("notes of " + name),
+				},
+			})
+			require.NoError(t, err)
+			require.NotEmpty(t, patched.Experiment.Name)
+			require.Equal(t, "notes of "+name, patched.Experiment.Notes)
+			require.Equal(t, full, patched.Experiment.Capabilities, "PatchExperiment")
+		})
+	}
+}
+
+// jobPrivacyFailingAuthZ is a cluster authorization whose admin predicate fails.
+type jobPrivacyFailingAuthZ struct {
+	*cluster.MiscAuthZBasic
+}
+
+// CanUpdateMasterConfig fails.
+func (jobPrivacyFailingAuthZ) CanUpdateMasterConfig(
+	context.Context, *model.User,
+) (permErr error, err error) {
+	return nil, errors.New("the authorization backend is down")
+}
+
+var registerJobPrivacyFailingAuthZ sync.Once
+
+// TestJobPrivacyFailClosed checks that the read paths answer nothing when job privacy cannot be
+// decided: an admin predicate error is Internal and a policy read error is Unavailable, with no
+// partial list, and an admin, who reads no policy, is unaffected by the latter.
+func TestJobPrivacyFailClosed(t *testing.T) {
+	var aux, compute string
+	var summaries map[model.AllocationID]sproto.AllocationSummary
+	mockRM := mockRMWithResolver(resolveOmittedPoolTo(&aux, &compute))
+	mockRM.On("GetAllocationSummaries", mock.Anything).Return(
+		func() map[model.AllocationID]sproto.AllocationSummary { return summaries }, nil)
+	mockRM.On("GetJobQ", mock.Anything).Return(map[model.JobID]*sproto.RMJobInfo{}, nil)
+	api, admin, adminCtx := setupAPITest(t, nil, mockRM)
+	jobservice.SetDefaultService(mockRM)
+	lockJobPrivacyPolicy(t)
+	cs, err := command.NewService(api.m.db, api.m.rm)
+	require.NoError(t, err)
+	command.SetDefaultService(cs)
+	aux = accessTestPool(t, "aux", admin, false)
+	compute = accessTestPool(t, "compute", admin, false)
+	owner := addGCTestOwner(t)
+	other := addGCTestOwner(t)
+	ownerCtx, otherCtx := userContext(t, owner), userContext(t, other)
+
+	projectID, _ := db.RequireMockProjectID(t, db.SingleDB(), 1, false)
+	exp := createTestExpWithProjectID(t, api, owner, projectID)
+	_, trialTask := db.RequireMockTrial(t, db.SingleDB(), exp)
+	_, err = db.Bun().NewRaw(`UPDATE tasks SET job_id = ? WHERE task_id = ?`,
+		exp.JobID, trialTask.TaskID).Exec(adminCtx)
+	require.NoError(t, err)
+	_, err = api.LaunchCommand(ownerCtx, &apiv1.LaunchCommandRequest{})
+	require.NoError(t, err)
+	_, err = api.LaunchShell(ownerCtx, &apiv1.LaunchShellRequest{})
+	require.NoError(t, err)
+	oldService := task.DefaultService
+	task.DefaultService = &captureAllocationService{AllocationService: oldService}
+	t.Cleanup(func() { task.DefaultService = oldService })
+	generic, err := createGenericTaskForAccessTest(ownerCtx, t, api,
+		&apiv1.CreateGenericTaskRequest{Config: "entrypoint: [\"true\"]\n"})
+	require.NoError(t, err)
+	mockRM.On("GetExternalJobs", mock.Anything).Return(func(rm.ResourcePoolName) []*jobv1.Job {
+		return []*jobv1.Job{{JobId: exp.JobID.String(), SubmissionTime: timestamppb.Now()}}
+	}, nil)
+	summaries = map[model.AllocationID]sproto.AllocationSummary{
+		model.AllocationID(trialTask.TaskID + ".1"): {
+			TaskID: trialTask.TaskID, AllocationID: model.AllocationID(trialTask.TaskID + ".1"),
+			RegisteredTime: time.Now(), ResourcePool: "default",
+		},
+	}
+
+	// reads makes each read as the user and returns its response, nil when there is none, and
+	// its error.
+	reads := func(ctx context.Context) map[string]func() (any, error) {
+		return map[string]func() (any, error){
+			"GetExperiments": func() (any, error) {
+				return api.GetExperiments(ctx, &apiv1.GetExperimentsRequest{
+					ProjectId: int32(projectID),
+				})
+			},
+			"SearchExperiments": func() (any, error) {
+				return api.SearchExperiments(ctx, &apiv1.SearchExperimentsRequest{
+					ProjectId: ptrs.Ptr(int32(projectID)),
+				})
+			},
+			"SearchRuns": func() (any, error) {
+				return api.SearchRuns(ctx, &apiv1.SearchRunsRequest{
+					ProjectId: ptrs.Ptr(int32(projectID)),
+				})
+			},
+			"GetExperiment": func() (any, error) {
+				return api.GetExperiment(ctx, &apiv1.GetExperimentRequest{
+					ExperimentId: int32(exp.ID),
+				})
+			},
+			"GetGenericTasks": func() (any, error) {
+				return api.GetGenericTasks(ctx, &apiv1.GetGenericTasksRequest{
+					TaskIds: []string{generic.TaskId},
+				})
+			},
+			"GetCommands": func() (any, error) {
+				return api.GetCommands(ctx, &apiv1.GetCommandsRequest{})
+			},
+			"GetShells": func() (any, error) {
+				return api.GetShells(ctx, &apiv1.GetShellsRequest{})
+			},
+			"GetJobsV2": func() (any, error) {
+				return api.GetJobsV2(ctx, &apiv1.GetJobsV2Request{ResourcePool: "default"})
+			},
+			"GetTasks": func() (any, error) {
+				return api.GetTasks(ctx, &apiv1.GetTasksRequest{})
+			},
+			"TaskLogs": func() (any, error) {
+				stream := &mockStream[*apiv1.TaskLogsResponse]{ctx: ctx}
+				err := api.TaskLogs(&apiv1.TaskLogsRequest{TaskId: string(trialTask.TaskID)}, stream)
+				if len(stream.getData()) > 0 {
+					return stream.getData(), err
+				}
+				return nil, err
+			},
+		}
+	}
+	requireNoAnswer := func(t *testing.T, ctx context.Context, code codes.Code) {
+		t.Helper()
+		for name, read := range reads(ctx) {
+			resp, err := read()
+			require.Equal(t, code, status.Code(err), "%s: %v", name, err)
+			require.Nil(t, resp, name)
+		}
+	}
+
+	t.Run("policy read error", func(t *testing.T) {
+		restore := jobprivacy.FailPolicyReadsForTests(errors.New("the policy table is gone"))
+		t.Cleanup(restore)
+		requireNoAnswer(t, otherCtx, codes.Unavailable)
+		for name, read := range reads(adminCtx) {
+			_, err := read()
+			require.NoError(t, err, name)
+		}
+	})
+
+	t.Run("admin predicate error", func(t *testing.T) {
+		registerJobPrivacyFailingAuthZ.Do(func() {
+			cluster.AuthZProvider.Register("jobprivacy-failing",
+				jobPrivacyFailingAuthZ{&cluster.MiscAuthZBasic{}})
+		})
+		oldAuthZ := config.GetMasterConfig().Security.AuthZ
+		config.GetMasterConfig().Security.AuthZ = config.AuthZConfig{
+			Type: "jobprivacy-failing", FallbackType: ptrs.Ptr(config.BasicAuthZType),
+		}
+		t.Cleanup(func() { config.GetMasterConfig().Security.AuthZ = oldAuthZ })
+		requireNoAnswer(t, otherCtx, codes.Internal)
+		requireNoAnswer(t, ownerCtx, codes.Internal)
+	})
 }

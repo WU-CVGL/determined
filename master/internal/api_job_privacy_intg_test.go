@@ -18,6 +18,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/command"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/job/jobservice"
+	"github.com/determined-ai/determined/master/internal/rm"
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/internal/task"
 	"github.com/determined-ai/determined/master/pkg/model"
@@ -368,8 +369,9 @@ func TestJobPrivacyCapabilities(t *testing.T) {
 		})
 		require.NoError(t, err)
 	}
-	mockRM.On("GetExternalJobs", mock.Anything).Return(
-		[]*jobv1.Job{{JobId: exp.JobID.String(), SubmissionTime: timestamppb.Now()}}, nil)
+	mockRM.On("GetExternalJobs", mock.Anything).Return(func(rm.ResourcePoolName) []*jobv1.Job {
+		return []*jobv1.Job{{JobId: exp.JobID.String(), SubmissionTime: timestamppb.Now()}}
+	}, nil)
 	summaries = map[model.AllocationID]sproto.AllocationSummary{
 		model.AllocationID(fmt.Sprintf("%s.1", trialTask.TaskID)): {
 			TaskID: trialTask.TaskID, AllocationID: model.AllocationID(trialTask.TaskID + ".1"),

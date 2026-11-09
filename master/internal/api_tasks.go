@@ -909,15 +909,11 @@ func (a *apiServer) GetTasks(
 func setAllocationSummaryCapabilities(
 	ctx context.Context, curUser model.User, summaries map[string]*taskv1.AllocationSummary,
 ) error {
-	v, err := jobprivacy.NewViewer(ctx, curUser)
-	if err != nil {
-		return err
-	}
 	taskIDs := make([]model.TaskID, 0, len(summaries))
 	for _, s := range summaries {
 		taskIDs = append(taskIDs, model.TaskID(s.TaskId))
 	}
-	caps, err := jobprivacy.ForTasks(ctx, v, taskIDs)
+	caps, err := allocationSummaryCaps(ctx, curUser, taskIDs)
 	if err != nil {
 		return err
 	}
@@ -929,6 +925,18 @@ func setAllocationSummaryCapabilities(
 		s.Capabilities = c.Proto()
 	}
 	return nil
+}
+
+// allocationSummaryCaps returns the user's job privacy capabilities on the job of each task of
+// the allocation summaries, which both task summary routes use.
+func allocationSummaryCaps(
+	ctx context.Context, curUser model.User, taskIDs []model.TaskID,
+) (map[model.TaskID]jobprivacy.Caps, error) {
+	v, err := jobprivacy.NewViewer(ctx, curUser)
+	if err != nil {
+		return nil, err
+	}
+	return jobprivacy.ForTasks(ctx, v, taskIDs)
 }
 
 // canReadTaskLogs returns nil when the requesting user may read the task's logs: the existing

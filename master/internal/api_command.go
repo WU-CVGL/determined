@@ -449,7 +449,11 @@ func (a *apiServer) KillCommand(
 		return nil, err
 	}
 
-	return &apiv1.KillCommandResponse{Command: cmd.ToV1Command()}, nil
+	v1Cmd := cmd.ToV1Command()
+	if _, err = setCommandCapabilities(ctx, *curUser, v1Cmd); err != nil {
+		return nil, err
+	}
+	return &apiv1.KillCommandResponse{Command: v1Cmd}, nil
 }
 
 func (a *apiServer) SetCommandPriority(
@@ -481,7 +485,11 @@ func (a *apiServer) SetCommandPriority(
 		return nil, err
 	}
 
-	return &apiv1.SetCommandPriorityResponse{Command: cmd.ToV1Command()}, nil
+	v1Cmd := cmd.ToV1Command()
+	if _, err = setCommandCapabilities(ctx, *curUser, v1Cmd); err != nil {
+		return nil, err
+	}
+	return &apiv1.SetCommandPriorityResponse{Command: v1Cmd}, nil
 }
 
 func (a *apiServer) getOIDCPachydermEnvVars(

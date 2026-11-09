@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -59,12 +60,25 @@ type policyRow struct {
 // default. A kind without a row is forbidden and its new-job audience is {}; the seeded rows are
 // never deleted, so that is logged as an error.
 func ReadPolicy(ctx context.Context, idb bun.IDB) (Policy, error) {
+	if fault := policyReadFault.Load(); fault != nil {
+		return policyFromRows(nil, *fault)
+	}
 	if idb == nil {
 		idb = db.Bun()
 	}
 	var rows []policyRow
 	err := idb.NewSelect().Model(&rows).Scan(ctx)
 	return policyFromRows(rows, err)
+}
+
+// policyReadFault, when set, is the error of every policy read.
+var policyReadFault atomic.Pointer[error]
+
+// FailPolicyReadsForTests makes every policy read in this process fail with err until restore is
+// called, so that tests can check that each read path fails closed. It is for tests only.
+func FailPolicyReadsForTests(err error) (restore func()) {
+	policyReadFault.Store(&err)
+	return func() { policyReadFault.Store(nil) }
 }
 
 // policyFromRows builds the policy from the rows of job_privacy_policy and the error of reading
