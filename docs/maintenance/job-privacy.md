@@ -76,6 +76,11 @@ task without such a record is readable only by administrators.
 - Experiments, runs, commands, shells, generic tasks, jobs in the queue, and
   tasks carry `capabilities` in lists and details: `viewTitle`, `viewLogs`,
   `viewConfig`, and `manageSharing`.
+- Workspace webhooks get what a job shares with all users: an experiment event
+  leaves out the experiment's name unless its title is shared, and a task-log
+  event is sent only when the job's logs are shared. When job privacy cannot be
+  read, they get neither. Global webhooks, which administrators create, get
+  everything.
 
 Metrics, hyperparameters, TensorBoard sources, and checkpoint files are not
 covered and stay visible to every user who may view the job.
