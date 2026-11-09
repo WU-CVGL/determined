@@ -25,13 +25,14 @@ import TemplateCreateModalComponent from 'pages/Templates/TemplateCreateModal';
 import { paths } from 'routes/utils';
 import clusterStore from 'stores/cluster';
 import workspaceStore from 'stores/workspaces';
-import { CommandResponse, CommandTask, RawJson, ResourcePool, Template, Workspace } from 'types';
+import { CommandResponse, CommandTask, RawJson, ResourcePool, Workspace } from 'types';
 import { isUsablePool } from 'utils/cluster';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import {
+  applyConfigEdits,
+  configEdits,
   configFromForm,
   DEFAULT_SOURCE_MODE,
-  draftFromEditedConfig,
   formFieldsFromConfig,
   isSourceId,
   NtscLaunchOptions,
@@ -221,6 +222,8 @@ const CodeEditor = React.lazy(() => import('hew/CodeEditor'));
  * Start from a template: the template name is sent with the simple fields.
  * Start from a config (a recent task or this browser's history): the config
  * is the base and the simple fields are applied on top of it; no template is
+ * sent. An edited full config's edits are applied to the request it was
+ * previewed with, which becomes the base of any start-from; a template is still
  * sent. A recent task's config is fetched when it is picked; Launch and the
  * full config stay disabled until it arrives, and until the master's preview
  * of the start-from's services answers.
@@ -302,7 +305,9 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
             config: configFromForm(baseConfig, {
               ...fields,
               services: checkedServices(fields, offered.current),
+              slots: sshOff ? 0 : fields.slots,
             }),
+            template: templateNameFromStartFrom(fields.source),
             workspaceId: fields.workspaceId,
           }
         : {
@@ -327,8 +332,8 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   // message with Retry, keeps them disabled, and is sent again when the pool or the workspace
   // changes. Switching between the simple form and the full config previews nothing, so that the
   // form keeps its changes: the watched fields read undefined while the simple form is replaced,
-  // which is no start-from change. An edited full config becomes the start-from's config when the
-  // simple form shows again, as a config start-from does, without a preview.
+  // which is no start-from change. The edits of an edited full config are applied to the
+  // start-from's base when the simple form shows again, without a preview.
   const [simpleFormShown, setSimpleFormShown] = useState(false);
   const source = Form.useWatch('source', form);
   const pool = Form.useWatch('pool', form);
@@ -414,40 +419,24 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
 
   const handleServicesRetry = useCallback(() => setServicesRetry((count) => count + 1), []);
 
-  // The templates that "Start from" lists, to tell what a previewed template sets.
-  const templates = useRef<Template[]>();
-  const handleTemplates = useCallback((list: Template[]) => {
-    templates.current = list;
-  }, []);
-
-  // Previewed each time the full config opens, numbered so that a late answer is dropped; the
-  // config as the editor first shows it, to tell an edited one; and the configs it was requested
-  // with (see draftFromEditedConfig).
+  // Previewed each time the full config opens, numbered so that a late answer is dropped, with the
+  // request config it was previewed for: the config as the editor first shows it tells the edits.
   const configSeq = useRef(0);
-  const previewedConfig = useRef<unknown>();
-  const previewedRequest = useRef<RawJson[]>();
+  const previewed = useRef<{ config: RawJson; request: RawJson }>();
   const fetchConfig = useCallback(async () => {
     const seq = ++configSeq.current;
+    previewed.current = undefined;
     setConfig(NotLoaded);
     setConfigError(undefined);
 
     const fields: LaunchFormValues = form.getFieldsValue(true);
     const options = simpleOptions(fields);
-    const request = shellRequest(options);
-    const template = request.templateName
-      ? templates.current?.find((item) => item.name === request.templateName)
-      : undefined;
+    const request = shellRequest(options).config ?? {};
     try {
       const newConfig = await previewShell(options);
       if (seq !== configSeq.current) return;
       const text = yaml.dump(newConfig);
-      previewedConfig.current = yaml.load(text);
-      const requested = request.config ?? {};
-      previewedRequest.current = !request.templateName
-        ? [requested]
-        : template
-          ? [requested, template.config ?? {}]
-          : undefined;
+      previewed.current = { config: yaml.load(text) as RawJson, request };
       setConfig(Loaded(text));
     } catch (e) {
       if (seq === configSeq.current) setConfigError(e instanceof Error ? e.message : PREVIEW_ERROR);
@@ -455,26 +444,26 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   }, [form, simpleOptions]);
 
   /**
-   * Makes a full config whose YAML was edited the simple form's config, without the defaults that
-   * the master filled in and the user left as they were, its fields filled from it, and its
-   * services confirmed. A YAML that does not parse to a config changes nothing.
+   * Applies the edits of a full config whose YAML was edited, the difference to the previewed
+   * config, to the request it was previewed for, which becomes the start-from's base; fills the
+   * simple form from it and confirms its services. The values the master filled in and the user
+   * left as they were are not in the edits. A YAML that does not parse to a config changes nothing.
    */
   const applyEditedConfig = useCallback(() => {
+    const shown = previewed.current;
     let edited: unknown;
     try {
       edited = yaml.load(Loadable.isLoaded(config) ? config.data : '');
     } catch {
       return;
     }
-    if (!isPlainObject(edited) || isEqual(edited, previewedConfig.current)) return;
-    const base = draftFromEditedConfig(
-      edited as RawJson,
-      previewedConfig.current,
-      previewedRequest.current,
-    );
+    if (!shown || !isPlainObject(edited)) return;
+    const base = applyConfigEdits(shown.request, configEdits(edited as RawJson, shown.config));
+    if (isEqual(base, shown.request)) return;
     const fields = formFieldsFromConfig(base);
     const services = serviceChecks(fields.services);
-    const baseSshOff = sshDisabled(base);
+    // A template's ssh-off is in the edited config, not in the base.
+    const baseSshOff = sshDisabled(edited as RawJson);
     setBaseConfig(base);
     setSshOff(baseSshOff);
     offered.current = offeredServices(fields.services);
@@ -482,7 +471,6 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       name: fields.name,
       pool: fields.pool,
       services,
-      // configFromForm sends 0 slots for a config without ssh.
       slots: baseSshOff ? 0 : fields.slots,
     });
     // Replaced, not merged: the other mode's fields do not carry over.
@@ -736,7 +724,6 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
           onStartFrom={handleStartFrom}
           onStartFromAutoSelected={handleStartFromAutoSelected}
           onStartFromLoadingTask={setStartFromLoadingTask}
-          onTemplates={handleTemplates}
         />
       )}
       {redactedEnv.length > 0 && (
@@ -907,7 +894,6 @@ interface LaunchFormProps {
   onStartFrom: (start: StartFrom) => void;
   onStartFromAutoSelected: () => void;
   onStartFromLoadingTask: (taskId?: string) => void;
-  onTemplates: (templates: Template[]) => void;
   /** The message of the refused preview of the services, if the last one was refused. */
   servicesError?: string;
   setWorkspace: (arg0: Workspace | undefined) => void;
@@ -930,7 +916,6 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
   onStartFrom,
   onStartFromAutoSelected,
   onStartFromLoadingTask,
-  onTemplates,
   servicesError,
   setWorkspace,
   sshOff,
@@ -1046,7 +1031,6 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
           onAutoSelected={onStartFromAutoSelected}
           onLoadingTaskChange={onStartFromLoadingTask}
           onResolve={onStartFrom}
-          onTemplates={onTemplates}
         />
       </Form.Item>
       <Form.Item initialValue={defaults?.name} label="Name" name="name">

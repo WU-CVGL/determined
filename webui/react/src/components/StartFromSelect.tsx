@@ -82,8 +82,6 @@ interface Props {
   onChange?: (value?: string) => void;
   onLoadingTaskChange: (taskId?: string) => void;
   onResolve: (start: StartFrom) => void;
-  /** Called with the templates once they load. */
-  onTemplates?: (templates: Template[]) => void;
   value?: string;
 }
 
@@ -134,7 +132,6 @@ const StartFromSelect: React.FC<Props> = ({
   onChange,
   onLoadingTaskChange,
   onResolve,
-  onTemplates,
   value,
 }: Props) => {
   const currentUser = Loadable.getOrElse(undefined, useObservable(userStore.currentUser));
@@ -176,10 +173,6 @@ const StartFromSelect: React.FC<Props> = ({
       active = false;
     };
   }, []);
-
-  useEffect(() => {
-    if (templates) onTemplates?.(templates);
-  }, [onTemplates, templates]);
 
   useEffect(() => {
     if (userId === undefined) return;

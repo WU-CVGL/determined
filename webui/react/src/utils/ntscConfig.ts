@@ -1,4 +1,4 @@
-import { cloneDeep, isEqual, isNil, isPlainObject } from 'lodash';
+import { cloneDeep, isEqual, isNil, isPlainObject, unset } from 'lodash';
 
 import { RawJson } from 'types';
 
@@ -200,13 +200,6 @@ export const SHARED_FS_CONTAINER_PATH = '/determined_shared_fs';
 
 const mountList = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
-/** Whether two bind mounts mount the same host path at the same container path. */
-const sameMount = (a: unknown, b: unknown): boolean => {
-  const x = asObject(a);
-  const y = asObject(b);
-  return !!x && !!y && x.container_path === y.container_path && x.host_path === y.host_path;
-};
-
 /** Removes the bind mounts that `drop` matches, and the list when that empties it. */
 const dropMounts = (config: RawJson, drop: (mount: unknown) => boolean): void => {
   const mounts = mountList(config.bind_mounts);
@@ -219,7 +212,7 @@ const dropMounts = (config: RawJson, drop: (mount: unknown) => boolean): void =>
 /**
  * Prepares a past task's merged config (from the master) for another launch, as a "Start from" of
  * it does and as templates and this browser's history save it. A config the user edits in the
- * launch form is not cleaned up this way (see draftFromEditedConfig).
+ * launch form is not cleaned up this way (see configEdits).
  * - entrypoint: the master sets it on every launch (for a shell it holds the
  *   sshd command line with a random port).
  * - an auto-generated description, so the next launch gets a new pet name.
@@ -249,42 +242,6 @@ export const relaunchConfig = (config: RawJson): RawJson => {
       return item?.container_path === SHARED_FS_CONTAINER_PATH && item.read_only === true;
     });
   }
-  return out;
-};
-
-/**
- * Makes the full config the user edited the launch form's draft. The master's preview fills in
- * values the request did not set: resources.priority (the pool's default),
- * environment.registry_auth (the task container defaults') and bind mounts (the task container
- * defaults', the tensorboard service's checkpoint storage). Where the edited config still holds
- * such a value as previewed, it is dropped, so that the master fills it in again at launch for the
- * pool and the sources chosen then. A value the user changed or added stays, and so does one that
- * the previewed request set.
- *
- * `requested` is the configs the preview was requested with: the request's and the template's it
- * named. Undefined, when the template's is not known, drops nothing.
- */
-export const draftFromEditedConfig = (
-  edited: RawJson,
-  previewed: unknown,
-  requested: RawJson[] | undefined,
-): RawJson => {
-  const out = cloneDeep(edited);
-  if (!requested) return out;
-  const shown = asObject(previewed);
-  const filledIn = (section: string, key: string, value: unknown) =>
-    isEqual(value, asObject(shown?.[section])?.[key]) &&
-    requested.every((config) => isNil(asObject(config[section])?.[key]));
-  const environment = asObject(out.environment);
-  if (environment && filledIn('environment', 'registry_auth', environment.registry_auth))
-    delete environment.registry_auth;
-  const resources = asObject(out.resources);
-  if (resources && filledIn('resources', 'priority', resources.priority)) delete resources.priority;
-  const requestedMounts = requested.flatMap((config) => mountList(config.bind_mounts));
-  const addedMounts = mountList(shown?.bind_mounts).filter(
-    (mount) => !requestedMounts.some((item) => sameMount(item, mount)),
-  );
-  dropMounts(out, (mount) => addedMounts.some((item) => isEqual(item, mount)));
   return out;
 };
 
@@ -321,6 +278,52 @@ export const minimalDiff = (config: RawJson, defaults: RawJson): RawJson => {
     }
     out[key] = valueObject ? dropNulls(valueObject) : value;
   });
+  return out;
+};
+
+/**
+ * The edits that turn `before` into `after`: `changed` is minimalDiff(after, before), and
+ * `removed` the paths of the keys of `before` that `after` lacks. Objects are compared key by key,
+ * everything else (including arrays) as a whole.
+ */
+export interface ConfigEdits {
+  changed: RawJson;
+  removed: string[][];
+}
+
+const removedPaths = (after: RawJson, before: RawJson, path: string[] = []): string[][] =>
+  Object.entries(before).flatMap(([key, value]) => {
+    if (value === undefined) return [];
+    if (after[key] === undefined) return [[...path, key]];
+    const afterObject = asObject(after[key]);
+    const beforeObject = asObject(value);
+    return afterObject && beforeObject
+      ? removedPaths(afterObject, beforeObject, [...path, key])
+      : [];
+  });
+
+export const configEdits = (after: RawJson, before: RawJson): ConfigEdits => ({
+  changed: minimalDiff(after, before),
+  removed: removedPaths(after, before),
+});
+
+const withChanges = (config: RawJson, changed: RawJson): RawJson => {
+  const out = cloneDeep(config);
+  Object.entries(changed).forEach(([key, value]) => {
+    const change = asObject(value);
+    const current = asObject(out[key]);
+    out[key] = change && current ? withChanges(current, change) : cloneDeep(value);
+  });
+  return out;
+};
+
+/**
+ * Applies edits (see configEdits) to a config: a changed or added key is set, objects key by key;
+ * a removed key is deleted where the config has it, and ignored where it does not.
+ */
+export const applyConfigEdits = (config: RawJson, edits: ConfigEdits): RawJson => {
+  const out = withChanges(config, edits.changed);
+  edits.removed.forEach((path) => unset(out, path));
   return out;
 };
 

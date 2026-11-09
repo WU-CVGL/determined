@@ -1,10 +1,13 @@
 import { cloneDeep } from 'lodash';
 
+import { RawJson } from 'types';
+
 import {
+  applyConfigEdits,
+  configEdits,
   configFromForm,
   dataSourceFromEntry,
   DEFAULT_SOURCE_MODE,
-  draftFromEditedConfig,
   formFieldsFromConfig,
   isAutoDescription,
   minimalDiff,
@@ -109,100 +112,133 @@ describe('ntscConfig', () => {
     });
   });
 
-  describe('draftFromEditedConfig', () => {
-    /** The request of a "Launch Again" of mergedShellConfig. */
-    const relaunched = relaunchConfig(mergedShellConfig);
+  describe('configEdits and applyConfigEdits', () => {
+    /** The request of a "Launch Again" of mergedShellConfig, which the master previews as it. */
+    const request = relaunchConfig(mergedShellConfig);
+    /** Applies the edits that turn previewed into edited to the request. */
+    const draft = (
+      edited: RawJson,
+      previewed: RawJson = mergedShellConfig,
+      base: RawJson = request,
+    ) => applyConfigEdits(base, configEdits(edited, previewed));
 
-    it('drops the previewed priority and registry_auth that the user left as they were', () => {
-      const edited = {
-        ...mergedShellConfig,
-        environment: { ...mergedShellConfig.environment, environment_variables: ['EDITED=1'] },
-      };
-      const out = draftFromEditedConfig(edited, mergedShellConfig, [relaunched]);
-      expect(out.environment).toEqual({
-        environment_variables: ['EDITED=1'],
-        image: mergedShellConfig.environment.image,
+    it('leaves the request as it is when nothing was edited', () => {
+      expect(configEdits(mergedShellConfig, mergedShellConfig)).toEqual({
+        changed: {},
+        removed: [],
       });
-      expect(out.resources).toEqual({ resource_pool: 'gpu', slots: 2 });
-      expect(out.entrypoint).toEqual(mergedShellConfig.entrypoint);
+      expect(draft(mergedShellConfig)).toEqual(request);
     });
 
-    it('keeps a priority and registry_auth that the user changed or added', () => {
+    it('sets a changed value and keeps the values the master filled in out', () => {
+      const edited = {
+        ...mergedShellConfig,
+        resources: { ...mergedShellConfig.resources, slots: 4 },
+      };
+      expect(configEdits(edited, mergedShellConfig)).toEqual({
+        changed: { resources: { slots: 4 } },
+        removed: [],
+      });
+      const out = draft(edited);
+      expect(out.resources).toEqual({ resource_pool: 'gpu', slots: 4 });
+      expect(out).not.toHaveProperty('entrypoint');
+      expect(out.environment).not.toHaveProperty('registry_auth');
+    });
+
+    it('sets an added value, also under a key the request does not have', () => {
       const registryAuth = { password: 'other', username: 'you' };
       const edited = {
         ...mergedShellConfig,
         environment: { ...mergedShellConfig.environment, registry_auth: registryAuth },
         resources: { ...mergedShellConfig.resources, priority: 7 },
+        services: { tensorboard: { args: ['--x'], logdir: 'runs' } },
       };
-      const out = draftFromEditedConfig(edited, mergedShellConfig, [relaunched]);
-      expect(out.environment.registry_auth).toEqual(registryAuth);
-      expect(out.resources.priority).toBe(7);
-      const previewed = { resources: { resource_pool: 'gpu' } };
-      expect(draftFromEditedConfig(mergedShellConfig, previewed, [{}])).toEqual(mergedShellConfig);
+      const out = draft(edited, mergedShellConfig, { description: 'lab' });
+      expect(out).toEqual({
+        description: 'lab',
+        environment: { registry_auth: registryAuth },
+        resources: { priority: 7 },
+        services: { tensorboard: { args: ['--x'], logdir: 'runs' } },
+      });
     });
 
-    it('keeps a previewed priority and registry_auth that the request or its template set', () => {
-      const registryAuth = { password: 'other', username: 'you' };
-      // A second round trip: the draft of the first holds them, and the preview echoes them.
-      const draft = {
-        ...relaunched,
-        environment: { ...relaunched.environment, registry_auth: registryAuth },
-        resources: { ...relaunched.resources, priority: 7 },
-      };
-      const previewed = { ...draft, entrypoint: mergedShellConfig.entrypoint };
-      const edited = { ...previewed, idle_timeout: '1h' };
-      const out = draftFromEditedConfig(edited, previewed, [draft]);
-      expect(out.environment.registry_auth).toEqual(registryAuth);
-      expect(out.resources.priority).toBe(7);
-      // A template's registry_auth, which a launch of the draft does not send the template for.
-      const template = { environment: { registry_auth: registryAuth } };
-      const fromTemplate = draftFromEditedConfig(edited, previewed, [{ resources: {} }, template]);
-      expect(fromTemplate.environment.registry_auth).toEqual(registryAuth);
-      expect(fromTemplate.resources).not.toHaveProperty('priority');
-      // Requested configs that are not known drop nothing.
-      expect(draftFromEditedConfig(edited, previewed, undefined)).toEqual(edited);
-    });
-
-    it('drops a bind mount that the preview added, not one the request had or the user changed', () => {
-      const sharedFs = {
-        container_path: '/determined_shared_fs',
-        host_path: '/mnt/ckpt-a',
-        propagation: 'rprivate',
-        read_only: true,
-      };
-      const userMount = { container_path: '/data', host_path: '/mnt/data' };
-      const requested = {
-        bind_mounts: [userMount],
-        services: { tensorboard: { experiment_ids: [5] } },
-      };
-      const previewed = {
-        ...requested,
-        bind_mounts: [{ ...userMount, propagation: 'rprivate', read_only: false }, sharedFs],
-      };
-      const edited = { ...previewed, idle_timeout: '1h' };
-      expect(draftFromEditedConfig(edited, previewed, [requested]).bind_mounts).toEqual([
-        previewed.bind_mounts[0],
+    it('deletes a removed key that the request has and ignores one it does not', () => {
+      const base = { ...request, description: 'mine', resources: { slots: 2 } };
+      const previewed = { ...mergedShellConfig, description: 'mine' };
+      const edited: RawJson = cloneDeep(previewed);
+      delete edited.description;
+      delete edited.environment.registry_auth;
+      delete edited.resources.priority;
+      delete edited.resources.slots;
+      expect(configEdits(edited, previewed).removed).toEqual([
+        ['description'],
+        ['environment', 'registry_auth'],
+        ['resources', 'priority'],
+        ['resources', 'slots'],
       ]);
-      // The only mount, added by the preview: no list is left.
-      const onlyShared = { ...previewed, bind_mounts: [sharedFs] };
-      expect(draftFromEditedConfig(onlyShared, onlyShared, [{}])).not.toHaveProperty('bind_mounts');
-      // A mount the user changed, or that the request had, stays.
-      const changed = { ...edited, bind_mounts: [{ ...sharedFs, read_only: false }] };
-      expect(draftFromEditedConfig(changed, previewed, [requested]).bind_mounts).toEqual(
-        changed.bind_mounts,
-      );
-      const withShared = { ...requested, bind_mounts: [userMount, sharedFs] };
-      expect(draftFromEditedConfig(edited, previewed, [withShared]).bind_mounts).toEqual(
-        previewed.bind_mounts,
-      );
+      const out = draft(edited, previewed, base);
+      expect(out).not.toHaveProperty('description');
+      expect(out.resources).toEqual({});
+      expect(out.environment).toEqual(request.environment);
+      // A removed section whose keys the request partly has.
+      const { bind_mounts: _mounts, ...withoutMounts } = previewed;
+      expect(draft(withoutMounts, previewed, base)).not.toHaveProperty('bind_mounts');
+      expect(draft(withoutMounts, previewed, {})).toEqual({});
     });
 
-    it('takes a config without environment or resources and does not change its input', () => {
-      const edited = { description: 'my shell' };
-      expect(draftFromEditedConfig(edited, undefined, [])).toEqual(edited);
-      const input = cloneDeep(mergedShellConfig);
-      draftFromEditedConfig(input, mergedShellConfig, []);
-      expect(input).toEqual(mergedShellConfig);
+    it('recurses into nested objects', () => {
+      const previewed = { a: { b: { c: 1, d: 2 }, e: 3 } };
+      const edited = { a: { b: { c: 1, d: 5, f: 6 }, e: 3 } };
+      expect(configEdits(edited, previewed).changed).toEqual({ a: { b: { d: 5, f: 6 } } });
+      expect(draft(edited, previewed, { a: { b: { c: 9 } }, g: 1 })).toEqual({
+        a: { b: { c: 9, d: 5, f: 6 } },
+        g: 1,
+      });
+      const removed = { a: { b: { c: 1 }, e: 3 } };
+      expect(draft(removed, previewed, { a: { b: { c: 9, d: 2 } } })).toEqual({
+        a: { b: { c: 9 } },
+      });
+    });
+
+    it('sets an edited array as a whole', () => {
+      const mount = { container_path: '/scratch', host_path: '/mnt/scratch' };
+      const edited = {
+        ...mergedShellConfig,
+        bind_mounts: [...mergedShellConfig.bind_mounts, mount],
+        environment: {
+          ...mergedShellConfig.environment,
+          environment_variables: {
+            ...mergedShellConfig.environment.environment_variables,
+            cuda: [],
+          },
+        },
+      };
+      const out = draft(edited, mergedShellConfig, {});
+      expect(out).toEqual({
+        bind_mounts: edited.bind_mounts,
+        environment: { environment_variables: { cuda: [] } },
+      });
+    });
+
+    it('sets a null that clears a value and leaves out one that clears nothing', () => {
+      const edited = { ...mergedShellConfig, debug: null, work_dir: null, x: null };
+      expect(configEdits(edited, mergedShellConfig)).toEqual({
+        changed: { debug: null },
+        removed: [],
+      });
+      expect(draft(edited).debug).toBeNull();
+      // A null the user removes is removed where the request has it.
+      const { idle_timeout: _timeout, ...withoutTimeout } = mergedShellConfig;
+      expect(draft(withoutTimeout, mergedShellConfig, { idle_timeout: null })).toEqual({});
+    });
+
+    it('does not change its inputs', () => {
+      const base = cloneDeep(request);
+      const edits = configEdits({ ...mergedShellConfig, debug: true }, mergedShellConfig);
+      const out = applyConfigEdits(base, edits);
+      expect(base).toEqual(request);
+      out.resources.slots = 9;
+      expect(base.resources.slots).toBe(2);
     });
   });
 
@@ -620,18 +656,18 @@ describe('ntscConfig', () => {
       });
     });
 
-    it('takes an edited session config as the draft and reads its source back unchanged', () => {
+    it('applies the edits of a session config and reads its source back unchanged', () => {
       const edited = { ...sessionConfig, description: 'my session', idle_timeout: '10m' };
-      const draft = draftFromEditedConfig(edited, sessionConfig, [relaunchConfig(sessionConfig)]);
-      expect(draft.resources).toEqual({ resource_pool: 'aux', slots: 0 });
-      expect(draft.services).toEqual(sessionConfig.services);
+      const base = relaunchConfig(sessionConfig);
+      const draft = applyConfigEdits(base, configEdits(edited, sessionConfig));
+      expect(draft).toEqual({ ...base, description: 'my session', idle_timeout: '10m' });
       const fields = formFieldsFromConfig(draft);
       expect(fields.dataSource).toEqual(experiments([3, 7], []));
       expect(sshDisabled(draft)).toBe(true);
       expect(configFromForm(draft, fields)).toEqual(draft);
-      // Another round trip changes nothing.
+      // Another round trip without edits changes nothing.
       const request = configFromForm(draft, fields);
-      const again = draftFromEditedConfig(request, sessionConfig, [request]);
+      const again = applyConfigEdits(request, configEdits(edited, edited));
       expect(configFromForm(again, formFieldsFromConfig(again))).toEqual(draft);
       // An ID added in the form joins the draft's; ssh stays off with 0 slots.
       const added = configFromForm(draft, { ...fields, dataSource: experiments([3, 7, '12']) });
@@ -648,7 +684,7 @@ describe('ntscConfig', () => {
         services: { tensorboard: { args: ['--x'], logdir: 'runs' } },
       };
       const edited = { ...previewed, services: { tensorboard: { args: ['--x'], trial_ids: [5] } } };
-      const draft = draftFromEditedConfig(edited, previewed, [relaunchConfig(previewed)]);
+      const draft = applyConfigEdits(relaunchConfig(previewed), configEdits(edited, previewed));
       const fields = formFieldsFromConfig(draft);
       expect(fields.dataSource).toEqual(experiments([], [5]));
       expect(configFromForm(draft, fields).services).toEqual(edited.services);
@@ -657,7 +693,7 @@ describe('ntscConfig', () => {
         tensorboard: { args: ['--x'], logdir: 'logs' },
       });
       // From a log directory draft to IDs: no log directory is left.
-      const logdirDraft = draftFromEditedConfig(previewed, edited, [relaunchConfig(edited)]);
+      const logdirDraft = applyConfigEdits(relaunchConfig(edited), configEdits(previewed, edited));
       const logdirFields = formFieldsFromConfig(logdirDraft);
       expect(logdirFields.dataSource).toEqual(logdir('runs'));
       expect(

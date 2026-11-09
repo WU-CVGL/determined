@@ -1852,7 +1852,7 @@ describe('NtscLaunchModal', () => {
       expect(mocks.launchShell).toHaveBeenCalledWith(trip.request);
     });
 
-    it('makes an edited full config the simple form’s config', async () => {
+    it('applies the edits of a full config to the simple form’s request, with the template', async () => {
       mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, TENSORBOARD_TEMPLATE]);
       const { onLaunched, user } = await setup();
       await openStartFrom(user);
@@ -1887,11 +1887,11 @@ describe('NtscLaunchModal', () => {
       const trip = await roundTrip(user);
       expect(trip.request).toEqual({
         config: {
-          environment: { environment_variables: ['EDITED=1'], image: { cuda: 'default:1' } },
-          resources: { resource_pool: 'default', slots: 1 },
+          environment: { environment_variables: ['EDITED=1'] },
+          resources: { slots: 1 },
           services,
         },
-        templateName: undefined,
+        templateName: 'tensorboard',
         workspaceId: WORKSPACE.id,
       });
       expect(trip.config.services).toEqual(services);
@@ -1973,7 +1973,7 @@ describe('NtscLaunchModal', () => {
       }
     });
 
-    it('launches the same edited config from the full config and after the simple form', async () => {
+    it('launches the edits of the full config after the simple form as the full config does', async () => {
       const edit = (config: RawJson): RawJson => ({
         ...config,
         environment: {
@@ -2015,7 +2015,6 @@ describe('NtscLaunchModal', () => {
           logdir: 'logs/r',
         });
       }
-      expect(viaSimpleForm).toEqual(direct);
     });
 
     it('keeps a typed priority and registry_auth through a second edited round trip', async () => {
@@ -2037,13 +2036,12 @@ describe('NtscLaunchModal', () => {
       expect(config.resources.priority).toBe(7);
       expect(config.environment).toEqual({
         environment_variables: ['EDITED=1'],
-        image: { cuda: 'default:1' },
         registry_auth: registryAuth,
       });
     });
 
     it.each([false, true])(
-      'keeps the registry_auth of a template through an edited full config (restored: %s)',
+      'sends the template, not its registry_auth, after an edited full config (restored: %s)',
       async (restored) => {
         mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, REGISTRY_TEMPLATE]);
         if (restored) {
@@ -2072,10 +2070,8 @@ describe('NtscLaunchModal', () => {
           await launch(user);
           await waitFor(() => expect(onLaunched).toHaveBeenCalled());
           const request = mocks.launchShell.mock.lastCall?.[0];
-          expect(request.templateName).toBeUndefined();
-          expect(request.config.environment.registry_auth).toEqual(
-            REGISTRY_TEMPLATE.config.environment.registry_auth,
-          );
+          expect(request.templateName).toBe(REGISTRY_TEMPLATE.name);
+          expect(request.config.environment).toEqual({ environment_variables: ['EDITED=1'] });
           expect(request.config.resources).not.toHaveProperty('priority');
         };
         if (restored) await withLoadedSettings(body);
@@ -2083,6 +2079,169 @@ describe('NtscLaunchModal', () => {
       },
       15_000,
     );
+    describe('with the values the master fills in', () => {
+      /** A default bind mount of the task container defaults. */
+      const DEFAULT_MOUNT = {
+        container_path: '/shared',
+        host_path: '/mnt/shared',
+        read_only: false,
+      };
+      /**
+       * previewFor, with what the master fills in where the request sets nothing: a generated
+       * description, a default bind mount and the registry credentials of the task container
+       * defaults, and an image for the slots.
+       */
+      const previewWithDefaults = async (params: { config?: RawJson; templateName?: string }) => {
+        const previewed: RawJson = await previewFor(params);
+        const config = params.config ?? {};
+        return {
+          ...previewed,
+          bind_mounts: config.bind_mounts ?? [DEFAULT_MOUNT],
+          description: config.description ?? 'Shell (lively-calm-fox)',
+          environment: {
+            ...previewed.environment,
+            image: config.resources?.slots === 0 ? { cpu: 'cpu:1' } : { cuda: 'cuda:1' },
+            registry_auth: config.environment?.registry_auth ?? { password: 'pw', username: 'det' },
+          },
+        };
+      };
+      beforeEach(() => {
+        mocks.previewShell.mockImplementation(previewWithDefaults);
+      });
+      const launched = async (user: ReturnType<typeof userEvent.setup>, onLaunched: unknown) => {
+        await launch(user);
+        await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+        return mocks.launchShell.mock.lastCall?.[0];
+      };
+
+      it.each([false, true])(
+        'sends only the edit of one environment variable (template: %s)',
+        async (fromTemplate) => {
+          mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, EXPERIMENT_TEMPLATE]);
+          const { onLaunched, user } = await setup();
+          if (fromTemplate) {
+            await openStartFrom(user);
+            await user.click(await screen.findByText('exp-seven'));
+            await waitFor(() => expect(idTag('7')).toBeInTheDocument());
+            await waitFor(() => expect(launchButton()).toBeEnabled());
+          }
+          const trip = await roundTrip(user, (config) => ({
+            ...config,
+            environment: { ...config.environment, environment_variables: ['EDITED=1'] },
+          }));
+          expect(trip.config).toMatchObject({
+            bind_mounts: [DEFAULT_MOUNT],
+            description: 'Shell (lively-calm-fox)',
+            resources: { priority: 42 },
+          });
+          const request = await launched(user, onLaunched);
+          expect(request).toEqual({
+            ...trip.request,
+            config: {
+              ...trip.request.config,
+              environment: { environment_variables: ['EDITED=1'] },
+            },
+          });
+          expect(request.templateName).toBe(fromTemplate ? 'exp-seven' : undefined);
+        },
+        15_000,
+      );
+
+      it('sends no image after an edited trip when the slots change', async () => {
+        mocks.pools = [
+          {
+            auxContainerCapacityPerAgent: 0,
+            name: 'gpu-pool',
+            slotsAvailable: 8,
+            slotsPerAgent: 8,
+            usable: true,
+          },
+        ];
+        mocks.availablePools = ['gpu-pool'];
+        clusterStore.fetchResourcePools();
+        await waitFor(() =>
+          expect(Loadable.getOrElse([], clusterStore.resourcePools.get())).toHaveLength(1),
+        );
+        try {
+          const { onLaunched, user } = await setup();
+          const picker = screen.getByRole('combobox', { name: 'Resource Pool' });
+          await waitFor(() => expect(picker.closest('.ant-select')).toHaveTextContent('gpu-pool'));
+          const trip = await roundTrip(user, (config) => ({ ...config, idle_timeout: '1h' }));
+          expect(trip.config.environment.image).toEqual({ cuda: 'cuda:1' });
+          const slots = screen.getByLabelText('Slots');
+          await user.clear(slots);
+          await user.type(slots, '0');
+          await waitFor(() => expect(slots).toHaveValue('0'));
+          const request = await launched(user, onLaunched);
+          expect(request.config.idle_timeout).toBe('1h');
+          expect(request.config.resources.slots).toBe(0);
+          expect(request.config).not.toHaveProperty('environment');
+        } finally {
+          mocks.pools = [];
+          mocks.availablePools = [];
+          clusterStore.fetchResourcePools();
+          await waitFor(() =>
+            expect(Loadable.getOrElse([], clusterStore.resourcePools.get())).toHaveLength(0),
+          );
+        }
+      }, 15_000);
+
+      it('removes a key that the request has, not one the master fills in', async () => {
+        const { onLaunched, user } = await setup();
+        await roundTrip(user, (config) => ({
+          ...config,
+          description: 'mine',
+          environment: { ...config.environment, environment_variables: ['EDITED=1'] },
+        }));
+        expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('mine');
+        await roundTrip(user, (config) => {
+          const { description: _description, ...rest } = config;
+          const { environment_variables: _variables, ...environment } = config.environment;
+          const { priority: _priority, ...resources } = config.resources;
+          const { bind_mounts: _mounts, ...kept } = rest;
+          return { ...kept, environment, resources };
+        });
+        expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('');
+        const again = await roundTrip(user);
+        expect(again.config.resources.priority).toBe(42);
+        expect(again.config.bind_mounts).toEqual([DEFAULT_MOUNT]);
+        const request = await launched(user, onLaunched);
+        expect(request.config).not.toHaveProperty('description');
+        expect(request.config).not.toHaveProperty('bind_mounts');
+        expect(request.config.environment).toEqual({});
+        expect(request.config.resources).not.toHaveProperty('priority');
+      }, 15_000);
+
+      it('sends an edited bind mount list as a whole', async () => {
+        const mount = { container_path: '/scratch', host_path: '/mnt/scratch' };
+        const { onLaunched, user } = await setup();
+        const trip = await roundTrip(user, (config) => ({
+          ...config,
+          bind_mounts: [...config.bind_mounts, mount],
+        }));
+        const request = await launched(user, onLaunched);
+        expect(request.config.bind_mounts).toEqual([DEFAULT_MOUNT, mount]);
+        expect(request.config.bind_mounts).toEqual(trip.config.bind_mounts);
+      }, 15_000);
+
+      it('keeps a template without ssh locked after an edit of something else', async () => {
+        mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, SESSION_TEMPLATE]);
+        const { onLaunched, user } = await setup();
+        await openStartFrom(user);
+        await user.click(await screen.findByText('session'));
+        await waitFor(() => expect(serviceBox('tensorboard')).toBeDisabled());
+        await waitFor(() => expect(launchButton()).toBeEnabled());
+        await roundTrip(user, (config) => ({ ...config, idle_timeout: '1h' }));
+        expect(serviceBox('tensorboard')).toBeDisabled();
+        expect(screen.getByLabelText('Slots')).toBeDisabled();
+        expect(screen.getByLabelText('Slots')).toHaveValue('0');
+        expect(sourceModes()).toEqual([EXPERIMENTS_MODE]);
+        const request = await launched(user, onLaunched);
+        expect(request.templateName).toBe('session');
+        expect(request.config.idle_timeout).toBe('1h');
+        expect(request.config.resources.slots).toBe(0);
+      }, 15_000);
+    });
     describe('with the TensorBoard data source', () => {
       /** An edit of the YAML that the simple form does not show. */
       const addEnv = (config: RawJson): RawJson => ({
@@ -2200,7 +2359,7 @@ describe('NtscLaunchModal', () => {
 
         expect(await launched(user, onLaunched)).toEqual({
           config: {
-            environment: { environment_variables: ['EDITED=1'], image: { cuda: 'default:1' } },
+            environment: { environment_variables: ['EDITED=1'], image: { cpu: 'default:1' } },
             idle_timeout: '5m',
             resources: { resource_pool: 'aux', slots: 0 },
             services: { ssh: { enabled: false }, tensorboard: { experiment_ids: [3, 7] } },
@@ -2305,7 +2464,6 @@ describe('NtscLaunchModal', () => {
           });
           expect(request.config.services.tensorboard).toEqual({ experiment_ids: [7, 9] });
         }
-        expect(viaSimpleForm).toEqual(direct);
       }, 15_000);
 
       it('shows the source mode of an edited full config in the Data source block', async () => {
@@ -2327,11 +2485,10 @@ describe('NtscLaunchModal', () => {
         expect(idTag('4')).toBeInTheDocument();
         expect(screen.queryByPlaceholderText('runs')).not.toBeInTheDocument();
 
+        // The template's args stay the template's.
         const request = await launched(user, onLaunched);
-        expect(request.config.services.tensorboard).toEqual({
-          args: ['--reload_interval=5'],
-          experiment_ids: [4],
-        });
+        expect(request.templateName).toBe('tensorboard');
+        expect(request.config.services.tensorboard).toEqual({ experiment_ids: [4] });
       }, 15_000);
     });
   });
