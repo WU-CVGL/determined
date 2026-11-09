@@ -6,7 +6,7 @@
  * blocked or cleared storage, another browser).
  *
  * What is stored, in window.localStorage under `u:<user id>/launch-history/shell`:
- * the launch config the master returned (after sanitizeConfig: no entrypoint,
+ * the launch config the master returned (after relaunchConfig: no entrypoint,
  * no registry_auth, no generated description, no priority), with environment
  * variables whose names look like credentials removed (from
  * environment_variables and from the env of the containers in a Kubernetes
@@ -23,7 +23,7 @@ import * as io from 'io-ts';
 
 import { CommandType, RawJson } from 'types';
 import md5 from 'utils/md5';
-import { redactSensitiveEnv, sanitizeConfig, stableStringify } from 'utils/ntscConfig';
+import { redactSensitiveEnv, relaunchConfig, stableStringify } from 'utils/ntscConfig';
 import { StorageManager } from 'utils/storage';
 
 export const LAUNCH_HISTORY_LIMIT = 20;
@@ -102,7 +102,7 @@ export const recordLaunch = (
 ): void => {
   if (userId === undefined || !launch.config || launch.workspaceId === undefined) return;
   try {
-    const { config, redacted } = redactSensitiveEnv(sanitizeConfig(launch.config));
+    const { config, redacted } = redactSensitiveEnv(relaunchConfig(launch.config));
     const id = md5(`${HISTORY_KEY}:${launch.workspaceId}:${stableStringify(config)}`);
     const entry: LaunchHistoryEntry = {
       config,

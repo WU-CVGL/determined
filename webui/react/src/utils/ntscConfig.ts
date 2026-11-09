@@ -119,7 +119,9 @@ export const simpleLaunchConfig = (options: NtscLaunchOptions): RawJson => {
 };
 
 /**
- * Prepares a merged config (from the master) for another launch.
+ * Prepares a past task's merged config (from the master) for another launch, as a "Start from" of
+ * it does and as templates and this browser's history save it. A config the user edits in the
+ * launch form is not cleaned up: it is launched as written.
  * - entrypoint: the master sets it on every launch (for a shell it holds the
  *   sshd command line with a random port).
  * - an auto-generated description, so the next launch gets a new pet name.
@@ -129,7 +131,7 @@ export const simpleLaunchConfig = (options: NtscLaunchOptions): RawJson => {
  * Keys are deleted rather than set to null, so the master's defaults apply.
  * Everything else (image, bind mounts, environment variables, ...) is kept.
  */
-export const sanitizeConfig = (config: RawJson): RawJson => {
+export const relaunchConfig = (config: RawJson): RawJson => {
   const out = cloneDeep(config);
   delete out.entrypoint;
   if (isAutoDescription(out.description)) delete out.description;
@@ -179,7 +181,7 @@ export const minimalDiff = (config: RawJson, defaults: RawJson): RawJson => {
 /**
  * Builds a template from a launch config.
  *
- * It applies sanitizeConfig and always drops the description (a template
+ * It applies relaunchConfig and always drops the description (a template
  * should not name every task launched from it). A null in a template clears
  * the cluster default, like a null in a launch config does.
  *
@@ -198,9 +200,9 @@ export const minimalDiff = (config: RawJson, defaults: RawJson): RawJson => {
  * the template is picked.
  */
 export const templateFromConfig = (config: RawJson, defaults: RawJson): RawJson => {
-  const clean = sanitizeConfig(config);
+  const clean = relaunchConfig(config);
   delete clean.description;
-  const cleanDefaults = sanitizeConfig(defaults);
+  const cleanDefaults = relaunchConfig(defaults);
   delete cleanDefaults.description;
   const out = minimalDiff(clean, cleanDefaults);
   const resources = asObject(clean.resources);
@@ -236,7 +238,11 @@ export const formFieldsFromConfig = (config: RawJson): LaunchFormFields => {
   };
 };
 
-/** Applies the simple form's fields on top of a base config. */
+/**
+ * Applies the simple form's fields on top of a base config. Everything else of the base, such as
+ * the entrypoint, environment.registry_auth, resources.priority and a service's other options,
+ * stays as it is.
+ */
 export const configFromForm = (base: RawJson, fields: LaunchFormFields): RawJson => {
   const out = cloneDeep(base);
   if (fields.name) out.description = fields.name;

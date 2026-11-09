@@ -5,7 +5,7 @@ import {
   formFieldsFromConfig,
   minimalDiff,
   redactSensitiveEnv,
-  sanitizeConfig,
+  relaunchConfig,
   sensitiveEnvNames,
   ShellServiceChoices,
   simpleLaunchConfig,
@@ -55,9 +55,9 @@ const podSpecConfig = {
 };
 
 describe('ntscConfig', () => {
-  describe('sanitizeConfig', () => {
+  describe('relaunchConfig', () => {
     it('deletes launch-specific and secret keys and keeps the rest', () => {
-      const out = sanitizeConfig(mergedShellConfig);
+      const out = relaunchConfig(mergedShellConfig);
       expect(out).not.toHaveProperty('entrypoint');
       expect(out).not.toHaveProperty('description');
       expect(out.environment).not.toHaveProperty('registry_auth');
@@ -71,12 +71,12 @@ describe('ntscConfig', () => {
     });
 
     it('keeps a description the user chose', () => {
-      expect(sanitizeConfig({ description: 'my shell' }).description).toBe('my shell');
+      expect(relaunchConfig({ description: 'my shell' }).description).toBe('my shell');
     });
 
     it('does not change its input', () => {
       const input = cloneDeep(mergedShellConfig);
-      sanitizeConfig(input);
+      relaunchConfig(input);
       expect(input).toEqual(mergedShellConfig);
     });
   });
@@ -303,7 +303,7 @@ describe('ntscConfig', () => {
     });
 
     it('applies the form on top of a base config without touching other keys', () => {
-      const out = configFromForm(sanitizeConfig(mergedShellConfig), {
+      const out = configFromForm(relaunchConfig(mergedShellConfig), {
         name: 'again',
         pool: 'cpu',
         slots: 0,
@@ -314,6 +314,19 @@ describe('ntscConfig', () => {
 
       const cleared = configFromForm({ description: 'x', resources: { resource_pool: 'a' } }, {});
       expect(cleared).toEqual({ resources: {} });
+    });
+
+    it('reads an edited config into the form and back without changing it', () => {
+      const edited = {
+        ...mergedShellConfig,
+        description: 'my shell',
+        services: {
+          jupyter: { enabled: false },
+          tensorboard: { args: ['--reload_interval=30'], logdir: 'runs' },
+          vscode: {},
+        },
+      };
+      expect(configFromForm(edited, formFieldsFromConfig(edited))).toEqual(edited);
     });
 
     it('reads template resources', () => {

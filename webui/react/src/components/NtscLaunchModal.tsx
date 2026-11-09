@@ -31,7 +31,7 @@ import {
   configFromForm,
   formFieldsFromConfig,
   NtscLaunchOptions,
-  sanitizeConfig,
+  relaunchConfig,
   SHELL_SERVICE_LABELS,
   SHELL_SERVICES,
   ShellService,
@@ -364,8 +364,9 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   }, [form, simpleOptions]);
 
   /**
-   * Makes a full config whose YAML was edited the simple form's config, its fields filled from it,
-   * and its services confirmed. A YAML that does not parse to a config changes nothing.
+   * Makes a full config whose YAML was edited the simple form's config as written, its fields
+   * filled from it, and its services confirmed. A YAML that does not parse to a config changes
+   * nothing.
    */
   const applyEditedConfig = useCallback(() => {
     let edited: unknown;
@@ -375,7 +376,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       return;
     }
     if (!isPlainObject(edited) || isEqual(edited, previewedConfig.current)) return;
-    const base = sanitizeConfig(edited as RawJson);
+    const base = edited as RawJson;
     const fields = formFieldsFromConfig(base);
     const services = serviceChecks(fields.services);
     setBaseConfig(base);
@@ -399,6 +400,14 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
 
   const handleSecondary = useCallback(async () => {
     if (showFullConfig) {
+      // A YAML that is no config shows its error and keeps the full config.
+      if (Loadable.isLoaded(config)) {
+        try {
+          await fullConfigForm.validateFields(['config']);
+        } catch {
+          return;
+        }
+      }
       configSeq.current++;
       applyEditedConfig();
       setFullConfigFormInvalid(false);
@@ -412,7 +421,15 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       fetchConfig();
     } else return;
     setShowFullConfig((show) => !show);
-  }, [applyEditedConfig, fetchConfig, form, servicesConfirmed, showFullConfig]);
+  }, [
+    applyEditedConfig,
+    config,
+    fetchConfig,
+    form,
+    fullConfigForm,
+    servicesConfirmed,
+    showFullConfig,
+  ]);
 
   const launch = useCallback(
     async (options: NtscLaunchOptions & { config?: RawJson }) => {
@@ -464,7 +481,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   const handleStartFrom = useCallback(
     (start: StartFrom) => {
       if (start.kind === 'config') {
-        const base = sanitizeConfig(start.config);
+        const base = relaunchConfig(start.config);
         const fields = formFieldsFromConfig(base);
         setBaseConfig(base);
         setRedactedEnv(start.redactedEnv);
@@ -738,7 +755,10 @@ const FullConfig: React.FC<FullConfigProps> = ({
             {
               validator: (_rule, value) => {
                 try {
-                  yaml.load(value);
+                  // An empty YAML is left to the required rule.
+                  if (value && !isPlainObject(yaml.load(value))) {
+                    return Promise.reject(new Error(configRequired));
+                  }
                   return Promise.resolve();
                 } catch (err: unknown) {
                   return Promise.reject(

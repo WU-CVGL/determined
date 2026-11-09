@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Button from 'hew/Button';
 import { useModal } from 'hew/Modal';
@@ -1018,7 +1018,7 @@ describe('NtscLaunchModal', () => {
         services: { tensorboard: { logdir: 'logs/exp' } },
       });
       await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
-      expect(screen.getByLabelText('Log directory in the task')).toHaveValue('logs/exp');
+      expect(await screen.findByLabelText('Log directory in the task')).toHaveValue('logs/exp');
       await launch(user);
       await waitFor(() => expect(onLaunched).toHaveBeenCalled());
       expect(mocks.launchShell.mock.calls[0][0].config.services).toEqual({
@@ -1724,7 +1724,7 @@ describe('NtscLaunchModal', () => {
       expect(trip.request).toEqual({
         config: {
           environment: { environment_variables: ['EDITED=1'], image: { cuda: 'default:1' } },
-          resources: { resource_pool: 'default', slots: 1 },
+          resources: { priority: 42, resource_pool: 'default', slots: 1 },
           services,
         },
         templateName: undefined,
@@ -1737,24 +1737,63 @@ describe('NtscLaunchModal', () => {
       expect(mocks.launchShell).toHaveBeenCalledWith(trip.request);
     });
 
-    it('keeps the simple form when the full config’s YAML does not parse', async () => {
-      mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, NO_JUPYTER_TEMPLATE]);
-      const { onLaunched, user } = await setup();
-      await openStartFrom(user);
-      await user.click(await screen.findByText('no-jupyter'));
-      await waitFor(() => expect(serviceBox('vscode')).toBeChecked());
-      await user.click(serviceBox('jupyter'));
+    it('keeps the full config and shows the error when its YAML does not parse', async () => {
+      const { user } = await setup();
       await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
       await waitFor(() => expect(editorText()).toContain('resource_pool'));
-      const request = mocks.previewShell.mock.lastCall?.[0];
+      const calls = mocks.previewShell.mock.calls.length;
       fireEvent.change(screen.getByTestId('code-editor'), { target: { value: 'services: [' } });
       await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
-      expect(serviceBox('jupyter')).toBeChecked();
-      expect(serviceBox('vscode')).toBeChecked();
-      await launch(user);
-      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
-      expect(mocks.launchShell).toHaveBeenCalledWith(request);
-      expect(request.templateName).toBe('no-jupyter');
+      expect(await screen.findByText(/Invalid YAML/)).toBeInTheDocument();
+      expect(screen.getByTestId('code-editor')).toHaveValue('services: [');
+      expect(screen.getByRole('button', { name: 'Show Simple Config' })).toBeInTheDocument();
+      expect(launchButton()).toBeDisabled();
+      expect(mocks.previewShell).toHaveBeenCalledTimes(calls);
+    });
+
+    it('launches the same edited config from the full config and after the simple form', async () => {
+      const edit = (config: RawJson): RawJson => ({
+        ...config,
+        environment: {
+          ...config.environment,
+          registry_auth: { password: 'hunter2', username: 'me' },
+        },
+        resources: { ...config.resources, priority: 7 },
+        services: {
+          ...config.services,
+          tensorboard: { args: ['--reload_interval=30'], logdir: 'logs/r' },
+        },
+      });
+      const launchEdited = async (viaSimpleForm: boolean) => {
+        const { onLaunched, user } = await setup();
+        await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+        await waitFor(() => expect(editorText()).toContain('resource_pool'));
+        editConfig(edit);
+        if (viaSimpleForm) {
+          await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
+          await waitFor(() => expect(serviceBox('tensorboard')).toBeChecked());
+        }
+        await launch(user);
+        await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+        return mocks.launchShell.mock.lastCall?.[0];
+      };
+
+      const direct = await launchEdited(false);
+      cleanup();
+      const viaSimpleForm = await launchEdited(true);
+      expect(mocks.launchShell).toHaveBeenCalledTimes(2);
+      for (const request of [direct, viaSimpleForm]) {
+        expect(request.config.resources.priority).toBe(7);
+        expect(request.config.environment.registry_auth).toEqual({
+          password: 'hunter2',
+          username: 'me',
+        });
+        expect(request.config.services.tensorboard).toEqual({
+          args: ['--reload_interval=30'],
+          logdir: 'logs/r',
+        });
+      }
+      expect(viaSimpleForm).toEqual(direct);
     });
   });
 
