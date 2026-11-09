@@ -451,14 +451,16 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     const base = draftFromEditedConfig(edited as RawJson, previewedConfig.current);
     const fields = formFieldsFromConfig(base);
     const services = serviceChecks(fields.services);
+    const baseSshOff = sshDisabled(base);
     setBaseConfig(base);
-    setSshOff(sshDisabled(base));
+    setSshOff(baseSshOff);
     offered.current = offeredServices(fields.services);
     form.setFieldsValue({
       name: fields.name,
       pool: fields.pool,
       services,
-      slots: fields.slots,
+      // configFromForm sends 0 slots for a config without ssh.
+      slots: baseSshOff ? 0 : fields.slots,
     });
     // Replaced, not merged: the other mode's fields do not carry over.
     form.setFieldValue('dataSource', fields.dataSource);

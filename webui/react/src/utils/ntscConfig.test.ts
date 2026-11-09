@@ -541,6 +541,50 @@ describe('ntscConfig', () => {
       });
     });
 
+    it('takes an edited session config as the draft and reads its source back unchanged', () => {
+      const edited = { ...sessionConfig, description: 'my session', idle_timeout: '10m' };
+      const draft = draftFromEditedConfig(edited, sessionConfig);
+      expect(draft.resources).toEqual({ resource_pool: 'aux', slots: 0 });
+      expect(draft.services).toEqual(sessionConfig.services);
+      const fields = formFieldsFromConfig(draft);
+      expect(fields.dataSource).toEqual(experiments([3, 7], []));
+      expect(sshDisabled(draft)).toBe(true);
+      expect(configFromForm(draft, fields)).toEqual(draft);
+      // Another round trip changes nothing.
+      const again = draftFromEditedConfig(configFromForm(draft, fields), sessionConfig);
+      expect(configFromForm(again, formFieldsFromConfig(again))).toEqual(draft);
+      // An ID added in the form joins the draft's; ssh stays off with 0 slots.
+      const added = configFromForm(draft, { ...fields, dataSource: experiments([3, 7, '12']) });
+      expect(added.services).toEqual({
+        ssh: { enabled: false },
+        tensorboard: { experiment_ids: [3, 7, 12] },
+      });
+      expect(added.resources).toEqual({ resource_pool: 'aux', slots: 0 });
+    });
+
+    it('reads the mode of an edited draft and sends only the chosen one', () => {
+      const previewed = {
+        ...mergedShellConfig,
+        services: { tensorboard: { args: ['--x'], logdir: 'runs' } },
+      };
+      const edited = { ...previewed, services: { tensorboard: { args: ['--x'], trial_ids: [5] } } };
+      const draft = draftFromEditedConfig(edited, previewed);
+      const fields = formFieldsFromConfig(draft);
+      expect(fields.dataSource).toEqual(experiments([], [5]));
+      expect(configFromForm(draft, fields).services).toEqual(edited.services);
+      // Back to a log directory: no IDs are left.
+      expect(configFromForm(draft, { ...fields, dataSource: logdir('logs') }).services).toEqual({
+        tensorboard: { args: ['--x'], logdir: 'logs' },
+      });
+      // From a log directory draft to IDs: no log directory is left.
+      const logdirDraft = draftFromEditedConfig(previewed, edited);
+      const logdirFields = formFieldsFromConfig(logdirDraft);
+      expect(logdirFields.dataSource).toEqual(logdir('runs'));
+      expect(
+        configFromForm(logdirDraft, { ...logdirFields, dataSource: experiments([4]) }).services,
+      ).toEqual({ tensorboard: { args: ['--x'], experiment_ids: [4] } });
+    });
+
     it('keeps ssh off, the sources, 0 slots and the idle timeout of a session in a template', () => {
       const defaults = {
         environment: { image: { cpu: 'cpu-image:1' } },
