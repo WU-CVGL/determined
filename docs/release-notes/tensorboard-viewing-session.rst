@@ -8,9 +8,6 @@
    the logs arrive, and starting one needs the permission to launch shells in the workspace.
    ``tensorboard_args`` is read as ``services.tensorboard.args``.
 
--  TensorBoard: ``det tensorboard list``, ``kill``, ``open`` and ``config`` act on TensorBoard
-   tasks only; a viewing session is managed with ``det shell`` and ``det task``.
-
 **New Features**
 
 -  TensorBoard: The experiment and trial pages and ``det tensorboard start`` open a CPU viewing

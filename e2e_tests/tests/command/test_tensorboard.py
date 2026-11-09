@@ -49,9 +49,8 @@ LOADER_PREFIX = "tensorboard loader: "
 def tensorboard_session(sess: api.Session, args: List[str]) -> Iterator[str]:
     """
     Starts a TensorBoard viewing session with `det tensorboard start <args> --detach`, yields its
-    task ID, and kills it with `det shell kill`, since `det tensorboard kill` does not see sessions.
-    The kill may fail only for a session that has ended by itself, such as one whose image lacks
-    TensorBoard.
+    task ID, and kills it with `det tensorboard kill`. The kill may fail only for a session that has
+    ended by itself, such as one whose image lacks TensorBoard.
     """
     task_id = detproc.check_output(sess, ["det", "tensorboard", "start", *args, "--detach"]).strip()
     try:
@@ -59,7 +58,7 @@ def tensorboard_session(sess: api.Session, args: List[str]) -> Iterator[str]:
     finally:
         kill = detproc.run(
             sess,
-            ["det", "shell", "kill", task_id],
+            ["det", "tensorboard", "kill", task_id],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -320,6 +319,53 @@ def test_tensorboard_old_type() -> None:
 
 
 @pytest.mark.e2e_cpu
+def test_tensorboard_commands_manage_sessions() -> None:
+    """
+    The tensorboard commands list and configure a viewing session; a shell with an attached
+    TensorBoard is neither listed nor killed by them.
+    """
+    sess = api_utils.user_session()
+    exp_ref = completed_experiment(sess, SHARED_FS_CONFIG)
+    with tensorboard_session(sess, [str(exp_ref.id)]) as task_id:
+        listed = detproc.check_output(sess, ["det", "tensorboard", "list", "-q"])
+        assert task_id in listed.split(), listed
+        config = util.yaml_safe_load(
+            detproc.check_output(sess, ["det", "tensorboard", "config", task_id[:8]])
+        )
+        assert config["services"]["ssh"]["enabled"] is False, config
+
+    shell_id = detproc.check_output(
+        sess,
+        [
+            "det",
+            "shell",
+            "start",
+            "--detach",
+            "--config",
+            "resources.slots=0",
+            "--config",
+            "services.tensorboard.logdir=/tmp",
+        ],
+    ).strip()
+    try:
+        listed = detproc.check_output(sess, ["det", "tensorboard", "list", "-q"])
+        assert shell_id not in listed.split(), listed
+        kill = detproc.run(
+            sess,
+            ["det", "tensorboard", "kill", shell_id],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        assert kill.returncode != 0, kill.stdout
+        assert "is a shell, not a TensorBoard; use det shell kill" in kill.stderr, kill.stderr
+        shell = bindings.get_GetShell(sess, shellId=shell_id).shell
+        assert shell.endTime is None, shell.to_json()
+    finally:
+        detproc.check_call(sess, ["det", "shell", "kill", shell_id])
+
+
+@pytest.mark.e2e_cpu
 def test_start_tensorboard_without_detach() -> None:
     """
     Without --detach, `det tensorboard start` prints the launch line, waits until the session is
@@ -349,7 +395,7 @@ def test_start_tensorboard_without_detach() -> None:
         assert f"/tasks/{task_id}/interactive?tab=tensorboard" in url[0], output
     finally:
         if task_id is not None:
-            detproc.check_call(sess, ["det", "shell", "kill", task_id])
+            detproc.check_call(sess, ["det", "tensorboard", "kill", task_id])
 
 
 @pytest.mark.e2e_cpu
