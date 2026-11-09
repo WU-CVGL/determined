@@ -679,7 +679,6 @@ func (a *apiServer) PostModelVersion(
 		req.Notes,
 		model.UserID(user.User.GetId()),
 	)
-
 	if err != nil {
 		return nil, errors.Wrapf(err, "error adding model version to model %q", req.ModelName)
 	}

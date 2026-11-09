@@ -435,9 +435,21 @@ func (a *apiServer) GetAllocation(
 	if err != nil {
 		return nil, fmt.Errorf("querying allocation %s: %w", req.AllocationId, err)
 	}
-	return &apiv1.GetAllocationResponse{
-		Allocation: allocation.Proto(),
-	}, nil
+	curUser, _, err := grpcutil.GetUser(ctx)
+	if err != nil {
+		return nil, err
+	}
+	v, err := jobprivacy.NewViewer(ctx, *curUser)
+	if err != nil {
+		return nil, err
+	}
+	caps, err := taskCaps(ctx, v, allocation.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	pb := allocation.Proto()
+	redactAllocation(pb, caps)
+	return &apiv1.GetAllocationResponse{Allocation: pb}, nil
 }
 
 func (a *apiServer) PostAllocationProxyAddress(
@@ -905,7 +917,7 @@ func (a *apiServer) GetTasks(
 }
 
 // setAllocationSummaryCapabilities sets the user's job privacy capabilities on each summary, from
-// its task's job, and clears the name of a summary whose title the user may not read.
+// its task's job, and clears what they hide (redactAllocationSummary).
 func setAllocationSummaryCapabilities(
 	ctx context.Context, curUser model.User, summaries map[string]*taskv1.AllocationSummary,
 ) error {
@@ -919,9 +931,7 @@ func setAllocationSummaryCapabilities(
 	}
 	for _, s := range summaries {
 		c := caps[model.TaskID(s.TaskId)]
-		if !c.ViewTitle {
-			s.Name = ""
-		}
+		redactAllocationSummary(s, c)
 		s.Capabilities = c.Proto()
 	}
 	return nil

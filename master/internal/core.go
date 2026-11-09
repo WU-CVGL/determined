@@ -298,7 +298,7 @@ func (m *Master) getRawResourceAllocation(c echo.Context) error {
 	curUser := c.(*detContext.DetContext).MustGetUser()
 	if err := redactRawAllocationLabels(
 		c.Request().Context(), curUser, resp.ResourceEntries); err != nil {
-		return err
+		return echoJobPrivacyError(err)
 	}
 
 	c.Response().Header().Set("Content-Type", "text/csv")

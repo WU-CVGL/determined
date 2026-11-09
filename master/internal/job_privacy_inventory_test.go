@@ -16,7 +16,8 @@ import (
 )
 
 // jobContentMessages are the messages that are a job or carry a job's title, logs or config. The
-// log streams' responses are listed themselves, since they do not embed TaskLog.
+// log streams' responses are listed themselves, since they do not embed TaskLog. Task and
+// Allocation carry free-text failure reasons, which follow the logs.
 var jobContentMessages = map[protoreflect.FullName]bool{
 	"determined.job.v1.Job":                     true,
 	"determined.experiment.v1.Experiment":       true,
@@ -26,6 +27,8 @@ var jobContentMessages = map[protoreflect.FullName]bool{
 	"determined.command.v1.Command":             true,
 	"determined.shell.v1.Shell":                 true,
 	"determined.task.v1.AllocationSummary":      true,
+	"determined.task.v1.Task":                   true,
+	"determined.task.v1.Allocation":             true,
 	"determined.checkpoint.v1.Checkpoint":       true,
 	"determined.model.v1.ModelVersion":          true,
 	"determined.task.v1.TaskLog":                true,
@@ -44,6 +47,9 @@ var jobPrivacyCheckedRPCs = map[string]string{
 	"SearchRuns":               "TestJobPrivacyExperimentReadPaths",
 	"GetExperimentTrials":      "TestJobPrivacyExperimentReadPaths",
 	"GetTrial":                 "TestJobPrivacyExperimentReadPaths",
+	"PutTrial":                 "TestJobPrivacyTrialUpsert",
+	"GetTask":                  "TestJobPrivacyFailureReasons",
+	"GetAllocation":            "TestJobPrivacyFailureReasons",
 	"GetJobs":                  "TestJobPrivacyTaskListsAndConfigs",
 	"GetJobsV2":                "TestJobPrivacyTaskListsAndConfigs",
 	"GetTasks":                 "TestJobPrivacyTaskListsAndConfigs",
@@ -64,25 +70,28 @@ var jobPrivacyCheckedRPCs = map[string]string{
 	"TaskLogsFields":           "TestJobPrivacyLogReadPaths",
 	"TrialLogs":                "TestJobPrivacyLogReadPaths",
 	"TrialLogsFields":          "TestJobPrivacyLogReadPaths",
-	"KillCommand":              "TestJobPrivacyControlResponses",
-	"SetCommandPriority":       "TestJobPrivacyControlResponses",
-	"KillShell":                "TestJobPrivacyControlResponses",
-	"SetShellPriority":         "TestJobPrivacyControlResponses",
+	"KillCommand":              "TestJobPrivacyFailureReasons",
+	"SetCommandPriority":       "TestJobPrivacyFailureReasons",
+	"KillShell":                "TestJobPrivacyFailureReasons",
+	"SetShellPriority":         "TestJobPrivacyFailureReasons",
 	"PatchExperiment":          "TestJobPrivacyControlResponses",
 }
 
 // jobPrivacyUncheckedRPCs gives, for each RPC whose response reaches job content and that no test
-// reads as a user who may not read it, why no such user gets that content from it.
+// reads as a user who may not read it, why no such user gets that content from it. "Editors" may
+// be users other than the owner under RBAC.
 var jobPrivacyUncheckedRPCs = map[string]string{
-	"CreateExperiment":     "the caller owns the new experiment; redactExperimentForViewer runs",
-	"PutExperiment":        "the caller owns the new unmanaged experiment",
-	"ContinueExperiment":   "editors only; redactExperimentForViewer, as GetExperiment",
-	"LaunchCommand":        "the caller owns the new command",
-	"LaunchShell":          "the caller owns the new shell",
-	"CreateTrial":          "editors only; a new trial has no log policy match",
-	"PutTrial":             "editors only; a new trial has no log policy match",
-	"PatchTrial":           "editors only; redactTrialsLogPolicy, as GetTrial",
-	"GetTrialByExternalID": "returns GetTrial's response",
+	"CreateExperiment": "always a new experiment, which the caller owns; " +
+		"redactExperimentForViewer runs",
+	"PutExperiment": "an upsert: a PUT of an existing external experiment returns it as " +
+		"stored, possibly another user's; redactExperimentForViewer runs, as in GetExperiment",
+	"ContinueExperiment": "editors; redactExperimentForViewer runs, as in GetExperiment",
+	"LaunchCommand":      "always a new command, which the caller owns and which has not exited",
+	"LaunchShell":        "always a new shell, which the caller owns and which has not exited",
+	"CreateTrial": "editors; always a new trial (a new task ID, never an upsert), which has " +
+		"no log policy match",
+	"PatchTrial":           "editors; redactTrialsLogPolicy runs, as in GetTrial",
+	"GetTrialByExternalID": "returns GetTrial's response, redaction included",
 	"CompareTrials":        "get_trials_basic selects no title, config or log policy match",
 }
 

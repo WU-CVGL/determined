@@ -965,3 +965,20 @@ func TestPickVariation(t *testing.T) {
 		})
 	}
 }
+
+// The streaming_updates feature switch needs the basic authz type, the only one the stream module
+// has.
+func TestValidateStreamingUpdatesNeedsBasicAuthZ(t *testing.T) {
+	c := DefaultConfig()
+	c.FeatureSwitches = []string{"streaming_updates"}
+	require.Empty(t, c.Validate())
+
+	c.Security.AuthZ.Type = RBACAuthZType
+	errs := c.Validate()
+	require.Len(t, errs, 1)
+	require.EqualError(t, errs[0],
+		`feature switch "streaming_updates" requires security.authz.type "basic"`)
+
+	c.FeatureSwitches = []string{}
+	require.Empty(t, c.Validate())
+}

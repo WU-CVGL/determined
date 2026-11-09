@@ -197,8 +197,9 @@ func (e Exprs) ExpLabelsText() string { return e.whenTitle("e.config->>'labels'"
 // ExpLabelsJSON is the experiment's labels as jsonb, NULL when its title is hidden or the labels
 // are a JSON null.
 func (e Exprs) ExpLabelsJSON() string {
-	return e.whenTitle("CASE WHEN e.config->'labels'::text = 'null' THEN NULL " +
-		"ELSE e.config->'labels' END")
+	// NULLIF reads the config once; a CASE that tests and then returns the labels detoasts the
+	// config twice per row.
+	return e.whenTitle("NULLIF(e.config->'labels', 'null'::jsonb)")
 }
 
 // ExpNotesMarker is 'omitted' when the experiment has notes and its title is visible, else NULL.
