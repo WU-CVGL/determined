@@ -38,6 +38,25 @@ describe('launchHistory', () => {
     expect(listLaunchHistory(undefined)).toEqual([]);
   });
 
+  it('drops the name the master gave a shell or a TensorBoard session', () => {
+    const session = {
+      ...launchConfig('TensorBoard (brave-cat)'),
+      idle_timeout: '5m',
+      resources: { resource_pool: 'aux', slots: 0 },
+      services: { ssh: { enabled: false }, tensorboard: { experiment_ids: [7] } },
+    };
+    recordLaunch(1, { config: session, workspaceId: 5 });
+    recordLaunch(1, { config: launchConfig('Shell (lively-calm-fox)'), workspaceId: 5 });
+    const [shell, recorded] = listLaunchHistory(1);
+    expect(shell.config).not.toHaveProperty('description');
+    expect(recorded.config).not.toHaveProperty('description');
+    expect(recorded.config).toMatchObject({
+      idle_timeout: '5m',
+      resources: { resource_pool: 'aux', slots: 0 },
+      services: { ssh: { enabled: false }, tensorboard: { experiment_ids: [7] } },
+    });
+  });
+
   it('keys the stored data by user id', () => {
     recordLaunch(7, { config: launchConfig('a'), workspaceId: 1 });
     expect(Object.keys(window.localStorage)).toEqual(['u:7/launch-history/shell']);

@@ -13,6 +13,7 @@ import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
 import { paths } from 'routes/utils';
 import { V1LaunchWarning, V1TaskService } from 'services/api-ts-sdk';
 import { CommandResponse, InteractiveTaskTab } from 'types';
+import { sshDisabled } from 'utils/ntscConfig';
 import { canOpenTaskService } from 'utils/task';
 import { openInteractiveTask } from 'utils/wait';
 
@@ -25,7 +26,9 @@ interface Props {
 /** Shown after a shell launch: how to connect and where to follow the task. */
 const ShellLaunchedModalComponent: React.FC<Props> = ({ response, services }: Props) => {
   const { command, warnings = [] } = response;
-  const terminalEnabled = useFeature().isOn('shell_terminal');
+  // A shell launched with ssh off, such as a TensorBoard session, has no terminal.
+  const sshOn = !sshDisabled(response.config);
+  const terminalEnabled = useFeature().isOn('shell_terminal') && sshOn;
   const resourcesEnabled = useTaskResourcesEnabled();
   const openTab = (tab: InteractiveTaskTab) => () => openInteractiveTask(command.id, { tab });
   return (
@@ -67,8 +70,12 @@ const ShellLaunchedModalComponent: React.FC<Props> = ({ response, services }: Pr
           </Button>
         )}
       </Column>
-      <Label>Start an interactive SSH session in the terminal:</Label>
-      <CodeSample text={`det shell open ${command.id}`} />
+      {sshOn && (
+        <>
+          <Label>Start an interactive SSH session in the terminal:</Label>
+          <CodeSample text={`det shell open ${command.id}`} />
+        </>
+      )}
       <Row>
         <Link path={paths.taskLogs(command)}>View Logs</Link>
         {resourcesEnabled && <Link path={paths.taskResources(command.id)}>View Resources</Link>}

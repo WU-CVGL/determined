@@ -11,9 +11,9 @@ import {
   getTensorBoards,
   killExperiment,
   killTensorBoard,
-  openOrCreateTensorBoard,
   pauseExperiment,
 } from 'services/api';
+import { handleTensorBoardError, openTensorBoardSession } from 'utils/tensorBoardSession';
 
 const root: NonLeafNode = {
   options: [
@@ -117,7 +117,9 @@ const root: NonLeafNode = {
                 return [
                   {
                     onAction: () => {
-                      openOrCreateTensorBoard({ trialIds: parseIds(inp) });
+                      openTensorBoardSession({ trialIds: parseIds(inp) }).catch((e) =>
+                        handleTensorBoardError(e, 'Unable to View TensorBoard'),
+                      );
                     },
                     title: inp,
                   },
@@ -131,7 +133,9 @@ const root: NonLeafNode = {
                 return [
                   {
                     onAction: () => {
-                      openOrCreateTensorBoard({ experimentIds: parseIds(inp) });
+                      openTensorBoardSession({ experimentIds: parseIds(inp) }).catch((e) =>
+                        handleTensorBoardError(e, 'Unable to View TensorBoard'),
+                      );
                     },
                     title: inp,
                   },

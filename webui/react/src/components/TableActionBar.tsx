@@ -31,7 +31,6 @@ import {
   deleteExperiments,
   getExperiments,
   killExperiments,
-  openOrCreateTensorBoard,
   pauseExperiments,
   unarchiveExperiments,
 } from 'services/api';
@@ -52,7 +51,7 @@ import {
   getProjectExperimentForExperimentItem,
 } from 'utils/experiment';
 import { capitalizeWord } from 'utils/string';
-import { openCommandResponse } from 'utils/wait';
+import { handleTensorBoardError, openTensorBoardSession } from 'utils/tensorBoardSession';
 
 import LoadableCount from './LoadableCount';
 import css from './TableActionBar.module.scss';
@@ -227,12 +226,10 @@ const TableActionBar: React.FC<Props> = ({
             // if unmanaged experiments are selected, open experimentTensorBoardModal
             openExperimentTensorBoardModal();
           } else {
-            openCommandResponse(
-              await openOrCreateTensorBoard({
-                experimentIds: params.experimentIds,
-                workspaceId: project?.workspaceId,
-              }),
-            );
+            await openTensorBoardSession({
+              experimentIds: params.experimentIds,
+              workspaceId: project?.workspaceId,
+            });
           }
           return;
         }
@@ -326,15 +323,18 @@ const TableActionBar: React.FC<Props> = ({
           });
         }
       } catch (e) {
-        const publicSubject =
-          action === ExperimentAction.OpenTensorBoard
-            ? `Unable to View TensorBoard for Selected ${capitalizeWord(labelPlural)}`
-            : `Unable to ${action} Selected ${capitalizeWord(labelPlural)}`;
+        if (action === ExperimentAction.OpenTensorBoard) {
+          handleTensorBoardError(
+            e,
+            `Unable to View TensorBoard for Selected ${capitalizeWord(labelPlural)}`,
+          );
+          return;
+        }
         handleError(e, {
           isUserTriggered: true,
           level: ErrorLevel.Error,
           publicMessage: 'Please try again later.',
-          publicSubject,
+          publicSubject: `Unable to ${action} Selected ${capitalizeWord(labelPlural)}`,
           silent: false,
         });
       } finally {

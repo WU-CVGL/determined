@@ -1,5 +1,3 @@
-import _ from 'lodash';
-
 import {
   killableCommandStates,
   killableGenericTaskStates,
@@ -7,7 +5,6 @@ import {
   terminalCommandStates,
 } from 'constants/states';
 import { V1TaskService, V1TaskServiceState, V1TaskType } from 'services/api-ts-sdk';
-import { LaunchTensorBoardParams } from 'services/types';
 import * as Type from 'types';
 import { CommandState, RunState, State } from 'types';
 
@@ -221,32 +218,6 @@ export const isTaskKillable = (task: { state: State }, canModifyWorkspaceNSC: bo
     (killableRunStates.includes(task.state as Type.RunState) ||
       killableCommandStates.includes(task.state as Type.CommandState))
   );
-};
-
-// Checks whether tensorboard source matches a given source list.
-export const tensorBoardMatchesSource = (
-  tensorBoard: Type.CommandTask,
-  source: LaunchTensorBoardParams,
-): boolean => {
-  if (source.experimentIds) {
-    source.experimentIds?.sort();
-    tensorBoard.misc?.experimentIds?.sort();
-
-    if (_.isEqual(tensorBoard.misc?.experimentIds, source.experimentIds)) {
-      return true;
-    }
-  }
-
-  if (source.trialIds) {
-    source.trialIds?.sort();
-    tensorBoard.misc?.trialIds?.sort();
-
-    if (_.isEqual(tensorBoard.misc?.trialIds, source.trialIds)) {
-      return true;
-    }
-  }
-
-  return false;
 };
 
 const commandStateSortOrder: CommandState[] = [

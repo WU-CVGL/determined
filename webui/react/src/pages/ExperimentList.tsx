@@ -55,7 +55,6 @@ import {
   getExperimentLabels,
   getExperiments,
   killExperiment,
-  openOrCreateTensorBoard,
   patchExperiment,
   pauseExperiment,
   unarchiveExperiment,
@@ -87,8 +86,8 @@ import { useObservable } from 'utils/observable';
 import { validateDetApiEnum, validateDetApiEnumList } from 'utils/service';
 import { alphaNumericSorter } from 'utils/sort';
 import { humanReadableBytes } from 'utils/string';
+import { handleTensorBoardError, openTensorBoardSession } from 'utils/tensorBoardSession';
 import { getDisplayName } from 'utils/user';
-import { openCommandResponse } from 'utils/wait';
 
 import {
   DEFAULT_COLUMN_WIDTHS,
@@ -763,7 +762,7 @@ const ExperimentList: React.FC<Props> = ({ project }) => {
         );
       });
       if (action === Action.OpenTensorBoard) {
-        return openOrCreateTensorBoard({
+        return openTensorBoardSession({
           experimentIds: validExperimentIds,
           workspaceId: project.workspaceId,
         });
@@ -826,10 +825,7 @@ const ExperimentList: React.FC<Props> = ({ project }) => {
   const submitBatchAction = useCallback(
     async (action: Action) => {
       try {
-        const result = await sendBatchActions(action);
-        if (action === Action.OpenTensorBoard && result) {
-          openCommandResponse(result as CommandResponse);
-        }
+        await sendBatchActions(action);
 
         /*
          * Deselect selected rows since their states may have changed where they
@@ -840,15 +836,15 @@ const ExperimentList: React.FC<Props> = ({ project }) => {
         // Refetch experiment list to get updates based on batch action.
         await fetchExperiments();
       } catch (e) {
-        const publicSubject =
-          action === Action.OpenTensorBoard
-            ? 'Unable to View TensorBoard for Selected Experiments'
-            : `Unable to ${action} Selected Experiments`;
+        if (action === Action.OpenTensorBoard) {
+          handleTensorBoardError(e, 'Unable to View TensorBoard for Selected Experiments');
+          return;
+        }
         handleError(e, {
           isUserTriggered: true,
           level: ErrorLevel.Error,
           publicMessage: 'Please try again later.',
-          publicSubject,
+          publicSubject: `Unable to ${action} Selected Experiments`,
           silent: false,
         });
       }

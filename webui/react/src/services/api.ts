@@ -1,6 +1,4 @@
-import { terminalCommandStates } from 'constants/states';
 import * as Api from 'services/api-ts-sdk';
-import { V1LaunchWarning } from 'services/api-ts-sdk';
 import * as Config from 'services/apiConfig';
 import { RawResourcePoolAccess } from 'services/decoder';
 import * as Service from 'services/types';
@@ -8,7 +6,6 @@ import { DeterminedInfo, Telemetry } from 'stores/determinedInfo';
 import { EmptyParams, RawJson, SingleEntityParams } from 'types';
 import * as Type from 'types';
 import { generateDetApi } from 'utils/service';
-import { tensorBoardMatchesSource } from 'utils/task';
 
 /* Authentication */
 
@@ -1027,30 +1024,11 @@ export const launchShell = generateDetApi<
   Type.CommandResponse
 >(Config.launchShell);
 
-export const launchTensorBoard = generateDetApi<
-  Service.LaunchTensorBoardParams,
-  Api.V1LaunchTensorboardResponse,
-  Type.CommandResponse
->(Config.launchTensorBoard);
-
 export const deleteCheckpoints = generateDetApi<
   Api.V1DeleteCheckpointsRequest,
   Api.V1DeleteCheckpointsResponse,
   Api.V1DeleteCheckpointsResponse
 >(Config.deleteCheckpoints);
-
-export const openOrCreateTensorBoard = async (
-  params: Service.LaunchTensorBoardParams,
-): Promise<Type.CommandResponse> => {
-  const tensorboards = await getTensorBoards({});
-  const match = tensorboards.find(
-    (tensorboard) =>
-      !terminalCommandStates.has(tensorboard.state) &&
-      tensorBoardMatchesSource(tensorboard, params),
-  );
-  if (match) return { command: match, warnings: [V1LaunchWarning.CURRENTSLOTSEXCEEDED] };
-  return launchTensorBoard(params);
-};
 
 export const killTask = async (task: Pick<Type.CommandTask, 'id' | 'type'>): Promise<void> => {
   switch (task.type) {

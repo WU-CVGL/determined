@@ -43,7 +43,6 @@ import {
   archiveExperiment,
   continueExperiment,
   getExpTrials,
-  openOrCreateTensorBoard,
   pauseExperiment,
   unarchiveExperiment,
 } from 'services/api';
@@ -66,7 +65,7 @@ import {
 } from 'utils/experiment';
 import { routeToReactUrl } from 'utils/routes';
 import { capitalize, pluralizer } from 'utils/string';
-import { openCommandResponse } from 'utils/wait';
+import { handleTensorBoardError, openTensorBoardSession } from 'utils/tensorBoardSession';
 
 import css from './ExperimentDetailsHeader.module.scss';
 
@@ -524,13 +523,13 @@ const ExperimentDetailsHeader: React.FC<Props> = ({
             onClick: async () => {
               setIsRunningTensorBoard(true);
               try {
-                const commandResponse = await openOrCreateTensorBoard({
+                await openTensorBoardSession({
                   experimentIds: [experiment.id],
                   workspaceId: experiment.workspaceId,
                 });
-                openCommandResponse(commandResponse);
-                setIsRunningTensorBoard(false);
               } catch (e) {
+                handleTensorBoardError(e, 'Unable to View TensorBoard');
+              } finally {
                 setIsRunningTensorBoard(false);
               }
             },
