@@ -2268,6 +2268,107 @@ describe('NtscLaunchModal', () => {
         expect(request.config.idle_timeout).toBe('1h');
         expect(request.config.resources.slots).toBe(0);
       }, 15_000);
+
+      it('keeps a template without ssh locked when its ssh line is deleted', async () => {
+        mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, SESSION_TEMPLATE]);
+        const { onLaunched, user } = await setup();
+        await openStartFrom(user);
+        await user.click(await screen.findByText('session'));
+        await waitFor(() => expect(serviceBox('tensorboard')).toBeDisabled());
+        await waitFor(() => expect(launchButton()).toBeEnabled());
+        await roundTrip(user, (config) => {
+          const { ssh: _ssh, ...services } = config.services;
+          return { ...config, idle_timeout: '1h', services };
+        });
+        expect(serviceBox('tensorboard')).toBeDisabled();
+        expect(screen.getByLabelText('Slots')).toBeDisabled();
+        expect(screen.getByLabelText('Slots')).toHaveValue('0');
+        expect(sourceModes()).toEqual([EXPERIMENTS_MODE]);
+        const again = await roundTrip(user);
+        expect(again.config.services.ssh).toEqual({ enabled: false });
+        const request = await launched(user, onLaunched);
+        expect(request.templateName).toBe('session');
+        expect(request.config.services).not.toHaveProperty('ssh');
+        expect(request.config.resources.slots).toBe(0);
+      }, 15_000);
+
+      it('keeps the locked TensorBoard of a template without ssh when its line is deleted', async () => {
+        mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, SESSION_TEMPLATE]);
+        const { onLaunched, user } = await setup();
+        await openStartFrom(user);
+        await user.click(await screen.findByText('session'));
+        await waitFor(() => expect(serviceBox('tensorboard')).toBeDisabled());
+        await waitFor(() => expect(launchButton()).toBeEnabled());
+        await roundTrip(user, (config) => {
+          const { tensorboard: _tensorboard, ...services } = config.services;
+          return { ...config, idle_timeout: '1h', services };
+        });
+        expect(serviceBox('tensorboard')).toBeChecked();
+        expect(serviceBox('tensorboard')).toBeDisabled();
+        expect(idTag('3')).toBeInTheDocument();
+        const request = await launched(user, onLaunched);
+        expect(request.templateName).toBe('session');
+        expect(request.config.services.tensorboard).toEqual({ experiment_ids: [3] });
+        expect(request.config.resources.slots).toBe(0);
+      }, 15_000);
+
+      it('unlocks a TensorBoard session launched again when its ssh line is deleted', async () => {
+        mocks.getShellConfig.mockResolvedValue(sessionShellConfig);
+        const { onLaunched, user } = await setup(
+          { initialTask: task(CommandType.Shell, { name: 'TensorBoard (brave-cat)' }) },
+          { settled: false },
+        );
+        await waitFor(() => expect(launchButton()).toBeEnabled());
+        expect(screen.getByLabelText('Slots')).toBeDisabled();
+        await roundTrip(user, (config) => {
+          const { ssh: _ssh, ...services } = config.services;
+          return { ...config, services };
+        });
+        expect(screen.getByLabelText('Slots')).toBeEnabled();
+        expect(serviceBox('tensorboard')).toBeEnabled();
+        const request = await launched(user, onLaunched);
+        expect(request.config.services).not.toHaveProperty('ssh');
+      }, 15_000);
+
+      it.each(['Shell (my-box)', 'TensorBoard (runs)'])(
+        'sends a description edited to look generated: %s',
+        async (description) => {
+          const { onLaunched, user } = await setup();
+          await roundTrip(user, (config) => ({ ...config, description }));
+          expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue(description);
+          const request = await launched(user, onLaunched);
+          expect(request.config.description).toBe(description);
+        },
+        15_000,
+      );
+
+      it('keeps a typed name that looks generated through an edit of something else', async () => {
+        const { onLaunched, user } = await setup();
+        await user.type(screen.getByPlaceholderText('Name (optional)'), 'Shell (dev)');
+        await roundTrip(user, (config) => ({ ...config, idle_timeout: '1h' }));
+        expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('Shell (dev)');
+        const request = await launched(user, onLaunched);
+        expect(request.config.description).toBe('Shell (dev)');
+        expect(request.config.idle_timeout).toBe('1h');
+      }, 15_000);
+
+      it('turns a service off whose line is deleted, as its box shows', async () => {
+        const { onLaunched, user } = await setup();
+        expect(serviceBox('jupyter')).toBeChecked();
+        await roundTrip(user, (config) => {
+          const { jupyter: _jupyter, ...services } = config.services;
+          return { ...config, idle_timeout: '1h', services };
+        });
+        expect(serviceBox('jupyter')).not.toBeChecked();
+        const again = await roundTrip(user);
+        expect(again.config.services.jupyter).toEqual({ enabled: false });
+        expect(serviceBox('jupyter')).not.toBeChecked();
+        await user.click(serviceBox('jupyter'));
+        await user.click(serviceBox('jupyter'));
+        const request = await launched(user, onLaunched);
+        expect(request.config.services.jupyter).toEqual({ enabled: false });
+        expect(request.config.idle_timeout).toBe('1h');
+      }, 15_000);
     });
     describe('with the TensorBoard data source', () => {
       /** An edit of the YAML that the simple form does not show. */
@@ -2366,6 +2467,35 @@ describe('NtscLaunchModal', () => {
         15_000,
       );
 
+      it('keeps the other mode’s log directory through an edit of something else', async () => {
+        const { onLaunched, user } = await setup();
+        await user.click(serviceBox('tensorboard'));
+        await user.click(modeRadio(LOGDIR_MODE));
+        await user.type(logdirField(), 'runs');
+        await user.click(modeRadio(EXPERIMENTS_MODE));
+        await addId(user, 'Experiments', '5');
+        await roundTrip(user, addEnv);
+        await user.click(modeRadio(LOGDIR_MODE));
+        expect(logdirField()).toHaveValue('runs');
+        const request = await launched(user, onLaunched);
+        expect(request.config.services.tensorboard).toEqual({ logdir: 'runs' });
+        expect(request.config.environment.environment_variables).toEqual(['EDITED=1']);
+      }, 15_000);
+
+      it('keeps the IDs of an unchecked TensorBoard through an edit of something else', async () => {
+        const { onLaunched, user } = await setup();
+        await user.click(serviceBox('tensorboard'));
+        await addId(user, 'Experiments', '5');
+        await user.click(serviceBox('tensorboard'));
+        const trip = await roundTrip(user, addEnv);
+        expect(trip.request.config.services).not.toHaveProperty('tensorboard');
+        await user.click(serviceBox('tensorboard'));
+        expect(modeRadio(EXPERIMENTS_MODE)).toBeChecked();
+        expect(idTag('5')).toBeInTheDocument();
+        const request = await launched(user, onLaunched);
+        expect(request.config.services.tensorboard).toEqual({ experiment_ids: [5] });
+      }, 15_000);
+
       it('keeps a TensorBoard session launched again without ssh across round trips', async () => {
         mocks.getShellConfig.mockResolvedValue(sessionShellConfig);
         const { onLaunched, user } = await setup(
@@ -2444,11 +2574,16 @@ describe('NtscLaunchModal', () => {
         expect(sourceModes()).toEqual([EXPERIMENTS_MODE]);
         expect(idTag('4')).toBeInTheDocument();
 
+        // The deleted editors' boxes show unchecked and turn them off.
+        expect(serviceBox('jupyter')).not.toBeChecked();
+        expect(serviceBox('vscode')).not.toBeChecked();
         const request = await launched(user, onLaunched);
         expect(request.config.resources.slots).toBe(0);
         expect(request.config.services).toEqual({
+          jupyter: { enabled: false },
           ssh: { enabled: false },
           tensorboard: { experiment_ids: [4] },
+          vscode: { enabled: false },
         });
       }, 15_000);
 

@@ -12,7 +12,7 @@ import Spinner from 'hew/Spinner';
 import { Loadable, Loaded, NotLoaded } from 'hew/utils/loadable';
 import { number, string, undefined as undefinedType, union } from 'io-ts';
 import yaml from 'js-yaml';
-import { isEqual, isPlainObject } from 'lodash';
+import { has, isEqual, isPlainObject, union as unionOf } from 'lodash';
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import Link from 'components/Link';
@@ -132,6 +132,10 @@ const checkedServices = (
 
 const serviceChecks = (choices: ShellServiceChoices = {}): Record<string, boolean> =>
   Object.fromEntries(SHELL_SERVICES.map((name) => [name, choices[name] ?? false]));
+
+/** A shell without ssh runs the tensorboard service: its box is locked. */
+const serviceLocked = (name: ShellService, sshOff: boolean): boolean =>
+  sshOff && name === 'tensorboard';
 
 /** The services that a config has an entry for: the ones the master offers for it. */
 const offeredServices = (choices: ShellServiceChoices = {}): ShellService[] =>
@@ -272,6 +276,8 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   // Whether the start-from turns ssh off: the shell then runs with 0 slots and the tensorboard
   // service reading experiments or trials.
   const [sshOff, setSshOff] = useState(false);
+  // Whether the start-from itself turns ssh off: a template's, which the request does not carry.
+  const startSshOff = useRef(false);
 
   /**
    * The values to keep for the next launch. A start-from without ssh keeps the previous slots and
@@ -444,9 +450,10 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
 
   /**
    * Applies the edits of a full config whose YAML was edited, the difference to the previewed
-   * config, to the request it was previewed for, which becomes the start-from's base; fills the
-   * simple form from it and confirms its services. The values the master filled in and the user
-   * left as they were are not in the edits. A YAML that does not parse to a config changes nothing.
+   * config, to the request it was previewed for, which becomes the start-from's base; sets the
+   * simple fields that the edits change and confirms its services. The values the master filled
+   * in and the user left as they were are not in the edits. A YAML that does not parse to a config
+   * changes nothing.
    */
   const applyEditedConfig = useCallback(() => {
     const shown = previewed.current;
@@ -459,25 +466,42 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     if (!shown || !isPlainObject(edited)) return;
     const base = applyConfigEdits(shown.request, edited as RawJson, shown.config);
     if (isEqual(base, shown.request)) return;
-    const fields = formFieldsFromConfig(base);
-    const services = serviceChecks(fields.services);
-    // A template's ssh-off is in the edited config, not in the base.
-    const baseSshOff = sshDisabled(edited as RawJson);
+    // Only the simple fields that the edits change are set; the others keep the form's values,
+    // such as the other source mode's fields. A description in the base is the user's.
+    const read = (config: RawJson) => ({
+      ...formFieldsFromConfig(config),
+      name: typeof config.description === 'string' ? config.description : '',
+    });
+    const before = read(shown.request);
+    const after = read(base);
+    // Without an ssh entry in the base, the start-from's ssh-off applies.
+    const baseSshOff = has(base, ['services', 'ssh']) ? sshDisabled(base) : startSshOff.current;
     setBaseConfig(base);
     setSshOff(baseSshOff);
-    offered.current = offeredServices(fields.services);
-    form.setFieldsValue({
-      name: fields.name,
-      pool: fields.pool,
-      services,
-      slots: baseSshOff ? 0 : fields.slots,
+    // A service whose entry is removed stays offered, so that its unchecked box turns it off.
+    offered.current = unionOf(offered.current, offeredServices(after.services));
+    if (after.name !== before.name) form.setFieldValue('name', after.name);
+    if (after.pool !== before.pool) form.setFieldValue('pool', after.pool);
+    if (baseSshOff) form.setFieldValue('slots', 0);
+    else if (after.slots !== before.slots) form.setFieldValue('slots', after.slots);
+    // A locked box is checked.
+    SHELL_SERVICES.forEach((name) => {
+      const runs = after.services?.[name];
+      if (serviceLocked(name, baseSshOff)) form.setFieldValue(['services', name], true);
+      else if (runs !== before.services?.[name]) {
+        form.setFieldValue(['services', name], runs ?? false);
+      }
     });
-    // Replaced, not merged: the other mode's fields do not carry over.
-    form.setFieldValue('dataSource', fields.dataSource);
+    // Replaced, not merged: the other mode's fields do not carry over. Without a tensorboard entry
+    // the form's source stays.
+    const hasTensorBoard = has(base, ['services', 'tensorboard']);
+    if (hasTensorBoard && !isEqual(after.dataSource, before.dataSource)) {
+      form.setFieldValue('dataSource', after.dataSource);
+    }
     setServicesPreview({
       baseConfig: base,
-      sent: services,
-      sentDataSource: fields.dataSource,
+      sent: form.getFieldValue('services'),
+      sentDataSource: form.getFieldValue('dataSource'),
       seq: servicesPreview.current.seq + 1,
       source: form.getFieldValue('source'),
       status: 'success',
@@ -574,6 +598,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
         setBaseConfig(base);
         setRedactedEnv(start.redactedEnv);
         setSshOff(sshDisabled(base));
+        startSshOff.current = false;
         offered.current = offeredServices(fields.services);
         form.setFieldsValue({
           name: fields.name,
@@ -593,6 +618,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       setRedactedEnv([]);
       const nextSshOff = start.kind === 'template' && sshDisabled(start.template.config);
       setSshOff(nextSshOff);
+      startSshOff.current = nextSshOff;
       // The 0 slots of a start-from without ssh do not carry over to one with ssh.
       if (sshOff && !nextSshOff) form.setFieldValue('slots', defaults.slots ?? DEFAULT_SLOT_COUNT);
       if (start.kind === 'template') {
@@ -1055,7 +1081,7 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
         <Row>
           {SHELL_SERVICES.map((name) => (
             <Form.Item key={name} name={['services', name]} noStyle valuePropName="checked">
-              <Checkbox disabled={sshOff && name === 'tensorboard'}>
+              <Checkbox disabled={serviceLocked(name, sshOff)}>
                 {SHELL_SERVICE_LABELS[name]}
               </Checkbox>
             </Form.Item>
