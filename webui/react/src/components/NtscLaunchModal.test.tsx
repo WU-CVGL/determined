@@ -34,6 +34,8 @@ const mocks = vi.hoisted(() => ({
   openCommandResponse: vi.fn(),
   pools: [] as unknown[],
   previewShell: vi.fn(),
+  /** The host path of a shared_fs checkpoint storage that experiments and trials are read from. */
+  sharedFsHostPath: undefined as string | undefined,
   taskTemplatesOn: true,
   updateTaskTemplate: vi.fn(),
 }));
@@ -208,6 +210,13 @@ const SESSION_TEMPLATE = {
   workspaceId: WORKSPACE.id,
 };
 
+/** A template that pulls its image with registry credentials. */
+const REGISTRY_TEMPLATE = {
+  config: { environment: { registry_auth: { password: 'tpl-secret', username: 'tpl' } } },
+  name: 'private-image',
+  workspaceId: WORKSPACE.id,
+};
+
 /** A TensorBoard viewing session's config as GET /api/v1/shells/{id} returns it. */
 const sessionShellConfig = {
   description: 'TensorBoard (brave-cat)',
@@ -223,8 +232,12 @@ const DEFAULT_SERVICES = { jupyter: {}, vscode: {} };
 
 /**
  * What the master's shell preview returns for a request config: no description, entrypoint or
- * idle_timeout of its own, and the services it runs: its defaults, under the template's entries,
- * under the request's, which keep the template's options they do not set but its enabled.
+ * idle_timeout of its own; the template's environment under the request's, with the image of its
+ * own; the request's priority, else the template's, else the pool default 42; the bind mounts of
+ * both, and the read-only mount of the shared_fs checkpoint storage (mocks.sharedFsHostPath) when
+ * TensorBoard reads experiments or trials; and the services it runs: its defaults, under the
+ * template's entries, under the request's, which keep the template's options they do not set but
+ * its enabled.
  */
 const previewFor = (params: { config?: RawJson; templateName?: string }) => {
   const config = params.config ?? {};
@@ -236,6 +249,7 @@ const previewFor = (params: { config?: RawJson; templateName?: string }) => {
     TENSORBOARD_TEMPLATE,
     SESSION_TEMPLATE,
     EXPERIMENT_TEMPLATE,
+    REGISTRY_TEMPLATE,
   ].find((item) => item.name === params.templateName)?.config as RawJson | undefined;
   const templateServices: RawJson = template?.services ?? {};
   const requestServices: RawJson = config.services ?? {};
@@ -250,12 +264,33 @@ const previewFor = (params: { config?: RawJson; templateName?: string }) => {
   // A shell without ssh has TensorBoard as its primary service and no default editors.
   const tensorBoardPrimary = services.ssh?.enabled === false;
   const idleTimeout = config.idle_timeout ?? template?.idle_timeout;
+  const tensorboard = services.tensorboard;
+  const readsIds = !!(tensorboard?.experiment_ids?.length || tensorboard?.trial_ids?.length);
+  const mounts: RawJson[] = [...(template?.bind_mounts ?? []), ...(config.bind_mounts ?? [])];
+  const sharedFsPath = '/determined_shared_fs';
+  if (
+    mocks.sharedFsHostPath &&
+    readsIds &&
+    !mounts.some((mount) => mount.container_path === sharedFsPath)
+  ) {
+    mounts.push({
+      container_path: sharedFsPath,
+      host_path: mocks.sharedFsHostPath,
+      propagation: 'rprivate',
+      read_only: true,
+    });
+  }
   return Promise.resolve({
+    ...(mounts.length === 0 ? {} : { bind_mounts: mounts }),
     ...(config.description === undefined ? {} : { description: config.description }),
-    environment: { image: { cuda: custom ? 'custom:2' : 'default:1' } },
+    environment: {
+      ...template?.environment,
+      ...config.environment,
+      image: { cuda: custom ? 'custom:2' : 'default:1' },
+    },
     ...(idleTimeout === undefined ? {} : { idle_timeout: idleTimeout }),
     resources: {
-      priority: 42,
+      priority: resources.priority ?? template?.resources?.priority ?? 42,
       resource_pool: resources.resource_pool ?? 'default',
       slots: resources.slots ?? 1,
     },
@@ -418,6 +453,7 @@ describe('NtscLaunchModal', () => {
     mocks.getUserSetting.mockReset().mockResolvedValue({ settings: [] });
     mocks.openCommandResponse.mockReset();
     mocks.previewShell.mockReset().mockImplementation(previewFor);
+    mocks.sharedFsHostPath = undefined;
     userStore.updateCurrentUser({ id: USER_ID, isActive: true, isAdmin: false, username: 'me' });
   });
 
@@ -1981,6 +2017,72 @@ describe('NtscLaunchModal', () => {
       }
       expect(viaSimpleForm).toEqual(direct);
     });
+
+    it('keeps a typed priority and registry_auth through a second edited round trip', async () => {
+      const registryAuth = { password: 'hunter2', username: 'me' };
+      const { onLaunched, user } = await setup();
+      await roundTrip(user, (config) => ({
+        ...config,
+        environment: { ...config.environment, registry_auth: registryAuth },
+        resources: { ...config.resources, priority: 7 },
+      }));
+      const second = await roundTrip(user, (config) => ({
+        ...config,
+        environment: { ...config.environment, environment_variables: ['EDITED=1'] },
+      }));
+      expect(second.request.config.resources.priority).toBe(7);
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      const { config } = mocks.launchShell.mock.lastCall?.[0] ?? {};
+      expect(config.resources.priority).toBe(7);
+      expect(config.environment).toEqual({
+        environment_variables: ['EDITED=1'],
+        image: { cuda: 'default:1' },
+        registry_auth: registryAuth,
+      });
+    });
+
+    it.each([false, true])(
+      'keeps the registry_auth of a template through an edited full config (restored: %s)',
+      async (restored) => {
+        mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, REGISTRY_TEMPLATE]);
+        if (restored) {
+          mocks.getUserSetting.mockResolvedValue(
+            userSettingsResponse({ 'shell-launch': { template: REGISTRY_TEMPLATE.name } }),
+          );
+        }
+        const body = async () => {
+          const { onLaunched, user } = await setup();
+          if (restored) {
+            expect(await screen.findByTitle(REGISTRY_TEMPLATE.name)).toBeInTheDocument();
+          } else {
+            await openStartFrom(user);
+            await user.click(await screen.findByText(REGISTRY_TEMPLATE.name));
+          }
+          await waitFor(() =>
+            expect(mocks.previewShell).toHaveBeenLastCalledWith(
+              expect.objectContaining({ templateName: REGISTRY_TEMPLATE.name }),
+            ),
+          );
+          await waitFor(() => expect(launchButton()).toBeEnabled());
+          await roundTrip(user, (config) => ({
+            ...config,
+            environment: { ...config.environment, environment_variables: ['EDITED=1'] },
+          }));
+          await launch(user);
+          await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+          const request = mocks.launchShell.mock.lastCall?.[0];
+          expect(request.templateName).toBeUndefined();
+          expect(request.config.environment.registry_auth).toEqual(
+            REGISTRY_TEMPLATE.config.environment.registry_auth,
+          );
+          expect(request.config.resources).not.toHaveProperty('priority');
+        };
+        if (restored) await withLoadedSettings(body);
+        else await body();
+      },
+      15_000,
+    );
     describe('with the TensorBoard data source', () => {
       /** An edit of the YAML that the simple form does not show. */
       const addEnv = (config: RawJson): RawJson => ({
@@ -2096,15 +2198,51 @@ describe('NtscLaunchModal', () => {
         expect(idTag('3')).toBeInTheDocument();
         expect(idTag('7')).toBeInTheDocument();
 
-        const request = await launched(user, onLaunched);
-        expect(request.templateName).toBeUndefined();
-        expect(request.config).toMatchObject({
-          environment: { environment_variables: ['EDITED=1'] },
-          idle_timeout: '5m',
-          resources: { resource_pool: 'aux', slots: 0 },
-          services: { ssh: { enabled: false }, tensorboard: { experiment_ids: [3, 7] } },
+        expect(await launched(user, onLaunched)).toEqual({
+          config: {
+            environment: { environment_variables: ['EDITED=1'], image: { cuda: 'default:1' } },
+            idle_timeout: '5m',
+            resources: { resource_pool: 'aux', slots: 0 },
+            services: { ssh: { enabled: false }, tensorboard: { experiment_ids: [3, 7] } },
+          },
+          templateName: undefined,
+          workspaceId: WORKSPACE.id,
         });
-        expect(request.config.resources).not.toHaveProperty('priority');
+      }, 15_000);
+
+      it('sends no checkpoint storage mount of the preview after a switch to a log directory', async () => {
+        mocks.sharedFsHostPath = '/mnt/ckpt-a';
+        const { onLaunched, user } = await setup();
+        await user.click(serviceBox('tensorboard'));
+        await addId(user, 'Experiments', '5');
+        const trip = await roundTrip(user, addEnv);
+        expect(trip.config.bind_mounts).toEqual([
+          expect.objectContaining({ container_path: '/determined_shared_fs', read_only: true }),
+        ]);
+        await user.click(modeRadio(LOGDIR_MODE));
+        await user.type(logdirField(), 'runs');
+
+        const request = await launched(user, onLaunched);
+        expect(request.config).not.toHaveProperty('bind_mounts');
+        expect(request.config.environment.environment_variables).toEqual(['EDITED=1']);
+        expect(request.config.services.tensorboard).toEqual({ logdir: 'runs' });
+      }, 15_000);
+
+      it('sends no checkpoint storage mount of a TensorBoard session launched again', async () => {
+        const sharedFs = {
+          container_path: '/determined_shared_fs',
+          host_path: '/mnt/ckpt-a',
+          propagation: 'rprivate',
+          read_only: true,
+        };
+        mocks.getShellConfig.mockResolvedValue({ ...sessionShellConfig, bind_mounts: [sharedFs] });
+        const { onLaunched, user } = await setup(
+          { initialTask: task(CommandType.Shell, { name: 'TensorBoard (brave-cat)' }) },
+          { settled: false },
+        );
+        await waitFor(() => expect(launchButton()).toBeEnabled());
+        const request = await launched(user, onLaunched);
+        expect(request.config).not.toHaveProperty('bind_mounts');
       }, 15_000);
 
       it('locks TensorBoard and the slots of an edited full config that turns ssh off', async () => {

@@ -195,6 +195,27 @@ export const simpleLaunchConfig = (options: NtscLaunchOptions): RawJson => {
   };
 };
 
+/** Where the master mounts a shared_fs checkpoint storage for the tensorboard service. */
+export const SHARED_FS_CONTAINER_PATH = '/determined_shared_fs';
+
+const mountList = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+
+/** Whether two bind mounts mount the same host path at the same container path. */
+const sameMount = (a: unknown, b: unknown): boolean => {
+  const x = asObject(a);
+  const y = asObject(b);
+  return !!x && !!y && x.container_path === y.container_path && x.host_path === y.host_path;
+};
+
+/** Removes the bind mounts that `drop` matches, and the list when that empties it. */
+const dropMounts = (config: RawJson, drop: (mount: unknown) => boolean): void => {
+  const mounts = mountList(config.bind_mounts);
+  const kept = mounts.filter((mount) => !drop(mount));
+  if (kept.length === mounts.length) return;
+  if (kept.length === 0) delete config.bind_mounts;
+  else config.bind_mounts = kept;
+};
+
 /**
  * Prepares a past task's merged config (from the master) for another launch, as a "Start from" of
  * it does and as templates and this browser's history save it. A config the user edits in the
@@ -205,6 +226,8 @@ export const simpleLaunchConfig = (options: NtscLaunchOptions): RawJson => {
  * - environment.registry_auth: it can hold registry credentials.
  * - resources.priority: the master filled in the pool's default; dropping it
  *   lets the default of the chosen pool apply again.
+ * - the read-only mount at SHARED_FS_CONTAINER_PATH of a tensorboard service that reads
+ *   experiments or trials: the master mounts their checkpoint storage there at each launch.
  * Keys are deleted rather than set to null, so the master's defaults apply.
  * Everything else (image, bind mounts, environment variables, ...) is kept.
  */
@@ -216,25 +239,52 @@ export const relaunchConfig = (config: RawJson): RawJson => {
   if (environment) delete environment.registry_auth;
   const resources = asObject(out.resources);
   if (resources) delete resources.priority;
+  const tensorboard = asObject(asObject(out.services)?.tensorboard);
+  const readsIds = [tensorboard?.experiment_ids, tensorboard?.trial_ids].some(
+    (ids) => (idList(ids)?.length ?? 0) !== 0,
+  );
+  if (readsIds) {
+    dropMounts(out, (mount) => {
+      const item = asObject(mount);
+      return item?.container_path === SHARED_FS_CONTAINER_PATH && item.read_only === true;
+    });
+  }
   return out;
 };
 
 /**
- * Makes the full config the user edited the launch form's draft. The master fills in
- * resources.priority (the pool's default) and environment.registry_auth (the task container
- * defaults') when it previews; where the edited config still holds the previewed value, it is
- * dropped, so the defaults of the pool chosen at launch apply. A value the user changed stays.
+ * Makes the full config the user edited the launch form's draft. The master's preview fills in
+ * values the request did not set: resources.priority (the pool's default),
+ * environment.registry_auth (the task container defaults') and bind mounts (the task container
+ * defaults', the tensorboard service's checkpoint storage). Where the edited config still holds
+ * such a value as previewed, it is dropped, so that the master fills it in again at launch for the
+ * pool and the sources chosen then. A value the user changed or added stays, and so does one that
+ * the previewed request set.
+ *
+ * `requested` is the configs the preview was requested with: the request's and the template's it
+ * named. Undefined, when the template's is not known, drops nothing.
  */
-export const draftFromEditedConfig = (edited: RawJson, previewed: unknown): RawJson => {
+export const draftFromEditedConfig = (
+  edited: RawJson,
+  previewed: unknown,
+  requested: RawJson[] | undefined,
+): RawJson => {
   const out = cloneDeep(edited);
+  if (!requested) return out;
   const shown = asObject(previewed);
+  const filledIn = (section: string, key: string, value: unknown) =>
+    isEqual(value, asObject(shown?.[section])?.[key]) &&
+    requested.every((config) => isNil(asObject(config[section])?.[key]));
   const environment = asObject(out.environment);
-  const shownAuth = asObject(shown?.environment)?.registry_auth;
-  if (environment && isEqual(environment.registry_auth, shownAuth))
+  if (environment && filledIn('environment', 'registry_auth', environment.registry_auth))
     delete environment.registry_auth;
   const resources = asObject(out.resources);
-  const shownPriority = asObject(shown?.resources)?.priority;
-  if (resources && isEqual(resources.priority, shownPriority)) delete resources.priority;
+  if (resources && filledIn('resources', 'priority', resources.priority)) delete resources.priority;
+  const requestedMounts = requested.flatMap((config) => mountList(config.bind_mounts));
+  const addedMounts = mountList(shown?.bind_mounts).filter(
+    (mount) => !requestedMounts.some((item) => sameMount(item, mount)),
+  );
+  dropMounts(out, (mount) => addedMounts.some((item) => isEqual(item, mount)));
   return out;
 };
 

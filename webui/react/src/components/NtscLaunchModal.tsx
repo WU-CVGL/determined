@@ -25,7 +25,7 @@ import TemplateCreateModalComponent from 'pages/Templates/TemplateCreateModal';
 import { paths } from 'routes/utils';
 import clusterStore from 'stores/cluster';
 import workspaceStore from 'stores/workspaces';
-import { CommandResponse, CommandTask, RawJson, ResourcePool, Workspace } from 'types';
+import { CommandResponse, CommandTask, RawJson, ResourcePool, Template, Workspace } from 'types';
 import { isUsablePool } from 'utils/cluster';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import {
@@ -47,7 +47,7 @@ import {
   TensorBoardSourceMode,
 } from 'utils/ntscConfig';
 import { useObservable } from 'utils/observable';
-import { launchShell, PREVIEW_ERROR, previewShell } from 'utils/shell';
+import { launchShell, PREVIEW_ERROR, previewShell, shellRequest } from 'utils/shell';
 
 const DEFAULT_SLOT_COUNT = 1;
 const BASE_FORM_ID = 'ntsc-launch-form';
@@ -414,21 +414,40 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
 
   const handleServicesRetry = useCallback(() => setServicesRetry((count) => count + 1), []);
 
-  // Previewed each time the full config opens, numbered so that a late answer is dropped, and the
-  // config as the editor first shows it, to tell an edited one.
+  // The templates that "Start from" lists, to tell what a previewed template sets.
+  const templates = useRef<Template[]>();
+  const handleTemplates = useCallback((list: Template[]) => {
+    templates.current = list;
+  }, []);
+
+  // Previewed each time the full config opens, numbered so that a late answer is dropped; the
+  // config as the editor first shows it, to tell an edited one; and the configs it was requested
+  // with (see draftFromEditedConfig).
   const configSeq = useRef(0);
   const previewedConfig = useRef<unknown>();
+  const previewedRequest = useRef<RawJson[]>();
   const fetchConfig = useCallback(async () => {
     const seq = ++configSeq.current;
     setConfig(NotLoaded);
     setConfigError(undefined);
 
     const fields: LaunchFormValues = form.getFieldsValue(true);
+    const options = simpleOptions(fields);
+    const request = shellRequest(options);
+    const template = request.templateName
+      ? templates.current?.find((item) => item.name === request.templateName)
+      : undefined;
     try {
-      const newConfig = await previewShell(simpleOptions(fields));
+      const newConfig = await previewShell(options);
       if (seq !== configSeq.current) return;
       const text = yaml.dump(newConfig);
       previewedConfig.current = yaml.load(text);
+      const requested = request.config ?? {};
+      previewedRequest.current = !request.templateName
+        ? [requested]
+        : template
+          ? [requested, template.config ?? {}]
+          : undefined;
       setConfig(Loaded(text));
     } catch (e) {
       if (seq === configSeq.current) setConfigError(e instanceof Error ? e.message : PREVIEW_ERROR);
@@ -448,7 +467,11 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       return;
     }
     if (!isPlainObject(edited) || isEqual(edited, previewedConfig.current)) return;
-    const base = draftFromEditedConfig(edited as RawJson, previewedConfig.current);
+    const base = draftFromEditedConfig(
+      edited as RawJson,
+      previewedConfig.current,
+      previewedRequest.current,
+    );
     const fields = formFieldsFromConfig(base);
     const services = serviceChecks(fields.services);
     const baseSshOff = sshDisabled(base);
@@ -713,6 +736,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
           onStartFrom={handleStartFrom}
           onStartFromAutoSelected={handleStartFromAutoSelected}
           onStartFromLoadingTask={setStartFromLoadingTask}
+          onTemplates={handleTemplates}
         />
       )}
       {redactedEnv.length > 0 && (
@@ -883,6 +907,7 @@ interface LaunchFormProps {
   onStartFrom: (start: StartFrom) => void;
   onStartFromAutoSelected: () => void;
   onStartFromLoadingTask: (taskId?: string) => void;
+  onTemplates: (templates: Template[]) => void;
   /** The message of the refused preview of the services, if the last one was refused. */
   servicesError?: string;
   setWorkspace: (arg0: Workspace | undefined) => void;
@@ -905,6 +930,7 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
   onStartFrom,
   onStartFromAutoSelected,
   onStartFromLoadingTask,
+  onTemplates,
   servicesError,
   setWorkspace,
   sshOff,
@@ -1020,6 +1046,7 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
           onAutoSelected={onStartFromAutoSelected}
           onLoadingTaskChange={onStartFromLoadingTask}
           onResolve={onStartFrom}
+          onTemplates={onTemplates}
         />
       </Form.Item>
       <Form.Item initialValue={defaults?.name} label="Name" name="name">
