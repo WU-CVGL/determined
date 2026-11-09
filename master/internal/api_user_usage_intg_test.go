@@ -6,6 +6,7 @@ package internal
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -186,6 +187,33 @@ func setupUserUsageTest(t *testing.T) (*apiServer, context.Context, model.User, 
 		},
 		// Before task_stats: no QUEUED row.
 		{pool: "gpu", slots: 1, start: "2020-03-09 10:00", end: "2020-03-09 11:00", state: terminated},
+		// Assigned before the range, released just after its start.
+		{
+			pool: "gpu", slots: 1, queuedEnds: []string{"2020-02-29 22:00"},
+			start: "2020-02-29 22:01", end: "2020-03-01 03:00", state: terminated,
+		},
+		// Assigned before midnight, pulled after it: counts from the assignment.
+		{
+			pool: "gpu", slots: 1, queuedEnds: []string{"2020-03-01 23:30"},
+			start: "2020-03-02 00:30", end: "2020-03-02 01:00", state: terminated,
+		},
+		// Released exactly at midnight, and a minute after it.
+		{
+			pool: "gpu", slots: 1, queuedEnds: []string{"2020-03-04 22:00"},
+			start: "2020-03-04 22:00", end: "2020-03-05 00:00", state: terminated,
+		},
+		{
+			pool: "gpu", slots: 1, queuedEnds: []string{"2020-03-04 23:00"},
+			start: "2020-03-04 23:00", end: "2020-03-05 00:01", state: terminated,
+		},
+		// Assigned exactly at midnight.
+		{
+			pool: "gpu", slots: 1, queuedEnds: []string{"2020-03-06 00:00"},
+			start: "2020-03-06 00:00", end: "2020-03-06 01:00", state: terminated,
+		},
+		// No QUEUED row, within a few hours before the end of a day.
+		{pool: "gpu", slots: 1, start: "2020-03-09 20:00", end: "2020-03-09 22:00", state: terminated},
+		{pool: "gpu", slots: 1, start: "2020-03-10 20:00", end: "2020-03-10 23:00", state: terminated},
 	} {
 		addUsageAllocation(t, cmd, i, a)
 	}
@@ -204,47 +232,86 @@ func setupUserUsageTest(t *testing.T) (*apiServer, context.Context, model.User, 
 	return api, ctx, owner, other
 }
 
+// usageMinutes converts minutes to hours as the entries do, from seconds.
+func usageMinutes(n int) float64 {
+	return float64(n*60) / 3600
+}
+
 // userUsageDailyMarch2020 is the owner's usage from 2020-03-01 to 2020-03-10.
 var userUsageDailyMarch2020 = []userUsageEntry{
-	{"2020-03-01", 4, 0, 0, 4, 1},
-	{"2020-03-02", 4, 0, 1, 5, 1},
+	{"2020-03-01", 3 + 4 + 0.5, 0, 0, 3 + 4, 1},
+	{"2020-03-02", 4 + 1, 0, 1, 5, 1},
+	{"2020-03-03", 0, 0, 0, 0, 0},
+	{"2020-03-04", 2 + 1, 0, 0, 2, 1},
+	{"2020-03-05", usageMinutes(1), 0, 0, usageMinutes(1), 1},
+	{"2020-03-06", 1, 0, 0, 1, 1},
+	{"2020-03-07", 0, 2 * 2, 0, 2, 1},
+	{"2020-03-08", 0, 2 * 24, 0, 24, 1},
+	{"2020-03-09", 1 + 2, 2 * 2, 0, 2 + 1 + 2, 1},
+	{"2020-03-10", 3, 0, 0, 3, 1},
+}
+
+// otherUsageDailyMarch2020 is the other user's usage from 2020-03-01 to 2020-03-10.
+var otherUsageDailyMarch2020 = []userUsageEntry{
+	{"2020-03-01", 4 * 8, 0, 0, 8, 1},
+	{"2020-03-02", 0, 0, 0, 0, 0},
 	{"2020-03-03", 0, 0, 0, 0, 0},
 	{"2020-03-04", 0, 0, 0, 0, 0},
 	{"2020-03-05", 0, 0, 0, 0, 0},
 	{"2020-03-06", 0, 0, 0, 0, 0},
-	{"2020-03-07", 0, 2 * 2, 0, 2, 1},
-	{"2020-03-08", 0, 2 * 24, 0, 24, 1},
-	{"2020-03-09", 1, 2 * 2, 0, 3, 1},
+	{"2020-03-07", 0, 0, 0, 0, 0},
+	{"2020-03-08", 0, 0, 0, 0, 0},
+	{"2020-03-09", 0, 0, 0, 0, 0},
 	{"2020-03-10", 0, 0, 0, 0, 0},
 }
 
-func TestUserUsage(t *testing.T) {
-	api, ctx, owner, other := setupUserUsageTest(t)
-	daily := func(userID model.UserID) []userUsageEntry {
+// requireUserUsageDaily checks the user's daily usage from 2020-03-01 to 2020-03-10, read as
+// one range and one day at a time, so that each day's range cuts through the allocations.
+func requireUserUsageDaily(
+	ctx context.Context, t *testing.T, api *apiServer, userID model.UserID, want []userUsageEntry,
+) {
+	read := func(start, end string) []userUsageEntry {
 		resp, err := api.GetUserUsage(ctx, &apiv1.GetUserUsageRequest{
-			UserId: int32(userID), StartDate: "2020-03-01", EndDate: "2020-03-10", Period: usageDaily,
+			UserId: int32(userID), StartDate: start, EndDate: end, Period: usageDaily,
 		})
 		require.NoError(t, err)
 		require.NotNil(t, resp.AsOf)
 		require.NotEmpty(t, resp.CoverageStart)
-		require.LessOrEqual(t, resp.CoverageStart, "2020-03-01")
+		require.LessOrEqual(t, resp.CoverageStart, start)
 		return usageEntries(resp.Entries)
 	}
-
-	require.Equal(t, userUsageDailyMarch2020, daily(owner.ID))
-	otherDaily := daily(other.ID)
-	require.Len(t, otherDaily, 10)
-	require.Equal(t, userUsageEntry{"2020-03-01", 4 * 8, 0, 0, 8, 1}, otherDaily[0])
-	for _, e := range otherDaily[1:] {
-		require.Equal(t, userUsageEntry{period: e.period}, e)
+	require.Equal(t, want, read("2020-03-01", "2020-03-10"))
+	for _, e := range want {
+		require.Equal(t, []userUsageEntry{e}, read(e.period, e.period), e.period)
 	}
+}
+
+func TestUserUsage(t *testing.T) {
+	api, ctx, owner, other := setupUserUsageTest(t)
+	requireUserUsageDaily(ctx, t, api, owner.ID, userUsageDailyMarch2020)
+	requireUserUsageDaily(ctx, t, api, other.ID, otherUsageDailyMarch2020)
+
+	// The read keeps the allocations that overlap the range, and the open one killed before
+	// pulling, which is skipped later; it leaves out the one released exactly at the range start
+	// and the one assigned exactly at its end.
+	rows, err := readUserAllocations(context.TODO(), db.Bun(), owner.ID,
+		time.Date(2020, 3, 5, 0, 0, 0, 0, time.UTC), time.Date(2020, 3, 6, 0, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+	var read []string
+	for _, r := range rows {
+		read = append(read, r.AllocationID[strings.LastIndex(r.AllocationID, "."):])
+	}
+	require.ElementsMatch(t, []string{".1", ".9"}, read)
 
 	resp, err := api.GetUserUsage(ctx, &apiv1.GetUserUsageRequest{
 		UserId: int32(owner.ID), StartDate: "2020-03", EndDate: "2020-04", Period: usageMonthly,
 	})
 	require.NoError(t, err)
 	require.Equal(t, []userUsageEntry{
-		{"2020-03", 4 + 4 + 1, 2*2 + 2*24 + 2*2, 1, 4 + 5 + 2 + 24 + 3, 5},
+		{
+			"2020-03", usageMinutes((7.5+5+3+1+3+3)*60 + 1), 2*2 + 2*24 + 2*2, 1,
+			usageMinutes((7+5+2+1+2+24+5+3)*60 + 1), 9,
+		},
 		{"2020-04", 0, 0, 0, 0, 0},
 	}, usageEntries(resp.Entries))
 
@@ -252,7 +319,7 @@ func TestUserUsage(t *testing.T) {
 	_, err = db.Bun().NewUpdate().Table("users").Set("username = ?", uuid.NewString()).
 		Where("id = ?", owner.ID).Exec(context.TODO())
 	require.NoError(t, err)
-	require.Equal(t, userUsageDailyMarch2020, daily(owner.ID))
+	requireUserUsageDaily(ctx, t, api, owner.ID, userUsageDailyMarch2020)
 
 	_, err = api.GetUserUsage(ctx, &apiv1.GetUserUsageRequest{
 		UserId: 1 << 30, StartDate: "2020-03-01", EndDate: "2020-03-10", Period: usageDaily,
@@ -269,7 +336,7 @@ func TestUserUsage(t *testing.T) {
 }
 
 func TestUserUsageSessionTimeZone(t *testing.T) {
-	api, ctx, owner, _ := setupUserUsageTest(t)
+	api, ctx, owner, other := setupUserUsageTest(t)
 
 	// Pin the pool to one connection so that the session time zone applies to the RPC's reads.
 	sqlDB := db.Bun().DB
@@ -285,11 +352,8 @@ func TestUserUsageSessionTimeZone(t *testing.T) {
 		t.Run(tz, func(t *testing.T) {
 			_, err := db.Bun().ExecContext(context.TODO(), fmt.Sprintf("SET TIME ZONE '%s'", tz))
 			require.NoError(t, err)
-			resp, err := api.GetUserUsage(ctx, &apiv1.GetUserUsageRequest{
-				UserId: int32(owner.ID), StartDate: "2020-03-01", EndDate: "2020-03-10", Period: usageDaily,
-			})
-			require.NoError(t, err)
-			require.Equal(t, userUsageDailyMarch2020, usageEntries(resp.Entries))
+			requireUserUsageDaily(ctx, t, api, owner.ID, userUsageDailyMarch2020)
+			requireUserUsageDaily(ctx, t, api, other.ID, otherUsageDailyMarch2020)
 
 			var got string
 			require.NoError(t, db.Bun().NewRaw("SHOW TIME ZONE").Scan(context.TODO(), &got))

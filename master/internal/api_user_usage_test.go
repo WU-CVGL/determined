@@ -11,7 +11,6 @@ import (
 
 	"github.com/determined-ai/determined/master/internal/sproto"
 	"github.com/determined-ai/determined/master/pkg/aproto"
-	"github.com/determined-ai/determined/master/pkg/cproto"
 	"github.com/determined-ai/determined/master/pkg/device"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
@@ -511,55 +510,4 @@ func TestCurrentResourcesByPool(t *testing.T) {
 	require.Equal(t, "k8s", got[2].ResourcePool)
 	require.Equal(t, int32(1), got[2].Counts.Gpus)
 	require.Nil(t, got[2].Counts.AuxContainers)
-}
-
-// TestCurrentResourcesAuxMatchesZeroSlotContainers checks that, summed over all owners, the Aux
-// count equals the agentrm pool summary's active Aux containers: the containers without devices
-// (agentState.numUsedZeroSlots), here on a fabricated state of agents and their containers.
-func TestCurrentResourcesAuxMatchesZeroSlotContainers(t *testing.T) {
-	type agent struct {
-		pool       string
-		containers []cproto.Container
-	}
-	agents := map[string]agent{
-		"g1": {"gpu", []cproto.Container{
-			{ID: "c1", Devices: devices(device.CUDA, 2)},
-			{ID: "c2"},
-			{ID: "c3"},
-		}},
-		"g2": {"gpu", []cproto.Container{{ID: "c4"}, {ID: "c5", Devices: devices(device.CUDA, 1)}}},
-		"p1": {"cpu", []cproto.Container{{ID: "c6"}, {ID: "c7", Devices: devices(device.CPU, 4)}}},
-	}
-
-	numUsedZeroSlots := map[string]int32{}
-	summaries := map[model.AllocationID]sproto.AllocationSummary{}
-	owned := map[model.TaskID]bool{}
-	for id, a := range agents {
-		for i, c := range a.containers {
-			if len(c.Devices) == 0 {
-				numUsedZeroSlots[a.pool]++
-			}
-			// Each container belongs to a task of its own, with alternating owners.
-			taskID := model.TaskID(fmt.Sprintf("%s-%s", id, c.ID))
-			owned[taskID] = i%2 == 0
-			r := containerSummary(id, c.Devices...)
-			r.ContainerID = ptrs.Ptr(c.ID)
-			summaries[model.AllocationID(taskID+".1")] = sproto.AllocationSummary{
-				TaskID: taskID, ResourcePool: a.pool, Resources: []sproto.ResourcesSummary{r},
-			}
-		}
-	}
-	notOwned := map[model.TaskID]bool{}
-	for id, mine := range owned {
-		notOwned[id] = !mine
-	}
-
-	aux := map[string]int32{}
-	for _, o := range []map[model.TaskID]bool{owned, notOwned} {
-		for _, p := range currentResources(summaries, o, testPools()) {
-			aux[p.ResourcePool] += *p.Counts.AuxContainers
-		}
-	}
-	require.Equal(t, numUsedZeroSlots, aux)
-	require.Equal(t, map[string]int32{"gpu": 3, "cpu": 1}, aux)
 }

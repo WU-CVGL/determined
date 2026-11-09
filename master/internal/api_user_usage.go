@@ -15,7 +15,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
 	"github.com/determined-ai/determined/master/internal/sproto"
-	"github.com/determined-ai/determined/master/pkg/device"
+	"github.com/determined-ai/determined/master/internal/userusage"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 	"github.com/determined-ai/determined/proto/pkg/devicev1"
@@ -215,10 +215,8 @@ type poolCounts struct {
 	k8s bool
 }
 
-// currentResources counts the resources the owned tasks hold, by pool. On agentrm each device
-// counts by its own type and a container without devices is one Aux container. Kubernetes
-// devices carry no type, so they count by the pool's slot type, and Kubernetes has no Aux.
-// Pools without any count are left out; the result is sorted by pool name.
+// currentResources counts the resources the owned tasks hold, by pool (userusage.Count). Pools
+// without any count are left out; the result is sorted by pool name.
 func currentResources(
 	summaries map[model.AllocationID]sproto.AllocationSummary,
 	owned map[model.TaskID]bool,
@@ -236,36 +234,11 @@ func currentResources(
 			counts[s.ResourcePool] = c
 		}
 		for _, r := range s.Resources {
-			n := 0
-			for _, devices := range r.AgentDevices {
-				n += len(devices)
-			}
-			switch {
-			case r.ResourcesType == sproto.ResourcesTypeK8sJob || pool.k8s:
-				c.k8s = true
-				if pool.cpu {
-					c.cpuSlots += n
-				} else {
-					c.gpus += n
-				}
-			case n == 0:
-				c.aux++
-			default:
-				for _, devices := range r.AgentDevices {
-					for _, d := range devices {
-						switch {
-						case d.Type == device.CPU:
-							c.cpuSlots++
-						case d.Type == device.CUDA || d.Type == device.ROCM:
-							c.gpus++
-						case pool.cpu:
-							c.cpuSlots++
-						default:
-							c.gpus++
-						}
-					}
-				}
-			}
+			rc := userusage.Count(r, pool.k8s, pool.cpu)
+			c.gpus += rc.GPUs
+			c.cpuSlots += rc.CPUSlots
+			c.aux += rc.Aux
+			c.k8s = c.k8s || rc.K8s
 		}
 	}
 
@@ -376,7 +349,7 @@ func readUserAllocations(
 	ctx context.Context, idb bun.IDB, userID model.UserID, rangeStart, rangeEnd time.Time,
 ) ([]userAllocationRow, error) {
 	rows := []userAllocationRow{}
-	// The times are timestamp without time zone, written in UTC; bun sends the bounds as UTC.
+	// bun sends the bounds as UTC literals with the offset +00:00.
 	err := idb.NewRaw(`
 SELECT a.allocation_id, a.resource_pool, a.slots, a.start_time, a.end_time, a.state,
        q.queued_end
@@ -393,8 +366,11 @@ LEFT JOIN LATERAL (
 ) q ON true
 WHERE j.owner_id = ?
   AND t.task_type <> 'CHECKPOINT_GC'
-  AND coalesce(q.queued_end, a.start_time) < ?
-  AND (a.end_time IS NULL OR a.end_time > ?)`,
+  -- task_stats times are timestamp with time zone, allocations times timestamp without time
+  -- zone written in UTC. Both sides compare as timestamp with time zone, with the allocations
+  -- times read as UTC: otherwise Postgres reads them in the session TimeZone.
+  AND coalesce(q.queued_end, a.start_time AT TIME ZONE 'UTC') < ?
+  AND (a.end_time IS NULL OR a.end_time AT TIME ZONE 'UTC' > ?)`,
 		userID, rangeEnd.UTC(), rangeStart.UTC()).Scan(ctx, &rows)
 	if err != nil {
 		return nil, err
