@@ -140,6 +140,9 @@ type Master struct {
 	// xidCache holds the GPUs' recent critical XIDs; gpuXIDs builds it on first use.
 	xidCache     *gpuhealth.XIDCache
 	xidCacheOnce sync.Once
+
+	// userUsageCoverage caches the first day with allocation records for GetUserUsage.
+	userUsageCoverage userUsageCoverage
 }
 
 // New creates an instance of the Determined master.
