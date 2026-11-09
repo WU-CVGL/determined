@@ -10,6 +10,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/command"
 	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/db"
+	"github.com/determined-ai/determined/master/internal/experiment"
 	"github.com/determined-ai/determined/master/internal/rbac"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/proto/pkg/jobv1"
@@ -133,11 +134,60 @@ func (a *JobAuthZRBAC) CanControlJobQueue(
 		rbacv1.PermissionType_PERMISSION_TYPE_CONTROL_STRICT_JOB_QUEUE)
 }
 
-// CanControlJobQueueUpdate preserves the existing RBAC queue authorization model.
+// CanControlJobQueueUpdate checks the permission to change the target job, as the job's own
+// priority setting does: an experiment needs the permission to edit it, a shell, command or
+// TensorBoard the permission to set its priority, and a generic task the permission to control it,
+// each in the job's workspace. Other jobs need the permission to update the master config.
 func (a *JobAuthZRBAC) CanControlJobQueueUpdate(
 	ctx context.Context, curUser model.User, jobID model.JobID,
 ) error {
-	return nil
+	j, err := db.JobByID(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	switch j.JobType {
+	case model.JobTypeExperiment:
+		exp, err := db.ExperimentByJobID(ctx, jobID)
+		if err != nil {
+			return err
+		}
+		return experiment.AuthZProvider.Get().CanSetExperimentsPriority(ctx, curUser, exp, 0)
+	case model.JobTypeShell, model.JobTypeCommand, model.JobTypeTensorboard:
+		workspaceID, err := jobWorkspace(ctx, jobID)
+		if err != nil {
+			return err
+		}
+		return command.AuthZProvider.Get().CanSetNSCsPriority(ctx, curUser, workspaceID, 0)
+	case model.JobTypeGeneric:
+		workspaceID, err := jobWorkspace(ctx, jobID)
+		if err != nil {
+			return err
+		}
+		return command.AuthZProvider.Get().CanControlGenericTask(
+			ctx, curUser, workspaceID, j.OwnerID)
+	default:
+		permErr, err := cluster.AuthZProvider.Get().CanUpdateMasterConfig(ctx, &curUser)
+		if err != nil {
+			return err
+		}
+		return permErr
+	}
+}
+
+// jobWorkspace returns the workspace of the command, shell, TensorBoard or generic task that runs
+// a job.
+func jobWorkspace(ctx context.Context, jobID model.JobID) (model.AccessScopeID, error) {
+	var taskID model.TaskID
+	if err := db.Bun().NewSelect().Table("tasks").Column("task_id").
+		Where("job_id = ?", jobID).Order("start_time").Limit(1).
+		Scan(ctx, &taskID); err != nil {
+		return 0, db.MatchSentinelError(err)
+	}
+	metadata, err := command.IdentifyTask(ctx, taskID)
+	if err != nil {
+		return 0, err
+	}
+	return metadata.WorkspaceID, nil
 }
 
 func init() {
