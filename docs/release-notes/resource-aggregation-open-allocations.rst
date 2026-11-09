@@ -7,4 +7,5 @@
 
 -  Cluster usage: the usage history is rebuilt from the task records at the first start after the
    upgrade, which may take some minutes. Usage of tasks whose records were deleted before is no
-   longer in it. Usage is also recorded by user id.
+   longer in it. The aggregates from before the upgrade are kept in the table
+   ``resource_aggregates_legacy``.
