@@ -371,19 +371,6 @@ func (a *allocation) SendContainerLog(log *sproto.ContainerLog) {
 	a.sendTaskLog(log.ToTaskLog())
 }
 
-// SetWaiting moves the allocation to the waiting state if it has not progressed past it yet.
-func (a *allocation) SetWaiting(ctx context.Context) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	a.setMostProgressedModelState(model.AllocationStateWaiting)
-	if err := db.UpdateAllocationState(ctx, a.model); err != nil {
-		a.crash(err)
-		return err
-	}
-	return nil
-}
-
 // SetReady sets the ready bit and moves the allocation to the running state if it has not
 // progressed past it already.
 func (a *allocation) SetReady(ctx context.Context) error {
@@ -1259,8 +1246,7 @@ func (a *allocation) registerProxies(addresses []cproto.Address) {
 			pcfg.Port, pcfg.ProxyTCP, pcfg.Exec)
 		a.proxies = append(a.proxies, pcfg.ServiceID)
 	}
-	// The task's idle time, if watched, counts from when its services can be reached, as a
-	// proxy's LastRequested does.
+	// The task's idle time, if watched, counts from when its services can be reached.
 	idle.Touch(a.req.TaskID)
 
 	if len(a.proxies) != len(a.req.ProxyPorts) {

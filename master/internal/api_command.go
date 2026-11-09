@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"slices"
 	"strconv"
 
@@ -40,7 +39,6 @@ import (
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/master/pkg/tasks"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
-	"github.com/determined-ai/determined/proto/pkg/rbacv1"
 	"github.com/determined-ai/determined/proto/pkg/utilv1"
 	"github.com/determined-ai/determined/proto/pkg/workspacev1"
 )
@@ -48,11 +46,6 @@ import (
 const (
 	commandEntrypoint = "/run/determined/command-entrypoint.sh"
 )
-
-func getRandomPort(min, max int) int {
-	//nolint:gosec // Weak RNG doesn't matter here.
-	return rand.Intn(max-min) + min
-}
 
 type protoCommandParams struct {
 	TemplateName string
@@ -277,26 +270,8 @@ func (a *apiServer) isNTSCPermittedToLaunch(
 		return notFoundErr
 	}
 
-	if spec.TaskType == model.TaskTypeTensorboard {
-		if err := command.AuthZProvider.Get().CanGetTensorboard(
-			ctx, *user, workspaceID, spec.Metadata.ExperimentIDs, spec.Metadata.TrialIDs,
-		); err != nil {
-			var pdErr authz.PermissionDeniedError
-			if errors.As(err, &pdErr) {
-				for _, perm := range pdErr.RequiredPermissions {
-					if perm == rbacv1.PermissionType_PERMISSION_TYPE_VIEW_WORKSPACE {
-						return apiutils.ErrNotFound
-					}
-				}
-			}
-
-			return apiutils.MapAndFilterErrors(err, nil, nil)
-		}
-	} else {
-		if err := command.AuthZProvider.Get().CanCreateNSC(
-			ctx, *user, workspaceID); err != nil {
-			return apiutils.MapAndFilterErrors(err, nil, nil)
-		}
+	if err := command.AuthZProvider.Get().CanCreateNSC(ctx, *user, workspaceID); err != nil {
+		return apiutils.MapAndFilterErrors(err, nil, nil)
 	}
 
 	return nil

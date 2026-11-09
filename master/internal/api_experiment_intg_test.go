@@ -1774,8 +1774,6 @@ func TestAuthZCreateExperiment(t *testing.T) {
 
 func TestAuthZGetExperimentAndCanDoActions(t *testing.T) {
 	api, authZExp, _, curUser, ctx := setupExpAuthTest(t, nil)
-	authZNSC := setupNSCAuthZ()
-	workspaceAuthZ := setupWorkspaceAuthZ()
 	exp := createTestExp(t, api, curUser)
 
 	// put/patch
@@ -1912,19 +1910,6 @@ func TestAuthZGetExperimentAndCanDoActions(t *testing.T) {
 		{"CanGetExperimentArtifacts", func(id int) error {
 			_, err := api.GetExperimentTrials(ctx, &apiv1.GetExperimentTrialsRequest{
 				ExperimentId: int32(id),
-			})
-			return err
-		}},
-		{"CanGetExperimentArtifacts", func(id int) error {
-			authZNSC.On("CanGetTensorboard", mock.Anything, mockUserArg, mock.Anything, mock.Anything,
-				mock.Anything).Return(nil).Once()
-			workspaceAuthZ.On("CanGetWorkspace", mock.Anything, mock.Anything, mock.Anything).
-				Return(nil).Once()
-			mockRM := MockRM()
-			mockRM.On("SmallerValueIsHigherPriority", mock.Anything).Return(true, nil)
-			api.m.rm = mockRM
-			_, err := api.LaunchTensorboard(ctx, &apiv1.LaunchTensorboardRequest{
-				ExperimentIds: []int32{int32(id)},
 			})
 			return err
 		}},

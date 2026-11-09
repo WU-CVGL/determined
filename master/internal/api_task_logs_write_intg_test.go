@@ -35,7 +35,7 @@ type logWriteTask struct {
 	allocationID model.AllocationID
 }
 
-// addCommandTaskForLogsTest persists a command, shell or TensorBoard the way
+// addCommandTaskForLogsTest persists a command or shell the way
 // Command.registerJobAndTask and Command.persist do: a job that the owner owns, the task, its
 // allocation and its command state in a workspace.
 func addCommandTaskForLogsTest(
@@ -127,8 +127,6 @@ func TestTaskLogWritesNeedTaskControl(t *testing.T) {
 			workspaceID),
 		addCommandTaskForLogsTest(ctx, t, owner, model.TaskTypeShell, model.JobTypeShell,
 			workspaceID),
-		addCommandTaskForLogsTest(ctx, t, owner, model.TaskTypeTensorboard,
-			model.JobTypeTensorboard, workspaceID),
 		{
 			name: string(model.TaskTypeGeneric), taskID: genericID,
 			allocationID: model.AllocationID(genericID.String() + ".0"),

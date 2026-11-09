@@ -174,7 +174,6 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 	// Without an idle timeout, the shell's idle time is not watched.
 	require.Nil(t, alloc.IdleTimeout)
 	require.True(t, spec.WatchTaskActivity)
-	require.False(t, spec.WatchProxyIdleTimeout)
 
 	// The environment of both services, merged with the others.
 	env := spec.Base.ExtraEnvVars
@@ -397,7 +396,6 @@ func TestLaunchShellIdleTimeout(t *testing.T) {
 				ServiceID: taskID, TaskID: model.TaskID(taskID), UseTaskActivity: true,
 				TimeoutDuration: 45 * time.Minute,
 			}, allocateRequest(t, rm, taskID).IdleTimeout)
-			require.False(t, spec.WatchProxyIdleTimeout)
 
 			env := spec.Base.ExtraEnvVars
 			if tc.wantIdleType == "" {
@@ -628,7 +626,7 @@ func TestLaunchRejectsServices(t *testing.T) {
 	jupyter := map[string]any{"jupyter": map[string]any{}}
 
 	// The message ties each rejection to the services check: a launch can be refused with
-	// InvalidArgument for other reasons, such as TensorBoard's experiment 1 not existing.
+	// InvalidArgument for other reasons.
 	requireInvalid := func(err error, what, msg string) {
 		t.Helper()
 		require.Error(t, err, what)
@@ -638,10 +636,6 @@ func TestLaunchRejectsServices(t *testing.T) {
 	const onlyShells = "services: only shells run services"
 	_, err = api.LaunchCommand(ctx, &apiv1.LaunchCommandRequest{Config: servicesConfig(t, jupyter)})
 	requireInvalid(err, "command", onlyShells)
-	_, err = api.LaunchTensorboard(ctx, &apiv1.LaunchTensorboardRequest{
-		ExperimentIds: []int32{1}, Config: servicesConfig(t, jupyter),
-	})
-	requireInvalid(err, "tensorboard", onlyShells)
 
 	for name, tc := range map[string]struct {
 		services any

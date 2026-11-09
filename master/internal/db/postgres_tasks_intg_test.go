@@ -370,14 +370,15 @@ func TestExhaustiveEnums(t *testing.T) {
 			ignore:          ignore,
 		}
 	}
-	// Postgres keeps NOTEBOOK in both enums; no row has it.
-	addCheck("JobType", "public.job_type", map[string]bool{"NOTEBOOK": true})
-	addCheck("TaskType", "public.task_type", map[string]bool{"NOTEBOOK": true})
+	// Postgres keeps NOTEBOOK and TENSORBOARD in both enums, and WAITING in allocation_state; no
+	// row has them.
+	addCheck("JobType", "public.job_type", map[string]bool{"NOTEBOOK": true, "TENSORBOARD": true})
+	addCheck("TaskType", "public.task_type", map[string]bool{"NOTEBOOK": true, "TENSORBOARD": true})
 	addCheck("State", "public.experiment_state", map[string]bool{
 		"PARTIALLY_DELETED": true,
 		"DELETED":           true,
 	})
-	addCheck("AllocationState", "public.allocation_state", map[string]bool{})
+	addCheck("AllocationState", "public.allocation_state", map[string]bool{"WAITING": true})
 
 	// Populate postgres types.
 	for _, c := range checks {

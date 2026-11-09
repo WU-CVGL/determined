@@ -33,7 +33,7 @@ func (a *JobAuthZRBAC) FilterJobs(
 		switch job.Type {
 		case jobv1.Type_TYPE_EXPERIMENT:
 			hasExperiment = true
-		case jobv1.Type_TYPE_TENSORBOARD, jobv1.Type_TYPE_SHELL, jobv1.Type_TYPE_COMMAND:
+		case jobv1.Type_TYPE_SHELL, jobv1.Type_TYPE_COMMAND:
 			hasNTSC = true
 		}
 		if hasNTSC && hasExperiment {
@@ -101,7 +101,7 @@ func (a *JobAuthZRBAC) FilterJobs(
 			if userHasGlobalExpViewPerm || viewable {
 				viewableJobs = append(viewableJobs, job)
 			}
-		case jobv1.Type_TYPE_TENSORBOARD, jobv1.Type_TYPE_SHELL, jobv1.Type_TYPE_COMMAND:
+		case jobv1.Type_TYPE_SHELL, jobv1.Type_TYPE_COMMAND:
 			viewable := viewableNtscWorkspaces[model.AccessScopeID(job.WorkspaceId)]
 			if userHasGlobalNTSCViewPerm || viewable {
 				viewableJobs = append(viewableJobs, job)

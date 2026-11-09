@@ -673,8 +673,6 @@ func TestUnusualMetricNames(t *testing.T) {
 
 func TestTrialAuthZ(t *testing.T) {
 	api, authZExp, _, curUser, ctx := setupExpAuthTest(t, nil)
-	authZNSC := setupNSCAuthZ()
-	workspaceAuthZ := setupWorkspaceAuthZ()
 	trial, _ := createTestTrial(t, api, curUser)
 
 	mockUserArg := mock.MatchedBy(func(u model.User) bool {
@@ -779,19 +777,6 @@ func TestTrialAuthZ(t *testing.T) {
 		{"CanEditExperiment", func(id int) error {
 			_, err := api.PostTrialRunnerMetadata(ctx, &apiv1.PostTrialRunnerMetadataRequest{
 				TrialId: int32(id),
-			})
-			return err
-		}, false},
-		{"CanGetExperimentArtifacts", func(id int) error {
-			authZNSC.On("CanGetTensorboard", mock.Anything, mockUserArg, mock.Anything, mock.Anything,
-				mock.Anything).Return(nil).Once()
-			workspaceAuthZ.On("CanGetWorkspace", mock.Anything, mock.Anything, mock.Anything).
-				Return(nil).Once()
-			mockRM := MockRM()
-			mockRM.On("SmallerValueIsHigherPriority", mock.Anything).Return(true, nil)
-			api.m.rm = mockRM
-			_, err := api.LaunchTensorboard(ctx, &apiv1.LaunchTensorboardRequest{
-				TrialIds: []int32{int32(id)},
 			})
 			return err
 		}, false},

@@ -19,8 +19,7 @@ import (
 // The key is removed rather than replaced with the "********" placeholder used for cluster and pool
 // configs: configs read through the API are launched again (generic task forks, experiment forks
 // in the WebUI), and a placeholder would be sent to the registry as a password. Without the key,
-// such a launch by another user falls back to the registry_auth of the task container defaults,
-// as a TensorBoard on another user's experiment does.
+// such a launch by another user falls back to the registry_auth of the task container defaults.
 //
 // These helpers change only the copy of a config that goes into an API response, never the config
 // that a task runs with.

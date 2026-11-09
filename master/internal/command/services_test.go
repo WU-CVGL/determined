@@ -63,9 +63,8 @@ func TestTaskServices(t *testing.T) {
 	ssh.Port = 3220
 	require.Equal(t, []tasks.InteractiveService{ssh}, taskServices(shell, model.TaskTypeShell))
 
-	// Commands and TensorBoards have none.
+	// Commands have none.
 	require.Empty(t, taskServices(tasks.GenericCommandSpec{}, model.TaskTypeCommand))
-	require.Empty(t, taskServices(tasks.GenericCommandSpec{}, model.TaskTypeTensorboard))
 }
 
 // snapshot is a snapshot of services' states, "name", state, "name", state, ...
