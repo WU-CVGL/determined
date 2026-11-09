@@ -542,6 +542,19 @@ describe('InteractiveTask', () => {
     expect(getTensorBoard).not.toHaveBeenCalled();
   });
 
+  it('shows a TensorBoard session, a shell without ssh, as its TensorBoard tab without a Terminal', async () => {
+    vi.mocked(getShells).mockResolvedValue([{ ...shell, name: 'TensorBoard (brave-cat)' }]);
+    vi.mocked(getTaskServices).mockResolvedValue(
+      servicesWith(['tensorboard'], true, V1TaskServiceState.READY),
+    );
+    setup('?tab=tensorboard');
+    const pane = await screen.findByTestId('service-pane-tensorboard');
+    expect(pane).toHaveAttribute('data-state', V1TaskServiceState.READY);
+    expect(tabLabels()).toEqual(['TensorBoard', 'Logs', 'Resources']);
+    expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
+    expect(getTensorBoard).not.toHaveBeenCalled();
+  });
+
   it('leaves out the TensorBoard tab when the user may not connect to the service', async () => {
     vi.mocked(getTaskServices).mockResolvedValue(servicesWith(['ssh', 'tensorboard'], false));
     setup();

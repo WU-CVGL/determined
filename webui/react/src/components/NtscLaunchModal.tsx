@@ -5,13 +5,14 @@ import Form, { FormInstance } from 'hew/Form';
 import Input from 'hew/Input';
 import InputNumber from 'hew/InputNumber';
 import { Modal, useModal } from 'hew/Modal';
+import RadioGroup, { RadioGroupOption } from 'hew/RadioGroup';
 import Row from 'hew/Row';
 import Select, { Option, SelectValue } from 'hew/Select';
 import Spinner from 'hew/Spinner';
 import { Loadable, Loaded, NotLoaded } from 'hew/utils/loadable';
 import { number, string, undefined as undefinedType, union } from 'io-ts';
 import yaml from 'js-yaml';
-import { isPlainObject } from 'lodash';
+import { isEqual, isPlainObject } from 'lodash';
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import Link from 'components/Link';
@@ -29,15 +30,20 @@ import { isUsablePool } from 'utils/cluster';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import {
   configFromForm,
+  DEFAULT_SOURCE_MODE,
   formFieldsFromConfig,
+  isSourceId,
   NtscLaunchOptions,
   sanitizeConfig,
   SHELL_SERVICE_LABELS,
   SHELL_SERVICES,
   ShellService,
   ShellServiceChoices,
+  sshDisabled,
   templateFromConfig,
   templateResources,
+  TensorBoardDataSource,
+  TensorBoardSourceMode,
 } from 'utils/ntscConfig';
 import { useObservable } from 'utils/observable';
 import { launchShell, PREVIEW_ERROR, previewShell } from 'utils/shell';
@@ -49,19 +55,61 @@ const BASE_FORM_ID = 'ntsc-launch-form';
  * The user's last-used form values. The services and their options are not among them: the
  * master's defaults are.
  */
-type LaunchFormSettings = Omit<NtscLaunchOptions, 'services' | 'logdir'>;
+type LaunchFormSettings = Omit<NtscLaunchOptions, 'services' | 'dataSource'>;
 
 /**
  * The simple form's values. `source` is the "Start from" picker's value; `services` holds a
  * checkbox per service of SHELL_SERVICES, unset until the master's preview of the start-from
- * fills them with what it would run; `logdir` is the tensorboard service's log directory, which
- * the form shows and sends while that service is checked.
+ * fills them with what it would run; `dataSource` is the tensorboard service's data source, which
+ * the form shows and sends while that service is checked: the fields of both modes are kept, and
+ * only the chosen mode's are sent.
  */
 interface LaunchFormValues extends LaunchFormSettings {
-  logdir?: string;
+  dataSource?: TensorBoardDataSource;
   services?: Partial<Record<string, boolean>>;
   source?: string;
 }
+
+/** The fields of the tensorboard service's data source, by mode. */
+const DATA_SOURCE_FIELDS: Record<TensorBoardSourceMode, string[][]> = {
+  experiments: [
+    ['dataSource', 'experimentIds'],
+    ['dataSource', 'trialIds'],
+  ],
+  logdir: [['dataSource', 'logdir']],
+};
+
+/** Every field of the tensorboard service's data source. */
+const DATA_SOURCE_PATHS = [['dataSource', 'mode'], ...Object.values(DATA_SOURCE_FIELDS).flat()];
+
+const EXPERIMENTS_OPTION: RadioGroupOption<TensorBoardSourceMode> = {
+  id: 'experiments',
+  label: 'Determined experiments',
+};
+const SOURCE_OPTIONS: RadioGroupOption<TensorBoardSourceMode>[] = [
+  EXPERIMENTS_OPTION,
+  { id: 'logdir', label: 'Log directory in the task' },
+];
+
+/** Each ID of a tag input is a positive integer. */
+const idsRule = {
+  validator: (_rule: unknown, value?: (number | string)[]) => {
+    const invalid = (value ?? []).find((id) => !isSourceId(id));
+    return invalid === undefined
+      ? Promise.resolve()
+      : Promise.reject(new Error(`${invalid} is not an ID`));
+  },
+};
+
+/** The experiments mode reads at least one experiment or trial. */
+const oneSourceRule = ({ getFieldValue }: Pick<FormInstance, 'getFieldValue'>) => ({
+  validator: (_rule: unknown, value?: (number | string)[]) => {
+    const trialIds: (number | string)[] | undefined = getFieldValue(['dataSource', 'trialIds']);
+    return (value?.length ?? 0) !== 0 || (trialIds?.length ?? 0) !== 0
+      ? Promise.resolve()
+      : Promise.reject(new Error('An experiment or trial is required'));
+  },
+});
 
 /**
  * The services to send: a checked one runs, an unchecked one that the master offered is turned
@@ -90,14 +138,14 @@ const offeredServices = (choices: ShellServiceChoices = {}): ShellService[] =>
 
 /**
  * A preview of the start-from's services: the start-from it was sent for, its number, the
- * checkboxes and the log directory as they were when the start-from's first preview was sent, and
+ * checkboxes and the data source as they were when the start-from's first preview was sent, and
  * whether it is on its way, succeeded or failed with error.
  */
 interface ServicesPreview {
   baseConfig?: RawJson;
   error?: string;
   sent?: LaunchFormValues['services'];
-  sentLogdir?: string;
+  sentDataSource?: TensorBoardDataSource;
   seq: number;
   source?: string;
   status: 'pending' | 'success' | 'error';
@@ -218,10 +266,28 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   const { settings: defaults, updateSettings: saveDefaults } =
     useSettings<LaunchFormSettings>(settingsConfig);
 
+  // Whether the start-from turns ssh off: the shell then runs with 0 slots and the tensorboard
+  // service reading experiments or trials.
+  const [sshOff, setSshOff] = useState(false);
+
+  /**
+   * The values to keep for the next launch. A start-from without ssh keeps the previous slots and
+   * template: its 0 slots are not the user's default, and its template is restored without them.
+   */
+  const saveFormDefaults = useCallback(
+    (fields: LaunchFormValues) => {
+      const settings = settingsFromForm(fields);
+      saveDefaults(
+        sshOff ? { ...settings, slots: defaults.slots, template: defaults.template } : settings,
+      );
+    },
+    [defaults.slots, defaults.template, saveDefaults, sshOff],
+  );
+
   const handleModalClose = useCallback(() => {
     const fields: LaunchFormValues = form.getFieldsValue(true);
-    saveDefaults(settingsFromForm(fields));
-  }, [form, saveDefaults]);
+    saveFormDefaults(fields);
+  }, [form, saveFormDefaults]);
 
   // The services that the start-from's config or preview has an entry for.
   const offered = useRef<ShellService[]>([]);
@@ -238,15 +304,15 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
             workspaceId: fields.workspaceId,
           }
         : {
-            logdir: fields.logdir,
+            dataSource: fields.dataSource,
             name: fields.name,
             pool: fields.pool,
             services: checkedServices(fields, offered.current),
-            slots: fields.slots,
+            slots: sshOff ? 0 : fields.slots,
             template: templateNameFromStartFrom(fields.source),
             workspaceId: fields.workspaceId,
           },
-    [baseConfig],
+    [baseConfig, sshOff],
   );
 
   // The services that the start-from runs, previewed through the master without the checkboxes
@@ -254,7 +320,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   // what a template or a config turns off. A new template or the defaults clear the checkboxes
   // first; a config fills them from its entries. The checkboxes follow the latest preview, except a
   // box changed since the start-from's first preview was sent, also while a refusal showed. The
-  // tensorboard service's log directory follows the same rule as its checkbox. Launch and the full
+  // tensorboard service's data source follows the same rule as its checkbox. Launch and the full
   // config wait for a successful preview of the current start-from: a refused one shows its
   // message with Retry, keeps them disabled, and is sent again when the pool or the workspace
   // changes. Showing the simple form again after the full config previews nothing, so that the
@@ -285,13 +351,13 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     if (!sameStart && !baseConfig) {
       // The checkboxes were filled for another start-from.
       offered.current = [];
-      form.resetFields([...SHELL_SERVICES.map((name) => ['services', name]), 'logdir']);
+      form.resetFields([...SHELL_SERVICES.map((name) => ['services', name]), ...DATA_SOURCE_PATHS]);
     }
     const fields: LaunchFormValues = form.getFieldsValue(true);
     // A retry, or a pool or workspace change after a refusal, keeps the boxes changed since.
     const sent = sameStart ? last.sent : fields.services;
-    const sentLogdir = sameStart ? last.sentLogdir : fields.logdir;
-    setServicesPreview({ baseConfig, sent, sentLogdir, seq, source, status: 'pending' });
+    const sentDataSource = sameStart ? last.sentDataSource : fields.dataSource;
+    setServicesPreview({ baseConfig, sent, sentDataSource, seq, source, status: 'pending' });
     previewShell(simpleOptions({ ...fields, services: undefined, source }))
       .then((previewed) => {
         if (seq !== servicesPreview.current.seq) return;
@@ -300,9 +366,12 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
         offered.current = offeredServices(choices);
         const checks = serviceChecks(choices);
         const current: LaunchFormValues['services'] = form.getFieldValue('services');
-        const currentLogdir: string | undefined = form.getFieldValue('logdir');
+        const currentDataSource: TensorBoardDataSource | undefined =
+          form.getFieldValue('dataSource');
         form.setFieldsValue({
-          logdir: currentLogdir === sentLogdir ? previewedFields.logdir : currentLogdir,
+          dataSource: isEqual(currentDataSource, sentDataSource)
+            ? previewedFields.dataSource
+            : currentDataSource,
           services: Object.fromEntries(
             SHELL_SERVICES.map((name) => [
               name,
@@ -310,7 +379,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
             ]),
           ),
         });
-        setServicesPreview({ baseConfig, sent, sentLogdir, seq, source, status: 'success' });
+        setServicesPreview({ baseConfig, sent, sentDataSource, seq, source, status: 'success' });
       })
       .catch((e) => {
         if (seq !== servicesPreview.current.seq) return;
@@ -318,7 +387,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
           baseConfig,
           error: e instanceof Error ? e.message : PREVIEW_ERROR,
           sent,
-          sentLogdir,
+          sentDataSource,
           seq,
           source,
           status: 'error',
@@ -361,8 +430,10 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       setFullConfigFormInvalid(false);
     } else if (servicesConfirmed) {
       // The full config is the simple form's: a checked service's required field comes first.
+      const mode: TensorBoardSourceMode =
+        form.getFieldValue(['dataSource', 'mode']) ?? DEFAULT_SOURCE_MODE;
       try {
-        await form.validateFields(['logdir']);
+        await form.validateFields(DATA_SOURCE_FIELDS[mode]);
       } catch {
         return;
       }
@@ -381,7 +452,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
 
   const handleSubmit = useCallback(async () => {
     const fields: LaunchFormValues = form.getFieldsValue(true);
-    saveDefaults(settingsFromForm(fields));
+    saveFormDefaults(fields);
     if (showFullConfig) {
       const values = await fullConfigForm.validateFields();
       const usableConfig = Loadable.isLoaded(config) ? config.data : '';
@@ -401,7 +472,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     fullConfigForm,
     form,
     launch,
-    saveDefaults,
+    saveFormDefaults,
     servicesConfirmed,
     showFullConfig,
     simpleOptions,
@@ -425,9 +496,10 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
         const fields = formFieldsFromConfig(base);
         setBaseConfig(base);
         setRedactedEnv(start.redactedEnv);
+        setSshOff(sshDisabled(base));
         offered.current = offeredServices(fields.services);
         form.setFieldsValue({
-          logdir: fields.logdir,
+          dataSource: fields.dataSource,
           name: fields.name,
           pool: fields.pool,
           services: serviceChecks(fields.services),
@@ -441,9 +513,11 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       }
       setBaseConfig(undefined);
       setRedactedEnv([]);
+      setSshOff(start.kind === 'template' && sshDisabled(start.template.config));
       if (start.kind === 'template') {
         // The master ignores a template's resources for shells, so they are
-        // copied into the form, which always sends them.
+        // copied into the form, which always sends them; a template that turns
+        // ssh off gets 0 slots, before its services are previewed.
         const { pool, slots } = templateResources(start.template.config);
         if (pool !== undefined) form.setFieldValue('pool', pool);
         if (slots !== undefined) form.setFieldValue('slots', slots);
@@ -560,6 +634,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
           lockedWorkspace={!!workspace}
           servicesError={servicesResult.status === 'error' ? servicesResult.error : undefined}
           setWorkspace={setCurrentWorkspace}
+          sshOff={sshOff}
           startFromLoadingTask={startFromLoadingTask}
           workspaces={workspaces}
           onServicesRetry={handleServicesRetry}
@@ -737,6 +812,8 @@ interface LaunchFormProps {
   /** The message of the refused preview of the services, if the last one was refused. */
   servicesError?: string;
   setWorkspace: (arg0: Workspace | undefined) => void;
+  /** The start-from turns ssh off: 0 slots, and TensorBoard reading experiments or trials. */
+  sshOff: boolean;
   startFromLoadingTask?: string;
   workspaces: Workspace[];
 }
@@ -756,11 +833,14 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
   onStartFromLoadingTask,
   servicesError,
   setWorkspace,
+  sshOff,
   startFromLoadingTask,
   workspaces,
 }: LaunchFormProps) => {
   const selectedWorkspaceId = Form.useWatch('workspaceId', form);
   const tensorBoardChecked = Form.useWatch(['services', 'tensorboard'], form);
+  const sourceMode: TensorBoardSourceMode =
+    Form.useWatch(['dataSource', 'mode'], form) ?? DEFAULT_SOURCE_MODE;
   const templatesOn = useFeature().isOn('task_templates');
 
   useEffect(() => {
@@ -882,6 +962,7 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
         label="Slots"
         name="slots">
         <InputNumber
+          disabled={sshOff}
           max={resourceInfo.maxSlots === -1 ? Number.MAX_SAFE_INTEGER : resourceInfo.maxSlots}
           min={0}
         />
@@ -890,25 +971,47 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
         <Row>
           {SHELL_SERVICES.map((name) => (
             <Form.Item key={name} name={['services', name]} noStyle valuePropName="checked">
-              <Checkbox>{SHELL_SERVICE_LABELS[name]}</Checkbox>
+              <Checkbox disabled={sshOff && name === 'tensorboard'}>
+                {SHELL_SERVICE_LABELS[name]}
+              </Checkbox>
             </Form.Item>
           ))}
         </Row>
       </Form.Item>
       {tensorBoardChecked && (
         <Form.Item label="Data source">
-          <Form.Item
-            label="Log directory in the task"
-            name="logdir"
-            rules={[
-              {
-                message: 'Log directory in the task is required',
-                required: true,
-                whitespace: true,
-              },
-            ]}>
-            <Input placeholder="runs" />
+          <Form.Item initialValue={DEFAULT_SOURCE_MODE} name={['dataSource', 'mode']} noStyle>
+            <RadioGroup
+              options={sshOff ? [EXPERIMENTS_OPTION] : SOURCE_OPTIONS}
+              radioType="radio"
+            />
           </Form.Item>
+          {sourceMode === 'experiments' ? (
+            <>
+              <Form.Item
+                dependencies={[['dataSource', 'trialIds']]}
+                label="Experiments"
+                name={['dataSource', 'experimentIds']}
+                rules={[idsRule, oneSourceRule]}>
+                <Select filterOption={false} mode="tags" />
+              </Form.Item>
+              <Form.Item label="Trials" name={['dataSource', 'trialIds']} rules={[idsRule]}>
+                <Select filterOption={false} mode="tags" />
+              </Form.Item>
+            </>
+          ) : (
+            <Form.Item
+              name={['dataSource', 'logdir']}
+              rules={[
+                {
+                  message: 'Log directory in the task is required',
+                  required: true,
+                  whitespace: true,
+                },
+              ]}>
+              <Input placeholder="runs" />
+            </Form.Item>
+          )}
         </Form.Item>
       )}
       {servicesError && (

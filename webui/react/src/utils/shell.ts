@@ -21,12 +21,15 @@ export const shellRequest = (options: ShellLaunchOptions): LaunchShellParams => 
   workspaceId: options.workspaceId,
 });
 
-/** The statuses of the master's refusals that the user can act on: InvalidArgument, PermissionDenied. */
-const ACTIONABLE_STATUSES = [400, 403];
+/**
+ * The statuses of the master's refusals that the user can act on: InvalidArgument,
+ * PermissionDenied, NotFound.
+ */
+const ACTIONABLE_STATUSES = [400, 403, 404];
 
 /**
- * The master's message for a refused request that the user can act on, such as an unknown service
- * or a resource pool the user may not use; undefined for any other error.
+ * The master's message for a refused request that the user can act on, such as an unknown service,
+ * a resource pool the user may not use or an unknown experiment; undefined for any other error.
  */
 export const actionableErrorMessage = (e: unknown): string | undefined => {
   if (!isDetError(e)) return undefined;

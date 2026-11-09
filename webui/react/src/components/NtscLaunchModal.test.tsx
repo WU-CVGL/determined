@@ -17,6 +17,7 @@ import userStore from 'stores/users';
 import userSettings from 'stores/userSettings';
 import { CommandState, CommandTask, CommandType, RawJson, WorkspaceState } from 'types';
 import { listLaunchHistory, recordLaunch } from 'utils/launchHistory';
+import { sanitizeConfig } from 'utils/ntscConfig';
 import { processApiError } from 'utils/service';
 
 const mocks = vi.hoisted(() => ({
@@ -190,6 +191,26 @@ const TENSORBOARD_TEMPLATE = {
   workspaceId: WORKSPACE.id,
 };
 
+/** A template of a TensorBoard viewing session: ssh off, experiments, no slots of its own. */
+const SESSION_TEMPLATE = {
+  config: {
+    idle_timeout: '5m',
+    services: { ssh: { enabled: false }, tensorboard: { experiment_ids: [3] } },
+  },
+  name: 'session',
+  workspaceId: WORKSPACE.id,
+};
+
+/** A TensorBoard viewing session's config as GET /api/v1/shells/{id} returns it. */
+const sessionShellConfig = {
+  description: 'TensorBoard (brave-cat)',
+  entrypoint: ['/run/determined/ssh/shell-entrypoint.sh', '-p', '3201'],
+  environment: { image: { cpu: 'default:1' } },
+  idle_timeout: '5m',
+  resources: { priority: 42, resource_pool: 'aux', slots: 0 },
+  services: { ssh: { enabled: false }, tensorboard: { experiment_ids: [3, 7] } },
+};
+
 /** The services that the master runs by default: jupyter, and vscode when it serves code-server. */
 const DEFAULT_SERVICES = { jupyter: {}, vscode: {} };
 
@@ -202,7 +223,7 @@ const previewFor = (params: { config?: RawJson; templateName?: string }) => {
   const config = params.config ?? {};
   const resources = config.resources ?? {};
   const custom = config.description === 'tpl source';
-  const template = [GPU_TEMPLATE, NO_JUPYTER_TEMPLATE, TENSORBOARD_TEMPLATE].find(
+  const template = [GPU_TEMPLATE, NO_JUPYTER_TEMPLATE, TENSORBOARD_TEMPLATE, SESSION_TEMPLATE].find(
     (item) => item.name === params.templateName,
   )?.config as RawJson | undefined;
   const templateServices: RawJson = template?.services ?? {};
@@ -214,20 +235,22 @@ const previewFor = (params: { config?: RawJson; templateName?: string }) => {
       return [name, out];
     }),
   );
+  const services: RawJson = { ...templateServices, ...merged };
+  // A shell without ssh has TensorBoard as its primary service and no default editors.
+  const tensorBoardPrimary = services.ssh?.enabled === false;
+  const idleTimeout = config.idle_timeout ?? template?.idle_timeout;
   return Promise.resolve({
     ...(config.description === undefined ? {} : { description: config.description }),
     environment: { image: { cuda: custom ? 'custom:2' : 'default:1' } },
-    ...(config.idle_timeout === undefined ? {} : { idle_timeout: config.idle_timeout }),
+    ...(idleTimeout === undefined ? {} : { idle_timeout: idleTimeout }),
     resources: {
       priority: 42,
       resource_pool: resources.resource_pool ?? 'default',
       slots: resources.slots ?? 1,
     },
     services: {
-      jupyter: {},
-      ...(mocks.codeServer ? { vscode: {} } : {}),
-      ...templateServices,
-      ...merged,
+      ...(tensorBoardPrimary ? {} : { jupyter: {}, ...(mocks.codeServer ? { vscode: {} } : {}) }),
+      ...services,
     },
   });
 };
@@ -246,6 +269,15 @@ const SERVICE_LABELS: Record<string, string> = {
   vscode: 'VS Code',
 };
 const serviceBox = (name: string) => screen.getByRole('checkbox', { name: SERVICE_LABELS[name] });
+
+/** The data source modes of the tensorboard service, as the form labels them. */
+const EXPERIMENTS_MODE = 'Determined experiments';
+const LOGDIR_MODE = 'Log directory in the task';
+const sourceModes = () =>
+  screen.queryAllByRole('radio').map((radio) => radio.closest('label')?.textContent);
+const modeRadio = (label: string) => screen.getByRole('radio', { name: label });
+/** The log directory's input, shown in the "Log directory in the task" mode. */
+const logdirField = () => screen.getByPlaceholderText('runs');
 
 const launchedShell = {
   command: task(CommandType.Shell, {
@@ -918,6 +950,26 @@ describe('NtscLaunchModal', () => {
       });
     });
 
+    it('keeps the last slots and template after a start-from without ssh', async () => {
+      mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, SESSION_TEMPLATE]);
+      await withLoadedSettings(async () => {
+        const { user } = await setup();
+        await openStartFrom(user);
+        await user.click(await screen.findByText('session'));
+        await waitFor(() => expect(serviceBox('tensorboard')).toBeChecked());
+        expect(screen.getByLabelText('Slots')).toHaveValue('0');
+        await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+        await waitFor(() =>
+          expect(savedSettings('shell-launch')).toEqual({
+            name: 'shell-name',
+            slots: 2,
+            workspaceId: WORKSPACE.id,
+          }),
+        );
+      });
+    });
+
     it('saves the values on Cancel', async () => {
       await withLoadedSettings(async () => {
         const { user } = await setup();
@@ -996,11 +1048,23 @@ describe('NtscLaunchModal', () => {
       expect(mocks.launchShell.mock.calls[0][0].config.services).toEqual({ jupyter: {} });
     });
 
-    it('asks for the log directory while TensorBoard is checked and sends it with the service', async () => {
+    it('offers both data sources while TensorBoard is checked, Determined experiments first', async () => {
+      const { user } = await setup();
+      await user.click(serviceBox('tensorboard'));
+      expect(screen.getByText('Data source')).toBeInTheDocument();
+      expect(sourceModes()).toEqual([EXPERIMENTS_MODE, LOGDIR_MODE]);
+      expect(modeRadio(EXPERIMENTS_MODE)).toBeChecked();
+      expect(screen.getByLabelText('Experiments')).toBeInTheDocument();
+      expect(screen.getByLabelText('Trials')).toBeInTheDocument();
+      expect(screen.queryByPlaceholderText('runs')).not.toBeInTheDocument();
+    });
+
+    it('asks for the log directory in its mode and sends it with the service', async () => {
       const { onLaunched, user } = await setup();
       await user.click(serviceBox('tensorboard'));
       expect(screen.getByText('Data source')).toBeInTheDocument();
-      const field = screen.getByLabelText('Log directory in the task');
+      await user.click(modeRadio(LOGDIR_MODE));
+      const field = logdirField();
       expect(field).toHaveValue('');
       expect(field).toHaveAttribute('placeholder', 'runs');
 
@@ -1018,7 +1082,8 @@ describe('NtscLaunchModal', () => {
         services: { tensorboard: { logdir: 'logs/exp' } },
       });
       await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
-      expect(screen.getByLabelText('Log directory in the task')).toHaveValue('logs/exp');
+      expect(modeRadio(LOGDIR_MODE)).toBeChecked();
+      expect(logdirField()).toHaveValue('logs/exp');
       await launch(user);
       await waitFor(() => expect(onLaunched).toHaveBeenCalled());
       expect(mocks.launchShell.mock.calls[0][0].config.services).toEqual({
@@ -1030,7 +1095,8 @@ describe('NtscLaunchModal', () => {
     it('sends no tensorboard entry once TensorBoard is unchecked again', async () => {
       const { onLaunched, user } = await setup();
       await user.click(serviceBox('tensorboard'));
-      await user.type(screen.getByLabelText('Log directory in the task'), 'runs');
+      await user.click(modeRadio(LOGDIR_MODE));
+      await user.type(logdirField(), 'runs');
       await user.click(serviceBox('tensorboard'));
       expect(screen.queryByText('Data source')).not.toBeInTheDocument();
       await launch(user);
@@ -1044,7 +1110,8 @@ describe('NtscLaunchModal', () => {
       await openStartFrom(user);
       await user.click(await screen.findByText('tensorboard'));
       await waitFor(() => expect(serviceBox('tensorboard')).toBeChecked());
-      expect(screen.getByLabelText('Log directory in the task')).toHaveValue('runs');
+      expect(modeRadio(LOGDIR_MODE)).toBeChecked();
+      expect(logdirField()).toHaveValue('runs');
 
       await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
       await waitFor(() => expect(editorText()).toContain('reload_interval'));
@@ -1072,7 +1139,8 @@ describe('NtscLaunchModal', () => {
       });
       const { onLaunched, user } = await setup({ initialTask: task(CommandType.Shell) });
       await waitFor(() => expect(serviceBox('tensorboard')).toBeChecked());
-      const field = screen.getByLabelText('Log directory in the task');
+      expect(modeRadio(LOGDIR_MODE)).toBeChecked();
+      const field = logdirField();
       expect(field).toHaveValue('runs');
       await user.clear(field);
       await user.type(field, '/data/runs');
@@ -1561,6 +1629,269 @@ describe('NtscLaunchModal', () => {
     });
   });
 
+  describe('TensorBoard data source', () => {
+    /** The tag of an ID in the Experiments or Trials input. */
+    const idTag = (id: string) =>
+      document.querySelector(`.ant-select-selection-item[title="${id}"]`);
+    /** Adds an ID to the Experiments or Trials tag input: typed, then Enter. */
+    const addId = async (_user: ReturnType<typeof userEvent.setup>, label: string, id: string) => {
+      const input = screen.getByLabelText(label);
+      fireEvent.change(input, { target: { value: id } });
+      fireEvent.keyDown(input, { code: 'Enter', key: 'Enter', keyCode: 13 });
+      await waitFor(() => expect(idTag(id)).toBeInTheDocument());
+    };
+    const showFullConfig = async (user: ReturnType<typeof userEvent.setup>) => {
+      await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+    };
+    const showSimpleConfig = async (user: ReturnType<typeof userEvent.setup>) => {
+      await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
+    };
+    const fullConfigTensorBoard = () =>
+      (yaml.load(editorText()) as RawJson).services?.tensorboard as RawJson | undefined;
+
+    it('sends only the chosen mode’s source, and keeps what was typed in the other', async () => {
+      const { onLaunched, user } = await setup();
+      await user.click(serviceBox('tensorboard'));
+      await addId(user, 'Experiments', '7');
+      await user.click(modeRadio(LOGDIR_MODE));
+      await user.type(logdirField(), 'runs');
+
+      await showFullConfig(user);
+      await waitFor(() => expect(editorText()).toContain('logdir'));
+      expect(fullConfigTensorBoard()).toEqual({ logdir: 'runs' });
+      await showSimpleConfig(user);
+
+      await user.click(modeRadio(EXPERIMENTS_MODE));
+      expect(idTag('7')).toBeInTheDocument();
+      await user.click(modeRadio(LOGDIR_MODE));
+      expect(logdirField()).toHaveValue('runs');
+      await user.click(modeRadio(EXPERIMENTS_MODE));
+
+      await showFullConfig(user);
+      await waitFor(() => expect(editorText()).toContain('experiment_ids'));
+      expect(fullConfigTensorBoard()).toEqual({ experiment_ids: [7] });
+      await showSimpleConfig(user);
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell.mock.calls[0][0].config.services).toEqual({
+        ...DEFAULT_SERVICES,
+        tensorboard: { experiment_ids: [7] },
+      });
+    });
+
+    it('requires an experiment or trial given by ID before Launch and the full config', async () => {
+      const { onLaunched, user } = await setup();
+      await user.click(serviceBox('tensorboard'));
+      await showFullConfig(user);
+      expect(await screen.findByText('An experiment or trial is required')).toBeInTheDocument();
+      expect(screen.queryByTestId('code-editor')).not.toBeInTheDocument();
+      await launch(user);
+      expect(mocks.launchShell).not.toHaveBeenCalled();
+
+      await addId(user, 'Trials', '12a');
+      expect(await screen.findByText('12a is not an ID')).toBeInTheDocument();
+      await waitFor(() =>
+        expect(screen.queryByText('An experiment or trial is required')).not.toBeInTheDocument(),
+      );
+      await launch(user);
+      expect(mocks.launchShell).not.toHaveBeenCalled();
+
+      await user.click(idTag('12a')?.querySelector('.ant-select-selection-item-remove') as Element);
+      await waitFor(() => expect(idTag('12a')).not.toBeInTheDocument());
+      await addId(user, 'Trials', '12');
+      await waitFor(() => expect(screen.queryByText('12a is not an ID')).not.toBeInTheDocument());
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell.mock.calls[0][0].config.services.tensorboard).toEqual({
+        trial_ids: [12],
+      });
+    });
+
+    it('previews and launches exactly the same request with experiments and trials', async () => {
+      const { onLaunched, user } = await setup();
+      await user.click(serviceBox('tensorboard'));
+      await addId(user, 'Experiments', '9');
+      await addId(user, 'Experiments', '10');
+      await addId(user, 'Trials', '12');
+      await showFullConfig(user);
+      await waitFor(() => expect(editorText()).toContain('trial_ids'));
+      const request = {
+        config: {
+          description: undefined,
+          resources: { resource_pool: undefined, slots: 1 },
+          services: {
+            ...DEFAULT_SERVICES,
+            tensorboard: { experiment_ids: [9, 10], trial_ids: [12] },
+          },
+        },
+        templateName: undefined,
+        workspaceId: WORKSPACE.id,
+      };
+      expect(mocks.previewShell).toHaveBeenLastCalledWith(request);
+
+      await showSimpleConfig(user);
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell).toHaveBeenCalledWith(request);
+    });
+
+    it('sends experiments instead of a template’s log directory, with the template', async () => {
+      mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, TENSORBOARD_TEMPLATE]);
+      const { onLaunched, user } = await setup();
+      await openStartFrom(user);
+      await user.click(await screen.findByText('tensorboard'));
+      await waitFor(() => expect(serviceBox('tensorboard')).toBeChecked());
+      expect(modeRadio(LOGDIR_MODE)).toBeChecked();
+
+      await user.click(modeRadio(EXPERIMENTS_MODE));
+      await addId(user, 'Experiments', '7');
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell).toHaveBeenCalledWith({
+        config: {
+          description: undefined,
+          resources: { resource_pool: undefined, slots: 1 },
+          services: { ...DEFAULT_SERVICES, tensorboard: { experiment_ids: [7] } },
+        },
+        templateName: 'tensorboard',
+        workspaceId: WORKSPACE.id,
+      });
+    });
+
+    it('runs a template that turns ssh off with 0 slots and TensorBoard reading experiments', async () => {
+      mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, SESSION_TEMPLATE]);
+      const { onLaunched, user } = await setup();
+      await openStartFrom(user);
+      await user.click(await screen.findByText('session'));
+      await waitFor(() => expect(serviceBox('tensorboard')).toBeChecked());
+      // The template's services are previewed with 0 slots.
+      expect(mocks.previewShell).toHaveBeenLastCalledWith({
+        config: { description: undefined, resources: { resource_pool: undefined, slots: 0 } },
+        templateName: 'session',
+        workspaceId: WORKSPACE.id,
+      });
+      const slots = screen.getByLabelText('Slots');
+      expect(slots).toHaveValue('0');
+      expect(slots).toBeDisabled();
+      expect(serviceBox('tensorboard')).toBeDisabled();
+      expect(serviceBox('jupyter')).not.toBeChecked();
+      expect(serviceBox('jupyter')).toBeEnabled();
+      expect(sourceModes()).toEqual([EXPERIMENTS_MODE]);
+      expect(modeRadio(EXPERIMENTS_MODE)).toBeChecked();
+      expect(idTag('3')).toBeInTheDocument();
+
+      const request = {
+        config: {
+          description: undefined,
+          resources: { resource_pool: undefined, slots: 0 },
+          services: { tensorboard: { experiment_ids: [3] } },
+        },
+        templateName: 'session',
+        workspaceId: WORKSPACE.id,
+      };
+      await showFullConfig(user);
+      await waitFor(() => expect(editorText()).toContain('experiment_ids'));
+      expect(mocks.previewShell).toHaveBeenCalledWith(request);
+      await showSimpleConfig(user);
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell).toHaveBeenCalledWith(request);
+    });
+
+    it('launches a TensorBoard session again as it was, without its name', async () => {
+      mocks.getShellConfig.mockResolvedValue(sessionShellConfig);
+      const { onLaunched, user } = await setup(
+        { initialTask: task(CommandType.Shell, { name: 'TensorBoard (brave-cat)' }) },
+        { settled: false },
+      );
+      await waitFor(() => expect(serviceBox('tensorboard')).toBeChecked());
+      await waitFor(() => expect(launchButton()).toBeEnabled());
+      expect(serviceBox('tensorboard')).toBeDisabled();
+      expect(serviceBox('jupyter')).not.toBeChecked();
+      expect(sourceModes()).toEqual([EXPERIMENTS_MODE]);
+      expect(modeRadio(EXPERIMENTS_MODE)).toBeChecked();
+      expect(idTag('3')).toBeInTheDocument();
+      expect(idTag('7')).toBeInTheDocument();
+      expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('');
+      await waitFor(() => expect(screen.getByLabelText('Slots')).toHaveValue('0'));
+      expect(screen.getByLabelText('Slots')).toBeDisabled();
+
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      const base = sanitizeConfig(sessionShellConfig);
+      expect(base).not.toHaveProperty('description');
+      expect(mocks.launchShell).toHaveBeenCalledWith({
+        config: base,
+        templateName: undefined,
+        workspaceId: WORKSPACE.id,
+      });
+      expect(base).toEqual({
+        environment: { image: { cpu: 'default:1' } },
+        idle_timeout: '5m',
+        resources: { resource_pool: 'aux', slots: 0 },
+        services: { ssh: { enabled: false }, tensorboard: { experiment_ids: [3, 7] } },
+      });
+    });
+
+    it('keeps a source changed while the preview of a picked config is on its way', async () => {
+      mocks.getShellConfig.mockResolvedValue({
+        ...clusterShellConfig,
+        services: { jupyter: {}, tensorboard: { args: ['--x'], logdir: 'runs' } },
+      });
+      const pending = deferred<void>();
+      mocks.previewShell.mockImplementationOnce((params: { config?: RawJson }) =>
+        pending.promise.then(() => previewFor(params)),
+      );
+      const { onLaunched, user } = await setup(
+        { initialTask: task(CommandType.Shell) },
+        { settled: false },
+      );
+      await waitFor(() => expect(serviceBox('tensorboard')).toBeChecked());
+      await waitFor(() => expect(mocks.previewShell).toHaveBeenCalledTimes(1));
+      expect(modeRadio(LOGDIR_MODE)).toBeChecked();
+      await user.click(modeRadio(EXPERIMENTS_MODE));
+      await addId(user, 'Experiments', '7');
+      pending.resolve();
+
+      await waitFor(() => expect(launchButton()).toBeEnabled());
+      expect(modeRadio(EXPERIMENTS_MODE)).toBeChecked();
+      expect(idTag('7')).toBeInTheDocument();
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell.mock.calls[0][0].config.services.tensorboard).toEqual({
+        args: ['--x'],
+        experiment_ids: [7],
+      });
+    });
+
+    it('saves a TensorBoard session as a template with ssh off, its sources and 0 slots', async () => {
+      mocks.getShellConfig.mockResolvedValue(sessionShellConfig);
+      const { user } = await setup(
+        { initialTask: task(CommandType.Shell, { name: 'TensorBoard (brave-cat)' }) },
+        { settled: false },
+      );
+      await waitFor(() => expect(launchButton()).toBeEnabled());
+      await showFullConfig(user);
+      await waitFor(() => expect(editorText()).toContain('experiment_ids'));
+
+      await user.click(screen.getByRole('button', { name: 'Save as Template' }));
+      expect(await screen.findByText('New Template')).toBeInTheDocument();
+      // The cluster defaults are read for 0 slots.
+      expect(mocks.previewShell).toHaveBeenLastCalledWith({
+        config: { description: undefined, resources: { resource_pool: 'aux', slots: 0 } },
+        templateName: undefined,
+        workspaceId: WORKSPACE.id,
+      });
+      const draft = yaml.load(editorText()) as RawJson;
+      expect(draft).toMatchObject({
+        idle_timeout: '5m',
+        resources: { resource_pool: 'aux', slots: 0 },
+        services: { ssh: { enabled: false }, tensorboard: { experiment_ids: [3, 7] } },
+      });
+      expect(draft).not.toHaveProperty('description');
+    });
+  });
+
   describe('a refused preview', () => {
     /**
      * Opens the form, whose preview on open is refused with status and message: Launch and the full
@@ -1594,6 +1925,7 @@ describe('NtscLaunchModal', () => {
     it.each([
       [400, 'services: unknown service "x"; known services: jupyter, ssh, vscode'],
       [403, 'user may not use the resource pool gpu'],
+      [404, "experiment '12' not found"],
     ])('shows the master’s message for a %s', async (status, message) => {
       await openRefusedFullConfig(status, message);
       expect(await screen.findByText(message)).toBeInTheDocument();

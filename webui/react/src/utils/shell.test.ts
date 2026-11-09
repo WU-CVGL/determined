@@ -103,7 +103,7 @@ describe('shell', () => {
   });
 
   describe('a refused preview', () => {
-    it.each([400, 403])('is thrown with the master’s message for a %s', async (status) => {
+    it.each([400, 403, 404])('is thrown with the master’s message for a %s', async (status) => {
       vi.mocked(apiPreviewShell).mockRejectedValue(await masterError(status, 'no such pool'));
       await expect(previewShell({})).rejects.toThrow('no such pool');
     });
@@ -119,12 +119,15 @@ describe('shell', () => {
   });
 
   describe('actionableErrorMessage', () => {
-    it('reads the message of an InvalidArgument or PermissionDenied refusal only', async () => {
+    it('reads the message of an InvalidArgument, PermissionDenied or NotFound refusal only', async () => {
       expect(actionableErrorMessage(await masterError(400, 'unknown service'))).toBe(
         'unknown service',
       );
       expect(actionableErrorMessage(await masterError(403, 'denied'))).toBe('denied');
-      expect(actionableErrorMessage(await masterError(404, 'not found'))).toBeUndefined();
+      expect(actionableErrorMessage(await masterError(404, "experiment '12' not found"))).toBe(
+        "experiment '12' not found",
+      );
+      expect(actionableErrorMessage(await masterError(500, 'database down'))).toBeUndefined();
       expect(actionableErrorMessage(new Error('x'))).toBeUndefined();
       expect(actionableErrorMessage(undefined)).toBeUndefined();
     });
