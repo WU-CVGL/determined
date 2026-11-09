@@ -1,6 +1,8 @@
 package model
 
 import (
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	"github.com/uptrace/bun"
@@ -85,4 +87,15 @@ type Job struct {
 	JobType JobType         `db:"job_type" bun:"job_type"`
 	OwnerID *UserID         `db:"owner_id" bun:"owner_id"`
 	QPos    decimal.Decimal `db:"q_position" bun:"q_position"`
+
+	// TitleAudience, LogsAudience and ConfigAudience are who may read the job's title, logs and
+	// config besides its owner and admins: {} is nobody else and {authenticated} is every
+	// authenticated user. nil (NULL) is a job created before job privacy, public under the
+	// default. db.AddJobTx stamps them at creation and ignores the values set here.
+	TitleAudience  []string `db:"title_audience" bun:"title_audience,array"`
+	LogsAudience   []string `db:"logs_audience" bun:"logs_audience,array"`
+	ConfigAudience []string `db:"config_audience" bun:"config_audience,array"`
+	// SharingUpdatedBy and SharingUpdatedAt record the last change of the job's own sharing.
+	SharingUpdatedBy *UserID    `db:"sharing_updated_by" bun:"sharing_updated_by"`
+	SharingUpdatedAt *time.Time `db:"sharing_updated_at" bun:"sharing_updated_at"`
 }

@@ -161,6 +161,8 @@ message Job {
   // queue list APIs. Unset if no allocation has received resources.
   // Available only in Agent-only clusters; omitted on other or mixed backends.
   google.protobuf.Timestamp allocation_start_time = 18;
+  // What the requesting user may do with this job's content.
+  JobCapabilities capabilities = 19;
 }
 
 // RBACJob is a job that can have either a limited or a full
@@ -217,4 +219,84 @@ message AggregateQueueStats {
   string period_start = 1;
   // The total number of seconds queued.
   float seconds = 2;
+}
+
+// The content kinds of job privacy.
+enum JobContentKind {
+  // Unspecified kind.
+  JOB_CONTENT_KIND_UNSPECIFIED = 0;
+  // The job's name, description, labels and notes.
+  JOB_CONTENT_KIND_TITLE = 1;
+  // The job's logs.
+  JOB_CONTENT_KIND_LOGS = 2;
+  // The job's config.
+  JOB_CONTENT_KIND_CONFIG = 3;
+}
+
+// Who may read a kind of a job's content besides its owner and admins. Empty
+// means nobody else.
+message JobAudience {
+  // All authenticated users.
+  bool all_users = 1;
+}
+
+// What the requesting user may do with this job's content, computed by the
+// server.
+message JobCapabilities {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: {
+      required: [ "view_title", "view_logs", "view_config", "manage_sharing" ]
+    }
+  };
+  // The user may read the job's name, description, labels and notes.
+  bool view_title = 1;
+  // The user may read the job's logs.
+  bool view_logs = 2;
+  // The user may read the job's config.
+  bool view_config = 3;
+  // The user may change the job's sharing.
+  bool manage_sharing = 4;
+}
+
+// A job's own sharing. An unset audience is a job created before job privacy:
+// no setting.
+message JobSharing {
+  // Who may read the job's title.
+  JobAudience title = 1;
+  // Who may read the job's logs.
+  JobAudience logs = 2;
+  // Who may read the job's config.
+  JobAudience config = 3;
+  // The user who last changed the job's sharing.
+  optional int32 updated_by = 4;
+  // When the job's sharing was last changed.
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+// The cluster policy for one kind of job content.
+message JobPrivacyRule {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: { required: [ "kind", "sharing_allowed", "new_job_audience" ] }
+  };
+  // The content kind.
+  JobContentKind kind = 1;
+  // Whether jobs may share this kind with users other than the owner.
+  bool sharing_allowed = 2;
+  // The audience new jobs get unless the owner chose one.
+  JobAudience new_job_audience = 3;
+}
+
+// A user's job privacy preferences.
+message UserJobPrivacy {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: { required: [ "share_titles", "share_logs" ] }
+  };
+  // Whether the titles of the user's jobs are shared.
+  bool share_titles = 1;
+  // Whether the logs of the user's jobs are shared.
+  bool share_logs = 2;
+  // The title audience of the user's new jobs. Unset: the cluster default.
+  JobAudience new_job_titles = 3;
+  // The logs audience of the user's new jobs. Unset: the cluster default.
+  JobAudience new_job_logs = 4;
 }

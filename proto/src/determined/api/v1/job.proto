@@ -103,3 +103,114 @@ message GetJobQueueStatsResponse {
   // List of queue stats per resource pool.
   repeated RPQueueStat results = 1;
 }
+
+// Get the cluster's job privacy policy.
+message GetJobPrivacyPolicyRequest {}
+
+// Response to GetJobPrivacyPolicyRequest.
+message GetJobPrivacyPolicyResponse {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: { required: [ "rules" ] }
+  };
+  // One rule per content kind.
+  repeated determined.job.v1.JobPrivacyRule rules = 1;
+}
+
+// Set the cluster's job privacy policy.
+message PutJobPrivacyPolicyRequest {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: { required: [ "rules" ] }
+  };
+  // Exactly one rule per content kind.
+  repeated determined.job.v1.JobPrivacyRule rules = 1;
+}
+
+// Response to PutJobPrivacyPolicyRequest.
+message PutJobPrivacyPolicyResponse {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: { required: [ "rules" ] }
+  };
+  // The stored rules.
+  repeated determined.job.v1.JobPrivacyRule rules = 1;
+}
+
+// Get the requesting user's job privacy preferences.
+message GetMyJobPrivacyRequest {}
+
+// Response to GetMyJobPrivacyRequest.
+message GetMyJobPrivacyResponse {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: { required: [ "privacy" ] }
+  };
+  // The user's preferences.
+  determined.job.v1.UserJobPrivacy privacy = 1;
+}
+
+// Change the requesting user's job privacy preferences. Unset fields are kept.
+message PatchMyJobPrivacyRequest {
+  // Whether the titles of the user's jobs are shared.
+  optional bool share_titles = 1;
+  // Whether the logs of the user's jobs are shared.
+  optional bool share_logs = 2;
+  // The title audience of the user's new jobs.
+  determined.job.v1.JobAudience new_job_titles = 3;
+  // The logs audience of the user's new jobs.
+  determined.job.v1.JobAudience new_job_logs = 4;
+  // Return the title audience of new jobs to the cluster default.
+  bool reset_new_job_titles = 5;
+  // Return the logs audience of new jobs to the cluster default.
+  bool reset_new_job_logs = 6;
+}
+
+// Response to PatchMyJobPrivacyRequest.
+message PatchMyJobPrivacyResponse {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: { required: [ "privacy" ] }
+  };
+  // The user's preferences.
+  determined.job.v1.UserJobPrivacy privacy = 1;
+}
+
+// Get a job's own sharing.
+message GetJobSharingRequest {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: { required: [ "job_id" ] }
+  };
+  // The job ID.
+  string job_id = 1;
+}
+
+// Response to GetJobSharingRequest.
+message GetJobSharingResponse {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: { required: [ "sharing", "rules" ] }
+  };
+  // The job's sharing.
+  determined.job.v1.JobSharing sharing = 1;
+  // The cluster policy, one rule per content kind.
+  repeated determined.job.v1.JobPrivacyRule rules = 2;
+}
+
+// Change a job's own sharing. Unset audiences are kept.
+message PatchJobSharingRequest {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: { required: [ "job_id" ] }
+  };
+  // The job ID.
+  string job_id = 1;
+  // Who may read the job's title.
+  determined.job.v1.JobAudience title = 2;
+  // Who may read the job's logs.
+  determined.job.v1.JobAudience logs = 3;
+  // Who may read the job's config.
+  determined.job.v1.JobAudience config = 4;
+}
+
+// Response to PatchJobSharingRequest.
+message PatchJobSharingResponse {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: { required: [ "sharing" ] }
+  };
+  // The job's sharing.
+  determined.job.v1.JobSharing sharing = 1;
+}
