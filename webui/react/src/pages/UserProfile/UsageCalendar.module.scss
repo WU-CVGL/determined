@@ -1,5 +1,8 @@
 .base {
   max-width: 100%;
+}
+.scroll {
+  max-width: 100%;
   overflow-x: auto;
   padding-bottom: 4px;
 }
@@ -47,11 +50,11 @@
 }
 .level1 {
   // stylelint-disable-next-line declaration-property-value-no-unknown -- css-tree 2.3 predates color-mix()
-  background-color: color-mix(in srgb, var(--theme-status-active) 30%, var(--theme-surface));
+  background-color: color-mix(in srgb, var(--theme-status-active) 40%, var(--theme-surface-strong));
 }
 .level2 {
   // stylelint-disable-next-line declaration-property-value-no-unknown -- css-tree 2.3 predates color-mix()
-  background-color: color-mix(in srgb, var(--theme-status-active) 60%, var(--theme-surface));
+  background-color: color-mix(in srgb, var(--theme-status-active) 70%, var(--theme-surface-strong));
 }
 .level3 {
   background-color: var(--theme-status-active);
