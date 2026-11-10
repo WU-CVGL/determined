@@ -29,6 +29,33 @@ STREAM_LOGS = {
     }
 }
 
+# The error that ends a stream whose logs the master refuses while it runs, as a follow stream
+# received it in an end-to-end check.
+STREAM_LOGS_REVOKED = {
+    "error": {
+        "grpcCode": 7,
+        "httpCode": 403,
+        "message": (
+            "1 error occurred:\n\t* failed to fetch batch: rpc error: code = PermissionDenied "
+            "desc = logs not shared\n\n"
+        ),
+        "httpStatus": "Forbidden",
+    }
+}
+
+
+def log_line(n: int) -> Dict[str, Any]:
+    return {
+        "result": {
+            "id": str(n),
+            "level": "LOG_LEVEL_INFO",
+            "log": f"tick-{n}\n",
+            "message": f"tick-{n}\n",
+            "taskId": TASK_ID,
+            "timestamp": "2026-11-09T22:20:49Z",
+        }
+    }
+
 
 def with_caps(obj: Dict[str, Any], caps: Optional[Dict[str, bool]]) -> Dict[str, Any]:
     out = copy.deepcopy(obj)
@@ -367,6 +394,50 @@ def test_task_logs_follow_stream_ends_not_shared(capsys: pytest.CaptureFixture) 
         )
         err = run_refused(capsys, ["task", "logs", "-f", TASK_ID])
     assert err == "logs not shared"
+
+
+def test_task_logs_follow_stream_revoked_while_running(capsys: pytest.CaptureFixture) -> None:
+    # A follow stream that delivered lines, then ended when the logs were no longer shared.
+    body = "".join(
+        json.dumps(obj) + "\n" for obj in [log_line(1), log_line(2), STREAM_LOGS_REVOKED]
+    )
+    with util.standard_cli_rsps() as rsps:
+        rsps.get(f"{MASTER}/api/v1/tasks/{TASK_ID}/logs", body=body, status=200)
+        with pytest.raises(SystemExit) as e:
+            cli.main(["task", "logs", "-f", TASK_ID])
+    assert e.value.code == 1
+    captured = capsys.readouterr()
+    assert "tick-1" in captured.out and "tick-2" in captured.out
+    assert "Task log stream ended" not in captured.out
+    assert captured.err.strip() == "logs not shared"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        # The refusal text inside a line, not at its end.
+        "1 error occurred:\n\t* code = PermissionDenied desc = logs not shared, then more\n\n",
+        # The refusal text as a mere part of a line.
+        "1 error occurred:\n\t* failed to fetch batch: why logs not shared\n\n",
+        # Another refusal of the stream.
+        "1 error occurred:\n\t* failed to fetch batch: rpc error: code = PermissionDenied "
+        "desc = denied\n\n",
+    ],
+)
+def test_task_logs_follow_stream_other_error_unchanged(
+    capsys: pytest.CaptureFixture, message: str
+) -> None:
+    error = copy.deepcopy(STREAM_LOGS_REVOKED)
+    error["error"]["message"] = message
+    body = "".join(json.dumps(obj) + "\n" for obj in [log_line(1), error])
+    with util.standard_cli_rsps() as rsps:
+        rsps.get(f"{MASTER}/api/v1/tasks/{TASK_ID}/logs", body=body, status=200)
+        with pytest.raises(SystemExit) as e:
+            cli.main(["task", "logs", "-f", TASK_ID])
+    assert e.value.code == 1
+    captured = capsys.readouterr()
+    assert "Task log stream ended" in captured.out
+    assert captured.err.startswith("Failed on operation get_TaskLogs: Stream Error during")
 
 
 def test_task_logs_other_refusal_unchanged(capsys: pytest.CaptureFixture) -> None:
