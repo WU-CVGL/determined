@@ -101,23 +101,27 @@ You can use the WebUI to view :ref:`historical-cluster-usage-data`.
 list opens the page of that user, which every signed-in user can open: it shows the same overview
 for that user, and **Jobs** on it lists the user's jobs. Your own page is Home.
 
-Where the cluster meters auxiliary containers or the user's usage holds auxiliary container time,
-**GPU**, **Aux** and **GPU+Aux** choose the resources that the whole overview shows, **GPU+Aux** by
-default. Where neither holds, because every resource pool is a Kubernetes pool and the user has no
-auxiliary container time, the overview shows GPUs only. CPU slots are not shown.
+The overview shows the GPUs and the auxiliary containers of the user. Where the cluster meters no
+auxiliary containers, because every resource pool is a Kubernetes pool, and the user's usage holds
+no auxiliary container time, it shows GPUs only. CPU slots are not shown.
 
 -  **Current resources**: the GPUs and the auxiliary containers that the user's tasks hold now.
 
 -  **Active days**: a calendar of the last 53 weeks with a cell for each UTC day, shaded by how long
    the user's tasks held the chosen resources that day: any time, more than 4 hours, or more than 12
-   hours. With **GPU+Aux**, a time with both held counts once. The title gives the number of shaded
-   days. Selecting a day shows its date and its hours.
+   hours. **GPU**, **Aux** and **GPU+Aux**, next to the title, choose those resources, **GPU+Aux**
+   by default; with **GPU+Aux**, a time with both held counts once. The choice applies to this
+   calendar only. The title gives the number of shaded days. Selecting a day shows its date and its
+   hours of the chosen resources. Where the overview shows GPUs only, the calendar is in **GPU** and
+   there is no choice.
 
--  **Usage**: the GPU hours and the auxiliary container hours for each of the last 31 UTC days
-   (**Day**) or the last 13 UTC months (**Month**); the months also give their active days.
+-  **Usage**: a chart of the GPU hours and the auxiliary container hours for each of the last 31 UTC
+   days (**Day**) or the last 13 UTC months (**Month**). The hours are listed under **Details**,
+   closed by default, where the months also give their active days: the days with GPUs or auxiliary
+   containers held.
 
 .. image:: /assets/images/webui-user-page.png
-   :alt: Home with the overview in GPU+Aux: current resources, the active days calendar with a day selected, and the usage by month
+   :alt: Home with the overview: current resources, the active days calendar in GPU+Aux with a day selected, and the usage by month
 
 |
 

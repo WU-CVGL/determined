@@ -33,8 +33,9 @@ class CurrentResources extends BaseComponent {
 }
 
 /**
- * Represents the resource mode control of the overview: GPU, Aux or GPU+Aux, shown unless the
- * cluster does not meter Aux containers and the usage holds no Aux time.
+ * Represents the resource mode control of the Active days section: GPU, Aux or GPU+Aux for the
+ * calendar, its count and the selected day, shown unless the cluster does not meter Aux
+ * containers and the usage holds no Aux time.
  */
 class ModeControl extends BaseComponent {
   readonly gpu = this.option('gpu');
@@ -71,7 +72,8 @@ class UsageCalendar extends BaseComponent {
 }
 
 /**
- * Represents the Usage section of the overview: the Day | Month switch, the chart and the table.
+ * Represents the Usage section of the overview: the Day | Month switch, the chart, and the Details
+ * accordion with the table, closed at first.
  */
 class UsageSection extends BaseComponent {
   readonly day = new BaseComponent({
@@ -94,10 +96,6 @@ class UsageRow extends Row {}
  */
 export class UserOverview extends NamedComponent {
   override defaultSelector = '[data-testid="user-overview"]';
-  readonly mode = new ModeControl({
-    parent: this,
-    selector: '[class*="UserOverview_mode"]',
-  });
   readonly currentResources = new CurrentResources({
     parent: this,
     selector: 'section#current-resources',
@@ -105,6 +103,11 @@ export class UserOverview extends NamedComponent {
   readonly activeDays = new BaseComponent({
     parent: this,
     selector: 'section#active-days',
+  });
+  /** The mode control, in the row of the title of Active days. */
+  readonly mode = new ModeControl({
+    parent: this.activeDays,
+    selector: '.ant-radio-group',
   });
   /** "Active days · N". */
   readonly activeDaysTitle = new BaseComponent({
@@ -120,11 +123,22 @@ export class UserOverview extends NamedComponent {
     parent: this.usage,
     selector: '[class^="ClusterHistoricalUsageChart_base"]',
   });
+  /** The Details accordion under the chart. */
+  readonly usageDetails = new BaseComponent({
+    parent: this.usage,
+    selector: '.ant-collapse-item',
+  });
+  /** The header of Details: clicking it opens or closes the table; aria-expanded is its state. */
+  readonly usageDetailsToggle = new BaseComponent({
+    parent: this.usageDetails,
+    selector: '.ant-collapse-header',
+  });
+  /** The table of the hours; only in the document while Details is open. */
   readonly usageTable = new Table({
     bodySelector: 'tbody.ant-table-tbody',
     headRowType: UsageHeadRow,
     headSelector: 'thead.ant-table-thead',
-    parent: this.usage,
+    parent: this.usageDetails,
     rowType: UsageRow,
   });
 }

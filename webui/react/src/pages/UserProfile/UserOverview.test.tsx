@@ -22,8 +22,19 @@ vi.mock('utils/error', async (importOriginal) => ({
   default: vi.fn(),
 }));
 
-/** The renders of the history blocks. */
-const renders = vi.hoisted(() => ({ calendar: 0, chart: 0, table: 0 }));
+/** The renders of the cards and of the history blocks. */
+const renders = vi.hoisted(() => ({ calendar: 0, cards: 0, chart: 0, table: 0 }));
+
+vi.mock('components/OverviewStats', async (importOriginal) => {
+  const { default: OverviewStats } =
+    await importOriginal<typeof import('components/OverviewStats')>();
+  return {
+    default: (props: React.ComponentProps<typeof OverviewStats>) => {
+      renders.cards++;
+      return <OverviewStats {...props} />;
+    },
+  };
+});
 
 /* The chart draws on a canvas; the stub shows what it was given. */
 vi.mock('pages/Cluster/ClusterHistoricalUsageChart', () => ({
@@ -103,6 +114,22 @@ const coveredUsage = (
   return { coverageStart: '2025-11-01', entries };
 };
 
+/**
+ * In November: GPUs on 11-09, 11-07 and 11-06, Aux containers on 11-08 and 11-07: 3 GPU days, 2
+ * Aux days and 4 days with either.
+ */
+const MIXED = coveredUsage((date) =>
+  date === '2026-11-09'
+    ? [6]
+    : date === '2026-11-08'
+      ? [0, 13]
+      : date === '2026-11-07'
+        ? [2, 5]
+        : date === '2026-11-06'
+          ? [1]
+          : [0],
+);
+
 /** GPU hours on two days. */
 const USAGE = coveredUsage((date) => [date === '2026-11-09' ? 6 : date === '2026-10-02' ? 2 : 0]);
 
@@ -116,9 +143,28 @@ const Wrapper: React.FC<{ children?: React.ReactNode }> = ({ children }) => (
 
 const setup = (userId = 4) => render(<UserOverview userId={userId} />, { wrapper: Wrapper });
 
+const section = (id: string) => document.querySelector(`section#${id}`) as HTMLElement;
+/** The mode control of the Active days section. */
+const modes = () => within(section('active-days')).queryAllByRole('radio');
+const mode = (name: string) => within(section('active-days')).getByRole('radio', { name });
 const stat = (title: string) => screen.getByText(title).parentElement?.parentElement as HTMLElement;
 const columns = () => screen.getAllByRole('columnheader').map((header) => header.textContent);
 const series = () => screen.getByTestId('chart-series').textContent;
+const cardTitles = () =>
+  ['GPUs', 'Aux containers'].filter((title) =>
+    within(section('current-resources')).queryByText(title),
+  );
+const level = (date: string) => screen.getByLabelText(date).className.match(/level\d/)?.[0];
+const dayLine = () => screen.getByTestId('usage-calendar-day');
+/** The control of the table under the chart. */
+const details = () =>
+  within(document.querySelector('section#usage') as HTMLElement).getByRole('button', {
+    name: /Details/,
+  });
+const openDetails = async (user: ReturnType<typeof userEvent.setup>) => {
+  await act(() => user.click(details()));
+  expect(details()).toHaveAttribute('aria-expanded', 'true');
+};
 
 let hidden = false;
 
@@ -151,7 +197,7 @@ describe('UserOverview', () => {
   });
 
   afterEach(() => {
-    Object.assign(renders, { calendar: 0, chart: 0, table: 0 });
+    Object.assign(renders, { calendar: 0, cards: 0, chart: 0, table: 0 });
     visibility.mockRestore();
     vi.useRealTimers();
     vi.clearAllMocks();
@@ -166,71 +212,93 @@ describe('UserOverview', () => {
       { userId: 4 },
       { signal: expect.any(AbortSignal) },
     );
-    expect(screen.getByRole('radio', { name: 'GPU+Aux' })).toBeChecked();
+    expect(mode('GPU+Aux')).toBeChecked();
   });
 
-  it('changes the cards, the chart, the table, the calendar and its count with the mode', async () => {
+  it('puts the mode control in the Active days section, GPU, Aux and GPU+Aux', async () => {
+    setup();
+    expect(await screen.findByText('Active days · 2')).toBeInTheDocument();
+    expect(modes().map((radio) => radio.closest('label')?.textContent)).toEqual([
+      'GPU',
+      'Aux',
+      'GPU+Aux',
+    ]);
+    expect(mode('GPU+Aux')).toBeChecked();
+    // Day and Month are the other radios.
+    expect(
+      within(section('current-resources')).queryByRole('radio', { name: 'GPU' }),
+    ).not.toBeInTheDocument();
+    expect(within(section('usage')).getAllByRole('radio')).toHaveLength(2);
+  });
+
+  it('changes the calendar, its count and the day line with the mode, and not the cards, the chart or the table', async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    // GPUs on 11-09, Aux containers on 11-08, both on 11-07.
-    vi.mocked(getUserUsage).mockResolvedValue(
-      coveredUsage((date) =>
-        date === '2026-11-09'
-          ? [6]
-          : date === '2026-11-08'
-            ? [0, 13]
-            : date === '2026-11-07'
-              ? [2, 5]
-              : [0],
-      ),
-    );
+    vi.mocked(getUserUsage).mockResolvedValue(MIXED);
     setup();
     await waitFor(() => expect(stat('GPUs')).toHaveTextContent('3'));
-    expect(await screen.findByText('Active days · 3')).toBeInTheDocument();
+    expect(await screen.findByText('Active days · 4')).toBeInTheDocument();
     await act(() => user.click(screen.getByLabelText('2026-11-07')));
-    const dayLine = () => screen.getByTestId('usage-calendar-day');
-    const level = (date: string) => screen.getByLabelText(date).className.match(/level\d/)?.[0];
+    await openDetails(user);
+    const days = ['2026-11-09', '2026-11-08', '2026-11-07', '2026-11-06'];
+    const others = () => ({
+      aux: stat('Aux containers').textContent,
+      cards: cardTitles(),
+      columns: columns(),
+      gpus: stat('GPUs').textContent,
+      rows: screen.getAllByRole('row').map((row) => row.textContent),
+      series: series(),
+      values: screen.getByTestId('chart-values').textContent,
+    });
 
-    expect(screen.getByText('Aux containers')).toBeInTheDocument();
-    expect(series()).toBe('GPU,Aux');
-    expect(columns()).toEqual(['Date', 'GPU hours', 'Aux container hours']);
-    expect([level('2026-11-09'), level('2026-11-08'), level('2026-11-07')]).toEqual([
-      'level2',
-      'level3',
-      'level2',
-    ]);
+    expect(days.map(level)).toEqual(['level2', 'level3', 'level2', 'level1']);
     expect(dayLine()).toHaveTextContent(/^2026-11-07 \(UTC\)GPU hours 2.0Aux container hours 5.0$/);
+    const shown = others();
+    expect(shown.cards).toEqual(['GPUs', 'Aux containers']);
+    expect(shown.series).toBe('GPU,Aux');
+    expect(shown.columns).toEqual(['Date', 'GPU hours', 'Aux container hours']);
 
-    await act(() => user.click(screen.getByRole('radio', { name: 'GPU' })));
-    expect(screen.getByText('GPUs')).toBeInTheDocument();
-    expect(screen.queryByText('Aux containers')).not.toBeInTheDocument();
-    expect(series()).toBe('GPU');
-    expect(columns()).toEqual(['Date', 'GPU hours']);
-    expect([level('2026-11-09'), level('2026-11-08'), level('2026-11-07')]).toEqual([
-      'level2',
-      'level0',
-      'level1',
-    ]);
-    expect(screen.getByText('Active days · 2')).toBeInTheDocument();
+    await act(() => user.click(mode('GPU')));
+    expect(mode('GPU')).toBeChecked();
+    expect(screen.getByText('Active days · 3')).toBeInTheDocument();
+    expect(days.map(level)).toEqual(['level2', 'level0', 'level1', 'level1']);
     expect(dayLine()).toHaveTextContent(/^2026-11-07 \(UTC\)GPU hours 2.0$/);
+    expect(others()).toEqual(shown);
 
-    await act(() => user.click(screen.getByRole('radio', { name: 'Aux' })));
-    expect(screen.queryByText('GPUs')).not.toBeInTheDocument();
-    expect(stat('Aux containers')).toHaveTextContent('1');
-    expect(series()).toBe('Aux');
-    expect(columns()).toEqual(['Date', 'Aux container hours']);
-    expect([level('2026-11-09'), level('2026-11-08'), level('2026-11-07')]).toEqual([
-      'level0',
-      'level3',
-      'level2',
-    ]);
+    await act(() => user.click(mode('Aux')));
     expect(screen.getByText('Active days · 2')).toBeInTheDocument();
+    expect(days.map(level)).toEqual(['level0', 'level3', 'level2', 'level0']);
     expect(dayLine()).toHaveTextContent(/^2026-11-07 \(UTC\)Aux container hours 5.0$/);
+    expect(others()).toEqual(shown);
+    expect(details()).toHaveAttribute('aria-expanded', 'true');
 
-    await user.click(screen.getByText('Month'));
-    await waitFor(() => expect(columns()).toEqual(['Month', 'Aux container hours', 'Active days']));
-    expect(within(screen.getAllByRole('row')[1]).getAllByRole('cell')[2]).toHaveTextContent(/^2$/);
+    await act(() => user.click(mode('GPU+Aux')));
+    expect(screen.getByText('Active days · 4')).toBeInTheDocument();
+    expect(others()).toEqual(shown);
     expect(getUserUsage).toHaveBeenCalledTimes(1);
-  });
+  }, 30_000);
+
+  it("counts each month's days with GPUs or Aux containers in every mode", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    vi.mocked(getUserUsage).mockResolvedValue(MIXED);
+    setup();
+    expect(await screen.findByText('Active days · 4')).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'Month' }));
+    await openDetails(user);
+    expect(columns()).toEqual(['Month', 'GPU hours', 'Aux container hours', 'Active days']);
+    const november = () =>
+      within(screen.getAllByRole('row')[1])
+        .getAllByRole('cell')
+        .map((cell) => cell.textContent);
+    expect(november()).toEqual(['2026-11', '9.0', '18.0', '4']);
+    for (const [name, count] of [
+      ['GPU', 3],
+      ['Aux', 2],
+    ] as const) {
+      await act(() => user.click(mode(name)));
+      expect(screen.getByText(`Active days · ${count}`)).toBeInTheDocument();
+      expect(november()).toEqual(['2026-11', '9.0', '18.0', '4']);
+    }
+  }, 30_000);
 
   it('shows GPUs only, without the mode control, where the cluster does not meter Aux and the usage has none', async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
@@ -241,13 +309,17 @@ describe('UserOverview', () => {
     setup();
     await waitFor(() => expect(screen.getByTestId('chart-series')).toHaveTextContent(/^GPU$/));
     expect(stat('GPUs')).toHaveTextContent('8');
-    expect(screen.queryByText('Aux containers')).not.toBeInTheDocument();
-    expect(screen.queryByRole('radio', { name: 'GPU+Aux' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('columnheader', { name: 'Aux container hours' })).toBeNull();
+    expect(cardTitles()).toEqual(['GPUs']);
+    expect(screen.queryAllByRole('radio', { name: /GPU|Aux/ })).toHaveLength(0);
+    expect(modes()).toHaveLength(0);
+    expect(screen.getByText('Active days · 2')).toBeInTheDocument();
+    await openDetails(user);
+    expect(columns()).toEqual(['Date', 'GPU hours']);
     await act(() => user.click(screen.getByLabelText('2026-11-09')));
-    expect(screen.getByTestId('usage-calendar-day')).toHaveTextContent(
-      /^2026-11-09 \(UTC\)GPU hours 6.0$/,
-    );
+    expect(dayLine()).toHaveTextContent(/^2026-11-09 \(UTC\)GPU hours 6.0$/);
+    await user.click(screen.getByRole('radio', { name: 'Month' }));
+    await waitFor(() => expect(columns()).toEqual(['Month', 'GPU hours', 'Active days']));
+    expect(within(screen.getAllByRole('row')[1]).getAllByRole('cell')[2]).toHaveTextContent(/^1$/);
   });
 
   it('selects GPU once Aux is known to be absent, and keeps it when Aux comes back', async () => {
@@ -259,27 +331,36 @@ describe('UserOverview', () => {
     const usage = deferred<UserUsage>();
     vi.mocked(getUserUsage).mockReturnValue(usage.promise);
     setup();
+    // Unknown while the usage loads: both kinds and the control.
     await waitFor(() => expect(stat('GPUs')).toHaveTextContent('8'));
-    await act(() => user.click(screen.getByRole('radio', { name: 'Aux' })));
-    expect(screen.queryByText('GPUs')).not.toBeInTheDocument();
+    expect(cardTitles()).toEqual(['GPUs', 'Aux containers']);
+    await act(() => user.click(mode('Aux')));
+    expect(mode('Aux')).toBeChecked();
 
     await act(() => {
       usage.resolve(USAGE);
       return Promise.resolve();
     });
     expect(await screen.findByTestId('chart-series')).toHaveTextContent(/^GPU$/);
-    expect(screen.queryByRole('radio', { name: 'GPU+Aux' })).not.toBeInTheDocument();
+    expect(modes()).toHaveLength(0);
+    expect(cardTitles()).toEqual(['GPUs']);
+    expect(screen.getByText('Active days · 2')).toBeInTheDocument();
+    await openDetails(user);
 
     vi.mocked(getUserResources).mockResolvedValue({
       auxMetered: true,
       pools: [{ counts: { auxContainers: 0, cpuSlots: 0, gpus: 8 }, resourcePool: 'default' }],
     });
     await act(() => vi.advanceTimersByTimeAsync(RESOURCES_POLL_INTERVAL));
-    await waitFor(() => expect(screen.getByRole('radio', { name: 'GPU' })).toBeChecked());
-    expect(series()).toBe('GPU');
-    expect(columns()).toEqual(['Date', 'GPU hours']);
-    expect(stat('GPUs')).toHaveTextContent('8');
-    expect(screen.queryByText('Aux containers')).not.toBeInTheDocument();
+    // The control comes back in GPU, not in the Aux mode chosen before.
+    await waitFor(() => expect(mode('GPU')).toBeChecked());
+    expect(mode('Aux')).not.toBeChecked();
+    await act(() => user.click(screen.getByLabelText('2026-11-09')));
+    expect(dayLine()).toHaveTextContent(/^2026-11-09 \(UTC\)GPU hours 6.0$/);
+    expect(cardTitles()).toEqual(['GPUs', 'Aux containers']);
+    expect(series()).toBe('GPU,Aux');
+    expect(columns()).toEqual(['Date', 'GPU hours', 'Aux container hours']);
+    expect(details()).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('shows the Aux containers the user holds in a pool the viewer may not see', async () => {
@@ -296,7 +377,7 @@ describe('UserOverview', () => {
     setup();
     expect(await screen.findByTestId('chart-series')).toHaveTextContent('GPU,Aux');
     expect(screen.getByTestId('usage-calendar')).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'GPU+Aux' })).toBeChecked();
+    expect(mode('GPU+Aux')).toBeChecked();
     expect(screen.queryByText('GPUs')).not.toBeInTheDocument();
   });
 
@@ -310,12 +391,11 @@ describe('UserOverview', () => {
     expect(await screen.findByTestId('chart-series')).toHaveTextContent('GPU,Aux');
     expect(screen.queryByText('GPUs')).not.toBeInTheDocument();
     expect(screen.queryByText('Aux containers')).not.toBeInTheDocument();
-    await act(() => user.click(screen.getByRole('radio', { name: 'Aux' })));
-    expect(series()).toBe('Aux');
+    await act(() => user.click(mode('Aux')));
+    expect(series()).toBe('GPU,Aux');
+    expect(screen.getByText('Active days · 1')).toBeInTheDocument();
     await act(() => user.click(screen.getByLabelText('2026-11-09')));
-    expect(screen.getByTestId('usage-calendar-day')).toHaveTextContent(
-      /^2026-11-09 \(UTC\)Aux container hours 3.0$/,
-    );
+    expect(dayLine()).toHaveTextContent(/^2026-11-09 \(UTC\)Aux container hours 3.0$/);
   });
 
   it('keeps the mode control when the current resources fail and the usage has no Aux', async () => {
@@ -324,7 +404,7 @@ describe('UserOverview', () => {
     expect(await screen.findByTestId('chart-series')).toHaveTextContent('GPU,Aux');
     await waitFor(() => expect(getUserResources).toHaveBeenCalled());
     await act(() => vi.advanceTimersByTimeAsync(0));
-    expect(screen.getByRole('radio', { name: 'GPU+Aux' })).toBeChecked();
+    expect(mode('GPU+Aux')).toBeChecked();
     expect(series()).toBe('GPU,Aux');
   });
 
@@ -341,7 +421,7 @@ describe('UserOverview', () => {
     setup();
     await waitFor(() => expect(stat('GPUs')).toHaveTextContent('8'));
     expect(stat('Aux containers')).toHaveTextContent('0');
-    expect(screen.getByRole('radio', { name: 'GPU+Aux' })).toBeChecked();
+    expect(mode('GPU+Aux')).toBeChecked();
     expect(await screen.findByTestId('chart-series')).toHaveTextContent('GPU,Aux');
     await act(() => user.click(screen.getByLabelText('2026-11-09')));
     expect(screen.getByTestId('usage-calendar-day')).toHaveTextContent(
@@ -375,13 +455,14 @@ describe('UserOverview', () => {
     expect(days).toHaveLength(31);
     expect(days?.[0]).toBe('2026-10-11');
     expect(days?.at(-1)).toBe('2026-11-10');
+    await openDetails(user);
     expect(screen.getByRole('columnheader', { name: 'Date' })).toBeInTheDocument();
     // The table lists the newest day first.
     const firstRow = () => screen.getAllByRole('row')[1];
     expect(within(firstRow()).getAllByRole('cell')[0]).toHaveTextContent('2026-11-10');
     expect(within(screen.getAllByRole('row')[2]).getAllByRole('cell')[1]).toHaveTextContent('6.0');
 
-    await user.click(screen.getByText('Month'));
+    await user.click(screen.getByRole('radio', { name: 'Month' }));
     await waitFor(() =>
       expect(screen.getByRole('columnheader', { name: 'Month' })).toBeInTheDocument(),
     );
@@ -407,7 +488,7 @@ describe('UserOverview', () => {
     expect(screen.getByRole('columnheader', { name: 'Active days' })).toBeInTheDocument();
     expect(within(firstRow()).getAllByRole('cell')[3]).toHaveTextContent(/^1$/);
 
-    await user.click(screen.getByText('Day'));
+    await user.click(screen.getByRole('radio', { name: 'Day' }));
     await waitFor(() =>
       expect(screen.getByRole('columnheader', { name: 'Date' })).toBeInTheDocument(),
     );
@@ -415,6 +496,7 @@ describe('UserOverview', () => {
   });
 
   it('shows zeros and flat lines without any usage', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     vi.mocked(getUserResources).mockResolvedValue({ auxMetered: true, pools: [] });
     vi.mocked(getUserUsage).mockResolvedValue(coveredUsage(() => [0]));
     setup();
@@ -429,6 +511,7 @@ describe('UserOverview', () => {
     const values = JSON.parse(screen.getByTestId('chart-values').textContent ?? '{}');
     expect(values.GPU).toEqual(Array(31).fill(0));
     expect(values.Aux).toEqual(Array(31).fill(0));
+    await openDetails(user);
     expect(within(screen.getAllByRole('row')[1]).getAllByRole('cell')[1]).toHaveTextContent('0.0');
   });
 
@@ -438,6 +521,106 @@ describe('UserOverview', () => {
     expect(await screen.findByTestId('usage-calendar')).toBeInTheDocument();
     expect(screen.getByLabelText('2026-11-10')).toHaveClass('notCovered');
     expect(screen.getByTestId('chart-series')).toHaveTextContent('GPU');
+  });
+
+  describe('Details', () => {
+    it('is closed at first, without the table', async () => {
+      setup();
+      expect(await screen.findByTestId('usage-chart')).toBeInTheDocument();
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(details()).toHaveAttribute('aria-expanded', 'false');
+      expect(details()).toHaveTextContent(/^Details$/);
+      expect(screen.queryByRole('table')).not.toBeInTheDocument();
+      expect(screen.queryAllByRole('row')).toHaveLength(0);
+      expect(renders.table).toBe(0);
+    });
+
+    it('lists the hours of the view when opened, and drops them when closed', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      setup();
+      expect(await screen.findByTestId('usage-chart')).toBeInTheDocument();
+      await act(() => user.click(mode('GPU')));
+      await user.click(screen.getByRole('radio', { name: 'Month' }));
+      await waitFor(() => expect(screen.getByTestId('chart-time')).toHaveTextContent(/^2025-11,/));
+
+      await openDetails(user);
+      expect(columns()).toEqual(['Month', 'GPU hours', 'Aux container hours', 'Active days']);
+      // The header and the 13 months, the newest first.
+      expect(screen.getAllByRole('row')).toHaveLength(14);
+      expect(within(screen.getAllByRole('row')[1]).getAllByRole('cell')[0]).toHaveTextContent(
+        '2026-11',
+      );
+
+      await act(() => user.click(details()));
+      expect(details()).toHaveAttribute('aria-expanded', 'false');
+      await waitFor(() => expect(screen.queryAllByRole('row')).toHaveLength(0));
+    });
+
+    it('opens and closes from the keyboard', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      setup();
+      expect(await screen.findByTestId('usage-chart')).toBeInTheDocument();
+      act(() => details().focus());
+      await act(() => user.keyboard('{Enter}'));
+      expect(details()).toHaveAttribute('aria-expanded', 'true');
+      // The header and the 31 days.
+      expect(screen.getAllByRole('row')).toHaveLength(32);
+      await act(() => user.keyboard('{Enter}'));
+      expect(details()).toHaveAttribute('aria-expanded', 'false');
+      await waitFor(() => expect(screen.queryAllByRole('row')).toHaveLength(0));
+    });
+
+    it('stays open across the views, the modes and the usage refreshes', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      setup();
+      expect(await screen.findByTestId('usage-chart')).toBeInTheDocument();
+      await openDetails(user);
+      expect(columns()).toEqual(['Date', 'GPU hours', 'Aux container hours']);
+
+      await user.click(screen.getByRole('radio', { name: 'Month' }));
+      await waitFor(() =>
+        expect(columns()).toEqual(['Month', 'GPU hours', 'Aux container hours', 'Active days']),
+      );
+      expect(details()).toHaveAttribute('aria-expanded', 'true');
+
+      await act(() => user.click(mode('GPU')));
+      expect(columns()).toEqual(['Month', 'GPU hours', 'Aux container hours', 'Active days']);
+      expect(details()).toHaveAttribute('aria-expanded', 'true');
+
+      vi.mocked(getUserUsage).mockResolvedValue(
+        coveredUsage((date) => [date === '2026-11-09' ? 9 : 0]),
+      );
+      await act(() => vi.advanceTimersByTimeAsync(USAGE_REFRESH_INTERVAL));
+      expect(getUserUsage).toHaveBeenCalledTimes(2);
+      await waitFor(() =>
+        expect(within(screen.getAllByRole('row')[1]).getAllByRole('cell')[1]).toHaveTextContent(
+          '9.0',
+        ),
+      );
+      expect(details()).toHaveAttribute('aria-expanded', 'true');
+
+      await user.click(screen.getByRole('radio', { name: 'Day' }));
+      await waitFor(() => expect(columns()).toEqual(['Date', 'GPU hours', 'Aux container hours']));
+      expect(within(screen.getAllByRole('row')[2]).getAllByRole('cell')[1]).toHaveTextContent(
+        '9.0',
+      );
+      expect(details()).toHaveAttribute('aria-expanded', 'true');
+    });
+
+    it('stays closed across the views, the modes and the usage refreshes', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      setup();
+      expect(await screen.findByTestId('usage-chart')).toBeInTheDocument();
+      await user.click(screen.getByRole('radio', { name: 'Month' }));
+      await waitFor(() => expect(screen.getByTestId('chart-time')).toHaveTextContent(/^2025-11,/));
+      await act(() => user.click(mode('Aux')));
+      expect(mode('Aux')).toBeChecked();
+      await act(() => vi.advanceTimersByTimeAsync(USAGE_REFRESH_INTERVAL));
+      expect(getUserUsage).toHaveBeenCalledTimes(2);
+      expect(details()).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryAllByRole('row')).toHaveLength(0);
+      expect(renders.table).toBe(0);
+    });
   });
 
   it('reads the current resources every 15 s, and not while the page is hidden', async () => {
@@ -465,27 +648,67 @@ describe('UserOverview', () => {
   });
 
   it('renders the calendar, the chart and the table no more for the resources polls', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const pools = (gpus: number) => ({
       auxMetered: true,
       pools: [{ counts: { auxContainers: 0, cpuSlots: 0, gpus }, resourcePool: 'default' }],
+    });
+    const poll = async (counts: number[]) => {
+      for (const gpus of counts) {
+        vi.mocked(getUserResources).mockResolvedValue(pools(gpus));
+        await act(() => vi.advanceTimersByTimeAsync(RESOURCES_POLL_INTERVAL));
+        await waitFor(() => expect(stat('GPUs')).toHaveTextContent(String(gpus)));
+      }
+    };
+    const history = () => ({
+      calendar: renders.calendar,
+      chart: renders.chart,
+      table: renders.table,
     });
     setup();
     await waitFor(() => expect(stat('GPUs')).toHaveTextContent('3'));
     expect(await screen.findByTestId('usage-chart')).toBeInTheDocument();
     await act(() => vi.advanceTimersByTimeAsync(0));
+
+    // With the table closed.
+    const closed = history();
+    expect(closed.calendar).toBeGreaterThan(0);
+    expect(closed.chart).toBeGreaterThan(0);
+    expect(closed.table).toBe(0);
+    await poll([4, 5, 6]);
+    expect(history()).toEqual(closed);
+
+    // With the table open.
+    await openDetails(user);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    const open = history();
+    expect(open.table).toBeGreaterThan(0);
+    await poll([7, 8, 9]);
+    expect(getUserResources).toHaveBeenCalledTimes(7);
+    expect(getUserUsage).toHaveBeenCalledTimes(1);
+    expect(history()).toEqual(open);
+  });
+
+  it('renders the Active days section only for a mode switch', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    setup();
+    await waitFor(() => expect(stat('GPUs')).toHaveTextContent('3'));
+    expect(await screen.findByText('Active days · 2')).toBeInTheDocument();
+    await openDetails(user);
+    await act(() => vi.advanceTimersByTimeAsync(0));
     const before = { ...renders };
-    expect(before.calendar).toBeGreaterThan(0);
-    expect(before.chart).toBeGreaterThan(0);
+    expect(before.cards).toBeGreaterThan(0);
     expect(before.table).toBeGreaterThan(0);
 
-    for (const gpus of [4, 5, 6]) {
-      vi.mocked(getUserResources).mockResolvedValue(pools(gpus));
-      await act(() => vi.advanceTimersByTimeAsync(RESOURCES_POLL_INTERVAL));
-      await waitFor(() => expect(stat('GPUs')).toHaveTextContent(String(gpus)));
+    for (const name of ['GPU', 'Aux', 'GPU+Aux']) {
+      const calendar = renders.calendar;
+      await act(() => user.click(mode(name)));
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(mode(name)).toBeChecked();
+      expect(renders.calendar).toBeGreaterThan(calendar);
     }
-    expect(getUserResources).toHaveBeenCalledTimes(4);
-    expect(getUserUsage).toHaveBeenCalledTimes(1);
-    expect(renders).toEqual(before);
+    expect(renders).toEqual({ ...before, calendar: renders.calendar });
+    expect(getUserResources).toHaveBeenCalledTimes(1);
   });
 
   it('cancels the requests in flight when the overview goes away', async () => {
