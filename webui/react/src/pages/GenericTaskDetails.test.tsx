@@ -306,6 +306,49 @@ describe('GenericTaskDetails', () => {
         expect(configRequests()).toBe(before + 1);
       });
 
+      it('shows no old error while the config is read again after a re-share', async () => {
+        lookupShared[TASK_ID] = true;
+        vi.mocked(getGenericTaskConfig).mockImplementationOnce(() =>
+          Promise.reject(
+            new DetError(new Response(null, { status: 500 }), {
+              publicMessage: 'internal error',
+              publicSubject: 'Request getGenericTaskConfig failed.',
+            }),
+          ),
+        );
+        setup();
+        expect(await screen.findByText('Unable to load config')).toBeInTheDocument();
+
+        lookupShared[TASK_ID] = false;
+        await returnToPage();
+        expect(await screen.findByText('Config not shared')).toBeInTheDocument();
+        expect(configRequests()).toBe(1);
+
+        let answer: (value: { entrypoint: string }) => void = () => {};
+        vi.mocked(getGenericTaskConfig).mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              answer = resolve;
+            }),
+        );
+        configShared[TASK_ID] = true;
+        lookupShared[TASK_ID] = true;
+        await returnToPage();
+        await waitFor(() => expect(configRequests()).toBe(2));
+        expect(screen.queryByText('Config not shared')).not.toBeInTheDocument();
+        expect(screen.queryByText('Unable to load config')).not.toBeInTheDocument();
+        expect(screen.getByText('Fetching config...')).toBeInTheDocument();
+
+        await act(async () => {
+          answer({ entrypoint: `${SENTINEL}-${TASK_ID}` });
+          await vi.advanceTimersByTimeAsync(100);
+        });
+        expect(await screen.findByText(new RegExp(SENTINEL))).toBeInTheDocument();
+        expect(screen.queryByText('Unable to load config')).not.toBeInTheDocument();
+        await poll(2);
+        expect(configRequests()).toBe(2);
+      });
+
       it('reads a refused config once per return while the lookup still shows it', async () => {
         lookupShared[TASK_ID] = true;
         setup();

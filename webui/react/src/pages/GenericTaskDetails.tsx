@@ -178,6 +178,7 @@ const GenericTaskDetails: React.FC = () => {
     if (!isGeneric) return;
     if (configNotShared) {
       setConfig(undefined);
+      setConfigError(undefined);
       return;
     }
     let active = true;
