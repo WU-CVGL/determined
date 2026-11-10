@@ -5,6 +5,7 @@ import {
   CommandType,
   GenericTask,
   GenericTaskState,
+  JobCapabilities,
   RunState,
 } from 'types';
 
@@ -28,6 +29,7 @@ import {
   mergeRuns,
   MULTI_NODE,
   pageOfRuns,
+  runDisplayName,
   RunKind,
   RunRow,
   savedSlots,
@@ -533,6 +535,78 @@ describe('runRows', () => {
       expect(experimentSearch('  ')).toEqual({});
       expect(experimentSearch(' bert ')).toEqual({ name: 'bert' });
       expect(experimentSearch('42')).toEqual({ experimentIdFilter: { incl: [42] } });
+    });
+  });
+  describe('rows whose title is not shared', () => {
+    const hidden: JobCapabilities = {
+      manageSharing: false,
+      viewConfig: false,
+      viewLogs: false,
+      viewTitle: false,
+    };
+    const shellId = '1a2b3c4d-0000-4000-8000-000000000000';
+    // As the decoders map them: no name, the capabilities and the public fields.
+    const hiddenShell = commandRow(
+      command(shellId, '2026-01-02T00:00:00Z', {
+        capabilities: hidden,
+        name: undefined,
+        type: CommandType.Shell,
+      }),
+    );
+    const hiddenGeneric = genericTaskRow({
+      ...generic('9f8e7d6c-0000-4000-8000-000000000000', '2026-01-03T00:00:00Z'),
+      capabilities: hidden,
+      name: undefined,
+    });
+    const hiddenExperiment = experimentRow({
+      ...experiment(12, '2026-01-04T00:00:00Z'),
+      capabilities: hidden,
+      config: { resources: { slots_per_trial: 2 } } as unknown as BulkExperimentItem['config'],
+      name: undefined,
+    });
+
+    it('show their kind and short ID', () => {
+      expect(runDisplayName(hiddenShell)).toBe('Shell 1a2b3c4d');
+      expect(runDisplayName(hiddenGeneric)).toBe('Generic Task 9f8e7d6c');
+      expect(runDisplayName(hiddenExperiment)).toBe('Experiment 12');
+      expect(runDisplayName(commandRow(command('c', '2026-01-01T00:00:00Z')))).toBe('task c');
+    });
+
+    it('keep their public fields', () => {
+      expect(hiddenExperiment.slots).toBe(2);
+      expect(hiddenExperiment.resourcePool).toBe('default');
+      expect(hiddenShell.ownerName).toBeUndefined();
+      expect(hiddenGeneric.ownerName).toBe('alice');
+    });
+
+    it('sort last by name in both directions', () => {
+      const visible = [
+        commandRow(command('a', '2026-01-01T00:00:00Z', { name: 'alpha' })),
+        commandRow(command('z', '2026-01-01T00:00:00Z', { name: 'zulu' })),
+      ];
+      for (const desc of [false, true]) {
+        const sort = { desc, key: SortKey.Name };
+        const commands = sortCommandRows([hiddenShell, ...visible], sort);
+        expect(keys(commands)).toEqual(
+          desc
+            ? [visible[1].key, visible[0].key, hiddenShell.key]
+            : [visible[0].key, visible[1].key, hiddenShell.key],
+        );
+        const merged = mergeRuns([commands, [hiddenGeneric], [hiddenExperiment]], sort);
+        // The ties of hidden rows: the newest start first.
+        expect(keys(merged).slice(2)).toEqual([
+          hiddenExperiment.key,
+          hiddenGeneric.key,
+          hiddenShell.key,
+        ]);
+      }
+    });
+
+    it('match a search by their ID only', () => {
+      const rows = [hiddenShell as CommandRunRow];
+      const filter = { kinds: [RunKind.Shell] };
+      expect(filterCommandRows(rows, { ...filter, search: 'shell' })).toEqual([]);
+      expect(filterCommandRows(rows, { ...filter, search: '1a2b' })).toEqual(rows);
     });
   });
 });

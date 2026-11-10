@@ -92,12 +92,12 @@ const HpParallelCoordinates: React.FC<Props> = ({
     if (
       selectedMetric &&
       selectedMetric.group === MetricType.Validation &&
-      selectedMetric.name === experiment.config.searcher.metric
+      selectedMetric.name === experiment.config?.searcher.metric
     ) {
       return experiment.config.searcher.smallerIsBetter;
     }
     return undefined;
-  }, [experiment.config.searcher, selectedMetric]);
+  }, [experiment.config?.searcher, selectedMetric]);
 
   const resetFilteredTrials = useCallback(() => {
     // Skip if there isn't any chart data.

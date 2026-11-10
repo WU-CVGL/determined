@@ -7,6 +7,7 @@ import { MapOfIdsToColors } from 'hooks/useGlasbey';
 import { RunMetricData } from 'hooks/useMetrics';
 import { ExperimentWithTrial, FlatRun, Serie, TrialItem, XAxisDomain, XOR } from 'types';
 import handleError from 'utils/error';
+import { jobDisplayName } from 'utils/jobPrivacy';
 import { metricToKey } from 'utils/metric';
 
 interface BaseProps {
@@ -42,7 +43,12 @@ const CompareMetrics: React.FC<Props> = ({
       const chartedMetrics: Record<string, boolean> = {};
       const expNameById = experiments.reduce(
         (acc, cur) => {
-          acc[cur.experiment.id] = cur.experiment.name;
+          acc[cur.experiment.id] = jobDisplayName(
+            'Experiment',
+            cur.experiment.id,
+            cur.experiment.name,
+            cur.experiment.capabilities,
+          );
           return acc;
         },
         {} as Record<number, string>,

@@ -104,3 +104,18 @@ describe('sortJobs on the text cases of the shared fixture', () => {
     });
   });
 });
+
+describe('jobs whose title is not shared', () => {
+  const hidden = { manageSharing: false, viewConfig: false, viewLogs: false, viewTitle: false };
+  // As the master lists them: an empty name and the capabilities.
+  const hiddenJobs: FullJob[] = [
+    { ...jobs[0], capabilities: hidden, jobId: 'hidden-a', name: '' },
+    { ...jobs[1], capabilities: hidden, jobId: 'hidden-b', name: '' },
+  ];
+
+  it.each([false, true])('sort last by name, in queue order (descending: %s)', (desc) => {
+    const visible = jobs.slice(2, 5);
+    const sorted = sortJobs([...hiddenJobs, ...visible], 'name', desc, ownerName);
+    expect(sorted.slice(-2).map((job) => job.jobId)).toEqual(['hidden-a', 'hidden-b']);
+  });
+});

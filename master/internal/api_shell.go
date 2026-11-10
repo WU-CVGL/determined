@@ -26,6 +26,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
+	"github.com/determined-ai/determined/master/internal/jobprivacy"
 	"github.com/determined-ai/determined/master/internal/rbac/audit"
 	"github.com/determined-ai/determined/master/pkg/archive"
 	"github.com/determined-ai/determined/master/pkg/check"
@@ -104,6 +105,10 @@ func (a *apiServer) GetShells(
 		return nil, err
 	}
 
+	// Hidden descriptions are cleared before the sort, so a hidden row sorts as an empty one.
+	if _, err = setShellCapabilities(ctx, *curUser, resp.Shells...); err != nil {
+		return nil, err
+	}
 	api.Sort(resp.Shells, req.OrderBy, req.SortBy, apiv1.GetShellsRequest_SORT_BY_ID)
 	if err = api.Paginate(&resp.Pagination, &resp.Shells, req.Offset, req.Limit); err != nil {
 		return nil, err
@@ -144,7 +149,40 @@ func (a *apiServer) GetShell(
 	if err = checkShellSources(ctx, *curUser, req.ShellId, resp.Shell, resp.Config); err != nil {
 		return nil, err
 	}
+	caps, err := setShellCapabilities(ctx, *curUser, resp.Shell)
+	if err != nil {
+		return nil, err
+	}
+	if !caps[resp.Shell.Id].ViewConfig {
+		resp.Config = nil
+	}
 	return resp, nil
+}
+
+// setShellCapabilities sets the user's job privacy capabilities on the shells, clears the
+// description of a shell whose title the user may not read and the exit status of one whose logs
+// the user may not read, and returns the capabilities by shell ID.
+func setShellCapabilities(
+	ctx context.Context, curUser model.User, shells ...*shellv1.Shell,
+) (map[string]jobprivacy.Caps, error) {
+	v, err := jobprivacy.NewViewer(ctx, curUser)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]jobprivacy.Caps, len(shells))
+	return byID, applyJobPrivacy(ctx, v, shells,
+		func(s *shellv1.Shell) string { return s.JobId },
+		func(s *shellv1.Shell, caps jobprivacy.Caps) {
+			if !caps.ViewTitle {
+				s.Description = ""
+			}
+			// The exit status is a free-text failure reason, which follows the logs.
+			if !caps.ViewLogs {
+				s.ExitStatus = ""
+			}
+			s.Capabilities = caps.Proto()
+			byID[s.Id] = caps
+		})
 }
 
 // mayReadTensorBoardSources reports whether user may see which experiments and trials a task's
@@ -251,6 +289,9 @@ func (a *apiServer) KillShell(
 	if err = checkShellSources(ctx, *curUser, req.ShellId, shell, nil); err != nil {
 		return nil, err
 	}
+	if _, err = setShellCapabilities(ctx, *curUser, shell); err != nil {
+		return nil, err
+	}
 	return &apiv1.KillShellResponse{Shell: shell}, nil
 }
 
@@ -286,6 +327,9 @@ func (a *apiServer) SetShellPriority(
 
 	shell := cmd.ToV1Shell()
 	if err = checkShellSources(ctx, *curUser, req.ShellId, shell, nil); err != nil {
+		return nil, err
+	}
+	if _, err = setShellCapabilities(ctx, *curUser, shell); err != nil {
 		return nil, err
 	}
 	return &apiv1.SetShellPriorityResponse{Shell: shell}, nil

@@ -2339,6 +2339,68 @@ export const updateJobQueue: DetApi<
   request: (params: Api.V1UpdateJobQueueRequest) => detApi.Internal.updateJobQueue(params),
 };
 
+/* Job privacy */
+
+export const getJobPrivacyPolicy: DetApi<
+  EmptyParams,
+  Api.V1GetJobPrivacyPolicyResponse,
+  Api.V1JobPrivacyRule[]
+> = {
+  name: 'getJobPrivacyPolicy',
+  postProcess: (response) => response.rules ?? [],
+  request: (_params, options) => detApi.Internal.getJobPrivacyPolicy(options),
+};
+
+export const putJobPrivacyPolicy: DetApi<
+  Api.V1PutJobPrivacyPolicyRequest,
+  Api.V1PutJobPrivacyPolicyResponse,
+  Api.V1JobPrivacyRule[]
+> = {
+  name: 'putJobPrivacyPolicy',
+  postProcess: (response) => response.rules ?? [],
+  request: (params, options) => detApi.Internal.putJobPrivacyPolicy(params, options),
+};
+
+export const getMyJobPrivacy: DetApi<
+  EmptyParams,
+  Api.V1GetMyJobPrivacyResponse,
+  Api.V1UserJobPrivacy
+> = {
+  name: 'getMyJobPrivacy',
+  postProcess: (response) => response.privacy,
+  request: (_params, options) => detApi.Internal.getMyJobPrivacy(options),
+};
+
+export const patchMyJobPrivacy: DetApi<
+  Api.V1PatchMyJobPrivacyRequest,
+  Api.V1PatchMyJobPrivacyResponse,
+  Api.V1UserJobPrivacy
+> = {
+  name: 'patchMyJobPrivacy',
+  postProcess: (response) => response.privacy,
+  request: (params, options) => detApi.Internal.patchMyJobPrivacy(params, options),
+};
+
+export const getJobSharing: DetApi<
+  Service.JobSharingParams,
+  Api.V1GetJobSharingResponse,
+  Type.JobSharingSettings
+> = {
+  name: 'getJobSharing',
+  postProcess: (response) => ({ rules: response.rules ?? [], sharing: response.sharing }),
+  request: (params, options) => detApi.Internal.getJobSharing(params.jobId, options),
+};
+
+export const patchJobSharing: DetApi<
+  Api.V1PatchJobSharingRequest,
+  Api.V1PatchJobSharingResponse,
+  Api.V1JobSharing
+> = {
+  name: 'patchJobSharing',
+  postProcess: (response) => response.sharing,
+  request: (params, options) => detApi.Internal.patchJobSharing(params.jobId, params, options),
+};
+
 export const deleteCheckpoints: DetApi<
   Api.V1DeleteCheckpointsRequest,
   Api.V1DeleteCheckpointsResponse,

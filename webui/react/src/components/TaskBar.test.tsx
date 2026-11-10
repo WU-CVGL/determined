@@ -63,6 +63,16 @@ describe('TaskBar', () => {
     expect(handleViewLogsClick).toHaveBeenCalledTimes(1);
   });
 
+  it('offers Sharing between View Logs and Kill when given', async () => {
+    const onSharing = vi.fn();
+    renderBar({ onSharing });
+    await userEvent.click(screen.getByTestId('task-action-dropdown-trigger'));
+    await screen.findByText('Kill');
+    expect(menuLabels()).toEqual(['View Logs', 'Sharing', 'Kill']);
+    await userEvent.click(screen.getByText('Sharing'));
+    expect(onSharing).toHaveBeenCalledTimes(1);
+  });
+
   it('kills the task by its type after a confirmation', async () => {
     renderBar();
     await userEvent.click(screen.getByTestId('task-action-dropdown-trigger'));

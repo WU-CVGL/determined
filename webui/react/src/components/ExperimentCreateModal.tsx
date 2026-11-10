@@ -270,6 +270,8 @@ const ExperimentCreateModalComponent = ({
   };
 
   useEffect(() => {
+    // Unset when the experiment's config is not shared with the viewer.
+    if (!experiment.configRaw) return;
     let config = upgradeConfig(experiment.configRaw);
 
     if (!isFork && trial) {
@@ -316,7 +318,7 @@ const ExperimentCreateModalComponent = ({
     form.validateFields([EXPERIMENT_NAME]); // initial disabled state set here, gets updated later in handleFieldsChange
   }, [entityCopy, experiment, trial, type, isFork, form]);
 
-  if (!experiment || (!isFork && !trial)) return <></>;
+  if (!experiment?.configRaw || (!isFork && !trial)) return <></>;
 
   return (
     <Modal

@@ -321,6 +321,44 @@ export const updateJobQueue = generateDetApi<
   Api.V1UpdateJobQueueResponse
 >(Config.updateJobQueue);
 
+/* Job privacy */
+
+export const getJobPrivacyPolicy = generateDetApi<
+  EmptyParams,
+  Api.V1GetJobPrivacyPolicyResponse,
+  Api.V1JobPrivacyRule[]
+>(Config.getJobPrivacyPolicy);
+
+export const putJobPrivacyPolicy = generateDetApi<
+  Api.V1PutJobPrivacyPolicyRequest,
+  Api.V1PutJobPrivacyPolicyResponse,
+  Api.V1JobPrivacyRule[]
+>(Config.putJobPrivacyPolicy);
+
+export const getMyJobPrivacy = generateDetApi<
+  EmptyParams,
+  Api.V1GetMyJobPrivacyResponse,
+  Api.V1UserJobPrivacy
+>(Config.getMyJobPrivacy);
+
+export const patchMyJobPrivacy = generateDetApi<
+  Api.V1PatchMyJobPrivacyRequest,
+  Api.V1PatchMyJobPrivacyResponse,
+  Api.V1UserJobPrivacy
+>(Config.patchMyJobPrivacy);
+
+export const getJobSharing = generateDetApi<
+  Service.JobSharingParams,
+  Api.V1GetJobSharingResponse,
+  Type.JobSharingSettings
+>(Config.getJobSharing);
+
+export const patchJobSharing = generateDetApi<
+  Api.V1PatchJobSharingRequest,
+  Api.V1PatchJobSharingResponse,
+  Api.V1JobSharing
+>(Config.patchJobSharing);
+
 /* Experiments */
 
 export const getExperiments = generateDetApi<

@@ -26,7 +26,7 @@ export const useCheckpointFlow = ({
   models: modelsIn,
 }: {
   checkpoint?: CheckpointWorkloadExtended | CoreApiGenericCheckpoint;
-  config: ExperimentConfig;
+  config?: ExperimentConfig;
   title: string;
   models?: Loadable<ModelItem[]>;
 }): Return => {

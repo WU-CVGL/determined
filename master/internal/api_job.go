@@ -10,6 +10,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/api/apiutils"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/job/jobservice"
+	"github.com/determined-ai/determined/master/internal/jobprivacy"
 	"github.com/determined-ai/determined/master/internal/poolaccess"
 	"github.com/determined-ai/determined/master/internal/rm"
 
@@ -41,6 +42,9 @@ func (a *apiServer) GetJobs(
 
 	jobs, err = job.AuthZProvider.Get().FilterJobs(ctx, *curUser, jobs)
 	if err != nil {
+		return nil, err
+	}
+	if err = setQueueJobCapabilities(ctx, *curUser, jobs); err != nil {
 		return nil, err
 	}
 	resp.Jobs = jobs
@@ -78,6 +82,10 @@ func (a *apiServer) GetJobsV2(
 
 	okJobs, err := job.AuthZProvider.Get().FilterJobs(ctx, *curUser, jobs)
 	if err != nil {
+		return nil, err
+	}
+	// Limited jobs carry no content, so they get no capabilities.
+	if err = setQueueJobCapabilities(ctx, *curUser, okJobs); err != nil {
 		return nil, err
 	}
 	okJobsMap := make(map[string]bool)
@@ -118,6 +126,23 @@ func (a *apiServer) GetJobsV2(
 		return nil, err
 	}
 	return resp, nil
+}
+
+// setQueueJobCapabilities sets the user's job privacy capabilities on the queue's jobs and clears
+// the name of a job whose title the user may not read.
+func setQueueJobCapabilities(ctx context.Context, curUser model.User, jobs []*jobv1.Job) error {
+	v, err := jobprivacy.NewViewer(ctx, curUser)
+	if err != nil {
+		return err
+	}
+	return applyJobPrivacy(ctx, v, jobs,
+		func(j *jobv1.Job) string { return j.JobId },
+		func(j *jobv1.Job, c jobprivacy.Caps) {
+			if !c.ViewTitle {
+				j.Name = ""
+			}
+			j.Capabilities = c.Proto()
+		})
 }
 
 func (a *apiServer) enrichJobAllocationStartTimes(ctx context.Context, jobs []*jobv1.Job) error {

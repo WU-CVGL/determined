@@ -94,7 +94,7 @@ const RunEntityCopyMap = {
   trial: 'run',
 };
 
-const HyperparameterSearchModal = ({ closeModal, experiment, trial }: Props): JSX.Element => {
+const HyperparameterSearchForm = ({ closeModal, experiment, trial }: Props): JSX.Element => {
   const idPrefix = useId();
   const [modalError, setModalError] = useState<string>();
   const [searcher, setSearcher] = useState(
@@ -862,5 +862,9 @@ const HyperparameterRow: React.FC<RowProps> = ({
     </>
   );
 };
+
+/* A search starts from the experiment's config, which is unset when it is not shared. */
+const HyperparameterSearchModal = (props: Props): JSX.Element =>
+  props.experiment.configRaw ? <HyperparameterSearchForm {...props} /> : <></>;
 
 export default HyperparameterSearchModal;

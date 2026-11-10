@@ -285,6 +285,8 @@ const ExperimentContinueModalComponent = ({
   };
 
   useEffect(() => {
+    // Unset when the experiment's config is not shared with the viewer.
+    if (!experiment.configRaw) return;
     let config = upgradeConfig(experiment.configRaw);
 
     if (!isReactivate && trial) {
@@ -331,7 +333,7 @@ const ExperimentContinueModalComponent = ({
     form.validateFields([EXPERIMENT_NAME]); // initial disabled state set here, gets updated later in handleFieldsChange
   }, [entityCopyMap, experiment, trial, type, isReactivate, form]);
 
-  if (!experiment || (!isReactivate && !trial)) return <></>;
+  if (!experiment?.configRaw || (!isReactivate && !trial)) return <></>;
 
   const hideSimpleConfig = isReactivate && experiment.state !== RunState.Completed;
 

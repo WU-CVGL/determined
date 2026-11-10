@@ -1556,6 +1556,7 @@ class v1AllocationRendezvousInfoResponse(Printable):
 class v1AllocationSummary(Printable):
     """AllocationSummary contains information about a task for external display."""
     allocationId: "typing.Optional[str]" = None
+    capabilities: "typing.Optional[v1JobCapabilities]" = None
     name: "typing.Optional[str]" = None
     priority: "typing.Optional[int]" = None
     proxyPorts: "typing.Optional[typing.Sequence[v1ProxyPortConfig]]" = None
@@ -1570,6 +1571,7 @@ class v1AllocationSummary(Printable):
         self,
         *,
         allocationId: "typing.Union[str, None, Unset]" = _unset,
+        capabilities: "typing.Union[v1JobCapabilities, None, Unset]" = _unset,
         name: "typing.Union[str, None, Unset]" = _unset,
         priority: "typing.Union[int, None, Unset]" = _unset,
         proxyPorts: "typing.Union[typing.Sequence[v1ProxyPortConfig], None, Unset]" = _unset,
@@ -1582,6 +1584,8 @@ class v1AllocationSummary(Printable):
     ):
         if not isinstance(allocationId, Unset):
             self.allocationId = allocationId
+        if not isinstance(capabilities, Unset):
+            self.capabilities = capabilities
         if not isinstance(name, Unset):
             self.name = name
         if not isinstance(priority, Unset):
@@ -1607,6 +1611,8 @@ class v1AllocationSummary(Printable):
         }
         if "allocationId" in obj:
             kwargs["allocationId"] = obj["allocationId"]
+        if "capabilities" in obj:
+            kwargs["capabilities"] = v1JobCapabilities.from_json(obj["capabilities"]) if obj["capabilities"] is not None else None
         if "name" in obj:
             kwargs["name"] = obj["name"]
         if "priority" in obj:
@@ -1632,6 +1638,8 @@ class v1AllocationSummary(Printable):
         }
         if not omit_unset or "allocationId" in vars(self):
             out["allocationId"] = self.allocationId
+        if not omit_unset or "capabilities" in vars(self):
+            out["capabilities"] = None if self.capabilities is None else self.capabilities.to_json(omit_unset)
         if not omit_unset or "name" in vars(self):
             out["name"] = self.name
         if not omit_unset or "priority" in vars(self):
@@ -2383,6 +2391,7 @@ class v1ColumnType(DetEnum):
 class v1Command(Printable):
     """Command is a single container running the configured command."""
     allocationStartTime: "typing.Optional[str]" = None
+    capabilities: "typing.Optional[v1JobCapabilities]" = None
     container: "typing.Optional[v1Container]" = None
     displayName: "typing.Optional[str]" = None
     endTime: "typing.Optional[str]" = None
@@ -2402,6 +2411,7 @@ class v1Command(Printable):
         username: str,
         workspaceId: int,
         allocationStartTime: "typing.Union[str, None, Unset]" = _unset,
+        capabilities: "typing.Union[v1JobCapabilities, None, Unset]" = _unset,
         container: "typing.Union[v1Container, None, Unset]" = _unset,
         displayName: "typing.Union[str, None, Unset]" = _unset,
         endTime: "typing.Union[str, None, Unset]" = _unset,
@@ -2419,6 +2429,8 @@ class v1Command(Printable):
         self.workspaceId = workspaceId
         if not isinstance(allocationStartTime, Unset):
             self.allocationStartTime = allocationStartTime
+        if not isinstance(capabilities, Unset):
+            self.capabilities = capabilities
         if not isinstance(container, Unset):
             self.container = container
         if not isinstance(displayName, Unset):
@@ -2446,6 +2458,8 @@ class v1Command(Printable):
         }
         if "allocationStartTime" in obj:
             kwargs["allocationStartTime"] = obj["allocationStartTime"]
+        if "capabilities" in obj:
+            kwargs["capabilities"] = v1JobCapabilities.from_json(obj["capabilities"]) if obj["capabilities"] is not None else None
         if "container" in obj:
             kwargs["container"] = v1Container.from_json(obj["container"]) if obj["container"] is not None else None
         if "displayName" in obj:
@@ -2473,6 +2487,8 @@ class v1Command(Printable):
         }
         if not omit_unset or "allocationStartTime" in vars(self):
             out["allocationStartTime"] = self.allocationStartTime
+        if not omit_unset or "capabilities" in vars(self):
+            out["capabilities"] = None if self.capabilities is None else self.capabilities.to_json(omit_unset)
         if not omit_unset or "container" in vars(self):
             out["container"] = None if self.container is None else self.container.to_json(omit_unset)
         if not omit_unset or "displayName" in vars(self):
@@ -3763,6 +3779,7 @@ class v1Experiment(Printable):
     allocationStartTime: "typing.Optional[str]" = None
     bestTrialId: "typing.Optional[int]" = None
     bestTrialSearcherMetric: "typing.Optional[float]" = None
+    capabilities: "typing.Optional[v1JobCapabilities]" = None
     checkpointCount: "typing.Optional[int]" = None
     checkpointSize: "typing.Optional[str]" = None
     description: "typing.Optional[str]" = None
@@ -3807,6 +3824,7 @@ class v1Experiment(Printable):
         allocationStartTime: "typing.Union[str, None, Unset]" = _unset,
         bestTrialId: "typing.Union[int, None, Unset]" = _unset,
         bestTrialSearcherMetric: "typing.Union[float, None, Unset]" = _unset,
+        capabilities: "typing.Union[v1JobCapabilities, None, Unset]" = _unset,
         checkpointCount: "typing.Union[int, None, Unset]" = _unset,
         checkpointSize: "typing.Union[str, None, Unset]" = _unset,
         description: "typing.Union[str, None, Unset]" = _unset,
@@ -3851,6 +3869,8 @@ class v1Experiment(Printable):
             self.bestTrialId = bestTrialId
         if not isinstance(bestTrialSearcherMetric, Unset):
             self.bestTrialSearcherMetric = bestTrialSearcherMetric
+        if not isinstance(capabilities, Unset):
+            self.capabilities = capabilities
         if not isinstance(checkpointCount, Unset):
             self.checkpointCount = checkpointCount
         if not isinstance(checkpointSize, Unset):
@@ -3923,6 +3943,8 @@ class v1Experiment(Printable):
             kwargs["bestTrialId"] = obj["bestTrialId"]
         if "bestTrialSearcherMetric" in obj:
             kwargs["bestTrialSearcherMetric"] = float(obj["bestTrialSearcherMetric"]) if obj["bestTrialSearcherMetric"] is not None else None
+        if "capabilities" in obj:
+            kwargs["capabilities"] = v1JobCapabilities.from_json(obj["capabilities"]) if obj["capabilities"] is not None else None
         if "checkpointCount" in obj:
             kwargs["checkpointCount"] = obj["checkpointCount"]
         if "checkpointSize" in obj:
@@ -3995,6 +4017,8 @@ class v1Experiment(Printable):
             out["bestTrialId"] = self.bestTrialId
         if not omit_unset or "bestTrialSearcherMetric" in vars(self):
             out["bestTrialSearcherMetric"] = None if self.bestTrialSearcherMetric is None else dump_float(self.bestTrialSearcherMetric)
+        if not omit_unset or "capabilities" in vars(self):
+            out["capabilities"] = None if self.capabilities is None else self.capabilities.to_json(omit_unset)
         if not omit_unset or "checkpointCount" in vars(self):
             out["checkpointCount"] = self.checkpointCount
         if not omit_unset or "checkpointSize" in vars(self):
@@ -4402,6 +4426,7 @@ class v1FlatRun(Printable):
         return out
 
 class v1FlatRunExperiment(Printable):
+    capabilities: "typing.Optional[v1JobCapabilities]" = None
     externalExperimentId: "typing.Optional[str]" = None
     forkedFrom: "typing.Optional[int]" = None
     pachydermIntegration: "typing.Optional[typing.Dict[str, typing.Any]]" = None
@@ -4418,6 +4443,7 @@ class v1FlatRunExperiment(Printable):
         searcherMetric: str,
         searcherType: str,
         unmanaged: bool,
+        capabilities: "typing.Union[v1JobCapabilities, None, Unset]" = _unset,
         externalExperimentId: "typing.Union[str, None, Unset]" = _unset,
         forkedFrom: "typing.Union[int, None, Unset]" = _unset,
         pachydermIntegration: "typing.Union[typing.Dict[str, typing.Any], None, Unset]" = _unset,
@@ -4431,6 +4457,8 @@ class v1FlatRunExperiment(Printable):
         self.searcherMetric = searcherMetric
         self.searcherType = searcherType
         self.unmanaged = unmanaged
+        if not isinstance(capabilities, Unset):
+            self.capabilities = capabilities
         if not isinstance(externalExperimentId, Unset):
             self.externalExperimentId = externalExperimentId
         if not isinstance(forkedFrom, Unset):
@@ -4451,6 +4479,8 @@ class v1FlatRunExperiment(Printable):
             "searcherType": obj["searcherType"],
             "unmanaged": obj["unmanaged"],
         }
+        if "capabilities" in obj:
+            kwargs["capabilities"] = v1JobCapabilities.from_json(obj["capabilities"]) if obj["capabilities"] is not None else None
         if "externalExperimentId" in obj:
             kwargs["externalExperimentId"] = obj["externalExperimentId"]
         if "forkedFrom" in obj:
@@ -4471,6 +4501,8 @@ class v1FlatRunExperiment(Printable):
             "searcherType": self.searcherType,
             "unmanaged": self.unmanaged,
         }
+        if not omit_unset or "capabilities" in vars(self):
+            out["capabilities"] = None if self.capabilities is None else self.capabilities.to_json(omit_unset)
         if not omit_unset or "externalExperimentId" in vars(self):
             out["externalExperimentId"] = self.externalExperimentId
         if not omit_unset or "forkedFrom" in vars(self):
@@ -4485,6 +4517,7 @@ class v1GenericTask(Printable):
     """
     allocationId: "typing.Optional[str]" = None
     allocationStartTime: "typing.Optional[str]" = None
+    capabilities: "typing.Optional[v1JobCapabilities]" = None
     displayName: "typing.Optional[str]" = None
     endTime: "typing.Optional[str]" = None
     forkedFrom: "typing.Optional[str]" = None
@@ -4508,6 +4541,7 @@ class v1GenericTask(Printable):
         workspaceId: int,
         allocationId: "typing.Union[str, None, Unset]" = _unset,
         allocationStartTime: "typing.Union[str, None, Unset]" = _unset,
+        capabilities: "typing.Union[v1JobCapabilities, None, Unset]" = _unset,
         displayName: "typing.Union[str, None, Unset]" = _unset,
         endTime: "typing.Union[str, None, Unset]" = _unset,
         forkedFrom: "typing.Union[str, None, Unset]" = _unset,
@@ -4530,6 +4564,8 @@ class v1GenericTask(Printable):
             self.allocationId = allocationId
         if not isinstance(allocationStartTime, Unset):
             self.allocationStartTime = allocationStartTime
+        if not isinstance(capabilities, Unset):
+            self.capabilities = capabilities
         if not isinstance(displayName, Unset):
             self.displayName = displayName
         if not isinstance(endTime, Unset):
@@ -4560,6 +4596,8 @@ class v1GenericTask(Printable):
             kwargs["allocationId"] = obj["allocationId"]
         if "allocationStartTime" in obj:
             kwargs["allocationStartTime"] = obj["allocationStartTime"]
+        if "capabilities" in obj:
+            kwargs["capabilities"] = v1JobCapabilities.from_json(obj["capabilities"]) if obj["capabilities"] is not None else None
         if "displayName" in obj:
             kwargs["displayName"] = obj["displayName"]
         if "endTime" in obj:
@@ -4590,6 +4628,8 @@ class v1GenericTask(Printable):
             out["allocationId"] = self.allocationId
         if not omit_unset or "allocationStartTime" in vars(self):
             out["allocationStartTime"] = self.allocationStartTime
+        if not omit_unset or "capabilities" in vars(self):
+            out["capabilities"] = None if self.capabilities is None else self.capabilities.to_json(omit_unset)
         if not omit_unset or "displayName" in vars(self):
             out["displayName"] = self.displayName
         if not omit_unset or "endTime" in vars(self):
@@ -5435,6 +5475,29 @@ class v1GetGroupsResponse(Printable):
             out["pagination"] = None if self.pagination is None else self.pagination.to_json(omit_unset)
         return out
 
+class v1GetJobPrivacyPolicyResponse(Printable):
+    """Response to GetJobPrivacyPolicyRequest."""
+
+    def __init__(
+        self,
+        *,
+        rules: "typing.Sequence[v1JobPrivacyRule]",
+    ):
+        self.rules = rules
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1GetJobPrivacyPolicyResponse":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "rules": [v1JobPrivacyRule.from_json(x) for x in obj["rules"]],
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "rules": [x.to_json(omit_unset) for x in self.rules],
+        }
+        return out
+
 class v1GetJobQueueStatsResponse(Printable):
     """Response to GetJobQueueStatsRequest."""
 
@@ -5455,6 +5518,33 @@ class v1GetJobQueueStatsResponse(Printable):
     def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
         out: "typing.Dict[str, typing.Any]" = {
             "results": [x.to_json(omit_unset) for x in self.results],
+        }
+        return out
+
+class v1GetJobSharingResponse(Printable):
+    """Response to GetJobSharingRequest."""
+
+    def __init__(
+        self,
+        *,
+        rules: "typing.Sequence[v1JobPrivacyRule]",
+        sharing: "v1JobSharing",
+    ):
+        self.rules = rules
+        self.sharing = sharing
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1GetJobSharingResponse":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "rules": [v1JobPrivacyRule.from_json(x) for x in obj["rules"]],
+            "sharing": v1JobSharing.from_json(obj["sharing"]),
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "rules": [x.to_json(omit_unset) for x in self.rules],
+            "sharing": self.sharing.to_json(omit_unset),
         }
         return out
 
@@ -6041,6 +6131,29 @@ class v1GetModelsResponse(Printable):
         out: "typing.Dict[str, typing.Any]" = {
             "models": [x.to_json(omit_unset) for x in self.models],
             "pagination": self.pagination.to_json(omit_unset),
+        }
+        return out
+
+class v1GetMyJobPrivacyResponse(Printable):
+    """Response to GetMyJobPrivacyRequest."""
+
+    def __init__(
+        self,
+        *,
+        privacy: "v1UserJobPrivacy",
+    ):
+        self.privacy = privacy
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1GetMyJobPrivacyResponse":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "privacy": v1UserJobPrivacy.from_json(obj["privacy"]),
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "privacy": self.privacy.to_json(omit_unset),
         }
         return out
 
@@ -8032,6 +8145,7 @@ class v1Job(Printable):
     state.
     """
     allocationStartTime: "typing.Optional[str]" = None
+    capabilities: "typing.Optional[v1JobCapabilities]" = None
     placement: "typing.Optional[typing.Sequence[v1JobPlacement]]" = None
     priority: "typing.Optional[int]" = None
     progress: "typing.Optional[float]" = None
@@ -8054,6 +8168,7 @@ class v1Job(Printable):
         username: str,
         workspaceId: int,
         allocationStartTime: "typing.Union[str, None, Unset]" = _unset,
+        capabilities: "typing.Union[v1JobCapabilities, None, Unset]" = _unset,
         placement: "typing.Union[typing.Sequence[v1JobPlacement], None, Unset]" = _unset,
         priority: "typing.Union[int, None, Unset]" = _unset,
         progress: "typing.Union[float, None, Unset]" = _unset,
@@ -8074,6 +8189,8 @@ class v1Job(Printable):
         self.workspaceId = workspaceId
         if not isinstance(allocationStartTime, Unset):
             self.allocationStartTime = allocationStartTime
+        if not isinstance(capabilities, Unset):
+            self.capabilities = capabilities
         if not isinstance(placement, Unset):
             self.placement = placement
         if not isinstance(priority, Unset):
@@ -8104,6 +8221,8 @@ class v1Job(Printable):
         }
         if "allocationStartTime" in obj:
             kwargs["allocationStartTime"] = obj["allocationStartTime"]
+        if "capabilities" in obj:
+            kwargs["capabilities"] = v1JobCapabilities.from_json(obj["capabilities"]) if obj["capabilities"] is not None else None
         if "placement" in obj:
             kwargs["placement"] = [v1JobPlacement.from_json(x) for x in obj["placement"]] if obj["placement"] is not None else None
         if "priority" in obj:
@@ -8134,6 +8253,8 @@ class v1Job(Printable):
         }
         if not omit_unset or "allocationStartTime" in vars(self):
             out["allocationStartTime"] = self.allocationStartTime
+        if not omit_unset or "capabilities" in vars(self):
+            out["capabilities"] = None if self.capabilities is None else self.capabilities.to_json(omit_unset)
         if not omit_unset or "placement" in vars(self):
             out["placement"] = None if self.placement is None else [x.to_json(omit_unset) for x in self.placement]
         if not omit_unset or "priority" in vars(self):
@@ -8147,6 +8268,84 @@ class v1Job(Printable):
         if not omit_unset or "weight" in vars(self):
             out["weight"] = None if self.weight is None else dump_float(self.weight)
         return out
+
+class v1JobAudience(Printable):
+    """Who may read a kind of a job's content besides its owner and admins. Empty
+    means nobody else.
+    """
+    allUsers: "typing.Optional[bool]" = None
+
+    def __init__(
+        self,
+        *,
+        allUsers: "typing.Union[bool, None, Unset]" = _unset,
+    ):
+        if not isinstance(allUsers, Unset):
+            self.allUsers = allUsers
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1JobAudience":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+        }
+        if "allUsers" in obj:
+            kwargs["allUsers"] = obj["allUsers"]
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+        }
+        if not omit_unset or "allUsers" in vars(self):
+            out["allUsers"] = self.allUsers
+        return out
+
+class v1JobCapabilities(Printable):
+    """What the requesting user may do with this job's content, computed by the
+    server.
+    """
+
+    def __init__(
+        self,
+        *,
+        manageSharing: bool,
+        viewConfig: bool,
+        viewLogs: bool,
+        viewTitle: bool,
+    ):
+        self.manageSharing = manageSharing
+        self.viewConfig = viewConfig
+        self.viewLogs = viewLogs
+        self.viewTitle = viewTitle
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1JobCapabilities":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "manageSharing": obj["manageSharing"],
+            "viewConfig": obj["viewConfig"],
+            "viewLogs": obj["viewLogs"],
+            "viewTitle": obj["viewTitle"],
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "manageSharing": self.manageSharing,
+            "viewConfig": self.viewConfig,
+            "viewLogs": self.viewLogs,
+            "viewTitle": self.viewTitle,
+        }
+        return out
+
+class v1JobContentKind(DetEnum):
+    """The content kinds of job privacy.
+    - JOB_CONTENT_KIND_UNSPECIFIED: Unspecified kind.
+    - JOB_CONTENT_KIND_TITLE: The job's name, description, labels and notes.
+    - JOB_CONTENT_KIND_LOGS: The job's logs.
+    - JOB_CONTENT_KIND_CONFIG: The job's config.
+    """
+    UNSPECIFIED = "JOB_CONTENT_KIND_UNSPECIFIED"
+    TITLE = "JOB_CONTENT_KIND_TITLE"
+    LOGS = "JOB_CONTENT_KIND_LOGS"
+    CONFIG = "JOB_CONTENT_KIND_CONFIG"
 
 class v1JobPlacement(Printable):
     """The slots a job holds on one agent."""
@@ -8173,6 +8372,98 @@ class v1JobPlacement(Printable):
             "agentId": self.agentId,
             "deviceIds": self.deviceIds,
         }
+        return out
+
+class v1JobPrivacyRule(Printable):
+    """The cluster policy for one kind of job content."""
+
+    def __init__(
+        self,
+        *,
+        kind: "v1JobContentKind",
+        newJobAudience: "v1JobAudience",
+        sharingAllowed: bool,
+    ):
+        self.kind = kind
+        self.newJobAudience = newJobAudience
+        self.sharingAllowed = sharingAllowed
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1JobPrivacyRule":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "kind": v1JobContentKind(obj["kind"]),
+            "newJobAudience": v1JobAudience.from_json(obj["newJobAudience"]),
+            "sharingAllowed": obj["sharingAllowed"],
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "kind": self.kind.value,
+            "newJobAudience": self.newJobAudience.to_json(omit_unset),
+            "sharingAllowed": self.sharingAllowed,
+        }
+        return out
+
+class v1JobSharing(Printable):
+    """A job's own sharing. An unset audience is a job created before job privacy:
+    no setting.
+    """
+    config: "typing.Optional[v1JobAudience]" = None
+    logs: "typing.Optional[v1JobAudience]" = None
+    title: "typing.Optional[v1JobAudience]" = None
+    updatedAt: "typing.Optional[str]" = None
+    updatedBy: "typing.Optional[int]" = None
+
+    def __init__(
+        self,
+        *,
+        config: "typing.Union[v1JobAudience, None, Unset]" = _unset,
+        logs: "typing.Union[v1JobAudience, None, Unset]" = _unset,
+        title: "typing.Union[v1JobAudience, None, Unset]" = _unset,
+        updatedAt: "typing.Union[str, None, Unset]" = _unset,
+        updatedBy: "typing.Union[int, None, Unset]" = _unset,
+    ):
+        if not isinstance(config, Unset):
+            self.config = config
+        if not isinstance(logs, Unset):
+            self.logs = logs
+        if not isinstance(title, Unset):
+            self.title = title
+        if not isinstance(updatedAt, Unset):
+            self.updatedAt = updatedAt
+        if not isinstance(updatedBy, Unset):
+            self.updatedBy = updatedBy
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1JobSharing":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+        }
+        if "config" in obj:
+            kwargs["config"] = v1JobAudience.from_json(obj["config"]) if obj["config"] is not None else None
+        if "logs" in obj:
+            kwargs["logs"] = v1JobAudience.from_json(obj["logs"]) if obj["logs"] is not None else None
+        if "title" in obj:
+            kwargs["title"] = v1JobAudience.from_json(obj["title"]) if obj["title"] is not None else None
+        if "updatedAt" in obj:
+            kwargs["updatedAt"] = obj["updatedAt"]
+        if "updatedBy" in obj:
+            kwargs["updatedBy"] = obj["updatedBy"]
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+        }
+        if not omit_unset or "config" in vars(self):
+            out["config"] = None if self.config is None else self.config.to_json(omit_unset)
+        if not omit_unset or "logs" in vars(self):
+            out["logs"] = None if self.logs is None else self.logs.to_json(omit_unset)
+        if not omit_unset or "title" in vars(self):
+            out["title"] = None if self.title is None else self.title.to_json(omit_unset)
+        if not omit_unset or "updatedAt" in vars(self):
+            out["updatedAt"] = self.updatedAt
+        if not omit_unset or "updatedBy" in vars(self):
+            out["updatedBy"] = self.updatedBy
         return out
 
 class v1JobSummary(Printable):
@@ -10148,6 +10439,76 @@ class v1PatchExperimentResponse(Printable):
             out["experiment"] = None if self.experiment is None else self.experiment.to_json(omit_unset)
         return out
 
+class v1PatchJobSharingRequest(Printable):
+    """Change a job's own sharing. Unset audiences are kept."""
+    config: "typing.Optional[v1JobAudience]" = None
+    logs: "typing.Optional[v1JobAudience]" = None
+    title: "typing.Optional[v1JobAudience]" = None
+
+    def __init__(
+        self,
+        *,
+        jobId: str,
+        config: "typing.Union[v1JobAudience, None, Unset]" = _unset,
+        logs: "typing.Union[v1JobAudience, None, Unset]" = _unset,
+        title: "typing.Union[v1JobAudience, None, Unset]" = _unset,
+    ):
+        self.jobId = jobId
+        if not isinstance(config, Unset):
+            self.config = config
+        if not isinstance(logs, Unset):
+            self.logs = logs
+        if not isinstance(title, Unset):
+            self.title = title
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1PatchJobSharingRequest":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "jobId": obj["jobId"],
+        }
+        if "config" in obj:
+            kwargs["config"] = v1JobAudience.from_json(obj["config"]) if obj["config"] is not None else None
+        if "logs" in obj:
+            kwargs["logs"] = v1JobAudience.from_json(obj["logs"]) if obj["logs"] is not None else None
+        if "title" in obj:
+            kwargs["title"] = v1JobAudience.from_json(obj["title"]) if obj["title"] is not None else None
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "jobId": self.jobId,
+        }
+        if not omit_unset or "config" in vars(self):
+            out["config"] = None if self.config is None else self.config.to_json(omit_unset)
+        if not omit_unset or "logs" in vars(self):
+            out["logs"] = None if self.logs is None else self.logs.to_json(omit_unset)
+        if not omit_unset or "title" in vars(self):
+            out["title"] = None if self.title is None else self.title.to_json(omit_unset)
+        return out
+
+class v1PatchJobSharingResponse(Printable):
+    """Response to PatchJobSharingRequest."""
+
+    def __init__(
+        self,
+        *,
+        sharing: "v1JobSharing",
+    ):
+        self.sharing = sharing
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1PatchJobSharingResponse":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "sharing": v1JobSharing.from_json(obj["sharing"]),
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "sharing": self.sharing.to_json(omit_unset),
+        }
+        return out
+
 class v1PatchMasterConfigRequest(Printable):
     """Patch master config."""
     config: "typing.Optional[v1Config]" = None
@@ -10367,6 +10728,96 @@ class v1PatchModelVersionResponse(Printable):
     def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
         out: "typing.Dict[str, typing.Any]" = {
             "modelVersion": self.modelVersion.to_json(omit_unset),
+        }
+        return out
+
+class v1PatchMyJobPrivacyRequest(Printable):
+    """Change the requesting user's job privacy preferences. Unset fields are kept."""
+    newJobLogs: "typing.Optional[v1JobAudience]" = None
+    newJobTitles: "typing.Optional[v1JobAudience]" = None
+    resetNewJobLogs: "typing.Optional[bool]" = None
+    resetNewJobTitles: "typing.Optional[bool]" = None
+    shareLogs: "typing.Optional[bool]" = None
+    shareTitles: "typing.Optional[bool]" = None
+
+    def __init__(
+        self,
+        *,
+        newJobLogs: "typing.Union[v1JobAudience, None, Unset]" = _unset,
+        newJobTitles: "typing.Union[v1JobAudience, None, Unset]" = _unset,
+        resetNewJobLogs: "typing.Union[bool, None, Unset]" = _unset,
+        resetNewJobTitles: "typing.Union[bool, None, Unset]" = _unset,
+        shareLogs: "typing.Union[bool, None, Unset]" = _unset,
+        shareTitles: "typing.Union[bool, None, Unset]" = _unset,
+    ):
+        if not isinstance(newJobLogs, Unset):
+            self.newJobLogs = newJobLogs
+        if not isinstance(newJobTitles, Unset):
+            self.newJobTitles = newJobTitles
+        if not isinstance(resetNewJobLogs, Unset):
+            self.resetNewJobLogs = resetNewJobLogs
+        if not isinstance(resetNewJobTitles, Unset):
+            self.resetNewJobTitles = resetNewJobTitles
+        if not isinstance(shareLogs, Unset):
+            self.shareLogs = shareLogs
+        if not isinstance(shareTitles, Unset):
+            self.shareTitles = shareTitles
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1PatchMyJobPrivacyRequest":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+        }
+        if "newJobLogs" in obj:
+            kwargs["newJobLogs"] = v1JobAudience.from_json(obj["newJobLogs"]) if obj["newJobLogs"] is not None else None
+        if "newJobTitles" in obj:
+            kwargs["newJobTitles"] = v1JobAudience.from_json(obj["newJobTitles"]) if obj["newJobTitles"] is not None else None
+        if "resetNewJobLogs" in obj:
+            kwargs["resetNewJobLogs"] = obj["resetNewJobLogs"]
+        if "resetNewJobTitles" in obj:
+            kwargs["resetNewJobTitles"] = obj["resetNewJobTitles"]
+        if "shareLogs" in obj:
+            kwargs["shareLogs"] = obj["shareLogs"]
+        if "shareTitles" in obj:
+            kwargs["shareTitles"] = obj["shareTitles"]
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+        }
+        if not omit_unset or "newJobLogs" in vars(self):
+            out["newJobLogs"] = None if self.newJobLogs is None else self.newJobLogs.to_json(omit_unset)
+        if not omit_unset or "newJobTitles" in vars(self):
+            out["newJobTitles"] = None if self.newJobTitles is None else self.newJobTitles.to_json(omit_unset)
+        if not omit_unset or "resetNewJobLogs" in vars(self):
+            out["resetNewJobLogs"] = self.resetNewJobLogs
+        if not omit_unset or "resetNewJobTitles" in vars(self):
+            out["resetNewJobTitles"] = self.resetNewJobTitles
+        if not omit_unset or "shareLogs" in vars(self):
+            out["shareLogs"] = self.shareLogs
+        if not omit_unset or "shareTitles" in vars(self):
+            out["shareTitles"] = self.shareTitles
+        return out
+
+class v1PatchMyJobPrivacyResponse(Printable):
+    """Response to PatchMyJobPrivacyRequest."""
+
+    def __init__(
+        self,
+        *,
+        privacy: "v1UserJobPrivacy",
+    ):
+        self.privacy = privacy
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1PatchMyJobPrivacyResponse":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "privacy": v1UserJobPrivacy.from_json(obj["privacy"]),
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "privacy": self.privacy.to_json(omit_unset),
         }
         return out
 
@@ -12589,6 +13040,52 @@ class v1PutGlobalConfigPoliciesResponse(Printable):
         }
         if not omit_unset or "configPolicies" in vars(self):
             out["configPolicies"] = self.configPolicies
+        return out
+
+class v1PutJobPrivacyPolicyRequest(Printable):
+    """Set the cluster's job privacy policy."""
+
+    def __init__(
+        self,
+        *,
+        rules: "typing.Sequence[v1JobPrivacyRule]",
+    ):
+        self.rules = rules
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1PutJobPrivacyPolicyRequest":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "rules": [v1JobPrivacyRule.from_json(x) for x in obj["rules"]],
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "rules": [x.to_json(omit_unset) for x in self.rules],
+        }
+        return out
+
+class v1PutJobPrivacyPolicyResponse(Printable):
+    """Response to PutJobPrivacyPolicyRequest."""
+
+    def __init__(
+        self,
+        *,
+        rules: "typing.Sequence[v1JobPrivacyRule]",
+    ):
+        self.rules = rules
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1PutJobPrivacyPolicyResponse":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "rules": [v1JobPrivacyRule.from_json(x) for x in obj["rules"]],
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "rules": [x.to_json(omit_unset) for x in self.rules],
+        }
         return out
 
 class v1PutProjectNotesRequest(Printable):
@@ -15172,6 +15669,7 @@ class v1Shell(Printable):
     addresses: "typing.Optional[typing.Sequence[typing.Dict[str, typing.Any]]]" = None
     agentUserGroup: "typing.Optional[typing.Dict[str, typing.Any]]" = None
     allocationStartTime: "typing.Optional[str]" = None
+    capabilities: "typing.Optional[v1JobCapabilities]" = None
     container: "typing.Optional[v1Container]" = None
     displayName: "typing.Optional[str]" = None
     endTime: "typing.Optional[str]" = None
@@ -15197,6 +15695,7 @@ class v1Shell(Printable):
         addresses: "typing.Union[typing.Sequence[typing.Dict[str, typing.Any]], None, Unset]" = _unset,
         agentUserGroup: "typing.Union[typing.Dict[str, typing.Any], None, Unset]" = _unset,
         allocationStartTime: "typing.Union[str, None, Unset]" = _unset,
+        capabilities: "typing.Union[v1JobCapabilities, None, Unset]" = _unset,
         container: "typing.Union[v1Container, None, Unset]" = _unset,
         displayName: "typing.Union[str, None, Unset]" = _unset,
         endTime: "typing.Union[str, None, Unset]" = _unset,
@@ -15222,6 +15721,8 @@ class v1Shell(Printable):
             self.agentUserGroup = agentUserGroup
         if not isinstance(allocationStartTime, Unset):
             self.allocationStartTime = allocationStartTime
+        if not isinstance(capabilities, Unset):
+            self.capabilities = capabilities
         if not isinstance(container, Unset):
             self.container = container
         if not isinstance(displayName, Unset):
@@ -15261,6 +15762,8 @@ class v1Shell(Printable):
             kwargs["agentUserGroup"] = obj["agentUserGroup"]
         if "allocationStartTime" in obj:
             kwargs["allocationStartTime"] = obj["allocationStartTime"]
+        if "capabilities" in obj:
+            kwargs["capabilities"] = v1JobCapabilities.from_json(obj["capabilities"]) if obj["capabilities"] is not None else None
         if "container" in obj:
             kwargs["container"] = v1Container.from_json(obj["container"]) if obj["container"] is not None else None
         if "displayName" in obj:
@@ -15300,6 +15803,8 @@ class v1Shell(Printable):
             out["agentUserGroup"] = self.agentUserGroup
         if not omit_unset or "allocationStartTime" in vars(self):
             out["allocationStartTime"] = self.allocationStartTime
+        if not omit_unset or "capabilities" in vars(self):
+            out["capabilities"] = None if self.capabilities is None else self.capabilities.to_json(omit_unset)
         if not omit_unset or "container" in vars(self):
             out["container"] = None if self.container is None else self.container.to_json(omit_unset)
         if not omit_unset or "displayName" in vars(self):
@@ -15486,6 +15991,7 @@ class v1TableType(DetEnum):
 
 class v1Task(Printable):
     """Task is the model for a task in the database."""
+    capabilities: "typing.Optional[v1JobCapabilities]" = None
     config: "typing.Optional[str]" = None
     endTime: "typing.Optional[str]" = None
     forkedFrom: "typing.Optional[str]" = None
@@ -15500,6 +16006,7 @@ class v1Task(Printable):
         startTime: str,
         taskId: str,
         taskType: "v1TaskType",
+        capabilities: "typing.Union[v1JobCapabilities, None, Unset]" = _unset,
         config: "typing.Union[str, None, Unset]" = _unset,
         endTime: "typing.Union[str, None, Unset]" = _unset,
         forkedFrom: "typing.Union[str, None, Unset]" = _unset,
@@ -15511,6 +16018,8 @@ class v1Task(Printable):
         self.startTime = startTime
         self.taskId = taskId
         self.taskType = taskType
+        if not isinstance(capabilities, Unset):
+            self.capabilities = capabilities
         if not isinstance(config, Unset):
             self.config = config
         if not isinstance(endTime, Unset):
@@ -15532,6 +16041,8 @@ class v1Task(Printable):
             "taskId": obj["taskId"],
             "taskType": v1TaskType(obj["taskType"]),
         }
+        if "capabilities" in obj:
+            kwargs["capabilities"] = v1JobCapabilities.from_json(obj["capabilities"]) if obj["capabilities"] is not None else None
         if "config" in obj:
             kwargs["config"] = obj["config"]
         if "endTime" in obj:
@@ -15553,6 +16064,8 @@ class v1Task(Printable):
             "taskId": self.taskId,
             "taskType": self.taskType.value,
         }
+        if not omit_unset or "capabilities" in vars(self):
+            out["capabilities"] = None if self.capabilities is None else self.capabilities.to_json(omit_unset)
         if not omit_unset or "config" in vars(self):
             out["config"] = self.config
         if not omit_unset or "endTime" in vars(self):
@@ -17245,6 +17758,49 @@ class v1UserFilters(Printable):
             out["admin"] = self.admin
         if not omit_unset or "name" in vars(self):
             out["name"] = self.name
+        return out
+
+class v1UserJobPrivacy(Printable):
+    """A user's job privacy preferences."""
+    newJobLogs: "typing.Optional[v1JobAudience]" = None
+    newJobTitles: "typing.Optional[v1JobAudience]" = None
+
+    def __init__(
+        self,
+        *,
+        shareLogs: bool,
+        shareTitles: bool,
+        newJobLogs: "typing.Union[v1JobAudience, None, Unset]" = _unset,
+        newJobTitles: "typing.Union[v1JobAudience, None, Unset]" = _unset,
+    ):
+        self.shareLogs = shareLogs
+        self.shareTitles = shareTitles
+        if not isinstance(newJobLogs, Unset):
+            self.newJobLogs = newJobLogs
+        if not isinstance(newJobTitles, Unset):
+            self.newJobTitles = newJobTitles
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1UserJobPrivacy":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "shareLogs": obj["shareLogs"],
+            "shareTitles": obj["shareTitles"],
+        }
+        if "newJobLogs" in obj:
+            kwargs["newJobLogs"] = v1JobAudience.from_json(obj["newJobLogs"]) if obj["newJobLogs"] is not None else None
+        if "newJobTitles" in obj:
+            kwargs["newJobTitles"] = v1JobAudience.from_json(obj["newJobTitles"]) if obj["newJobTitles"] is not None else None
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "shareLogs": self.shareLogs,
+            "shareTitles": self.shareTitles,
+        }
+        if not omit_unset or "newJobLogs" in vars(self):
+            out["newJobLogs"] = None if self.newJobLogs is None else self.newJobLogs.to_json(omit_unset)
+        if not omit_unset or "newJobTitles" in vars(self):
+            out["newJobTitles"] = None if self.newJobTitles is None else self.newJobTitles.to_json(omit_unset)
         return out
 
 class v1UserPoolResources(Printable):
@@ -20214,6 +20770,25 @@ for users.
         return v1GetGroupsAndUsersAssignedToWorkspaceResponse.from_json(_resp.json())
     raise APIHttpError("get_GetGroupsAndUsersAssignedToWorkspace", _resp)
 
+def get_GetJobPrivacyPolicy(
+    session: "api.BaseSession",
+) -> "v1GetJobPrivacyPolicyResponse":
+    """Get the cluster's job privacy policy."""
+    _params = None
+    _resp = session._do_request(
+        method="GET",
+        path="/api/v1/job-privacy/policy",
+        params=_params,
+        json=None,
+        data=None,
+        headers=None,
+        timeout=None,
+        stream=False,
+    )
+    if _resp.status_code == 200:
+        return v1GetJobPrivacyPolicyResponse.from_json(_resp.json())
+    raise APIHttpError("get_GetJobPrivacyPolicy", _resp)
+
 def get_GetJobQueueStats(
     session: "api.BaseSession",
     *,
@@ -20239,6 +20814,32 @@ def get_GetJobQueueStats(
     if _resp.status_code == 200:
         return v1GetJobQueueStatsResponse.from_json(_resp.json())
     raise APIHttpError("get_GetJobQueueStats", _resp)
+
+def get_GetJobSharing(
+    session: "api.BaseSession",
+    *,
+    jobId: str,
+) -> "v1GetJobSharingResponse":
+    """Get a job's own sharing.
+
+    - jobId: The job ID.
+    """
+    _params = None
+    if type(jobId) == str:
+        jobId = parse.quote(jobId)
+    _resp = session._do_request(
+        method="GET",
+        path=f"/api/v1/jobs/{jobId}/sharing",
+        params=_params,
+        json=None,
+        data=None,
+        headers=None,
+        timeout=None,
+        stream=False,
+    )
+    if _resp.status_code == 200:
+        return v1GetJobSharingResponse.from_json(_resp.json())
+    raise APIHttpError("get_GetJobSharing", _resp)
 
 def get_GetJobs(
     session: "api.BaseSession",
@@ -20780,6 +21381,25 @@ denote number of models to skip from the end before returning results.
     if _resp.status_code == 200:
         return v1GetModelsResponse.from_json(_resp.json())
     raise APIHttpError("get_GetModels", _resp)
+
+def get_GetMyJobPrivacy(
+    session: "api.BaseSession",
+) -> "v1GetMyJobPrivacyResponse":
+    """Get the requesting user's job privacy preferences."""
+    _params = None
+    _resp = session._do_request(
+        method="GET",
+        path="/api/v1/me/job-privacy",
+        params=_params,
+        json=None,
+        data=None,
+        headers=None,
+        timeout=None,
+        stream=False,
+    )
+    if _resp.status_code == 200:
+        return v1GetMyJobPrivacyResponse.from_json(_resp.json())
+    raise APIHttpError("get_GetMyJobPrivacy", _resp)
 
 def get_GetPermissionsSummary(
     session: "api.BaseSession",
@@ -23129,6 +23749,33 @@ def patch_PatchExperiment(
         return v1PatchExperimentResponse.from_json(_resp.json())
     raise APIHttpError("patch_PatchExperiment", _resp)
 
+def patch_PatchJobSharing(
+    session: "api.BaseSession",
+    *,
+    body: "v1PatchJobSharingRequest",
+    jobId: str,
+) -> "v1PatchJobSharingResponse":
+    """Change a job's own sharing.
+
+    - jobId: The job ID.
+    """
+    _params = None
+    if type(jobId) == str:
+        jobId = parse.quote(jobId)
+    _resp = session._do_request(
+        method="PATCH",
+        path=f"/api/v1/jobs/{jobId}/sharing",
+        params=_params,
+        json=body.to_json(True),
+        data=None,
+        headers=None,
+        timeout=None,
+        stream=False,
+    )
+    if _resp.status_code == 200:
+        return v1PatchJobSharingResponse.from_json(_resp.json())
+    raise APIHttpError("patch_PatchJobSharing", _resp)
+
 def patch_PatchMasterConfig(
     session: "api.BaseSession",
     *,
@@ -23207,6 +23854,27 @@ def patch_PatchModelVersion(
     if _resp.status_code == 200:
         return v1PatchModelVersionResponse.from_json(_resp.json())
     raise APIHttpError("patch_PatchModelVersion", _resp)
+
+def patch_PatchMyJobPrivacy(
+    session: "api.BaseSession",
+    *,
+    body: "v1PatchMyJobPrivacyRequest",
+) -> "v1PatchMyJobPrivacyResponse":
+    """Change the requesting user's job privacy preferences."""
+    _params = None
+    _resp = session._do_request(
+        method="PATCH",
+        path="/api/v1/me/job-privacy",
+        params=_params,
+        json=body.to_json(True),
+        data=None,
+        headers=None,
+        timeout=None,
+        stream=False,
+    )
+    if _resp.status_code == 200:
+        return v1PatchMyJobPrivacyResponse.from_json(_resp.json())
+    raise APIHttpError("patch_PatchMyJobPrivacy", _resp)
 
 def patch_PatchProject(
     session: "api.BaseSession",
@@ -24136,6 +24804,27 @@ def put_PutGlobalConfigPolicies(
     if _resp.status_code == 200:
         return v1PutGlobalConfigPoliciesResponse.from_json(_resp.json())
     raise APIHttpError("put_PutGlobalConfigPolicies", _resp)
+
+def put_PutJobPrivacyPolicy(
+    session: "api.BaseSession",
+    *,
+    body: "v1PutJobPrivacyPolicyRequest",
+) -> "v1PutJobPrivacyPolicyResponse":
+    """Set the cluster's job privacy policy."""
+    _params = None
+    _resp = session._do_request(
+        method="PUT",
+        path="/api/v1/job-privacy/policy",
+        params=_params,
+        json=body.to_json(True),
+        data=None,
+        headers=None,
+        timeout=None,
+        stream=False,
+    )
+    if _resp.status_code == 200:
+        return v1PutJobPrivacyPolicyResponse.from_json(_resp.json())
+    raise APIHttpError("put_PutJobPrivacyPolicy", _resp)
 
 def put_PutProjectNotes(
     session: "api.BaseSession",
