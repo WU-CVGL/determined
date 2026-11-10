@@ -128,7 +128,7 @@ func restartWithQueuedTask(
 		_ = tasklist.GroupPriorityChangeRegistry.Delete(shell.jobID)
 	})
 	require.NoError(t, internaldb.CloseOpenAllocations(
-		context.Background(), task.DefaultService.GetAllAllocationIDs(),
+		context.Background(), task.DefaultService.GetAllAllocationIDs(), time.Now(),
 	))
 
 	restartedRM.AssertCalled(t, "SetGroupPriority", sproto.SetGroupPriority{
@@ -206,7 +206,7 @@ func TestRestoreQueuedShellKilled(t *testing.T) {
 	// The next master start closes it without a duration.
 	heartbeat := time.Now().UTC().Truncate(time.Millisecond)
 	require.NoError(t, internaldb.SingleDB().UpdateClusterHeartBeat(heartbeat))
-	require.NoError(t, internaldb.CloseOpenAllocations(context.Background(), nil))
+	require.NoError(t, internaldb.CloseOpenAllocations(context.Background(), nil, time.Now()))
 	row, err = internaldb.AllocationByID(context.Background(), shell.allocationID)
 	require.NoError(t, err)
 	require.NotNil(t, row.StartTime)

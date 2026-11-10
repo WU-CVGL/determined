@@ -23,6 +23,7 @@ import {
 import useFeature from 'hooks/useFeature';
 import usePermissions from 'hooks/usePermissions';
 import usePolling from 'hooks/usePolling';
+import UserOverview from 'pages/UserProfile/UserOverview';
 import { paths } from 'routes/utils';
 import { getCommands, getExperiments, getProjectsByUserActivity, getShells } from 'services/api';
 import userStore from 'stores/users';
@@ -168,6 +169,7 @@ const Dashboard: React.FC = () => {
         </Row>
       }
       title="Home">
+      {currentUser && <UserOverview userId={currentUser.id} />}
       {projectsLoading ? (
         <Section>
           <Spinner center spinning />

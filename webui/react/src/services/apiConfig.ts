@@ -236,6 +236,33 @@ export const getUser: DetApi<Service.GetUserParams, Api.V1GetUserResponse, Type.
   request: (params) => detApi.Users.getUser(params.userId),
 };
 
+export const getUserResources: DetApi<
+  Service.GetUserParams,
+  Api.V1GetUserResourcesResponse,
+  Type.UserResources
+> = {
+  name: 'getUserResources',
+  postProcess: (response) => decoder.mapV1UserResources(response),
+  request: (params, options) => detApi.Users.getUserResources(params.userId, options),
+};
+
+export const getUserUsage: DetApi<
+  Service.GetUserUsageParams,
+  Api.V1GetUserUsageResponse,
+  Type.UserUsage
+> = {
+  name: 'getUserUsage',
+  postProcess: (response) => decoder.mapV1UserUsage(response),
+  request: (params, options) =>
+    detApi.Users.getUserUsage(
+      params.userId,
+      params.startDate,
+      params.endDate,
+      params.period,
+      options,
+    ),
+};
+
 export const postUser: DetApi<
   Api.V1PostUserRequest,
   Api.V1PostUserResponse,

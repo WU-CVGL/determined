@@ -168,6 +168,26 @@ service Determined {
     };
   }
 
+  // Get the resources a user's tasks hold now.
+  rpc GetUserResources(GetUserResourcesRequest)
+      returns (GetUserResourcesResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/users/{user_id}/resources"
+    };
+    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
+      tags: "Users"
+    };
+  }
+  // Get a user's daily or monthly resource usage.
+  rpc GetUserUsage(GetUserUsageRequest) returns (GetUserUsageResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/users/{user_id}/usage"
+    };
+    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
+      tags: "Users"
+    };
+  }
+
   // Get the current user.
   rpc GetMe(GetMeRequest) returns (GetMeResponse) {
     option (google.api.http) = {

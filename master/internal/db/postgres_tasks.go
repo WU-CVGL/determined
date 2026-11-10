@@ -14,6 +14,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/determined-ai/determined/master/internal/api"
+	"github.com/determined-ai/determined/master/internal/userusage"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 )
@@ -160,13 +161,62 @@ func KillGenericTask(tID model.TaskID, endTime time.Time) error {
 
 // AddAllocation upserts the existence of an allocation. Allocation IDs may conflict in the event
 // the master restarts and the trial run ID increment is not persisted, but it is the same
-// allocation so this is OK.
+// allocation so this is OK. A reused ID starts without the earlier allocation's metering.
 func AddAllocation(ctx context.Context, a *model.Allocation) error {
 	_, err := Bun().NewInsert().Model(a).On("CONFLICT (allocation_id) DO UPDATE").
 		Set("task_id=EXCLUDED.task_id, slots=EXCLUDED.slots").
 		Set("resource_pool=EXCLUDED.resource_pool,start_time=EXCLUDED.start_time").
-		Set("state=EXCLUDED.state, ports=EXCLUDED.ports").Exec(ctx)
+		Set("state=EXCLUDED.state, ports=EXCLUDED.ports").
+		Set("assigned_time=EXCLUDED.assigned_time, released_time=EXCLUDED.released_time").
+		Set("metered_kind=EXCLUDED.metered_kind, metered_quantity=EXCLUDED.metered_quantity").
+		Exec(ctx)
 	return err
+}
+
+// AssignAllocation records when the resource manager assigned an allocation's resources and what
+// they are metered as. It records only the first assignment.
+func AssignAllocation(
+	ctx context.Context, id model.AllocationID, at time.Time, kind userusage.Kind, quantity int,
+) error {
+	// The times are timestamp without time zone in UTC.
+	_, err := Bun().NewUpdate().Table("allocations").
+		Set("assigned_time = ?, metered_kind = ?, metered_quantity = ?", at.UTC(), kind, quantity).
+		Where("allocation_id = ?", id).
+		Where("assigned_time IS NULL").
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("recording the assignment of allocation %s: %w", id, err)
+	}
+	return nil
+}
+
+// ReleaseAllocation records when an allocation's resources were released. It records only the
+// first release, never one before the assignment, and nothing for an allocation without one.
+func ReleaseAllocation(ctx context.Context, id model.AllocationID, at time.Time) error {
+	_, err := Bun().NewUpdate().Table("allocations").
+		Set("released_time = greatest(?, assigned_time)", at.UTC()).
+		Where("allocation_id = ?", id).
+		Where("assigned_time IS NOT NULL").
+		Where("released_time IS NULL").
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("recording the release of allocation %s: %w", id, err)
+	}
+	return nil
+}
+
+// ClearAllocationAssignment removes an allocation's assignment and metering, for an allocation
+// that requests resources again under its ID.
+func ClearAllocationAssignment(ctx context.Context, id model.AllocationID) error {
+	_, err := Bun().NewUpdate().Table("allocations").
+		Set("assigned_time = NULL, released_time = NULL").
+		Set("metered_kind = NULL, metered_quantity = NULL").
+		Where("allocation_id = ?", id).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("clearing the assignment of allocation %s: %w", id, err)
+	}
+	return nil
 }
 
 // AddAllocationExitStatus adds the allocation exit status to the allocations table.
@@ -284,33 +334,57 @@ func UpdateAllocationProxyAddress(ctx context.Context, a model.Allocation) error
 }
 
 // CloseOpenAllocations finds all allocations that were open when the master crashed
-// and adds an end time.
-func CloseOpenAllocations(ctx context.Context, exclude []model.AllocationID) error {
-	excludedFilter := ""
-	if len(exclude) > 0 {
-		excludeStr := make([]string, 0, len(exclude))
-		for _, v := range exclude {
-			excludeStr = append(excludeStr, v.String())
+// and adds an end time. The allocations in exclude are live; so are those assigned resources at or
+// after boot, the time this master started. Every statement works on the same allocations, taken
+// once in one transaction: those not ended, not started, or holding resources without a release,
+// apart from the live ones.
+func CloseOpenAllocations(
+	ctx context.Context, exclude []model.AllocationID, boot time.Time,
+) error {
+	return Bun().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		var ids []model.AllocationID
+		q := tx.NewSelect().Table("allocations").Column("allocation_id").
+			Where("(end_time IS NULL OR start_time IS NULL"+
+				" OR (assigned_time IS NOT NULL AND released_time IS NULL))").
+			Where("(assigned_time IS NULL OR assigned_time < ?)", boot.UTC())
+		if len(exclude) > 0 {
+			q = q.Where("allocation_id NOT IN (?)", bun.In(exclude))
 		}
-		excludedFilter = strings.Join(excludeStr, ",")
-	}
+		if err := q.For("UPDATE").Scan(ctx, &ids); err != nil {
+			return errors.Wrap(err, "finding old allocations")
+		}
+		if len(ids) == 0 {
+			return nil
+		}
 
-	// Excluded allocations are still live and set their start time when they get resources.
-	if _, err := Bun().NewRaw(`UPDATE allocations SET start_time = cluster_heartbeat FROM cluster_id
-	WHERE start_time is NULL
-	AND (? = '' OR allocation_id NOT IN (SELECT unnest(string_to_array(?, ','))))`,
-		excludedFilter, excludedFilter).Exec(ctx); err != nil {
-		return errors.Wrap(err,
-			"setting start time to cluster heartbeat when it's assigned to zero value")
-	}
+		// This runs before the statement below terminates the open allocations. Resources that an
+		// earlier master assigned and had not released when it stopped are released at its last
+		// heartbeat. A terminated allocation whose release was not written is released at its end,
+		// or, without one, at its assignment, so that it meters nothing (greatest ignores NULL); a
+		// later start never releases it at a later heartbeat.
+		if _, err := tx.NewRaw(`UPDATE allocations a SET released_time = CASE
+		WHEN a.state IS DISTINCT FROM 'TERMINATED' THEN greatest(c.cluster_heartbeat, a.assigned_time)
+		ELSE greatest(a.end_time, a.assigned_time)
+	END
+	FROM cluster_id c
+	WHERE a.allocation_id IN (?) AND a.assigned_time IS NOT NULL AND a.released_time IS NULL`,
+			bun.In(ids)).Exec(ctx); err != nil {
+			return errors.Wrap(err, "releasing the resources of old allocations")
+		}
 
-	if _, err := Bun().NewRaw(` UPDATE allocations 
+		if _, err := tx.NewRaw(`UPDATE allocations SET start_time = cluster_heartbeat FROM cluster_id
+	WHERE allocation_id IN (?) AND start_time IS NULL`, bun.In(ids)).Exec(ctx); err != nil {
+			return errors.Wrap(err,
+				"setting start time to cluster heartbeat when it's assigned to zero value")
+		}
+
+		if _, err := tx.NewRaw(`UPDATE allocations
 	SET end_time = greatest(cluster_heartbeat, start_time), state = 'TERMINATED' FROM cluster_id
-	WHERE end_time IS NULL AND (? = '' OR allocation_id NOT IN (SELECT unnest(string_to_array(?, ','))))`,
-		excludedFilter, excludedFilter).Exec(ctx); err != nil {
-		return errors.Wrap(err, "closing old allocations")
-	}
-	return nil
+	WHERE allocation_id IN (?) AND end_time IS NULL`, bun.In(ids)).Exec(ctx); err != nil {
+			return errors.Wrap(err, "closing old allocations")
+		}
+		return nil
+	})
 }
 
 // RecordTaskStats record stats for tasks.

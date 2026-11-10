@@ -1,7 +1,11 @@
+import { matchPath } from 'react-router-dom';
+
 import { CommandState, CommandTask, CommandType } from 'types';
 import { reactHostAddress } from 'utils/routes';
 
 import { findReactRoute, paths } from './utils';
+
+import appRoutes from './index';
 
 const initEnv = process.env;
 
@@ -59,6 +63,16 @@ describe('Routing Utilities', () => {
 
       expect(findReactRoute(reactHostAddress() + '/experiments/1')).toBeUndefined();
       expect(findReactRoute(reactHostAddress() + '/experiments/1/xyz')).toBeUndefined();
+    });
+  });
+
+  describe('user pages', () => {
+    it("should route /users/:userId to the user's page", () => {
+      expect(paths.userProfile(4)).toBe('/users/4');
+      expect(findReactRoute('/users/4')?.id).toBe('userProfile');
+      const route = appRoutes.find((route) => route.id === 'userProfile');
+      expect(route?.element).toBeDefined();
+      expect(matchPath(route?.path ?? '', '/users/4')?.params).toEqual({ userId: '4' });
     });
   });
 

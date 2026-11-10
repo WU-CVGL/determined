@@ -753,7 +753,7 @@ func TestCloseOpenAllocations(t *testing.T) {
 	a2In.State = &terminated
 
 	// Close only a2In open allocations (filter out the rest).
-	err = CloseOpenAllocations(ctx, []model.AllocationID{a1In.AllocationID})
+	err = CloseOpenAllocations(ctx, []model.AllocationID{a1In.AllocationID}, time.Now())
 	require.NoError(t, err)
 
 	a1, err := AllocationByID(ctx, a1In.AllocationID)
@@ -765,7 +765,7 @@ func TestCloseOpenAllocations(t *testing.T) {
 	require.NotNil(t, a2.EndTime)
 
 	// Close the rest of the open allocations.
-	err = CloseOpenAllocations(ctx, []model.AllocationID{})
+	err = CloseOpenAllocations(ctx, []model.AllocationID{}, time.Now())
 	require.NoError(t, err)
 
 	a1, err = AllocationByID(ctx, a1In.AllocationID)
@@ -799,7 +799,7 @@ func TestCloseOpenAllocationsNeverStarted(t *testing.T) {
 	}
 	live, closed := add(), add()
 
-	require.NoError(t, CloseOpenAllocations(ctx, []model.AllocationID{live}))
+	require.NoError(t, CloseOpenAllocations(ctx, []model.AllocationID{live}, time.Now()))
 
 	a, err := AllocationByID(ctx, live)
 	require.NoError(t, err)

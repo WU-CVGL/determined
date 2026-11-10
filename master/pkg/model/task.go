@@ -141,6 +141,15 @@ type Allocation struct {
 	ExitReason   *string `db:"exit_reason" bun:"exit_reason"`
 	ExitErr      *string `db:"exit_error" bun:"exit_error"`
 	StatusCode   *int32  `db:"status_code" bun:"status_code"`
+	// AssignedTime is when the resource manager assigned the allocation's resources, and
+	// ReleasedTime is when they were released. MeteredKind and MeteredQuantity are what the
+	// resources are metered as. Allocations from before metering have no times, and the kind
+	// "gpu" when their task container had recorded GPUs before the metering migration, else
+	// "unclassified" until an administrator sets it.
+	AssignedTime    *time.Time `db:"assigned_time" bun:"assigned_time"`
+	ReleasedTime    *time.Time `db:"released_time" bun:"released_time"`
+	MeteredKind     *string    `db:"metered_kind" bun:"metered_kind"`
+	MeteredQuantity *int       `db:"metered_quantity" bun:"metered_quantity"`
 }
 
 // AllocationWorkspaceRecord is the model for persisting the workspace and experiment
