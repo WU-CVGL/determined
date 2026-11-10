@@ -158,15 +158,6 @@ const NavigationTabbar: React.FC = () => {
   }
 
   const overflowActionsBottom: OverflowActionProps[] = [
-    ...(currentUser
-      ? [
-          {
-            icon: 'user' as const,
-            label: 'My Profile',
-            onClick: (e: AnyMouseEvent) => handlePathUpdate(e, paths.userProfile(currentUser.id)),
-          },
-        ]
-      : []),
     {
       icon: 'settings',
       label: 'User Settings',

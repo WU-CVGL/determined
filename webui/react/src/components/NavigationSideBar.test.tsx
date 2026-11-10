@@ -47,19 +47,12 @@ const setup = () => {
 };
 
 describe('NavigationSideBar', () => {
-  afterEach(() => {
-    window.history.replaceState(null, '', '/');
-  });
-
-  it("opens the signed-in user's page from My Profile, the first item of the user menu", async () => {
+  it('has no My Profile entry in the user menu', async () => {
     const user = userEvent.setup();
     setup();
     await user.click(screen.getByTestId('headerDropdown'));
     const items = await screen.findAllByRole('menuitem');
-    expect(items[0]).toHaveTextContent('My Profile');
-    const link = screen.getByText('My Profile').closest('a') as HTMLElement;
-    expect(link).toHaveAttribute('href', '/users/3');
-    await user.click(link);
-    expect(window.location.pathname).toBe('/users/3');
+    expect(items.length).toBeGreaterThan(0);
+    expect(screen.queryByText('My Profile')).not.toBeInTheDocument();
   });
 });

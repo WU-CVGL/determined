@@ -266,14 +266,8 @@ const NavigationSideBar: React.FC = () => {
         label: <Link path={paths.admin()}>Admin Settings</Link>,
       });
     }
-    if (currentUser) {
-      items.unshift({
-        key: 'profile',
-        label: <Link path={paths.userProfile(currentUser.id)}>My Profile</Link>,
-      });
-    }
     return items;
-  }, [canAdministrateUsers, currentUser]);
+  }, [canAdministrateUsers]);
 
   if (!showNavigation) return null;
 

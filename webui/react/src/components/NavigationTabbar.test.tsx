@@ -41,19 +41,13 @@ const setup = () => {
 };
 
 describe('NavigationTabbar', () => {
-  afterEach(() => {
-    window.history.replaceState(null, '', '/');
-  });
-
-  it("opens the signed-in user's page from My Profile, before User Settings", async () => {
+  it('has no My Profile entry in the overflow menu', async () => {
     const user = userEvent.setup();
     setup();
     await user.click(screen.getAllByLabelText('Overflow Menu')[0]);
     const labels = screen
       .getAllByText(/^(My Profile|User Settings|Sign out)$/)
       .map((el) => el.textContent);
-    expect(labels).toEqual(['My Profile', 'User Settings', 'Sign out']);
-    await user.click(screen.getByText('My Profile'));
-    expect(window.location.pathname).toBe('/users/3');
+    expect(labels).toEqual(['User Settings', 'Sign out']);
   });
 });

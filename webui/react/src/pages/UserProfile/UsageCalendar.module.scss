@@ -46,11 +46,13 @@
   background-color: var(--theme-surface-strong);
 }
 .level1 {
-  background-color: var(--theme-status-active-weak);
+  // stylelint-disable-next-line declaration-property-value-no-unknown -- css-tree 2.3 predates color-mix()
+  background-color: color-mix(in srgb, var(--theme-status-active) 30%, var(--theme-surface));
 }
 .level2 {
-  background-color: var(--theme-status-active);
+  // stylelint-disable-next-line declaration-property-value-no-unknown -- css-tree 2.3 predates color-mix()
+  background-color: color-mix(in srgb, var(--theme-status-active) 60%, var(--theme-surface));
 }
 .level3 {
-  background-color: var(--theme-status-active-strong);
+  background-color: var(--theme-status-active);
 }

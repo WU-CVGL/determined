@@ -2,6 +2,6 @@
 
 **New Features**
 
--  WebUI: Each user has a page, opened from **My Profile** in the user menu and from the owner
-   in the **Jobs** list, with the resources the user's tasks hold now, a calendar of the days
-   they held resources and their daily or monthly GPU, CPU slot and auxiliary container hours.
+-  WebUI: **Home** shows the GPUs and auxiliary containers that your tasks hold now, a calendar of
+   the UTC days they held them and their daily or monthly hours, for GPUs, auxiliary containers or
+   both. The owner of a job in the **Jobs** list opens the same overview for that user.

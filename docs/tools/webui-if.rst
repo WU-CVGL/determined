@@ -97,23 +97,31 @@ You can use the WebUI to view :ref:`historical-cluster-usage-data`.
  User Pages
 ************
 
-Each user has a page, which every signed-in user can open: **My Profile** in the user menu opens
-yours, and the owner of a job in the :ref:`Jobs <web-ui-jobs>` list opens theirs. **Jobs** on the
-page lists the user's jobs.
+**Home** shows an overview of your resources. The owner of a job in the :ref:`Jobs <web-ui-jobs>`
+list opens the page of that user, which every signed-in user can open: it shows the same overview
+for that user, and **Jobs** on it lists the user's jobs. Your own page is Home.
 
--  **Current resources**: the GPUs, CPU slots and auxiliary containers that the user's tasks hold
-   now. Kubernetes pools do not report auxiliary containers.
+Where the cluster meters auxiliary containers, **GPU**, **Aux** and **GPU+Aux** choose the resources
+that the whole overview shows, **GPU+Aux** by default. Where it does not, because every resource
+pool is a Kubernetes pool, the overview shows GPUs only. CPU slots are not shown.
 
--  **Active days (UTC)**: a calendar of the last 53 weeks with a cell for each UTC day, shaded by
-   how long the user's tasks held resources that day: any time, more than 4 hours, or more than 12
-   hours.
+-  **Current resources**: the GPUs and the auxiliary containers that the user's tasks hold now.
 
--  **Usage**: the user's GPU, CPU slot and auxiliary container hours for each of the last 31 days
-   (**Day**) or the last 13 months (**Month**).
+-  **Active days**: a calendar of the last 53 weeks with a cell for each UTC day, shaded by how long
+   the user's tasks held the chosen resources that day: any time, more than 4 hours, or more than 12
+   hours. With **GPU+Aux**, a time with both held counts once. The title gives the number of shaded
+   days. Selecting a day shows its date and its hours.
 
-The pages do not count checkpoint garbage collection, and count each allocation from when its
+-  **Usage**: the GPU hours and the auxiliary container hours for each of the last 31 UTC days
+   (**Day**) or the last 13 UTC months (**Month**); the months also give their active days.
+
+The current resources refresh every 15 seconds. The usage refreshes every five minutes, at the start
+of each UTC day, and when the page is shown again more than a minute after the usage was last
+loaded; it does not refresh while the page is hidden.
+
+The overview does not count checkpoint garbage collection, and counts each allocation from when its
 resources were assigned, where the cluster usage charts count from when its containers started
-pulling their images. See :ref:`user-pages`.
+pulling their images. See :ref:`user-pages` for how the usage is counted.
 
 **************************
  Viewing Cluster Topology
