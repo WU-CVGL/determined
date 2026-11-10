@@ -13,6 +13,7 @@ import { terminalGenericTaskStates } from 'constants/states';
 import usePageReturns from 'hooks/usePageReturns';
 import usePermissions from 'hooks/usePermissions';
 import usePolling from 'hooks/usePolling';
+import useRefusal from 'hooks/useRefusal';
 import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
 import GenericTaskActions from 'pages/GenericTaskDetails/GenericTaskActions';
 import GenericTaskConfig from 'pages/GenericTaskDetails/GenericTaskConfig';
@@ -59,7 +60,6 @@ const GenericTaskDetails: React.FC = () => {
   const [childTasks, setChildTasks] = useState<GenericTask[]>();
   const [config, setConfig] = useState<RawJson>();
   const [configError, setConfigError] = useState<string>();
-  const [configRefused, setConfigRefused] = useState(false);
   // Counts the saves of the task's sharing, to look the task up again after one.
   const [sharingSaves, setSharingSaves] = useState(0);
   const { modal: sharingModal, open: openSharing } = useJobSharingModal(
@@ -80,7 +80,6 @@ const GenericTaskDetails: React.FC = () => {
     setChildTasks(undefined);
     setConfig(undefined);
     setConfigError(undefined);
-    setConfigRefused(false);
   }, [taskId]);
 
   useEffect(() => {
@@ -170,17 +169,28 @@ const GenericTaskDetails: React.FC = () => {
     };
   }, [isGeneric, pageReturns, sharingSaves, taskId]);
 
+  // The config is read again once a refusal ends (see useRefusal), e.g. after a re-share.
+  const { notShared: configNotShared, refuse: refuseConfig } = useRefusal(
+    taskId,
+    configHidden(summary?.capabilities),
+  );
   useEffect(() => {
     if (!isGeneric) return;
+    if (configNotShared) {
+      setConfig(undefined);
+      return;
+    }
     let active = true;
     getGenericTaskConfig({ taskId }, { signal: canceler.current.signal })
       .then((value) => {
-        if (active) setConfig(value);
+        if (!active) return;
+        setConfig(value);
+        setConfigError(undefined);
       })
       .catch((e) => {
         if (!active || isAborted(e)) return;
         if (isConfigNotShared(e)) {
-          setConfigRefused(true);
+          refuseConfig();
           return;
         }
         setConfigError((e as Error).message);
@@ -189,7 +199,7 @@ const GenericTaskDetails: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [isGeneric, taskId]);
+  }, [configNotShared, isGeneric, refuseConfig, taskId]);
 
   const handleTabChange = useCallback(
     (key: string) => {
@@ -201,7 +211,6 @@ const GenericTaskDetails: React.FC = () => {
   const state = task?.taskState ?? summary?.state;
   const noPause = task?.noPause ?? summary?.noPause;
   const name = jobDisplayName('Generic Task', taskId, summary?.name, summary?.capabilities);
-  const configNotShared = configRefused || configHidden(summary?.capabilities);
   /*
    * Owners and admins can control a task. Without the task's owner, e.g. when the lookup fails,
    * the actions stay enabled and the master decides.

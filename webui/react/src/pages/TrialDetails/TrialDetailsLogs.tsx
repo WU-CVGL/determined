@@ -9,7 +9,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import useUI from 'components/ThemeProvider';
 import useFeature from 'hooks/useFeature';
-import useLogsRefusal from 'hooks/useLogsRefusal';
+import useRefusal from 'hooks/useRefusal';
 import { useSettings } from 'hooks/useSettings';
 import { DateString, decode, optional } from 'ioTypes';
 import { serverAddress } from 'routes/utils';
@@ -38,7 +38,7 @@ const TrialDetailsLogs: React.FC<Props> = ({ experiment, trial }: Props) => {
   const canceler = useRef(new AbortController());
   const f_flat_runs = useFeature().isOn('flat_runs');
 
-  const { notShared, refuse } = useLogsRefusal(trial?.id, logsHidden(experiment.capabilities));
+  const { notShared, refuse } = useRefusal(trial?.id, logsHidden(experiment.capabilities));
 
   const handleLogsError = useCallback(
     (e: unknown) => {

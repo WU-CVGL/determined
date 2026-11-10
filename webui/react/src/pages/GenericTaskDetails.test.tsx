@@ -6,6 +6,7 @@ import { HelmetProvider } from 'react-helmet-async';
 import { BrowserRouter } from 'react-router-dom';
 
 import { ThemeProvider } from 'components/ThemeProvider';
+import usePageVisibility from 'hooks/usePageVisibility';
 import {
   getGenericTask,
   getGenericTaskConfig,
@@ -23,13 +24,18 @@ import GenericTaskDetails from './GenericTaskDetails';
 
 const TASK_ID = 'task-1';
 
-const params = vi.hoisted(() => ({ tab: undefined as string | undefined }));
+const params = vi.hoisted(() => ({ tab: undefined as string | undefined, taskId: 'task-1' }));
 vi.mock('react-router-dom', async (importOriginal) => ({
   ...(await importOriginal<typeof import('react-router-dom')>()),
-  useParams: () => ({ tab: params.tab, taskId: TASK_ID }),
+  useParams: () => ({ tab: params.tab, taskId: params.taskId }),
 }));
 
 vi.mock('hooks/useTaskResourcesEnabled', () => ({ default: () => false }));
+
+vi.mock('hew/CodeEditor', () => ({
+  __esModule: true,
+  default: ({ file }: { file: string }) => <pre data-testid="code-editor">{file}</pre>,
+}));
 
 vi.mock('services/api', () => ({
   getGenericTask: vi.fn(),
@@ -67,20 +73,40 @@ const summary: GenericTask = {
   workspaceId: 1,
 };
 
-const setup = () =>
-  render(
-    <BrowserRouter>
-      <UIProvider theme={DefaultTheme.Light}>
-        <ThemeProvider>
-          <HelmetProvider>
-            <ConfirmationProvider>
-              <GenericTaskDetails />
-            </ConfirmationProvider>
-          </HelmetProvider>
-        </ThemeProvider>
-      </UIProvider>
-    </BrowserRouter>,
-  );
+const PageVisibility = () => {
+  usePageVisibility();
+  return null;
+};
+
+const tree = () => (
+  <BrowserRouter>
+    <UIProvider theme={DefaultTheme.Light}>
+      <ThemeProvider>
+        <PageVisibility />
+        <HelmetProvider>
+          <ConfirmationProvider>
+            <GenericTaskDetails />
+          </ConfirmationProvider>
+        </HelmetProvider>
+      </ThemeProvider>
+    </UIProvider>
+  </BrowserRouter>
+);
+
+const setup = () => render(tree());
+
+// The user leaves the page, e.g. for another browser tab, and comes back.
+const returnToPage = async () => {
+  for (const hidden of [true, false]) {
+    act(() => {
+      Object.defineProperty(document, 'hidden', { configurable: true, value: hidden });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+  }
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(100);
+  });
+};
 
 /* Runs polls, in steps so that React renders the responses in between as in a browser. */
 const poll = async (times: number) => {
@@ -101,6 +127,8 @@ describe('GenericTaskDetails', () => {
     vi.useRealTimers();
     vi.clearAllMocks();
     params.tab = undefined;
+    params.taskId = TASK_ID;
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
   });
 
   describe('job privacy', () => {
@@ -200,6 +228,150 @@ describe('GenericTaskDetails', () => {
       setup();
       expect(await screen.findByText('Config not shared')).toBeInTheDocument();
       expect(screen.queryByText('Unable to load config')).not.toBeInTheDocument();
+    });
+
+    describe('config sharing restored', () => {
+      const SENTINEL = 'sentinel-config-value';
+      const shared: JobCapabilities = {
+        manageSharing: false,
+        viewConfig: true,
+        viewLogs: true,
+        viewTitle: true,
+      };
+      // Whether each task's config is shared, as the master decides it now.
+      let configShared: Record<string, boolean>;
+      // Whether the lookup of each task says the config is shared; it can lag behind the master.
+      let lookupShared: Record<string, boolean>;
+
+      // As processApiError wraps the master's refusal.
+      const refusal = () =>
+        new DetError(new Response(null, { status: 403 }), {
+          publicMessage: 'config not shared',
+          publicSubject: 'Request getGenericTaskConfig failed.',
+        });
+
+      const configRequests = (taskId = TASK_ID) =>
+        vi.mocked(getGenericTaskConfig).mock.calls.filter(([args]) => args.taskId === taskId)
+          .length;
+
+      beforeEach(() => {
+        params.tab = 'config';
+        configShared = {};
+        lookupShared = {};
+        vi.mocked(getTask).mockImplementation(({ taskId }) =>
+          Promise.resolve({ ...taskItem(GenericTaskState.Active), taskId }),
+        );
+        vi.mocked(getGenericTask).mockImplementation((taskId) =>
+          Promise.resolve({
+            ...summary,
+            capabilities: { ...shared, viewConfig: !!lookupShared[taskId] },
+            taskId,
+          }),
+        );
+        vi.mocked(getGenericTaskConfig).mockImplementation(({ taskId }) =>
+          configShared[taskId]
+            ? Promise.resolve({ entrypoint: `${SENTINEL}-${taskId}` })
+            : Promise.reject(refusal()),
+        );
+        // A new answer at each poll, so that the page renders again in between.
+        let polls = 0;
+        vi.mocked(getGenericTasks).mockImplementation(() => {
+          polls++;
+          return Promise.resolve({
+            pagination: { limit: 0, offset: 0, total: polls },
+            tasks: Array.from({ length: polls }, (_, i) => ({
+              ...summary,
+              name: `child-${i}`,
+              parentId: TASK_ID,
+              taskId: `c${i}`,
+            })),
+          });
+        });
+      });
+
+      it('reads the config again when it is shared again and the user comes back', async () => {
+        setup();
+        expect(await screen.findByText('Config not shared')).toBeInTheDocument();
+        await poll(1);
+        const before = configRequests();
+        expect(before).toBe(1);
+
+        configShared[TASK_ID] = true;
+        lookupShared[TASK_ID] = true;
+        await returnToPage();
+        expect(await screen.findByText(new RegExp(SENTINEL))).toBeInTheDocument();
+        expect(screen.queryByText('Config not shared')).not.toBeInTheDocument();
+        expect(screen.queryByText('Unable to load config')).not.toBeInTheDocument();
+        await poll(2);
+        expect(configRequests()).toBe(before + 1);
+      });
+
+      it('reads a refused config once per return while the lookup still shows it', async () => {
+        lookupShared[TASK_ID] = true;
+        setup();
+        expect(await screen.findByText('Config not shared')).toBeInTheDocument();
+        await poll(1);
+        expect(configRequests()).toBe(1);
+
+        // Renders for new answers do not read the config again.
+        const childPolls = vi.mocked(getGenericTasks).mock.calls.length;
+        await poll(4);
+        expect(vi.mocked(getGenericTasks).mock.calls.length).toBeGreaterThan(childPolls + 2);
+        expect(configRequests()).toBe(1);
+
+        for (const expected of [2, 3, 4]) {
+          await returnToPage();
+          await poll(2);
+          expect(configRequests()).toBe(expected);
+          expect(screen.getByText('Config not shared')).toBeInTheDocument();
+        }
+      });
+
+      it('sends no config request at a return while the lookup hides the config', async () => {
+        setup();
+        expect(await screen.findByText('Config not shared')).toBeInTheDocument();
+        await poll(1);
+        const before = configRequests();
+        await returnToPage();
+        await poll(2);
+        expect(getGenericTask).toHaveBeenCalledTimes(2);
+        expect(configRequests()).toBe(before);
+        expect(screen.getByText('Config not shared')).toBeInTheDocument();
+      });
+
+      it('starts over for another task and drops the answer for the last one', async () => {
+        lookupShared[TASK_ID] = true;
+        const view = setup();
+        expect(await screen.findByText('Config not shared')).toBeInTheDocument();
+
+        // The config of the first task is shared while the second task is opened.
+        let answerFirst: (value: { entrypoint: string }) => void = () => {};
+        vi.mocked(getGenericTaskConfig).mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              answerFirst = resolve;
+            }),
+        );
+        await returnToPage();
+        expect(configRequests()).toBe(2);
+
+        configShared['task-2'] = true;
+        lookupShared['task-2'] = true;
+        params.taskId = 'task-2';
+        view.rerender(tree());
+        expect(await screen.findByText(new RegExp(`${SENTINEL}-task-2`))).toBeInTheDocument();
+        const second = configRequests('task-2');
+
+        await act(async () => {
+          answerFirst({ entrypoint: `${SENTINEL}-${TASK_ID}` });
+          await vi.advanceTimersByTimeAsync(100);
+        });
+        expect(screen.getByText(new RegExp(`${SENTINEL}-task-2`))).toBeInTheDocument();
+        expect(screen.queryByText(new RegExp(`${SENTINEL}-${TASK_ID}`))).not.toBeInTheDocument();
+        await poll(2);
+        expect(configRequests('task-2')).toBe(second);
+        expect(configRequests()).toBe(2);
+      });
     });
   });
 

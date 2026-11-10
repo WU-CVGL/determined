@@ -9,8 +9,8 @@ import { useParams } from 'react-router-dom';
 import Page from 'components/Page';
 import TaskResourcesLink from 'components/TaskResourcesLink';
 import { commandTypeToLabel } from 'constants/states';
-import useLogsRefusal from 'hooks/useLogsRefusal';
 import usePageReturns from 'hooks/usePageReturns';
+import useRefusal from 'hooks/useRefusal';
 import { ResetSettings, UpdateSettings, useSettings } from 'hooks/useSettings';
 import { DateString, decode, optional } from 'ioTypes';
 import { paths, serverAddress } from 'routes/utils';
@@ -75,7 +75,7 @@ interface ViewerProps {
  * The log viewer of a task with its filters, without a page around it. The caller owns the log
  * settings so that it can also read them, e.g. for the selected allocation. Logs that are not
  * shared with the viewer, by the task's capabilities or by the master's refusal, are not read
- * (see useLogsRefusal for when a refusal ends).
+ * (see useRefusal for when a refusal ends).
  */
 export const TaskLogsViewer: React.FC<ViewerProps> = ({
   logsHidden,
@@ -86,7 +86,7 @@ export const TaskLogsViewer: React.FC<ViewerProps> = ({
   updateSettings,
 }: ViewerProps) => {
   const [filterOptions, setFilterOptions] = useState<Filters>({});
-  const { notShared, refuse } = useLogsRefusal(taskId, !!logsHidden);
+  const { notShared, refuse } = useRefusal(taskId, !!logsHidden);
 
   const handleLogsError = useCallback(
     (e: unknown) => {
