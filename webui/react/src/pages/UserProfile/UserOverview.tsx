@@ -231,6 +231,10 @@ const Overview: React.FC<{ userId: number }> = ({ userId }) => {
     Loadable.match(resources, { _: () => false, Loaded: (resources) => !resources.auxMetered }) &&
     usageHasAux === false;
   const shownMode = auxAbsent ? ResourceMode.Gpu : mode;
+  // A hidden mode does not stay selected.
+  useEffect(() => {
+    if (auxAbsent) setMode(ResourceMode.Gpu);
+  }, [auxAbsent]);
   const projection = useMemo(() => usageProjection(shownMode), [shownMode]);
 
   return (

@@ -250,6 +250,38 @@ describe('UserOverview', () => {
     );
   });
 
+  it('selects GPU once Aux is known to be absent, and keeps it when Aux comes back', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    vi.mocked(getUserResources).mockResolvedValue({
+      auxMetered: false,
+      pools: [{ counts: { auxContainers: 0, cpuSlots: 0, gpus: 8 }, resourcePool: 'k8s' }],
+    });
+    const usage = deferred<UserUsage>();
+    vi.mocked(getUserUsage).mockReturnValue(usage.promise);
+    setup();
+    await waitFor(() => expect(stat('GPUs')).toHaveTextContent('8'));
+    await act(() => user.click(screen.getByRole('radio', { name: 'Aux' })));
+    expect(screen.queryByText('GPUs')).not.toBeInTheDocument();
+
+    await act(() => {
+      usage.resolve(USAGE);
+      return Promise.resolve();
+    });
+    expect(await screen.findByTestId('chart-series')).toHaveTextContent(/^GPU$/);
+    expect(screen.queryByRole('radio', { name: 'GPU+Aux' })).not.toBeInTheDocument();
+
+    vi.mocked(getUserResources).mockResolvedValue({
+      auxMetered: true,
+      pools: [{ counts: { auxContainers: 0, cpuSlots: 0, gpus: 8 }, resourcePool: 'default' }],
+    });
+    await act(() => vi.advanceTimersByTimeAsync(RESOURCES_POLL_INTERVAL));
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'GPU' })).toBeChecked());
+    expect(series()).toBe('GPU');
+    expect(columns()).toEqual(['Date', 'GPU hours']);
+    expect(stat('GPUs')).toHaveTextContent('8');
+    expect(screen.queryByText('Aux containers')).not.toBeInTheDocument();
+  });
+
   it('shows the Aux containers the user holds in a pool the viewer may not see', async () => {
     vi.mocked(getUserResources).mockResolvedValue({
       auxMetered: true,
