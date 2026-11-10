@@ -19,7 +19,6 @@ vi.mock('services/api', () => ({
   getGenericTask: vi.fn(() => Promise.resolve(undefined)),
   getShells: vi.fn(() => Promise.resolve([])),
   getTask: vi.fn(() => Promise.reject(new Error('no task record'))),
-  getTensorBoard: vi.fn(() => Promise.reject(new Error('no TensorBoard record'))),
 }));
 vi.mock('services/apiConfig', () => ({
   detApi: { StreamingJobs: { taskLogs: vi.fn(), taskLogsFields: vi.fn() } },

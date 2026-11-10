@@ -370,6 +370,43 @@ def test_shell_config_not_shared(capsys: pytest.CaptureFixture) -> None:
     assert err == "Config not shared"
 
 
+def expect_primary_service(rsps: responses.RequestsMock, task_id: str, primary: str) -> None:
+    rsps.get(
+        f"{MASTER}/api/v1/tasks/{task_id}/services",
+        json={"taskId": task_id, "userId": 2, "workspaceId": 1, "primary": primary, "services": []},
+    )
+
+
+def test_tensorboard_list_omits_hidden_title(capsys: pytest.CaptureFixture) -> None:
+    sessions = [
+        shell_json(0, HIDDEN, ""),
+        shell_json(1, SHOWN, "visible"),
+        shell_json(2, None, "old"),
+    ]
+    workspace = api_responses.sample_get_workspace().workspace.to_json()
+    workspace["id"] = 1
+    with util.standard_cli_rsps() as rsps:
+        rsps.get(f"{MASTER}/api/v1/shells", json={"shells": sessions})
+        for session in sessions:
+            expect_primary_service(rsps, session["id"], "tensorboard")
+        rsps.get(
+            f"{MASTER}/api/v1/workspaces",
+            json={"workspaces": [workspace], "pagination": pagination(1)},
+        )
+        cli.main(["tensorboard", "list", "--all"])
+    descriptions = {r[0][-1]: r[2] for r in table_rows(capsys.readouterr().out)}
+    assert descriptions == {"0": render.OMITTED_VALUE, "1": "visible", "2": "old"}
+
+
+def test_tensorboard_config_not_shared(capsys: pytest.CaptureFixture) -> None:
+    session = shell_json(0, HIDDEN, "")
+    with util.standard_cli_rsps() as rsps:
+        expect_primary_service(rsps, session["id"], "tensorboard")
+        rsps.get(f"{MASTER}/api/v1/shells/{session['id']}", json={"shell": session, "config": None})
+        err = run_refused(capsys, ["tensorboard", "config", session["id"]])
+    assert err == "Config not shared"
+
+
 def test_task_logs_not_shared(capsys: pytest.CaptureFixture) -> None:
     with util.standard_cli_rsps() as rsps:
         rsps.get(f"{MASTER}/api/v1/tasks/{TASK_ID}/logs", status=403, json=STREAM_LOGS)

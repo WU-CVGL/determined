@@ -14,7 +14,7 @@ import useRefusal from 'hooks/useRefusal';
 import { ResetSettings, UpdateSettings, useSettings } from 'hooks/useSettings';
 import { DateString, decode, optional } from 'ioTypes';
 import { paths, serverAddress } from 'routes/utils';
-import { getCommand, getGenericTask, getShells, getTask, getTensorBoard } from 'services/api';
+import { getCommand, getGenericTask, getShells, getTask } from 'services/api';
 import { detApi } from 'services/apiConfig';
 import { mapV1LogsResponse } from 'services/decoder';
 import { readStream } from 'services/utils';
@@ -45,8 +45,6 @@ const lookupCapabilities = async (
   switch (taskType) {
     case CommandType.Command:
       return (await getCommand({ commandId: taskId })).capabilities;
-    case CommandType.TensorBoard:
-      return (await getTensorBoard({ commandId: taskId })).capabilities;
     case CommandType.Shell:
       // The shell list has no private keys, unlike a shell's own lookup.
       return (await getShells({})).find((shell) => shell.id === taskId)?.capabilities;

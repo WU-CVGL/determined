@@ -421,7 +421,7 @@ export const InteractiveTask: React.FC = () => {
       }
     };
     return tabKeys.map((key) => ({ children: pane(key), key, label: TAB_LABELS[key] }));
-  }, [activeKey, phase, services, tabKeys, task, taskId]);
+  }, [activeKey, command?.capabilities, phase, services, tabKeys, task, taskId]);
 
   const state = task?.allocations[0]?.state;
   const title = ui.isPageHidden ? getTitleState(state, name) : name;

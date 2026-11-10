@@ -87,8 +87,9 @@ task without such a record is readable only by administrators.
   `Experiment 12`, and shows `Logs not shared` or `Config not shared` in place
   of hidden logs or a hidden config.
 - The CLI prints `***` for a hidden title, description, or labels. `det
-  experiment config`, `det shell config`, and `det command config` print
-  `Config not shared`; the other commands print the master's message.
+  experiment config`, `det shell config`, `det tensorboard config`, and `det
+  command config` print `Config not shared`; the other commands print the
+  master's message.
 
 Metrics, hyperparameters, TensorBoard sources, and checkpoint files are not
 covered and stay visible to every user who may view the job.
