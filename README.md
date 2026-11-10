@@ -20,9 +20,7 @@ GPUs. JupyterLab comes from the task image; the default does not install it. Sta
 **JupyterLab**, **VS Code**, **Logs** and **Resources** tabs. A shell runs until it is killed,
 or until it has been idle for the `idle_timeout` its configuration sets.
 
-![The task page of a shell with its Terminal, JupyterLab, VS Code, Logs and Resources tabs, JupyterLab open](docs/assets/images/interactive-task-page.png)
-
-![The Launch Interactive Task form with a resource pool, slots, and the JupyterLab and VS Code services checked under Services](docs/assets/images/launch-interactive-task.png)
+![The task page of a shell with its Terminal, JupyterLab, VS Code, Logs and Resources tabs, VS Code open](docs/assets/images/interactive-task-page.png)
 
 ```bash
 det shell start                    # an SSH session and the default services
@@ -41,6 +39,8 @@ det task open <shell id> vscode    # VS Code in the browser
 - **GPU topology placement**: tasks get NUMA-packed or best-connected GPUs, and a pool's topology
   view outlines the GPUs each job holds.
 - **Task resource charts**: the CPU, memory and GPU use of each task, read from Prometheus.
+
+<p align="center"><img alt="The WebUI: experiment tracking with learning curves and hyperparameter plots, distributed training and hyperparameter tuning with trial metrics and the trials of a search, and resource management with the cluster's resource pools, the job queue and a job's queue settings" src="docs/assets/readme_images/features.gif"></p>
 
 ![A resource pool's topology view: two nodes, their NUMA groups, and each GPU's state and health](docs/assets/images/resource-pool-topology.png)
 
