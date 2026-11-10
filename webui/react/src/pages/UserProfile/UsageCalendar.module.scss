@@ -38,8 +38,8 @@
   width: 11px;
 
   &:focus-visible {
-    box-shadow: var(--theme-focus-shadow);
-    outline: none;
+    outline: 2px solid var(--theme-surface-on);
+    outline-offset: 1px;
   }
 }
 .day {

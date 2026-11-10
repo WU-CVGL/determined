@@ -1,5 +1,5 @@
 import Tooltip from 'hew/Tooltip';
-import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { CalendarDay, CalendarWeek, UsageValue } from './usage';
 import css from './UsageCalendar.module.scss';
@@ -21,15 +21,40 @@ const DayLine: React.FC<{ day: CalendarDay; values: UsageValue[] }> = ({ day, va
   </div>
 );
 
+// The step in days of an arrow key: a column is a week, a row a weekday.
+const KEY_STEPS: Record<string, number> = {
+  ArrowDown: 1,
+  ArrowLeft: -7,
+  ArrowRight: 7,
+  ArrowUp: -1,
+};
+
 /** The UTC days of the last 53 weeks, a column a week from Monday, by level. */
 const UsageCalendar: React.FC<Props> = ({ dayValues, weeks }: Props) => {
   const [selectedDate, setSelectedDate] = useState<string>();
+  const days = useMemo(() => weeks.flatMap((week) => week.days), [weeks]);
   const selected = useMemo(
-    () =>
-      selectedDate === undefined
-        ? undefined
-        : weeks.flatMap((week) => week.days).find((day) => day.date === selectedDate),
-    [selectedDate, weeks],
+    () => (selectedDate === undefined ? undefined : days.find((day) => day.date === selectedDate)),
+    [selectedDate, days],
+  );
+
+  // The grid is one stop in the tab order, at the day last focused or else the newest; the arrow
+  // keys move between its days.
+  const [focusDate, setFocusDate] = useState<string>();
+  const tabStop = days.some((day) => day.date === focusDate)
+    ? focusDate
+    : days[days.length - 1]?.date;
+  const grid = useRef<HTMLDivElement>(null);
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const step = KEY_STEPS[e.key];
+      const from = days.findIndex((day) => day.date === (e.target as HTMLElement).dataset.date);
+      const to = days[from + step];
+      if (step === undefined || from < 0 || !to) return;
+      e.preventDefault();
+      grid.current?.querySelector<HTMLElement>(`[data-date="${to.date}"]`)?.focus();
+    },
+    [days],
   );
 
   // The newest weeks are at the right end: a grid wider than the page starts there.
@@ -48,7 +73,7 @@ const UsageCalendar: React.FC<Props> = ({ dayValues, weeks }: Props) => {
             </span>
           ))}
         </div>
-        <div className={css.grid}>
+        <div className={css.grid} ref={grid} onKeyDown={handleKeyDown}>
           {weeks.flatMap((week) =>
             week.days.map((day) => {
               const classes = [css.cell];
@@ -59,8 +84,10 @@ const UsageCalendar: React.FC<Props> = ({ dayValues, weeks }: Props) => {
                     aria-label={day.date}
                     className={classes.join(' ')}
                     data-date={day.date}
+                    tabIndex={day.date === tabStop ? 0 : -1}
                     type="button"
                     onClick={() => setSelectedDate(day.date)}
+                    onFocus={() => setFocusDate(day.date)}
                   />
                 </Tooltip>
               );

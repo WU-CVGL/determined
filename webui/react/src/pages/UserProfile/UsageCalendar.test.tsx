@@ -113,6 +113,50 @@ describe('UsageCalendar', () => {
     );
   });
 
+  it('is one stop in the tab order, at the newest day until another is focused', () => {
+    setup([]);
+    const stops = screen
+      .getAllByRole('button')
+      .filter((button) => button.getAttribute('tabindex') === '0');
+    expect(stops).toHaveLength(1);
+    const newest = stops[0].getAttribute('data-date');
+    expect(
+      screen
+        .getAllByRole('button')
+        .every((button) => (button.dataset.date ?? '') <= (newest ?? '')),
+    ).toBe(true);
+
+    act(() => cell('2026-10-31').focus());
+    expect(cell('2026-10-31')).toHaveAttribute('tabindex', '0');
+    expect(stops[0]).toHaveAttribute('tabindex', '-1');
+  });
+
+  it('moves between days with the arrow keys: a day up and down, a week left and right', async () => {
+    const user = userEvent.setup();
+    setup([day('2026-10-28', 3)], ResourceMode.Gpu);
+    act(() => cell('2026-10-28').focus());
+    await act(() => user.keyboard('{ArrowDown}'));
+    expect(cell('2026-10-29')).toHaveFocus();
+    await act(() => user.keyboard('{ArrowUp}{ArrowUp}'));
+    expect(cell('2026-10-27')).toHaveFocus();
+    await act(() => user.keyboard('{ArrowLeft}'));
+    expect(cell('2026-10-20')).toHaveFocus();
+    await act(() => user.keyboard('{ArrowRight}{ArrowRight}'));
+    expect(cell('2026-11-03')).toHaveFocus();
+    await act(() => user.keyboard(' '));
+    expect(screen.getByTestId('usage-calendar-day')).toHaveTextContent(/^2026-11-03 \(UTC\)/);
+  });
+
+  it('keeps the focus at the ends of the grid', async () => {
+    const user = userEvent.setup();
+    setup([]);
+    const all = screen.getAllByRole('button');
+    const first = all[0];
+    act(() => first.focus());
+    await act(() => user.keyboard('{ArrowUp}{ArrowLeft}'));
+    expect(first).toHaveFocus();
+  });
+
   it('shows only the date of a day without records', async () => {
     const user = userEvent.setup();
     setup([]);
