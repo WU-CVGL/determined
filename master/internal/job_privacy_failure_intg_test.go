@@ -467,6 +467,9 @@ func TestJobPrivacyFailureReasons(t *testing.T) {
 				got, err := api.GetTask(ctx, &apiv1.GetTaskRequest{TaskId: taskID})
 				require.NoError(t, err, taskID)
 				requireMarker("GetTask "+taskID, got)
+				// The task's capabilities say whether the logs, and so the reasons, are shared.
+				require.NotNil(t, got.Task.Capabilities, taskID)
+				require.Equal(t, vw.full, got.Task.Capabilities.ViewLogs, taskID)
 				var a *taskv1.Allocation
 				for _, ta := range got.Task.Allocations {
 					if ta.AllocationId == allocationID {

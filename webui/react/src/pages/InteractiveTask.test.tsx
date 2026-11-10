@@ -1020,6 +1020,44 @@ describe('InteractiveTask capabilities', () => {
     await waitFor(() => expect(getShells).toHaveBeenCalledTimes(2));
   });
 
+  it('keeps the newer capabilities when the read of a return answers before the poll’s', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getTaskServices).mockResolvedValue(
+        servicesWith(['ssh'], true, V1TaskServiceState.READY),
+      );
+      master.shells = [shell];
+      const running = (capabilities: JobCapabilities): TaskItem => ({
+        ...taskWith(true),
+        capabilities,
+      });
+      let answerPoll: (task: TaskItem) => void = () => undefined;
+      vi.mocked(getTask)
+        .mockResolvedValueOnce(running(caps(true, false)))
+        .mockImplementationOnce(() => new Promise<TaskItem>((resolve) => (answerPoll = resolve)))
+        .mockResolvedValueOnce(running(caps(true, true)));
+      setup('?tab=logs', true);
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(logsHiddenAttr()).toBe('true');
+      // The poll's next read is sent and held.
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+      expect(getTask).toHaveBeenCalledTimes(2);
+
+      setPageHidden(true);
+      setPageHidden(false);
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(getTask).toHaveBeenCalledTimes(3);
+      expect(logsHiddenAttr()).toBe('false');
+
+      // The poll's read, sent before the return's, answers last with the older capabilities.
+      act(() => answerPoll(running(caps(true, false))));
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(logsHiddenAttr()).toBe('false');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('takes the capabilities of the shell record from an older master, whose task has none', async () => {
     master.shells = [{ ...shell, capabilities: caps(true, false) }];
     setup('?tab=logs', true);
