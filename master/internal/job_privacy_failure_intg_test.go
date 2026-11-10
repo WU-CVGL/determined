@@ -51,6 +51,13 @@ func (jobPrivacyEditorAuthZ) CanEditExperiment(
 	return nil
 }
 
+// CanEditExperimentsMetadata allows every user.
+func (jobPrivacyEditorAuthZ) CanEditExperimentsMetadata(
+	context.Context, model.User, *model.Experiment,
+) error {
+	return nil
+}
+
 var registerJobPrivacyEditorAuthZ sync.Once
 
 // useJobPrivacyEditorAuthZ makes every user an editor of every experiment until the test ends.
@@ -162,6 +169,58 @@ func TestJobPrivacyTrialUpsert(t *testing.T) {
 			require.Equal(t, want, put.Trial.LogPolicyMatched, "PutTrial")
 		})
 	}
+}
+
+// TestJobPrivacyLabelEdits checks that an editor who may not read an experiment's title can add
+// and remove one label: every response, those that change nothing included, carries no labels,
+// and the stored labels keep the others, which the editor never saw.
+func TestJobPrivacyLabelEdits(t *testing.T) {
+	api, _, _ := setupAPITest(t, nil)
+	lockJobPrivacyPolicy(t)
+	useJobPrivacyEditorAuthZ(t)
+	owner := addGCTestOwner(t)
+	editor := addGCTestOwner(t)
+	ownerCtx, editorCtx := userContext(t, owner), userContext(t, editor)
+
+	keepA, keepB, label := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	exp := createTestExpWithProjectID(t, api, owner, 1, keepA, keepB)
+	shareJob(ownerCtx, t, api, exp.JobID.String(), false, true, true)
+	expID := int32(exp.ID)
+
+	stored := func() []string {
+		t.Helper()
+		var labels []string
+		require.NoError(t, db.Bun().NewRaw(
+			`SELECT jsonb_array_elements_text(config->'labels') FROM experiments WHERE id = ?`,
+			expID).Scan(context.Background(), &labels))
+		return labels
+	}
+
+	put := func(msg string) {
+		t.Helper()
+		resp, err := api.PutExperimentLabel(editorCtx,
+			&apiv1.PutExperimentLabelRequest{ExperimentId: expID, Label: label})
+		require.NoError(t, err, msg)
+		require.Empty(t, resp.Labels, msg)
+		require.ElementsMatch(t, []string{keepA, keepB, label}, stored(), msg)
+	}
+	del := func(msg string) {
+		t.Helper()
+		resp, err := api.DeleteExperimentLabel(editorCtx,
+			&apiv1.DeleteExperimentLabelRequest{ExperimentId: expID, Label: label})
+		require.NoError(t, err, msg)
+		require.Empty(t, resp.Labels, msg)
+		require.ElementsMatch(t, []string{keepA, keepB}, stored(), msg)
+	}
+	put("add")
+	put("add a label that exists")
+	del("remove")
+	del("remove a label that is absent")
+
+	resp, err := api.PutExperimentLabel(ownerCtx,
+		&apiv1.PutExperimentLabelRequest{ExperimentId: expID, Label: label})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{keepA, keepB, label}, resp.Labels, "the owner reads them")
 }
 
 // exitAllocationService starts allocations as its AllocationService does and keeps their exit
