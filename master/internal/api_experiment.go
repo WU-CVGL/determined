@@ -2819,6 +2819,25 @@ func (a *apiServer) PatchTrial(ctx context.Context, req *apiv1.PatchTrialRequest
 	return resp, nil
 }
 
+// experimentForLabelEdit reads an experiment and locks its row until tx ends, so label edits
+// of one experiment run one after the other. Only the experiments row is locked: Postgres
+// cannot lock the nullable side of the outer joins in getExperimentColumns.
+func experimentForLabelEdit(
+	ctx context.Context, tx bun.Tx, experimentID int32,
+) (*experimentv1.Experiment, error) {
+	exp := &experimentv1.Experiment{}
+	if err := tx.NewSelect().
+		ModelTableExpr("experiments as e").
+		Model(exp).
+		Apply(getExperimentColumns).
+		Where("e.id = ?", experimentID).
+		For("UPDATE OF e").
+		Scan(ctx); err != nil {
+		return nil, err
+	}
+	return exp, nil
+}
+
 func (a *apiServer) PutExperimentLabel(ctx context.Context,
 	req *apiv1.PutExperimentLabelRequest,
 ) (*apiv1.PutExperimentLabelResponse, error) {
@@ -2837,13 +2856,8 @@ func (a *apiServer) PutExperimentLabel(ctx context.Context,
 		}
 	}()
 
-	exp := &experimentv1.Experiment{}
-	query := db.Bun().NewSelect().
-		ModelTableExpr("experiments as e").
-		Model(exp).
-		Apply(getExperimentColumns).
-		Where("e.id = ?", req.ExperimentId)
-	if err = query.Scan(ctx); err != nil {
+	exp, err := experimentForLabelEdit(ctx, tx, req.ExperimentId)
+	if err != nil {
 		return nil, err
 	}
 	modelExp, err := model.ExperimentFromProto(exp)
@@ -2894,14 +2908,8 @@ func (a *apiServer) DeleteExperimentLabel(ctx context.Context,
 		}
 	}()
 
-	exp := &experimentv1.Experiment{}
-	query := db.Bun().NewSelect().
-		ModelTableExpr("experiments as e").
-		Model(exp).
-		Apply(getExperimentColumns).
-		Where("e.id = ?", req.ExperimentId).
-		For("UPDATE")
-	if err = query.Scan(ctx); err != nil {
+	exp, err := experimentForLabelEdit(ctx, tx, req.ExperimentId)
+	if err != nil {
 		return nil, err
 	}
 

@@ -51,6 +51,30 @@ allocation data for analysis:
 -  ``det resources aggregated <start date> <end date>``: Get aggregated allocation information.
    Dates are in the format yyyy-mm-dd.
 
+************************************
+ Aggregates From Before the Rebuild
+************************************
+
+The database table ``resource_aggregates_legacy`` holds the aggregates that were computed before
+running tasks were counted: they miss the usage of a task that was still running when its day was
+aggregated. It has the columns of ``resource_aggregates``: ``date``, ``aggregation_type``,
+``aggregation_key`` and ``seconds``. For the types ``total``, ``username``, ``experiment_label`` and
+``resource_pool`` the seconds are slot-seconds; for ``queued`` they are the average seconds that
+tasks waited in the queue. Neither the WebUI nor the endpoints read that table. It can be queried or
+exported from the database, for example the slot-hours by user and day:
+
+.. code:: sql
+
+   COPY (
+     SELECT date, aggregation_key AS username, seconds / 3600 AS slot_hours
+     FROM resource_aggregates_legacy
+     WHERE aggregation_type = 'username'
+     ORDER BY date, aggregation_key
+   ) TO STDOUT WITH CSV HEADER;
+
+It still holds the usage of tasks whose records were deleted since, which a rebuild cannot
+recompute.
+
 .. _user-pages:
 
 ************
@@ -82,19 +106,30 @@ Both count what the tasks hold, not what they use:
 
 -  Allocations recorded before the master metered assignments count from the end of their first
    queued period, or else from their start, to their end; one that ended without a recorded end
-   counts nothing. Their slots take their pool's slot type the first time the master knows it, and
-   keep it. A static pool's slot type is known once the same number of connected agents has reported
-   one type for ten minutes. Until then, and for pools without agents or that no longer exist, their
-   slots count as slot-seconds of an unknown kind. Without slots they count as auxiliary containers,
-   also in pools that no longer exist when the cluster has only agent resource pools, and are not
-   counted on Kubernetes. An administrator who knows what such a pool held can set the kind (``gpu``
-   or ``cpu``) in the database:
+   counts nothing. Their slots count as GPUs when their task container had recorded GPUs before the
+   master started metering. The slots of the others, also of an allocation whose container was still
+   starting then, count as slot-seconds of an unknown kind, and those without slots are not counted,
+   until an administrator who knows what a pool held in a period sets their kind in the database.
+   For allocations with slots, the kind is ``gpu`` or ``cpu``, one unit per slot:
 
    .. code:: sql
 
       UPDATE allocations SET metered_kind = 'gpu', metered_quantity = slots
       WHERE resource_pool = '<pool>' AND metered_kind = 'unclassified'
-        AND assigned_time IS NULL AND slots > 0;
+        AND assigned_time IS NULL AND slots > 0
+        AND start_time >= '<start>' AND start_time < '<end>';
+
+   For allocations without slots, the kind is ``aux``, one auxiliary container each:
+
+   .. code:: sql
+
+      UPDATE allocations SET metered_kind = 'aux', metered_quantity = 1
+      WHERE resource_pool = '<pool>' AND metered_kind = 'unclassified'
+        AND assigned_time IS NULL AND slots = 0
+        AND start_time >= '<start>' AND start_time < '<end>';
+
+   The last line of each is optional: it limits the statement to the allocations that started in the
+   period, in UTC.
 
 -  Checkpoint garbage collection is not counted.
 
@@ -102,7 +137,8 @@ Both count what the tasks hold, not what they use:
    until the whole allocation is released.
 
 -  History starts with the cluster's first metered allocation, and allocation records that were
-   deleted are not in it.
+   deleted are not in it. When an administrator sets the kind of allocations from before that start,
+   it moves to them within ten minutes.
 
 -  Pool names appear as in the job queue, whether or not ``hide_unusable_pools`` is set.
 

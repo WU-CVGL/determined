@@ -71,21 +71,3 @@ func Assigned(rs []sproto.ResourcesSummary, slots int) (Kind, int) {
 		return KindAux, 1
 	}
 }
-
-// LegacyKind returns what an allocation from before metering is metered as, from its slot count
-// and its pool: without slots it is an auxiliary container, or nothing on Kubernetes; with slots
-// it takes the pool's slot type. It returns false when the slot type does not tell.
-func LegacyKind(slots int, k8s bool, slotType device.Type) (Kind, bool) {
-	switch {
-	case slots == 0 && k8s:
-		return KindNone, true
-	case slots == 0:
-		return KindAux, true
-	case slotType == device.CPU:
-		return KindCPU, true
-	case slotType == device.CUDA || slotType == device.ROCM:
-		return KindGPU, true
-	default:
-		return "", false
-	}
-}

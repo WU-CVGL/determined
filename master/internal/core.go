@@ -1348,8 +1348,6 @@ func (m *Master) Run(ctx context.Context, gRPCLogInitDone chan struct{}) error {
 	proxy.DefaultProxy.TaskActivity = idle.Records{}
 	portregistry.InitPortRegistry(config.GetMasterConfig().ReservedPorts)
 
-	go periodicallyAggregateResourceAllocation(m.db)
-
 	// Initialize the HTTP server and listen for incoming requests.
 	m.echo = echo.New()
 	m.echo.Use(middleware.Recover())
@@ -1498,8 +1496,10 @@ func (m *Master) Run(ctx context.Context, gRPCLogInitDone chan struct{}) error {
 	// This ensures that in the scenario where a cluster fails the allocations that
 	// CloseOpenAllocations closes are set to the last cluster heartbeat when the cluster was running.
 	go updateClusterHeartbeat(ctx, m.db)
-	go newLegacyClassifier(m.rm, m.config.ResourceManagers()).run(ctx, legacyClassifyInterval)
 	go trials.MarkLostTrialsWorker(ctx)
+	// Also after CloseOpenAllocations: an allocation still open counts as running until the end of
+	// each day aggregated, so allocations left open by a failed master must be closed first.
+	go periodicallyAggregateResourceAllocation(m.db)
 
 	// Docs and WebUI.
 	webuiRoot := filepath.Join(m.config.Root, "webui")
