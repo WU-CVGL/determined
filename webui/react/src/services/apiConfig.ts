@@ -49,7 +49,6 @@ const generateApiConfig = (apiConfig?: Api.ConfigurationParameters) => {
     StreamingProfiler: Api.ProfilerApiFetchParamCreator(config),
     Tasks: api(Api.TasksApi),
     Templates: api(Api.TemplatesApi),
-    TensorBoards: api(Api.TensorboardsApi),
     Users: api(Api.UsersApi),
     Webhooks: api(Api.WebhooksApi),
     Workspaces: api(Api.WorkspacesApi),
@@ -235,6 +234,33 @@ export const getUser: DetApi<Service.GetUserParams, Api.V1GetUserResponse, Type.
   name: 'getUser',
   postProcess: (response) => decoder.mapV1User(response.user),
   request: (params) => detApi.Users.getUser(params.userId),
+};
+
+export const getUserResources: DetApi<
+  Service.GetUserParams,
+  Api.V1GetUserResourcesResponse,
+  Type.UserResources
+> = {
+  name: 'getUserResources',
+  postProcess: (response) => decoder.mapV1UserResources(response),
+  request: (params, options) => detApi.Users.getUserResources(params.userId, options),
+};
+
+export const getUserUsage: DetApi<
+  Service.GetUserUsageParams,
+  Api.V1GetUserUsageResponse,
+  Type.UserUsage
+> = {
+  name: 'getUserUsage',
+  postProcess: (response) => decoder.mapV1UserUsage(response),
+  request: (params, options) =>
+    detApi.Users.getUserUsage(
+      params.userId,
+      params.startDate,
+      params.endDate,
+      params.period,
+      options,
+    ),
 };
 
 export const postUser: DetApi<
@@ -2133,27 +2159,6 @@ export const getShells: DetApi<
     ),
 };
 
-export const getTensorBoards: DetApi<
-  Service.GetTensorBoardsParams,
-  Api.V1GetTensorboardsResponse,
-  Type.CommandTask[]
-> = {
-  name: 'getTensorBoards',
-  postProcess: (response) =>
-    (response.tensorboards || []).map((tensorboard) => decoder.mapV1TensorBoard(tensorboard)),
-  request: (params: Service.GetTensorBoardsParams, options) =>
-    detApi.TensorBoards.getTensorboards(
-      params.sortBy,
-      params.orderBy,
-      params.offset,
-      params.limit ?? TASK_LIMIT,
-      undefined,
-      getUserIds(params.users),
-      params.workspaceId,
-      options ?? { signal: params.signal },
-    ),
-};
-
 export const killCommand: DetApi<Service.CommandIdParams, Api.V1KillCommandResponse, void> = {
   name: 'killCommand',
   postProcess: noOp,
@@ -2165,14 +2170,6 @@ export const killShell: DetApi<Service.CommandIdParams, Api.V1KillShellResponse,
   postProcess: noOp,
   request: (params: Service.CommandIdParams) => detApi.Shells.killShell(params.commandId),
 };
-
-export const killTensorBoard: DetApi<Service.CommandIdParams, Api.V1KillTensorboardResponse, void> =
-  {
-    name: 'killTensorBoard',
-    postProcess: noOp,
-    request: (params: Service.CommandIdParams) =>
-      detApi.TensorBoards.killTensorboard(params.commandId),
-  };
 
 export const getShell: DetApi<Service.CommandIdParams, Api.V1GetShellResponse, Type.CommandTask> = {
   name: 'getShell',
@@ -2188,17 +2185,6 @@ export const getShellConfig: DetApi<Service.CommandIdParams, Api.V1GetShellRespo
   name: 'getShellConfig',
   postProcess: (response) => response.config ?? {},
   request: (params: Service.CommandIdParams) => detApi.Shells.getShell(params.commandId),
-};
-
-export const getTensorBoard: DetApi<
-  Service.CommandIdParams,
-  Api.V1GetTensorboardResponse,
-  Type.CommandTask
-> = {
-  name: 'getTensorBoard',
-  postProcess: (response) => decoder.mapV1TensorBoard(response.tensorboard),
-  request: (params: Service.CommandIdParams) =>
-    detApi.TensorBoards.getTensorboard(params.commandId),
 };
 
 export const getCommand: DetApi<

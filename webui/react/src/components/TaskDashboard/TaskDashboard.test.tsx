@@ -16,7 +16,6 @@ import {
   getExperiments,
   getGenericTasks,
   getShells,
-  getTensorBoards,
   getUsers,
   getUserSetting,
   killExperiment,
@@ -57,7 +56,7 @@ const CURRENT_USER_ID = 3;
 /* The states the list APIs report for the generic task and the experiment. */
 const listed = vi.hoisted(() => ({ experimentState: 'ACTIVE', genericState: 'ACTIVE' }));
 
-/* With a user ID, the user may control only their own shells, commands and TensorBoards. */
+/* With a user ID, the user may control only their own shells and commands. */
 const access = vi.hoisted(() => ({ onlyOwnRunsOf: undefined as number | undefined }));
 
 /* The real fetchRunPage, which a test may replace for some queries. */
@@ -152,7 +151,6 @@ vi.mock('services/api', () => ({
       workspaceId: 0,
     }),
   ),
-  getTensorBoards: vi.fn(() => Promise.resolve([])),
   getUsers: vi.fn(() => Promise.resolve({ users: [] })),
   getUserSetting: vi.fn(() => Promise.resolve({ settings: [] })),
   getWorkspaceProjects: () => Promise.resolve({ pagination: { total: 0 }, projects: [] }),
@@ -580,7 +578,6 @@ describe('TaskDashboard', () => {
       'Generic Task',
       'Shell',
       'Command',
-      'TensorBoard',
     ]);
   });
 
@@ -1352,6 +1349,59 @@ describe('TaskDashboard', () => {
     }
   });
 
+  it("links each owner to the owner's page", async () => {
+    vi.mocked(getUsers).mockResolvedValue({
+      pagination: { total: 3 },
+      // The users of the owner filter test, and the signed-in user.
+      users: [
+        { displayName: 'Zoe', id: 9, isActive: true, isAdmin: false, username: 'zoe' },
+        { displayName: 'alice', id: 11, isActive: true, isAdmin: false, username: 'al' },
+        { id: CURRENT_USER_ID, isActive: true, isAdmin: false, username: 'me' },
+      ],
+    });
+    userStore.fetchUsers();
+    // A medium screen or wider, which shows the Owner column.
+    vi.stubGlobal('matchMedia', (media: string) => ({
+      addEventListener: vi.fn(),
+      addListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      matches: true,
+      media,
+      onchange: null,
+      removeEventListener: vi.fn(),
+      removeListener: vi.fn(),
+    }));
+    try {
+      setup();
+      expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
+      await settingsLoaded();
+      const owner = (name: string) => {
+        const at = screen
+          .getAllByRole('columnheader')
+          .findIndex((th) => th.textContent?.trim().startsWith('Owner'));
+        return screen.getByText(name).closest('tr')?.children[at] as HTMLElement;
+      };
+      await waitFor(() => expect(owner('eval-sweep')).toHaveTextContent('bob'), AFTER_LOAD);
+      // A user with a record: the avatar; without one: the owner's name.
+      // Each link is named by the user's name.
+      await waitFor(() =>
+        expect(within(owner('gpu-shell')).getByRole('link', { name: 'me' })).toHaveAttribute(
+          'href',
+          '/users/3',
+        ),
+      );
+      expect(within(owner('eval-sweep')).getByRole('link', { name: 'bob' })).toHaveAttribute(
+        'href',
+        '/users/4',
+      );
+      expect(owner('eval-sweep')).toHaveAttribute('title', 'bob');
+      // No owner, no link.
+      expect(owner('bert-finetune').querySelector('a')).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('keeps the filters of the Jobs page and of the tasks-only view apart', async () => {
     const jobs = setup();
     expect(await screen.findByText('bert-finetune')).toBeInTheDocument();
@@ -1439,14 +1489,13 @@ describe('TaskDashboard', () => {
     expect(screen.getByText('bert-finetune')).toBeInTheDocument();
   });
 
-  it('shows the sources of a TensorBoard: with flat runs, its searches and runs', async () => {
-    vi.mocked(getTensorBoards).mockResolvedValue([
+  it('shows the sources of a viewing session: with flat runs, its searches and runs', async () => {
+    vi.mocked(getShells).mockResolvedValue([
       {
         ...SHELL,
-        id: 'tb-1',
+        id: 'shell-tb',
         misc: { experimentIds: [5, 2], trialIds: [7] },
         name: 'loss-curves',
-        type: CommandType.TensorBoard,
       },
     ]);
     setup();

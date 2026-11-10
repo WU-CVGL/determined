@@ -146,7 +146,9 @@ func TestLaunchNTSCChecksResolvedPool(t *testing.T) {
 	// The pool that an omitted resources.resource_pool resolves to is checked.
 	_, err = api.LaunchCommand(otherCtx, &apiv1.LaunchCommandRequest{})
 	requirePoolDenied(t, err, other, wscompute)
-	_, err = api.LaunchTensorboard(otherCtx, &apiv1.LaunchTensorboardRequest{ExperimentIds: []int32{1}})
+	noSlots, err := structpb.NewStruct(map[string]any{"resources": map[string]any{"slots": 0}})
+	require.NoError(t, err)
+	_, err = api.LaunchShell(otherCtx, &apiv1.LaunchShellRequest{Config: noSlots})
 	requirePoolDenied(t, err, other, wsaux)
 	// So is an explicit pool, and a shell preview reports the refusal.
 	_, err = api.LaunchShell(otherCtx, &apiv1.LaunchShellRequest{Config: ntscPoolConfig(t, wscompute)})
@@ -166,9 +168,15 @@ func TestLaunchNTSCChecksResolvedPool(t *testing.T) {
 	badIdleTimeout.Fields["idle_timeout"] = structpb.NewStringValue("0s")
 	_, err = api.LaunchCommand(otherCtx, &apiv1.LaunchCommandRequest{Config: badIdleTimeout})
 	require.Equal(t, codes.InvalidArgument, status.Code(err), "%v", err)
-	_, err = api.LaunchTensorboard(otherCtx, &apiv1.LaunchTensorboardRequest{
-		Config: ntscPoolConfig(t, open), ExperimentIds: []int32{math.MaxInt32},
+	missingSource := ntscPoolConfig(t, open)
+	missingSource.Fields["services"] = structpb.NewStructValue(&structpb.Struct{
+		Fields: map[string]*structpb.Value{"tensorboard": structpb.NewStructValue(&structpb.Struct{
+			Fields: map[string]*structpb.Value{"experiment_ids": structpb.NewListValue(
+				&structpb.ListValue{Values: []*structpb.Value{structpb.NewNumberValue(math.MaxInt32)}},
+			)},
+		})},
 	})
+	_, err = api.LaunchShell(otherCtx, &apiv1.LaunchShellRequest{Config: missingSource})
 	require.Error(t, err)
 	require.Equal(t, sessions, countUserSessions(adminCtx, t, other.ID),
 		"a refused launch must not start a task session")

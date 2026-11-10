@@ -288,7 +288,6 @@ export const CommandState = {
   Starting: 'STARTING',
   Terminated: 'TERMINATED',
   Terminating: 'TERMINATING',
-  Waiting: 'WAITING',
 } as const;
 
 export type CommandState = ValueOf<typeof CommandState>;
@@ -306,7 +305,6 @@ export interface CommandAddress {
 export const CommandType = {
   Command: 'command',
   Shell: 'shell',
-  TensorBoard: 'tensor-board',
 } as const;
 
 export type CommandType = ValueOf<typeof CommandType>;
@@ -320,7 +318,7 @@ export interface CommandConfig {
   description: string;
 }
 
-// The command type is shared between Commands, TensorBoards, and Shells.
+// The command type is shared between Commands and Shells.
 export interface Command {
   config: CommandConfig; // We do not use this field in the WebUI.
   exitStatus?: string;
@@ -931,7 +929,6 @@ export interface GenericTaskPagination {
 export interface TaskCounts {
   commands: number;
   shells: number;
-  tensorboards: number;
 }
 
 export interface ModelItem {
@@ -1132,6 +1129,48 @@ export interface KubernetesResourceManagers {
 
 export interface ResourcePool extends Omit<Api.V1ResourcePool, 'slotType'> {
   slotType: ResourceType;
+}
+
+/* User pages (/api/v1/users/{user_id}/resources and /usage) */
+
+export interface UserResourceCounts {
+  auxContainers: number;
+  cpuSlots: number;
+  gpus: number;
+}
+
+export interface UserPoolResources {
+  counts: UserResourceCounts;
+  resourcePool: string;
+}
+
+export interface UserResources {
+  asOf?: Date;
+  /** Whether containers without slots are metered on the cluster. */
+  auxMetered: boolean;
+  pools: UserPoolResources[];
+}
+
+/** A UTC day (YYYY-MM-DD) or month (YYYY-MM) of a user's usage, in seconds and days. */
+export interface UserUsageEntry {
+  auxActiveDays: number;
+  auxActiveSeconds: number;
+  auxContainerSeconds: number;
+  cpuSlotSeconds: number;
+  gpuActiveDays: number;
+  gpuActiveSeconds: number;
+  gpuOrAuxActiveDays: number;
+  gpuOrAuxActiveSeconds: number;
+  gpuSeconds: number;
+  periodStart: string;
+  unclassifiedSlotSeconds: number;
+}
+
+export interface UserUsage {
+  asOf?: Date;
+  /** The first UTC day (YYYY-MM-DD) with records; undefined without any. */
+  coverageStart?: string;
+  entries: UserUsageEntry[];
 }
 
 /* Resource pool access (/api/v1/resource-pool-access, Echo routes without a proto) */

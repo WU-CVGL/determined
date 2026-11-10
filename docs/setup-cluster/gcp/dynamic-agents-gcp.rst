@@ -145,9 +145,6 @@ Agents
    -  Two additional ephemeral TCP ports in the range 1024-65536 are used for additional intra-trial
       communication between trial containers.
 
-   -  For TensorBoards, an inbound and outbound TCP port between 2600-2900 is used to connect the
-      master and the tensorboard container.
-
 .. _gcp-gpu-requirements:
 
 The following GPU types are supported by Determined:

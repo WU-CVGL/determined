@@ -10,12 +10,6 @@ const routes: RouteConfig[] = [
     title: 'Interactive Task',
   },
   {
-    id: 'interactive',
-    needAuth: true,
-    path: '/interactive/:taskId/:taskType/:taskName/:taskResourcePool/:taskUrl',
-    title: 'Interactive Task',
-  },
-  {
     id: 'shellTerminal',
     needAuth: true,
     path: '/shells/:taskId/terminal',
@@ -168,6 +162,12 @@ const routes: RouteConfig[] = [
     title: 'Jobs',
   },
   {
+    id: 'userProfile',
+    needAuth: true,
+    path: '/users/:userId',
+    title: 'User',
+  },
+  {
     icon: 'tasks',
     id: 'taskList',
     needAuth: true,
@@ -276,11 +276,6 @@ const routes: RouteConfig[] = [
     path: '/logs',
     redirect: '/clusters/logs',
     title: 'Cluster Logs',
-  },
-  {
-    id: 'wait',
-    needAuth: true,
-    path: '/wait/:taskType/:taskId',
   },
   {
     id: 'signIn',

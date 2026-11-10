@@ -71,7 +71,7 @@ func TestIdentifyTask(t *testing.T) {
 		TaskType:    model.TaskTypeCommand,
 	}, meta)
 
-	// Tensorboard.
+	// A TensorBoard viewing session: a shell whose metadata names its sources.
 	exp0 := db.RequireMockExperiment(t, pgDB, user)
 	t0, trialTask := db.RequireMockTrial(t, pgDB, exp0)
 	t1, _ := db.RequireMockTrial(t, pgDB, exp0)
@@ -79,13 +79,13 @@ func TestIdentifyTask(t *testing.T) {
 
 	expIDs := []int{exp0.ID, exp1.ID}
 	trialIDs := []int{t0.ID, t1.ID}
-	tensorboardID := requireMockTensorboardID(t, user.ID, expIDs, trialIDs)
+	sessionID := requireMockViewingSessionID(t, user.ID, expIDs, trialIDs)
 
-	meta, err = IdentifyTask(ctx, tensorboardID)
+	meta, err = IdentifyTask(ctx, sessionID)
 	require.NoError(t, err)
 	require.Equal(t, TaskMetadata{
 		WorkspaceID:   1,
-		TaskType:      model.TaskTypeTensorboard,
+		TaskType:      model.TaskTypeShell,
 		ExperimentIDs: []int32{int32(expIDs[0]), int32(expIDs[1])},
 		TrialIDs:      []int32{int32(trialIDs[0]), int32(trialIDs[1])},
 	}, meta)
@@ -148,8 +148,9 @@ func requireMockCommandID(t *testing.T, userID model.UserID) model.TaskID {
 	return task.TaskID
 }
 
-// requireMockTensorboardID creates a mock tensorboard and returns a tensorboard ID.
-func requireMockTensorboardID(
+// requireMockViewingSessionID creates a mock TensorBoard viewing session, a shell that reads the
+// given experiments and trials, and returns its task ID.
+func requireMockViewingSessionID(
 	t *testing.T, userID model.UserID, expIDs, trialIDs []int,
 ) model.TaskID {
 	pgDB := db.SingleDB()
@@ -157,7 +158,7 @@ func requireMockTensorboardID(
 	task := db.RequireMockTask(t, pgDB, &userID)
 	alloc := db.RequireMockAllocation(t, pgDB, task.TaskID)
 
-	mockTensorboard := struct {
+	mockSession := struct {
 		bun.BaseModel `bun:"table:command_state"`
 
 		TaskID             model.TaskID
@@ -167,7 +168,7 @@ func requireMockTensorboardID(
 		TaskID:       task.TaskID,
 		AllocationID: alloc.AllocationID,
 		GenericCommandSpec: map[string]any{
-			"TaskType": model.TaskTypeTensorboard,
+			"TaskType": model.TaskTypeShell,
 			"Metadata": map[string]any{
 				"workspace_id":   1,
 				"experiment_ids": expIDs,
@@ -180,7 +181,7 @@ func requireMockTensorboardID(
 			},
 		},
 	}
-	_, err := db.Bun().NewInsert().Model(&mockTensorboard).Exec(context.TODO())
+	_, err := db.Bun().NewInsert().Model(&mockSession).Exec(context.TODO())
 	require.NoError(t, err)
 
 	return task.TaskID

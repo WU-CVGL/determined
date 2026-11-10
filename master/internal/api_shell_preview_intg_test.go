@@ -422,9 +422,9 @@ func TestPreviewShellDefaultServices(t *testing.T) {
 
 // A shell's preview refuses what its launch refuses, with the same code and message: an unknown
 // service, ssh disabled, vscode while the master serves no code-server, services without a free
-// port, an invalid services.jupyter.idle_type or one on another service, the key that it replaces,
-// notebook_idle_type, an idle_timeout that is not positive or shorter than the minimum, and a config
-// that does not decode.
+// port, an invalid services.jupyter.idle_type or one on another service, the removed keys
+// notebook_idle_type and tensorboard_args, an idle_timeout that is not positive or shorter than the
+// minimum, and a config that does not decode.
 func TestPreviewShellRefusesAsLaunch(t *testing.T) {
 	api, curUser, ctx := setupPreviewTest(t)
 
@@ -466,6 +466,10 @@ func TestPreviewShellRefusesAsLaunch(t *testing.T) {
 		"notebook_idle_type": {
 			config: previewConfig(t, map[string]any{"notebook_idle_type": "activity"}),
 			msg:    "notebook_idle_type: use services.jupyter.idle_type",
+		},
+		"tensorboard_args": {
+			config: previewConfig(t, map[string]any{"tensorboard_args": []any{"--x"}}),
+			msg:    "tensorboard_args: use services.tensorboard.args",
 		},
 		"idle_timeout zero": {
 			config: previewConfig(t, map[string]any{"idle_timeout": "0s"}),

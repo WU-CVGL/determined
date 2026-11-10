@@ -234,7 +234,6 @@ class ClusterInfo:
         #:    - ``"TRIAL"``
         #:    - ``"SHELL"``
         #:    - ``"COMMAND"``
-        #:    - ``"TENSORBOARD"``
         #:    - ``"CHECKPOINT_GC"``
         #:
         #: Additional values may be added in the future.

@@ -44,7 +44,7 @@ import (
 const (
 	shellSSHDConfigFile   = "/run/determined/ssh/sshd_config"
 	shellEntrypointScript = "/run/determined/ssh/shell-entrypoint.sh"
-	// Agent ports 2600 - 3500 are split between TensorBoards, services, and sshd.
+	// Agent ports 2900 - 3499 are split between services (2900 - 3199) and sshd (3200 - 3499).
 	minSshdPort = 3200
 	maxSshdPort = minSshdPort + 299
 	// minShellIdleTimeout is the shortest idle_timeout a shell takes: JupyterLab's idle check

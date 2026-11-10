@@ -118,21 +118,6 @@ func TestCanGetNTSC(t *testing.T) {
 	_, err = api.GetShell(ctx, &apiv1.GetShellRequest{ShellId: shell.Id})
 	require.Equal(t, apiPkg.NotFoundErrs("shell", shell.Id, true), err)
 
-	// Tensorboards.
-	// check permission errors are returned with not found status and follow the same pattern.
-	authz.On("CanGetTensorboard", mock.Anything, curUser, mock.Anything, mock.Anything,
-		mock.Anything).Return(authz2.PermissionDeniedError{}).Once()
-
-	genericTb, _ := command.DefaultCmdService.LaunchGenericCommand(model.TaskTypeTensorboard,
-		model.JobTypeTensorboard, mockGenericReq(t, api.m.db))
-	tb := genericTb.ToV1Tensorboard()
-
-	_, err = api.GetTensorboard(ctx, &apiv1.GetTensorboardRequest{TensorboardId: invalidID})
-	require.Equal(t, apiPkg.NotFoundErrs("tensorboard", invalidID, true), err)
-
-	_, err = api.GetTensorboard(ctx, &apiv1.GetTensorboardRequest{TensorboardId: tb.Id})
-	require.Equal(t, apiPkg.NotFoundErrs("tensorboard", tb.Id, true), err)
-
 	// check other errors are not returned with permission denied status.
 	authz.On("CanGetNSC", mock.Anything, curUser, mock.Anything, mock.Anything).Return(
 		fmt.Errorf("other error"),
@@ -146,14 +131,6 @@ func TestCanGetNTSC(t *testing.T) {
 	require.Error(t, err)
 	require.NotEqual(t, codes.PermissionDenied, status.Code(err))
 	require.NotEqual(t, codes.NotFound, status.Code(err))
-
-	authz.On("CanGetTensorboard", mock.Anything, curUser, mock.Anything, mock.Anything,
-		mock.Anything).Return(fmt.Errorf("other error")).Once()
-
-	_, err = api.GetTensorboard(ctx, &apiv1.GetTensorboardRequest{TensorboardId: tb.Id})
-	require.Error(t, err)
-	require.NotEqual(t, codes.PermissionDenied, status.Code(err))
-	require.NotEqual(t, codes.NotFound, status.Code(err))
 }
 
 func TestAuthZCanTerminateNSC(t *testing.T) {
@@ -162,8 +139,6 @@ func TestAuthZCanTerminateNSC(t *testing.T) {
 	authz.On("CanGetNSC", mock.Anything, curUser, mock.Anything, mock.Anything).Return(
 		nil,
 	)
-	authz.On("CanGetTensorboard", mock.Anything, curUser, mock.Anything, mock.Anything,
-		mock.Anything).Return(nil)
 
 	// check permission errors are returned with permission denied status.
 	authz.On("CanTerminateNSC", mock.Anything, curUser, mock.Anything).Return(
@@ -188,16 +163,6 @@ func TestAuthZCanTerminateNSC(t *testing.T) {
 	_, err = api.KillShell(ctx, &apiv1.KillShellRequest{ShellId: shell.Id})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 
-	// Tensorboards.
-	authz.On("CanTerminateTensorboard", mock.Anything, curUser, mock.Anything).Return(
-		authz2.PermissionDeniedError{},
-	).Once()
-	genericTb, _ := command.DefaultCmdService.LaunchGenericCommand(model.TaskTypeTensorboard,
-		model.JobTypeTensorboard, mockGenericReq(t, api.m.db))
-	tb := genericTb.ToV1Tensorboard()
-	_, err = api.KillTensorboard(ctx, &apiv1.KillTensorboardRequest{TensorboardId: tb.Id})
-	require.Equal(t, codes.PermissionDenied, status.Code(err))
-
 	// check other errors are not returned with permission denied status.
 	authz.On("CanTerminateNSC", mock.Anything, curUser, mock.Anything).Return(
 		fmt.Errorf("other error"),
@@ -208,13 +173,6 @@ func TestAuthZCanTerminateNSC(t *testing.T) {
 	require.NotEqual(t, codes.PermissionDenied, status.Code(err))
 
 	_, err = api.KillShell(ctx, &apiv1.KillShellRequest{ShellId: shell.Id})
-	require.Error(t, err)
-	require.NotEqual(t, codes.PermissionDenied, status.Code(err))
-
-	authz.On("CanTerminateTensorboard", mock.Anything, curUser, mock.Anything).Return(
-		fmt.Errorf("other error"),
-	)
-	_, err = api.KillTensorboard(ctx, &apiv1.KillTensorboardRequest{TensorboardId: tb.Id})
 	require.Error(t, err)
 	require.NotEqual(t, codes.PermissionDenied, status.Code(err))
 }
@@ -248,14 +206,11 @@ func TestKillShellError(t *testing.T) {
 func TestNSCControlChecksOwnerBeforeMutation(t *testing.T) {
 	api, authz, curUser, ctx := setupNTSCAuthzTest(t)
 	authz.On("CanGetNSC", mock.Anything, curUser, mock.Anything).Return(nil)
-	authz.On("CanGetTensorboard", mock.Anything, curUser, mock.Anything,
-		mock.Anything, mock.Anything).Return(nil)
 	authz.On("CanTerminateNSC", mock.Anything, curUser, mock.Anything).Return(nil)
-	authz.On("CanTerminateTensorboard", mock.Anything, curUser, mock.Anything).Return(nil)
 	authz.On("CanSetNSCsPriority", mock.Anything, curUser, mock.Anything,
 		mock.Anything).Return(nil)
 	authz.On("CanControlGenericTask", mock.Anything, curUser, mock.Anything,
-		mock.Anything).Return(authz2.PermissionDeniedError{}).Times(6)
+		mock.Anything).Return(authz2.PermissionDeniedError{}).Times(4)
 
 	launch := func(taskType model.TaskType, jobType model.JobType) *command.Command {
 		t.Helper()
@@ -266,29 +221,19 @@ func TestNSCControlChecksOwnerBeforeMutation(t *testing.T) {
 	}
 	cmd := launch(model.TaskTypeCommand, model.JobTypeCommand)
 	shell := launch(model.TaskTypeShell, model.JobTypeShell)
-	tensorboard := launch(model.TaskTypeTensorboard, model.JobTypeTensorboard)
 
 	cmdID := cmd.ToV1Command().Id
-	shellID, tbID := shell.ToV1Shell().Id, tensorboard.ToV1Tensorboard().Id
-	states := []interface{}{
-		cmd.ToV1Command().State, shell.ToV1Shell().State, tensorboard.ToV1Tensorboard().State,
-	}
+	shellID := shell.ToV1Shell().Id
+	states := []interface{}{cmd.ToV1Command().State, shell.ToV1Shell().State}
 	_, err := api.KillCommand(ctx, &apiv1.KillCommandRequest{CommandId: cmdID})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 	_, err = api.KillShell(ctx, &apiv1.KillShellRequest{ShellId: shellID})
-	require.Equal(t, codes.PermissionDenied, status.Code(err))
-	_, err = api.KillTensorboard(ctx, &apiv1.KillTensorboardRequest{TensorboardId: tbID})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 	_, err = api.SetCommandPriority(ctx, &apiv1.SetCommandPriorityRequest{CommandId: cmdID})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 	_, err = api.SetShellPriority(ctx, &apiv1.SetShellPriorityRequest{ShellId: shellID})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
-	_, err = api.SetTensorboardPriority(ctx,
-		&apiv1.SetTensorboardPriorityRequest{TensorboardId: tbID})
-	require.Equal(t, codes.PermissionDenied, status.Code(err))
-	require.Equal(t, []interface{}{
-		cmd.ToV1Command().State, shell.ToV1Shell().State, tensorboard.ToV1Tensorboard().State,
-	}, states)
+	require.Equal(t, []interface{}{cmd.ToV1Command().State, shell.ToV1Shell().State}, states)
 	authz.AssertExpectations(t)
 }
 
@@ -442,10 +387,6 @@ func TestAllocationMutationsRequireOwnSessionOwnerOrAdmin(t *testing.T) {
 	}{
 		{"AllocationReady", func(ctx context.Context) error {
 			_, err := api.AllocationReady(ctx, &apiv1.AllocationReadyRequest{AllocationId: id})
-			return err
-		}},
-		{"AllocationWaiting", func(ctx context.Context) error {
-			_, err := api.AllocationWaiting(ctx, &apiv1.AllocationWaitingRequest{AllocationId: id})
 			return err
 		}},
 		{"ReportTaskActivity", func(ctx context.Context) error {
@@ -758,13 +699,11 @@ func TestAuthZCanSetNSCsPriority(t *testing.T) {
 	authz.On("CanGetNSC", mock.Anything, curUser, mock.Anything, mock.Anything).Return(
 		nil,
 	)
-	authz.On("CanGetTensorboard", mock.Anything, curUser, mock.Anything, mock.Anything,
-		mock.Anything).Return(nil)
 
 	// check permission errors are returned with permission denied status.
 	authz.On("CanSetNSCsPriority", mock.Anything, curUser, mock.Anything, mock.Anything).Return(
 		authz2.PermissionDeniedError{},
-	).Times(3)
+	).Times(2)
 
 	// Commands.
 	genericCmd, _ := command.DefaultCmdService.LaunchGenericCommand(
@@ -784,26 +723,15 @@ func TestAuthZCanSetNSCsPriority(t *testing.T) {
 	_, err = api.SetShellPriority(ctx, &apiv1.SetShellPriorityRequest{ShellId: shell.Id})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 
-	// Tensorboards.
-	genericTb, _ := command.DefaultCmdService.LaunchGenericCommand(model.TaskTypeTensorboard,
-		model.JobTypeTensorboard, mockGenericReq(t, api.m.db))
-	tb := genericTb.ToV1Tensorboard()
-	_, err = api.SetTensorboardPriority(ctx, &apiv1.SetTensorboardPriorityRequest{TensorboardId: tb.Id})
-	require.Equal(t, codes.PermissionDenied, status.Code(err))
-
 	// check other errors are not returned with permission denied status.
 	authz.On("CanSetNSCsPriority", mock.Anything, curUser, mock.Anything, mock.Anything).Return(
 		fmt.Errorf("other error"),
-	).Times(3)
+	).Times(2)
 	_, err = api.SetCommandPriority(ctx, &apiv1.SetCommandPriorityRequest{CommandId: cmd.Id})
 	require.Error(t, err)
 	require.NotEqual(t, codes.PermissionDenied, status.Code(err))
 
 	_, err = api.SetShellPriority(ctx, &apiv1.SetShellPriorityRequest{ShellId: shell.Id})
-	require.Error(t, err)
-	require.NotEqual(t, codes.PermissionDenied, status.Code(err))
-
-	_, err = api.SetTensorboardPriority(ctx, &apiv1.SetTensorboardPriorityRequest{TensorboardId: tb.Id})
 	require.Error(t, err)
 	require.NotEqual(t, codes.PermissionDenied, status.Code(err))
 }

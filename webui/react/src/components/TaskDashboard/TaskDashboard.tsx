@@ -39,6 +39,7 @@ import TaskActionDropdown from 'components/TaskActionDropdown';
 import TensorBoardSourcesModalComponent, {
   TensorBoardSource,
 } from 'components/TensorBoardSourcesModal';
+import UserProfileLink from 'components/UserProfileLink';
 import useFeature from 'hooks/useFeature';
 import {
   GenericTaskActionStateContext,
@@ -106,7 +107,7 @@ import settingsConfig, {
 interface Props {
   /** A project's dashboard: its experiments and generic tasks. */
   projectId?: number;
-  /** The tasks-only view: shells, commands, TensorBoards and generic tasks. */
+  /** The tasks-only view: shells, commands and generic tasks. */
   tasksOnly?: boolean;
   /** A workspace's dashboard, which launches shells in it. */
   workspace?: Workspace;
@@ -117,7 +118,6 @@ const runKindIcon: Record<RunKind, IconName> = {
   [RunKind.Experiment]: 'experiment',
   [RunKind.GenericTask]: 'tasks',
   [RunKind.Shell]: 'shell',
-  [RunKind.TensorBoard]: 'tensor-board',
 };
 
 const runKindSingularLabel: Record<RunKind, string> = {
@@ -125,7 +125,6 @@ const runKindSingularLabel: Record<RunKind, string> = {
   [RunKind.Experiment]: 'experiment',
   [RunKind.GenericTask]: 'generic task',
   [RunKind.Shell]: 'shell',
-  [RunKind.TensorBoard]: 'TensorBoard',
 };
 
 /** "2 experiments and 1 shell" */
@@ -273,8 +272,8 @@ const checklistFilter = ({
 });
 
 /**
- * One table of the runs of every kind: experiments, generic tasks, shells, commands and
- * TensorBoards, newest first by default.
+ * One table of the runs of every kind: experiments, generic tasks, shells and commands, newest
+ * first by default.
  * - All workspaces (no props), a workspace, or a project (experiments and generic tasks only).
  * - The column headers sort and filter: kind, state, owner, slots and, on the global page,
  *   workspaces; the toolbar searches. Each dashboard stores them on its own, and a URL with any of
@@ -862,7 +861,21 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         key: 'user',
         render: (_: unknown, row: RunRow) => {
           const user = users.find((u) => u.id === row.userId);
-          if (user) return userRenderer(user);
+          if (user) {
+            return (
+              <UserProfileLink name={getDisplayName(user)} userId={user.id}>
+                {userRenderer(user)}
+              </UserProfileLink>
+            );
+          }
+          if (row.userId && row.ownerName) {
+            // The cell's title is the link's text.
+            return (
+              <UserProfileLink name={row.ownerName} userId={row.userId}>
+                {row.ownerName}
+              </UserProfileLink>
+            );
+          }
           return row.ownerName ?? '—';
         },
         sortDirections: ASCEND_FIRST,

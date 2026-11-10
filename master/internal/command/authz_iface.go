@@ -3,8 +3,6 @@ package command
 import (
 	"context"
 
-	"github.com/determined-ai/determined/proto/pkg/tensorboardv1"
-
 	"github.com/determined-ai/determined/master/internal/authz"
 	"github.com/determined-ai/determined/master/pkg/model"
 )
@@ -32,7 +30,6 @@ type NSCAuthZ interface {
 	) error
 
 	// PATCH /NSCs/:nsc_id
-	// POST /api/v1/tensorboards/:tb_id/set_priority
 	CanSetNSCsPriority(
 		ctx context.Context, curUser model.User, workspaceID model.AccessScopeID, priority int,
 	) error
@@ -42,28 +39,11 @@ type NSCAuthZ interface {
 		ctx context.Context, curUser model.User, requestedScope model.AccessScopeID,
 	) (model.AccessScopeSet, error)
 
-	FilterTensorboards(
-		ctx context.Context, curUser model.User, requestedScope model.AccessScopeID,
-		tensorboards []*tensorboardv1.Tensorboard,
-	) ([]*tensorboardv1.Tensorboard, error)
-
-	// Tensorboard functions
-	// GET /api/v1/tensorboards/:tb_id
-	CanGetTensorboard(
-		ctx context.Context, curUser model.User, workspaceID model.AccessScopeID,
-		experimentIDs []int32, trialIDs []int32,
-	) error
-
 	// CanGetTensorBoardSources returns nil if the user may read the TensorBoard logs of every
 	// experiment in experimentIDs and every trial in trialIDs. It refuses empty lists and IDs that
 	// name nothing.
 	CanGetTensorBoardSources(
 		ctx context.Context, curUser model.User, experimentIDs, trialIDs []int32,
-	) error
-
-	// POST /api/v1/tensorboards/:tb_id/kill
-	CanTerminateTensorboard(
-		ctx context.Context, curUser model.User, workspaceID model.AccessScopeID,
 	) error
 
 	CanCreateGenericTask(

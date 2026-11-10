@@ -195,6 +195,9 @@ export const paths = {
   uncategorized: (): string => {
     return '/projects/1/experiments';
   },
+  userProfile: (userId: number | string): string => {
+    return `/users/${userId}`;
+  },
   users: (): string => {
     return '/users';
   },

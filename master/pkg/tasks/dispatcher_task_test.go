@@ -1924,7 +1924,6 @@ func TestTaskSpec_addQuotes(t *testing.T) {
 func Test_restrictCommandsAndShellsToSingleNode(t *testing.T) {
 	taskTypes := []model.TaskType{
 		model.TaskTypeTrial,
-		model.TaskTypeTensorboard,
 		model.TaskTypeCheckpointGC,
 		model.TaskTypeCommand,
 		model.TaskTypeShell,

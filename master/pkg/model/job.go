@@ -29,8 +29,6 @@ const (
 	JobTypeShell JobType = "SHELL"
 	// JobTypeCommand is the "COMMAND" job type for the enum public.job_type in Postgres.
 	JobTypeCommand JobType = "COMMAND"
-	// JobTypeTensorboard is the "TENSORBOARD" job type for the enum.job_type in Postgres.
-	JobTypeTensorboard JobType = "TENSORBOARD"
 	// JobTypeExperiment is the "EXPERIMENT" job type for the enum.job_type in Postgres.
 	JobTypeExperiment JobType = "EXPERIMENT"
 	// JobTypeCheckpointGC is the "CheckpointGC" job type for enum.job_type in Postgres.
@@ -48,8 +46,6 @@ func (jt JobType) Proto() jobv1.Type {
 		return jobv1.Type_TYPE_COMMAND
 	case JobTypeShell:
 		return jobv1.Type_TYPE_SHELL
-	case JobTypeTensorboard:
-		return jobv1.Type_TYPE_TENSORBOARD
 	case JobTypeCheckpointGC:
 		return jobv1.Type_TYPE_CHECKPOINT_GC
 	case JobTypeGeneric:
@@ -68,8 +64,6 @@ func JobTypeFromProto(t jobv1.Type) JobType {
 		return JobTypeCommand
 	case jobv1.Type_TYPE_SHELL:
 		return JobTypeShell
-	case jobv1.Type_TYPE_TENSORBOARD:
-		return JobTypeTensorboard
 	case jobv1.Type_TYPE_CHECKPOINT_GC:
 		return JobTypeCheckpointGC
 	default:

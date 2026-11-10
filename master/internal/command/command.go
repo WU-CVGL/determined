@@ -32,7 +32,6 @@ import (
 	"github.com/determined-ai/determined/proto/pkg/commandv1"
 	"github.com/determined-ai/determined/proto/pkg/shellv1"
 	"github.com/determined-ai/determined/proto/pkg/taskv1"
-	"github.com/determined-ai/determined/proto/pkg/tensorboardv1"
 )
 
 // terminatedDuration defines the amount of time the command stays in a
@@ -46,7 +45,7 @@ var queueStates = []model.AllocationState{
 }
 
 // Command is executed in a containerized environment on a Determined cluster.
-// Locking in: Start, OnExit, DeleteIfInWorkspace, ToV1Command/Shell/Tensorboard.
+// Locking in: Start, OnExit, DeleteIfInWorkspace, ToV1Command/Shell.
 type Command struct {
 	mu sync.Mutex
 
@@ -398,36 +397,8 @@ func (c *Command) ShellPrivateKey() string {
 	return *c.Metadata.PrivateKey
 }
 
-// ToV1Tensorboard takes a *Command from the command service registry & returns a *tensorboardv1.Tensorboard.
-func (c *Command) ToV1Tensorboard() *tensorboardv1.Tensorboard {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	allo := c.refreshAllocationState()
-	state := enrichState(allo.State)
-	return &tensorboardv1.Tensorboard{
-		Id:             c.stringID(),
-		State:          state,
-		Description:    c.Config.Description,
-		StartTime:      protoutils.ToTimestamp(c.registeredTime),
-		Container:      allo.SingleContainer().ToProto(),
-		ServiceAddress: c.serviceAddress(),
-		ExperimentIds:  c.Metadata.ExperimentIDs,
-		TrialIds:       c.Metadata.TrialIDs,
-		Username:       c.Base.Owner.Username,
-		UserId:         int32(c.Base.Owner.ID),
-		DisplayName:    c.Base.Owner.DisplayName.ValueOrZero(),
-		ResourcePool:   c.Config.Resources.ResourcePool,
-		ExitStatus:     c.exitStatus.String(),
-		EndTime:        c.endTimeProto(),
-		JobId:          c.jobID.String(),
-		WorkspaceId:    int32(c.GenericCommandSpec.Metadata.WorkspaceID),
-		Slots:          int32(c.Config.Resources.Slots),
-	}
-}
-
-// ToV1Command(), ToV1Shell(), ToV1Tensorboard() helper functions:
-// refreshAllocationState, enrichState, toProto, endTimeProto, serviceAddress, stringID
+// ToV1Command() and ToV1Shell() helper functions:
+// refreshAllocationState, enrichState, toProto, endTimeProto, stringID
 
 // Refresh our view of the allocation state. If the allocation has sent us an exit status,
 // we don't ask for a refresh because it won't respond. Otherwise, ask with a timeout
@@ -469,10 +440,6 @@ func (c *Command) endTimeProto() *timestamppb.Timestamp {
 	return protoutils.ToTimestamp(*c.endTime)
 }
 
-func (c *Command) serviceAddress() string {
-	return fmt.Sprintf("/proxy/%s/", c.taskID)
-}
-
 func (c *Command) stringID() string {
 	return c.taskID.String()
 }
@@ -481,18 +448,10 @@ func (c *Command) stringID() string {
 // every start and restore. Each service's port gets one proxy from its record in spec.Services,
 // the tensorboard service's with its token, and the other ports, such as those of the config's
 // environment, are plain; a plain port that a record owns is skipped. A spec without records
-// reaches every port as a plain port, but for a TensorBoard's own port, which gets the spec's token.
+// reaches every port as a plain port.
 func proxyPortConfigs(spec tasks.GenericCommandSpec, taskID model.TaskID) []*sproto.ProxyPortConfig {
 	if len(spec.Services) == 0 {
-		ports := sproto.NewProxyPortConfig(spec.ProxyPorts(), taskID, false)
-		if spec.TaskType == model.TaskTypeTensorboard && spec.Metadata.TensorBoardToken != nil {
-			for _, port := range ports {
-				if port.ServiceID == string(taskID) {
-					port.ServiceToken = *spec.Metadata.TensorBoardToken
-				}
-			}
-		}
-		return ports
+		return sproto.NewProxyPortConfig(spec.ProxyPorts(), taskID, false)
 	}
 	ports := make([]*sproto.ProxyPortConfig, 0, len(spec.Services))
 	owned := make(map[int]bool, len(spec.Services))
@@ -523,24 +482,17 @@ func proxyPortConfigs(spec tasks.GenericCommandSpec, taskID model.TaskID) []*spr
 }
 
 // idleTimeoutConfig returns how the task's idle time is watched, if its config sets an idle
-// timeout: a shell's through its task's activity record, a TensorBoard's through the last request
-// to its proxy, as its launch chose. Other tasks are not watched.
+// timeout and its launch chose to watch it: through its task's activity record. Other tasks are
+// not watched.
 func idleTimeoutConfig(spec tasks.GenericCommandSpec, taskID model.TaskID) *sproto.IdleTimeoutConfig {
-	if spec.Config.IdleTimeout == nil {
+	if spec.Config.IdleTimeout == nil || !spec.WatchTaskActivity {
 		return nil
 	}
-	cfg := sproto.IdleTimeoutConfig{
+	return &sproto.IdleTimeoutConfig{
 		ServiceID:       string(taskID),
+		UseTaskActivity: true,
+		TaskID:          taskID,
 		TimeoutDuration: time.Duration(*spec.Config.IdleTimeout),
 		Debug:           spec.Config.Debug,
 	}
-	switch {
-	case spec.WatchTaskActivity:
-		cfg.UseTaskActivity, cfg.TaskID = true, taskID
-	case spec.WatchProxyIdleTimeout:
-		cfg.UseProxyState = true
-	default:
-		return nil
-	}
-	return &cfg
 }

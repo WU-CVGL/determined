@@ -34,10 +34,9 @@ const testRoutes: RouteConfig[] = [
 
 const routeById = (id: string) => routes.find((r) => r.id === id) as RouteConfig;
 
-/* The task page and the two old routes that send to it, with their real redirect components. */
+/* The task page and the old route that sends to it, with its real redirect component. */
 const taskRoutes: RouteConfig[] = [
   { ...routeById('interactiveTask'), element: <LocationProbe /> },
-  { ...routeById('interactive'), element: <InteractiveTaskRedirect /> },
   {
     ...routeById('shellTerminal'),
     element: <InteractiveTaskRedirect tab={InteractiveTaskTab.Terminal} />,
@@ -85,31 +84,7 @@ describe('task page routes', () => {
     const route = routeById('interactiveTask');
     expect(route.needAuth).toBe(true);
     expect(route.path).toBe('/tasks/:taskId/interactive');
-    expect(routeById('interactive').needAuth).toBe(true);
     expect(routeById('shellTerminal').needAuth).toBe(true);
-  });
-
-  it('send the old interactive page of the WebUI to the task page', async () => {
-    const waitUrl = encodeURIComponent('/det/wait/tensor-board/task-1?serviceAddr=/proxy/task-1/');
-    setup(
-      `/interactive/task-1/tensor-board/TensorBoard%20(x)/default/${waitUrl}/?currentSlotsExceeded=false`,
-      taskRoutes,
-    );
-    expect(await screen.findByTestId('location')).toHaveTextContent(TASK_PATH);
-    expect(screen.getByTestId('location')).toHaveTextContent(/interactive$/);
-  });
-
-  it('send the old interactive page as the CLI builds it to the task page, with its warning', async () => {
-    // quote_plus of the wait page URL, with the CLI's own type segment and no trailing slash.
-    const waitUrl =
-      '%2Fdet%2Fwait%2Ftensorboard%2Ftask-1%3FeventUrl%3D%2Fproxy%2Ftask-1%2Ftensorboard%2Ftask-1%2Fevents%3Ftail%3D1%26serviceAddr%3D%2Fproxy%2Ftask-1';
-    setup(
-      `/interactive/task-1/tensorboard/TensorBoard+%28x%29/default/${waitUrl}?currentSlotsExceeded=true`,
-      taskRoutes,
-    );
-    expect(await screen.findByTestId('location')).toHaveTextContent(
-      `${TASK_PATH}?currentSlotsExceeded=true`,
-    );
   });
 
   it('send the old terminal page to the Terminal tab of the task page', async () => {

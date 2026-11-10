@@ -34,7 +34,7 @@ func (a *JobAuthZRBAC) FilterJobs(
 		switch job.Type {
 		case jobv1.Type_TYPE_EXPERIMENT:
 			hasExperiment = true
-		case jobv1.Type_TYPE_TENSORBOARD, jobv1.Type_TYPE_SHELL, jobv1.Type_TYPE_COMMAND:
+		case jobv1.Type_TYPE_SHELL, jobv1.Type_TYPE_COMMAND:
 			hasNTSC = true
 		}
 		if hasNTSC && hasExperiment {
@@ -102,7 +102,7 @@ func (a *JobAuthZRBAC) FilterJobs(
 			if userHasGlobalExpViewPerm || viewable {
 				viewableJobs = append(viewableJobs, job)
 			}
-		case jobv1.Type_TYPE_TENSORBOARD, jobv1.Type_TYPE_SHELL, jobv1.Type_TYPE_COMMAND:
+		case jobv1.Type_TYPE_SHELL, jobv1.Type_TYPE_COMMAND:
 			viewable := viewableNtscWorkspaces[model.AccessScopeID(job.WorkspaceId)]
 			if userHasGlobalNTSCViewPerm || viewable {
 				viewableJobs = append(viewableJobs, job)
@@ -135,9 +135,9 @@ func (a *JobAuthZRBAC) CanControlJobQueue(
 }
 
 // CanControlJobQueueUpdate checks the permission to change the target job, as the job's own
-// priority setting does: an experiment needs the permission to edit it, a shell, command or
-// TensorBoard the permission to set its priority, and a generic task the permission to control it,
-// each in the job's workspace. Other jobs need the permission to update the master config.
+// priority setting does: an experiment needs the permission to edit it, a shell or command the
+// permission to set its priority, and a generic task the permission to control it, each in the
+// job's workspace. Other jobs need the permission to update the master config.
 func (a *JobAuthZRBAC) CanControlJobQueueUpdate(
 	ctx context.Context, curUser model.User, jobID model.JobID,
 ) error {
@@ -152,7 +152,7 @@ func (a *JobAuthZRBAC) CanControlJobQueueUpdate(
 			return err
 		}
 		return experiment.AuthZProvider.Get().CanSetExperimentsPriority(ctx, curUser, exp, 0)
-	case model.JobTypeShell, model.JobTypeCommand, model.JobTypeTensorboard:
+	case model.JobTypeShell, model.JobTypeCommand:
 		workspaceID, err := jobWorkspace(ctx, jobID)
 		if err != nil {
 			return err
@@ -174,8 +174,7 @@ func (a *JobAuthZRBAC) CanControlJobQueueUpdate(
 	}
 }
 
-// jobWorkspace returns the workspace of the command, shell, TensorBoard or generic task that runs
-// a job.
+// jobWorkspace returns the workspace of the command, shell or generic task that runs a job.
 func jobWorkspace(ctx context.Context, jobID model.JobID) (model.AccessScopeID, error) {
 	var taskID model.TaskID
 	if err := db.Bun().NewSelect().Table("tasks").Column("task_id").

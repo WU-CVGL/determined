@@ -90,8 +90,7 @@ message GetTaskServicesResponse {
   // The name of the task's primary service, whose readiness makes the task
   // ready; empty for a task without services.
   string primary = 4;
-  // The services of the task, the primary one first. Commands and TensorBoards
-  // have none.
+  // The services of the task, the primary one first. Commands have none.
   repeated determined.task.v1.TaskService services = 5;
   // The experiments (all trials) whose TensorBoard logs the task's tensorboard
   // service reads.
@@ -249,7 +248,7 @@ message GetActiveTasksCountRequest {}
 // Response to GetActiveTasksCountRequest.
 message GetActiveTasksCountResponse {
   option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
-    json_schema: { required: [ "commands", "shells", "tensorboards" ] }
+    json_schema: { required: [ "commands", "shells" ] }
   };
 
   // The count of commands.
@@ -258,8 +257,8 @@ message GetActiveTasksCountResponse {
   reserved "notebooks";
   // The count of shells.
   int32 shells = 3;
-  // The count of TensorBoards.
-  int32 tensorboards = 4;
+  reserved 4;
+  reserved "tensorboards";
 }
 
 // Mark the given task as ready.
@@ -279,14 +278,6 @@ message ReportTaskActivityRequest {
 }
 // Response to ReportTaskActivityRequest.
 message ReportTaskActivityResponse {}
-
-// Mark the given task as waiting.
-message AllocationWaitingRequest {
-  // The id of the allocation.
-  string allocation_id = 1;
-}
-// Response to AllocationWaitingRequest.
-message AllocationWaitingResponse {}
 
 // The state of one service in a ReportTaskServicesRequest.
 message TaskServiceReport {

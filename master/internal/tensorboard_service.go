@@ -28,8 +28,8 @@ const (
 	// strings, which the service decodes, so that an argument may hold any character but NUL, which
 	// the config refuses.
 	tensorBoardArgsEnvVar = "DET_TENSORBOARD_ARGS"
-	// tensorBoardTokenEnvVar is the token that TensorBoard, of a shell or a task, requires of every
-	// request, which the master's proxy adds to the requests that it passes on.
+	// tensorBoardTokenEnvVar is the token that a shell's TensorBoard requires of every request,
+	// which the master's proxy adds to the requests that it passes on.
 	tensorBoardTokenEnvVar = "DET_TENSORBOARD_TOKEN" //nolint:gosec // A variable's name.
 	// tensorBoardTokenBytes is the entropy of a tensorboard service's token.
 	tensorBoardTokenBytes = 32
