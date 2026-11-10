@@ -1137,8 +1137,7 @@ export interface ResourcePool extends Omit<Api.V1ResourcePool, 'slotType'> {
 /* User pages (/api/v1/users/{user_id}/resources and /usage) */
 
 export interface UserResourceCounts {
-  /** Containers without slots; undefined where not available (Kubernetes). */
-  auxContainers?: number;
+  auxContainers: number;
   cpuSlots: number;
   gpus: number;
 }
@@ -1150,18 +1149,24 @@ export interface UserPoolResources {
 
 export interface UserResources {
   asOf?: Date;
+  /** Whether containers without slots are metered on the cluster. */
+  auxMetered: boolean;
   pools: UserPoolResources[];
 }
 
-/** A UTC day (YYYY-MM-DD) or month (YYYY-MM) of a user's usage, in seconds. */
+/** A UTC day (YYYY-MM-DD) or month (YYYY-MM) of a user's usage, in seconds and days. */
 export interface UserUsageEntry {
-  activeDays: number;
-  activeSeconds: number;
-  /** Undefined where not available (no pool but Kubernetes). */
-  auxContainerSeconds?: number;
+  auxActiveDays: number;
+  auxActiveSeconds: number;
+  auxContainerSeconds: number;
   cpuSlotSeconds: number;
+  gpuActiveDays: number;
+  gpuActiveSeconds: number;
+  gpuOrAuxActiveDays: number;
+  gpuOrAuxActiveSeconds: number;
   gpuSeconds: number;
   periodStart: string;
+  unclassifiedSlotSeconds: number;
 }
 
 export interface UserUsage {

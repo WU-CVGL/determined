@@ -1,37 +1,28 @@
 import Tooltip from 'hew/Tooltip';
 import React, { useMemo, useState } from 'react';
 
-import { UserUsage } from 'types';
-
-import { CalendarDay, calendarWeeks, formatHours } from './usage';
+import { CalendarDay, CalendarWeek, UsageValue } from './usage';
 import css from './UsageCalendar.module.scss';
 
 interface Props {
-  showCpuSlots: boolean;
-  usage: UserUsage;
+  /** The values of a day, shown under the grid when it is selected. */
+  dayValues: (day: CalendarDay) => UsageValue[];
+  weeks: CalendarWeek[];
 }
 
-const DayLine: React.FC<{ day: CalendarDay; showCpuSlots: boolean }> = ({ day, showCpuSlots }) => (
+const DayLine: React.FC<{ day: CalendarDay; values: UsageValue[] }> = ({ day, values }) => (
   <div className={css.day} data-testid="usage-calendar-day">
-    <span>{day.date}</span>
-    {day.entry && (
-      <>
-        <span>GPU hours {formatHours(day.entry.gpuSeconds)}</span>
-        {showCpuSlots && <span>CPU slot hours {formatHours(day.entry.cpuSlotSeconds)}</span>}
-        <span>
-          Aux container hours{' '}
-          {day.entry.auxContainerSeconds === undefined
-            ? 'Not available'
-            : formatHours(day.entry.auxContainerSeconds)}
-        </span>
-      </>
-    )}
+    <span>{day.date} (UTC)</span>
+    {values.map(({ title, value }) => (
+      <span key={title}>
+        {title} {value}
+      </span>
+    ))}
   </div>
 );
 
-/** The UTC days of the last 53 weeks, a column a week from Monday, by the time anything was held. */
-const UsageCalendar: React.FC<Props> = ({ showCpuSlots, usage }: Props) => {
-  const weeks = useMemo(() => calendarWeeks(usage.entries), [usage.entries]);
+/** The UTC days of the last 53 weeks, a column a week from Monday, by level. */
+const UsageCalendar: React.FC<Props> = ({ dayValues, weeks }: Props) => {
   const [selectedDate, setSelectedDate] = useState<string>();
   const selected = useMemo(
     () =>
@@ -73,7 +64,7 @@ const UsageCalendar: React.FC<Props> = ({ showCpuSlots, usage }: Props) => {
           }),
         )}
       </div>
-      {selected && <DayLine day={selected} showCpuSlots={showCpuSlots} />}
+      {selected && <DayLine day={selected} values={dayValues(selected)} />}
     </div>
   );
 };

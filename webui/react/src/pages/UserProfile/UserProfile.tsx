@@ -19,132 +19,65 @@ import { GroupBy } from 'pages/Cluster/ClusterHistoricalUsage.settings';
 import ClusterHistoricalUsageChart from 'pages/Cluster/ClusterHistoricalUsageChart';
 import { paths } from 'routes/utils';
 import { getUserResources, getUserUsage } from 'services/api';
-import { V1ResourceAllocationAggregationPeriod, V1ResourcePoolType } from 'services/api-ts-sdk';
-import clusterStore from 'stores/cluster';
+import { V1ResourceAllocationAggregationPeriod } from 'services/api-ts-sdk';
 import userStore from 'stores/users';
-import { ResourcePool, ResourceType, UserResources, UserUsage, UserUsageEntry } from 'types';
+import { UserResources, UserUsage } from 'types';
 import handleError from 'utils/error';
 import { useObservable } from 'utils/observable';
 import { isAborted } from 'utils/service';
 
 import {
   DAY_FORMAT,
-  formatHours,
-  lastDays,
-  lastMonths,
   MONTH_FORMAT,
+  PERIOD_COLUMN,
+  ResourceMode,
   todayUtc,
-  toHours,
-  totalResources,
   USAGE_DAYS,
   USAGE_MONTHS,
+  usageProjection,
+  UsageProjection,
   usageRange,
+  UsageRow,
 } from './usage';
 import UsageCalendar from './UsageCalendar';
 import css from './UserProfile.module.scss';
 
 export const RESOURCES_POLL_INTERVAL = 15_000;
 
-const anyCpuPool = (pools: ResourcePool[]): boolean =>
-  pools.some((pool) => pool.slotType === ResourceType.CPU);
-
-interface BlockProps {
-  pools: ResourcePool[];
-  userId: number;
+interface ResourcesProps {
+  projection?: UsageProjection;
+  resources: Loadable<UserResources>;
 }
 
-const CurrentResources: React.FC<BlockProps> = ({ pools, userId }: BlockProps) => {
-  const [resources, setResources] = useState<Loadable<UserResources>>(NotLoaded);
-  const hasLoaded = useRef(false);
-
-  const fetchResources = useCallback(async () => {
-    try {
-      const response = await getUserResources({ userId });
-      hasLoaded.current = true;
-      setResources(Loaded(response));
-    } catch (e) {
-      // A failed refresh keeps the last counts.
-      handleError(e, {
-        publicSubject: 'Unable to fetch current resources.',
-        silent: hasLoaded.current,
-      });
-      if (!hasLoaded.current) setResources(Failed(e as Error));
-    }
-  }, [userId]);
-
-  usePolling(fetchResources, { interval: RESOURCES_POLL_INTERVAL });
-
-  const allKubernetes =
-    pools.length > 0 && pools.every((pool) => pool.type === V1ResourcePoolType.K8S);
-
-  return (
-    <Section loading={Loadable.isNotLoaded(resources)} title="Current resources">
-      {Loadable.match(resources, {
-        Failed: () => null,
-        Loaded: ({ pools: held }) => {
-          const total = totalResources(held);
-          return (
-            <Card.Group size="small">
-              <OverviewStats title="GPUs">{total.gpus}</OverviewStats>
-              {(total.cpuSlots > 0 || anyCpuPool(pools)) && (
-                <OverviewStats title="CPU slots">{total.cpuSlots}</OverviewStats>
-              )}
-              <OverviewStats title="Aux containers">
-                {allKubernetes ? 'Not available' : total.auxContainers ?? 0}
+const CurrentResources: React.FC<ResourcesProps> = ({ projection, resources }) => (
+  <Section loading={Loadable.isNotLoaded(resources)} title="Current resources">
+    {Loadable.match(resources, {
+      Failed: () => null,
+      Loaded: (resources) =>
+        projection && (
+          <Card.Group size="small">
+            {projection.cards(resources).map((card) => (
+              <OverviewStats key={card.key} title={card.title}>
+                {card.value}
               </OverviewStats>
-            </Card.Group>
-          );
-        },
-        NotLoaded: () => null,
-      })}
-    </Section>
-  );
-};
-
-const usageColumns = (groupBy: GroupBy, showCpuSlots: boolean, showAux: boolean) =>
-  [
-    {
-      dataIndex: 'periodStart',
-      key: 'periodStart',
-      title: groupBy === GroupBy.Month ? 'Month' : 'Date',
-    },
-    {
-      align: 'right' as const,
-      dataIndex: 'gpuSeconds',
-      key: 'gpuSeconds',
-      render: (seconds: number) => formatHours(seconds),
-      title: 'GPU hours',
-    },
-    showCpuSlots && {
-      align: 'right' as const,
-      dataIndex: 'cpuSlotSeconds',
-      key: 'cpuSlotSeconds',
-      render: (seconds: number) => formatHours(seconds),
-      title: 'CPU slot hours',
-    },
-    showAux && {
-      align: 'right' as const,
-      dataIndex: 'auxContainerSeconds',
-      key: 'auxContainerSeconds',
-      render: (seconds?: number) => formatHours(seconds ?? 0),
-      title: 'Aux container hours',
-    },
-  ].filter((column): column is Exclude<typeof column, false> => !!column);
+            ))}
+          </Card.Group>
+        ),
+      NotLoaded: () => null,
+    })}
+  </Section>
+);
 
 interface UsageProps {
-  showCpuSlots: boolean;
+  groupBy: GroupBy;
+  projection: UsageProjection;
   usage: UserUsage;
 }
 
-const UsageView: React.FC<UsageProps & { groupBy: GroupBy }> = ({
-  groupBy,
-  showCpuSlots,
-  usage,
-}) => {
-  const showAux = usage.entries.some((entry) => entry.auxContainerSeconds !== undefined);
-  const entries = useMemo(
-    () => (groupBy === GroupBy.Month ? lastMonths(usage.entries) : lastDays(usage.entries)),
-    [groupBy, usage.entries],
+const UsageView: React.FC<UsageProps> = ({ groupBy, projection, usage }) => {
+  const view = useMemo(
+    () => projection.usage(groupBy, usage.entries),
+    [groupBy, projection, usage.entries],
   );
   const dateRange = useMemo((): [number, number] => {
     // The chart reads its time strings as local dates, and so does its range.
@@ -156,38 +89,39 @@ const UsageView: React.FC<UsageProps & { groupBy: GroupBy }> = ({
     return [dayjs(first.format(format)).unix(), dayjs(today.format(format)).unix()];
   }, [groupBy]);
 
-  const hoursByLabel: Record<string, number[]> = {
-    GPU: entries.map((entry) => toHours(entry.gpuSeconds)),
-  };
-  if (showCpuSlots) {
-    hoursByLabel['CPU slots'] = entries.map((entry) => toHours(entry.cpuSlotSeconds));
-  }
-  if (showAux) {
-    hoursByLabel['Aux'] = entries.map((entry) => toHours(entry.auxContainerSeconds ?? 0));
-  }
-
   return (
     <>
       <ClusterHistoricalUsageChart
         chartKey={groupBy === GroupBy.Month ? 1 : 0}
         dateRange={dateRange}
         groupBy={groupBy}
-        hoursByLabel={hoursByLabel}
+        hoursByLabel={view.hoursByLabel}
         label="Hours"
-        time={entries.map((entry) => entry.periodStart)}
+        time={view.time}
       />
-      <ResponsiveTable<UserUsageEntry>
-        columns={usageColumns(groupBy, showCpuSlots, showAux)}
-        dataSource={[...entries].reverse()}
+      <ResponsiveTable<UsageRow>
+        columns={view.columns.map((column) => ({
+          align: column.numeric ? ('right' as const) : undefined,
+          dataIndex: column.key,
+          key: column.key,
+          title: column.title,
+        }))}
+        dataSource={view.rows}
         pagination={false}
-        rowKey="periodStart"
+        rowKey={PERIOD_COLUMN}
         size="small"
       />
     </>
   );
 };
 
-const UserUsageSections: React.FC<BlockProps> = ({ pools, userId }: BlockProps) => {
+interface UsageSectionsProps {
+  projection?: UsageProjection;
+  userId: number;
+}
+
+/** The calendar and the usage; empty until the projection is known. */
+const UserUsageSections: React.FC<UsageSectionsProps> = ({ projection, userId }) => {
   const [usage, setUsage] = useState<Loadable<UserUsage>>(NotLoaded);
   const [groupBy, setGroupBy] = useState<GroupBy>(GroupBy.Day);
 
@@ -213,24 +147,35 @@ const UserUsageSections: React.FC<BlockProps> = ({ pools, userId }: BlockProps) 
     return () => canceler.abort();
   }, [userId]);
 
-  const showCpuSlots =
-    anyCpuPool(pools) ||
-    Loadable.getOrElse<UserUsageEntry[]>(
-      [],
-      Loadable.map(usage, (u) => u.entries),
-    ).some((entry) => entry.cpuSlotSeconds > 0);
+  const shown = useMemo(
+    () =>
+      projection
+        ? Loadable.map(usage, (usage) => ({ projection, usage }))
+        : Loadable.flatMap(usage, () => NotLoaded),
+    [projection, usage],
+  );
+  const calendar = useMemo(
+    () => Loadable.map(shown, ({ projection, usage }) => projection.calendar(usage.entries)),
+    [shown],
+  );
 
   return (
     <>
-      <Section loading={Loadable.isNotLoaded(usage)} title="Active days (UTC)">
-        {Loadable.match(usage, {
-          Failed: () => null,
-          Loaded: (usage) => <UsageCalendar showCpuSlots={showCpuSlots} usage={usage} />,
-          NotLoaded: () => null,
+      <Section
+        id="active-days"
+        loading={Loadable.isNotLoaded(calendar)}
+        title={Loadable.match(calendar, {
+          _: () => 'Active days',
+          Loaded: ({ activeDays }) => `Active days · ${activeDays}`,
+        })}>
+        {Loadable.match(calendar, {
+          _: () => null,
+          Loaded: ({ weeks }) =>
+            projection && <UsageCalendar dayValues={projection.day} weeks={weeks} />,
         })}
       </Section>
       <Section
-        loading={Loadable.isNotLoaded(usage)}
+        loading={Loadable.isNotLoaded(shown)}
         options={
           <RadioGroup<GroupBy>
             options={[
@@ -242,14 +187,54 @@ const UserUsageSections: React.FC<BlockProps> = ({ pools, userId }: BlockProps) 
           />
         }
         title="Usage">
-        {Loadable.match(usage, {
-          Failed: () => null,
-          Loaded: (usage) => (
-            <UsageView groupBy={groupBy} showCpuSlots={showCpuSlots} usage={usage} />
+        {Loadable.match(shown, {
+          _: () => null,
+          Loaded: ({ projection, usage }) => (
+            <UsageView groupBy={groupBy} projection={projection} usage={usage} />
           ),
-          NotLoaded: () => null,
         })}
       </Section>
+    </>
+  );
+};
+
+/** The current resources, the calendar and the usage of a user, in one resource mode. */
+const UserResourceSections: React.FC<{ userId: number }> = ({ userId }) => {
+  const [resources, setResources] = useState<Loadable<UserResources>>(NotLoaded);
+  const hasLoaded = useRef(false);
+
+  const fetchResources = useCallback(async () => {
+    try {
+      const response = await getUserResources({ userId });
+      hasLoaded.current = true;
+      setResources(Loaded(response));
+    } catch (e) {
+      // A failed refresh keeps the last counts.
+      handleError(e, {
+        publicSubject: 'Unable to fetch current resources.',
+        silent: hasLoaded.current,
+      });
+      if (!hasLoaded.current) setResources(Failed(e as Error));
+    }
+  }, [userId]);
+
+  usePolling(fetchResources, { interval: RESOURCES_POLL_INTERVAL });
+
+  // Aux is shown where the cluster meters it; without the resources, GPUs only.
+  const auxMetered = Loadable.match(resources, {
+    Failed: () => false,
+    Loaded: (resources) => resources.auxMetered,
+    NotLoaded: () => undefined,
+  });
+  const projection = useMemo(
+    () => (auxMetered === undefined ? undefined : usageProjection(ResourceMode.Both, auxMetered)),
+    [auxMetered],
+  );
+
+  return (
+    <>
+      <CurrentResources projection={projection} resources={resources} />
+      <UserUsageSections projection={projection} userId={userId} />
     </>
   );
 };
@@ -259,7 +244,6 @@ const UserProfile: React.FC = () => {
   const userId = /^\d+$/.test(userIdParam) ? Number(userIdParam) : undefined;
   const loadableUser = useObservable(useMemo(() => userStore.getUser(userId ?? -1), [userId]));
   const loadableUsers = useObservable(useMemo(() => userStore.getUsers(), []));
-  const pools = Loadable.getOrElse([], useObservable(clusterStore.resourcePools));
 
   const user = Loadable.getOrElse(undefined, loadableUser);
   const notFound = userId === undefined || (!user && Loadable.isLoaded(loadableUsers));
@@ -279,8 +263,7 @@ const UserProfile: React.FC = () => {
             </div>
             <Link path={`${paths.jobs()}?user=${userId}`}>Jobs</Link>
           </div>
-          <CurrentResources key={`resources-${userId}`} pools={pools} userId={userId} />
-          <UserUsageSections key={`usage-${userId}`} pools={pools} userId={userId} />
+          <UserResourceSections key={userId} userId={userId} />
         </div>
       )}
     </Page>

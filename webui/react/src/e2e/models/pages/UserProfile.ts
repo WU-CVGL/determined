@@ -21,7 +21,6 @@ class ResourceStat extends BaseComponent {
  */
 class CurrentResources extends BaseComponent {
   readonly gpus = this.stat('GPUs');
-  readonly cpuSlots = this.stat('CPU slots');
   readonly auxContainers = this.stat('Aux containers');
 
   /**
@@ -114,7 +113,7 @@ export class UserProfile extends DeterminedPage {
   });
   readonly #activeDays = new BaseComponent({
     parent: this.#base,
-    selector: 'section#active-days-utc',
+    selector: 'section#active-days',
   });
   readonly calendar = new UsageCalendar({
     parent: this.#activeDays,

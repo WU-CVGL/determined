@@ -6,24 +6,14 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 import { ThemeProvider } from 'components/ThemeProvider';
 import usePageVisibility from 'hooks/usePageVisibility';
-import { getResourcePools, getUserResources, getUsers, getUserUsage } from 'services/api';
-import { V1ResourcePoolType } from 'services/api-ts-sdk';
-import clusterStore from 'stores/cluster';
+import { getUserResources, getUsers, getUserUsage } from 'services/api';
 import userStore from 'stores/users';
-import {
-  DetailedUser,
-  ResourcePool,
-  ResourceType,
-  UserResources,
-  UserUsage,
-  UserUsageEntry,
-} from 'types';
+import { DetailedUser, UserResources, UserUsage, UserUsageEntry } from 'types';
 import handleError from 'utils/error';
 
 import UserProfile, { RESOURCES_POLL_INTERVAL } from './UserProfile';
 
 vi.mock('services/api', () => ({
-  getResourcePools: vi.fn(),
   getUserResources: vi.fn(),
   getUsers: vi.fn(),
   getUserUsage: vi.fn(),
@@ -62,27 +52,27 @@ const ALICE: DetailedUser = {
 
 const BOB: DetailedUser = { id: 5, isActive: false, isAdmin: false, username: 'bob' };
 
-const pool = (name: string, type: V1ResourcePoolType, slotType: ResourceType): ResourcePool =>
-  ({ name, slotType, type, usable: true }) as unknown as ResourcePool;
-
-const GPU_POOL = pool('default', V1ResourcePoolType.STATIC, ResourceType.CUDA);
-const CPU_POOL = pool('cpu', V1ResourcePoolType.STATIC, ResourceType.CPU);
-const K8S_POOL = pool('k8s', V1ResourcePoolType.K8S, ResourceType.CUDA);
-
 const RESOURCES: UserResources = {
+  auxMetered: true,
   pools: [
     { counts: { auxContainers: 1, cpuSlots: 0, gpus: 2 }, resourcePool: 'default' },
     { counts: { auxContainers: 0, cpuSlots: 0, gpus: 1 }, resourcePool: 'other' },
   ],
 };
 
-const day = (periodStart: string, gpuHours: number, auxHours?: number): UserUsageEntry => ({
-  activeDays: gpuHours > 0 ? 1 : 0,
-  activeSeconds: gpuHours * HOUR,
-  auxContainerSeconds: auxHours === undefined ? undefined : auxHours * HOUR,
-  cpuSlotSeconds: 0,
+/** A day with one GPU for some hours, and CPU slots on days without. */
+const day = (periodStart: string, gpuHours: number): UserUsageEntry => ({
+  auxActiveDays: 0,
+  auxActiveSeconds: 0,
+  auxContainerSeconds: 0,
+  cpuSlotSeconds: gpuHours > 0 ? 0 : 13 * HOUR,
+  gpuActiveDays: gpuHours > 0 ? 1 : 0,
+  gpuActiveSeconds: gpuHours * HOUR,
+  gpuOrAuxActiveDays: gpuHours > 0 ? 1 : 0,
+  gpuOrAuxActiveSeconds: gpuHours * HOUR,
   gpuSeconds: gpuHours * HOUR,
   periodStart,
+  unclassifiedSlotSeconds: 0,
 });
 
 /** Covered daily from 2025-11-01 to today, with the GPU hours of each day. */
@@ -90,7 +80,7 @@ const coveredUsage = (gpuHours: (date: string) => number): UserUsage => {
   const entries: UserUsageEntry[] = [];
   for (let t = Date.parse('2025-11-01T00:00:00Z'); t <= NOW.getTime(); t += 24 * HOUR * 1000) {
     const date = new Date(t).toISOString().slice(0, 10);
-    entries.push(day(date, gpuHours(date), 0));
+    entries.push(day(date, gpuHours(date)));
   }
   return { coverageStart: '2025-11-01', entries };
 };
@@ -104,9 +94,7 @@ const PageVisibility = () => {
   return null;
 };
 
-const setup = async (userId: string, pools: ResourcePool[] = [GPU_POOL]) => {
-  vi.mocked(getResourcePools).mockResolvedValue(pools);
-  clusterStore.fetchResourcePools();
+const setup = async (userId: string) => {
   userStore.fetchUsers();
   await waitFor(() => expect(getUsers).toHaveBeenCalled());
   render(
@@ -151,7 +139,6 @@ describe('UserProfile', () => {
     expect(screen.queryByText('Deactivated')).not.toBeInTheDocument();
     await waitFor(() => expect(stat('GPUs')).toHaveTextContent('3'));
     expect(stat('Aux containers')).toHaveTextContent('1');
-    // No CPU pool and no CPU slots held.
     expect(screen.queryByText('CPU slots')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Jobs' })).toHaveAttribute('href', '/jobs?user=4');
     expect(getUserResources).toHaveBeenCalledWith({ userId: 4 });
@@ -162,26 +149,53 @@ describe('UserProfile', () => {
     expect(await screen.findByText('Deactivated')).toBeInTheDocument();
   });
 
-  it('shows CPU slots with a CPU pool', async () => {
-    await setup('4', [GPU_POOL, CPU_POOL]);
-    await waitFor(() => expect(stat('CPU slots')).toHaveTextContent('0'));
-  });
-
-  it('shows Aux as not available when every pool is Kubernetes', async () => {
+  it('shows GPUs only where the cluster does not meter Aux', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     vi.mocked(getUserResources).mockResolvedValue({
-      pools: [{ counts: { cpuSlots: 0, gpus: 8 }, resourcePool: 'k8s' }],
-    });
-    await setup('4', [K8S_POOL]);
-    await waitFor(() => expect(stat('GPUs')).toHaveTextContent('8'));
-    expect(stat('Aux containers')).toHaveTextContent('Not available');
-  });
-
-  it('shows CPU slots the user holds without a CPU pool', async () => {
-    vi.mocked(getUserResources).mockResolvedValue({
-      pools: [{ counts: { auxContainers: 0, cpuSlots: 2, gpus: 0 }, resourcePool: 'default' }],
+      auxMetered: false,
+      pools: [{ counts: { auxContainers: 0, cpuSlots: 0, gpus: 8 }, resourcePool: 'k8s' }],
     });
     await setup('4');
-    await waitFor(() => expect(stat('CPU slots')).toHaveTextContent('2'));
+    await waitFor(() => expect(stat('GPUs')).toHaveTextContent('8'));
+    expect(screen.queryByText('Aux containers')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('chart-series')).toHaveTextContent(/^GPU$/);
+    expect(screen.queryByRole('columnheader', { name: 'Aux container hours' })).toBeNull();
+    await act(() => user.click(screen.getByLabelText('2026-11-09')));
+    expect(screen.getByTestId('usage-calendar-day')).toHaveTextContent(
+      /^2026-11-09 \(UTC\)GPU hours 6.0$/,
+    );
+  });
+
+  it('shows the Aux containers the user holds in a pool the viewer may not see', async () => {
+    vi.mocked(getUserResources).mockResolvedValue({
+      auxMetered: true,
+      pools: [{ counts: { auxContainers: 2, cpuSlots: 0, gpus: 0 }, resourcePool: 'hidden' }],
+    });
+    await setup('4');
+    await waitFor(() => expect(stat('Aux containers')).toHaveTextContent('2'));
+  });
+
+  it('shows the usage once the current resources are known', async () => {
+    let resolve: (resources: UserResources) => void = () => undefined;
+    vi.mocked(getUserResources).mockReturnValue(new Promise((r) => (resolve = r)));
+    await setup('4');
+    await waitFor(() => expect(getUserUsage).toHaveBeenCalled());
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(screen.queryByTestId('usage-calendar')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('usage-chart')).not.toBeInTheDocument();
+    await act(() => {
+      resolve(RESOURCES);
+      return Promise.resolve();
+    });
+    expect(await screen.findByTestId('chart-series')).toHaveTextContent('GPU,Aux');
+    expect(screen.getByTestId('usage-calendar')).toBeInTheDocument();
+  });
+
+  it('shows the GPU usage when the current resources fail', async () => {
+    vi.mocked(getUserResources).mockRejectedValue(new Error('offline'));
+    await setup('4');
+    expect(await screen.findByTestId('chart-series')).toHaveTextContent(/^GPU$/);
+    expect(screen.queryByText('GPUs')).not.toBeInTheDocument();
   });
 
   it.each(['99', 'alice', '4x'])('says "User not found" for /users/%s', async (userId) => {
@@ -202,7 +216,9 @@ describe('UserProfile', () => {
       userId: 4,
     });
     expect(screen.getByLabelText('2026-11-09')).toHaveClass('level2');
-    expect(screen.getByText('Active days (UTC)')).toBeInTheDocument();
+    // The other days hold CPU slots only.
+    expect(screen.getByLabelText('2026-11-08')).toHaveClass('level0');
+    expect(screen.getByText('Active days · 2')).toBeInTheDocument();
   });
 
   it('switches between days and months without another request', async () => {
@@ -244,6 +260,8 @@ describe('UserProfile', () => {
     expect(within(firstRow()).getAllByRole('cell')[0]).toHaveTextContent('2026-11');
     expect(within(firstRow()).getAllByRole('cell')[1]).toHaveTextContent('6.0');
     expect(within(screen.getAllByRole('row')[2]).getAllByRole('cell')[1]).toHaveTextContent('2.0');
+    expect(screen.getByRole('columnheader', { name: 'Active days' })).toBeInTheDocument();
+    expect(within(firstRow()).getAllByRole('cell')[3]).toHaveTextContent(/^1$/);
 
     await user.click(screen.getByText('Day'));
     await waitFor(() =>
@@ -253,7 +271,7 @@ describe('UserProfile', () => {
   });
 
   it('shows zeros and flat lines without any usage', async () => {
-    vi.mocked(getUserResources).mockResolvedValue({ pools: [] });
+    vi.mocked(getUserResources).mockResolvedValue({ auxMetered: true, pools: [] });
     vi.mocked(getUserUsage).mockResolvedValue(coveredUsage(() => 0));
     await setup('4');
     await waitFor(() => expect(stat('GPUs')).toHaveTextContent('0'));
@@ -286,6 +304,7 @@ describe('UserProfile', () => {
       expect(getUserResources).toHaveBeenCalledTimes(1);
 
       vi.mocked(getUserResources).mockResolvedValue({
+        auxMetered: true,
         pools: [{ counts: { auxContainers: 0, cpuSlots: 0, gpus: 0 }, resourcePool: 'default' }],
       });
       await act(() => vi.advanceTimersByTimeAsync(RESOURCES_POLL_INTERVAL));

@@ -2,8 +2,9 @@ import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DefaultTheme, UIProvider } from 'hew/Theme';
 
-import { UserUsage, UserUsageEntry } from 'types';
+import { UserUsageEntry } from 'types';
 
+import { ResourceMode, usageProjection } from './usage';
 import UsageCalendar from './UsageCalendar';
 
 vi.mock('hew/Tooltip');
@@ -12,27 +13,29 @@ vi.mock('hew/Tooltip');
 const NOW = new Date('2026-11-10T15:00:00Z');
 const HOUR = 3600;
 
-const day = (periodStart: string, activeHours: number, aux?: number): UserUsageEntry => ({
-  activeDays: activeHours > 0 ? 1 : 0,
-  activeSeconds: activeHours * HOUR,
-  auxContainerSeconds: aux === undefined ? undefined : aux * HOUR,
+/** A day with GPU and Aux active hours, 2 GPUs while active and CPU slots. */
+const day = (periodStart: string, activeHours: number, auxHours = 0): UserUsageEntry => ({
+  auxActiveDays: auxHours > 0 ? 1 : 0,
+  auxActiveSeconds: auxHours * HOUR,
+  auxContainerSeconds: auxHours * HOUR,
   cpuSlotSeconds: 0.5 * HOUR,
+  gpuActiveDays: activeHours > 0 ? 1 : 0,
+  gpuActiveSeconds: activeHours * HOUR,
+  gpuOrAuxActiveDays: activeHours > 0 || auxHours > 0 ? 1 : 0,
+  gpuOrAuxActiveSeconds: Math.max(activeHours, auxHours) * HOUR,
   gpuSeconds: 2 * activeHours * HOUR,
   periodStart,
+  unclassifiedSlotSeconds: 0,
 });
 
-/** Covered from 2026-11-01: the days before have no entries. */
-const usage = (entries: UserUsageEntry[]): UserUsage => ({
-  coverageStart: '2026-11-01',
-  entries,
-});
-
-const setup = (props: { showCpuSlots?: boolean; usage: UserUsage }) =>
-  render(
+const setup = (entries: UserUsageEntry[], mode: ResourceMode = ResourceMode.Both) => {
+  const projection = usageProjection(mode, true);
+  return render(
     <UIProvider theme={DefaultTheme.Light}>
-      <UsageCalendar showCpuSlots={props.showCpuSlots ?? false} usage={props.usage} />
+      <UsageCalendar dayValues={projection.day} weeks={projection.calendar(entries).weeks} />
     </UIProvider>,
   );
+};
 
 const cell = (date: string) => screen.getByLabelText(date);
 
@@ -46,7 +49,7 @@ describe('UsageCalendar', () => {
   });
 
   it('shows 53 weeks of 7 days, Monday first, ending with today', () => {
-    setup({ usage: usage([]) });
+    setup([]);
     const cells = screen.getAllByRole('button');
     // 52 whole weeks and Monday and Tuesday of this one.
     expect(cells).toHaveLength(52 * 7 + 2);
@@ -58,7 +61,7 @@ describe('UsageCalendar', () => {
   it('levels the covered days by active hours and outlines the days without records', () => {
     const hours = [0, 1, 4, 5, 12, 13, 24];
     const entries = hours.map((active, index) => day(`2026-11-0${index + 1}`, active));
-    setup({ usage: usage(entries) });
+    setup(entries);
     expect(cell('2026-11-01')).toHaveClass('level0');
     expect(cell('2026-11-02')).toHaveClass('level1');
     expect(cell('2026-11-03')).toHaveClass('level1');
@@ -70,9 +73,17 @@ describe('UsageCalendar', () => {
     expect(cell('2026-10-31')).not.toHaveClass('level0');
   });
 
+  it("levels the days by the mode's active hours", () => {
+    const { unmount } = setup([day('2026-11-02', 0, 5)]);
+    expect(cell('2026-11-02')).toHaveClass('level2');
+    unmount();
+    setup([day('2026-11-02', 0, 5)], ResourceMode.Gpu);
+    expect(cell('2026-11-02')).toHaveClass('level0');
+  });
+
   it("shows a day's date in its tooltip", async () => {
     const user = userEvent.setup();
-    setup({ usage: usage([day('2026-11-03', 3)]) });
+    setup([day('2026-11-03', 3)]);
     await act(() => user.hover(cell('2026-11-03')));
     expect(await screen.findByRole('tooltip')).toHaveTextContent('2026-11-03');
     expect(screen.queryByTestId('usage-calendar-day')).not.toBeInTheDocument();
@@ -80,34 +91,32 @@ describe('UsageCalendar', () => {
 
   it("shows a day's hours under the grid when clicked", async () => {
     const user = userEvent.setup();
-    setup({ showCpuSlots: true, usage: usage([day('2026-11-03', 3, 1.5)]) });
+    setup([day('2026-11-03', 3, 1.5)]);
     await act(() => user.click(cell('2026-11-03')));
     const line = screen.getByTestId('usage-calendar-day');
-    expect(line).toHaveTextContent(
-      '2026-11-03GPU hours 6.0CPU slot hours 0.5Aux container hours 1.5',
-    );
+    expect(line).toHaveTextContent('2026-11-03 (UTC)GPU hours 6.0Aux container hours 1.5');
   });
 
-  it("shows a day's hours on Enter, Aux as not available where it is unset, and no CPU slots unless shown", async () => {
+  it("shows a day's hours of the mode on Enter", async () => {
     const user = userEvent.setup();
-    setup({ usage: usage([day('2026-11-03', 3)]) });
+    setup([day('2026-11-03', 3)], ResourceMode.Gpu);
     act(() => cell('2026-11-03').focus());
     expect(cell('2026-11-03')).toHaveFocus();
     await act(() => user.keyboard('{Enter}'));
     expect(screen.getByTestId('usage-calendar-day')).toHaveTextContent(
-      '2026-11-03GPU hours 6.0Aux container hours Not available',
+      /^2026-11-03 \(UTC\)GPU hours 6.0$/,
     );
   });
 
   it('shows only the date of a day without records', async () => {
     const user = userEvent.setup();
-    setup({ usage: usage([]) });
+    setup([]);
     await act(() => user.click(cell('2026-10-31')));
-    expect(screen.getByTestId('usage-calendar-day')).toHaveTextContent(/^2026-10-31$/);
+    expect(screen.getByTestId('usage-calendar-day')).toHaveTextContent(/^2026-10-31 \(UTC\)$/);
   });
 
   it('labels the month columns', () => {
-    setup({ usage: usage([]) });
+    setup([]);
     expect(screen.getByText('Dec')).toBeInTheDocument();
     expect(screen.getByText('Nov')).toBeInTheDocument();
   });
