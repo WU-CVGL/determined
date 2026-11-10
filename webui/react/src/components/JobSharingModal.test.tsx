@@ -98,7 +98,7 @@ describe('JobSharingModal', () => {
     expect(within(row('logs')).getByText('Logs')).toBeInTheDocument();
     expect(within(row('config')).getByText('Config')).toBeInTheDocument();
     expect(shown('title')).toBe('Everyone');
-    expect(shown('logs')).toBe('Only me');
+    expect(shown('logs')).toBe('Owner only');
     expect(shown('config')).toBe('Everyone');
     expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
@@ -111,14 +111,14 @@ describe('JobSharingModal', () => {
     await setup();
     await user.click(picker('logs'));
     expect(await openOption('Everyone')).toHaveClass('ant-select-item-option-disabled');
-    expect(await openOption('Only me')).not.toHaveClass('ant-select-item-option-disabled');
+    expect(await openOption('Owner only')).not.toHaveClass('ant-select-item-option-disabled');
   });
 
-  it('disables Logs and Config while Title is Only me', async () => {
+  it('disables Logs and Config while Title is Owner only', async () => {
     vi.mocked(getJobSharing).mockResolvedValue(settings({ title: { allUsers: true } }));
     await setup();
     expect(picker('logs')).toBeEnabled();
-    await choose('title', 'Only me');
+    await choose('title', 'Owner only');
     expect(picker('logs')).toBeDisabled();
     expect(picker('config')).toBeDisabled();
     // Their choices are kept.
@@ -131,7 +131,7 @@ describe('JobSharingModal', () => {
     );
     const onSaved = vi.fn();
     await setup(onSaved);
-    await choose('config', 'Only me');
+    await choose('config', 'Owner only');
     await user.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
     expect(patchJobSharing).toHaveBeenCalledTimes(1);

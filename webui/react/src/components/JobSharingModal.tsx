@@ -19,8 +19,8 @@ import {
 import css from './JobSharingModal.module.scss';
 
 const EVERYONE = 'everyone';
-const ONLY_ME = 'only-me';
-type Choice = typeof EVERYONE | typeof ONLY_ME;
+const OWNER_ONLY = 'owner-only';
+type Choice = typeof EVERYONE | typeof OWNER_ONLY;
 
 const ROW_LABELS: Record<JobContentKind, string> = {
   [V1JobContentKind.TITLE]: 'Title',
@@ -39,7 +39,7 @@ type Choices = Record<JobContentKind, Choice>;
 /** The job's choices: an audience that is not set is a job from before job privacy, public. */
 const choicesOf = ({ sharing }: JobSharingSettings): Choices => {
   const choice = (kind: JobContentKind): Choice =>
-    audienceAllUsers(sharing[FIELDS[kind]]) === false ? ONLY_ME : EVERYONE;
+    audienceAllUsers(sharing[FIELDS[kind]]) === false ? OWNER_ONLY : EVERYONE;
   return {
     [V1JobContentKind.TITLE]: choice(V1JobContentKind.TITLE),
     [V1JobContentKind.LOGS]: choice(V1JobContentKind.LOGS),
@@ -103,7 +103,7 @@ const JobSharingModalComponent: React.FC<Props> = ({ jobId, onClose, onSaved }: 
     onClose();
   }, [onClose, onSaved]);
 
-  const titleOnlyMe = choices?.[V1JobContentKind.TITLE] === ONLY_ME;
+  const titleOwnerOnly = choices?.[V1JobContentKind.TITLE] === OWNER_ONLY;
 
   return (
     <Modal
@@ -126,7 +126,7 @@ const JobSharingModalComponent: React.FC<Props> = ({ jobId, onClose, onSaved }: 
             <div className={css.row} data-testid={`job-sharing-${FIELDS[kind]}`} key={kind}>
               <span>{ROW_LABELS[kind]}</span>
               <Select
-                disabled={kind !== V1JobContentKind.TITLE && titleOnlyMe}
+                disabled={kind !== V1JobContentKind.TITLE && titleOwnerOnly}
                 searchable={false}
                 value={choices[kind]}
                 width={140}
@@ -136,7 +136,7 @@ const JobSharingModalComponent: React.FC<Props> = ({ jobId, onClose, onSaved }: 
                 <Option disabled={!sharingAllowed(settings.rules, kind)} value={EVERYONE}>
                   Everyone
                 </Option>
-                <Option value={ONLY_ME}>Only me</Option>
+                <Option value={OWNER_ONLY}>Owner only</Option>
               </Select>
             </div>
           ))}
