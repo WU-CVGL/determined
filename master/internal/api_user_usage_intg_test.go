@@ -552,7 +552,7 @@ func TestUserUsageCoverageSkipsUnmetered(t *testing.T) {
 			released: "2021-01-01 11:00", start: "2021-01-01 10:00", end: "2021-01-01 11:00", state: terminated,
 		},
 		{
-			pool: "gpu", slots: 1, kind: gpu, queuedEnds: []string{"2021-01-02 10:00"},
+			pool: "gpu", slots: 1, kind: gpu, queuedEnds: []string{"2021-01-02 09:00"},
 			start: "2021-01-02 10:00", end: "2021-01-02 10:00", state: terminated,
 		},
 		{
