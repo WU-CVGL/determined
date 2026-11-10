@@ -50,3 +50,27 @@ allocation data for analysis:
    format yyyy-mm-ddThh:mm:ssZ.
 -  ``det resources aggregated <start date> <end date>``: Get aggregated allocation information.
    Dates are in the format yyyy-mm-dd.
+
+************************************
+ Aggregates From Before the Rebuild
+************************************
+
+The aggregates are derived from the allocation records. A master that changes how they are computed
+rebuilds them from those records and keeps the earlier ones in the database table
+``resource_aggregates_legacy``, with the columns of ``resource_aggregates``: ``date``,
+``aggregation_type`` (``total``, ``username``, ``experiment_label``, ``resource_pool``, and
+``queued`` for the queued time), ``aggregation_key`` and ``seconds``, which are slot-seconds.
+Neither the WebUI nor the endpoints read that table. It can be queried or exported from the
+database, for example the slot-hours by user and day:
+
+.. code:: sql
+
+   COPY (
+     SELECT date, aggregation_key AS username, seconds / 3600 AS slot_hours
+     FROM resource_aggregates_legacy
+     WHERE aggregation_type = 'username'
+     ORDER BY date, aggregation_key
+   ) TO STDOUT WITH CSV HEADER;
+
+It still holds the usage of tasks whose records were deleted since, which a rebuild cannot
+recompute.
