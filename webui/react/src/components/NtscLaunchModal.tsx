@@ -12,7 +12,7 @@ import Spinner from 'hew/Spinner';
 import { Loadable, Loaded, NotLoaded } from 'hew/utils/loadable';
 import { number, string, undefined as undefinedType, union } from 'io-ts';
 import yaml from 'js-yaml';
-import { isEqual, isPlainObject } from 'lodash';
+import { has, isEqual, isPlainObject, union as unionOf } from 'lodash';
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import Link from 'components/Link';
@@ -29,12 +29,13 @@ import { CommandResponse, CommandTask, RawJson, ResourcePool, Workspace } from '
 import { isUsablePool } from 'utils/cluster';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import {
+  applyConfigEdits,
   configFromForm,
   DEFAULT_SOURCE_MODE,
   formFieldsFromConfig,
   isSourceId,
   NtscLaunchOptions,
-  sanitizeConfig,
+  relaunchConfig,
   SHELL_SERVICE_LABELS,
   SHELL_SERVICES,
   ShellService,
@@ -46,7 +47,7 @@ import {
   TensorBoardSourceMode,
 } from 'utils/ntscConfig';
 import { useObservable } from 'utils/observable';
-import { launchShell, PREVIEW_ERROR, previewShell } from 'utils/shell';
+import { launchShell, PREVIEW_ERROR, previewShell, shellRequest } from 'utils/shell';
 
 const DEFAULT_SLOT_COUNT = 1;
 const BASE_FORM_ID = 'ntsc-launch-form';
@@ -131,6 +132,10 @@ const checkedServices = (
 
 const serviceChecks = (choices: ShellServiceChoices = {}): Record<string, boolean> =>
   Object.fromEntries(SHELL_SERVICES.map((name) => [name, choices[name] ?? false]));
+
+/** A shell without ssh runs the tensorboard service: its box is locked. */
+const serviceLocked = (name: ShellService, sshOff: boolean): boolean =>
+  sshOff && name === 'tensorboard';
 
 /** The services that a config has an entry for: the ones the master offers for it. */
 const offeredServices = (choices: ShellServiceChoices = {}): ShellService[] =>
@@ -220,6 +225,8 @@ const CodeEditor = React.lazy(() => import('hew/CodeEditor'));
  * Start from a template: the template name is sent with the simple fields.
  * Start from a config (a recent task or this browser's history): the config
  * is the base and the simple fields are applied on top of it; no template is
+ * sent. An edited full config's edits are applied to the request it was
+ * previewed with, which becomes the base of any start-from; a template is still
  * sent. A recent task's config is fetched when it is picked; Launch and the
  * full config stay disabled until it arrives, and until the master's preview
  * of the start-from's services answers.
@@ -269,6 +276,8 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   // Whether the start-from turns ssh off: the shell then runs with 0 slots and the tensorboard
   // service reading experiments or trials.
   const [sshOff, setSshOff] = useState(false);
+  // Whether the start-from itself turns ssh off: a template's, which the request does not carry.
+  const startSshOff = useRef(false);
 
   /**
    * The values to keep for the next launch. A start-from without ssh keeps the previous slots and
@@ -301,7 +310,9 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
             config: configFromForm(baseConfig, {
               ...fields,
               services: checkedServices(fields, offered.current),
+              slots: sshOff ? 0 : fields.slots,
             }),
+            template: templateNameFromStartFrom(fields.source),
             workspaceId: fields.workspaceId,
           }
         : {
@@ -324,8 +335,10 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   // tensorboard service's data source follows the same rule as its checkbox. Launch and the full
   // config wait for a successful preview of the current start-from: a refused one shows its
   // message with Retry, keeps them disabled, and is sent again when the pool or the workspace
-  // changes. Showing the simple form again after the full config previews nothing, so that the
-  // checkboxes keep their changes.
+  // changes. Switching between the simple form and the full config previews nothing, so that the
+  // form keeps its changes: the watched fields read undefined while the simple form is replaced,
+  // which is no start-from change. The edits of an edited full config are applied to the
+  // start-from's base when the simple form shows again, without a preview unless they turn ssh on.
   const [simpleFormShown, setSimpleFormShown] = useState(false);
   const source = Form.useWatch('source', form);
   const pool = Form.useWatch('pool', form);
@@ -344,7 +357,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     servicesResult.source === source &&
     servicesResult.baseConfig === baseConfig;
   useEffect(() => {
-    if (!simpleFormShown || startFromLoading) return;
+    if (showFullConfig || !simpleFormShown || startFromLoading) return;
     const last = servicesPreview.current;
     const sameStart = last.seq !== 0 && last.source === source && last.baseConfig === baseConfig;
     if (last.status !== 'error' && sameStart) return;
@@ -401,6 +414,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     pool,
     servicesRetry,
     setServicesPreview,
+    showFullConfig,
     simpleFormShown,
     simpleOptions,
     source,
@@ -410,25 +424,106 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
 
   const handleServicesRetry = useCallback(() => setServicesRetry((count) => count + 1), []);
 
-  // Previewed each time the full config opens, numbered so that a late answer is dropped.
+  // Previewed each time the full config opens, numbered so that a late answer is dropped, with the
+  // request config it was previewed for: the config as the editor first shows it tells the edits.
   const configSeq = useRef(0);
+  const previewed = useRef<{ config: RawJson; request: RawJson }>();
   const fetchConfig = useCallback(async () => {
     const seq = ++configSeq.current;
+    previewed.current = undefined;
     setConfig(NotLoaded);
     setConfigError(undefined);
 
     const fields: LaunchFormValues = form.getFieldsValue(true);
+    const options = simpleOptions(fields);
+    const request = shellRequest(options).config ?? {};
     try {
-      const newConfig = await previewShell(simpleOptions(fields));
-      if (seq === configSeq.current) setConfig(Loaded(yaml.dump(newConfig)));
+      const newConfig = await previewShell(options);
+      if (seq !== configSeq.current) return;
+      const text = yaml.dump(newConfig);
+      previewed.current = { config: yaml.load(text) as RawJson, request };
+      setConfig(Loaded(text));
     } catch (e) {
       if (seq === configSeq.current) setConfigError(e instanceof Error ? e.message : PREVIEW_ERROR);
     }
   }, [form, simpleOptions]);
 
+  /**
+   * Applies the edits of a full config whose YAML was edited, the difference to the previewed
+   * config, to the request it was previewed for, which becomes the start-from's base; sets the
+   * simple fields that the edits change and confirms its services, except where the edits turn
+   * ssh on: the services preview then previews the draft. The values the master filled
+   * in and the user left as they were are not in the edits. A YAML that does not parse to a config
+   * changes nothing.
+   */
+  const applyEditedConfig = useCallback(() => {
+    const shown = previewed.current;
+    let edited: unknown;
+    try {
+      edited = yaml.load(Loadable.isLoaded(config) ? config.data : '');
+    } catch {
+      return;
+    }
+    if (!shown || !isPlainObject(edited)) return;
+    const base = applyConfigEdits(shown.request, edited as RawJson, shown.config);
+    if (isEqual(base, shown.request)) return;
+    // Only the simple fields that the edits change are set; the others keep the form's values,
+    // such as the other source mode's fields. A description in the base is the user's.
+    const read = (config: RawJson) => ({
+      ...formFieldsFromConfig(config),
+      name: typeof config.description === 'string' ? config.description : '',
+    });
+    const before = read(shown.request);
+    const after = read(base);
+    // Without an ssh entry in the base, the start-from's ssh-off applies.
+    const baseSshOff = has(base, ['services', 'ssh']) ? sshDisabled(base) : startSshOff.current;
+    setBaseConfig(base);
+    setSshOff(baseSshOff);
+    // A service whose entry is removed stays offered, so that its unchecked box turns it off.
+    offered.current = unionOf(offered.current, offeredServices(after.services));
+    if (after.name !== before.name) form.setFieldValue('name', after.name);
+    if (after.pool !== before.pool) form.setFieldValue('pool', after.pool);
+    if (baseSshOff) form.setFieldValue('slots', 0);
+    else if (after.slots !== before.slots) form.setFieldValue('slots', after.slots);
+    // A locked box is checked.
+    SHELL_SERVICES.forEach((name) => {
+      const runs = after.services?.[name];
+      if (serviceLocked(name, baseSshOff)) form.setFieldValue(['services', name], true);
+      else if (runs !== before.services?.[name]) {
+        form.setFieldValue(['services', name], runs ?? false);
+      }
+    });
+    // Replaced, not merged: the other mode's fields do not carry over. Without a tensorboard entry
+    // the form's source stays.
+    const hasTensorBoard = has(base, ['services', 'tensorboard']);
+    if (hasTensorBoard && !isEqual(after.dataSource, before.dataSource)) {
+      form.setFieldValue('dataSource', after.dataSource);
+    }
+    // The services that ssh turned on adds, such as the master's default editors, are known only
+    // from a preview: the draft is previewed when the simple form shows.
+    if (sshOff && !baseSshOff) return;
+    setServicesPreview({
+      baseConfig: base,
+      sent: form.getFieldValue('services'),
+      sentDataSource: form.getFieldValue('dataSource'),
+      seq: servicesPreview.current.seq + 1,
+      source: form.getFieldValue('source'),
+      status: 'success',
+    });
+  }, [config, form, setServicesPreview, sshOff]);
+
   const handleSecondary = useCallback(async () => {
     if (showFullConfig) {
+      // A YAML that is no config shows its error and keeps the full config.
+      if (Loadable.isLoaded(config)) {
+        try {
+          await fullConfigForm.validateFields(['config']);
+        } catch {
+          return;
+        }
+      }
       configSeq.current++;
+      applyEditedConfig();
       setFullConfigFormInvalid(false);
     } else if (servicesConfirmed) {
       // The full config is the simple form's: a checked service's required field comes first.
@@ -442,7 +537,15 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       fetchConfig();
     } else return;
     setShowFullConfig((show) => !show);
-  }, [fetchConfig, form, servicesConfirmed, showFullConfig]);
+  }, [
+    applyEditedConfig,
+    config,
+    fetchConfig,
+    form,
+    fullConfigForm,
+    servicesConfirmed,
+    showFullConfig,
+  ]);
 
   const launch = useCallback(
     async (options: NtscLaunchOptions & { config?: RawJson }) => {
@@ -494,11 +597,12 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   const handleStartFrom = useCallback(
     (start: StartFrom) => {
       if (start.kind === 'config') {
-        const base = sanitizeConfig(start.config);
+        const base = relaunchConfig(start.config);
         const fields = formFieldsFromConfig(base);
         setBaseConfig(base);
         setRedactedEnv(start.redactedEnv);
         setSshOff(sshDisabled(base));
+        startSshOff.current = false;
         offered.current = offeredServices(fields.services);
         form.setFieldsValue({
           name: fields.name,
@@ -518,6 +622,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       setRedactedEnv([]);
       const nextSshOff = start.kind === 'template' && sshDisabled(start.template.config);
       setSshOff(nextSshOff);
+      startSshOff.current = nextSshOff;
       // The 0 slots of a start-from without ssh do not carry over to one with ssh.
       if (sshOff && !nextSshOff) form.setFieldValue('slots', defaults.slots ?? DEFAULT_SLOT_COUNT);
       if (start.kind === 'template') {
@@ -776,7 +881,10 @@ const FullConfig: React.FC<FullConfigProps> = ({
             {
               validator: (_rule, value) => {
                 try {
-                  yaml.load(value);
+                  // An empty YAML is left to the required rule.
+                  if (value && !isPlainObject(yaml.load(value))) {
+                    return Promise.reject(new Error(configRequired));
+                  }
                   return Promise.resolve();
                 } catch (err: unknown) {
                   return Promise.reject(
@@ -977,7 +1085,7 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
         <Row>
           {SHELL_SERVICES.map((name) => (
             <Form.Item key={name} name={['services', name]} noStyle valuePropName="checked">
-              <Checkbox disabled={sshOff && name === 'tensorboard'}>
+              <Checkbox disabled={serviceLocked(name, sshOff)}>
                 {SHELL_SERVICE_LABELS[name]}
               </Checkbox>
             </Form.Item>
