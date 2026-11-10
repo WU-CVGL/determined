@@ -92,7 +92,9 @@ covered and stay visible to every user who may view the job.
 ## Changes
 
 A change applies to the next request. An open log stream ends at its next
-permission check, within five minutes.
+permission check, within five minutes. A webhook event is checked and trimmed
+when it is queued: an event already queued is delivered, also on retries, after
+sharing is turned off.
 
 ## Not covered
 
