@@ -11,7 +11,7 @@
 // treated as "no record"), and an empty pool name (Internal). The check never picks another pool.
 //
 // Invariant: CanUseResourcePool, directly or through a Memo, is called only from the admission
-// check sites (command, shell and TensorBoard launch and the shell preview; generic task create and
+// check sites (command and shell launch and the shell preview; generic task create and
 // unpause; experiment create, continue and activate; job-queue pool moves) and when a workspace
 // default pool or the pool of an experiment config policy is set. UsablePools is called only by the
 // resource pool list (GetResourcePools). Nothing at or below task.DefaultService.StartAllocation or

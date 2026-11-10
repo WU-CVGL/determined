@@ -546,6 +546,7 @@ def test_tensorboard_start_launches_viewing_session(
     browser_open.assert_called_once_with(url)
     out = capsys.readouterr().out
     assert f"Launched tensorboard (id: {task_id}, name: TensorBoard (x))." in out
+    assert f"tensorboard (id: {task_id}) is ready." in out
     assert f"Tensorboard is running at: {url}" in out
 
     with mock.patch("webbrowser.open") as browser_open:
@@ -564,68 +565,69 @@ def test_tensorboard_start_launches_viewing_session(
         cli.main(["tensorboard", "start", "-h"])
     assert e.value.code == 0
     assert "100 trials" not in capsys.readouterr().out
+    assert_no_tensorboard_api(requests_mock)
 
 
-def tensorboard_ids(prefix: str = "") -> Tuple[str, str, str, str]:
+def tensorboard_ids(prefix: str = "") -> Tuple[str, str, str]:
     """
-    Returns the IDs of a TensorBoard task, a viewing session, a shell with an attached TensorBoard
-    and a shell with slots, each starting with prefix.
+    Returns the IDs of a viewing session, a shell with an attached TensorBoard and a shell with
+    slots, each starting with prefix.
     """
-    return tuple(prefix + str(uuid.uuid4())[len(prefix) :] for _ in range(4))  # type: ignore
+    return tuple(prefix + str(uuid.uuid4())[len(prefix) :] for _ in range(3))  # type: ignore
+
+
+def tensorboard_shell(task_id: str, description: str, **kwargs: Any) -> Dict[str, Any]:
+    return {
+        "id": task_id,
+        "description": description,
+        "jobId": "j",
+        "resourcePool": "default",
+        "startTime": "2026-01-01T00:00:00Z",
+        "state": "STATE_RUNNING",
+        "username": "fakeuser",
+        "workspaceId": 1,
+        "exitStatus": "",
+        "experimentIds": [1],
+        "trialIds": [],
+        **kwargs,
+    }
+
+
+def mock_primary_service(requests_mock: requests_mock.Mocker, task_id: str, primary: str) -> None:
+    requests_mock.get(
+        f"/api/v1/tasks/{task_id}/services",
+        status_code=requests.codes.ok,
+        json={
+            "taskId": task_id,
+            "userId": 1,
+            "workspaceId": 1,
+            "primary": primary,
+            "services": [],
+        },
+    )
 
 
 def mock_tensorboards(
     requests_mock: requests_mock.Mocker, prefix: str = ""
-) -> Tuple[str, str, str, str]:
+) -> Tuple[str, str, str]:
     """
-    Mocks a TensorBoard task, a viewing session, a shell with an attached TensorBoard and a shell
-    with slots, the last without services, which must not be asked for.
+    Mocks a viewing session, a shell with an attached TensorBoard and a shell with slots, the last
+    without services, which must not be asked for.
     """
-    tsb_id, session_id, dev_id, gpu_id = tensorboard_ids(prefix)
-
-    def item(task_id: str, description: str, **kwargs: Any) -> Dict[str, Any]:
-        return {
-            "id": task_id,
-            "description": description,
-            "jobId": "j",
-            "resourcePool": "default",
-            "startTime": "2026-01-01T00:00:00Z",
-            "state": "STATE_RUNNING",
-            "username": "fakeuser",
-            "workspaceId": 1,
-            "exitStatus": "",
-            "experimentIds": [1],
-            "trialIds": [],
-            **kwargs,
-        }
-
-    tsb = item(tsb_id, "TensorBoard (old)", startTime="2026-01-02T00:00:00Z")
-    requests_mock.get(
-        "/api/v1/tensorboards", status_code=requests.codes.ok, json={"tensorboards": [tsb]}
-    )
+    session_id, dev_id, gpu_id = tensorboard_ids(prefix)
     requests_mock.get(
         "/api/v1/shells",
         status_code=requests.codes.ok,
         json={
             "shells": [
-                item(session_id, "TensorBoard (new)", slots=0),
-                item(dev_id, "Shell (dev)", slots=0),
-                item(gpu_id, "Shell (gpu)", slots=1),
+                tensorboard_shell(session_id, "TensorBoard (new)", slots=0),
+                tensorboard_shell(dev_id, "Shell (dev)", slots=0),
+                tensorboard_shell(gpu_id, "Shell (gpu)", slots=1),
             ]
         },
     )
-    for task_id, primary in [(tsb_id, ""), (session_id, "tensorboard"), (dev_id, "ssh")]:
-        requests_mock.get(
-            f"/api/v1/tasks/{task_id}/services",
-            status_code=requests.codes.ok,
-            json={
-                "taskId": task_id,
-                "userId": 1,
-                "workspaceId": 1,
-                "primary": primary,
-                "services": [],
-            },
-        )
+    for task_id, primary in [(session_id, "tensorboard"), (dev_id, "ssh")]:
+        mock_primary_service(requests_mock, task_id, primary)
     workspace = {
         "archived": False,
         "errorMessage": "",
@@ -644,64 +646,58 @@ def mock_tensorboards(
         status_code=requests.codes.ok,
         json={"workspaces": [workspace], "pagination": {}},
     )
-    return tsb_id, session_id, dev_id, gpu_id
+    return session_id, dev_id, gpu_id
+
+
+def assert_no_tensorboard_api(requests_mock: requests_mock.Mocker) -> None:
+    paths = [r.path for r in requests_mock.request_history]
+    assert not [p for p in paths if p.startswith("/api/v1/tensorboards")], paths
 
 
 def test_tensorboard_list_sessions(
     requests_mock: requests_mock.Mocker, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # The list holds the TensorBoard tasks and the viewing sessions, not the other shells.
+    # The list holds the viewing sessions, not the other shells.
     mock_cli_login(requests_mock)
-    tsb_id, session_id, dev_id, gpu_id = mock_tensorboards(requests_mock)
+    session_id, dev_id, gpu_id = mock_tensorboards(requests_mock)
 
     cli.main(["tensorboard", "list", "-q"])
-    assert capsys.readouterr().out.split() == [tsb_id, session_id]
+    assert capsys.readouterr().out.split() == [session_id]
 
     cli.main(["tensorboard", "list", "--all"])
     lines = capsys.readouterr().out.splitlines()
     rows = [[c.strip() for c in line.split("|")] for line in lines[2:]]
-    assert [r[:4] for r in rows] == [
-        [session_id, "fakeuser", "TensorBoard (new)", "RUNNING"],
-        [tsb_id, "fakeuser", "TensorBoard (old)", "RUNNING"],
-    ]
+    assert [r[:4] for r in rows] == [[session_id, "fakeuser", "TensorBoard (new)", "RUNNING"]]
     assert rows[0][4] == "[1]"
-    # Both are listed for the user, or for all users with --all.
-    listed = [
-        "users" in r.qs
-        for r in requests_mock.request_history
-        if r.path in ("/api/v1/tensorboards", "/api/v1/shells")
-    ]
-    assert listed == [True, True, False, False]
+    # They are listed for the user, or for all users with --all.
+    listed = ["users" in r.qs for r in requests_mock.request_history if r.path == "/api/v1/shells"]
+    assert listed == [True, False]
 
-    cli.main(["tensorboard", "list", "--json", "--order-by", "desc"])
+    cli.main(["tensorboard", "list", "--json"])
     out = json.loads(capsys.readouterr().out)
-    assert [x["id"] for x in out] == [tsb_id, session_id]
-    assert out[1]["slots"] == 0
+    assert [x["id"] for x in out] == [session_id]
+    assert out[0]["slots"] == 0
     assert dev_id not in str(out) and gpu_id not in str(out)
+    assert_no_tensorboard_api(requests_mock)
 
 
 def test_tensorboard_kill_sessions(
     requests_mock: requests_mock.Mocker, capsys: pytest.CaptureFixture[str]
 ) -> None:
     mock_cli_login(requests_mock)
-    tsb_id, session_id, dev_id, gpu_id = mock_tensorboards(requests_mock)
+    session_id, dev_id, gpu_id = mock_tensorboards(requests_mock)
     kills = {
         task_id: requests_mock.post(
-            f"/api/v1/{api_path}/{task_id}/kill", status_code=requests.codes.ok, json={}
+            f"/api/v1/shells/{task_id}/kill", status_code=requests.codes.ok, json={}
         )
-        for task_id, api_path in [
-            (tsb_id, "tensorboards"),
-            (session_id, "shells"),
-            (dev_id, "shells"),
-            (gpu_id, "shells"),
-        ]
+        for task_id in [session_id, dev_id, gpu_id]
     }
 
-    # A viewing session is killed as a shell, a TensorBoard task as before.
-    cli.main(["tensorboard", "kill", session_id, tsb_id[:13]])
-    assert kills[session_id].call_count == 1 and kills[tsb_id].call_count == 1
-    out = capsys.readouterr().out
-    assert f"Killed tensorboard {session_id}" in out and f"Killed tensorboard {tsb_id}" in out
+    # A viewing session is killed as a shell.
+    cli.main(["tensorboard", "kill", session_id])
+    cli.main(["tensorboard", "kill", session_id[:13]])
+    assert kills[session_id].call_count == 2
+    assert f"Killed tensorboard {session_id}" in capsys.readouterr().out
 
     # Another shell is never killed, with or without --force, nor anything named with it.
     for args in [[dev_id], [session_id, dev_id], [gpu_id[:13], "-f"], [dev_id[:13]]]:
@@ -711,46 +707,63 @@ def test_tensorboard_kill_sessions(
         shell_id = gpu_id if args[0] == gpu_id[:13] else dev_id
         expected = f"{shell_id} is a shell, not a TensorBoard; use det shell kill"
         assert expected in capsys.readouterr().err
-    assert kills[session_id].call_count == 1
+    assert kills[session_id].call_count == 2
     assert kills[dev_id].call_count == 0 and kills[gpu_id].call_count == 0
 
-    # A full ID that the master does not know goes to the TensorBoard API, which answers.
-    unknown = str(uuid.uuid4())
+    # A full ID that names no shell, such as a command's or one the master does not know, is not
+    # found, and nothing is killed.
+    unknown, command_id = str(uuid.uuid4()), str(uuid.uuid4())
     requests_mock.get(f"/api/v1/tasks/{unknown}/services", status_code=404, json={})
-    tsb_kill = requests_mock.post(f"/api/v1/tensorboards/{unknown}/kill", status_code=404, json={})
-    shell_kill = requests_mock.post(f"/api/v1/shells/{unknown}/kill", status_code=404, json={})
-    with pytest.raises(SystemExit) as e:
-        cli.main(["tensorboard", "kill", unknown])
-    assert e.value.code == 1
-    assert tsb_kill.call_count == 1 and shell_kill.call_count == 0
+    mock_primary_service(requests_mock, command_id, "")
+    for task_id in [unknown, command_id]:
+        with pytest.raises(SystemExit) as e:
+            cli.main(["tensorboard", "kill", session_id, task_id])
+        assert e.value.code == 1
+        assert f"tensorboard {task_id} not found" in capsys.readouterr().err
+    assert kills[session_id].call_count == 2
+    assert_no_tensorboard_api(requests_mock)
 
 
 def test_tensorboard_session_prefixes(
     requests_mock: requests_mock.Mocker, capsys: pytest.CaptureFixture[str]
 ) -> None:
     mock_cli_login(requests_mock)
-    tsb_id, session_id, dev_id, gpu_id = mock_tensorboards(requests_mock, prefix="abc")
+    session_id, dev_id, gpu_id = mock_tensorboards(requests_mock, prefix="abc")
     kill = requests_mock.post(f"/api/v1/shells/{session_id}/kill", json={})
 
-    # A prefix that names a TensorBoard task and a viewing session names both.
-    with pytest.raises(SystemExit) as e:
-        cli.main(["tensorboard", "kill", "abc"])
-    assert e.value.code == 1
-    assert f"partial UUID 'abc' not unique: {tsb_id}, {session_id}" in capsys.readouterr().err
+    # A prefix that names a viewing session and other shells names the session.
+    cli.main(["tensorboard", "kill", "abc"])
+    assert kill.call_count == 1
     with pytest.raises(SystemExit):
         cli.main(["tensorboard", "kill", "abd"])
     assert "partial UUID 'abd' not found" in capsys.readouterr().err
-    assert kill.call_count == 0
 
-    cli.main(["tensorboard", "kill", session_id[:13]])
+    # A prefix that names two viewing sessions names both.
+    other_id = "abc" + str(uuid.uuid4())[3:]
+    requests_mock.get(
+        "/api/v1/shells",
+        status_code=requests.codes.ok,
+        json={
+            "shells": [
+                tensorboard_shell(session_id, "TensorBoard (a)", slots=0),
+                tensorboard_shell(other_id, "TensorBoard (b)", slots=0),
+            ]
+        },
+    )
+    mock_primary_service(requests_mock, other_id, "tensorboard")
+    with pytest.raises(SystemExit) as e:
+        cli.main(["tensorboard", "kill", "abc"])
+    assert e.value.code == 1
+    assert f"partial UUID 'abc' not unique: {session_id}, {other_id}" in capsys.readouterr().err
     assert kill.call_count == 1
+    assert_no_tensorboard_api(requests_mock)
 
 
 def test_tensorboard_session_commands(
     requests_mock: requests_mock.Mocker, capsys: pytest.CaptureFixture[str]
 ) -> None:
     mock_cli_login(requests_mock)
-    tsb_id, session_id, dev_id, _ = mock_tensorboards(requests_mock)
+    session_id, dev_id, _ = mock_tensorboards(requests_mock)
     requests_mock.get(
         f"/api/v1/tasks/{session_id}",
         status_code=requests.codes.ok,
@@ -771,53 +784,51 @@ def test_tensorboard_session_commands(
     browser_open.assert_called_once_with(url)
     assert capsys.readouterr().out == f"{url}\n"
 
-    # config prints the shell's config, and the TensorBoard task's as before.
+    # config prints the shell's config.
     session_config = {"services": {"ssh": {"enabled": False}, "tensorboard": {}}}
     requests_mock.get(
         f"/api/v1/shells/{session_id}",
         status_code=requests.codes.ok,
         json={"config": session_config},
     )
-    requests_mock.get(
-        f"/api/v1/tensorboards/{tsb_id}",
-        status_code=requests.codes.ok,
-        json={"config": {"description": "old"}},
-    )
     cli.main(["tensorboard", "config", session_id])
     assert capsys.readouterr().out == render.format_object_as_yaml(session_config) + "\n"
-    cli.main(["tensorboard", "config", tsb_id])
-    assert capsys.readouterr().out == render.format_object_as_yaml({"description": "old"}) + "\n"
 
     # logs are the task's logs.
     with mock.patch("determined.common.api.task_logs", return_value=[]) as task_logs:
         cli.main(["tensorboard", "logs", session_id[:13], "-f"])
-        cli.main(["tensorboard", "logs", tsb_id])
-    assert [c.args[1] for c in task_logs.call_args_list] == [session_id, tsb_id]
+    assert [c.args[1] for c in task_logs.call_args_list] == [session_id]
     assert task_logs.call_args_list[0].kwargs["follow"] is True
 
-    # set priority sets the shell's priority, and the TensorBoard task's as before.
+    # set priority sets the shell's priority.
     session_priority = requests_mock.post(f"/api/v1/shells/{session_id}/set_priority", json={})
-    tsb_priority = requests_mock.post(f"/api/v1/tensorboards/{tsb_id}/set_priority", json={})
     cli.main(["tensorboard", "set", "priority", session_id, "7"])
-    cli.main(["tensorboard", "set", "priority", tsb_id, "8"])
     assert session_priority.last_request.json() == {"priority": 7}
-    assert tsb_priority.last_request.json() == {"priority": 8}
     capsys.readouterr()
 
-    # A shell with an attached TensorBoard is refused by each of them.
-    for args, use in [
-        (["open", dev_id], "open"),
-        (["config", dev_id], "config"),
-        (["logs", dev_id], "logs"),
-        (["set", "priority", dev_id, "1"], "set priority"),
+    # A shell with an attached TensorBoard is refused by each of them, and a full ID that names no
+    # shell is not found.
+    unknown = str(uuid.uuid4())
+    requests_mock.get(f"/api/v1/tasks/{unknown}/services", status_code=404, json={})
+    for task_id, expected in [
+        (dev_id, f"{dev_id} is a shell, not a TensorBoard; use det shell "),
+        (unknown, f"tensorboard {unknown} not found"),
     ]:
-        with mock.patch("webbrowser.open") as browser_open:
-            with pytest.raises(SystemExit) as e:
-                cli.main(["tensorboard", *args])
-        assert e.value.code == 1
-        browser_open.assert_not_called()
-        expected = f"{dev_id} is a shell, not a TensorBoard; use det shell {use}"
-        assert expected in capsys.readouterr().err
+        for args, use in [
+            (["open", task_id], "open"),
+            (["config", task_id], "config"),
+            (["logs", task_id], "logs"),
+            (["set", "priority", task_id, "1"], "set priority"),
+        ]:
+            with mock.patch("webbrowser.open") as browser_open:
+                with pytest.raises(SystemExit) as e:
+                    cli.main(["tensorboard", *args])
+            assert e.value.code == 1
+            browser_open.assert_not_called()
+            err = capsys.readouterr().err
+            assert (expected + use if task_id == dev_id else expected) in err
+    assert session_priority.call_count == 1
+    assert_no_tensorboard_api(requests_mock)
 
 
 def test_create_reject_large_model_def(

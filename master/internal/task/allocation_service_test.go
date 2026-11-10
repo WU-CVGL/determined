@@ -129,17 +129,6 @@ func TestSetReady(t *testing.T) {
 	require.True(t, *dbState.IsReady)
 }
 
-func TestSetWaiting(t *testing.T) {
-	closeDB, _, id, _, exitFuture := requireStarted(t)
-	defer closeDB()
-	defer requireKilled(t, id, exitFuture)
-
-	err := DefaultService.SetWaiting(context.TODO(), id)
-	require.NoError(t, err)
-
-	requireState(t, id, model.AllocationStateWaiting)
-}
-
 func TestSetProxyAddress(t *testing.T) {
 	cases := []struct {
 		name          string

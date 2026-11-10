@@ -58,7 +58,6 @@ func TestNTSCCarriesGPUTopologyPreference(t *testing.T) {
 	}{
 		{model.TaskTypeCommand, model.JobTypeCommand},
 		{model.TaskTypeShell, model.JobTypeShell},
-		{model.TaskTypeTensorboard, model.JobTypeTensorboard},
 	} {
 		for _, pref := range []*expconf.GPUTopologyPreference{
 			nil, ptrs.Ptr(expconf.GPUTopologySoft), ptrs.Ptr(expconf.GPUTopologyStrong),

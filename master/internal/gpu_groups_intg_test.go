@@ -154,16 +154,14 @@ resources:
 		ResourcePool: checks[len(checks)-1].ResourcePool, Slots: 2, GPUGroups: wantGroups,
 	}, checks[len(checks)-1])
 
-	// Commands, shells, their previews and TensorBoards, from their config or a template.
+	// Commands, shells and their previews, from their config or a template.
 	userCtx := ntscUserCtx(t, curUser)
 	ntscConfig := func(slots int, groups string) *structpb.Struct {
 		var list []any
 		require.NoError(t, yaml.Unmarshal([]byte(groups), &list))
-		resources := map[string]any{"gpu_groups": list}
-		if slots >= 0 {
-			resources["slots"] = slots
-		}
-		config, err := structpb.NewStruct(map[string]any{"resources": resources})
+		config, err := structpb.NewStruct(map[string]any{
+			"resources": map[string]any{"gpu_groups": list, "slots": slots},
+		})
 		require.NoError(t, err)
 		return config
 	}
@@ -175,10 +173,6 @@ resources:
 	requireInvalidArgument(t, err, "resources.gpu_groups counts must add up to resources.slots (1)")
 	_, err = api.LaunchShell(userCtx, &apiv1.LaunchShellRequest{Config: ntscConfig(4, gpuGroupsConfig(ada6000))})
 	requireInvalidArgument(t, err, "resources.gpu_groups counts must add up to resources.slots (4)")
-	_, err = api.LaunchTensorboard(userCtx, &apiv1.LaunchTensorboardRequest{
-		ExperimentIds: []int32{1}, Config: ntscConfig(-1, gpuGroupsConfig(ada6000)),
-	})
-	requireInvalidArgument(t, err, "resources.gpu_groups counts must add up to resources.slots (0)")
 
 	templateName := "groups-" + uuid.NewString()
 	_, err = db.Bun().NewRaw("INSERT INTO templates (name, config, workspace_id) VALUES (?, ?::jsonb, 1)",

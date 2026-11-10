@@ -314,7 +314,7 @@ added as a pod label. Names longer than 63 characters will be truncated.
 | determined.ai/task_id       |                                                   |
 +-----------------------------+---------------------------------------------------+
 | determined.ai/task_type     | Determined task type, e.g. ``TRIAL``, ``SHELL``,  |
-|                             | ``TENSORBOARD``                                   |
+|                             | ``COMMAND``                                       |
 +-----------------------------+---------------------------------------------------+
 | determined.ai/trial_id      | ``task_type=TRIAL`` only                          |
 +-----------------------------+---------------------------------------------------+

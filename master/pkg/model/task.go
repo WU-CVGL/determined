@@ -42,8 +42,6 @@ const (
 	TaskTypeShell TaskType = "SHELL"
 	// TaskTypeCommand is the "COMMAND" job type for the enum public.job_type in Postgres.
 	TaskTypeCommand TaskType = "COMMAND"
-	// TaskTypeTensorboard is the "TENSORBOARD" task type for the enum.task_type in Postgres.
-	TaskTypeTensorboard TaskType = "TENSORBOARD"
 	// TaskTypeCheckpointGC is the "CHECKPOINT_GC" job type for the enum public.job_type in Postgres.
 	TaskTypeCheckpointGC TaskType = "CHECKPOINT_GC"
 	// TaskTypeGeneric is the "GENERIC" job type for the enum public.job_type in Postgres.
@@ -228,8 +226,6 @@ type ResourceAggregates struct {
 const (
 	// AllocationStatePending state denotes that the command is awaiting allocation.
 	AllocationStatePending AllocationState = "PENDING"
-	// AllocationStateWaiting state denotes that the command is waiting on data.
-	AllocationStateWaiting AllocationState = "WAITING"
 	// AllocationStateAssigned state denotes that the command has been assigned to an agent but has
 	// not started yet.
 	AllocationStateAssigned AllocationState = "ASSIGNED"
@@ -264,7 +260,6 @@ func MostProgressedAllocationState(states ...AllocationState) AllocationState {
 		AllocationStatePulling:     2,
 		AllocationStateStarting:    3,
 		AllocationStateRunning:     4,
-		AllocationStateWaiting:     5,
 		AllocationStateTerminating: 6,
 		AllocationStateTerminated:  7,
 	}
@@ -295,8 +290,6 @@ func (s *AllocationState) Proto() taskv1.State {
 	}
 
 	switch *s {
-	case AllocationStateWaiting:
-		return taskv1.State_STATE_WAITING
 	case AllocationStatePulling:
 		return taskv1.State_STATE_PULLING
 	case AllocationStateStarting:

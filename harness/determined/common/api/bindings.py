@@ -475,7 +475,6 @@ class jobv1Type(DetEnum):
     """Job type.
     - TYPE_UNSPECIFIED: Unspecified state.
     - TYPE_EXPERIMENT: Experiement Job.
-    - TYPE_TENSORBOARD: TensorBoard Job.
     - TYPE_SHELL: Shell Job.
     - TYPE_COMMAND: Command Job.
     - TYPE_CHECKPOINT_GC: CheckpointGC Job.
@@ -484,7 +483,6 @@ class jobv1Type(DetEnum):
     """
     UNSPECIFIED = "TYPE_UNSPECIFIED"
     EXPERIMENT = "TYPE_EXPERIMENT"
-    TENSORBOARD = "TYPE_TENSORBOARD"
     SHELL = "TYPE_SHELL"
     COMMAND = "TYPE_COMMAND"
     CHECKPOINT_GC = "TYPE_CHECKPOINT_GC"
@@ -678,7 +676,6 @@ class taskv1State(DetEnum):
     - STATE_RUNNING: The service in the task is running.
     - STATE_TERMINATED: The task has exited or has been aborted.
     - STATE_TERMINATING: The task has begun to exit.
-    - STATE_WAITING: The task is waiting on something to complete.
     - STATE_QUEUED: Additional state to cover queueing operations.
     """
     UNSPECIFIED = "STATE_UNSPECIFIED"
@@ -687,7 +684,6 @@ class taskv1State(DetEnum):
     RUNNING = "STATE_RUNNING"
     TERMINATED = "STATE_TERMINATED"
     TERMINATING = "STATE_TERMINATING"
-    WAITING = "STATE_WAITING"
     QUEUED = "STATE_QUEUED"
 
 class trialv1State(DetEnum):
@@ -1654,33 +1650,6 @@ class v1AllocationSummary(Printable):
             out["slotsNeeded"] = self.slotsNeeded
         if not omit_unset or "taskId" in vars(self):
             out["taskId"] = self.taskId
-        return out
-
-class v1AllocationWaitingRequest(Printable):
-    """Mark the given task as waiting."""
-    allocationId: "typing.Optional[str]" = None
-
-    def __init__(
-        self,
-        *,
-        allocationId: "typing.Union[str, None, Unset]" = _unset,
-    ):
-        if not isinstance(allocationId, Unset):
-            self.allocationId = allocationId
-
-    @classmethod
-    def from_json(cls, obj: Json) -> "v1AllocationWaitingRequest":
-        kwargs: "typing.Dict[str, typing.Any]" = {
-        }
-        if "allocationId" in obj:
-            kwargs["allocationId"] = obj["allocationId"]
-        return cls(**kwargs)
-
-    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
-        out: "typing.Dict[str, typing.Any]" = {
-        }
-        if not omit_unset or "allocationId" in vars(self):
-            out["allocationId"] = self.allocationId
         return out
 
 class v1ArchiveExperimentsRequest(Printable):
@@ -4712,18 +4681,15 @@ class v1GetActiveTasksCountResponse(Printable):
         *,
         commands: int,
         shells: int,
-        tensorboards: int,
     ):
         self.commands = commands
         self.shells = shells
-        self.tensorboards = tensorboards
 
     @classmethod
     def from_json(cls, obj: Json) -> "v1GetActiveTasksCountResponse":
         kwargs: "typing.Dict[str, typing.Any]" = {
             "commands": obj["commands"],
             "shells": obj["shells"],
-            "tensorboards": obj["tensorboards"],
         }
         return cls(**kwargs)
 
@@ -4731,7 +4697,6 @@ class v1GetActiveTasksCountResponse(Printable):
         out: "typing.Dict[str, typing.Any]" = {
             "commands": self.commands,
             "shells": self.shells,
-            "tensorboards": self.tensorboards,
         }
         return out
 
@@ -6876,78 +6841,6 @@ class v1GetTemplatesResponse(Printable):
         }
         return out
 
-class v1GetTensorboardResponse(Printable):
-    """Response to GetTensorboardRequest."""
-
-    def __init__(
-        self,
-        *,
-        config: "typing.Dict[str, typing.Any]",
-        tensorboard: "v1Tensorboard",
-    ):
-        self.config = config
-        self.tensorboard = tensorboard
-
-    @classmethod
-    def from_json(cls, obj: Json) -> "v1GetTensorboardResponse":
-        kwargs: "typing.Dict[str, typing.Any]" = {
-            "config": obj["config"],
-            "tensorboard": v1Tensorboard.from_json(obj["tensorboard"]),
-        }
-        return cls(**kwargs)
-
-    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
-        out: "typing.Dict[str, typing.Any]" = {
-            "config": self.config,
-            "tensorboard": self.tensorboard.to_json(omit_unset),
-        }
-        return out
-
-class v1GetTensorboardsRequestSortBy(DetEnum):
-    """Sorts tensorboards by the given field.
-    - SORT_BY_UNSPECIFIED: Returns tensorboards in an unsorted list.
-    - SORT_BY_ID: Returns tensorboards sorted by id.
-    - SORT_BY_DESCRIPTION: Returns tensorboards sorted by description.
-    - SORT_BY_START_TIME: Return tensorboards sorted by start time.
-    - SORT_BY_WORKSPACE_ID: Return tensorboards sorted by workspace_id.
-    """
-    UNSPECIFIED = "SORT_BY_UNSPECIFIED"
-    ID = "SORT_BY_ID"
-    DESCRIPTION = "SORT_BY_DESCRIPTION"
-    START_TIME = "SORT_BY_START_TIME"
-    WORKSPACE_ID = "SORT_BY_WORKSPACE_ID"
-
-class v1GetTensorboardsResponse(Printable):
-    """Response to GetTensorboardsRequest."""
-    pagination: "typing.Optional[v1Pagination]" = None
-
-    def __init__(
-        self,
-        *,
-        tensorboards: "typing.Sequence[v1Tensorboard]",
-        pagination: "typing.Union[v1Pagination, None, Unset]" = _unset,
-    ):
-        self.tensorboards = tensorboards
-        if not isinstance(pagination, Unset):
-            self.pagination = pagination
-
-    @classmethod
-    def from_json(cls, obj: Json) -> "v1GetTensorboardsResponse":
-        kwargs: "typing.Dict[str, typing.Any]" = {
-            "tensorboards": [v1Tensorboard.from_json(x) for x in obj["tensorboards"]],
-        }
-        if "pagination" in obj:
-            kwargs["pagination"] = v1Pagination.from_json(obj["pagination"]) if obj["pagination"] is not None else None
-        return cls(**kwargs)
-
-    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
-        out: "typing.Dict[str, typing.Any]" = {
-            "tensorboards": [x.to_json(omit_unset) for x in self.tensorboards],
-        }
-        if not omit_unset or "pagination" in vars(self):
-            out["pagination"] = None if self.pagination is None else self.pagination.to_json(omit_unset)
-        return out
-
 class v1GetTrainingMetricsResponse(Printable):
     """Response to GetTrainingMetricsRequest."""
 
@@ -8547,33 +8440,6 @@ class v1KillShellResponse(Printable):
             out["shell"] = None if self.shell is None else self.shell.to_json(omit_unset)
         return out
 
-class v1KillTensorboardResponse(Printable):
-    """Response to KillTensorboardRequest."""
-    tensorboard: "typing.Optional[v1Tensorboard]" = None
-
-    def __init__(
-        self,
-        *,
-        tensorboard: "typing.Union[v1Tensorboard, None, Unset]" = _unset,
-    ):
-        if not isinstance(tensorboard, Unset):
-            self.tensorboard = tensorboard
-
-    @classmethod
-    def from_json(cls, obj: Json) -> "v1KillTensorboardResponse":
-        kwargs: "typing.Dict[str, typing.Any]" = {
-        }
-        if "tensorboard" in obj:
-            kwargs["tensorboard"] = v1Tensorboard.from_json(obj["tensorboard"]) if obj["tensorboard"] is not None else None
-        return cls(**kwargs)
-
-    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
-        out: "typing.Dict[str, typing.Any]" = {
-        }
-        if not omit_unset or "tensorboard" in vars(self):
-            out["tensorboard"] = None if self.tensorboard is None else self.tensorboard.to_json(omit_unset)
-        return out
-
 class v1LaunchCommandRequest(Printable):
     """Request to launch a command."""
     config: "typing.Optional[typing.Dict[str, typing.Any]]" = None
@@ -8757,116 +8623,6 @@ class v1LaunchShellResponse(Printable):
         out: "typing.Dict[str, typing.Any]" = {
             "config": self.config,
             "shell": self.shell.to_json(omit_unset),
-        }
-        if not omit_unset or "warnings" in vars(self):
-            out["warnings"] = None if self.warnings is None else [x.value for x in self.warnings]
-        return out
-
-class v1LaunchTensorboardRequest(Printable):
-    """Request to launch a tensorboard."""
-    config: "typing.Optional[typing.Dict[str, typing.Any]]" = None
-    experimentIds: "typing.Optional[typing.Sequence[int]]" = None
-    files: "typing.Optional[typing.Sequence[v1File]]" = None
-    filters: "typing.Optional[v1BulkExperimentFilters]" = None
-    templateName: "typing.Optional[str]" = None
-    trialIds: "typing.Optional[typing.Sequence[int]]" = None
-    workspaceId: "typing.Optional[int]" = None
-
-    def __init__(
-        self,
-        *,
-        config: "typing.Union[typing.Dict[str, typing.Any], None, Unset]" = _unset,
-        experimentIds: "typing.Union[typing.Sequence[int], None, Unset]" = _unset,
-        files: "typing.Union[typing.Sequence[v1File], None, Unset]" = _unset,
-        filters: "typing.Union[v1BulkExperimentFilters, None, Unset]" = _unset,
-        templateName: "typing.Union[str, None, Unset]" = _unset,
-        trialIds: "typing.Union[typing.Sequence[int], None, Unset]" = _unset,
-        workspaceId: "typing.Union[int, None, Unset]" = _unset,
-    ):
-        if not isinstance(config, Unset):
-            self.config = config
-        if not isinstance(experimentIds, Unset):
-            self.experimentIds = experimentIds
-        if not isinstance(files, Unset):
-            self.files = files
-        if not isinstance(filters, Unset):
-            self.filters = filters
-        if not isinstance(templateName, Unset):
-            self.templateName = templateName
-        if not isinstance(trialIds, Unset):
-            self.trialIds = trialIds
-        if not isinstance(workspaceId, Unset):
-            self.workspaceId = workspaceId
-
-    @classmethod
-    def from_json(cls, obj: Json) -> "v1LaunchTensorboardRequest":
-        kwargs: "typing.Dict[str, typing.Any]" = {
-        }
-        if "config" in obj:
-            kwargs["config"] = obj["config"]
-        if "experimentIds" in obj:
-            kwargs["experimentIds"] = obj["experimentIds"]
-        if "files" in obj:
-            kwargs["files"] = [v1File.from_json(x) for x in obj["files"]] if obj["files"] is not None else None
-        if "filters" in obj:
-            kwargs["filters"] = v1BulkExperimentFilters.from_json(obj["filters"]) if obj["filters"] is not None else None
-        if "templateName" in obj:
-            kwargs["templateName"] = obj["templateName"]
-        if "trialIds" in obj:
-            kwargs["trialIds"] = obj["trialIds"]
-        if "workspaceId" in obj:
-            kwargs["workspaceId"] = obj["workspaceId"]
-        return cls(**kwargs)
-
-    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
-        out: "typing.Dict[str, typing.Any]" = {
-        }
-        if not omit_unset or "config" in vars(self):
-            out["config"] = self.config
-        if not omit_unset or "experimentIds" in vars(self):
-            out["experimentIds"] = self.experimentIds
-        if not omit_unset or "files" in vars(self):
-            out["files"] = None if self.files is None else [x.to_json(omit_unset) for x in self.files]
-        if not omit_unset or "filters" in vars(self):
-            out["filters"] = None if self.filters is None else self.filters.to_json(omit_unset)
-        if not omit_unset or "templateName" in vars(self):
-            out["templateName"] = self.templateName
-        if not omit_unset or "trialIds" in vars(self):
-            out["trialIds"] = self.trialIds
-        if not omit_unset or "workspaceId" in vars(self):
-            out["workspaceId"] = self.workspaceId
-        return out
-
-class v1LaunchTensorboardResponse(Printable):
-    """Response to LaunchTensorboardRequest."""
-    warnings: "typing.Optional[typing.Sequence[v1LaunchWarning]]" = None
-
-    def __init__(
-        self,
-        *,
-        config: "typing.Dict[str, typing.Any]",
-        tensorboard: "v1Tensorboard",
-        warnings: "typing.Union[typing.Sequence[v1LaunchWarning], None, Unset]" = _unset,
-    ):
-        self.config = config
-        self.tensorboard = tensorboard
-        if not isinstance(warnings, Unset):
-            self.warnings = warnings
-
-    @classmethod
-    def from_json(cls, obj: Json) -> "v1LaunchTensorboardResponse":
-        kwargs: "typing.Dict[str, typing.Any]" = {
-            "config": obj["config"],
-            "tensorboard": v1Tensorboard.from_json(obj["tensorboard"]),
-        }
-        if "warnings" in obj:
-            kwargs["warnings"] = [v1LaunchWarning(x) for x in obj["warnings"]] if obj["warnings"] is not None else None
-        return cls(**kwargs)
-
-    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
-        out: "typing.Dict[str, typing.Any]" = {
-            "config": self.config,
-            "tensorboard": self.tensorboard.to_json(omit_unset),
         }
         if not omit_unset or "warnings" in vars(self):
             out["warnings"] = None if self.warnings is None else [x.value for x in self.warnings]
@@ -15287,68 +15043,6 @@ class v1SetShellPriorityResponse(Printable):
             out["shell"] = None if self.shell is None else self.shell.to_json(omit_unset)
         return out
 
-class v1SetTensorboardPriorityRequest(Printable):
-    """Set the priority of the requested TensorBoard."""
-    priority: "typing.Optional[int]" = None
-    tensorboardId: "typing.Optional[str]" = None
-
-    def __init__(
-        self,
-        *,
-        priority: "typing.Union[int, None, Unset]" = _unset,
-        tensorboardId: "typing.Union[str, None, Unset]" = _unset,
-    ):
-        if not isinstance(priority, Unset):
-            self.priority = priority
-        if not isinstance(tensorboardId, Unset):
-            self.tensorboardId = tensorboardId
-
-    @classmethod
-    def from_json(cls, obj: Json) -> "v1SetTensorboardPriorityRequest":
-        kwargs: "typing.Dict[str, typing.Any]" = {
-        }
-        if "priority" in obj:
-            kwargs["priority"] = obj["priority"]
-        if "tensorboardId" in obj:
-            kwargs["tensorboardId"] = obj["tensorboardId"]
-        return cls(**kwargs)
-
-    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
-        out: "typing.Dict[str, typing.Any]" = {
-        }
-        if not omit_unset or "priority" in vars(self):
-            out["priority"] = self.priority
-        if not omit_unset or "tensorboardId" in vars(self):
-            out["tensorboardId"] = self.tensorboardId
-        return out
-
-class v1SetTensorboardPriorityResponse(Printable):
-    """Response to SetTensorboardPriorityRequest."""
-    tensorboard: "typing.Optional[v1Tensorboard]" = None
-
-    def __init__(
-        self,
-        *,
-        tensorboard: "typing.Union[v1Tensorboard, None, Unset]" = _unset,
-    ):
-        if not isinstance(tensorboard, Unset):
-            self.tensorboard = tensorboard
-
-    @classmethod
-    def from_json(cls, obj: Json) -> "v1SetTensorboardPriorityResponse":
-        kwargs: "typing.Dict[str, typing.Any]" = {
-        }
-        if "tensorboard" in obj:
-            kwargs["tensorboard"] = v1Tensorboard.from_json(obj["tensorboard"]) if obj["tensorboard"] is not None else None
-        return cls(**kwargs)
-
-    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
-        out: "typing.Dict[str, typing.Any]" = {
-        }
-        if not omit_unset or "tensorboard" in vars(self):
-            out["tensorboard"] = None if self.tensorboard is None else self.tensorboard.to_json(omit_unset)
-        return out
-
 class v1SetUserPasswordRequest(Printable):
     """Set the requested user's passwords."""
     oldPassword: "typing.Optional[str]" = None
@@ -16360,7 +16054,6 @@ class v1TaskType(DetEnum):
     - TASK_TYPE_TRIAL: "TRIAL" task type for the enum public.task_type in Postgres.
     - TASK_TYPE_SHELL: "SHELL" task type for the enum public.task_type in Postgres.
     - TASK_TYPE_COMMAND: "COMMAND" task type for the enum public.task_type in Postgres.
-    - TASK_TYPE_TENSORBOARD: "TENSORBOARD" task type for the enum public.task_type in Postgres.
     - TASK_TYPE_CHECKPOINT_GC: "CHECKPOINT_GC" task type for the enum public.task_type in Postgres.
     - TASK_TYPE_GENERIC: "GENERIC" task type for the enum public.task_type in Postgres.
     """
@@ -16368,7 +16061,6 @@ class v1TaskType(DetEnum):
     TRIAL = "TASK_TYPE_TRIAL"
     SHELL = "TASK_TYPE_SHELL"
     COMMAND = "TASK_TYPE_COMMAND"
-    TENSORBOARD = "TASK_TYPE_TENSORBOARD"
     CHECKPOINT_GC = "TASK_TYPE_CHECKPOINT_GC"
     GENERIC = "TASK_TYPE_GENERIC"
 
@@ -16403,137 +16095,6 @@ class v1Template(Printable):
             "name": self.name,
             "workspaceId": self.workspaceId,
         }
-        return out
-
-class v1Tensorboard(Printable):
-    """Tensorboard is a tensorboard instance in a containerized environment."""
-    allocationStartTime: "typing.Optional[str]" = None
-    container: "typing.Optional[v1Container]" = None
-    displayName: "typing.Optional[str]" = None
-    endTime: "typing.Optional[str]" = None
-    exitStatus: "typing.Optional[str]" = None
-    experimentIds: "typing.Optional[typing.Sequence[int]]" = None
-    serviceAddress: "typing.Optional[str]" = None
-    slots: "typing.Optional[int]" = None
-    trialIds: "typing.Optional[typing.Sequence[int]]" = None
-    userId: "typing.Optional[int]" = None
-
-    def __init__(
-        self,
-        *,
-        description: str,
-        id: str,
-        jobId: str,
-        resourcePool: str,
-        startTime: str,
-        state: "taskv1State",
-        username: str,
-        workspaceId: int,
-        allocationStartTime: "typing.Union[str, None, Unset]" = _unset,
-        container: "typing.Union[v1Container, None, Unset]" = _unset,
-        displayName: "typing.Union[str, None, Unset]" = _unset,
-        endTime: "typing.Union[str, None, Unset]" = _unset,
-        exitStatus: "typing.Union[str, None, Unset]" = _unset,
-        experimentIds: "typing.Union[typing.Sequence[int], None, Unset]" = _unset,
-        serviceAddress: "typing.Union[str, None, Unset]" = _unset,
-        slots: "typing.Union[int, None, Unset]" = _unset,
-        trialIds: "typing.Union[typing.Sequence[int], None, Unset]" = _unset,
-        userId: "typing.Union[int, None, Unset]" = _unset,
-    ):
-        self.description = description
-        self.id = id
-        self.jobId = jobId
-        self.resourcePool = resourcePool
-        self.startTime = startTime
-        self.state = state
-        self.username = username
-        self.workspaceId = workspaceId
-        if not isinstance(allocationStartTime, Unset):
-            self.allocationStartTime = allocationStartTime
-        if not isinstance(container, Unset):
-            self.container = container
-        if not isinstance(displayName, Unset):
-            self.displayName = displayName
-        if not isinstance(endTime, Unset):
-            self.endTime = endTime
-        if not isinstance(exitStatus, Unset):
-            self.exitStatus = exitStatus
-        if not isinstance(experimentIds, Unset):
-            self.experimentIds = experimentIds
-        if not isinstance(serviceAddress, Unset):
-            self.serviceAddress = serviceAddress
-        if not isinstance(slots, Unset):
-            self.slots = slots
-        if not isinstance(trialIds, Unset):
-            self.trialIds = trialIds
-        if not isinstance(userId, Unset):
-            self.userId = userId
-
-    @classmethod
-    def from_json(cls, obj: Json) -> "v1Tensorboard":
-        kwargs: "typing.Dict[str, typing.Any]" = {
-            "description": obj["description"],
-            "id": obj["id"],
-            "jobId": obj["jobId"],
-            "resourcePool": obj["resourcePool"],
-            "startTime": obj["startTime"],
-            "state": taskv1State(obj["state"]),
-            "username": obj["username"],
-            "workspaceId": obj["workspaceId"],
-        }
-        if "allocationStartTime" in obj:
-            kwargs["allocationStartTime"] = obj["allocationStartTime"]
-        if "container" in obj:
-            kwargs["container"] = v1Container.from_json(obj["container"]) if obj["container"] is not None else None
-        if "displayName" in obj:
-            kwargs["displayName"] = obj["displayName"]
-        if "endTime" in obj:
-            kwargs["endTime"] = obj["endTime"]
-        if "exitStatus" in obj:
-            kwargs["exitStatus"] = obj["exitStatus"]
-        if "experimentIds" in obj:
-            kwargs["experimentIds"] = obj["experimentIds"]
-        if "serviceAddress" in obj:
-            kwargs["serviceAddress"] = obj["serviceAddress"]
-        if "slots" in obj:
-            kwargs["slots"] = obj["slots"]
-        if "trialIds" in obj:
-            kwargs["trialIds"] = obj["trialIds"]
-        if "userId" in obj:
-            kwargs["userId"] = obj["userId"]
-        return cls(**kwargs)
-
-    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
-        out: "typing.Dict[str, typing.Any]" = {
-            "description": self.description,
-            "id": self.id,
-            "jobId": self.jobId,
-            "resourcePool": self.resourcePool,
-            "startTime": self.startTime,
-            "state": self.state.value,
-            "username": self.username,
-            "workspaceId": self.workspaceId,
-        }
-        if not omit_unset or "allocationStartTime" in vars(self):
-            out["allocationStartTime"] = self.allocationStartTime
-        if not omit_unset or "container" in vars(self):
-            out["container"] = None if self.container is None else self.container.to_json(omit_unset)
-        if not omit_unset or "displayName" in vars(self):
-            out["displayName"] = self.displayName
-        if not omit_unset or "endTime" in vars(self):
-            out["endTime"] = self.endTime
-        if not omit_unset or "exitStatus" in vars(self):
-            out["exitStatus"] = self.exitStatus
-        if not omit_unset or "experimentIds" in vars(self):
-            out["experimentIds"] = self.experimentIds
-        if not omit_unset or "serviceAddress" in vars(self):
-            out["serviceAddress"] = self.serviceAddress
-        if not omit_unset or "slots" in vars(self):
-            out["slots"] = self.slots
-        if not omit_unset or "trialIds" in vars(self):
-            out["trialIds"] = self.trialIds
-        if not omit_unset or "userId" in vars(self):
-            out["userId"] = self.userId
         return out
 
 class v1TestWebhookResponse(Printable):
@@ -18585,33 +18146,6 @@ def get_AllocationRendezvousInfo(
         return v1AllocationRendezvousInfoResponse.from_json(_resp.json())
     raise APIHttpError("get_AllocationRendezvousInfo", _resp)
 
-def post_AllocationWaiting(
-    session: "api.BaseSession",
-    *,
-    allocationId: str,
-    body: "v1AllocationWaitingRequest",
-) -> None:
-    """Set allocation to waiting state.
-
-    - allocationId: The id of the allocation.
-    """
-    _params = None
-    if type(allocationId) == str:
-        allocationId = parse.quote(allocationId)
-    _resp = session._do_request(
-        method="POST",
-        path=f"/api/v1/allocations/{allocationId}/waiting",
-        params=_params,
-        json=body.to_json(True),
-        data=None,
-        headers=None,
-        timeout=None,
-        stream=False,
-    )
-    if _resp.status_code == 200:
-        return
-    raise APIHttpError("post_AllocationWaiting", _resp)
-
 def post_ArchiveExperiment(
     session: "api.BaseSession",
     *,
@@ -20013,7 +19547,7 @@ def get_GetCommands(
     limit: "typing.Optional[int]" = None,
     offset: "typing.Optional[int]" = None,
     orderBy: "typing.Optional[v1OrderBy]" = None,
-    sortBy: "typing.Optional[v1GetTensorboardsRequestSortBy]" = None,
+    sortBy: "typing.Optional[v1GetShellsRequestSortBy]" = None,
     userIds: "typing.Optional[typing.Sequence[int]]" = None,
     users: "typing.Optional[typing.Sequence[str]]" = None,
     workspaceId: "typing.Optional[int]" = None,
@@ -21557,7 +21091,7 @@ def get_GetShells(
     limit: "typing.Optional[int]" = None,
     offset: "typing.Optional[int]" = None,
     orderBy: "typing.Optional[v1OrderBy]" = None,
-    sortBy: "typing.Optional[v1GetTensorboardsRequestSortBy]" = None,
+    sortBy: "typing.Optional[v1GetShellsRequestSortBy]" = None,
     userIds: "typing.Optional[typing.Sequence[int]]" = None,
     users: "typing.Optional[typing.Sequence[str]]" = None,
     workspaceId: "typing.Optional[int]" = None,
@@ -21973,91 +21507,6 @@ denote number of templates to skip from the end before returning results.
     if _resp.status_code == 200:
         return v1GetTemplatesResponse.from_json(_resp.json())
     raise APIHttpError("get_GetTemplates", _resp)
-
-def get_GetTensorboard(
-    session: "api.BaseSession",
-    *,
-    tensorboardId: str,
-) -> "v1GetTensorboardResponse":
-    """Get the requested tensorboard.
-
-    - tensorboardId: The id of the tensorboard.
-    """
-    _params = None
-    if type(tensorboardId) == str:
-        tensorboardId = parse.quote(tensorboardId)
-    _resp = session._do_request(
-        method="GET",
-        path=f"/api/v1/tensorboards/{tensorboardId}",
-        params=_params,
-        json=None,
-        data=None,
-        headers=None,
-        timeout=None,
-        stream=False,
-    )
-    if _resp.status_code == 200:
-        return v1GetTensorboardResponse.from_json(_resp.json())
-    raise APIHttpError("get_GetTensorboard", _resp)
-
-def get_GetTensorboards(
-    session: "api.BaseSession",
-    *,
-    limit: "typing.Optional[int]" = None,
-    offset: "typing.Optional[int]" = None,
-    orderBy: "typing.Optional[v1OrderBy]" = None,
-    sortBy: "typing.Optional[v1GetTensorboardsRequestSortBy]" = None,
-    userIds: "typing.Optional[typing.Sequence[int]]" = None,
-    users: "typing.Optional[typing.Sequence[str]]" = None,
-    workspaceId: "typing.Optional[int]" = None,
-) -> "v1GetTensorboardsResponse":
-    """Get a list of tensorboards.
-
-    - limit: Limit the number of tensorboards. A value of 0 denotes no limit.
-    - offset: Skip the number of tensorboards before returning results. Negative values
-denote number of tensorboards to skip from the end before returning
-results.
-    - orderBy: Order tensorboards in either ascending or descending order.
-
- - ORDER_BY_UNSPECIFIED: Returns records in no specific order.
- - ORDER_BY_ASC: Returns records in ascending order.
- - ORDER_BY_DESC: Returns records in descending order.
-    - sortBy: Sort tensorboards by the given field.
-
- - SORT_BY_UNSPECIFIED: Returns tensorboards in an unsorted list.
- - SORT_BY_ID: Returns tensorboards sorted by id.
- - SORT_BY_DESCRIPTION: Returns tensorboards sorted by description.
- - SORT_BY_START_TIME: Return tensorboards sorted by start time.
- - SORT_BY_WORKSPACE_ID: Return tensorboards sorted by workspace_id.
-    - userIds: Limit tensorboards to those that are owned by users with the specified
-userIds.
-    - users: Limit tensorboards to those that are owned by users with the specified
-usernames.
-    - workspaceId: Limit tensorboards to those that are in a specific workspace, or 0 for
-all accessible workspaces.
-    """
-    _params = {
-        "limit": limit,
-        "offset": offset,
-        "orderBy": orderBy.value if orderBy is not None else None,
-        "sortBy": sortBy.value if sortBy is not None else None,
-        "userIds": userIds,
-        "users": users,
-        "workspaceId": workspaceId,
-    }
-    _resp = session._do_request(
-        method="GET",
-        path="/api/v1/tensorboards",
-        params=_params,
-        json=None,
-        data=None,
-        headers=None,
-        timeout=None,
-        stream=False,
-    )
-    if _resp.status_code == 200:
-        return v1GetTensorboardsResponse.from_json(_resp.json())
-    raise APIHttpError("get_GetTensorboards", _resp)
 
 def get_GetTrainingMetrics(
     session: "api.BaseSession",
@@ -23077,32 +22526,6 @@ def post_KillShell(
         return v1KillShellResponse.from_json(_resp.json())
     raise APIHttpError("post_KillShell", _resp)
 
-def post_KillTensorboard(
-    session: "api.BaseSession",
-    *,
-    tensorboardId: str,
-) -> "v1KillTensorboardResponse":
-    """Kill the requested tensorboard.
-
-    - tensorboardId: The id of the tensorboard.
-    """
-    _params = None
-    if type(tensorboardId) == str:
-        tensorboardId = parse.quote(tensorboardId)
-    _resp = session._do_request(
-        method="POST",
-        path=f"/api/v1/tensorboards/{tensorboardId}/kill",
-        params=_params,
-        json=None,
-        data=None,
-        headers=None,
-        timeout=None,
-        stream=False,
-    )
-    if _resp.status_code == 200:
-        return v1KillTensorboardResponse.from_json(_resp.json())
-    raise APIHttpError("post_KillTensorboard", _resp)
-
 def post_KillTrial(
     session: "api.BaseSession",
     *,
@@ -23168,27 +22591,6 @@ def post_LaunchShell(
     if _resp.status_code == 200:
         return v1LaunchShellResponse.from_json(_resp.json())
     raise APIHttpError("post_LaunchShell", _resp)
-
-def post_LaunchTensorboard(
-    session: "api.BaseSession",
-    *,
-    body: "v1LaunchTensorboardRequest",
-) -> "v1LaunchTensorboardResponse":
-    """Launch a tensorboard."""
-    _params = None
-    _resp = session._do_request(
-        method="POST",
-        path="/api/v1/tensorboards",
-        params=_params,
-        json=body.to_json(True),
-        data=None,
-        headers=None,
-        timeout=None,
-        stream=False,
-    )
-    if _resp.status_code == 200:
-        return v1LaunchTensorboardResponse.from_json(_resp.json())
-    raise APIHttpError("post_LaunchTensorboard", _resp)
 
 def get_ListRPsBoundToWorkspace(
     session: "api.BaseSession",
@@ -25416,33 +24818,6 @@ def post_SetShellPriority(
         return v1SetShellPriorityResponse.from_json(_resp.json())
     raise APIHttpError("post_SetShellPriority", _resp)
 
-def post_SetTensorboardPriority(
-    session: "api.BaseSession",
-    *,
-    body: "v1SetTensorboardPriorityRequest",
-    tensorboardId: str,
-) -> "v1SetTensorboardPriorityResponse":
-    """Set the priority of the requested TensorBoard.
-
-    - tensorboardId: The id of the TensorBoard.
-    """
-    _params = None
-    if type(tensorboardId) == str:
-        tensorboardId = parse.quote(tensorboardId)
-    _resp = session._do_request(
-        method="POST",
-        path=f"/api/v1/tensorboards/{tensorboardId}/set_priority",
-        params=_params,
-        json=body.to_json(True),
-        data=None,
-        headers=None,
-        timeout=None,
-        stream=False,
-    )
-    if _resp.status_code == 200:
-        return v1SetTensorboardPriorityResponse.from_json(_resp.json())
-    raise APIHttpError("post_SetTensorboardPriority", _resp)
-
 def post_SetUserPassword(
     session: "api.BaseSession",
     *,
@@ -26232,7 +25607,6 @@ Paginated = typing.Union[
     v1GetResourcePoolsResponse,
     v1GetShellsResponse,
     v1GetTemplatesResponse,
-    v1GetTensorboardsResponse,
     v1GetTrialCheckpointsResponse,
     v1GetTrialWorkloadsResponse,
     v1GetUsersResponse,

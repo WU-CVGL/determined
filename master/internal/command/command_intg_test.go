@@ -27,7 +27,6 @@ import (
 	"github.com/determined-ai/determined/proto/pkg/commandv1"
 	"github.com/determined-ai/determined/proto/pkg/shellv1"
 	"github.com/determined-ai/determined/proto/pkg/taskv1"
-	"github.com/determined-ai/determined/proto/pkg/tensorboardv1"
 )
 
 func TestCommandManagerLifecycle(t *testing.T) {
@@ -133,41 +132,7 @@ func TestShellManagerLifecycle(t *testing.T) {
 	require.Empty(t, resp4.ToV1Shell().PrivateKey)
 }
 
-func TestTensorboardManagerLifecycle(t *testing.T) {
-	db := setupTest(t)
-
-	// Launch a Tensorboard.
-	cmd1 := launchTensorboard(t, db)
-
-	// Get Tensorboard.
-	resp1, err := DefaultCmdService.GetTensorboard(&apiv1.GetTensorboardRequest{TensorboardId: cmd1.Id})
-	require.NotNil(t, resp1)
-	require.NoError(t, err)
-
-	// Launch another Tensorboard.
-	cmd2 := launchTensorboard(t, db)
-
-	// Get Tensorboards.
-	resp2, err := DefaultCmdService.GetTensorboards(&apiv1.GetTensorboardsRequest{})
-	require.NotNil(t, resp2)
-	require.NoError(t, err)
-	require.Len(t, resp2.Tensorboards, 2)
-
-	// Kill 1 Tensorboard.
-	resp3, err := DefaultCmdService.KillNTSC(cmd2.Id, model.TaskTypeTensorboard)
-	require.NotNil(t, resp3)
-	require.NoError(t, err)
-
-	tb3 := resp3.ToV1Tensorboard()
-	require.Equal(t, taskv1.State_STATE_TERMINATED, tb3.State)
-
-	// Set Tensorboard priority.
-	resp4, err := DefaultCmdService.SetNTSCPriority(cmd1.Id, 0, model.TaskTypeTensorboard)
-	require.NotNil(t, resp4)
-	require.NoError(t, err)
-}
-
-// The lists of shells, commands and TensorBoards report the slot count each one requests, also
+// The lists of shells and commands report the slot count each one requests, also
 // when it requests none.
 func TestNTSCListsReportSlots(t *testing.T) {
 	db := setupTest(t)
@@ -202,15 +167,6 @@ func TestNTSCListsReportSlots(t *testing.T) {
 		}
 		require.Contains(t, listed, shellID, "shell with %d slots", slots)
 		require.Equal(t, int32(slots), listed[shellID], "shell with %d slots", slots)
-
-		tensorboardID := launch(model.TaskTypeTensorboard, model.JobTypeTensorboard)
-		tensorboards, err := DefaultCmdService.GetTensorboards(&apiv1.GetTensorboardsRequest{})
-		require.NoError(t, err)
-		for _, tb := range tensorboards.Tensorboards {
-			listed[tb.Id] = tb.Slots
-		}
-		require.Contains(t, listed, tensorboardID, "TensorBoard with %d slots", slots)
-		require.Equal(t, int32(slots), listed[tensorboardID], "TensorBoard with %d slots", slots)
 	}
 }
 
@@ -289,16 +245,4 @@ func launchShell(t *testing.T, db *db.PgDB) *shellv1.Shell {
 	require.NotNil(t, v1shell)
 	require.NotNil(t, DefaultCmdService.commands[model.TaskID(v1shell.Id)])
 	return v1shell
-}
-
-func launchTensorboard(t *testing.T, db *db.PgDB) *tensorboardv1.Tensorboard {
-	cmd, err := DefaultCmdService.LaunchGenericCommand(
-		model.TaskTypeTensorboard,
-		model.JobTypeTensorboard,
-		CreateMockGenericReq(t, db))
-	v1tb := cmd.ToV1Tensorboard()
-	require.NoError(t, err)
-	require.NotNil(t, v1tb)
-	require.NotNil(t, DefaultCmdService.commands[model.TaskID(v1tb.Id)])
-	return v1tb
 }
