@@ -97,53 +97,85 @@ func ForJobs(ctx context.Context, v Viewer, jobIDs []model.JobID) (map[model.Job
 	return caps, nil
 }
 
-// taskJobRow is a task's job, or, for a task without one, its owner from the command record.
-type taskJobRow struct {
-	TaskID model.TaskID `bun:"task_id"`
-	JobID  *model.JobID `bun:"job_id"`
-	// LegacyOwnerID is set only for a task without a job that has a command record.
-	LegacyOwnerID *model.UserID `bun:"legacy_owner_id"`
+// TaskJob is what decides the privacy of a task: its job, or, for a task without one, the owner
+// from its command record.
+type TaskJob struct {
+	// JobID is the task's own job, or, for a trial task without one (an unmanaged trial), the job
+	// of its experiment.
+	JobID *model.JobID
+	// LegacyOwnerID is set only for a task without a job that has a command record (rows from
+	// before tasks had jobs).
+	LegacyOwnerID *model.UserID
 }
 
-// ForTasks returns the viewer's capabilities on each task's job. Every requested ID is in the
-// result. A task without a job (rows from before tasks had jobs) takes its owner from its command
-// record and is a job without audiences, public under the default; a task without a job and
-// without a command record, and an unknown task, are hidden from non-admins.
-func ForTasks(
-	ctx context.Context, v Viewer, taskIDs []model.TaskID,
-) (map[model.TaskID]Caps, error) {
-	caps := make(map[model.TaskID]Caps, len(taskIDs))
-	if v.Admin {
-		for _, id := range taskIDs {
-			caps[id] = AllCaps
-		}
-		return caps, nil
+// trialExperimentJobExpr is the job of the experiment of trial task t.
+const trialExperimentJobExpr = `(SELECT e.job_id FROM run_id_task_id AS rt
+	JOIN runs AS r ON r.id = rt.run_id
+	JOIN experiments AS e ON e.id = r.experiment_id
+	WHERE rt.task_id = t.task_id LIMIT 1)`
+
+// TaskJobs resolves each task to what decides its privacy, in one query: the task's own job;
+// else, for a trial task, the job of its experiment; else the owner from its command record. A
+// task that is not found is not in the result; one that is found and has none of them has an
+// empty TaskJob. A query error is Unavailable.
+func TaskJobs(
+	ctx context.Context, idb bun.IDB, taskIDs []model.TaskID,
+) (map[model.TaskID]TaskJob, error) {
+	if idb == nil {
+		idb = db.Bun()
 	}
-	for _, id := range taskIDs {
-		caps[id] = Caps{}
-	}
+	jobs := make(map[model.TaskID]TaskJob, len(taskIDs))
 	if len(taskIDs) == 0 {
-		return caps, nil
+		return jobs, nil
 	}
-	var rows []taskJobRow
-	err := db.Bun().NewSelect().
+	var rows []struct {
+		TaskID        model.TaskID  `bun:"task_id"`
+		JobID         *model.JobID  `bun:"job_id"`
+		LegacyOwnerID *model.UserID `bun:"legacy_owner_id"`
+	}
+	err := idb.NewSelect().
 		TableExpr("tasks AS t").
 		Join("LEFT JOIN command_state AS cs ON cs.task_id = t.task_id AND t.job_id IS NULL").
-		ColumnExpr("t.task_id, t.job_id").
+		Column("t.task_id").
+		ColumnExpr("COALESCE(t.job_id, CASE WHEN t.task_type = ? THEN "+
+			trialExperimentJobExpr+" END) AS job_id", model.TaskTypeTrial).
 		ColumnExpr("(cs.generic_command_spec->'Base'->'Owner'->>'id')::int AS legacy_owner_id").
 		Where("t.task_id IN (?)", bun.In(taskIDs)).
 		Scan(ctx, &rows)
 	if err != nil {
 		return nil, readError(err)
 	}
+	for _, r := range rows {
+		tj := TaskJob{JobID: r.JobID}
+		if r.JobID == nil {
+			tj.LegacyOwnerID = r.LegacyOwnerID
+		}
+		jobs[r.TaskID] = tj
+	}
+	return jobs, nil
+}
+
+// ForTaskJobs returns the viewer's capabilities on each resolved task (TaskJobs). A task whose
+// TaskJob is empty is hidden from non-admins.
+func ForTaskJobs(
+	ctx context.Context, v Viewer, tasks map[model.TaskID]TaskJob,
+) (map[model.TaskID]Caps, error) {
+	caps := make(map[model.TaskID]Caps, len(tasks))
+	if v.Admin {
+		for id := range tasks {
+			caps[id] = AllCaps
+		}
+		return caps, nil
+	}
 	var jobIDs []model.JobID
 	var legacyOwners []model.UserID
-	for _, r := range rows {
+	for id, tj := range tasks {
+		caps[id] = Caps{}
 		switch {
-		case r.JobID != nil:
-			jobIDs = append(jobIDs, *r.JobID)
-		case r.LegacyOwnerID != nil:
-			legacyOwners = append(legacyOwners, *r.LegacyOwnerID)
+		case tj.JobID != nil:
+			jobIDs = append(jobIDs, *tj.JobID)
+		case tj.LegacyOwnerID != nil:
+			legacyOwners = append(legacyOwners, *tj.LegacyOwnerID)
 		}
 	}
 	if len(jobIDs) == 0 && len(legacyOwners) == 0 {
@@ -161,19 +193,47 @@ func ForTasks(
 	if err != nil {
 		return nil, err
 	}
-	for _, r := range rows {
+	for id, tj := range tasks {
 		switch {
-		case r.JobID != nil:
-			caps[r.TaskID] = Effective(v, facts[*r.JobID], p)
-		case r.LegacyOwnerID != nil:
-			s := switches[*r.LegacyOwnerID]
-			caps[r.TaskID] = Effective(v, JobFacts{
-				OwnerID:     r.LegacyOwnerID,
+		case tj.JobID != nil:
+			caps[id] = Effective(v, facts[*tj.JobID], p)
+		case tj.LegacyOwnerID != nil:
+			s := switches[*tj.LegacyOwnerID]
+			caps[id] = Effective(v, JobFacts{
+				OwnerID:     tj.LegacyOwnerID,
 				Exists:      true,
 				ShareTitles: s.ShareTitles,
 				ShareLogs:   s.ShareLogs,
 			}, p)
 		}
+	}
+	return caps, nil
+}
+
+// ForTasks returns the viewer's capabilities on each task, resolved by TaskJobs. Every requested
+// ID is in the result. A task with a command record and no job is a job without audiences, public
+// under the default; a task with none of TaskJobs' sources, and an unknown task, are hidden from
+// non-admins.
+func ForTasks(
+	ctx context.Context, v Viewer, taskIDs []model.TaskID,
+) (map[model.TaskID]Caps, error) {
+	caps := make(map[model.TaskID]Caps, len(taskIDs))
+	if v.Admin {
+		for _, id := range taskIDs {
+			caps[id] = AllCaps
+		}
+		return caps, nil
+	}
+	tasks, err := TaskJobs(ctx, nil, taskIDs)
+	if err != nil {
+		return nil, err
+	}
+	found, err := ForTaskJobs(ctx, v, tasks)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range taskIDs {
+		caps[id] = found[id]
 	}
 	return caps, nil
 }

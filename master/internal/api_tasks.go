@@ -951,9 +951,8 @@ func allocationSummaryCaps(
 
 // canReadTaskLogs returns nil when the requesting user may read the task's logs: the existing
 // check (the experiment's artifacts for a trial, the task's read rule otherwise), then job privacy
-// on the task's job. A task whose logs are not shared with the user is PermissionDenied "logs not
-// shared"; a task the user may not see keeps its NotFound. A trial task without a job takes its
-// experiment's; any other task without one is judged by jobprivacy.RequireTask.
+// on the task, resolved by jobprivacy.TaskJobs. A task whose logs are not shared with the user is
+// PermissionDenied "logs not shared"; a task the user may not see keeps its NotFound.
 func (a *apiServer) canReadTaskLogs(ctx context.Context, taskID model.TaskID) error {
 	t, err := taskForAction(ctx, taskID)
 	if err != nil {
@@ -963,28 +962,15 @@ func (a *apiServer) canReadTaskLogs(ctx context.Context, taskID model.TaskID) er
 	if err != nil {
 		return err
 	}
-	_, expID, err := a.canDoActionsOnLoadedTaskForUser(ctx, taskID, t, *curUser,
-		expauth.AuthZProvider.Get().CanGetExperimentArtifacts)
-	if err != nil {
+	if _, _, err = a.canDoActionsOnLoadedTaskForUser(ctx, taskID, t, *curUser,
+		expauth.AuthZProvider.Get().CanGetExperimentArtifacts); err != nil {
 		return err
 	}
 	v, err := jobprivacy.NewViewer(ctx, *curUser)
 	if err != nil {
 		return err
 	}
-	switch {
-	case t.JobID != nil:
-		return jobprivacy.Require(ctx, v, *t.JobID, jobprivacy.Logs)
-	case expID != nil:
-		jobs, err := experimentJobs(ctx, []int32{int32(*expID)})
-		if err != nil {
-			return err
-		}
-		// An experiment that is gone has no job, which Require hides from non-admins.
-		return jobprivacy.Require(ctx, v, jobs[int32(*expID)], jobprivacy.Logs)
-	default:
-		return jobprivacy.RequireTask(ctx, v, taskID, jobprivacy.Logs)
-	}
+	return jobprivacy.RequireTask(ctx, v, taskID, jobprivacy.Logs)
 }
 
 // trialLogsAction is the check of trial log reads, as an experiment action: the experiment's

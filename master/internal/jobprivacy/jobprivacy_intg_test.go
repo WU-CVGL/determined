@@ -280,12 +280,15 @@ func TestForTasks(t *testing.T) {
 	owner := db.RequireMockUser(t, db.SingleDB())
 	other := db.RequireMockUser(t, db.SingleDB())
 
-	addTask := func(jobID *model.JobID) model.TaskID {
+	addTaskOfType := func(jobID *model.JobID, typ model.TaskType) model.TaskID {
 		id := model.NewTaskID()
 		require.NoError(t, db.AddTask(ctx, &model.Task{
-			TaskID: id, JobID: jobID, TaskType: model.TaskTypeCommand, StartTime: time.Now(),
+			TaskID: id, JobID: jobID, TaskType: typ, StartTime: time.Now(),
 		}))
 		return id
+	}
+	addTask := func(jobID *model.JobID) model.TaskID {
+		return addTaskOfType(jobID, model.TaskTypeCommand)
 	}
 	private := insertJob(ctx, t, &owner.ID, []string{}, []string{}, []string{})
 	withJob := addTask(&private)
@@ -301,25 +304,34 @@ func TestForTasks(t *testing.T) {
 			jsonb_build_object('id', ?::int))))`, legacy, allocationID, owner.ID).Exec(ctx)
 	require.NoError(t, err)
 
-	// A task without a job or a command record.
+	// A task without a job or a command record, and a trial task without a job or a trial.
 	orphan := addTask(nil)
+	trialOrphan := addTaskOfType(nil, model.TaskTypeTrial)
 	unknown := model.NewTaskID()
 
-	ids := []model.TaskID{withJob, legacy, orphan, unknown}
+	ids := []model.TaskID{withJob, legacy, orphan, trialOrphan, unknown}
 	caps, err := ForTasks(ctx, Viewer{ID: other.ID}, ids)
 	require.NoError(t, err)
 	require.Equal(t, map[model.TaskID]Caps{
-		withJob: {},
-		legacy:  {ViewTitle: true, ViewLogs: true, ViewConfig: true},
-		orphan:  {},
-		unknown: {},
+		withJob:     {},
+		legacy:      {ViewTitle: true, ViewLogs: true, ViewConfig: true},
+		orphan:      {},
+		trialOrphan: {},
+		unknown:     {},
 	}, caps)
 
 	caps, err = ForTasks(ctx, Viewer{ID: owner.ID}, ids)
 	require.NoError(t, err)
 	require.Equal(t, map[model.TaskID]Caps{
-		withJob: AllCaps, legacy: AllCaps, orphan: {}, unknown: {},
+		withJob: AllCaps, legacy: AllCaps, orphan: {}, trialOrphan: {}, unknown: {},
 	}, caps)
+
+	tasks, err := TaskJobs(ctx, nil, ids)
+	require.NoError(t, err)
+	require.Equal(t, map[model.TaskID]TaskJob{
+		withJob: {JobID: &private}, legacy: {LegacyOwnerID: &owner.ID},
+		orphan: {}, trialOrphan: {},
+	}, tasks, "an unknown task is not in the result")
 
 	caps, err = ForTasks(ctx, Viewer{ID: other.ID, Admin: true}, ids)
 	require.NoError(t, err)
