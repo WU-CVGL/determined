@@ -44,7 +44,7 @@ func TestShipper(t *testing.T) {
 		e := ExperimentPayload{
 			ID:            1,
 			State:         "COMPLETED",
-			Name:          name,
+			Name:          &name,
 			Duration:      1,
 			ResourcePool:  "default",
 			SlotsPerTrial: 1,

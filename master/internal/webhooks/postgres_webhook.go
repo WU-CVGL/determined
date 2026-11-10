@@ -17,6 +17,7 @@ import (
 	conf "github.com/determined-ai/determined/master/internal/config"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/experiment"
+	"github.com/determined-ai/determined/master/internal/jobprivacy"
 	"github.com/determined-ai/determined/master/internal/logpattern"
 	"github.com/determined-ai/determined/master/internal/project"
 	"github.com/determined-ai/determined/master/internal/workspace"
@@ -46,6 +47,47 @@ type CustomTriggerData struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Level       string `json:"level"`
+}
+
+// workspaceWebhookViewer is the viewer that workspace webhooks are evaluated as: a user who is
+// neither the job's owner nor an admin (user IDs start at 1), so that a workspace webhook carries
+// only what the job shares with all authenticated users. Global webhooks are created by admins and
+// carry everything.
+var workspaceWebhookViewer = jobprivacy.Viewer{}
+
+// sharedWithAll returns a function that reads, on its first call, what a job shares with all
+// authenticated users, and returns the same capabilities on later calls, so that one event reads
+// job privacy at most once. A read error is logged and shares nothing.
+func sharedWithAll(read func() (jobprivacy.Caps, error)) func() jobprivacy.Caps {
+	var caps *jobprivacy.Caps
+	return func() jobprivacy.Caps {
+		if caps == nil {
+			c, err := read()
+			if err != nil {
+				log.WithError(err).Error(
+					"reading job privacy for workspace webhooks; sending no hidden content")
+				c = jobprivacy.Caps{}
+			}
+			caps = &c
+		}
+		return *caps
+	}
+}
+
+// jobSharedWithAll is sharedWithAll for a job.
+func jobSharedWithAll(ctx context.Context, jobID model.JobID) func() jobprivacy.Caps {
+	return sharedWithAll(func() (jobprivacy.Caps, error) {
+		caps, err := jobprivacy.ForJobs(ctx, workspaceWebhookViewer, []model.JobID{jobID})
+		return caps[jobID], err
+	})
+}
+
+// taskSharedWithAll is sharedWithAll for the job of a task.
+func taskSharedWithAll(ctx context.Context, taskID model.TaskID) func() jobprivacy.Caps {
+	return sharedWithAll(func() (jobprivacy.Caps, error) {
+		caps, err := jobprivacy.ForTasks(ctx, workspaceWebhookViewer, []model.TaskID{taskID})
+		return caps[taskID], err
+	})
 }
 
 // New creates a new webhook manager.
@@ -221,6 +263,8 @@ func (l *WebhookManager) scanLogs(
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
+	// Workspace webhooks get a task's log lines only when its logs are shared with all users.
+	logsShared := make(map[model.TaskID]func() jobprivacy.Caps)
 	for _, log := range logs {
 		if log.AgentID == nil {
 			return fmt.Errorf("AgentID must be non nil to trigger webhooks in logs")
@@ -235,6 +279,15 @@ func (l *WebhookManager) scanLogs(
 			if cacheItem.re.MatchString(log.Log) {
 				for _, t := range cacheItem.triggerIDToTrigger {
 					if matchWebhook(t, config, int32(workspaceID), expID) {
+						if t.Webhook.WorkspaceID != nil {
+							taskID := model.TaskID(log.TaskID)
+							if logsShared[taskID] == nil {
+								logsShared[taskID] = taskSharedWithAll(ctx, taskID)
+							}
+							if !logsShared[taskID]().ViewLogs {
+								continue
+							}
+						}
 						if err := addTaskLogEvent(ctx,
 							model.TaskID(log.TaskID), *log.AgentID, log.Log, t); err != nil {
 							return err
@@ -330,6 +383,10 @@ func handleCustomTriggerData(ctx context.Context, data CustomTriggerData, experi
 		return fmt.Errorf("error getting workspace from experiment : %w", err)
 	}
 
+	// Workspace webhooks get the experiment's name only when its title is shared with all users.
+	shared := jobSharedWithAll(ctx, m.JobID)
+	showName := func(w *Webhook) bool { return w.WorkspaceID == nil || shared().ViewTitle }
+
 	var es []Event
 	if webhookConfig.WebhookID != nil {
 		for _, webhookID := range *webhookConfig.WebhookID {
@@ -341,8 +398,8 @@ func handleCustomTriggerData(ctx context.Context, data CustomTriggerData, experi
 				(webhook.WorkspaceID != nil && *webhook.WorkspaceID != workspaceID) {
 				continue
 			}
-			err = generateEventForCustomTrigger(
-				ctx, &es, webhook.Triggers, webhook.WebhookType, webhook.URL, m.Experiment, activeConfig, data, trialID)
+			err = generateEventForCustomTrigger(ctx, &es, webhook.Triggers, webhook.WebhookType,
+				webhook.URL, m.Experiment, activeConfig, data, trialID, showName(webhook))
 			if err != nil {
 				return fmt.Errorf("error genrating event for webhook with ID %d %+v: %w", webhookID, webhook, err)
 			}
@@ -357,8 +414,8 @@ func handleCustomTriggerData(ctx context.Context, data CustomTriggerData, experi
 			if webhook == nil {
 				continue
 			}
-			err = generateEventForCustomTrigger(
-				ctx, &es, webhook.Triggers, webhook.WebhookType, webhook.URL, m.Experiment, activeConfig, data, trialID)
+			err = generateEventForCustomTrigger(ctx, &es, webhook.Triggers, webhook.WebhookType,
+				webhook.URL, m.Experiment, activeConfig, data, trialID, showName(webhook))
 			if err != nil {
 				return fmt.Errorf("error genrating event %s %+v: %w", webhookName, webhook, err)
 			}
@@ -387,13 +444,14 @@ func generateEventForCustomTrigger(
 	activeConfig expconf.ExperimentConfig,
 	data CustomTriggerData,
 	trialID *int,
+	showName bool,
 ) error {
 	for _, t := range triggers {
 		if t.TriggerType != TriggerTypeCustom {
 			continue
 		}
 		p, err := generateEventPayload(
-			ctx, webhookType, e, activeConfig, e.State, TriggerTypeCustom, &data, trialID,
+			ctx, webhookType, e, activeConfig, e.State, TriggerTypeCustom, &data, trialID, showName,
 		)
 		if err != nil {
 			return fmt.Errorf("error generating event payload: %w", err)
@@ -491,14 +549,17 @@ func ReportExperimentStateChanged(
 		webhookConfig = activeConfig.Integrations().Webhooks
 	}
 
+	// Workspace webhooks get the experiment's name only when its title is shared with all users.
+	shared := jobSharedWithAll(ctx, e.JobID)
+
 	var es []Event
 	for _, t := range ts {
 		if !matchWebhook(&t, webhookConfig, workspaceID, ptrs.Ptr(e.ID)) {
 			continue
 		}
-		p, err := generateEventPayload(
-			ctx, t.Webhook.WebhookType, e, activeConfig, e.State, TriggerTypeStateChange, nil, nil,
-		)
+		showName := t.Webhook.WorkspaceID == nil || shared().ViewTitle
+		p, err := generateEventPayload(ctx, t.Webhook.WebhookType, e, activeConfig, e.State,
+			TriggerTypeStateChange, nil, nil, showName)
 		if err != nil {
 			return fmt.Errorf("error generating event payload: %w", err)
 		}
@@ -681,10 +742,11 @@ func generateEventPayload(
 	expState model.State,
 	tT TriggerType,
 	eventData *CustomTriggerData, trialID *int,
+	showName bool,
 ) ([]byte, error) {
 	switch wt {
 	case WebhookTypeDefault:
-		experiment := experimentToWebhookPayload(e, activeConfig)
+		experiment := experimentToWebhookPayload(e, activeConfig, showName)
 		if trialID != nil && *trialID > 0 {
 			experiment.TrialID = *trialID
 		}
@@ -705,7 +767,7 @@ func generateEventPayload(
 		}
 		return pJSON, nil
 	case WebhookTypeSlack:
-		slackJSON, err := generateSlackPayload(ctx, e, activeConfig, eventData, trialID)
+		slackJSON, err := generateSlackPayload(ctx, e, activeConfig, eventData, trialID, showName)
 		if err != nil {
 			return nil, err
 		}
@@ -715,9 +777,12 @@ func generateEventPayload(
 	}
 }
 
+// generateSlackPayload returns the Slack message of an experiment event; the experiment is named
+// by its ID only unless showName is set.
 func generateSlackPayload(
 	ctx context.Context, e model.Experiment,
 	activeConfig expconf.ExperimentConfig, eventData *CustomTriggerData, trialID *int,
+	showName bool,
 ) ([]byte, error) {
 	var status string
 	var eURL string
@@ -752,33 +817,37 @@ func generateSlackPayload(
 		}
 	}
 
+	label := fmt.Sprintf("#%v", e.ID)
+	if showName {
+		label = fmt.Sprintf("%v (#%v)", activeConfig.Name(), e.ID)
+	}
 	switch e.State {
 	case model.CompletedState:
 		status = "Your experiment completed successfully 🎉"
 		if baseURLIsSet {
-			eURL = fmt.Sprintf("✅ <%v/det/experiments/%v/overview | %v (#%v)>",
-				webUIBaseURL, e.ID, activeConfig.Name(), e.ID)
+			eURL = fmt.Sprintf("✅ <%v/det/experiments/%v/overview | %v>",
+				webUIBaseURL, e.ID, label)
 		} else {
-			eURL = fmt.Sprintf("✅ %v (#%v)", activeConfig.Name(), e.ID)
+			eURL = fmt.Sprintf("✅ %v", label)
 		}
 		mStatus = "Completed"
 	case model.ErrorState:
 		status = "Your experiment has stopped with errors"
 		if baseURLIsSet {
-			eURL = fmt.Sprintf("❌ <%v/det/experiments/%v/overview | %v (#%v)>",
-				webUIBaseURL, e.ID, activeConfig.Name(), e.ID)
+			eURL = fmt.Sprintf("❌ <%v/det/experiments/%v/overview | %v>",
+				webUIBaseURL, e.ID, label)
 		} else {
-			eURL = fmt.Sprintf("❌ %v (#%v)", activeConfig.Name(), e.ID)
+			eURL = fmt.Sprintf("❌ %v", label)
 		}
 		c = "#DD5040"
 		mStatus = "Errored"
 	default:
 		status = fmt.Sprintf("The status of your experiment is %s", e.State)
 		if baseURLIsSet {
-			eURL = fmt.Sprintf("<%v/det/experiments/%v/overview | %v (#%v)>",
-				webUIBaseURL, e.ID, activeConfig.Name(), e.ID)
+			eURL = fmt.Sprintf("<%v/det/experiments/%v/overview | %v>",
+				webUIBaseURL, e.ID, label)
 		} else {
-			eURL = fmt.Sprintf("%v (#%v)", activeConfig.Name(), e.ID)
+			eURL = label
 		}
 		c = "#009bde"
 		mStatus = string(e.State)
