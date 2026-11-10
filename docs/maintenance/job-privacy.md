@@ -43,10 +43,11 @@ A job created before job privacy has no audiences of its own and is shared
 under the policy and its owner's switches.
 
 The trials of an experiment follow the experiment. Deleting checkpoints creates
-a checkpoint garbage collection job owned by the user who deletes them. A task
-recorded without a job follows the record of its command, shell, or generic
-task, or the experiment of its trial, as a job created before job privacy; a
-task without such a record is readable only by administrators.
+a checkpoint garbage collection job owned by the user who deletes them. A trial
+task without a job of its own follows its experiment's job. Any other task
+without a job uses the owner recorded with its command, shell, or generic task
+and follows the rules for a job created before job privacy; a task without such
+a record is readable only by administrators.
 
 ## Settings
 
