@@ -2912,8 +2912,8 @@ func (a *apiServer) PutExperimentLabel(ctx context.Context,
 		return nil, err
 	}
 	defer func() {
-		if err = tx.Rollback(); err != nil && err != sql.ErrTxDone {
-			log.WithError(err).Error("error rolling back transaction in create workspace")
+		if rollbackErr := tx.Rollback(); rollbackErr != nil && rollbackErr != sql.ErrTxDone {
+			log.WithError(rollbackErr).Error("error rolling back transaction in put experiment label")
 		}
 	}()
 
@@ -2976,8 +2976,8 @@ func (a *apiServer) DeleteExperimentLabel(ctx context.Context,
 		return nil, err
 	}
 	defer func() {
-		if err = tx.Rollback(); err != nil && err != sql.ErrTxDone {
-			log.WithError(err).Error("error rolling back transaction in create workspace")
+		if rollbackErr := tx.Rollback(); rollbackErr != nil && rollbackErr != sql.ErrTxDone {
+			log.WithError(rollbackErr).Error("error rolling back transaction in delete experiment label")
 		}
 	}()
 
