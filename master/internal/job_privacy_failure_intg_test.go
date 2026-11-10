@@ -286,6 +286,41 @@ func TestJobPrivacyLabelEdits(t *testing.T) {
 	require.ElementsMatch(t, []string{keepA, keepB, label}, resp.Labels, "the owner reads them")
 }
 
+// TestJobPrivacyNoOpLabelEditsReleaseTheRow checks that a label edit that writes nothing ends its
+// transaction before it reads the job privacy for the response: with one free pool connection,
+// a read while the transaction still holds it waits until the deadline.
+func TestJobPrivacyNoOpLabelEditsReleaseTheRow(t *testing.T) {
+	api, _, _ := setupAPITest(t, nil)
+	lockJobPrivacyPolicy(t)
+	useJobPrivacyEditorAuthZ(t)
+	owner := addGCTestOwner(t)
+	editor := addGCTestOwner(t)
+	ownerCtx, editorCtx := userContext(t, owner), userContext(t, editor)
+
+	keep, absent := uuid.NewString(), uuid.NewString()
+	exp := createTestExpWithProjectID(t, api, owner, 1, keep)
+	shareJob(ownerCtx, t, api, exp.JobID.String(), false, true, true)
+	expID := int32(exp.ID)
+
+	// The policy lock of this test holds a connection of its own.
+	sqlDB := db.Bun().DB
+	stats := sqlDB.Stats()
+	sqlDB.SetMaxOpenConns(stats.InUse + 1)
+	t.Cleanup(func() { sqlDB.SetMaxOpenConns(stats.MaxOpenConnections) })
+
+	ctx, cancel := context.WithTimeout(editorCtx, 5*time.Second)
+	defer cancel()
+	putResp, err := api.PutExperimentLabel(ctx,
+		&apiv1.PutExperimentLabelRequest{ExperimentId: expID, Label: keep})
+	require.NoError(t, err, "add a label that exists")
+	require.Empty(t, putResp.Labels, "add a label that exists")
+
+	delResp, err := api.DeleteExperimentLabel(ctx,
+		&apiv1.DeleteExperimentLabelRequest{ExperimentId: expID, Label: absent})
+	require.NoError(t, err, "remove a label that is absent")
+	require.Empty(t, delResp.Labels, "remove a label that is absent")
+}
+
 // exitAllocationService starts allocations as its AllocationService does and keeps their exit
 // callbacks, so that a test can end an allocation with an exit of its choice.
 type exitAllocationService struct {
