@@ -112,7 +112,7 @@ This is the same as ``det shell start --config "services={jupyter: {enabled: fal
 named by both, the last flag wins. TensorBoard runs only when the configuration asks for it, with a
 log directory, or experiment and trial IDs (see :ref:`tensorboard-service`). The WebUI's **Launch
 Interactive Task** form has **JupyterLab**, **VS Code** and **TensorBoard** boxes under
-**Services**, checked for the services the shell would run, and **Data source** for TensorBoard.
+**Services**, checked for the services the shell would run, and **TensorBoard data source**.
 
 A task restored after a master restart keeps the services it was started with. The default does not
 install JupyterLab into the image: without it, the ``jupyter`` service is ``UNAVAILABLE`` and the
@@ -269,8 +269,8 @@ refuses requests without it, in every network mode, a ``network_mode`` of ``host
 TensorBoard stops, the shell and its other services keep running.
 
 In the WebUI, check **TensorBoard** under **Services** of the **Launch Interactive Task** form and
-enter the directory as **Log directory in the task** under **Data source**. The shell's page then
-has a **TensorBoard** tab, and its action menu has **Open TensorBoard**.
+enter the directory as **Log directory in the task** under **TensorBoard data source**. The shell's
+page then has a **TensorBoard** tab, and its action menu has **Open TensorBoard**.
 
 .. _shell-image-requirements:
 
