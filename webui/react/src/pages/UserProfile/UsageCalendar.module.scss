@@ -2,9 +2,13 @@
   max-width: 100%;
 }
 .scroll {
-  max-width: 100%;
+  // The padding leaves room for the focus outline of a day at the edge of the box; the margin
+  // keeps the grid where it was.
+  margin: -3px -3px 0;
+  max-width: calc(100% + 6px);
   overflow-x: auto;
-  padding-bottom: 4px;
+  padding: 3px 3px 4px;
+  scroll-padding: 3px;
 }
 .months,
 .grid {

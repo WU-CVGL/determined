@@ -147,6 +147,24 @@ describe('UsageCalendar', () => {
     expect(screen.getByTestId('usage-calendar-day')).toHaveTextContent(/^2026-11-03 \(UTC\)/);
   });
 
+  it('scrolls the day reached with an arrow key into view', async () => {
+    const user = userEvent.setup();
+    const scrollIntoView = vi.fn();
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    try {
+      setup([]);
+      act(() => cell('2026-10-28').focus());
+      await act(() => user.keyboard('{ArrowLeft}'));
+      expect(cell('2026-10-21')).toHaveFocus();
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView.mock.instances[0]).toBe(cell('2026-10-21'));
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' });
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original;
+    }
+  });
+
   it('keeps the focus at the ends of the grid', async () => {
     const user = userEvent.setup();
     setup([]);

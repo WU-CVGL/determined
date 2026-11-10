@@ -52,7 +52,10 @@ const UsageCalendar: React.FC<Props> = ({ dayValues, weeks }: Props) => {
       const to = days[from + step];
       if (step === undefined || from < 0 || !to) return;
       e.preventDefault();
-      grid.current?.querySelector<HTMLElement>(`[data-date="${to.date}"]`)?.focus();
+      const target = grid.current?.querySelector<HTMLElement>(`[data-date="${to.date}"]`);
+      target?.focus();
+      // Focus alone does not scroll to a day that is partly in view.
+      target?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
     },
     [days],
   );
