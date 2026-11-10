@@ -205,6 +205,24 @@ To revert to default settings:
 -  Select **Reset to Default**.
 -  Confirm you want to reset all user settings to their default values.
 
+.. _web-ui-job-privacy:
+
+*********************
+ Sharing Job Content
+*********************
+
+Who besides a job's owner and administrators may read the job's title, logs and config is set in
+three places:
+
+-  **Job Privacy** in the user settings: whether your titles and logs are shared, and the default
+   for your new jobs.
+-  **Sharing** in a job's action menu: the job's own sharing.
+-  The **Job Privacy** tab of Admin Settings, for administrators: which of them may be shared, and
+   the default for new jobs.
+
+A job whose title is not shared with you shows its type and ID, such as ``Experiment 12``. To learn
+more, visit :doc:`/maintenance/job-privacy`.
+
 ******************
  Choosing a Theme
 ******************

@@ -61,10 +61,11 @@ def ls(args: argparse.Namespace) -> None:
     ]
 
     def computed_job_name(job: bindings.v1Job) -> str:
+        name = render.title_or_omitted(job.name, job.capabilities)
         if job.type == bindings.jobv1Type.EXPERIMENT:
-            return f"{job.name} ({job.entityId})"
+            return f"{name} ({job.entityId})"
         else:
-            return job.name
+            return str(name)
 
     values = [
         [

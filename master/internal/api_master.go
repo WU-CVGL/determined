@@ -235,6 +235,9 @@ func (a *apiServer) ResourceAllocationRaw(
 	); err != nil {
 		return nil, fmt.Errorf("error fetching raw allocation data: %w", err)
 	}
+	if err := redactRawAllocationLabels(ctx, *u, resp.ResourceEntries); err != nil {
+		return nil, err
+	}
 
 	return resp, nil
 }

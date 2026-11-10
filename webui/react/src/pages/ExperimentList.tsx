@@ -82,6 +82,7 @@ import {
   getActionsForExperimentsUnion,
   getProjectExperimentForExperimentItem,
 } from 'utils/experiment';
+import { titleHidden } from 'utils/jobPrivacy';
 import { useObservable } from 'utils/observable';
 import { validateDetApiEnum, validateDetApiEnumList } from 'utils/service';
 import { alphaNumericSorter } from 'utils/sort';
@@ -412,8 +413,10 @@ const ExperimentList: React.FC<Props> = ({ project }) => {
     [],
   );
 
+  // The description and labels of an experiment whose title is not shared are omitted, not empty.
   const canEditExperiment = useCallback(
     (experiment: BulkExperimentItem) =>
+      !titleHidden(experiment.capabilities) &&
       permissions.canModifyExperimentMetadata({
         userId: experiment.userId,
         workspace: { id: project.workspaceId },

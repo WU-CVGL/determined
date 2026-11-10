@@ -10,6 +10,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/db"
 	expauth "github.com/determined-ai/determined/master/internal/experiment"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
+	"github.com/determined-ai/determined/master/internal/jobprivacy"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
 	"github.com/determined-ai/determined/proto/pkg/taskv1"
@@ -27,10 +28,24 @@ func (a *apiServer) GetTask(
 	switch err := a.m.db.QueryProto("get_task", t, req.TaskId); {
 	case errors.Is(err, db.ErrNotFound):
 		return nil, api.NotFoundErrs("task", req.TaskId, true)
-	default:
-		return &apiv1.GetTaskResponse{Task: t},
-			errors.Wrapf(err, "error fetching task %s from database", req.TaskId)
+	case err != nil:
+		return nil, errors.Wrapf(err, "error fetching task %s from database", req.TaskId)
 	}
+	curUser, _, err := grpcutil.GetUser(ctx)
+	if err != nil {
+		return nil, err
+	}
+	v, err := jobprivacy.NewViewer(ctx, *curUser)
+	if err != nil {
+		return nil, err
+	}
+	caps, err := taskCaps(ctx, v, model.TaskID(req.TaskId))
+	if err != nil {
+		return nil, err
+	}
+	redactTask(t, caps)
+	t.Capabilities = caps.Proto()
+	return &apiv1.GetTaskResponse{Task: t}, nil
 }
 
 func (a *apiServer) GetGenericTaskConfig(
@@ -41,6 +56,15 @@ func (a *apiServer) GetGenericTaskConfig(
 	}
 	curUser, _, err := grpcutil.GetUser(ctx)
 	if err != nil {
+		return nil, err
+	}
+	// A config not shared with the user is refused; a fork from the task reads it here, so it is
+	// refused too.
+	v, err := jobprivacy.NewViewer(ctx, *curUser)
+	if err != nil {
+		return nil, err
+	}
+	if err = jobprivacy.RequireTask(ctx, v, model.TaskID(req.TaskId), jobprivacy.Config); err != nil {
 		return nil, err
 	}
 

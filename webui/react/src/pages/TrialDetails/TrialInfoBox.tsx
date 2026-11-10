@@ -17,6 +17,7 @@ import { getTaskAcceleratorData } from 'services/api';
 import { V1AcceleratorData } from 'services/api-ts-sdk/api';
 import { CheckpointWorkloadExtended, ExperimentBase, TrialDetails } from 'types';
 import handleError from 'utils/error';
+import { experimentSearcherMetric, experimentSearcherName } from 'utils/experiment';
 import { createPachydermLineageLink } from 'utils/integrations';
 import { AnyMouseEvent } from 'utils/routes';
 import { humanReadableBytes, pluralizer } from 'utils/string';
@@ -156,9 +157,7 @@ const TrialInfoBox: React.FC<Props> = ({ trial, experiment }: Props) => {
 
   const allocationModal = useModal(allocationModalComponent);
   const lineageComponent = useMemo(() => {
-    const {
-      config: { integrations },
-    } = experiment;
+    const integrations = experiment.config?.integrations;
 
     if (integrations?.pachyderm !== undefined) {
       const url = createPachydermLineageLink(integrations.pachyderm);
@@ -217,7 +216,8 @@ const TrialInfoBox: React.FC<Props> = ({ trial, experiment }: Props) => {
 export default TrialInfoBox;
 
 export const TrialInfoBoxMultiTrial: React.FC<Props> = ({ experiment }: Props) => {
-  const searcher = experiment.config.searcher;
+  const searcherMetric = experimentSearcherMetric(experiment);
+  const searcherName = experimentSearcherName(experiment);
   const checkpointsSize = useMemo(() => {
     const totalBytes = experiment?.checkpointSize;
     if (!totalBytes) return;
@@ -226,8 +226,8 @@ export const TrialInfoBoxMultiTrial: React.FC<Props> = ({ experiment }: Props) =
   return (
     <Section>
       <Card.Group size="small">
-        {searcher?.metric && <OverviewStats title="Metric">{searcher.metric}</OverviewStats>}
-        {searcher?.name && <OverviewStats title="Searcher">{searcher.name}</OverviewStats>}
+        {searcherMetric && <OverviewStats title="Metric">{searcherMetric}</OverviewStats>}
+        {searcherName && <OverviewStats title="Searcher">{searcherName}</OverviewStats>}
         {experiment.numTrials > 0 && (
           <OverviewStats title="Trials">{experiment.numTrials}</OverviewStats>
         )}

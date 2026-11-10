@@ -9,6 +9,7 @@ import "protoc-gen-swagger/options/annotations.proto";
 
 import "determined/container/v1/container.proto";
 import "determined/task/v1/task.proto";
+import "determined/job/v1/job.proto";
 
 // Shell is an ssh server in a containerized environment.
 message Shell {
@@ -73,4 +74,6 @@ message Shell {
   // assigned.
   // Available only in Agent-only clusters; omitted on other or mixed backends.
   google.protobuf.Timestamp allocation_start_time = 102;
+  // What the requesting user may do with the content of this shell's job.
+  determined.job.v1.JobCapabilities capabilities = 103;
 }

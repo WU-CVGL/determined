@@ -5,11 +5,15 @@ import * as ioTypes from 'ioTypes';
 import { DateString } from 'ioTypes';
 import {
   Devicev1Type,
+  Experimentv1State,
   Taskv1State,
   V1Agent,
+  V1Experiment,
   V1ExperimentActionResult,
+  V1FlatRun,
   V1GenericTask,
   V1GenericTaskState,
+  V1JobCapabilities,
   V1RunActionResult,
   V1Task,
   V1TaskType,
@@ -153,6 +157,10 @@ describe('Decoder', () => {
       });
     });
 
+    it('should carry the job, whose sharing the Sharing action opens', () => {
+      mappers.forEach((map) => expect(map(wire()).jobId).toBe('job-1'));
+    });
+
     it('should carry the sources of a shell that has them', () => {
       expect(decoder.mapV1Shell({ ...wire(), experimentIds: [4], trialIds: [] }).misc).toEqual({
         experimentIds: [4],
@@ -213,6 +221,8 @@ describe('Decoder', () => {
     it('should map a listed generic task', () => {
       expect(decoder.mapV1GenericTask(sdkTask)).toStrictEqual({
         allocationId: 'alloc-1',
+        allocationStartTime: undefined,
+        capabilities: undefined,
         description: 'evaluates the checkpoints of run 12',
         displayName: 'Alice Chen',
         endTime: undefined,
@@ -279,6 +289,23 @@ describe('Decoder', () => {
       });
     });
 
+    it('should carry the capabilities of GetTask, and none from an older master', () => {
+      const task: V1Task = {
+        allocations: [],
+        startTime: '2026-01-01T00:00:00Z' as DateString,
+        taskId: 'task-1',
+        taskType: V1TaskType.SHELL,
+      };
+      const capabilities = {
+        manageSharing: false,
+        viewConfig: false,
+        viewLogs: true,
+        viewTitle: true,
+      };
+      expect(decoder.mapV1Task({ ...task, capabilities }).capabilities).toStrictEqual(capabilities);
+      expect(decoder.mapV1Task(task).capabilities).toBeUndefined();
+    });
+
     it('should parse the config JSON string', () => {
       expect(decoder.mapGenericTaskConfig('{"entrypoint":["python","eval.py"]}')).toStrictEqual({
         entrypoint: ['python', 'eval.py'],
@@ -319,6 +346,162 @@ describe('Decoder', () => {
       expect(decoder.jsonToAgents([{ ...agent, gpuTopology: undefined }])[0].gpuTopology).toBe(
         undefined,
       );
+    });
+  });
+  describe('job privacy', () => {
+    const hidden: V1JobCapabilities = {
+      manageSharing: false,
+      viewConfig: false,
+      viewLogs: false,
+      viewTitle: false,
+    };
+    const configHidden: V1JobCapabilities = { ...hidden, viewLogs: true, viewTitle: true };
+    const sdkTaskOf = (capabilities: V1JobCapabilities): V1GenericTask => ({
+      capabilities,
+      description: 'evaluates',
+      jobId: 'job-1',
+      name: 'eval-sweep',
+      noPause: true,
+      projectId: 1,
+      resourcePool: 'default',
+      slots: 1,
+      startTime: '2026-01-01T00:00:00Z' as DateString,
+      state: V1GenericTaskState.ACTIVE,
+      taskId: 'task-1',
+      userId: 3,
+      username: 'alice',
+      workspaceId: 4,
+    });
+
+    // An experiment as the master sends it to a viewer it hides the title and config from.
+    const hiddenExperiment: V1Experiment = {
+      archived: false,
+      capabilities: hidden,
+      config: null,
+      description: '',
+      id: 12,
+      jobId: 'job-12',
+      labels: [],
+      name: '',
+      notes: '',
+      numTrials: 1,
+      originalConfig: '',
+      projectId: 1,
+      projectOwnerId: 1,
+      searcherMetric: 'loss',
+      searcherType: 'single',
+      startTime: '2026-01-01T00:00:00Z' as DateString,
+      state: Experimentv1State.ACTIVE,
+      username: 'alice',
+    };
+
+    it('should omit a hidden title and keep the public fields of an experiment', () => {
+      const item = decoder.mapV1Experiment(hiddenExperiment);
+      expect(item.name).toBeUndefined();
+      expect(item.labels).toEqual([]);
+      expect(item.config).toBeUndefined();
+      expect(item.capabilities).toEqual(hidden);
+      expect(item.id).toBe(12);
+      expect(item.username).toBe('alice');
+      expect(item.searcherType).toBe('single');
+    });
+
+    it('should tolerate an experiment without name and labels', () => {
+      const { labels: _labels, name: _name, ...rest } = hiddenExperiment;
+      const item = decoder.mapV1Experiment(rest as V1Experiment);
+      expect(item.name).toBeUndefined();
+      expect(item.labels).toEqual([]);
+    });
+
+    it('should not decode the config of an experiment detail that omits it', () => {
+      const detail = decoder.mapV1GetExperimentDetailsResponse({
+        config: null,
+        experiment: { ...hiddenExperiment, capabilities: configHidden, name: 'mnist' },
+        jobSummary: undefined,
+      } as unknown as Parameters<typeof decoder.mapV1GetExperimentDetailsResponse>[0]);
+      expect(detail.config).toBeUndefined();
+      expect(detail.configRaw).toBeUndefined();
+      expect(detail.originalConfig).toBeUndefined();
+      expect(detail.name).toBe('mnist');
+    });
+
+    it('should not decode a config the capabilities deny', () => {
+      const full = decoder.mapV1Experiment(
+        { ...hiddenExperiment, capabilities: configHidden },
+        undefined,
+        { resources: { slots_per_trial: 2 } },
+      );
+      expect(full.config).toBeUndefined();
+      expect(full.configRaw).toBeUndefined();
+    });
+
+    it('should decode the config of an experiment shared in full', () => {
+      const config = experimentResps[0].config;
+      const full = decoder.mapV1Experiment(
+        { ...hiddenExperiment, capabilities: { ...hidden, viewConfig: true, viewTitle: true } },
+        undefined,
+        config,
+      );
+      expect(full.configRaw).toBe(config);
+      expect(full.config?.searcher.name).toBe(config.searcher.name);
+    });
+
+    it('should omit the hidden title of a shell, command and generic task', () => {
+      const wire = {
+        capabilities: hidden,
+        description: '',
+        id: 'task-1',
+        jobId: 'job-1',
+        resourcePool: 'default',
+        startTime: '2026-01-01T00:00:00Z' as DateString,
+        state: Taskv1State.RUNNING,
+        username: 'alice',
+        workspaceId: 1,
+      };
+      [decoder.mapV1Command, decoder.mapV1Shell].forEach((map) => {
+        const task = map(wire);
+        expect(task.name).toBeUndefined();
+        expect(task.capabilities).toEqual(hidden);
+      });
+      const generic = decoder.mapV1GenericTask({ ...sdkTaskOf(hidden), description: '', name: '' });
+      expect(generic.name).toBeUndefined();
+      expect(generic.capabilities).toEqual(hidden);
+    });
+
+    it('should keep the title of a shared task', () => {
+      const shared = { ...hidden, viewTitle: true };
+      const generic = decoder.mapV1GenericTask({ ...sdkTaskOf(shared), name: '' });
+      expect(generic.name).toBe('Generic Task task-1');
+    });
+
+    it('should omit the hidden experiment name of a run', () => {
+      const run = decoder.decodeV1FlatRun({
+        archived: false,
+        checkpointCount: 0,
+        experiment: {
+          capabilities: hidden,
+          description: '',
+          id: 12,
+          isMultitrial: false,
+          name: '',
+          progress: 0,
+          resourcePool: 'default',
+          searcherMetric: 'loss',
+          searcherType: 'single',
+          unmanaged: false,
+        },
+        id: 3,
+        parentArchived: false,
+        projectId: 1,
+        projectName: 'Uncategorized',
+        startTime: '2026-01-01T00:00:00Z' as DateString,
+        state: Experimentv1State.ACTIVE,
+        summaryMetrics: {},
+        workspaceId: 1,
+        workspaceName: 'Uncategorized',
+      } as V1FlatRun);
+      expect(run.experiment?.name).toBeUndefined();
+      expect(run.experiment?.capabilities).toEqual(hidden);
     });
   });
 

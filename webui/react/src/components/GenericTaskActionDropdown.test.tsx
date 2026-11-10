@@ -5,7 +5,7 @@ import { ConfirmationProvider } from 'hew/useConfirm';
 import { MemoryRouter } from 'react-router-dom';
 
 import GenericTaskActions from 'pages/GenericTaskDetails/GenericTaskActions';
-import { killGenericTask, pauseGenericTask, unpauseGenericTask } from 'services/api';
+import { getJobSharing, killGenericTask, pauseGenericTask, unpauseGenericTask } from 'services/api';
 import { GenericTask, GenericTaskState } from 'types';
 import { copyToClipboard } from 'utils/dom';
 import handleError from 'utils/error';
@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('services/api', () => ({
+  getJobSharing: vi.fn(() => new Promise(() => undefined)),
   killGenericTask: vi.fn(() => Promise.resolve()),
   pauseGenericTask: vi.fn(() => Promise.resolve()),
   unpauseGenericTask: vi.fn(() => Promise.resolve()),
@@ -43,7 +44,7 @@ vi.mock('react-router-dom', async (importOriginal) => ({
   useNavigate: () => mocks.navigate,
 }));
 
-const TASK: GenericTask = {
+const TASK = {
   description: '',
   jobId: 'job-1',
   name: 'eval-sweep',
@@ -57,7 +58,7 @@ const TASK: GenericTask = {
   userId: 4,
   username: 'bob',
   workspaceId: 7,
-};
+} satisfies GenericTask;
 
 const FULL_MENU = ['View Logs', 'View Resources', 'Copy Task ID', 'Pause', 'Kill'];
 
@@ -178,6 +179,64 @@ describe('GenericTaskActionDropdown', () => {
         expect(menuLabels()).toEqual(FULL_MENU.filter((label) => label !== 'View Resources'));
       },
     );
+  });
+
+  describe('Sharing', () => {
+    const capabilities = {
+      manageSharing: true,
+      viewConfig: true,
+      viewLogs: true,
+      viewTitle: true,
+    };
+
+    it('is offered after Copy Task ID when the master lets the user manage it', async () => {
+      await openMenu({ capabilities });
+      expect(menuLabels()).toEqual([
+        'View Logs',
+        'View Resources',
+        'Copy Task ID',
+        'Sharing',
+        'Pause',
+        'Kill',
+      ]);
+    });
+
+    it('is left out when the master does not let the user manage it', async () => {
+      await openMenu({ capabilities: { ...capabilities, manageSharing: false } });
+      expect(menuLabels()).toEqual(FULL_MENU);
+    });
+
+    it('opens the sharing of the task’s job', async () => {
+      await openMenu({ capabilities });
+      await userEvent.click(screen.getByText('Sharing'));
+      await waitFor(() => expect(getJobSharing).toHaveBeenCalledTimes(1));
+      expect(vi.mocked(getJobSharing).mock.calls[0][0]).toEqual({ jobId: 'job-1' });
+      expect(await screen.findByRole('dialog', { name: 'Sharing' })).toBeInTheDocument();
+    });
+
+    it('is a button on the task’s page when given', async () => {
+      const onSharing = vi.fn();
+      render(
+        <UIProvider theme={DefaultTheme.Light}>
+          <ConfirmationProvider>
+            <GenericTaskActions canControl task={TASK} onSharing={onSharing} />
+          </ConfirmationProvider>
+        </UIProvider>,
+      );
+      await userEvent.click(screen.getByTestId('generic-task-sharing'));
+      expect(onSharing).toHaveBeenCalledTimes(1);
+    });
+
+    it('is not on the task’s page otherwise', () => {
+      render(
+        <UIProvider theme={DefaultTheme.Light}>
+          <ConfirmationProvider>
+            <GenericTaskActions canControl task={TASK} />
+          </ConfirmationProvider>
+        </UIProvider>,
+      );
+      expect(screen.queryByTestId('generic-task-sharing')).not.toBeInTheDocument();
+    });
   });
 
   describe('viewing', () => {

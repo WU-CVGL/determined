@@ -8,6 +8,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import Page, { BreadCrumbRoute } from 'components/Page';
 import { terminalRunStates } from 'constants/states';
 import useFeature from 'hooks/useFeature';
+import usePageReturns from 'hooks/usePageReturns';
 import usePolling from 'hooks/usePolling';
 import ExperimentDetailsHeader from 'pages/ExperimentDetails/ExperimentDetailsHeader';
 import ExperimentMultiTrialTabs from 'pages/ExperimentDetails/ExperimentMultiTrialTabs';
@@ -19,6 +20,7 @@ import userSettings from 'stores/userSettings';
 import workspaceStore from 'stores/workspaces';
 import { ExperimentBase, TrialItem, Workspace } from 'types';
 import { isSingleTrialExperiment } from 'utils/experiment';
+import { jobDisplayName } from 'utils/jobPrivacy';
 import { useObservable } from 'utils/observable';
 import { isAborted, isNotFound } from 'utils/service';
 
@@ -76,6 +78,19 @@ const ExperimentDetails: React.FC = () => {
     }
   }, [experiment, stopPolling]);
 
+  // An ended experiment is not polled: read it again when the user comes back to the page, for
+  // sharing changed meanwhile. A read that fails leaves the page as it was.
+  usePageReturns(() => {
+    if (!experiment || !terminalRunStates.has(experiment.state)) return;
+    getExperimentDetails({ id }, { signal: canceler.current?.signal })
+      .then((newExperiment) =>
+        setExperiment((prevExperiment) =>
+          _.isEqual(prevExperiment, newExperiment) ? prevExperiment : newExperiment,
+        ),
+      )
+      .catch(() => undefined);
+  });
+
   useEffect(() => {
     fetchExperimentDetails();
   }, [fetchExperimentDetails]);
@@ -118,7 +133,9 @@ const ExperimentDetails: React.FC = () => {
     });
 
   pageBreadcrumb.push({
-    breadcrumbName: experiment?.name ?? '',
+    breadcrumbName: experiment
+      ? jobDisplayName('Experiment', experiment.id, experiment.name, experiment.capabilities)
+      : '',
     path: paths.experimentDetails(id),
   });
 

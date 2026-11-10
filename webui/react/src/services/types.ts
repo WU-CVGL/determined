@@ -68,6 +68,10 @@ export interface TrialWorkloadsParams extends TrialDetailsParams, PaginationPara
   sortKey?: string;
 }
 
+export interface JobSharingParams {
+  jobId: string;
+}
+
 export interface CommandIdParams {
   commandId: string;
 }

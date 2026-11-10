@@ -7,6 +7,7 @@ import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
 import "protoc-gen-swagger/options/annotations.proto";
+import "determined/job/v1/job.proto";
 
 // The current state of the experiment.
 enum State {
@@ -167,6 +168,8 @@ message Experiment {
   // GetExperiments; unset if no trial has received resources.
   // Available only in Agent-only clusters; omitted on other or mixed backends.
   google.protobuf.Timestamp allocation_start_time = 48;
+  // What the requesting user may do with the content of this experiment's job.
+  determined.job.v1.JobCapabilities capabilities = 49;
 }
 
 // PatchExperiment is a partial update to an experiment with only id required.

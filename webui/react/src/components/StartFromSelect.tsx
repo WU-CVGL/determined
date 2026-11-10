@@ -9,6 +9,7 @@ import { GetShellsParams } from 'services/types';
 import userStore from 'stores/users';
 import { CommandTask, RawJson, Template } from 'types';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
+import { jobDisplayName } from 'utils/jobPrivacy';
 import { clearLaunchHistory, LaunchHistoryEntry, listLaunchHistory } from 'utils/launchHistory';
 import { formFieldsFromConfig } from 'utils/ntscConfig';
 import { useObservable } from 'utils/observable';
@@ -41,9 +42,12 @@ const formatTime = (time: number | string): string => dayjs(time).format('MMM D,
 const SHELL_LABEL = 'Shell';
 
 const taskLabel = (task: CommandTask): string =>
-  [SHELL_LABEL, task.name, capitalize(task.state.toLowerCase()), formatTime(task.startTime)].join(
-    ' · ',
-  );
+  [
+    SHELL_LABEL,
+    jobDisplayName(SHELL_LABEL, task.id, task.name, task.capabilities),
+    capitalize(task.state.toLowerCase()),
+    formatTime(task.startTime),
+  ].join(' · ');
 
 const localLabel = (entry: LaunchHistoryEntry): string => {
   const { name, pool, slots = 1 } = formFieldsFromConfig(entry.config);
@@ -224,7 +228,7 @@ const StartFromSelect: React.FC<Props> = ({
           level: ErrorLevel.Warn,
           publicMessage:
             'The master keeps ended tasks for about 24 hours and forgets them when it restarts.',
-          publicSubject: `Unable to load the config of ${task.name}.`,
+          publicSubject: `Unable to load the config of ${jobDisplayName(SHELL_LABEL, task.id, task.name, task.capabilities)}.`,
           silent: false,
           type: ErrorType.Server,
         });

@@ -1,4 +1,5 @@
 import Icon from 'hew/Icon';
+import Message from 'hew/Message';
 import Spinner from 'hew/Spinner';
 import { Failed, Loadable, Loaded, NotLoaded } from 'hew/utils/loadable';
 import { TreeNode } from 'hew/utils/types';
@@ -12,6 +13,7 @@ import { V1FileNode } from 'services/api-ts-sdk';
 import { ExperimentBase, RawJson } from 'types';
 import handleError, { ErrorType } from 'utils/error';
 import { isSingleTrialExperiment } from 'utils/experiment';
+import { CONFIG_NOT_SHARED, configHidden } from 'utils/jobPrivacy';
 
 import css from './ExperimentCodeViewer.module.scss';
 
@@ -64,12 +66,12 @@ const ExperimentCodeViewer: React.FC<Props> = ({
     return fileTree.map<TreeNode>(convertV1FileNodeToTreeNode);
   }, [experiment.id]);
 
-  // handle blank selected file path
+  // handle blank selected file path: the config, else the first file, as without a shared config
   const filePath =
     selectedFilePath ||
     (submittedConfig && 'Submitted Configuration') ||
     (runtimeConfig && 'Runtime Configuration') ||
-    '';
+    String(Loadable.getOrElse([], expFiles).find((node) => node.isLeaf)?.key ?? '');
 
   const keyedFileContent = useAsync<[string, string]>(async () => {
     if (filePath === 'Submitted Configuration' && submittedConfig !== undefined) {
@@ -78,6 +80,8 @@ const ExperimentCodeViewer: React.FC<Props> = ({
     if (filePath === 'Runtime Configuration' && runtimeConfig !== undefined) {
       return [filePath, runtimeConfig];
     }
+    // No file to show yet, as when the config is not shared and no code file is picked.
+    if (!filePath) return NotLoaded;
     try {
       const file = await getExperimentFileFromTree({
         experimentId: experiment.id,
@@ -140,6 +144,7 @@ const ExperimentCodeViewer: React.FC<Props> = ({
   return (
     <React.Suspense fallback={<Spinner spinning tip="Loading code viewer..." />}>
       <Spinner spinning={expFiles === NotLoaded} tip="Loading file tree...">
+        {configHidden(experiment.capabilities) && <Message title={CONFIG_NOT_SHARED} />}
         <div className={cssClasses.join(' ')}>
           <CodeEditor
             file={fileContent}

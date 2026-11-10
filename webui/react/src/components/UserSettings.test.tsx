@@ -23,6 +23,8 @@ const settingsApi = vi.hoisted(() => ({
 }));
 
 vi.mock('services/api', () => ({
+  getJobPrivacyPolicy: () => Promise.resolve([]),
+  getMyJobPrivacy: () => Promise.resolve({ shareLogs: true, shareTitles: true }),
   getUsers: () =>
     Promise.resolve({
       users: [
@@ -36,6 +38,7 @@ vi.mock('services/api', () => ({
       ],
     }),
   getUserSetting: settingsApi.getUserSetting,
+  patchMyJobPrivacy: vi.fn(),
   patchUser: vi.fn((params: PatchUserParams) =>
     Promise.resolve({
       displayName: params.userParams.displayName,
@@ -126,6 +129,20 @@ describe('UserSettings', () => {
     } finally {
       settingsApi.getUserSetting.mockResolvedValue({ settings: [] });
     }
+  });
+
+  it('shows the Job Privacy section between Preferences and Shortcuts', async () => {
+    setup();
+    expect(await screen.findByText('Share titles')).toBeInTheDocument();
+    const titles = ['Preferences', 'Job Privacy', 'Shortcuts'].map((title) =>
+      screen.getByRole('heading', { name: title }),
+    );
+    expect(
+      titles[0].compareDocumentPosition(titles[1]) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      titles[1].compareDocumentPosition(titles[2]) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('should render with correct values', async () => {

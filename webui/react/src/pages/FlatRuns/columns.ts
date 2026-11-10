@@ -21,6 +21,7 @@ import { Loadable } from 'hew/utils/loadable';
 import { handlePath, paths } from 'routes/utils';
 import { DetailedUser, FlatRun, RunState } from 'types';
 import { DURATION_UNIT_MEASURES, durationInEnglish, getTimeInEnglish } from 'utils/datetime';
+import { jobDisplayName } from 'utils/jobPrivacy';
 import { humanReadableNumber } from 'utils/number';
 import { AnyMouseEvent } from 'utils/routes';
 import { capitalize, floatToPercent, humanReadableBytes } from 'utils/string';
@@ -226,27 +227,30 @@ export const getColumnDefs = ({
   experimentName: {
     id: 'experimentName',
     renderer: (record: FlatRun) =>
-      handleEmptyCell(record.experiment, (data) => ({
-        allowOverlay: false,
-        copyData: data.name,
-        cursor: 'pointer',
-        data: {
-          kind: LINK_CELL,
-          link: {
-            href: paths.experimentDetails(data.id),
-            title: data.name,
-            unmanaged: data.unmanaged,
+      handleEmptyCell(record.experiment, (data) => {
+        const name = jobDisplayName('Search', data.id, data.name, data.capabilities);
+        return {
+          allowOverlay: false,
+          copyData: name,
+          cursor: 'pointer',
+          data: {
+            kind: LINK_CELL,
+            link: {
+              href: paths.experimentDetails(data.id),
+              title: name,
+              unmanaged: data.unmanaged,
+            },
+            navigateOn: 'click',
+            onClick: (e: CellClickedEventArgs) =>
+              handlePath(e as unknown as AnyMouseEvent, {
+                path: paths.experimentDetails(data.id),
+              }),
+            underlineOffset: 6,
           },
-          navigateOn: 'click',
-          onClick: (e: CellClickedEventArgs) =>
-            handlePath(e as unknown as AnyMouseEvent, {
-              path: paths.experimentDetails(data.id),
-            }),
-          underlineOffset: 6,
-        },
-        kind: GridCellKind.Custom,
-        readonly: true,
-      })),
+          kind: GridCellKind.Custom,
+          readonly: true,
+        };
+      }),
     title: 'Search Name',
     tooltip: () => undefined,
     width: columnWidths.experimentName ?? defaultColumnWidths.experimentName ?? MIN_COLUMN_WIDTH,

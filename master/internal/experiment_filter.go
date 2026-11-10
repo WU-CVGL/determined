@@ -7,6 +7,7 @@ import (
 
 	"github.com/uptrace/bun"
 
+	"github.com/determined-ai/determined/master/internal/jobprivacy"
 	"github.com/determined-ai/determined/proto/pkg/projectv1"
 )
 
@@ -55,6 +56,10 @@ type experimentFilter struct {
 type experimentFilterRoot struct {
 	FilterGroup  experimentFilter
 	ShowArchived bool
+
+	// privacy is the requesting user's job privacy rule over e.job_id, which the experiment's
+	// name, description and tags are read by. Callers set it; it is not part of the request.
+	privacy jobprivacy.Exprs
 }
 
 func (o *operator) toSQL() (string, error) {
@@ -86,15 +91,17 @@ func (o *operator) toSQL() (string, error) {
 	return s, nil
 }
 
-func expColumnNameToSQL(columnName string) (string, error) {
+// expColumnNameToSQL is the SQL of an experiment column of a filter. The name, description and
+// tags are read by the job privacy rule privacy: a hidden one is NULL.
+func expColumnNameToSQL(columnName string, privacy jobprivacy.Exprs) (string, error) {
 	// To prevent SQL injection this function should never
 	// return a user generated field name
 
 	filterExperimentColMap := map[string]string{
 		"id":              "e.id",
-		"description":     "e.config->>'description'",
-		"name":            "e.config->>'name'",
-		"tags":            "e.config->>'labels'",
+		"description":     privacy.ExpDescription(),
+		"name":            privacy.ExpName(),
+		"tags":            privacy.ExpLabelsText(),
 		"searcherType":    "e.config->'searcher'->>'name'",
 		"searcherMetric":  "e.config->'searcher'->>'metric'",
 		"startTime":       "e.start_time",
@@ -132,15 +139,17 @@ func expColumnNameToSQL(columnName string) (string, error) {
 	return col, nil
 }
 
-func runColumnNameToSQL(columnName string) (string, error) {
+// runColumnNameToSQL is the SQL of a run column of a filter. The experiment's name, description
+// and tags are read by the job privacy rule privacy: a hidden one is NULL.
+func runColumnNameToSQL(columnName string, privacy jobprivacy.Exprs) (string, error) {
 	// To prevent SQL injection this function should never
 	// return a user generated field name
 
 	filterExperimentColMap := map[string]string{
 		"id":                    "r.id",
-		"experimentDescription": "e.config->>'description'",
-		"experimentName":        "e.config->>'name'",
-		"tags":                  "e.config->>'labels'",
+		"experimentDescription": privacy.ExpDescription(),
+		"experimentName":        privacy.ExpName(),
+		"tags":                  privacy.ExpLabelsText(),
 		"searcherType":          "e.config->'searcher'->>'name'",
 		"searcherMetric":        "e.config->'searcher'->>'metric'",
 		"startTime":             "r.start_time",
@@ -556,7 +565,7 @@ func expRunOperatorQuery(o operator, col string, oSQL string, val *interface{}) 
 }
 
 func (e experimentFilterRoot) toSQL(q *bun.SelectQuery) (*bun.SelectQuery, error) {
-	q, err := e.FilterGroup.toSQL(q, nil)
+	q, err := e.FilterGroup.toSQL(q, nil, e.privacy)
 	if err != nil {
 		return nil, err
 	}
@@ -564,7 +573,7 @@ func (e experimentFilterRoot) toSQL(q *bun.SelectQuery) (*bun.SelectQuery, error
 }
 
 func (e experimentFilter) toSQL(q *bun.SelectQuery,
-	c *filterConjunction,
+	c *filterConjunction, privacy jobprivacy.Exprs,
 ) (*bun.SelectQuery, error) {
 	switch e.Kind {
 	case field:
@@ -585,7 +594,7 @@ func (e experimentFilter) toSQL(q *bun.SelectQuery,
 		switch location {
 		case projectv1.LocationType_LOCATION_TYPE_EXPERIMENT.String():
 			var col string
-			col, err = expColumnNameToSQL(e.ColumnName)
+			col, err = expColumnNameToSQL(e.ColumnName, privacy)
 			if err != nil {
 				return nil, err
 			}
@@ -600,7 +609,7 @@ func (e experimentFilter) toSQL(q *bun.SelectQuery,
 			}
 		case projectv1.LocationType_LOCATION_TYPE_RUN.String():
 			var col string
-			col, err = runColumnNameToSQL(e.ColumnName)
+			col, err = runColumnNameToSQL(e.ColumnName, privacy)
 			if err != nil {
 				return nil, err
 			}
@@ -677,7 +686,7 @@ func (e experimentFilter) toSQL(q *bun.SelectQuery,
 		}
 		for _, c := range e.Children {
 			q = q.WhereGroup(co, func(q *bun.SelectQuery) *bun.SelectQuery {
-				_, err = c.toSQL(q, e.Conjunction)
+				_, err = c.toSQL(q, e.Conjunction, privacy)
 				if err != nil {
 					return q
 				}
