@@ -7,6 +7,7 @@ import (
 
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/protoutils"
+	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 	"github.com/determined-ai/determined/proto/pkg/webhookv1"
 
@@ -254,19 +255,24 @@ func (t TriggerType) Proto() webhookv1.TriggerType {
 	}
 }
 
-// Proto returns a proto from a TriggerType.
+// experimentToWebhookPayload returns the webhook representation of an experiment; the name is
+// left out unless showName is set.
 func experimentToWebhookPayload(
-	e model.Experiment, activeConfig expconf.ExperimentConfig,
+	e model.Experiment, activeConfig expconf.ExperimentConfig, showName bool,
 ) *ExperimentPayload {
 	var duration int
 	if e.EndTime != nil {
 		duration = int(e.EndTime.Sub(e.StartTime).Seconds())
 	}
 
+	var name *expconf.Name
+	if showName {
+		name = ptrs.Ptr(activeConfig.Name())
+	}
 	return &ExperimentPayload{
 		ID:            e.ID,
 		State:         e.State,
-		Name:          activeConfig.Name(),
+		Name:          name,
 		Duration:      duration,
 		ResourcePool:  activeConfig.Resources().ResourcePool(),
 		SlotsPerTrial: activeConfig.Resources().SlotsPerTrial(),
@@ -337,17 +343,18 @@ type EventData struct {
 	CustomData *CustomTriggerData `json:"custom_data,omitempty"`
 }
 
-// ExperimentPayload is the webhook request representation of an experiment.
+// ExperimentPayload is the webhook request representation of an experiment. Name is nil, and left
+// out, when the experiment's title is not shared with the webhook.
 type ExperimentPayload struct {
-	ID            int          `json:"id"`
-	State         model.State  `json:"state"`
-	Name          expconf.Name `json:"name"`
-	Duration      int          `json:"duration"`
-	ResourcePool  string       `json:"resource_pool"`
-	SlotsPerTrial int          `json:"slots_per_trial"`
-	WorkspaceName string       `json:"workspace"`
-	ProjectName   string       `json:"project"`
-	TrialID       int          `json:"trial_id,omitempty"`
+	ID            int           `json:"id"`
+	State         model.State   `json:"state"`
+	Name          *expconf.Name `json:"name,omitempty"`
+	Duration      int           `json:"duration"`
+	ResourcePool  string        `json:"resource_pool"`
+	SlotsPerTrial int           `json:"slots_per_trial"`
+	WorkspaceName string        `json:"workspace"`
+	ProjectName   string        `json:"project"`
+	TrialID       int           `json:"trial_id,omitempty"`
 }
 
 // TaskLogPayload is the webhook request representation of a trigger of a task log.

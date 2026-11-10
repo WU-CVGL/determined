@@ -91,6 +91,11 @@ a record is readable only by administrators.
   experiment config`, `det shell config`, `det tensorboard config`, and `det
   command config` print `Config not shared`; the other commands print the
   master's message.
+- Workspace webhooks get what a job shares with all users: an experiment event
+  leaves out the experiment's name unless its title is shared, and a task-log
+  event is sent only when the job's logs are shared. When job privacy cannot be
+  read, they get neither. Global webhooks, which administrators create, get
+  everything.
 
 Metrics, hyperparameters, TensorBoard sources, and checkpoint files are not
 covered and stay visible to every user who may view the job.
@@ -98,7 +103,9 @@ covered and stay visible to every user who may view the job.
 ## Changes
 
 A change applies to the next request. An open log stream ends at its next
-permission check, within five minutes.
+permission check, within five minutes. A webhook event is checked and trimmed
+when it is queued: an event already queued is delivered, also on retries, after
+sharing is turned off.
 
 ## Not covered
 

@@ -55,7 +55,14 @@ func TestMain(m *testing.M) {
 	}
 	SetDefault(manager)
 
-	os.Exit(m.Run())
+	// The job privacy policy is global and other packages' tests change it.
+	unlock, err := db.LockJobPrivacyPolicyForTests(context.Background())
+	if err != nil {
+		log.Panicln(err)
+	}
+	code := m.Run()
+	unlock()
+	os.Exit(code)
 }
 
 func TestWebhooks(t *testing.T) {
