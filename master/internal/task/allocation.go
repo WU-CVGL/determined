@@ -25,6 +25,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/task/tasklogger"
 	"github.com/determined-ai/determined/master/internal/task/taskmodel"
 	"github.com/determined-ai/determined/master/internal/telemetry"
+	"github.com/determined-ai/determined/master/internal/userusage"
 	"github.com/determined-ai/determined/master/pkg/cproto"
 	detLogger "github.com/determined-ai/determined/master/pkg/logger"
 	"github.com/determined-ai/determined/master/pkg/model"
@@ -554,6 +555,16 @@ func (a *allocation) requestResources() (*sproto.ResourcesSubscription, error) {
 				return nil, errors.Wrap(err, "clearing allocation start time")
 			}
 		}
+		if a.model.AssignedTime != nil || a.model.MeteredKind != nil {
+			// It may have recorded an assignment just before the master stopped, or, from before
+			// metering, carry the mark of a legacy allocation. Its assignment, if it gets one, is
+			// recorded again.
+			if err := db.ClearAllocationAssignment(context.TODO(), a.model.AllocationID); err != nil {
+				return nil, err
+			}
+			a.model.AssignedTime, a.model.ReleasedTime = nil, nil
+			a.model.MeteredKind, a.model.MeteredQuantity = nil, nil
+		}
 	} else {
 		// Insert new allocation.
 		a.syslog.Debug("requestResources add allocation")
@@ -630,12 +641,17 @@ func (a *allocation) finalize(
 		defer cl()
 	}
 
+	// The release is recorded before the terminated state: if the master stops in between, the
+	// next master start releases the still open allocation at its last heartbeat.
+	now := time.Now().UTC()
+	a.recordRelease(now)
+
 	a.setMostProgressedModelState(model.AllocationStateTerminated)
 	if err := db.UpdateAllocationState(context.TODO(), a.model); err != nil {
 		a.syslog.WithError(err).Error("failed to set allocation state to terminated")
 	}
 	a.purgeRestorableResources()
-	a.markResourcesReleased()
+	a.markResourcesReleased(now)
 
 	a.exited = &AllocationExited{UserRequestedStop: userRequestedStop, Err: exitErr, FinalState: a.state()}
 	a.SetExitStatus(exitReason, exitErr, nil)
@@ -655,11 +671,18 @@ func (a *allocation) resourcesAllocated(msg *sproto.ResourcesAllocated) error {
 	}
 	syslog.Infof("resources allocated")
 
+	// The assignment time is also the end of the queued time.
+	now := time.Now().UTC()
 	if !a.req.Restore {
 		if a.getModelState() != model.AllocationStatePending {
 			// If we have moved on from the pending state, these must be stale (and we must have
 			// already released them, just the scheduler hasn't gotten word yet).
 			return StaleResourcesReceivedError{}
+		}
+		// Recorded before the resources are persisted: an allocation that stops in between is
+		// requested again, which clears the assignment.
+		if err := a.recordAssignment(msg.Resources, now); err != nil {
+			return err
 		}
 		a.setModelState(model.AllocationStateAssigned)
 	} else {
@@ -684,7 +707,6 @@ func (a *allocation) resourcesAllocated(msg *sproto.ResourcesAllocated) error {
 		return errors.Wrap(err, "updating allocation state")
 	}
 
-	now := time.Now().UTC()
 	taskStatStartTime := msg.JobSubmissionTime
 	if msg.JobSubmissionTime.IsZero() && a.req.Restore {
 		taskStatStartTime = a.req.RequestTime
@@ -1021,14 +1043,20 @@ func (a *allocation) restoreResourceFailure(msg *sproto.ResourcesFailedError) {
 	}
 
 	if a.req.Restore {
-		// TODO(DET-8822): This heartbeat can be nil.
-		switch heartbeat := cluster.TheLastBootClusterHeartbeat(); {
+		// The resources were lost while no master ran; they count until its last heartbeat.
+		// TODO(DET-8822): This heartbeat can be nil, and then they count until now.
+		heartbeat := time.Now().UTC()
+		if hb := cluster.TheLastBootClusterHeartbeat(); hb != nil {
+			heartbeat = hb.UTC()
+		}
+		switch {
 		case a.model.StartTime == nil:
 		case heartbeat.Before(*a.model.StartTime):
 			a.model.EndTime = a.model.StartTime
 		default:
-			a.model.EndTime = heartbeat
+			a.model.EndTime = &heartbeat
 		}
+		a.recordRelease(heartbeat)
 	} else {
 		a.model.EndTime = ptrs.Ptr(time.Now().UTC())
 	}
@@ -1384,8 +1412,43 @@ func (a *allocation) markResourcesStarted() {
 	}
 }
 
-// markResourcesReleased persists completion information.
-func (a *allocation) markResourcesReleased() {
+// recordAssignment records when the allocation was assigned resources and what they are metered
+// as.
+func (a *allocation) recordAssignment(
+	resources map[sproto.ResourcesID]sproto.Resources, at time.Time,
+) error {
+	summaries := make([]sproto.ResourcesSummary, 0, len(resources))
+	for _, r := range resources {
+		summaries = append(summaries, r.Summary())
+	}
+	kind, quantity := userusage.Assigned(summaries, a.req.SlotsNeeded)
+	if err := db.AssignAllocation(context.TODO(), a.model.AllocationID, at, kind, quantity); err != nil {
+		return err
+	}
+	a.model.AssignedTime = &at
+	a.model.MeteredKind = ptrs.Ptr(string(kind))
+	a.model.MeteredQuantity = &quantity
+	return nil
+}
+
+// recordRelease records when the allocation's resources were released, once, if it was assigned
+// resources.
+func (a *allocation) recordRelease(at time.Time) {
+	if a.model.AssignedTime == nil || a.model.ReleasedTime != nil {
+		return
+	}
+	if err := db.ReleaseAllocation(context.TODO(), a.model.AllocationID, at); err != nil {
+		a.syslog.WithError(err).Error("allocation usage will not be properly accounted for")
+		return
+	}
+	if at.Before(*a.model.AssignedTime) {
+		at = *a.model.AssignedTime
+	}
+	a.model.ReleasedTime = &at
+}
+
+// markResourcesReleased persists completion information; now is the time of the release.
+func (a *allocation) markResourcesReleased(now time.Time) {
 	ctx := context.TODO()
 	if err := db.DeleteAllocationSession(ctx, a.model.AllocationID); err != nil {
 		a.syslog.WithError(err).Error("error deleting allocation session")
@@ -1393,7 +1456,7 @@ func (a *allocation) markResourcesReleased() {
 	if a.model.StartTime == nil {
 		return
 	}
-	a.model.EndTime = ptrs.Ptr(time.Now().UTC())
+	a.model.EndTime = &now
 	if err := db.CompleteAllocation(ctx, &a.model); err != nil {
 		a.syslog.WithError(err).Error("failed to mark allocation completed")
 	}

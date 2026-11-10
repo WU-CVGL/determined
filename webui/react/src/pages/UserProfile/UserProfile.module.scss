@@ -1,0 +1,17 @@
+.base {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.header {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+}
+.user {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}

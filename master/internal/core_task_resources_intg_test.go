@@ -180,7 +180,7 @@ func TestTaskResourceAllocationsIgnoreRestartHeartbeat(t *testing.T) {
 	_, err := pgDB.GetOrCreateClusterID("")
 	require.NoError(t, err)
 	require.NoError(t, pgDB.UpdateClusterHeartBeat(*at(30)))
-	require.NoError(t, db.CloseOpenAllocations(ctx, []model.AllocationID{pending}))
+	require.NoError(t, db.CloseOpenAllocations(ctx, []model.AllocationID{pending}, time.Now()))
 
 	closedRow, err := db.AllocationByID(ctx, closed)
 	require.NoError(t, err)
