@@ -2,7 +2,7 @@ package internal
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/determined-ai/determined/master/internal/api"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/internal/jobprivacy"
 	"github.com/determined-ai/determined/master/internal/sproto"
@@ -245,41 +246,22 @@ func redactRawAllocationLabels(
 	return nil
 }
 
-// taskCaps returns the viewer's capabilities on the job of a task: the task's own job, the
-// experiment's job for a trial task without one, and otherwise what jobprivacy.ForTasks decides,
-// as canReadTaskLogs does. An unknown task is NotFound.
+// taskCaps returns the viewer's capabilities on a task, resolved by jobprivacy.TaskJobs as
+// jobprivacy.ForTasks and canReadTaskLogs do. An unknown task is NotFound for a non-admin.
 func taskCaps(
 	ctx context.Context, v jobprivacy.Viewer, taskID model.TaskID,
 ) (jobprivacy.Caps, error) {
 	if v.Admin {
 		return jobprivacy.AllCaps, nil
 	}
-	t, err := taskForAction(ctx, taskID)
+	tasks, err := jobprivacy.TaskJobs(ctx, nil, []model.TaskID{taskID})
 	if err != nil {
 		return jobprivacy.Caps{}, err
 	}
-	if t.JobID != nil {
-		caps, err := jobprivacy.ForJobs(ctx, v, []model.JobID{*t.JobID})
-		if err != nil {
-			return jobprivacy.Caps{}, err
-		}
-		return caps[*t.JobID], nil
+	if _, ok := tasks[taskID]; !ok {
+		return jobprivacy.Caps{}, api.NotFoundErrs("task", fmt.Sprint(taskID), true)
 	}
-	if t.TaskType == model.TaskTypeTrial {
-		expID, err := experimentIDFromTrialTaskID(taskID)
-		switch {
-		case err == nil:
-			caps, err := experimentCaps(ctx, v, []int32{int32(expID)})
-			if err != nil {
-				return jobprivacy.Caps{}, err
-			}
-			return caps[int32(expID)], nil
-		case !errors.Is(err, errIsNotTrialTaskID):
-			return jobprivacy.Caps{}, status.Errorf(codes.Unavailable,
-				"could not read job privacy: %s; try again", err)
-		}
-	}
-	caps, err := jobprivacy.ForTasks(ctx, v, []model.TaskID{taskID})
+	caps, err := jobprivacy.ForTaskJobs(ctx, v, tasks)
 	if err != nil {
 		return jobprivacy.Caps{}, err
 	}

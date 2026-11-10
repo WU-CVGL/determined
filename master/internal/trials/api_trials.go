@@ -49,10 +49,13 @@ func (a *TrialsAPIServer) StartTrial(
 
 	err = db.Bun().RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if !req.Resume {
-			err := tx.NewSelect().Model(&obj).WherePK().
-				Column("run_id", "state").
+			// Locks the run row: the trials view outer-joins runs_metadata, which Postgres
+			// cannot lock. The view's run_id is the run's restart_id.
+			err := tx.NewSelect().Table("runs").
+				Column("restart_id").
+				Where("id = ?", trialID).
 				For("UPDATE").
-				Scan(ctx, &obj)
+				Scan(ctx, &obj.RunID)
 			if err != nil {
 				return err
 			}
