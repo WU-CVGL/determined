@@ -47,7 +47,7 @@ const Dashboard: React.FC = () => {
   const [submissionsLoading, setSubmissionsLoading] = useState<boolean>(true);
   const [projectsLoading, setProjectsLoading] = useState<boolean>(true);
   // A restart of the polling starts a batch while the last one is pending; only the latest batch
-  // sets the state.
+  // sets the state or reports an error.
   const batch = useRef(0);
   const currentUser = Loadable.getOrElse(undefined, useObservable(userStore.currentUser));
   const workspaces = Loadable.getOrElse([], useObservable(workspaceStore.workspaces));
@@ -98,6 +98,7 @@ const Dashboard: React.FC = () => {
         );
         if (isCurrent()) setExperiments(response.experiments);
       } catch (e) {
+        if (!isCurrent()) return;
         handleError(e, {
           publicSubject: `Error fetching ${f_flat_runs ? 'searches' : 'experiments'} for dashboard`,
           silent: false,
@@ -121,6 +122,7 @@ const Dashboard: React.FC = () => {
         setProjects(projects);
         setProjectsLoading(false);
       } catch (e) {
+        if (!isCurrent()) return;
         handleError(e, {
           publicSubject: 'Error fetching projects for dashboard',
           silent: false,

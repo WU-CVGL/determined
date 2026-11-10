@@ -9,6 +9,7 @@ import usePermissions from 'hooks/usePermissions';
 import authStore from 'stores/auth';
 import userStore from 'stores/users';
 import { DetailedUser } from 'types';
+import handleError from 'utils/error';
 
 import Dashboard from './Dashboard';
 
@@ -611,6 +612,48 @@ describe('Dashboard data loading', () => {
     await answer(projects[0], []);
     await waitFor(() => expect(projectsSpinning()).toBe(false));
     expect(screen.queryByText('Recently Viewed Projects')).not.toBeInTheDocument();
+  });
+
+  it('reports no error of a batch that a newer one replaced', async () => {
+    const projects = queue<unknown[]>(mocks.getProjectsByUserActivity);
+    const experiments = queue<{ experiments: unknown[] }>(mocks.getExperiments);
+    setup();
+    await waitFor(() => expect(experiments).toHaveLength(1));
+
+    // An update of the signed-in user restarts the polling while the first batch is pending.
+    act(() => userStore.updateCurrentUser(RENAMED_USER));
+    await waitFor(() => expect(experiments).toHaveLength(2));
+    expect(projects).toHaveLength(2);
+
+    await answer(projects[1], [project(2, 'Newer')]);
+    await answer(experiments[1], { experiments: [experiment(11, 'Newer search')] });
+    expect(await screen.findByText('Newer')).toBeInTheDocument();
+    expect(screen.getByText('Newer search')).toBeInTheDocument();
+
+    // The older batch fails after the newer one has answered.
+    await act(async () => {
+      projects[0].reject(new Error('unavailable'));
+      experiments[0].reject(new Error('unavailable'));
+      await Promise.allSettled([projects[0].promise, experiments[0].promise]);
+    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(vi.mocked(handleError)).not.toHaveBeenCalled();
+    expect(screen.getByText('Newer')).toBeInTheDocument();
+    expect(screen.getByText('Newer search')).toBeInTheDocument();
+  });
+
+  it('reports the error of the latest batch', async () => {
+    const projects = queue<unknown[]>(mocks.getProjectsByUserActivity);
+    const experiments = queue<{ experiments: unknown[] }>(mocks.getExperiments);
+    setup();
+    await waitFor(() => expect(experiments).toHaveLength(1));
+
+    await act(async () => {
+      projects[0].reject(new Error('unavailable'));
+      experiments[0].reject(new Error('unavailable'));
+      await Promise.allSettled([projects[0].promise, experiments[0].promise]);
+    });
+    await waitFor(() => expect(vi.mocked(handleError)).toHaveBeenCalledTimes(2));
   });
 
   it('a failed projects request blocks neither the submissions nor the next poll', async () => {
