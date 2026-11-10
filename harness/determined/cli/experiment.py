@@ -346,11 +346,11 @@ def describe(args: argparse.Namespace) -> None:
             render.format_percent(exp.progress),
             render.format_time(exp.startTime),
             render.format_time(exp.endTime),
-            exp.name,
-            exp.description,
+            render.title_or_omitted(exp.name, exp.capabilities),
+            render.title_or_omitted(exp.description, exp.capabilities),
             exp.archived,
             exp.resourcePool,
-            ", ".join(sorted(exp.labels or [])),
+            render.title_or_omitted(", ".join(sorted(exp.labels or [])), exp.capabilities),
         ]
         for exp in exps
     ]
@@ -557,7 +557,9 @@ def experiment_logs(args: argparse.Namespace) -> None:
     if len(trials) == 0:
         raise api.not_found_errs("experiment", args.experiment_id, sess)
     first_trial_id = sorted(t_id.id for t_id in trials)[0]
-    try:
+    with cli.log_stream_ended(
+        f"Trial log stream ended. To reopen log stream, run: det trial logs -f {first_trial_id}"
+    ):
         logs = api.trial_logs(
             sess,
             first_trial_id,
@@ -578,14 +580,6 @@ def experiment_logs(args: argparse.Namespace) -> None:
                 render.print_json(log.to_json())
         else:
             api.pprint_logs(logs)
-    finally:
-        print(
-            termcolor.colored(
-                "Trial log stream ended. To reopen log stream, run: "
-                "det trial logs -f {}".format(first_trial_id),
-                "green",
-            )
-        )
 
 
 def set_log_retention(args: argparse.Namespace) -> None:
@@ -610,10 +604,12 @@ def set_log_retention(args: argparse.Namespace) -> None:
 
 
 def config(args: argparse.Namespace) -> None:
-    result = bindings.get_GetExperiment(
+    exp = bindings.get_GetExperiment(
         cli.setup_session(args), experimentId=args.experiment_id
-    ).experiment.config
-    util.yaml_safe_dump(result, stream=sys.stdout, default_flow_style=False)
+    ).experiment
+    if not render.config_shared(exp.capabilities):
+        raise cli.CliError(render.CONFIG_NOT_SHARED)
+    util.yaml_safe_dump(exp.config, stream=sys.stdout, default_flow_style=False)
 
 
 def download_model_def(args: argparse.Namespace) -> None:
@@ -682,7 +678,7 @@ def list_experiments(args: argparse.Namespace, sess: api.Session) -> None:
         result = [
             e.id,
             e.username,
-            e.name,
+            render.title_or_omitted(e.name, e.capabilities),
             e.forkedFrom,
             e.state.value.replace("STATE_", ""),
             render.format_percent(e.progress),
@@ -790,19 +786,16 @@ def pause(args: argparse.Namespace) -> None:
 
 
 def set_description(args: argparse.Namespace) -> None:
+    # Only the description is patched: the rest of the title may not be shared with the user.
     sess = cli.setup_session(args)
-    exp = bindings.get_GetExperiment(sess, experimentId=args.experiment_id).experiment
-    exp_patch = bindings.v1PatchExperiment.from_json(exp.to_json())
-    exp_patch.description = args.description
+    exp_patch = bindings.v1PatchExperiment(id=args.experiment_id, description=args.description)
     bindings.patch_PatchExperiment(sess, body=exp_patch, experiment_id=args.experiment_id)
     print(f"Set description of experiment {args.experiment_id} to '{args.description}'")
 
 
 def set_name(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
-    exp = bindings.get_GetExperiment(sess, experimentId=args.experiment_id).experiment
-    exp_patch = bindings.v1PatchExperiment.from_json(exp.to_json())
-    exp_patch.name = args.name
+    exp_patch = bindings.v1PatchExperiment(id=args.experiment_id, name=args.name)
     bindings.patch_PatchExperiment(sess, body=exp_patch, experiment_id=args.experiment_id)
     print(f"Set name of experiment {args.experiment_id} to '{args.name}'")
 
@@ -810,11 +803,13 @@ def set_name(args: argparse.Namespace) -> None:
 def add_label(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
     exp = bindings.get_GetExperiment(sess, experimentId=args.experiment_id).experiment
-    exp_patch = bindings.v1PatchExperiment.from_json(exp.to_json())
-    if exp_patch.labels is None:
-        exp_patch.labels = []
-    if args.label not in exp_patch.labels:
-        exp_patch.labels = list(exp_patch.labels) + [args.label]
+    if not render.title_shared(exp.capabilities):
+        # The labels are not shared with the user: the master adds this one to the stored ones.
+        bindings.put_PutExperimentLabel(sess, experimentId=args.experiment_id, label=args.label)
+    elif args.label not in (exp.labels or []):
+        exp_patch = bindings.v1PatchExperiment(
+            id=args.experiment_id, labels=list(exp.labels or []) + [args.label]
+        )
         bindings.patch_PatchExperiment(sess, body=exp_patch, experiment_id=args.experiment_id)
     print(f"Added label '{args.label}' to experiment {args.experiment_id}")
 
@@ -822,9 +817,14 @@ def add_label(args: argparse.Namespace) -> None:
 def remove_label(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
     exp = bindings.get_GetExperiment(sess, experimentId=args.experiment_id).experiment
-    exp_patch = bindings.v1PatchExperiment.from_json(exp.to_json())
-    if (exp_patch.labels) and (args.label in exp_patch.labels):
-        exp_patch.labels = [label for label in exp_patch.labels if label != args.label]
+    if not render.title_shared(exp.capabilities):
+        bindings.delete_DeleteExperimentLabel(
+            sess, experimentId=args.experiment_id, label=args.label
+        )
+    elif exp.labels and args.label in exp.labels:
+        exp_patch = bindings.v1PatchExperiment(
+            id=args.experiment_id, labels=[label for label in exp.labels if label != args.label]
+        )
         bindings.patch_PatchExperiment(sess, body=exp_patch, experiment_id=args.experiment_id)
     print(f"Removed label '{args.label}' from experiment {args.experiment_id}")
 

@@ -5,6 +5,7 @@ import { BrandingType, ClusterMessage, DeterminedInfo } from 'stores/determinedI
 import { Pagination, RawJson } from 'types';
 import * as types from 'types';
 import { flattenObject, isNullOrUndefined, isNumber, isObject, isPrimitive } from 'utils/data';
+import { configHidden, titleHidden } from 'utils/jobPrivacy';
 import { capitalize } from 'utils/string';
 
 import * as Sdk from './api-ts-sdk'; // API Bindings
@@ -234,12 +235,15 @@ const mapCommonV1Task = (
   task: Sdk.V1Command | Sdk.V1Shell,
   type: types.CommandType,
 ): types.CommandTask => {
+  const capabilities = 'capabilities' in task ? task.capabilities : undefined;
   return {
     allocationStartTime: (task.allocationStartTime as string | undefined) || undefined,
+    capabilities,
     displayName: task.displayName || '',
     endTime: (task.endTime as string | undefined) || undefined,
     id: task.id,
-    name: task.description,
+    jobId: task.jobId || undefined,
+    name: titleHidden(capabilities) ? undefined : task.description ?? '',
     resourcePool: task.resourcePool,
     slots: task.slots,
     startTime: task.startTime as unknown as string,
@@ -322,12 +326,13 @@ export const mapV1GenericTask = (task: Sdk.V1GenericTask): types.GenericTask => 
   return {
     allocationId: task.allocationId || undefined,
     allocationStartTime: (task.allocationStartTime as string | undefined) || undefined,
+    capabilities: task.capabilities,
     description: task.description ?? '',
     displayName: task.displayName || undefined,
     endTime: (task.endTime as string | undefined) || undefined,
     forkedFrom: task.forkedFrom || undefined,
     jobId: task.jobId,
-    name: task.name || `Generic Task ${task.taskId}`,
+    name: titleHidden(task.capabilities) ? undefined : task.name || `Generic Task ${task.taskId}`,
     noPause: task.noPause ?? true,
     parentId: task.parentId || undefined,
     projectId: task.projectId,
@@ -536,27 +541,40 @@ export const encodeExperimentState = (state: types.RunState): Sdk.Experimentv1St
   return Sdk.Experimentv1State.UNSPECIFIED;
 };
 
+/**
+ * The config of an experiment that the response carries, decoded; none when the master omits it
+ * because it is not shared with the viewer.
+ */
+const decodeExperimentConfig = (
+  config: Sdk.V1GetExperimentResponse['config'] | null | undefined,
+  capabilities?: types.JobCapabilities,
+): { config: types.ExperimentConfig; ioConfig: ioTypes.ioTypeExperimentConfig } | undefined => {
+  if (config == null || configHidden(capabilities)) return undefined;
+  const ioConfig = ioTypes.decode<ioTypes.ioTypeExperimentConfig>(
+    ioTypes.ioExperimentConfig,
+    config,
+  );
+  return { config: ioToExperimentConfig(ioConfig), ioConfig };
+};
+
 export const mapV1GetExperimentDetailsResponse = ({
   experiment: exp,
   jobSummary,
   config,
 }: Sdk.V1GetExperimentResponse): types.ExperimentBase => {
-  const ioConfig = ioTypes.decode<ioTypes.ioTypeExperimentConfig>(
-    ioTypes.ioExperimentConfig,
-    config,
-  );
+  const decoded = decodeExperimentConfig(config, exp.capabilities);
   const continueFn = (value: unknown) => !(value as types.HyperparameterBase).type;
   const hyperparameters = flattenObject<types.HyperparameterBase>(
-    exp?.hyperparameters ?? ioConfig?.hyperparameters ?? {},
+    exp?.hyperparameters ?? decoded?.ioConfig.hyperparameters ?? {},
     { continueFn },
   ) as types.HyperparametersFlattened;
   const v1Exp = mapV1Experiment(exp, jobSummary);
   return {
     ...v1Exp,
-    config: ioToExperimentConfig(ioConfig),
-    configRaw: config ?? {},
+    config: decoded?.config,
+    configRaw: decoded ? config : undefined,
     hyperparameters,
-    originalConfig: exp.originalConfig,
+    originalConfig: exp.originalConfig || undefined,
     parentArchived: exp.parentArchived ?? false,
     projectName: exp.projectName ?? '',
     projectOwnerId: exp.projectOwnerId ?? 0,
@@ -599,9 +617,10 @@ export function mapV1Experiment(
   const bulkExpItem: types.BulkExperimentItem = {
     allocationStartTime: (data.allocationStartTime as string | undefined) || undefined,
     archived: data.archived,
+    capabilities: data.capabilities,
     checkpoints: data.checkpointCount,
     checkpointSize: parseInt(data?.checkpointSize || '0'),
-    config: data.config,
+    config: data.config ?? undefined,
     description: data.description,
     displayName: data.displayName,
     duration: data.duration,
@@ -615,7 +634,7 @@ export function mapV1Experiment(
     jobSummary: jobSummary,
     labels: data.labels || [],
     modelDefinitionSize: data.modelDefinitionSize,
-    name: data.name,
+    name: titleHidden(data.capabilities) ? undefined : data.name ?? '',
     notes: data.notes,
     numTrials: data.numTrials || 0,
     parentArchived: data.parentArchived,
@@ -641,16 +660,14 @@ export function mapV1Experiment(
     return bulkExpItem;
   }
 
-  const ioConfig = ioTypes.decode<ioTypes.ioTypeExperimentConfig>(
-    ioTypes.ioExperimentConfig,
-    config,
-  );
-
+  const decoded = decodeExperimentConfig(config, data.capabilities);
   const fullExpItem: types.FullExperimentItem = {
     ...bulkExpItem,
-    config: ioToExperimentConfig(ioConfig),
-    configRaw: config,
-    hyperparameters: getHyperparameters(data?.hyperparameters ?? ioConfig?.hyperparameters ?? {}),
+    config: decoded?.config,
+    configRaw: decoded ? config : undefined,
+    hyperparameters: getHyperparameters(
+      data?.hyperparameters ?? decoded?.ioConfig.hyperparameters ?? {},
+    ),
   };
   return fullExpItem;
 }
@@ -850,9 +867,14 @@ export const decodeTrialResponseToTrialDetails = (
 };
 
 export const decodeV1FlatRun = (data: Sdk.V1FlatRun): types.FlatRun => {
+  const experiment = data.experiment && {
+    ...data.experiment,
+    name: titleHidden(data.experiment.capabilities) ? undefined : data.experiment.name ?? '',
+  };
   return {
     ...data,
     checkpointSize: parseInt(data?.checkpointSize || '0'),
+    experiment,
     hyperparameters: flattenObject(data.hyperparameters || {}),
     state: decodeExperimentState(data.state),
     summaryMetrics: decodeSummaryMetrics(data.summaryMetrics),

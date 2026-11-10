@@ -1,21 +1,26 @@
 import LogViewer, { FetchConfig, FetchDirection, FetchType } from 'hew/LogViewer/LogViewer';
 import LogViewerSelect, { Filters } from 'hew/LogViewer/LogViewerSelect';
 import { Settings, settingsConfigForTask } from 'hew/LogViewer/LogViewerSelect.settings';
+import Message from 'hew/Message';
+import Spinner from 'hew/Spinner';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
 import Page from 'components/Page';
 import TaskResourcesLink from 'components/TaskResourcesLink';
 import { commandTypeToLabel } from 'constants/states';
+import usePageReturns from 'hooks/usePageReturns';
+import useRefusal from 'hooks/useRefusal';
 import { ResetSettings, UpdateSettings, useSettings } from 'hooks/useSettings';
 import { DateString, decode, optional } from 'ioTypes';
 import { paths, serverAddress } from 'routes/utils';
-import { getTask } from 'services/api';
+import { getCommand, getGenericTask, getShells, getTask } from 'services/api';
 import { detApi } from 'services/apiConfig';
 import { mapV1LogsResponse } from 'services/decoder';
 import { readStream } from 'services/utils';
-import { CommandType, TaskItem } from 'types';
+import { CommandType, JobCapabilities, TaskItem } from 'types';
 import handleError from 'utils/error';
+import { isLogsNotShared, LOGS_NOT_SHARED, logsHidden } from 'utils/jobPrivacy';
 
 import css from './TaskLogs.module.scss';
 
@@ -32,11 +37,31 @@ interface Props {
 }
 type OrderBy = 'ORDER_BY_UNSPECIFIED' | 'ORDER_BY_ASC' | 'ORDER_BY_DESC';
 
+/* The capabilities of a task, from the record of its type; an ended task has none. */
+const lookupCapabilities = async (
+  taskId: string,
+  taskType: string,
+): Promise<JobCapabilities | undefined> => {
+  switch (taskType) {
+    case CommandType.Command:
+      return (await getCommand({ commandId: taskId })).capabilities;
+    case CommandType.Shell:
+      // The shell list has no private keys, unlike a shell's own lookup.
+      return (await getShells({})).find((shell) => shell.id === taskId)?.capabilities;
+    case 'generic':
+      return (await getGenericTask(taskId))?.capabilities;
+    default:
+      return undefined;
+  }
+};
+
 export const TaskLogsWrapper: React.FC = () => {
   const { taskId, taskType } = useParams<Params>();
   return <TaskLogs taskId={taskId ?? ''} taskType={taskType ?? ''} />;
 };
 interface ViewerProps {
+  /** The task's logs are not shared with the viewer, as its capabilities say. */
+  logsHidden?: boolean;
   onCloseLogs?: () => void;
   resetSettings: ResetSettings;
   settings: Settings;
@@ -46,9 +71,12 @@ interface ViewerProps {
 
 /*
  * The log viewer of a task with its filters, without a page around it. The caller owns the log
- * settings so that it can also read them, e.g. for the selected allocation.
+ * settings so that it can also read them, e.g. for the selected allocation. Logs that are not
+ * shared with the viewer, by the task's capabilities or by the master's refusal, are not read
+ * (see useRefusal for when a refusal ends).
  */
 export const TaskLogsViewer: React.FC<ViewerProps> = ({
+  logsHidden,
   onCloseLogs,
   resetSettings,
   settings,
@@ -56,6 +84,18 @@ export const TaskLogsViewer: React.FC<ViewerProps> = ({
   updateSettings,
 }: ViewerProps) => {
   const [filterOptions, setFilterOptions] = useState<Filters>({});
+  const { notShared, refuse } = useRefusal(taskId, !!logsHidden);
+
+  const handleLogsError = useCallback(
+    (e: unknown) => {
+      if (isLogsNotShared(e)) {
+        refuse();
+        return;
+      }
+      handleError(e);
+    },
+    [refuse],
+  );
 
   const filterValues: Filters = useMemo(
     () => ({
@@ -133,15 +173,21 @@ export const TaskLogsViewer: React.FC<ViewerProps> = ({
   );
 
   useEffect(() => {
+    if (notShared) return;
     const canceler = new AbortController();
 
     readStream(
       detApi.StreamingJobs.taskLogsFields(taskId, true, { signal: canceler.signal }),
       (event) => setFilterOptions(event as Filters),
+      (e) => {
+        if (isLogsNotShared(e)) refuse();
+      },
     );
 
     return () => canceler.abort();
-  }, [taskId]);
+  }, [notShared, refuse, taskId]);
+
+  if (notShared) return <Message title={LOGS_NOT_SHARED} />;
 
   const logFilters = (
     <div className={css.filters}>
@@ -161,7 +207,7 @@ export const TaskLogsViewer: React.FC<ViewerProps> = ({
       handleCloseLogs={onCloseLogs}
       serverAddress={serverAddress}
       title={logFilters}
-      onError={handleError}
+      onError={handleLogsError}
       onFetch={handleFetch}
     />
   );
@@ -169,6 +215,8 @@ export const TaskLogsViewer: React.FC<ViewerProps> = ({
 
 const TaskLogs: React.FC<Props> = ({ taskId, taskType, onCloseLogs, headerComponent }: Props) => {
   const [task, setTask] = useState<TaskItem>();
+  // The task's capabilities once the lookup of its record has answered, with or without one.
+  const [lookup, setLookup] = useState<{ capabilities?: JobCapabilities; taskId: string }>();
 
   const taskTypeLabel =
     taskType === 'generic' ? 'Generic Task' : commandTypeToLabel[taskType as CommandType];
@@ -193,6 +241,25 @@ const TaskLogs: React.FC<Props> = ({ taskId, taskType, onCloseLogs, headerCompon
       active = false;
     };
   }, [taskId]);
+
+  // The lookup is repeated when the user comes back to the page, for sharing changed meanwhile.
+  const pageReturns = usePageReturns();
+
+  useEffect(() => {
+    let active = true;
+    lookupCapabilities(taskId, taskType)
+      .then((capabilities) => {
+        if (active) setLookup({ capabilities, taskId });
+      })
+      .catch(() => {
+        // The master refuses logs that are not shared, which the viewer shows. A repeated lookup
+        // that fails keeps the capabilities of the last one.
+        if (active) setLookup((last) => (last?.taskId === taskId ? last : { taskId }));
+      });
+    return () => {
+      active = false;
+    };
+  }, [pageReturns, taskId, taskType]);
 
   return (
     <Page
@@ -223,13 +290,18 @@ const TaskLogs: React.FC<Props> = ({ taskId, taskType, onCloseLogs, headerCompon
         )
       }
       title={title}>
-      <TaskLogsViewer
-        resetSettings={resetSettings}
-        settings={settings}
-        taskId={taskId}
-        updateSettings={updateSettings}
-        onCloseLogs={onCloseLogs}
-      />
+      {lookup?.taskId === taskId ? (
+        <TaskLogsViewer
+          logsHidden={logsHidden(lookup.capabilities)}
+          resetSettings={resetSettings}
+          settings={settings}
+          taskId={taskId}
+          updateSettings={updateSettings}
+          onCloseLogs={onCloseLogs}
+        />
+      ) : (
+        <Spinner center spinning />
+      )}
     </Page>
   );
 };

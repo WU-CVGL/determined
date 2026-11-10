@@ -1,7 +1,8 @@
 import argparse
+import contextlib
 import functools
 import sys
-from typing import Any, Callable, Dict, List, Sequence
+from typing import Any, Callable, Dict, Iterator, List, Sequence
 
 import termcolor
 
@@ -157,3 +158,19 @@ def wait_ntsc_ready(session: api.Session, ntsc_type: api.NTSC_Kind, eid: str) ->
 
 def warn(message: str) -> None:
     print(termcolor.colored(message, "yellow"), file=sys.stderr)
+
+
+@contextlib.contextmanager
+def log_stream_ended(message: str) -> Iterator[None]:
+    """Print message in green when the log stream inside ends.
+
+    Nothing is printed when the master refused the logs as not shared, since reopening the stream
+    would be refused too.
+    """
+    try:
+        yield
+    except BaseException as e:
+        if errors.not_shared_message(e) is None:
+            print(termcolor.colored(message, "green"))
+        raise
+    print(termcolor.colored(message, "green"))

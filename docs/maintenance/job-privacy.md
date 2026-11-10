@@ -53,14 +53,17 @@ a record is readable only by administrators.
 
 - **Policy**: administrators allow or forbid sharing of titles, logs, and
   configs, and set each kind's audience for new jobs: all users, or the owner
-  and administrators. Every user may read the policy.
+  and administrators. Every user may read the policy. In the WebUI, it is the
+  **Job Privacy** tab of Admin Settings.
 - **User switches**: each user turns sharing of their titles and of their logs
   on or off, and may set the audience of titles and of logs for their new jobs;
   without one, new jobs take the cluster's default. Setting all users for a kind
-  that the policy forbids is refused.
+  that the policy forbids is refused. In the WebUI, it is the **Job Privacy**
+  section of the user settings.
 - **Job sharing**: a job's owner and administrators set the job's title, logs,
   and config audiences. Setting all users for a kind that the policy forbids is
-  refused. The job records who changed its sharing and when.
+  refused. The job records who changed its sharing and when. In the WebUI, it
+  is the **Sharing** item of the job's action menu.
 
 ## What readers see
 
@@ -81,6 +84,13 @@ a record is readable only by administrators.
 - Experiments, runs, commands, shells, generic tasks, jobs in the queue, and
   tasks carry `capabilities` in lists and details: `viewTitle`, `viewLogs`,
   `viewConfig`, and `manageSharing`.
+- The WebUI shows a job whose title is hidden by its type and ID, such as
+  `Experiment 12`, and shows `Logs not shared` or `Config not shared` in place
+  of hidden logs or a hidden config.
+- The CLI prints `***` for a hidden title, description, or labels. `det
+  experiment config`, `det shell config`, `det tensorboard config`, and `det
+  command config` print `Config not shared`; the other commands print the
+  master's message.
 - Workspace webhooks get what a job shares with all users: an experiment event
   leaves out the experiment's name unless its title is shared, and a task-log
   event is sent only when the job's logs are shared. When job privacy cannot be

@@ -17,6 +17,7 @@ import {
   placementLines,
   taskJobLabel,
 } from 'utils/job';
+import { jobDisplayName, titleHidden } from 'utils/jobPrivacy';
 import { floatToPercent } from 'utils/string';
 import { ALLOCATION_START_TOOLTIP } from 'utils/taskTime';
 import { openInteractiveTask } from 'utils/wait';
@@ -131,6 +132,10 @@ export const columns: (f_flat_runs: boolean) => ColumnDef<Job>[] = (f_flat_runs)
     key: 'name',
     render: createOmitableRenderer<Job, FullJob>('entityId', (_, record): ReactNode => {
       let label: ReactNode = null;
+      if (titleHidden(record.capabilities)) {
+        label = <span>{jobDisplayName(jobTypeLabel(record.type), record.entityId)}</span>;
+        return linkToEntityPage(record, label);
+      }
       switch (record.type) {
         case JobType.EXPERIMENT:
           label = (

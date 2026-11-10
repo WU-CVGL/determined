@@ -24261,9 +24261,9 @@ var (
 
 	pattern_Determined_GetExperimentCheckpoints_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4}, []string{"api", "v1", "experiments", "id", "checkpoints"}, "", runtime.AssumeColonVerbOpt(true)))
 
-	pattern_Determined_PutExperimentLabel_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4, 1, 0, 4, 1, 5, 5}, []string{"api", "v1", "experiments", "experiment_id", "labels", "label"}, "", runtime.AssumeColonVerbOpt(true)))
+	pattern_Determined_PutExperimentLabel_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4, 3, 0, 4, 1, 5, 5}, []string{"api", "v1", "experiments", "experiment_id", "labels", "label"}, "", runtime.AssumeColonVerbOpt(true)))
 
-	pattern_Determined_DeleteExperimentLabel_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4, 1, 0, 4, 1, 5, 5}, []string{"api", "v1", "experiments", "experiment_id", "labels", "label"}, "", runtime.AssumeColonVerbOpt(true)))
+	pattern_Determined_DeleteExperimentLabel_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2, 1, 0, 4, 1, 5, 3, 2, 4, 3, 0, 4, 1, 5, 5}, []string{"api", "v1", "experiments", "experiment_id", "labels", "label"}, "", runtime.AssumeColonVerbOpt(true)))
 
 	pattern_Determined_PreviewHPSearch_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1, 2, 2}, []string{"api", "v1", "preview-hp-search"}, "", runtime.AssumeColonVerbOpt(true)))
 

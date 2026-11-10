@@ -26,6 +26,7 @@ import {
   Scale,
   ValueOf,
 } from 'types';
+import { experimentSearcherMetric, experimentSearcherName } from 'utils/experiment';
 import { alphaNumericSorter } from 'utils/sort';
 
 import ExperimentVisualizationFilters, {
@@ -90,7 +91,7 @@ const ExperimentVisualization: React.FC<Props> = ({ basePath, experiment }: Prop
   const location = useLocation();
   const searcherMetric = useRef<Metric>({
     group: MetricType.Validation,
-    name: experiment.config.searcher.metric,
+    name: experimentSearcherMetric(experiment) ?? '',
   });
 
   const { viz: type } = useParams<{ viz: ExperimentVisualizationType }>();
@@ -134,8 +135,8 @@ const ExperimentVisualization: React.FC<Props> = ({ basePath, experiment }: Prop
       hasLoaded: Loadable.isLoaded(loadableMetrics),
       isExperimentTerminal: terminalRunStates.has(experiment.state),
       isSupported: !(
-        ExperimentSearcherName.Single === experiment.config.searcher.name ||
-        ExperimentSearcherName.Pbt === experiment.config.searcher.name
+        ExperimentSearcherName.Single === experimentSearcherName(experiment) ||
+        ExperimentSearcherName.Pbt === experimentSearcherName(experiment)
       ),
     };
   }, [experiment, loadableMetrics, metrics]);
@@ -226,7 +227,7 @@ const ExperimentVisualization: React.FC<Props> = ({ basePath, experiment }: Prop
         label: 'Learning Curve',
       },
     ];
-    if (experiment.config.searcher.name !== ExperimentSearcherName.Custom) {
+    if (experimentSearcherName(experiment) !== ExperimentSearcherName.Custom) {
       tabs.push(
         {
           children: (

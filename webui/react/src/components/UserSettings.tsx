@@ -18,6 +18,7 @@ import { Loadable } from 'hew/utils/loadable';
 import React, { useCallback, useState } from 'react';
 
 import Grid from 'components/Grid';
+import JobPrivacySettings from 'components/JobPrivacySettings';
 import { RowHeight, rowHeightItems } from 'components/OptionsMenu';
 import PasswordChangeModalComponent from 'components/PasswordChangeModal';
 import Section from 'components/Section';
@@ -244,6 +245,9 @@ const UserSettings: React.FC<Props> = ({ show, onClose }: Props) => {
                   </Select>
                 </InlineForm>
               </div>
+            </Section>
+            <Section divider title="Job Privacy">
+              {show && <JobPrivacySettings />}
             </Section>
             <Section divider title="Shortcuts">
               <div className={css.section}>

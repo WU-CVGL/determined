@@ -27,6 +27,7 @@ import {
   WorkspacePermissionsArgs,
 } from 'types';
 import { deletePathList, getPathList, isNumber, setPathList, unflattenObject } from 'utils/data';
+import { configHidden, titleHidden } from 'utils/jobPrivacy';
 
 type ExperimentChecker = (
   experiment: ProjectExperiment,
@@ -53,11 +54,11 @@ export const isExperiment = <T extends BulkExperimentItem | FullExperimentItem>(
   return 'hyperparameters' in obj && 'archived' in obj;
 };
 
-// Decided by the config, which an experiment fetched on its own always has and an experiment
-// list row has too (the list routes send it, though the API marks it deprecated there).
+// Decided by the searcher, from the config or, when the config is not shared, from the searcher
+// type the master lists with the experiment.
 export const isSingleTrialExperiment = (experiment: ProjectExperiment): boolean => {
   return (
-    experiment?.config?.searcher?.name === ExperimentSearcherName.Single ||
+    (!!experiment && experimentSearcherName(experiment) === ExperimentSearcherName.Single) ||
     experiment?.config?.searcher?.max_trials === 1
   );
 };
@@ -119,6 +120,21 @@ export const upgradeConfig = (config: RawJson): RawJson => {
   return newConfig;
 };
 
+/**
+ * The name of an experiment's searcher: the config's, else the searcher type the master lists with
+ * the experiment, as for an experiment whose config is not shared with the viewer.
+ */
+export const experimentSearcherName = (
+  experiment: Pick<BulkExperimentItem, 'config' | 'searcherType'>,
+): ExperimentSearcherName =>
+  // The list's config of an experiment whose config is not shared has its resources only.
+  experiment.config?.searcher?.name ?? (experiment.searcherType as ExperimentSearcherName);
+
+/** The searcher's metric: the config's, else the one the master lists with the experiment. */
+export const experimentSearcherMetric = (
+  experiment: Pick<BulkExperimentItem, 'config' | 'searcherMetric'>,
+): string | undefined => experiment.config?.searcher?.metric ?? experiment.searcherMetric;
+
 /* eslint-disable @typescript-eslint/no-unused-vars */
 export const isExperimentModifiable = (experiment: ProjectExperiment): boolean =>
   !experiment.archived && !experiment.parentArchived;
@@ -144,7 +160,7 @@ export const canExperimentContinueTrial = (
     return true;
   // multi trial experiment can continue if it's terminated but not completed, and the searcher type is grid or random.
   if (
-    ContinuableNonSingleSearcherName.has(experiment.config?.searcher.name || 'custom') &&
+    ContinuableNonSingleSearcherName.has(experimentSearcherName(experiment)) &&
     erroredRunStates.has(experiment.state)
   )
     return true;
@@ -166,17 +182,22 @@ const experimentCheckers: Record<ExperimentAction, ExperimentChecker> = {
 
   [ExperimentAction.CompareTrials]: alwaysTrueExperimentChecker,
 
-  [ExperimentAction.ContinueTrial]: canExperimentContinueTrial,
+  // Continue, Fork and Search start from the experiment's config.
+  [ExperimentAction.ContinueTrial]: (experiment, trial) =>
+    !configHidden(experiment.capabilities) && canExperimentContinueTrial(experiment, trial),
 
   [ExperimentAction.Delete]: (experiment) => deletableRunStates.has(experiment.state),
 
   [ExperimentAction.DownloadCode]: (experiment) => experiment.modelDefinitionSize !== 0,
 
-  [ExperimentAction.Edit]: (experiment) => !experiment?.parentArchived && !experiment?.archived,
+  // Editing starts from the name and description.
+  [ExperimentAction.Edit]: (experiment) =>
+    !experiment?.parentArchived && !experiment?.archived && !titleHidden(experiment.capabilities),
 
-  [ExperimentAction.HyperparameterSearch]: alwaysTrueExperimentChecker,
+  [ExperimentAction.HyperparameterSearch]: (experiment) => !configHidden(experiment.capabilities),
 
-  [ExperimentAction.Fork]: isExperimentForkable,
+  [ExperimentAction.Fork]: (experiment) =>
+    !configHidden(experiment.capabilities) && isExperimentForkable(experiment),
 
   [ExperimentAction.Retry]: (experiment, _, erroredTrialCount) =>
     (erroredRunStates.has(experiment.state) ||
@@ -202,6 +223,9 @@ const experimentCheckers: Record<ExperimentAction, ExperimentChecker> = {
   [ExperimentAction.SwitchPin]: alwaysTrueExperimentChecker,
 
   [ExperimentAction.RetainLogs]: alwaysTrueExperimentChecker,
+
+  // The master says whether the viewer manages the experiment's sharing: its owner or an admin.
+  [ExperimentAction.Sharing]: (experiment) => !!experiment.capabilities?.manageSharing,
 };
 
 export const canActionExperiment = (

@@ -32,6 +32,34 @@ from determined.common import util
 _FORMAT = "presto"
 _DEFAULT_VALUE = "N/A"
 OMITTED_VALUE = "***"
+CONFIG_NOT_SHARED = "Config not shared"
+
+
+def title_shared(capabilities: Any) -> bool:
+    """Whether a job's title is shared with the viewer, from the capabilities the master sent.
+
+    capabilities is a bindings.v1JobCapabilities or its JSON. A job without capabilities, from a
+    master without job privacy, is shared.
+    """
+    if capabilities is None:
+        return True
+    if isinstance(capabilities, dict):
+        return capabilities.get("viewTitle", True) is not False
+    return bool(capabilities.viewTitle)
+
+
+def config_shared(capabilities: Any) -> bool:
+    """Whether a job's config is shared with the viewer; see title_shared."""
+    if capabilities is None:
+        return True
+    if isinstance(capabilities, dict):
+        return capabilities.get("viewConfig", True) is not False
+    return bool(capabilities.viewConfig)
+
+
+def title_or_omitted(value: Any, capabilities: Any) -> Any:
+    """value, or OMITTED_VALUE when the job's title is not shared with the viewer."""
+    return value if title_shared(capabilities) else OMITTED_VALUE
 
 
 def select_values(values: List[Dict[str, Any]], headers: Dict[str, str]) -> List[List[Any]]:

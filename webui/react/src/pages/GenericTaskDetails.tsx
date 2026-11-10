@@ -6,11 +6,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom';
 
 import GenericTaskStateBadge from 'components/GenericTaskStateBadge';
+import { useJobSharingModal } from 'components/JobSharingModal';
 import Page from 'components/Page';
 import TaskResourcesPanel from 'components/TaskResourcesPanel';
 import { terminalGenericTaskStates } from 'constants/states';
+import usePageReturns from 'hooks/usePageReturns';
 import usePermissions from 'hooks/usePermissions';
 import usePolling from 'hooks/usePolling';
+import useRefusal from 'hooks/useRefusal';
 import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
 import GenericTaskActions from 'pages/GenericTaskDetails/GenericTaskActions';
 import GenericTaskConfig from 'pages/GenericTaskDetails/GenericTaskConfig';
@@ -22,8 +25,8 @@ import { getGenericTask, getGenericTaskConfig, getGenericTasks, getTask } from '
 import { V1TaskType } from 'services/api-ts-sdk';
 import { GenericTask, RawJson, TaskItem, ValueOf } from 'types';
 import handleError, { ErrorType } from 'utils/error';
+import { configHidden, isConfigNotShared, jobDisplayName, logsHidden } from 'utils/jobPrivacy';
 import { isAborted, isNotFound } from 'utils/service';
-import { shortTaskId } from 'utils/task';
 
 import css from './GenericTaskDetails.module.scss';
 
@@ -57,6 +60,11 @@ const GenericTaskDetails: React.FC = () => {
   const [childTasks, setChildTasks] = useState<GenericTask[]>();
   const [config, setConfig] = useState<RawJson>();
   const [configError, setConfigError] = useState<string>();
+  // Counts the saves of the task's sharing, to look the task up again after one.
+  const [sharingSaves, setSharingSaves] = useState(0);
+  const { modal: sharingModal, open: openSharing } = useJobSharingModal(
+    useCallback(() => setSharingSaves((count) => count + 1), []),
+  );
 
   const tabKey: TabType = tab && TAB_KEYS.includes(tab) ? (tab as TabType) : DEFAULT_TAB_KEY;
   // The task shown now; responses for a task navigated away from are dropped.
@@ -134,14 +142,17 @@ const GenericTaskDetails: React.FC = () => {
     fetchChildren();
   }, [fetchChildren, fetchTask]);
 
-  // Owner, name and resources are only in the generic task list; look the task up once.
+  // Owner, name, resources and capabilities are only in the generic task list; look the task up
+  // once, and again when the user comes back to the page, for sharing changed meanwhile.
+  const pageReturns = usePageReturns();
   useEffect(() => {
     if (!isGeneric) return;
     let active = true;
     getGenericTask(taskId, { signal: canceler.current.signal })
       .then((found) => {
         if (!active) return;
-        setSummary(found);
+        // A repeated lookup that finds nothing keeps the last answer.
+        setSummary((last) => found ?? last);
         setSummaryFailed(!found);
       })
       .catch((e) => {
@@ -156,24 +167,40 @@ const GenericTaskDetails: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [isGeneric, taskId]);
+  }, [isGeneric, pageReturns, sharingSaves, taskId]);
 
+  // The config is read again once a refusal ends (see useRefusal), e.g. after a re-share.
+  const { notShared: configNotShared, refuse: refuseConfig } = useRefusal(
+    taskId,
+    configHidden(summary?.capabilities),
+  );
   useEffect(() => {
     if (!isGeneric) return;
+    if (configNotShared) {
+      setConfig(undefined);
+      setConfigError(undefined);
+      return;
+    }
     let active = true;
     getGenericTaskConfig({ taskId }, { signal: canceler.current.signal })
       .then((value) => {
-        if (active) setConfig(value);
+        if (!active) return;
+        setConfig(value);
+        setConfigError(undefined);
       })
       .catch((e) => {
         if (!active || isAborted(e)) return;
+        if (isConfigNotShared(e)) {
+          refuseConfig();
+          return;
+        }
         setConfigError((e as Error).message);
         handleError(e, { publicSubject: 'Unable to fetch config.', silent: true });
       });
     return () => {
       active = false;
     };
-  }, [isGeneric, taskId]);
+  }, [configNotShared, isGeneric, refuseConfig, taskId]);
 
   const handleTabChange = useCallback(
     (key: string) => {
@@ -184,11 +211,12 @@ const GenericTaskDetails: React.FC = () => {
 
   const state = task?.taskState ?? summary?.state;
   const noPause = task?.noPause ?? summary?.noPause;
-  const name = summary?.name ?? `Generic Task ${shortTaskId(taskId)}`;
+  const name = jobDisplayName('Generic Task', taskId, summary?.name, summary?.capabilities);
   /*
    * Owners and admins can control a task. Without the task's owner, e.g. when the lookup fails,
    * the actions stay enabled and the master decides.
    */
+  const summaryLoaded = !!summary || summaryFailed;
   const canControl = summary
     ? canModifyWorkspaceNSC({ userId: summary.userId, workspace: { id: summary.workspaceId } })
     : summaryFailed;
@@ -202,12 +230,19 @@ const GenericTaskDetails: React.FC = () => {
         label: 'Overview',
       },
       {
-        children: <GenericTaskConfig config={config} error={configError} />,
+        children: (
+          <GenericTaskConfig config={config} error={configError} notShared={configNotShared} />
+        ),
         key: TabType.Config,
         label: 'Configuration',
       },
       {
-        children: <GenericTaskLogs taskId={taskId} />,
+        // The logs are read once the lookup has said whether they are shared.
+        children: summaryLoaded ? (
+          <GenericTaskLogs logsHidden={logsHidden(summary?.capabilities)} taskId={taskId} />
+        ) : (
+          <Spinner center spinning />
+        ),
         key: TabType.Logs,
         label: 'Logs',
       },
@@ -227,7 +262,18 @@ const GenericTaskDetails: React.FC = () => {
       });
     }
     return tabs;
-  }, [childTasks, config, configError, resourcesEnabled, tabKey, task, taskId]);
+  }, [
+    childTasks,
+    config,
+    configError,
+    configNotShared,
+    resourcesEnabled,
+    summary?.capabilities,
+    summaryLoaded,
+    tabKey,
+    task,
+    taskId,
+  ]);
 
   if (taskError && !isNotFound(taskError)) {
     return (
@@ -268,7 +314,11 @@ const GenericTaskDetails: React.FC = () => {
               canControl={canControl}
               task={{ name, noPause, parentId, state, taskId }}
               onComplete={handleActionComplete}
+              onSharing={
+                summary?.capabilities?.manageSharing ? () => openSharing(summary.jobId) : undefined
+              }
             />
+            {sharingModal}
           </div>
         )
       }

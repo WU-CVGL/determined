@@ -1,12 +1,13 @@
 import { render, screen } from '@testing-library/react';
+import { DefaultTheme, UIProvider } from 'hew/Theme';
 import { MemoryRouter } from 'react-router-dom';
 
 import userStore from 'stores/users';
-import { CommandState, CommandTask, CommandType } from 'types';
+import { BulkExperimentItem, CommandState, CommandTask, CommandType, RunState } from 'types';
 
-import { taskNameRenderer } from './Table';
+import { experimentNameRenderer, taskNameRenderer } from './Table';
 
-const shell: CommandTask = {
+const shell = {
   id: 'shell-1',
   name: 'Shell (brave-otter)',
   resourcePool: 'default',
@@ -15,7 +16,7 @@ const shell: CommandTask = {
   type: CommandType.Shell,
   userId: 5,
   workspaceId: 1,
-};
+} satisfies CommandTask;
 
 const renderName = (record: CommandTask) =>
   render(<MemoryRouter>{taskNameRenderer(record.id, record, 0)}</MemoryRouter>);
@@ -34,5 +35,44 @@ describe('taskNameRenderer', () => {
   it('does not link stopped tasks', () => {
     renderName({ ...shell, id: 'shell-2', state: CommandState.Terminated });
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
+});
+
+describe('job privacy', () => {
+  const hidden = { manageSharing: false, viewConfig: false, viewLogs: false, viewTitle: false };
+
+  it('names a task whose title is not shared by its kind and short ID', () => {
+    renderName({
+      ...shell,
+      capabilities: hidden,
+      id: '1a2b3c4d-0000-4000-8000-000000000000',
+      name: undefined,
+    });
+    const link = screen.getByText('Shell 1a2b3c4d').closest('a');
+    expect(link).toHaveAttribute('title', 'Shell 1a2b3c4d');
+  });
+
+  it('names an experiment whose title is not shared by its kind and ID', () => {
+    const experiment: BulkExperimentItem = {
+      archived: false,
+      capabilities: hidden,
+      hyperparameters: {},
+      id: 12,
+      jobId: 'job-12',
+      labels: [],
+      numTrials: 1,
+      projectId: 1,
+      resourcePool: 'default',
+      searcherType: 'single',
+      startTime: '2026-01-01T00:00:00Z',
+      state: RunState.Active,
+      userId: 5,
+    };
+    render(
+      <UIProvider theme={DefaultTheme.Light}>
+        <MemoryRouter>{experimentNameRenderer(experiment.name, experiment)}</MemoryRouter>
+      </UIProvider>,
+    );
+    expect(screen.getByRole('link')).toHaveTextContent('Experiment 12');
   });
 });

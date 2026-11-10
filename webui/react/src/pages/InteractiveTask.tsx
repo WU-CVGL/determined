@@ -7,12 +7,15 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Helmet } from 'react-helmet-async';
 import { useParams, useSearchParams } from 'react-router-dom';
 
+import { useJobSharingModal } from 'components/JobSharingModal';
 import ShellTerminalPane from 'components/ShellTerminalPane';
 import TaskBar from 'components/TaskBar';
 import TaskResourcesPanel from 'components/TaskResourcesPanel';
 import TaskServicePane from 'components/TaskServicePane';
 import useUI from 'components/ThemeProvider';
+import { commandTypeToLabel } from 'constants/states';
 import useFeature from 'hooks/useFeature';
+import usePageReturns from 'hooks/usePageReturns';
 import { useSettings } from 'hooks/useSettings';
 import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
 import { TaskLogsViewer } from 'pages/TaskLogs';
@@ -21,6 +24,7 @@ import { V1TaskService, V1TaskServiceState } from 'services/api-ts-sdk';
 import { errorText } from 'services/taskService';
 import { CommandState, CommandTask, CommandType, InteractiveTaskTab, TaskItem } from 'types';
 import handleError, { ErrorLevel, ErrorType, handleWarning } from 'utils/error';
+import { jobDisplayName, logsHidden, titleHidden } from 'utils/jobPrivacy';
 import { isNotFound } from 'utils/service';
 import {
   canOpenShellTerminal,
@@ -92,12 +96,13 @@ const lookupCommand = async (
   }
 };
 
-const LogsPane: React.FC<{ taskId: string }> = ({ taskId }) => {
+const LogsPane: React.FC<{ hidden?: boolean; taskId: string }> = ({ hidden, taskId }) => {
   const taskSettingsConfig = useMemo(() => settingsConfigForTask(taskId), [taskId]);
   const { resetSettings, settings, updateSettings } = useSettings<Settings>(taskSettingsConfig);
   return (
     <div className={css.pane}>
       <TaskLogsViewer
+        logsHidden={hidden}
         resetSettings={resetSettings}
         settings={settings}
         taskId={taskId}
@@ -128,6 +133,11 @@ export const InteractiveTask: React.FC = () => {
   // Whether the lookup of the task's name and pool has answered, with or without a record.
   const [lookedUp, setLookedUp] = useState(false);
   const [error, setError] = useState<string>();
+  // Counts the saves of the task's sharing, to look the task up again after one.
+  const [sharingSaves, setSharingSaves] = useState(0);
+  const { modal: sharingModal, open: openSharing } = useJobSharingModal(
+    useCallback(() => setSharingSaves((count) => count + 1), []),
+  );
 
   const requestedTab = searchParams.get('tab');
   const slotsExceeded = searchParams.get('currentSlotsExceeded') === 'true';
@@ -299,13 +309,16 @@ export const InteractiveTask: React.FC = () => {
   const commandType = commandTypeOfTask(task?.taskType);
   const loaded = !!task;
 
-  // The name and pool, from the lookup of the task's type; an ended task has none.
+  // The name, pool and capabilities, from the lookup of the task's type; an ended task has none.
+  // It is repeated when the user comes back to the page, for sharing changed meanwhile.
+  const pageReturns = usePageReturns();
   useEffect(() => {
     if (!loaded) return;
     let cancelled = false;
     lookupCommand(taskId, commandType)
       .then((response) => {
-        if (!cancelled) setCommand(response);
+        // A repeated lookup that finds nothing keeps the last answer for this task.
+        if (!cancelled) setCommand((last) => response ?? (last?.id === taskId ? last : undefined));
       })
       .catch((e) => {
         if (!cancelled) handleError(e, { publicMessage: 'Unable to load the task.', silent: true });
@@ -316,7 +329,7 @@ export const InteractiveTask: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [taskId, commandType, loaded]);
+  }, [taskId, commandType, loaded, pageReturns, sharingSaves]);
 
   const selectTab = useCallback(
     (tab: string) =>
@@ -330,8 +343,12 @@ export const InteractiveTask: React.FC = () => {
     [setSearchParams],
   );
 
-  const name = command?.name || taskId;
+  const name =
+    command && titleHidden(command.capabilities)
+      ? jobDisplayName(commandTypeToLabel[command.type], taskId)
+      : command?.name || taskId;
   const phase = task ? taskPhase(task) : 'waiting';
+  const sharingJobId = command?.capabilities?.manageSharing ? command.jobId : undefined;
   const services = useMemo(() => taskServices?.services ?? [], [taskServices]);
 
   // The tabs the task has: its services first, then the logs and resources of every task.
@@ -396,7 +413,7 @@ export const InteractiveTask: React.FC = () => {
             />
           );
         case InteractiveTaskTab.Logs:
-          return <LogsPane taskId={taskId} />;
+          return <LogsPane hidden={logsHidden(command?.capabilities)} taskId={taskId} />;
         case InteractiveTaskTab.Resources:
           return (
             <TaskResourcesPanel endTime={task.endTime} startTime={task.startTime} taskId={taskId} />
@@ -404,7 +421,7 @@ export const InteractiveTask: React.FC = () => {
       }
     };
     return tabKeys.map((key) => ({ children: pane(key), key, label: TAB_LABELS[key] }));
-  }, [activeKey, phase, services, tabKeys, task, taskId]);
+  }, [activeKey, command?.capabilities, phase, services, tabKeys, task, taskId]);
 
   const state = task?.allocations[0]?.state;
   const title = ui.isPageHidden ? getTitleState(state, name) : name;
@@ -461,10 +478,12 @@ export const InteractiveTask: React.FC = () => {
             resourcePool={command?.resourcePool ?? ''}
             state={killState}
             type={commandType}
+            onSharing={sharingJobId ? () => openSharing(sharingJobId) : undefined}
           />
         </div>
         <div className={css.contentContainer}>{content}</div>
       </div>
+      {sharingModal}
     </>
   );
 };

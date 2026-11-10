@@ -301,7 +301,10 @@ def list_slots(args: argparse.Namespace) -> None:
 
     c_names = (
         {
-            r.containerId: {"name": a.name, "allocation_id": a.allocationId}
+            r.containerId: {
+                "name": render.title_or_omitted(a.name, a.capabilities),
+                "allocation_id": a.allocationId,
+            }
             for a in allocations.values()
             for r in (a.resources or {})
             if r.containerId
