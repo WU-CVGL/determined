@@ -71,7 +71,8 @@ class UsageCalendar extends BaseComponent {
 }
 
 /**
- * Represents the Usage section of the overview: the Day | Month switch, the chart and the table.
+ * Represents the Usage section of the overview: the Day | Month switch, the chart, and the Details
+ * accordion with the table, closed at first.
  */
 class UsageSection extends BaseComponent {
   readonly day = new BaseComponent({
@@ -120,11 +121,22 @@ export class UserOverview extends NamedComponent {
     parent: this.usage,
     selector: '[class^="ClusterHistoricalUsageChart_base"]',
   });
+  /** The Details accordion under the chart. */
+  readonly usageDetails = new BaseComponent({
+    parent: this.usage,
+    selector: '.ant-collapse-item',
+  });
+  /** The header of Details: clicking it opens or closes the table; aria-expanded is its state. */
+  readonly usageDetailsToggle = new BaseComponent({
+    parent: this.usageDetails,
+    selector: '.ant-collapse-header',
+  });
+  /** The table of the hours; only in the document while Details is open. */
   readonly usageTable = new Table({
     bodySelector: 'tbody.ant-table-tbody',
     headRowType: UsageHeadRow,
     headSelector: 'thead.ant-table-thead',
-    parent: this.usage,
+    parent: this.usageDetails,
     rowType: UsageRow,
   });
 }

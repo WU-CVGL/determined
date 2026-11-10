@@ -113,8 +113,9 @@ auxiliary container time, the overview shows GPUs only. CPU slots are not shown.
    hours. With **GPU+Aux**, a time with both held counts once. The title gives the number of shaded
    days. Selecting a day shows its date and its hours.
 
--  **Usage**: the GPU hours and the auxiliary container hours for each of the last 31 UTC days
-   (**Day**) or the last 13 UTC months (**Month**); the months also give their active days.
+-  **Usage**: a chart of the GPU hours and the auxiliary container hours for each of the last 31 UTC
+   days (**Day**) or the last 13 UTC months (**Month**). The hours are listed under **Details**,
+   closed by default, where the months also give their active days.
 
 .. image:: /assets/images/webui-user-page.png
    :alt: Home with the overview in GPU+Aux: current resources, the active days calendar with a day selected, and the usage by month

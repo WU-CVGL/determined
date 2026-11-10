@@ -1,4 +1,5 @@
 import dayjs from 'dayjs';
+import Accordion from 'hew/Accordion';
 import Card from 'hew/Card';
 import RadioGroup from 'hew/RadioGroup';
 import { Failed, Loadable, Loaded, NotLoaded } from 'hew/utils/loadable';
@@ -95,18 +96,21 @@ const UsageView: React.FC<UsageProps> = ({ groupBy, now, projection, usage }) =>
         label="Hours"
         time={view.time}
       />
-      <ResponsiveTable<UsageRow>
-        columns={view.columns.map((column) => ({
-          align: column.numeric ? ('right' as const) : undefined,
-          dataIndex: column.key,
-          key: column.key,
-          title: column.title,
-        }))}
-        dataSource={view.rows}
-        pagination={false}
-        rowKey={PERIOD_COLUMN}
-        size="small"
-      />
+      {/* Closed at first; the panel keeps its state while the view, the mode and the data change. */}
+      <Accordion mountChildren="on-open" title="Details">
+        <ResponsiveTable<UsageRow>
+          columns={view.columns.map((column) => ({
+            align: column.numeric ? ('right' as const) : undefined,
+            dataIndex: column.key,
+            key: column.key,
+            title: column.title,
+          }))}
+          dataSource={view.rows}
+          pagination={false}
+          rowKey={PERIOD_COLUMN}
+          size="small"
+        />
+      </Accordion>
     </>
   );
 };
