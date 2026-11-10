@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -436,6 +437,18 @@ func (c *Config) Resolve() error {
 	}
 
 	return nil
+}
+
+// Validate implements the check.Validatable interface.
+func (c *Config) Validate() []error {
+	var errs []error
+	// The stream module has only the basic authz provider, which grants every scope.
+	if slices.Contains(c.FeatureSwitches, "streaming_updates") &&
+		c.Security.AuthZ.Type != BasicAuthZType {
+		errs = append(errs, errors.New(
+			`feature switch "streaming_updates" requires security.authz.type "basic"`))
+	}
+	return errs
 }
 
 // Deprecations describe fields which were recently or will soon be removed.

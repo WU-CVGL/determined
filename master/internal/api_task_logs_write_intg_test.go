@@ -289,10 +289,12 @@ func TestTaskLogWritesNTSCAuthZ(t *testing.T) {
 	authZNSC.On("CanGetNSC", mock.Anything, asCurUser, ws).Return(nil).Once()
 	require.Equal(t, 3, readTaskLogs(ctx, t, api, shell.taskID))
 
-	// A checkpoint GC task asks no NSC permission: its owner or an admin may write, in every authz
-	// mode, and no one else.
+	// A checkpoint GC task asks no NSC permission. Those who may see its experiment see it, and its
+	// owner or an admin may write, in every authz mode, and no one else.
 	exp := createTestExpWithProjectID(t, api, owner, 1)
 	gc := addCheckpointGCTaskForLogsTest(adminCtx, t, "gc", exp.JobID, expGCTaskID(exp.ID))
+	authZExp.On("CanGetExperiment", mock.Anything, mock.Anything, mock.MatchedBy(
+		func(e *model.Experiment) bool { return e.ID == exp.ID })).Return(nil).Times(4)
 	require.Equal(t, http.StatusForbidden, postTaskLogsAs(t, srv, token,
 		jsonBody(t, shippedLogs(t, gc.taskID, "forged"))))
 	requireCode(t, codes.PermissionDenied, postTaskLogsGRPC(ctx, api, gc.taskID, "forged"))

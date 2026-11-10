@@ -562,7 +562,8 @@ func TestPostAllocationProxyAddressOwnerOrAdmin(t *testing.T) {
 	})
 	require.Equal(t, codes.NotFound, status.Code(err))
 
-	// A job without an owner is refused for everyone but admins.
+	// A job without an owner is refused for everyone but admins. Its task has no command state, so
+	// only admins may see it.
 	jobID, taskID := model.NewJobID(), model.NewTaskID()
 	require.NoError(t, db.AddJob(&model.Job{JobID: jobID, JobType: model.JobTypeCommand}))
 	require.NoError(t, db.AddTask(context.TODO(), &model.Task{
@@ -577,7 +578,7 @@ func TestPostAllocationProxyAddressOwnerOrAdmin(t *testing.T) {
 		&apiv1.PostAllocationProxyAddressRequest{
 			AllocationId: string(taskID) + ".1", ProxyAddress: "10.0.0.1",
 		})
-	require.Equal(t, codes.PermissionDenied, status.Code(err))
+	require.True(t, authz2.IsPermissionDenied(err), err)
 
 	// The owner, the task's own session and admins pass the ownership check; the address must be
 	// an IP, and an allocation that has no resources yet cannot take one.

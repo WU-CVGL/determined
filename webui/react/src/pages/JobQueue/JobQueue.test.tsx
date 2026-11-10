@@ -37,6 +37,7 @@ import {
   ResourcePool,
   TaskItem,
 } from 'types';
+import { routeToReactUrl } from 'utils/routes';
 import { isDangerMenuItem, menuLabels } from 'utils/tests/menu';
 
 import JobQueue from './JobQueue';
@@ -150,6 +151,10 @@ vi.mock('hooks/usePermissions', () => {
   return { default: () => checks };
 });
 vi.mock('hooks/useTaskResourcesEnabled', () => ({ default: () => true }));
+vi.mock('utils/routes', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('utils/routes')>()),
+  routeToReactUrl: vi.fn(),
+}));
 // Every feature switch is on, but flat_runs as the test sets it.
 vi.mock('hooks/useFeature', () => ({
   default: () => ({ isOn: (feature: string) => feature !== 'flat_runs' || features.flatRuns }),
@@ -581,6 +586,14 @@ describe('JobQueue', () => {
       });
       await openRowMenu('Shell (lively-calm-fox) (shell)');
       expect(await screen.findByText('Copy Task ID')).toBeInTheDocument();
+    });
+
+    it('opens the logs from the job menu by the task ID, without the task name', async () => {
+      vi.mocked(getTask).mockReturnValue(deferred<TaskItem>().promise);
+      setup();
+      await openRowMenu('Shell (lively-calm-fox) (shell)');
+      await userEvent.click(await screen.findByText('View Logs'));
+      expect(routeToReactUrl).toHaveBeenCalledWith('/shell/shell-1/logs');
     });
 
     it('keeps the task menu of a row when the lookup of another row fails', async () => {

@@ -348,7 +348,7 @@ const JobQueue: React.FC<Props> = ({ rpStats, selectedRp, jobState, onHighlight 
           triggers[JobAction.Kill] = () => killTask({ id: job.entityId, type: commandType });
         }
         triggers[JobAction.ViewLog] = () => {
-          routeToReactUrl(paths.taskLogs({ id: job.entityId, name: job.name, type: commandType }));
+          routeToReactUrl(paths.taskLogs({ id: job.entityId, type: commandType }));
         };
       }
 
