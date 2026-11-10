@@ -281,6 +281,42 @@ func isMultiTrialSampleCorrect(expectedMetrics []*commonv1.Metrics,
 	return true
 }
 
+func TestStartUnmanagedTrial(t *testing.T) {
+	api, curUser, ctx := setupAPITest(t, nil)
+	trial, _ := createTestTrial(t, api, curUser)
+	other, _ := createTestTrial(t, api, curUser)
+	_, err := db.Bun().NewUpdate().Table("experiments").Set("unmanaged = true").
+		Where("id IN (?)", bun.In([]int{trial.ExperimentID, other.ExperimentID})).Exec(ctx)
+	require.NoError(t, err)
+
+	runState := func(id int) (restartID int, state model.State) {
+		require.NoError(t, db.Bun().NewSelect().Table("runs").Column("restart_id", "state").
+			Where("id = ?", id).Scan(ctx, &restartID, &state))
+		return restartID, state
+	}
+
+	resp, err := api.StartTrial(ctx, &apiv1.StartTrialRequest{TrialId: int32(trial.ID)})
+	require.NoError(t, err)
+	require.Equal(t, int32(1), resp.TrialRunId)
+	restartID, state := runState(trial.ID)
+	require.Equal(t, 1, restartID)
+	require.Equal(t, model.RunningState, state)
+
+	_, err = api.StartTrial(ctx, &apiv1.StartTrialRequest{TrialId: int32(trial.ID)})
+	require.ErrorContains(t, err, "trial has already been started")
+	restartID, _ = runState(trial.ID)
+	require.Equal(t, 1, restartID)
+
+	resp, err = api.StartTrial(ctx,
+		&apiv1.StartTrialRequest{TrialId: int32(trial.ID), Resume: true})
+	require.NoError(t, err)
+	require.Equal(t, int32(2), resp.TrialRunId)
+
+	restartID, state = runState(other.ID)
+	require.Equal(t, 0, restartID)
+	require.Equal(t, model.PausedState, state)
+}
+
 func TestMultiTrialSampleSpecialMetrics(t *testing.T) {
 	api, curUser, ctx := setupAPITest(t, nil)
 
@@ -673,8 +709,6 @@ func TestUnusualMetricNames(t *testing.T) {
 
 func TestTrialAuthZ(t *testing.T) {
 	api, authZExp, _, curUser, ctx := setupExpAuthTest(t, nil)
-	authZNSC := setupNSCAuthZ()
-	workspaceAuthZ := setupWorkspaceAuthZ()
 	trial, _ := createTestTrial(t, api, curUser)
 
 	mockUserArg := mock.MatchedBy(func(u model.User) bool {
@@ -779,19 +813,6 @@ func TestTrialAuthZ(t *testing.T) {
 		{"CanEditExperiment", func(id int) error {
 			_, err := api.PostTrialRunnerMetadata(ctx, &apiv1.PostTrialRunnerMetadataRequest{
 				TrialId: int32(id),
-			})
-			return err
-		}, false},
-		{"CanGetExperimentArtifacts", func(id int) error {
-			authZNSC.On("CanGetTensorboard", mock.Anything, mockUserArg, mock.Anything, mock.Anything,
-				mock.Anything).Return(nil).Once()
-			workspaceAuthZ.On("CanGetWorkspace", mock.Anything, mock.Anything, mock.Anything).
-				Return(nil).Once()
-			mockRM := MockRM()
-			mockRM.On("SmallerValueIsHigherPriority", mock.Anything).Return(true, nil)
-			api.m.rm = mockRM
-			_, err := api.LaunchTensorboard(ctx, &apiv1.LaunchTensorboardRequest{
-				TrialIds: []int32{int32(id)},
 			})
 			return err
 		}, false},

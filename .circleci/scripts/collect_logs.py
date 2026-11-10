@@ -10,7 +10,7 @@ from determined.common import api
 from determined.common.api import bindings as b
 from determined.common.api import certs
 
-Task = Union[b.v1Command, b.v1Shell, b.v1Tensorboard]
+Task = Union[b.v1Command, b.v1Shell]
 
 
 def obtain_token(username: str, password: str, master_address: str) -> str:
@@ -84,7 +84,6 @@ class Cli(CliBase):
         tasks: List[Task] = []
         tasks.extend(b.get_GetCommands(self.session).commands)
         tasks.extend(b.get_GetShells(self.session).shells)
-        tasks.extend(b.get_GetTensorboards(self.session).tensorboards)
         return tasks
 
     def clean_os_path(self, s: str) -> str:

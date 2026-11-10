@@ -13,7 +13,7 @@ import (
 )
 
 // A task's idle watcher follows its persisted spec: a shell is watched through its activity record
-// and only with an idle timeout; TensorBoards through their proxy; other tasks have none.
+// and only with an idle timeout; other tasks have none.
 func TestIdleTimeoutConfig(t *testing.T) {
 	const taskID = model.TaskID("task")
 	timeout := ptrs.Ptr(model.Duration(30 * time.Minute))
@@ -23,18 +23,12 @@ func TestIdleTimeoutConfig(t *testing.T) {
 		return s
 	}
 	shell := func(s *tasks.GenericCommandSpec) { s.WatchTaskActivity = true }
-	tensorBoard := func(s *tasks.GenericCommandSpec) { s.WatchProxyIdleTimeout = true }
 	command := func(*tasks.GenericCommandSpec) {}
 
 	require.Nil(t, idleTimeoutConfig(spec(nil, shell), taskID))
 	require.Equal(t, &sproto.IdleTimeoutConfig{
 		ServiceID: "task", TaskID: taskID, UseTaskActivity: true, TimeoutDuration: 30 * time.Minute,
 	}, idleTimeoutConfig(spec(timeout, shell), taskID))
-
-	require.Nil(t, idleTimeoutConfig(spec(nil, tensorBoard), taskID))
-	require.Equal(t, &sproto.IdleTimeoutConfig{
-		ServiceID: "task", UseProxyState: true, TimeoutDuration: 30 * time.Minute,
-	}, idleTimeoutConfig(spec(timeout, tensorBoard), taskID))
 
 	// A shell saved before the master watched shells, and a command, are not watched.
 	require.Nil(t, idleTimeoutConfig(spec(timeout, command), taskID))

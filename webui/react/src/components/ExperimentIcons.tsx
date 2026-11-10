@@ -26,7 +26,6 @@ const ExperimentIcons: React.FC<Props> = ({
       case JobState.QUEUED:
       case RunState.Queued:
       case CommandState.Queued:
-      case CommandState.Waiting:
         return { backgroundColor, name: 'queued', opacity, title: stateToLabel(state) };
       case RunState.Starting:
       case RunState.Pulling:

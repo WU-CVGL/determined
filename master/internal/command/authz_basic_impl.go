@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/determined-ai/determined/proto/pkg/tensorboardv1"
-
 	"github.com/determined-ai/determined/master/internal/authz"
 	"github.com/determined-ai/determined/master/internal/db"
 	"github.com/determined-ai/determined/master/pkg/model"
@@ -69,24 +67,6 @@ func (a *NSCAuthZBasic) AccessibleScopes(
 	return returnScope, nil
 }
 
-// FilterTensorboards returns the tensorboards that the user has access to.
-func (a *NSCAuthZBasic) FilterTensorboards(
-	ctx context.Context,
-	curUser model.User,
-	requestedScope model.AccessScopeID,
-	tensorboards []*tensorboardv1.Tensorboard,
-) ([]*tensorboardv1.Tensorboard, error) {
-	return tensorboards, nil
-}
-
-// CanGetTensorboard returns true and nil error.
-func (a *NSCAuthZBasic) CanGetTensorboard(
-	ctx context.Context, curUser model.User, workspaceID model.AccessScopeID,
-	experimentIDs []int32, trialIDs []int32,
-) error {
-	return nil
-}
-
 // CanGetTensorBoardSources refuses empty lists and IDs that name nothing, such as a deleted
 // experiment, and returns nil otherwise.
 func (a *NSCAuthZBasic) CanGetTensorBoardSources(
@@ -101,13 +81,6 @@ func (a *NSCAuthZBasic) CanGetTensorBoardSources(
 	} else if err != nil {
 		return err
 	}
-	return nil
-}
-
-// CanTerminateTensorboard always returns nil.
-func (a *NSCAuthZBasic) CanTerminateTensorboard(
-	ctx context.Context, curUser model.User, workspaceID model.AccessScopeID,
-) error {
 	return nil
 }
 

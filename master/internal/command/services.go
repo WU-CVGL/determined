@@ -54,7 +54,7 @@ type TaskServiceCredential struct {
 }
 
 // taskServices returns the services of a task: its records, or, for a shell saved without them,
-// its sshd at the task ID, as proxyPortConfigs proxies it. Commands and TensorBoards have none.
+// its sshd at the task ID, as proxyPortConfigs proxies it. Commands have none.
 func taskServices(spec tasks.GenericCommandSpec, taskType model.TaskType) []tasks.InteractiveService {
 	if len(spec.Services) > 0 {
 		return spec.Services

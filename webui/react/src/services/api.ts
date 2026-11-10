@@ -70,6 +70,18 @@ export const getUser = generateDetApi<
   Type.DetailedUser
 >(Config.getUser);
 
+export const getUserResources = generateDetApi<
+  Service.GetUserParams,
+  Api.V1GetUserResourcesResponse,
+  Type.UserResources
+>(Config.getUserResources);
+
+export const getUserUsage = generateDetApi<
+  Service.GetUserUsageParams,
+  Api.V1GetUserUsageResponse,
+  Type.UserUsage
+>(Config.getUserUsage);
+
 export const postUser = generateDetApi<
   Api.V1PostUserRequest,
   Api.V1PostUserResponse,
@@ -940,12 +952,6 @@ export const getShells = generateDetApi<
   Type.CommandTask[]
 >(Config.getShells);
 
-export const getTensorBoards = generateDetApi<
-  Service.GetTensorBoardsParams,
-  Api.V1GetTensorboardsResponse,
-  Type.CommandTask[]
->(Config.getTensorBoards);
-
 export const killCommand = generateDetApi<Service.CommandIdParams, Api.V1KillCommandResponse, void>(
   Config.killCommand,
 );
@@ -953,12 +959,6 @@ export const killCommand = generateDetApi<Service.CommandIdParams, Api.V1KillCom
 export const killShell = generateDetApi<Service.CommandIdParams, Api.V1KillShellResponse, void>(
   Config.killShell,
 );
-
-export const killTensorBoard = generateDetApi<
-  Service.CommandIdParams,
-  Api.V1KillTensorboardResponse,
-  void
->(Config.killTensorBoard);
 
 export const getShell = generateDetApi<
   Service.CommandIdParams,
@@ -971,12 +971,6 @@ export const getShellConfig = generateDetApi<
   Api.V1GetShellResponse,
   RawJson
 >(Config.getShellConfig);
-
-export const getTensorBoard = generateDetApi<
-  Service.CommandIdParams,
-  Api.V1GetTensorboardResponse,
-  Type.CommandTask
->(Config.getTensorBoard);
 
 export const getCommand = generateDetApi<
   Service.CommandIdParams,
@@ -1036,8 +1030,6 @@ export const killTask = async (task: Pick<Type.CommandTask, 'id' | 'type'>): Pro
       return await killCommand({ commandId: task.id });
     case Type.CommandType.Shell:
       return await killShell({ commandId: task.id });
-    case Type.CommandType.TensorBoard:
-      return await killTensorBoard({ commandId: task.id });
   }
 };
 

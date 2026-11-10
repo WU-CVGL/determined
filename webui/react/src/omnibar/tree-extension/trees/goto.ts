@@ -1,9 +1,7 @@
-import { terminalCommandStates } from 'constants/states';
 import { alertAction, parseIds, visitAction } from 'omnibar/tree-extension/trees/actions';
 import { Children, TreeNode } from 'omnibar/tree-extension/types';
 import { paths } from 'routes/utils';
-import { getExperimentDetails, getTensorBoards, getTrialDetails } from 'services/api';
-import { openCommand } from 'utils/wait';
+import { getExperimentDetails, getTrialDetails } from 'services/api';
 
 const locations: TreeNode[] = [
   {
@@ -50,21 +48,9 @@ const locations: TreeNode[] = [
     title: 'trial',
   },
   {
-    aliases: ['tensorBoards', 'commands', 'shells'],
+    aliases: ['commands', 'shells'],
     onAction: visitAction(paths.taskList()),
     title: 'tasks',
-  },
-  {
-    options: async (): Promise<Children> => {
-      const tsbs = await getTensorBoards({});
-      return tsbs
-        .filter((tsb) => !terminalCommandStates.has(tsb.state))
-        .map((tsb) => ({
-          onAction: () => openCommand(tsb),
-          title: `${JSON.stringify(tsb.misc)}`,
-        }));
-    },
-    title: 'tensorBoard',
   },
   {
     onAction: visitAction(paths.clusterLogs()),

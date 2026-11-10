@@ -82,8 +82,12 @@ def _test_task_logs(task_type: str, task_config: Dict[str, Any], log_regex: re.P
     if task_type == "tensorboard":
         exp_ref = noop.create_experiment(sess, [noop.Report({"x": 1})])
         assert exp_ref.wait(interval=0.01) == client.ExperimentState.COMPLETED
-        treq = bindings.v1LaunchTensorboardRequest(config=task_config, experimentIds=[exp_ref.id])
-        task_id = bindings.post_LaunchTensorboard(sess, body=treq).tensorboard.id
+        # A viewing session: a shell whose tensorboard service reads the experiment.
+        services = {"tensorboard": {"experiment_ids": [exp_ref.id]}, "ssh": {"enabled": False}}
+        vreq = bindings.v1LaunchShellRequest(
+            config={**task_config, "services": services, "resources": {"slots": 0}}
+        )
+        task_id = bindings.post_LaunchShell(sess, body=vreq).shell.id
     elif task_type == "command":
         creq = bindings.v1LaunchCommandRequest(config=task_config)
         task_id = bindings.post_LaunchCommand(sess, body=creq).command.id
@@ -130,11 +134,9 @@ def _test_task_logs(task_type: str, task_config: Dict[str, Any], log_regex: re.P
         raise
 
     finally:
-        if task_type == "tensorboard":
-            bindings.post_KillTensorboard(sess, tensorboardId=task_id)
-        elif task_type == "command":
+        if task_type == "command":
             bindings.post_KillCommand(sess, commandId=task_id)
-        elif task_type == "shell":
+        elif task_type in ("shell", "tensorboard"):
             bindings.post_KillShell(sess, shellId=task_id)
 
 

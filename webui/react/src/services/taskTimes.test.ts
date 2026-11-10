@@ -1,10 +1,4 @@
-import {
-  mapV1Command,
-  mapV1ExperimentList,
-  mapV1GenericTask,
-  mapV1Shell,
-  mapV1TensorBoard,
-} from 'services/decoder';
+import { mapV1Command, mapV1ExperimentList, mapV1GenericTask, mapV1Shell } from 'services/decoder';
 
 import * as Sdk from './api-ts-sdk';
 
@@ -22,7 +16,6 @@ it('keeps submitted and assigned times distinct for every command kind, includin
   const decode = (item: typeof wire) => [
     mapV1Command(item as Sdk.V1Command),
     mapV1Shell(item as Sdk.V1Shell),
-    mapV1TensorBoard(item as Sdk.V1Tensorboard),
   ];
   for (const task of decode(wire)) {
     expect(task.startTime).toBe(submitted);

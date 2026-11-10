@@ -44,6 +44,8 @@ const (
 	tensorBoardSourcesEnvVar = "DET_TENSORBOARD_SOURCES"
 	// tensorBoardSourcesVersion is the version of the format of tensorBoardSourcesFile.
 	tensorBoardSourcesVersion = 1
+	// storageConfPath holds the checkpoint storage configuration that the loader reads.
+	storageConfPath = "/run/determined/tensorboard/storage_config.json"
 )
 
 // tensorBoardSource is one log directory that a tensorboard service reads.

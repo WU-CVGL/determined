@@ -1987,69 +1987,6 @@
       "gridPos": {
         "h": 4,
         "w": 4,
-        "x": 16,
-        "y": 78
-      },
-      "id": 33,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "last"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "10.4.1",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "count((kube_pod_labels{label_determined_ai_task_type=\"TENSORBOARD\"})) or vector(0)",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "{{label_determined_ai_workspace}}",
-          "range": true,
-          "refId": "C"
-        }
-      ],
-      "title": "Tensorboards",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
         "x": 20,
         "y": 78
       },

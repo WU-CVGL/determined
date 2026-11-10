@@ -56,8 +56,6 @@ const (
 	TaskShipLogsShellResource = "ship-logs.sh"
 	// TaskShipLogsPythonResource is the python script to ship logs.
 	TaskShipLogsPythonResource = "ship_logs.py"
-	// TensorboardEntryScriptResource is the script to set up TensorBoard.
-	TensorboardEntryScriptResource = "tensorboard-entrypoint.sh"
 	// TrialEntrypointScriptResource is the script to set up a trial.
 	TrialEntrypointScriptResource = "entrypoint.sh"
 	// AgentSetupScriptTemplateResource is the template for the script to run a dynamic agent.

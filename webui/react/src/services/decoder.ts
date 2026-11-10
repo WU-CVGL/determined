@@ -126,6 +126,37 @@ export const mapV1ResourcePool = (data: Sdk.V1ResourcePool): types.ResourcePool 
   return { ...data, slotType: mapV1DeviceType(data.slotType) };
 };
 
+export const mapV1UserResources = (data: Sdk.V1GetUserResourcesResponse): types.UserResources => ({
+  asOf: data.asOf ? new Date(data.asOf) : undefined,
+  auxMetered: data.auxMetered ?? false,
+  pools: (data.pools ?? []).map((pool) => ({
+    counts: {
+      auxContainers: pool.counts?.auxContainers ?? 0,
+      cpuSlots: pool.counts?.cpuSlots ?? 0,
+      gpus: pool.counts?.gpus ?? 0,
+    },
+    resourcePool: pool.resourcePool ?? '',
+  })),
+});
+
+export const mapV1UserUsage = (data: Sdk.V1GetUserUsageResponse): types.UserUsage => ({
+  asOf: data.asOf ? new Date(data.asOf) : undefined,
+  coverageStart: data.coverageStart || undefined,
+  entries: (data.entries ?? []).map((entry) => ({
+    auxActiveDays: entry.auxActiveDays ?? 0,
+    auxActiveSeconds: entry.auxActiveSeconds ?? 0,
+    auxContainerSeconds: entry.auxContainerSeconds ?? 0,
+    cpuSlotSeconds: entry.cpuSlotSeconds ?? 0,
+    gpuActiveDays: entry.gpuActiveDays ?? 0,
+    gpuActiveSeconds: entry.gpuActiveSeconds ?? 0,
+    gpuOrAuxActiveDays: entry.gpuOrAuxActiveDays ?? 0,
+    gpuOrAuxActiveSeconds: entry.gpuOrAuxActiveSeconds ?? 0,
+    gpuSeconds: entry.gpuSeconds ?? 0,
+    periodStart: entry.periodStart ?? '',
+    unclassifiedSlotSeconds: entry.unclassifiedSlotSeconds ?? 0,
+  })),
+});
+
 export const jsonToAgents = (agents: Array<Sdk.V1Agent>): types.Agent[] => {
   return agents.map((agent) => {
     const agentSlots = agent.slots || {};
@@ -200,7 +231,7 @@ const mapV1TaskState = (containerState: Sdk.Taskv1State): types.CommandState => 
 };
 
 const mapCommonV1Task = (
-  task: Sdk.V1Command | Sdk.V1Shell | Sdk.V1Tensorboard,
+  task: Sdk.V1Command | Sdk.V1Shell,
   type: types.CommandType,
 ): types.CommandTask => {
   return {
@@ -230,17 +261,6 @@ export const mapV1Shell = (shell: Sdk.V1Shell): types.CommandTask => {
   const trialIds = shell.trialIds ?? [];
   if (experimentIds.length === 0 && trialIds.length === 0) return task;
   return { ...task, misc: { experimentIds, trialIds } };
-};
-
-export const mapV1TensorBoard = (tensorboard: Sdk.V1Tensorboard): types.CommandTask => {
-  return {
-    ...mapCommonV1Task(tensorboard, types.CommandType.TensorBoard),
-    misc: {
-      experimentIds: tensorboard.experimentIds || [],
-      trialIds: tensorboard.trialIds || [],
-    },
-    serviceAddress: tensorboard.serviceAddress,
-  };
 };
 
 export const mapV1Template = (template: Sdk.V1Template): types.Template => {
@@ -273,7 +293,6 @@ export const mapV1Task = (task: Sdk.V1Task): types.TaskItem => {
             STATE_STARTING: types.CommandState.Starting,
             STATE_TERMINATED: types.CommandState.Terminated,
             STATE_TERMINATING: types.CommandState.Terminating,
-            STATE_WAITING: types.CommandState.Waiting,
           }[String(a?.state) || 'STATE_QUEUED'] || types.CommandState.Queued;
 
         return {

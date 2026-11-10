@@ -38,7 +38,6 @@ const linkToEntityPage = (job: Job, label: ReactNode): ReactNode => {
       return <Link path={paths.genericTaskDetails(job.entityId)}>{label}</Link>;
     case JobType.COMMAND:
     case JobType.SHELL:
-    case JobType.TENSORBOARD:
       // The task page, by ID, as the task tables open it.
       return <Link onClick={() => openInteractiveTask(job.entityId)}>{label}</Link>;
     default:

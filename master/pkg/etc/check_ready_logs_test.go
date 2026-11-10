@@ -229,21 +229,3 @@ func TestCheckReadyLogsReportsBeforePost(t *testing.T) {
 		})
 	}
 }
-
-// A TensorBoard's check, which has no service and reports nothing, posts the allocation's waiting
-// state with the same retries.
-func TestCheckReadyLogsPostsWaiting(t *testing.T) {
-	c := newReadyCheck(t, []string{"connection", "502", "ok"}, "waiting\n",
-		"--ready-regex", "up", "--waiting-regex", "waiting")
-	c.openGate()
-	require.NoError(t, c.cmd.Start())
-	status, posts := c.wait()
-	require.Equal(t, 0, status)
-	waiting := "/api/v1/allocations/" + standInAllocationID + "/waiting 10"
-	require.Equal(t, []string{waiting, waiting, waiting}, posts)
-	select {
-	case line := <-c.lines:
-		t.Fatalf("unexpected line in the FIFO: %q", line)
-	default:
-	}
-}

@@ -440,14 +440,11 @@ describe('TaskActionDropdown', () => {
       expect(screen.queryByText('Launch Again')).not.toBeInTheDocument();
     });
 
-    it.each([CommandType.Command, CommandType.TensorBoard])(
-      'is not offered on a %s',
-      async (type) => {
-        await openLaunchAgainMenu({ type }, owner);
-        await screen.findByText('View Logs');
-        expect(screen.queryByText('Launch Again')).not.toBeInTheDocument();
-      },
-    );
+    it('is not offered on a command', async () => {
+      await openLaunchAgainMenu({ type: CommandType.Command }, owner);
+      await screen.findByText('View Logs');
+      expect(screen.queryByText('Launch Again')).not.toBeInTheDocument();
+    });
 
     it('is not offered without permission to launch in the workspace', async () => {
       mocks.canCreateWorkspaceNSC = false;

@@ -347,11 +347,6 @@ export interface GetShellsParams extends FetchOptions, PaginationParams {
   workspaceId?: number;
 }
 
-export interface GetTensorBoardsParams extends FetchOptions, PaginationParams {
-  sortBy?: 'SORT_BY_UNSPECIFIED' | 'SORT_BY_ID' | 'SORT_BY_DESCRIPTION' | 'SORT_BY_START_TIME';
-  users?: string[];
-  workspaceId?: number;
-}
 export interface GetResourceAllocationAggregatedParams {
   endDate: Dayjs;
   period:
@@ -381,6 +376,14 @@ export interface GetUsersParams extends PaginationParams {
   sortBy?: Api.V1GetUsersRequestSortBy;
 }
 export interface GetUserParams {
+  userId: number;
+}
+export interface GetUserUsageParams {
+  /** The last day (YYYY-MM-DD) or month (YYYY-MM), UTC, inclusive. */
+  endDate: string;
+  period: Api.V1ResourceAllocationAggregationPeriod;
+  /** The first day (YYYY-MM-DD) or month (YYYY-MM), UTC, inclusive. */
+  startDate: string;
   userId: number;
 }
 export interface PostUserParams {
