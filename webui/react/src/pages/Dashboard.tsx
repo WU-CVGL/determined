@@ -5,7 +5,7 @@ import Message from 'hew/Message';
 import Row from 'hew/Row';
 import Spinner from 'hew/Spinner';
 import { Loadable } from 'hew/utils/loadable';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import ExperimentIcons from 'components/ExperimentIcons';
 import Link from 'components/Link';
@@ -43,10 +43,12 @@ const Dashboard: React.FC = () => {
   const [experiments, setExperiments] = useState<BulkExperimentItem[]>([]);
   const [tasks, setTasks] = useState<CommandTask[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [canceler] = useState(new AbortController());
   const [submissionsLoading, setSubmissionsLoading] = useState<boolean>(true);
   const [projectsLoading, setProjectsLoading] = useState<boolean>(true);
+  // A restart of the polling starts a batch while the last one is pending; only the latest batch
+  // sets the state or reports an error.
+  const batch = useRef(0);
   const currentUser = Loadable.getOrElse(undefined, useObservable(userStore.currentUser));
   const workspaces = Loadable.getOrElse([], useObservable(workspaceStore.workspaces));
   const { canCreateNSC } = usePermissions();
@@ -54,7 +56,7 @@ const Dashboard: React.FC = () => {
   type Submission = BulkExperimentItem & CommandTask;
 
   const fetchTasks = useCallback(
-    async (user: DetailedUser) => {
+    async (user: DetailedUser, isCurrent: () => boolean) => {
       const results = await Promise.allSettled([
         getCommands({
           limit: SUBMISSIONS_FETCH_LIMIT,
@@ -75,13 +77,13 @@ const Dashboard: React.FC = () => {
         if (current.status === 'fulfilled') return acc.concat(current.value);
         return acc;
       }, [] as CommandTask[]);
-      setTasks(newTasks);
+      if (isCurrent()) setTasks(newTasks);
     },
     [canceler],
   );
 
   const fetchExperiments = useCallback(
-    async (user: DetailedUser) => {
+    async (user: DetailedUser, isCurrent: () => boolean) => {
       try {
         const response = await getExperiments(
           {
@@ -94,8 +96,9 @@ const Dashboard: React.FC = () => {
             signal: canceler.signal,
           },
         );
-        setExperiments(response.experiments);
+        if (isCurrent()) setExperiments(response.experiments);
       } catch (e) {
+        if (!isCurrent()) return;
         handleError(e, {
           publicSubject: `Error fetching ${f_flat_runs ? 'searches' : 'experiments'} for dashboard`,
           silent: false,
@@ -106,46 +109,59 @@ const Dashboard: React.FC = () => {
     [f_flat_runs, canceler],
   );
 
-  const fetchProjects = useCallback(async () => {
-    try {
-      const projects = await getProjectsByUserActivity(
-        { limit: PROJECTS_FETCH_LIMIT },
-        {
-          signal: canceler.signal,
-        },
-      );
-      setProjects(projects);
-      setProjectsLoading(false);
-    } catch (e) {
-      handleError(e, {
-        publicSubject: 'Error fetching projects for dashboard',
-        silent: false,
-        type: ErrorType.Api,
-      });
-    }
-  }, [canceler]);
+  const fetchProjects = useCallback(
+    async (isCurrent: () => boolean) => {
+      try {
+        const projects = await getProjectsByUserActivity(
+          { limit: PROJECTS_FETCH_LIMIT },
+          {
+            signal: canceler.signal,
+          },
+        );
+        if (!isCurrent()) return;
+        setProjects(projects);
+        setProjectsLoading(false);
+      } catch (e) {
+        if (!isCurrent()) return;
+        handleError(e, {
+          publicSubject: 'Error fetching projects for dashboard',
+          silent: false,
+          type: ErrorType.Api,
+        });
+      }
+    },
+    [canceler],
+  );
 
-  const fetchSubmissions = useCallback(async () => {
-    if (!currentUser) return;
-    await Promise.allSettled([fetchExperiments(currentUser), fetchTasks(currentUser)]);
-    setSubmissionsLoading(false);
-  }, [currentUser, fetchExperiments, fetchTasks]);
+  const fetchSubmissions = useCallback(
+    async (isCurrent: () => boolean) => {
+      if (!currentUser) return;
+      await Promise.allSettled([
+        fetchExperiments(currentUser, isCurrent),
+        fetchTasks(currentUser, isCurrent),
+      ]);
+      if (isCurrent()) setSubmissionsLoading(false);
+    },
+    [currentUser, fetchExperiments, fetchTasks],
+  );
 
-  const fetchAll = useCallback(() => {
-    fetchProjects();
-    fetchSubmissions();
+  // The polling schedules the next batch once this one has settled.
+  const fetchAll = useCallback(async () => {
+    const current = ++batch.current;
+    const isCurrent = () => batch.current === current;
+    await Promise.allSettled([fetchProjects(isCurrent), fetchSubmissions(isCurrent)]);
   }, [fetchSubmissions, fetchProjects]);
 
   const { stopPolling } = usePolling(fetchAll, { rerunOnNewFn: true });
 
-  useEffect(() => {
-    setSubmissions(
+  const submissions = useMemo(
+    () =>
       (experiments as Submission[])
         .concat(tasks as Submission[])
         .sort((a, b) => dateTimeStringSorter(b.startTime, a.startTime))
         .slice(0, DISPLAY_LIMIT),
-    );
-  }, [experiments, tasks]);
+    [experiments, tasks],
+  );
 
   useEffect(() => {
     return () => {
@@ -155,10 +171,6 @@ const Dashboard: React.FC = () => {
   }, [canceler, stopPolling]);
 
   const pageBreadCrumb: BreadCrumbRoute[] = [{ breadcrumbName: 'Home', path: paths.dashboard() }];
-
-  if (projectsLoading && submissionsLoading) {
-    return null;
-  }
 
   return (
     <Page

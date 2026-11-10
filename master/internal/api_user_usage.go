@@ -39,26 +39,16 @@ const (
 	userUsageCoverageMaxAge = 10 * time.Minute
 )
 
-// canViewUserPage checks whether cur may read the resources and usage of target. Every
-// authenticated user may read every user's page; a later access rule goes here, and must then
-// also cover ResourceAllocationAggregated and ResourceAllocationRaw.
-func canViewUserPage(ctx context.Context, cur model.User, target model.User) error {
-	return nil
-}
-
-// GetUserResources returns the resources a user's tasks hold now.
+// GetUserResources returns the resources a user's tasks hold now. Every authenticated user may
+// read them for every user.
 func (a *apiServer) GetUserResources(
 	ctx context.Context, req *apiv1.GetUserResourcesRequest,
 ) (*apiv1.GetUserResourcesResponse, error) {
-	curUser, _, err := grpcutil.GetUser(ctx)
-	if err != nil {
+	if _, _, err := grpcutil.GetUser(ctx); err != nil {
 		return nil, err
 	}
 	target, err := getFullModelUser(ctx, model.UserID(req.UserId))
 	if err != nil {
-		return nil, err
-	}
-	if err := canViewUserPage(ctx, *curUser, target.ToUser()); err != nil {
 		return nil, err
 	}
 	asOf := time.Now().UTC().Truncate(time.Second)
@@ -100,19 +90,16 @@ func (a *apiServer) GetUserResources(
 	}, nil
 }
 
-// GetUserUsage returns a user's daily or monthly resource usage.
+// GetUserUsage returns a user's daily or monthly resource usage. Every authenticated user may
+// read it for every user.
 func (a *apiServer) GetUserUsage(
 	ctx context.Context, req *apiv1.GetUserUsageRequest,
 ) (*apiv1.GetUserUsageResponse, error) {
-	curUser, _, err := grpcutil.GetUser(ctx)
-	if err != nil {
+	if _, _, err := grpcutil.GetUser(ctx); err != nil {
 		return nil, err
 	}
 	target, err := getFullModelUser(ctx, model.UserID(req.UserId))
 	if err != nil {
-		return nil, err
-	}
-	if err := canViewUserPage(ctx, *curUser, target.ToUser()); err != nil {
 		return nil, err
 	}
 	rangeStart, rangeEnd, err := parseUsageRange(req.StartDate, req.EndDate, req.Period)
