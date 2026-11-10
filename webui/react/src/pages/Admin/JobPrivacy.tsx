@@ -148,6 +148,7 @@ const JobPrivacy: React.FC = () => {
         loading={!rows && !loadError}
         pagination={false}
         rowKey="kind"
+        scroll={{ x: 'max-content' }}
         size="small"
       />
       {saveError && <Alert message={saveError} type="error" />}
