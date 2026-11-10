@@ -173,8 +173,8 @@ export const paths = {
   taskList: (): string => {
     return '/tasks';
   },
-  taskLogs: (task: Pick<CommandTask, 'id' | 'name' | 'type'>): string => {
-    return `/${task.type}/${task.id}/logs?id=${task.name ?? ''}`;
+  taskLogs: (task: Pick<CommandTask, 'id' | 'type'>): string => {
+    return `/${task.type}/${task.id}/logs`;
   },
   taskResources: (taskId: string, allocationId?: string): string => {
     const path = `/tasks/${encodeURIComponent(taskId)}/resources`;

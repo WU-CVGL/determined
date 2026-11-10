@@ -28,10 +28,23 @@ func (a *apiServer) GetTask(
 	switch err := a.m.db.QueryProto("get_task", t, req.TaskId); {
 	case errors.Is(err, db.ErrNotFound):
 		return nil, api.NotFoundErrs("task", req.TaskId, true)
-	default:
-		return &apiv1.GetTaskResponse{Task: t},
-			errors.Wrapf(err, "error fetching task %s from database", req.TaskId)
+	case err != nil:
+		return nil, errors.Wrapf(err, "error fetching task %s from database", req.TaskId)
 	}
+	curUser, _, err := grpcutil.GetUser(ctx)
+	if err != nil {
+		return nil, err
+	}
+	v, err := jobprivacy.NewViewer(ctx, *curUser)
+	if err != nil {
+		return nil, err
+	}
+	caps, err := taskCaps(ctx, v, model.TaskID(req.TaskId))
+	if err != nil {
+		return nil, err
+	}
+	redactTask(t, caps)
+	return &apiv1.GetTaskResponse{Task: t}, nil
 }
 
 func (a *apiServer) GetGenericTaskConfig(

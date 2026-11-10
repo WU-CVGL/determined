@@ -3,7 +3,7 @@ import LogViewerSelect, { Filters } from 'hew/LogViewer/LogViewerSelect';
 import { Settings, settingsConfigForTask } from 'hew/LogViewer/LogViewerSelect.settings';
 import Message from 'hew/Message';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 
 import Page from 'components/Page';
 import TaskResourcesLink from 'components/TaskResourcesLink';
@@ -15,7 +15,7 @@ import { getTask } from 'services/api';
 import { detApi } from 'services/apiConfig';
 import { mapV1LogsResponse } from 'services/decoder';
 import { readStream } from 'services/utils';
-import { CommandTask, CommandType, TaskItem } from 'types';
+import { CommandType, TaskItem } from 'types';
 import handleError from 'utils/error';
 import { isLogsNotShared, LOGS_NOT_SHARED } from 'utils/jobPrivacy';
 
@@ -195,11 +195,10 @@ export const TaskLogsViewer: React.FC<ViewerProps> = ({
 
 const TaskLogs: React.FC<Props> = ({ taskId, taskType, onCloseLogs, headerComponent }: Props) => {
   const [task, setTask] = useState<TaskItem>();
-  const [searchParams] = useSearchParams();
 
   const taskTypeLabel =
     taskType === 'generic' ? 'Generic Task' : commandTypeToLabel[taskType as CommandType];
-  const title = `${searchParams.has('id') ? `${searchParams.get('id')} ` : ''}Logs`;
+  const title = `${taskTypeLabel} ${taskId.substring(0, 8)} Logs`;
 
   const taskSettingsConfig = useMemo(() => settingsConfigForTask(taskId), [taskId]);
   const { resetSettings, settings, updateSettings } = useSettings<Settings>(taskSettingsConfig);
@@ -231,10 +230,7 @@ const TaskLogs: React.FC<Props> = ({ taskId, taskType, onCloseLogs, headerCompon
           path:
             taskType === 'generic'
               ? paths.genericTaskDetails(taskId)
-              : paths.taskLogs({
-                  id: taskId,
-                  type: taskType,
-                } as CommandTask),
+              : paths.taskLogs({ id: taskId, type: taskType as CommandType }),
         },
       ]}
       headerComponent={headerComponent}

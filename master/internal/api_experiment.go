@@ -1510,7 +1510,8 @@ func (a *apiServer) createUnmanagedExperimentTx(
 		Experiment: protoExp,
 		Config:     protoutils.ToStruct(activeConfig),
 	}
-	// The creator owns the experiment, so this omits nothing; it sets the capabilities.
+	// A PUT of an existing external experiment returns it as stored, which may be another
+	// user's, so it is redacted as in GetExperiment.
 	if err = redactExperimentForViewer(ctx, *user, protoExp, &resp.Config); err != nil {
 		return nil, err
 	}
@@ -2762,8 +2763,8 @@ func (a *apiServer) PutTrial(ctx context.Context, req *apiv1.PutTrialRequest) (
 		return nil, fmt.Errorf("only unmanaged trials are supported")
 	}
 
-	_, _, err := a.getExperimentAndCheckCanDoActions(ctx, int(req.CreateTrialRequest.ExperimentId),
-		experiment.AuthZProvider.Get().CanEditExperiment)
+	_, curUser, err := a.getExperimentAndCheckCanDoActions(ctx,
+		int(req.CreateTrialRequest.ExperimentId), experiment.AuthZProvider.Get().CanEditExperiment)
 	if err != nil {
 		return nil, err
 	}
@@ -2780,6 +2781,11 @@ func (a *apiServer) PutTrial(ctx context.Context, req *apiv1.PutTrialRequest) (
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to run create trial tx: %w", err)
+	}
+	// A PUT of an existing trial returns it as stored, so its log policy match is redacted as in
+	// GetTrial.
+	if err = redactTrialsLogPolicy(ctx, curUser, trial); err != nil {
+		return nil, err
 	}
 
 	resp := &apiv1.PutTrialResponse{Trial: trial}

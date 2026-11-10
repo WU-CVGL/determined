@@ -1,76 +1,56 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { DefaultTheme, UIProvider } from 'hew/Theme';
+import { HelmetProvider } from 'react-helmet-async';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
-import { detApi } from 'services/apiConfig';
-import handleError from 'utils/error';
+import { ThemeProvider } from 'components/ThemeProvider';
 
-import { TaskLogsViewer } from './TaskLogs';
+import { TaskLogsWrapper } from './TaskLogs';
 
-vi.mock('services/api', () => ({ getTask: vi.fn() }));
+const TASK_ID = '0123abcd-4567-89ef';
+
+vi.mock('services/api', () => ({
+  getTask: vi.fn(() => Promise.reject(new Error('no task record'))),
+}));
 vi.mock('services/apiConfig', () => ({
-  detApi: {
-    StreamingJobs: {
-      taskLogs: vi.fn(() => ({ options: {}, url: '/api/v1/tasks/task-1/logs' })),
-      taskLogsFields: vi.fn(() => ({ options: {}, url: '/api/v1/tasks/task-1/logs/fields' })),
-    },
-  },
+  detApi: { StreamingJobs: { taskLogs: vi.fn(), taskLogsFields: vi.fn() } },
 }));
-vi.mock('utils/error', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('utils/error')>()),
-  default: vi.fn(),
+vi.mock('services/utils', () => ({ readStream: vi.fn() }));
+vi.mock('hew/LogViewer/LogViewer', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('hew/LogViewer/LogViewer')>()),
+  default: () => <div data-testid="log-viewer" />,
 }));
+vi.mock('hooks/useSettings', () => ({
+  useSettings: () => ({ resetSettings: vi.fn(), settings: {}, updateSettings: vi.fn() }),
+}));
+vi.mock('hooks/usePermissions', () => ({ default: () => ({ loading: false }) }));
 
-const TASK_ID = 'task-1';
-
-const setup = (logsHidden?: boolean) =>
+const setup = (url: string) =>
   render(
-    <UIProvider theme={DefaultTheme.Light}>
-      <TaskLogsViewer
-        logsHidden={logsHidden}
-        resetSettings={vi.fn()}
-        settings={{}}
-        taskId={TASK_ID}
-        updateSettings={vi.fn()}
-      />
-    </UIProvider>,
+    <MemoryRouter initialEntries={[url]}>
+      <UIProvider theme={DefaultTheme.Light}>
+        <ThemeProvider>
+          <HelmetProvider>
+            <Routes>
+              <Route element={<TaskLogsWrapper />} path="/:taskType/:taskId/logs" />
+            </Routes>
+          </HelmetProvider>
+        </ThemeProvider>
+      </UIProvider>
+    </MemoryRouter>,
   );
 
-// The master refuses the logs of a job whose logs are not shared before it sends a line.
-const refusal = () =>
-  new Response(JSON.stringify({ error: { httpCode: 403, message: 'logs not shared' } }), {
-    status: 403,
-  });
-
-describe('TaskLogsViewer', () => {
-  const fetchMock = vi.fn();
-
-  beforeEach(() => {
-    vi.mocked(detApi.StreamingJobs.taskLogs).mockClear();
-    vi.mocked(detApi.StreamingJobs.taskLogsFields).mockClear();
-    vi.mocked(handleError).mockClear();
-    fetchMock.mockReset().mockImplementation(() => Promise.resolve(refusal()));
-    vi.stubGlobal('fetch', fetchMock);
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it('opens no stream for logs that are not shared', () => {
-    setup(true);
-    expect(screen.getByText('Logs not shared')).toBeInTheDocument();
-    expect(detApi.StreamingJobs.taskLogs).not.toHaveBeenCalled();
-    expect(detApi.StreamingJobs.taskLogsFields).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('shows the refusal of the master once, without retrying or an error toast', async () => {
-    setup();
-    expect(await screen.findByText('Logs not shared')).toBeInTheDocument();
-    const calls = fetchMock.mock.calls.length;
-    // Give a retry the time to start: none does.
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(fetchMock.mock.calls.length).toBe(calls);
-    await waitFor(() => expect(handleError).not.toHaveBeenCalled());
+describe('TaskLogs', () => {
+  it('titles the page from the task type and ID, not from the address', async () => {
+    setup(`/shell/${TASK_ID}/logs?id=<script>secret`);
+    await screen.findByTestId('log-viewer');
+    await waitFor(() => expect(document.title).toMatch(/^Shell 0123abcd Logs - /));
+    expect(document.title).not.toContain('secret');
+    expect(document.title).not.toContain('<script>');
+    expect(document.body.innerHTML).not.toContain('secret');
+    expect(screen.getByRole('link', { name: 'Shell 0123abcd' })).toHaveAttribute(
+      'href',
+      `/shell/${TASK_ID}/logs`,
+    );
   });
 });
