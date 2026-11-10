@@ -34,28 +34,41 @@ send their token.
 
 0.44.0 does not change the agent, so agents stay on 0.42.2; the files that the
 master ships into task containers change only for tasks started after the
-upgrade. 0.44.0 removes the TensorBoard task type: before the swap, end every
-TensorBoard task, which `det tensorboard list --all` lists for an administrator
-under 0.43.1, and note their IDs, since the upgrade deletes their records and
-leaves a container still running unmanaged; find such a container on its
-agent's host with
-`docker ps --filter label=ai.determined.container.description=cmd-<task ID>`.
-Then back up the database. The first start runs seven migrations and rebuilds
-the cluster usage history, keeping the earlier aggregates in
-`resource_aggregates_legacy`. Allocations from before the upgrade count as GPUs
-in the user usage only when their task container recorded GPUs; the
-administrator statements in
+upgrade. Shells, commands and trials that run at the swap continue under the
+0.44.0 master, and a shell's JupyterLab and VS Code links keep working. 0.44.0
+removes the TensorBoard task type, and the upgrade deletes the TensorBoard
+tasks' records.
+Before the swap, remove `tensorboard_timeout` from the master configuration,
+since the 0.44.0 master refuses to start with it, and end every TensorBoard
+task: as an administrator under 0.43.1, kill the tasks that
+`det tensorboard list --all` lists until it shows each one as `TERMINATED`.
+Then back up the database. The first start runs seven migrations before the
+master accepts agents, so they count toward the master outage; the master then
+rebuilds the cluster usage history, keeping the earlier aggregates in
+`resource_aggregates_legacy`. A TensorBoard task still running at the swap
+keeps its container running with no record in Determined. After the start, run
+this on every agent host and `docker kill` each container it prints:
+
+```sh
+for c in $(docker ps -q); do
+  docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$c" |
+    grep -qx 'DET_TASK_TYPE=TENSORBOARD' && echo "$c"
+done
+```
+
+Allocations from before the upgrade, including those still running at the
+swap, count as GPUs in the user usage only when their task container recorded
+GPUs; the administrator statements in
 [historical cluster usage data](../manage/historical-cluster-usage-data.rst)
-classify the rest. The 0.44.0 master refuses a master configuration that sets
-`tensorboard_timeout`, and task configurations and templates that set
-`tensorboard_args`. A rollback restores the database backup taken before the
-upgrade, since the release deletes the TensorBoard task records, drops
-`notebook_sessions` and moves `tensorboard_args`. A 0.43.1 master started on
-the upgraded database without the restore runs tasks but cannot start a shell
-with the JupyterLab service; the tasks it runs are never in the user usage
-after upgrading again, the cluster usage days it aggregates use the old rule,
-and it does not enforce job privacy, so every job's title, logs and config are
-readable again.
+classify the rest. The 0.44.0 master refuses task configurations and templates
+that set `tensorboard_args`. A rollback restores the database backup taken
+before the upgrade, since the release deletes the TensorBoard task records,
+drops `notebook_sessions` and moves `tensorboard_args`. A 0.43.1 master started
+on the upgraded database without the restore runs tasks but cannot start a
+shell with the JupyterLab service; the tasks it runs are never in the user
+usage after upgrading again, the cluster usage days it aggregates use the old
+rule, and it does not enforce job privacy, so every job's title, logs and
+config are readable again.
 
 ## Install the CLI from the repository
 

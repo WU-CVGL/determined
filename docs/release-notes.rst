@@ -17,17 +17,17 @@ Version 0.44.0
 
 **Breaking Changes**
 
--  TensorBoard: Remove the TensorBoard task type; the upgrade deletes the TensorBoard tasks' records
-   with their logs, but not their event files, so end TensorBoard tasks and back up the database
-   first, and roll back by restoring that backup.
+-  Master, API: Remove the TensorBoard task and job types and ``/api/v1/tensorboards``; the upgrade
+   deletes the TensorBoard tasks' records with their logs, but not their event files, so end
+   TensorBoard tasks and back up the database first, and roll back by restoring that backup.
 
 -  CLI: ``det tensorboard`` manages viewing sessions, which need the permission to launch shells,
    install nothing in the image and do not inherit the experiment's image; an earlier CLI's ``det
    tensorboard`` fails.
 
 -  Shell: Replace ``tensorboard_args`` with ``services.tensorboard.args``, which the upgrade moves
-   in shell templates; a configuration or template that sets ``tensorboard_args`` is refused, except
-   a ``det tensorboard start`` configuration file.
+   in shell templates and removes elsewhere; a configuration or template that sets
+   ``tensorboard_args`` is refused, except a ``det tensorboard start`` configuration file.
 
 -  Master: Remove ``tensorboard_timeout`` and the Helm value ``tensorboardTimeout``; a master
    configuration that sets ``tensorboard_timeout`` does not start, and a viewing session ends after
@@ -70,17 +70,15 @@ Version 0.44.0
 -  API: ``GetExperiment`` returns the plain searcher name in ``searcherType`` and fills
    ``searcherMetric``.
 
--  Master: Refuse to start with ``streaming_updates`` and an authorization type other than
-   ``basic``, which would have streamed every project and model to every user.
-
--  WebUI: Task log links no longer carry the task's name in the address.
-
 **Security Fixes**
 
 -  RBAC: Changing a job's priority, weight or resource pool in the job queue needs the permission to
    change that job.
 -  Tasks: A task without a command record, other than a checkpoint GC task, is no longer readable by
    every user, and a checkpoint GC task is readable by those who may view its experiment.
+-  Master: Refuse to start with ``streaming_updates`` and an authorization type other than
+   ``basic``, which would have streamed every project and model to every user.
+-  WebUI: Task log links no longer carry the task's name in the address.
 
 See :doc:`the distribution guide </maintenance/distribution>` for the upgrade, :ref:`TensorBoard
 <tensorboards>`, :doc:`job privacy </maintenance/job-privacy>`, :ref:`user pages
