@@ -2882,7 +2882,8 @@ func (a *apiServer) PatchTrial(ctx context.Context, req *apiv1.PatchTrialRequest
 // experimentForLabelEdit reads an experiment and locks its row until tx ends, so label edits
 // of one experiment run one after the other. Only the experiments row is locked: Postgres
 // cannot lock the nullable side of the outer joins in experimentColumns. The labels are written
-// back, so they are read as stored, whoever asks; the response goes through labelsForViewer.
+// back, so they are read as stored, whoever asks; the response goes through labelsForViewer,
+// which reads on another connection, so it runs only after tx ends.
 func experimentForLabelEdit(
 	ctx context.Context, tx bun.Tx, experimentID int32,
 ) (*experimentv1.Experiment, error) {
@@ -2932,6 +2933,10 @@ func (a *apiServer) PutExperimentLabel(ctx context.Context,
 	}
 
 	if slices.Contains(exp.Labels, req.Label) {
+		// Nothing to write: release the row before labelsForViewer reads on another connection.
+		if err = tx.Rollback(); err != nil {
+			return nil, err
+		}
 		labels, err := labelsForViewer(ctx, *curUser, exp)
 		if err != nil {
 			return nil, err
@@ -2994,6 +2999,10 @@ func (a *apiServer) DeleteExperimentLabel(ctx context.Context,
 
 	i := slices.Index(exp.Labels, req.Label)
 	if i == -1 {
+		// Nothing to write: release the row before labelsForViewer reads on another connection.
+		if err = tx.Rollback(); err != nil {
+			return nil, err
+		}
 		labels, err := labelsForViewer(ctx, *curUser, exp)
 		if err != nil {
 			return nil, err
