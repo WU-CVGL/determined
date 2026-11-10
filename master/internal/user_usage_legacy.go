@@ -19,8 +19,8 @@ const (
 	// legacyClassifyInterval is how often the allocations from before metering are classified.
 	legacyClassifyInterval = time.Minute
 	// legacyStableTicks is how many classifications in a row a static pool must report the same
-	// slot type before its allocations take it.
-	legacyStableTicks = 10
+	// slot type before its allocations take it: ten minutes from the first.
+	legacyStableTicks = 11
 )
 
 // legacyClassifier gives the allocations from before metering, whose resources were never

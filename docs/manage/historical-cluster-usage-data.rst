@@ -79,13 +79,13 @@ Both count what the tasks hold, not what they use:
    manager's slot type, and an allocation without slots is not counted.
 
 -  Allocations recorded before the master metered assignments count from the end of their first
-   queued period, or else from their start, to their end. Their slots take their pool's slot type
-   the first time the master knows it, and keep it. A static pool's slot type is known once its
-   connected agents have reported one type for ten minutes, with no fewer agents than the pool had
-   earlier since the master started. Until then, and for pools that no longer exist, their slots
-   count as slot-seconds of an unknown kind. Without slots they count as auxiliary containers, also
-   in pools that no longer exist when the cluster has only agent resource pools, and are not counted
-   on Kubernetes.
+   queued period, or else from their start, to their end; one that ended without a recorded end
+   counts nothing. Their slots take their pool's slot type the first time the master knows it, and
+   keep it. A static pool's slot type is known once its connected agents have reported one type for
+   ten minutes, with no fewer agents than the pool had earlier since the master started. Until then,
+   and for pools that no longer exist, their slots count as slot-seconds of an unknown kind. Without
+   slots they count as auxiliary containers, also in pools that no longer exist when the cluster has
+   only agent resource pools, and are not counted on Kubernetes.
 
 -  Checkpoint garbage collection is not counted.
 

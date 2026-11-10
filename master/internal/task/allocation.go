@@ -1456,10 +1456,7 @@ func (a *allocation) markResourcesReleased(now time.Time) {
 	if a.model.StartTime == nil {
 		return
 	}
-	if a.model.EndTime == nil {
-		// A resources failure has already ended it, a failed restore at the last heartbeat.
-		a.model.EndTime = &now
-	}
+	a.model.EndTime = &now
 	if err := db.CompleteAllocation(ctx, &a.model); err != nil {
 		a.syslog.WithError(err).Error("failed to mark allocation completed")
 	}

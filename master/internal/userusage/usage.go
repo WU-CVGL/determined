@@ -31,7 +31,8 @@ type Interval struct {
 // Intervals builds at most one interval per record, cut at asOf. A record without a release counts
 // until asOf while it runs, and not at all once it has ended. Allocations from before metering are
 // also skipped when their start time equals their end time (closed at a master start without
-// resources). Records of KindNone, without a quantity or without a length give no interval.
+// resources). Records of KindNone, without a quantity or without a length give no interval. The
+// master's reads skip the same records in SQL (meteredSQL); the two must agree.
 func Intervals(rs []Record, asOf time.Time) []Interval {
 	asOf = asOf.UTC()
 	intervals := make([]Interval, 0, len(rs))

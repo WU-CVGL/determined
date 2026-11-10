@@ -248,8 +248,9 @@ func TestRestoreKeepsAssignment(t *testing.T) {
 	require.True(t, row.ReleasedTime.After(before), "released %s", row.ReleasedTime)
 }
 
-// Resources that are gone when the master restores them are released, and the allocation ends, at
-// the last heartbeat of the master that stopped, not when the restore fails.
+// Resources that are gone when the master restores them are released at the last heartbeat of the
+// master that stopped, not when the restore fails. The allocation ends when it is finalized, no
+// earlier than the release.
 func TestRestoreFailedReleasedAtHeartbeat(t *testing.T) {
 	pgDB, closeDB := requireDeps(t)
 	defer closeDB()
@@ -289,10 +290,11 @@ func TestRestoreFailedReleasedAtHeartbeat(t *testing.T) {
 	if cluster.TheLastBootClusterHeartbeat() != nil {
 		require.True(t, heartbeat.Truncate(time.Microsecond).Equal(*row.ReleasedTime),
 			"released %s, heartbeat %s", row.ReleasedTime, heartbeat)
-		require.True(t, row.ReleasedTime.Equal(*row.EndTime), "end %s", row.EndTime)
 	} else {
 		require.False(t, row.ReleasedTime.Before(heartbeat.Truncate(time.Microsecond)))
 	}
+	require.False(t, row.EndTime.Before(*row.ReleasedTime), "end %s, released %s",
+		row.EndTime, row.ReleasedTime)
 }
 
 // An allocation that waited for resources when the master stopped has its assignment cleared, also

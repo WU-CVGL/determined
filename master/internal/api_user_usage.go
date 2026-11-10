@@ -344,24 +344,42 @@ CROSS JOIN LATERAL (
              ELSE a.end_time END AT TIME ZONE 'UTC' AS held_until
 ) h`
 
+// meteredSQL holds for the allocations a, joined with heldSQL, that userusage.Intervals meters
+// them, apart from the cut at the time of the request: a kind other than none, a quantity, a
+// start, and a positive time held, or, without an end, no terminated state. An allocation from
+// before metering whose start time equals its end time was closed at a master start without ever
+// holding resources.
+const meteredSQL = `(
+    a.metered_kind IS NOT NULL AND a.metered_kind <> 'none'
+    AND coalesce(a.metered_quantity, a.slots) > 0
+    AND h.held_from IS NOT NULL
+    AND NOT (a.assigned_time IS NULL AND a.start_time IS NOT NULL
+             AND a.start_time IS NOT DISTINCT FROM a.end_time)
+    AND CASE WHEN h.held_until IS NULL THEN a.state IS DISTINCT FROM 'TERMINATED'
+             ELSE h.held_until > h.held_from END
+)`
+
+// userAllocationColumns selects a userAllocationRow from the allocations a joined with heldSQL. An
+// allocation from before metering whose kind is not known yet counts its slots.
+const userAllocationColumns = `a.allocation_id, a.state, a.metered_kind,
+       coalesce(a.metered_quantity, a.slots) AS quantity,
+       a.assigned_time, a.released_time, a.start_time, a.end_time, q.queued_end`
+
 // readUserAllocations reads the metered allocations of the user's tasks that may overlap
 // [rangeStart, rangeEnd). Checkpoint GC tasks are not counted.
 func readUserAllocations(
 	ctx context.Context, idb bun.IDB, userID model.UserID, rangeStart, rangeEnd time.Time,
 ) ([]userAllocationRow, error) {
 	rows := []userAllocationRow{}
-	// bun sends the bounds as UTC literals with the offset +00:00. An allocation from before
-	// metering whose kind is not known yet counts its slots.
+	// bun sends the bounds as UTC literals with the offset +00:00.
 	err := idb.NewRaw(`
-SELECT a.allocation_id, a.state, a.metered_kind, coalesce(a.metered_quantity, a.slots) AS quantity,
-       a.assigned_time, a.released_time, a.start_time, a.end_time, q.queued_end
+SELECT `+userAllocationColumns+`
 FROM jobs j
 JOIN tasks t ON t.job_id = j.job_id
 JOIN allocations a ON a.task_id = t.task_id`+heldSQL+`
 WHERE j.owner_id = ?
   AND t.task_type <> 'CHECKPOINT_GC'
-  -- Never assigned resources, or not metered.
-  AND a.metered_kind IS NOT NULL AND a.metered_kind <> 'none'
+  AND `+meteredSQL+`
   AND h.held_from < ?
   AND (h.held_until IS NULL OR h.held_until > ?)`,
 		userID, rangeEnd.UTC(), rangeStart.UTC()).Scan(ctx, &rows)
@@ -371,14 +389,13 @@ WHERE j.owner_id = ?
 	return rows, nil
 }
 
-// readUsageCoverage returns the earliest time from which any allocation is metered, or nil when
-// there is none.
+// readUsageCoverage returns the start of the first metered allocation, or nil when there is none.
 func readUsageCoverage(ctx context.Context, idb bun.IDB) (*time.Time, error) {
 	var first sql.NullTime
 	if err := idb.NewRaw(`
 SELECT min(h.held_from)
 FROM allocations a`+heldSQL+`
-WHERE a.metered_kind IS NOT NULL`).Scan(ctx, &first); err != nil {
+WHERE `+meteredSQL).Scan(ctx, &first); err != nil {
 		return nil, err
 	}
 	if !first.Valid {

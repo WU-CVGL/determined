@@ -141,7 +141,7 @@ type Master struct {
 	xidCache     *gpuhealth.XIDCache
 	xidCacheOnce sync.Once
 
-	// userUsageCoverage caches the first day with allocation records for GetUserUsage.
+	// userUsageCoverage caches the day of the first metered allocation for GetUserUsage.
 	userUsageCoverage userUsageCoverage
 
 	// bootTime is when this master started, before any allocation could get resources.

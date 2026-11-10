@@ -455,8 +455,10 @@ func (k *kubernetesResourcePool) assignResources(
 	}
 }
 
-func (k *kubernetesResourcePool) createResources(
-	req *sproto.AllocateRequest, slotsPerPod, numPods int,
+// newJobResource returns the resources of a job, new or restored; started is set for restored
+// resources that had started.
+func (k *kubernetesResourcePool) newJobResource(
+	req *sproto.AllocateRequest, slotsPerPod, numPods int, started *sproto.ResourcesStarted,
 ) *k8sJobResource {
 	return &k8sJobResource{
 		numPods:          numPods,
@@ -468,7 +470,14 @@ func (k *kubernetesResourcePool) createResources(
 		initialPosition:  k.queuePositions[k.allocationIDToJobID[req.AllocationID]],
 		defaultNamespace: k.defaultNamespace,
 		clusterName:      k.clusterName,
+		started:          started,
 	}
+}
+
+func (k *kubernetesResourcePool) createResources(
+	req *sproto.AllocateRequest, slotsPerPod, numPods int,
+) *k8sJobResource {
+	return k.newJobResource(req, slotsPerPod, numPods, nil)
 }
 
 func (k *kubernetesResourcePool) restoreResources(
@@ -485,19 +494,7 @@ func (k *kubernetesResourcePool) restoreResources(
 		return nil, err
 	}
 
-	return &k8sJobResource{
-		numPods:          numPods,
-		req:              req,
-		jobsService:      k.jobsService,
-		slots:            slotsPerPod,
-		slotType:         k.jobsService.slotType,
-		group:            k.groups[req.JobID],
-		initialPosition:  k.queuePositions[k.allocationIDToJobID[req.AllocationID]],
-		defaultNamespace: k.defaultNamespace,
-		clusterName:      k.clusterName,
-
-		started: restored.started,
-	}, nil
+	return k.newJobResource(req, slotsPerPod, numPods, restored.started), nil
 }
 
 func (k *kubernetesResourcePool) resourcesReleased(

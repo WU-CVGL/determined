@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"github.com/uptrace/bun"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -102,6 +103,14 @@ type usageAllocation struct {
 // The quantity is one aux container, the slots otherwise, and none for an unclassified allocation
 // from before metering.
 func addUsageAllocation(t *testing.T, taskID model.TaskID, n int, a usageAllocation) {
+	insertUsageAllocation(t, db.Bun(), taskID, n, a)
+}
+
+// insertUsageAllocation adds the allocation and its QUEUED rows as addUsageAllocation does, with
+// idb.
+func insertUsageAllocation(
+	t *testing.T, idb bun.IDB, taskID model.TaskID, n int, a usageAllocation,
+) {
 	ctx := context.TODO()
 	at := func(s string) *time.Time {
 		if s == "" {
@@ -123,7 +132,7 @@ func addUsageAllocation(t *testing.T, taskID model.TaskID, n int, a usageAllocat
 		kind, quantity = ptrs.Ptr(string(a.kind)), ptrs.Ptr(a.slots)
 	}
 	allocationID := model.AllocationID(fmt.Sprintf("%s.%d", taskID, n))
-	_, err := db.Bun().NewInsert().Model(&model.Allocation{
+	_, err := idb.NewInsert().Model(&model.Allocation{
 		AllocationID:    allocationID,
 		TaskID:          taskID,
 		Slots:           a.slots,
@@ -140,12 +149,13 @@ func addUsageAllocation(t *testing.T, taskID model.TaskID, n int, a usageAllocat
 	require.NoError(t, err)
 	for _, q := range a.queuedEnds {
 		end := at(q)
-		require.NoError(t, db.RecordTaskStats(ctx, &model.TaskStats{
+		_, err := idb.NewInsert().Model(&model.TaskStats{
 			AllocationID: allocationID,
 			EventType:    "QUEUED",
 			StartTime:    ptrs.Ptr(end.Add(-time.Hour)),
 			EndTime:      end,
-		}))
+		}).Exec(ctx)
+		require.NoError(t, err)
 	}
 }
 
@@ -366,9 +376,9 @@ func TestUserUsage(t *testing.T) {
 	requireUserUsageDaily(ctx, t, api, owner.ID, userUsageDailyMarch2020)
 	requireUserUsageDaily(ctx, t, api, other.ID, otherUsageDailyMarch2020)
 
-	// The read keeps the allocations that overlap the range, and the open one killed before
-	// pulling, which is skipped later; it leaves out the one released exactly at the range start
-	// and the one assigned exactly at its end.
+	// The read keeps the allocations that overlap the range; it leaves out the one killed before
+	// pulling, which is not metered, the one released exactly at the range start and the one
+	// assigned exactly at its end.
 	rows, err := readUserAllocations(context.TODO(), db.Bun(), owner.ID,
 		time.Date(2020, 3, 5, 0, 0, 0, 0, time.UTC), time.Date(2020, 3, 6, 0, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
@@ -376,7 +386,8 @@ func TestUserUsage(t *testing.T) {
 	for _, r := range rows {
 		read = append(read, r.AllocationID[strings.LastIndex(r.AllocationID, "."):])
 	}
-	require.Subset(t, read, []string{".1", ".9"})
+	require.Equal(t, []string{".9"}, read)
+	require.NotContains(t, read, ".1")
 	require.NotContains(t, read, ".8")
 	require.NotContains(t, read, ".10")
 
@@ -440,18 +451,12 @@ func TestUserUsageSessionTimeZone(t *testing.T) {
 	}
 }
 
-// The first allocation of an empty database, assigned at 23:50 and pulling at 00:10, counts 10
-// minutes on its first day, which is the coverage start from its assignment on. The database is
-// emptied in a scratch schema of a transaction that is rolled back.
-func TestUserUsageEmptyDatabase(t *testing.T) {
-	ctx := context.Background()
-	api, _, _ := setupAPITest(t, nil, &mocks.ResourceManager{})
-	owner := db.RequireMockUser(t, api.m.db)
-	task := addUsageTask(t, db.RequireMockJob(t, api.m.db, &owner.ID), model.TaskTypeCommand)
-
+// userUsageScratchTx begins a transaction in which the allocations and task_stats tables are empty
+// copies in a scratch schema. It is rolled back when the test ends.
+func userUsageScratchTx(ctx context.Context, t *testing.T) bun.Tx {
 	tx, err := db.Bun().BeginTx(ctx, nil)
 	require.NoError(t, err)
-	defer func() { require.NoError(t, tx.Rollback()) }()
+	t.Cleanup(func() { require.NoError(t, tx.Rollback()) })
 	schema := "user_usage_" + strings.ReplaceAll(uuid.NewString()[:8], "-", "")
 	for _, stmt := range []string{
 		"CREATE SCHEMA " + schema,
@@ -462,6 +467,18 @@ func TestUserUsageEmptyDatabase(t *testing.T) {
 		_, err := tx.ExecContext(ctx, stmt)
 		require.NoError(t, err, stmt)
 	}
+	return tx
+}
+
+// The first allocation of an empty database, assigned at 23:50 and pulling at 00:10, counts 10
+// minutes on its first day, which is the coverage start from its assignment on. The database is
+// emptied in a scratch schema of a transaction that is rolled back.
+func TestUserUsageEmptyDatabase(t *testing.T) {
+	ctx := context.Background()
+	api, _, _ := setupAPITest(t, nil, &mocks.ResourceManager{})
+	owner := db.RequireMockUser(t, api.m.db)
+	task := addUsageTask(t, db.RequireMockJob(t, api.m.db, &owner.ID), model.TaskTypeCommand)
+	tx := userUsageScratchTx(ctx, t)
 
 	coverage := &userUsageCoverage{}
 	first, err := coverage.get(ctx, tx)
@@ -512,6 +529,98 @@ func TestUserUsageEmptyDatabase(t *testing.T) {
 		gpuHours("2021-06-01", usageMinutes(10), usageMinutes(10)),
 		gpuHours("2021-06-02", 1, 1),
 	}, usageEntries(userUsage(rows, from, to, asOf, usageDaily)))
+}
+
+// The coverage starts with the first allocation that is metered. Older allocations that the
+// metering skips do not move it: one of a kind that is not metered, one from before metering
+// closed at a master start without ever holding resources, ones from before metering that ended
+// without an end or with only a QUEUED end, one from before metering without slots whose kind is
+// not known, and assigned ones released at their assignment or ended without a release. The read
+// skips exactly the allocations that userusage.Intervals gives no interval.
+func TestUserUsageCoverageSkipsUnmetered(t *testing.T) {
+	ctx := context.Background()
+	api, _, _ := setupAPITest(t, nil, &mocks.ResourceManager{})
+	owner := db.RequireMockUser(t, api.m.db)
+	task := addUsageTask(t, db.RequireMockJob(t, api.m.db, &owner.ID), model.TaskTypeCommand)
+	tx := userUsageScratchTx(ctx, t)
+
+	terminated, running := model.AllocationStateTerminated, model.AllocationStateRunning
+	gpu := userusage.KindGPU
+	skipped := []usageAllocation{
+		{
+			pool: "k8s", kind: userusage.KindNone, assigned: "2021-01-01 10:00",
+			released: "2021-01-01 11:00", start: "2021-01-01 10:00", end: "2021-01-01 11:00", state: terminated,
+		},
+		{
+			pool: "gpu", slots: 1, kind: gpu, queuedEnds: []string{"2021-01-02 10:00"},
+			start: "2021-01-02 10:00", end: "2021-01-02 10:00", state: terminated,
+		},
+		{
+			pool: "gpu", slots: 1, kind: gpu, queuedEnds: []string{"2021-01-03 10:00"},
+			start: "2021-01-03 10:05", state: terminated,
+		},
+		{pool: "gpu", slots: 1, kind: gpu, queuedEnds: []string{"2021-01-04 10:00"}, state: terminated},
+		{
+			pool: "gone", kind: userusage.KindUnclassified, queuedEnds: []string{"2021-01-05 10:00"},
+			start: "2021-01-05 10:00", end: "2021-01-05 11:00", state: terminated,
+		},
+		{
+			pool: "gpu", slots: 1, kind: gpu, assigned: "2021-01-06 10:00", released: "2021-01-06 10:00",
+			state: terminated,
+		},
+		{pool: "gpu", slots: 1, kind: gpu, assigned: "2021-01-07 10:00", state: terminated},
+	}
+	for i, a := range skipped {
+		insertUsageAllocation(t, tx, task, i, a)
+	}
+	first, err := readUsageCoverage(ctx, tx)
+	require.NoError(t, err)
+	require.Nil(t, first, "only allocations that are not metered")
+
+	metered := []usageAllocation{
+		{
+			pool: "gpu", slots: 1, kind: gpu, assigned: "2021-06-01 23:50", released: "2021-06-02 01:00",
+			start: "2021-06-02 00:10", end: "2021-06-02 01:00", state: terminated,
+		},
+		{
+			pool: "gpu", slots: 2, kind: gpu, queuedEnds: []string{"2021-06-03 10:00"},
+			start: "2021-06-03 10:05", end: "2021-06-03 11:00", state: terminated,
+		},
+		{pool: "cpu", slots: 1, kind: userusage.KindCPU, assigned: "2021-06-04 10:00", state: running},
+		{
+			pool: "gone", slots: 1, kind: userusage.KindUnclassified, queuedEnds: []string{"2021-06-05 10:00"},
+			state: running,
+		},
+	}
+	for i, a := range metered {
+		insertUsageAllocation(t, tx, task, len(skipped)+i, a)
+	}
+	first, err = readUsageCoverage(ctx, tx)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	require.True(t, time.Date(2021, 6, 1, 23, 50, 0, 0, time.UTC).Equal(*first), "coverage %s", first)
+	day, err := (&userUsageCoverage{}).get(ctx, tx)
+	require.NoError(t, err)
+	require.Equal(t, ptrs.Ptr(time.Date(2021, 6, 1, 0, 0, 0, 0, time.UTC)), day)
+
+	var rows []struct {
+		userAllocationRow
+		Metered bool `bun:"metered"`
+	}
+	require.NoError(t, tx.NewRaw(`
+SELECT `+userAllocationColumns+`, `+meteredSQL+` AS metered
+FROM allocations a`+heldSQL).Scan(ctx, &rows))
+	require.Len(t, rows, len(skipped)+len(metered))
+	asOf := time.Now().UTC()
+	n := 0
+	for _, r := range rows {
+		intervals := userusage.Intervals([]userusage.Record{r.record()}, asOf)
+		require.Equal(t, len(intervals) == 1, r.Metered, r.AllocationID)
+		if r.Metered {
+			n++
+		}
+	}
+	require.Equal(t, len(metered), n)
 }
 
 // After a master restart, before the agents reconnect, finished history keeps its kind: a new

@@ -2,6 +2,7 @@ package internal
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -9,6 +10,11 @@ import (
 	"github.com/determined-ai/determined/proto/pkg/devicev1"
 	"github.com/determined-ai/determined/proto/pkg/resourcepoolv1"
 )
+
+// A static pool's slot type is known once it was reported the same for ten minutes.
+func TestUserUsageLegacyStableTime(t *testing.T) {
+	require.Equal(t, 10*time.Minute, (legacyStableTicks-1)*legacyClassifyInterval)
+}
 
 func legacyPool(
 	typ resourcepoolv1.ResourcePoolType, slotType devicev1.Type, agents int32,
