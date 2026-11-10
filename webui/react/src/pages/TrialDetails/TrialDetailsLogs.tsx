@@ -194,6 +194,9 @@ const TrialDetailsLogs: React.FC<Props> = ({ experiment, trial }: Props) => {
 
     return () => {
       canceler.current.abort();
+      // A log viewer shown again fetches in its own effects, before this effect runs again: its
+      // requests must not be merged with the controller aborted here.
+      canceler.current = new AbortController();
       fieldCanceler.abort();
     };
   }, [notShared, refuse, trial?.id, ui.isPageHidden]);

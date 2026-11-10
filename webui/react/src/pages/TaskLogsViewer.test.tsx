@@ -5,6 +5,7 @@ import { ThemeProvider } from 'components/ThemeProvider';
 import usePageVisibility from 'hooks/usePageVisibility';
 import { detApi } from 'services/apiConfig';
 import handleError from 'utils/error';
+import { logRequests, logsFetch } from 'utils/tests/logsFetch';
 
 import { TaskLogsViewer } from './TaskLogs';
 
@@ -12,11 +13,35 @@ vi.mock('services/api', () => ({ getTask: vi.fn() }));
 vi.mock('services/apiConfig', () => ({
   detApi: {
     StreamingJobs: {
-      taskLogs: vi.fn(() => ({ options: {}, url: '/api/v1/tasks/task-1/logs' })),
-      taskLogsFields: vi.fn(() => ({ options: {}, url: '/api/v1/tasks/task-1/logs/fields' })),
+      // The request options are the last argument, with the signal of the request.
+      taskLogs: vi.fn((id: string, limit: number, follow: boolean, ...rest: unknown[]) => ({
+        options: rest.at(-1),
+        url: `/api/v1/tasks/${id}/logs?limit=${limit}&follow=${follow}`,
+      })),
+      taskLogsFields: vi.fn((id: string, follow: boolean, options: unknown) => ({
+        options,
+        url: `/api/v1/tasks/${id}/logs/fields?follow=${follow}`,
+      })),
     },
   },
 }));
+// Renders every log line: jsdom gives the viewer's scroll parent no height, so Virtuoso shows none.
+vi.mock('react-virtuoso', async (importOriginal) => {
+  const { forwardRef, Fragment, useImperativeHandle } =
+    await vi.importActual<typeof import('react')>('react');
+  const List = forwardRef<
+    { scrollToIndex: () => void },
+    { data?: unknown[]; itemContent: (index: number, item: unknown) => React.ReactNode }
+  >(({ data, itemContent }, ref) => {
+    useImperativeHandle(ref, () => ({ scrollToIndex: () => undefined }));
+    return (
+      <div>
+        {data?.map((item, index) => <Fragment key={index}>{itemContent(index, item)}</Fragment>)}
+      </div>
+    );
+  });
+  return { ...(await importOriginal<typeof import('react-virtuoso')>()), Virtuoso: List };
+});
 vi.mock('utils/error', async (importOriginal) => ({
   ...(await importOriginal<typeof import('utils/error')>()),
   default: vi.fn(),
@@ -29,16 +54,21 @@ const PageVisibility = () => {
   return null;
 };
 
+// The same settings on every render, as the settings store gives them.
+const settings = {};
+const resetSettings = vi.fn();
+const updateSettings = vi.fn();
+
 const viewer = (logsHidden?: boolean) => (
   <UIProvider theme={DefaultTheme.Light}>
     <ThemeProvider>
       <PageVisibility />
       <TaskLogsViewer
         logsHidden={logsHidden}
-        resetSettings={vi.fn()}
-        settings={{}}
+        resetSettings={resetSettings}
+        settings={settings}
         taskId={TASK_ID}
-        updateSettings={vi.fn()}
+        updateSettings={updateSettings}
       />
     </ThemeProvider>
   </UIProvider>
@@ -124,6 +154,28 @@ describe('TaskLogsViewer', () => {
     expect(screen.getByText('Logs not shared')).toBeInTheDocument();
     expect(fetchMock.mock.calls.length).toBe(calls);
     expect(detApi.StreamingJobs.taskLogsFields).toHaveBeenCalledTimes(opened);
+  });
+
+  it('reads the logs again and follows them when they are shared again without a refusal', async () => {
+    const { fetch, requests } = logsFetch(['first line', 'second line']);
+    vi.stubGlobal('fetch', fetch);
+    const view = render(viewer(false));
+    expect(await screen.findByText('second line')).toBeInTheDocument();
+    await waitFor(() => expect(logRequests(requests, true)).toHaveLength(1));
+
+    view.rerender(viewer(true));
+    expect(screen.getByText('Logs not shared')).toBeInTheDocument();
+    expect(requests.every((r) => r.signal?.aborted)).toBe(true);
+    const sent = requests.length;
+
+    view.rerender(viewer(false));
+    expect(await screen.findByText('second line')).toBeInTheDocument();
+    expect(screen.getByText('first line')).toBeInTheDocument();
+    expect(screen.queryByText('No logs to show.')).not.toBeInTheDocument();
+    const after = requests.slice(sent);
+    expect(logRequests(after, false)).toHaveLength(1);
+    expect(logRequests(after, true)).toHaveLength(1);
+    expect(logRequests(after, true)[0].signal?.aborted).toBe(false);
   });
 
   it('opens the logs again once when the user comes back to the page', async () => {
