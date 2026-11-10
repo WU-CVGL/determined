@@ -71,7 +71,7 @@ python -m pip install 'git+https://github.com/WU-CVGL/determined.git@main#subdir
 Pin the release and its package version:
 
 ```bash
-VERSION=0.43.1 python -m pip install 'git+https://github.com/WU-CVGL/determined.git@0.43.1#subdirectory=harness'
+VERSION=0.44.0 python -m pip install 'git+https://github.com/WU-CVGL/determined.git@0.44.0#subdirectory=harness'
 ```
 
 This installs the CLI and SDK only. To run this fork's master and agent, use matching
