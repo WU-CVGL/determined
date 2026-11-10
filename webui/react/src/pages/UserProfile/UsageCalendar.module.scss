@@ -26,9 +26,15 @@
   row-gap: 3px;
 }
 .cell {
+  appearance: none;
+  background: none;
+  border: 0;
   border-radius: 2px;
+  box-sizing: border-box;
   cursor: pointer;
+  display: block;
   height: 11px;
+  padding: 0;
   width: 11px;
 
   &:focus-visible {

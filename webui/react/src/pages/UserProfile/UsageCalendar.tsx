@@ -55,16 +55,12 @@ const UsageCalendar: React.FC<Props> = ({ dayValues, weeks }: Props) => {
               classes.push(day.entry ? css[`level${day.level}`] : css.notCovered);
               return (
                 <Tooltip content={day.date} key={day.date}>
-                  <div
+                  <button
                     aria-label={day.date}
                     className={classes.join(' ')}
                     data-date={day.date}
-                    role="button"
-                    tabIndex={0}
+                    type="button"
                     onClick={() => setSelectedDate(day.date)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') setSelectedDate(day.date);
-                    }}
                   />
                 </Tooltip>
               );

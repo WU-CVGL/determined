@@ -1386,10 +1386,17 @@ describe('TaskDashboard', () => {
       };
       await waitFor(() => expect(owner('eval-sweep')).toHaveTextContent('bob'), AFTER_LOAD);
       // A user with a record: the avatar; without one: the owner's name.
+      // Each link is named by the user's name.
       await waitFor(() =>
-        expect(owner('gpu-shell').querySelector('a')).toHaveAttribute('href', '/users/3'),
+        expect(within(owner('gpu-shell')).getByRole('link', { name: 'me' })).toHaveAttribute(
+          'href',
+          '/users/3',
+        ),
       );
-      expect(owner('eval-sweep').querySelector('a')).toHaveAttribute('href', '/users/4');
+      expect(within(owner('eval-sweep')).getByRole('link', { name: 'bob' })).toHaveAttribute(
+        'href',
+        '/users/4',
+      );
       expect(owner('eval-sweep')).toHaveAttribute('title', 'bob');
       // No owner, no link.
       expect(owner('bert-finetune').querySelector('a')).toBeNull();

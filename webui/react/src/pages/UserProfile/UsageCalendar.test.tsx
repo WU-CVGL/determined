@@ -97,12 +97,17 @@ describe('UsageCalendar', () => {
     expect(line).toHaveTextContent('2026-11-03 (UTC)GPU hours 6.0Aux container hours 1.5');
   });
 
-  it("shows a day's hours of the mode on Enter", async () => {
+  it.each([
+    ['Enter', '{Enter}'],
+    ['Space', ' '],
+  ])("shows a day's hours of the mode on %s", async (_, key) => {
     const user = userEvent.setup();
     setup([day('2026-11-03', 3)], ResourceMode.Gpu);
+    expect(cell('2026-11-03').tagName).toBe('BUTTON');
+    expect(cell('2026-11-03')).toHaveAttribute('type', 'button');
     act(() => cell('2026-11-03').focus());
     expect(cell('2026-11-03')).toHaveFocus();
-    await act(() => user.keyboard('{Enter}'));
+    await act(() => user.keyboard(key));
     expect(screen.getByTestId('usage-calendar-day')).toHaveTextContent(
       /^2026-11-03 \(UTC\)GPU hours 6.0$/,
     );

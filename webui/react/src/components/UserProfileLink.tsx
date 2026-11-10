@@ -1,18 +1,27 @@
-import Link from 'hew/Link';
 import React from 'react';
 
-import { handlePath, linkPath, paths } from 'routes/utils';
+import Link from 'components/Link';
+import { handlePath, paths } from 'routes/utils';
 
 interface Props {
-  children?: React.ReactNode;
+  /** What the link shows. */
+  children: React.ReactNode;
+  /** The user's name, the link's accessible name. */
+  name: string;
   userId: number;
 }
 
 /** A link to a user's page; its click does not reach the row or card around it. */
-const UserProfileLink: React.FC<Props> = ({ children, userId }: Props) => {
+const UserProfileLink: React.FC<Props> = ({ children, name, userId }: Props) => {
   const path = paths.userProfile(userId);
   return (
-    <Link href={linkPath(path)} onClick={(e) => handlePath(e, { path })}>
+    <Link
+      label={name}
+      path={path}
+      onClick={(e) => {
+        e.stopPropagation();
+        handlePath(e, { path });
+      }}>
       {children}
     </Link>
   );
