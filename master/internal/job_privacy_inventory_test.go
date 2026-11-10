@@ -17,7 +17,8 @@ import (
 
 // jobContentMessages are the messages that are a job or carry a job's title, logs or config. The
 // log streams' responses are listed themselves, since they do not embed TaskLog. Task and
-// Allocation carry free-text failure reasons, which follow the logs.
+// Allocation carry free-text failure reasons, which follow the logs; Task also carries the user's
+// capabilities on its job, which GetTask sets (TestJobPrivacyGetTaskCapabilities).
 var jobContentMessages = map[protoreflect.FullName]bool{
 	"determined.job.v1.Job":                     true,
 	"determined.experiment.v1.Experiment":       true,
