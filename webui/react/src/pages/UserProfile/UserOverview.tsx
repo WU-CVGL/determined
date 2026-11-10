@@ -39,7 +39,7 @@ const MODE_OPTIONS = [
 ];
 
 interface ResourcesProps {
-  projection?: UsageProjection;
+  projection: UsageProjection;
   resources: Loadable<UserResources>;
 }
 
@@ -47,16 +47,15 @@ const CurrentResources: React.FC<ResourcesProps> = ({ projection, resources }) =
   <Section loading={Loadable.isNotLoaded(resources)} title="Current resources">
     {Loadable.match(resources, {
       Failed: () => null,
-      Loaded: (resources) =>
-        projection && (
-          <Card.Group size="small">
-            {projection.cards(resources).map((card) => (
-              <OverviewStats key={card.key} title={card.title}>
-                {card.value}
-              </OverviewStats>
-            ))}
-          </Card.Group>
-        ),
+      Loaded: (resources) => (
+        <Card.Group size="small">
+          {projection.cards(resources).map((card) => (
+            <OverviewStats key={card.key} title={card.title}>
+              {card.value}
+            </OverviewStats>
+          ))}
+        </Card.Group>
+      ),
       NotLoaded: () => null,
     })}
   </Section>
@@ -112,25 +111,19 @@ const UsageView: React.FC<UsageProps> = ({ groupBy, now, projection, usage }) =>
 };
 
 interface UsageSectionsProps {
-  projection?: UsageProjection;
-  userId: number;
+  /** The start of the UTC day the views end with. */
+  now: number;
+  projection: UsageProjection;
+  usage: Loadable<UserUsage>;
 }
 
-/** The calendar and the usage; empty until the projection is known. */
-const UsageSections: React.FC<UsageSectionsProps> = ({ projection, userId }) => {
-  const { now, usage } = useUserUsage(userId);
+/** The calendar and the usage. */
+const UsageSections: React.FC<UsageSectionsProps> = ({ now, projection, usage }) => {
   const [groupBy, setGroupBy] = useState<GroupBy>(GroupBy.Day);
 
-  const shown = useMemo(
-    () =>
-      projection
-        ? Loadable.map(usage, (usage) => ({ projection, usage }))
-        : Loadable.flatMap(usage, () => NotLoaded),
-    [projection, usage],
-  );
   const calendar = useMemo(
-    () => Loadable.map(shown, ({ projection, usage }) => projection.calendar(usage.entries, now)),
-    [now, shown],
+    () => Loadable.map(usage, (usage) => projection.calendar(usage.entries, now)),
+    [now, projection, usage],
   );
 
   return (
@@ -144,12 +137,11 @@ const UsageSections: React.FC<UsageSectionsProps> = ({ projection, userId }) => 
         })}>
         {Loadable.match(calendar, {
           _: () => null,
-          Loaded: ({ weeks }) =>
-            projection && <UsageCalendar dayValues={projection.day} weeks={weeks} />,
+          Loaded: ({ weeks }) => <UsageCalendar dayValues={projection.day} weeks={weeks} />,
         })}
       </Section>
       <Section
-        loading={Loadable.isNotLoaded(shown)}
+        loading={Loadable.isNotLoaded(usage)}
         options={
           <RadioGroup<GroupBy>
             options={[
@@ -161,9 +153,9 @@ const UsageSections: React.FC<UsageSectionsProps> = ({ projection, userId }) => 
           />
         }
         title="Usage">
-        {Loadable.match(shown, {
+        {Loadable.match(usage, {
           _: () => null,
-          Loaded: ({ projection, usage }) => (
+          Loaded: (usage) => (
             <UsageView groupBy={groupBy} now={now} projection={projection} usage={usage} />
           ),
         })}
@@ -172,10 +164,15 @@ const UsageSections: React.FC<UsageSectionsProps> = ({ projection, userId }) => 
   );
 };
 
+/** Whether any day of the usage holds Aux time. */
+const hasAuxUsage = (usage: UserUsage): boolean =>
+  usage.entries.some((entry) => entry.auxContainerSeconds > 0 || entry.auxActiveSeconds > 0);
+
 /** The overview of one user; a new user starts over. */
 const Overview: React.FC<{ userId: number }> = ({ userId }) => {
   const [resources, setResources] = useState<Loadable<UserResources>>(NotLoaded);
   const [mode, setMode] = useState<ResourceMode>(ResourceMode.Both);
+  const { now, usage } = useUserUsage(userId);
   const hidden = usePageHidden();
   const hasLoaded = useRef(false);
   const hasFailed = useRef(false);
@@ -225,26 +222,22 @@ const Overview: React.FC<{ userId: number }> = ({ userId }) => {
     };
   }, [fetchResources, hidden]);
 
-  // Aux is shown where the cluster meters it; without the resources, GPUs only.
-  const auxMetered = Loadable.match(resources, {
-    Failed: () => false,
-    Loaded: (resources) => resources.auxMetered,
-    NotLoaded: () => undefined,
-  });
-  const projection = useMemo(
-    () => (auxMetered === undefined ? undefined : usageProjection(mode, auxMetered)),
-    [auxMetered, mode],
-  );
+  // Aux is left out only where the cluster is known not to meter it and the usage has none.
+  const auxAbsent =
+    Loadable.match(resources, { _: () => false, Loaded: (resources) => !resources.auxMetered }) &&
+    Loadable.match(usage, { _: () => false, Loaded: (usage) => !hasAuxUsage(usage) });
+  const shownMode = auxAbsent ? ResourceMode.Gpu : mode;
+  const projection = useMemo(() => usageProjection(shownMode), [shownMode]);
 
   return (
     <div className={css.base} data-testid="user-overview">
-      {auxMetered && (
+      {!auxAbsent && (
         <div className={css.mode}>
           <RadioGroup<ResourceMode> options={MODE_OPTIONS} value={mode} onChange={setMode} />
         </div>
       )}
       <CurrentResources projection={projection} resources={resources} />
-      <UsageSections projection={projection} userId={userId} />
+      <UsageSections now={now} projection={projection} usage={usage} />
     </div>
   );
 };
@@ -255,7 +248,7 @@ interface Props {
 
 /**
  * A user's current resources, active days and usage, in one resource mode: GPU, Aux or both,
- * where the cluster meters Aux containers.
+ * where the cluster meters Aux containers or the usage holds Aux time.
  */
 const UserOverview: React.FC<Props> = ({ userId }: Props) => (
   <Overview key={userId} userId={userId} />

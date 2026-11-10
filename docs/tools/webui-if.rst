@@ -101,9 +101,10 @@ You can use the WebUI to view :ref:`historical-cluster-usage-data`.
 list opens the page of that user, which every signed-in user can open: it shows the same overview
 for that user, and **Jobs** on it lists the user's jobs. Your own page is Home.
 
-Where the cluster meters auxiliary containers, **GPU**, **Aux** and **GPU+Aux** choose the resources
-that the whole overview shows, **GPU+Aux** by default. Where it does not, because every resource
-pool is a Kubernetes pool, the overview shows GPUs only. CPU slots are not shown.
+Where the cluster meters auxiliary containers or the user's usage holds auxiliary container time,
+**GPU**, **Aux** and **GPU+Aux** choose the resources that the whole overview shows, **GPU+Aux** by
+default. Where neither holds, because every resource pool is a Kubernetes pool and the user has no
+auxiliary container time, the overview shows GPUs only. CPU slots are not shown.
 
 -  **Current resources**: the GPUs and the auxiliary containers that the user's tasks hold now.
 

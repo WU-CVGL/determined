@@ -72,7 +72,7 @@ const RESOURCES: UserResources = {
   ],
 };
 
-const projection = (mode: ResourceMode) => usageProjection(mode, true);
+const projection = usageProjection;
 
 /** The level of each day of the fixture in the calendar. */
 const levels = (mode: ResourceMode) =>
@@ -406,15 +406,16 @@ describe('the projection of a resource mode', () => {
     });
   });
 
-  it('shows GPUs only where the cluster does not meter Aux', () => {
-    const p = usageProjection(ResourceMode.Both, false);
-    expect(p.mode).toBe(ResourceMode.Gpu);
-    expect(p.cards({ auxMetered: false, pools: RESOURCES.pools })).toEqual([
-      { key: 'gpu', title: 'GPUs', value: 3 },
+  it('shows the Aux hours of the mode whatever the cluster meters now', () => {
+    const p = projection(ResourceMode.Both);
+    const day = entry('2026-11-09', { ...active(0, 2, 2), auxContainerSeconds: 2 });
+    expect(day.auxContainerSeconds).toBe(7200);
+    expect(
+      p.cards({ auxMetered: false, pools: RESOURCES.pools }).map((card) => card.title),
+    ).toEqual(['GPUs', 'Aux containers']);
+    expect(p.day({ date: '2026-11-09', entry: day, level: 1 })).toEqual([
+      { title: 'GPU hours', value: '0.0' },
+      { title: 'Aux container hours', value: '2.0' },
     ]);
-    expect(Object.keys(p.usage(GroupBy.Day, ENTRIES, NOW).hoursByLabel)).toEqual(['GPU']);
-    expect(p.calendar(ENTRIES, NOW).activeDays).toBe(3);
-    expect(usageProjection(ResourceMode.Aux, false).mode).toBe(ResourceMode.Gpu);
-    expect(usageProjection(ResourceMode.Aux, true).mode).toBe(ResourceMode.Aux);
   });
 });

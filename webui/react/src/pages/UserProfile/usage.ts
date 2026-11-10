@@ -266,8 +266,6 @@ export interface UsageProjection {
   cards: (resources: UserResources) => ResourceCard[];
   /** The values of a calendar day; none for a day without records. */
   day: (day: CalendarDay) => UsageValue[];
-  /** The mode shown: GPU where the cluster does not meter Aux. */
-  mode: ResourceMode;
   usage: (groupBy: GroupBy, entries: UserUsageEntry[], now?: number) => UsageView;
 }
 
@@ -275,8 +273,7 @@ export const PERIOD_COLUMN = 'periodStart';
 const ACTIVE_DAYS_COLUMN = 'activeDays';
 
 /** What each block of a user page shows in a mode, from the daily entries and the resources. */
-export const usageProjection = (requested: ResourceMode, auxMetered: boolean): UsageProjection => {
-  const mode = auxMetered ? requested : ResourceMode.Gpu;
+export const usageProjection = (mode: ResourceMode): UsageProjection => {
   const kinds = MODE_KINDS[mode].map((kind) => ({ key: kind, ...KINDS[kind] }));
   const active = MODE_ACTIVE[mode];
 
@@ -297,7 +294,6 @@ export const usageProjection = (requested: ResourceMode, auxMetered: boolean): U
       entry
         ? kinds.map((kind) => ({ title: kind.hours, value: formatHours(kind.seconds(entry)) }))
         : [],
-    mode,
     usage: (groupBy, entries, now = Date.now()) => {
       const byMonth = groupBy === GroupBy.Month;
       const shown = byMonth ? lastMonths(entries, now) : lastDays(entries, now);

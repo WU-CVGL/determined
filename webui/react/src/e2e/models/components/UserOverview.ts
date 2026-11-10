@@ -33,8 +33,8 @@ class CurrentResources extends BaseComponent {
 }
 
 /**
- * Represents the resource mode control of the overview: GPU, Aux or GPU+Aux, shown only where the
- * cluster meters Aux containers.
+ * Represents the resource mode control of the overview: GPU, Aux or GPU+Aux, shown unless the
+ * cluster does not meter Aux containers and the usage holds no Aux time.
  */
 class ModeControl extends BaseComponent {
   readonly gpu = this.option('gpu');
