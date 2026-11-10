@@ -16,6 +16,8 @@ import handleError from 'utils/error';
 import { isAborted } from 'utils/service';
 
 import {
+  ActiveDaysProjection,
+  CurrentResourcesProjection,
   DAY_FORMAT,
   MONTH_FORMAT,
   PERIOD_COLUMN,
@@ -24,8 +26,8 @@ import {
   USAGE_DAYS,
   USAGE_MONTHS,
   usageProjection,
-  UsageProjection,
   UsageRow,
+  UsageSectionProjection,
 } from './usage';
 import UsageCalendar from './UsageCalendar';
 import usePageHidden from './usePageHidden';
@@ -34,18 +36,15 @@ import useUserUsage from './useUserUsage';
 
 export const RESOURCES_POLL_INTERVAL = 15_000;
 
-const MODE_OPTIONS = [
-  { id: ResourceMode.Gpu, label: 'GPU' },
-  { id: ResourceMode.Aux, label: 'Aux' },
-  { id: ResourceMode.Both, label: 'GPU+Aux' },
-];
-
 interface ResourcesProps {
-  projection: UsageProjection;
+  projection: CurrentResourcesProjection;
   resources: Loadable<UserResources>;
 }
 
-const CurrentResources: React.FC<ResourcesProps> = ({ projection, resources }) => (
+// The sections take stable props: a resources poll renders Current resources only, and a mode
+// switch renders Active days only.
+
+const CurrentResources: React.FC<ResourcesProps> = React.memo(({ projection, resources }) => (
   <Section loading={Loadable.isNotLoaded(resources)} title="Current resources">
     {Loadable.match(resources, {
       Failed: () => null,
@@ -61,19 +60,19 @@ const CurrentResources: React.FC<ResourcesProps> = ({ projection, resources }) =
       NotLoaded: () => null,
     })}
   </Section>
-);
+));
 
 interface UsageProps {
   groupBy: GroupBy;
   /** The start of the UTC day the views end with. */
   now: number;
-  projection: UsageProjection;
+  projection: UsageSectionProjection;
   usage: UserUsage;
 }
 
 const UsageView: React.FC<UsageProps> = ({ groupBy, now, projection, usage }) => {
   const view = useMemo(
-    () => projection.usage(groupBy, usage.entries, now),
+    () => projection.view(groupBy, usage.entries, now),
     [groupBy, now, projection, usage.entries],
   );
   const dateRange = useMemo((): [number, number] => {
@@ -96,7 +95,7 @@ const UsageView: React.FC<UsageProps> = ({ groupBy, now, projection, usage }) =>
         label="Hours"
         time={view.time}
       />
-      {/* Closed at first; the panel keeps its state while the view, the mode and the data change. */}
+      {/* Closed at first; the panel keeps its state while the view and the data change. */}
       <Accordion mountChildren="on-open" title="Details">
         <ResponsiveTable<UsageRow>
           columns={view.columns.map((column) => ({
@@ -115,40 +114,58 @@ const UsageView: React.FC<UsageProps> = ({ groupBy, now, projection, usage }) =>
   );
 };
 
-interface HistoryProps {
-  /** The start of the UTC day the views end with. */
+interface ActiveDaysProps {
+  /** The start of the UTC day the calendar ends with. */
   now: number;
-  projection: UsageProjection;
+  onModeChange: (mode: ResourceMode) => void;
+  projection: ActiveDaysProjection;
   usage: Loadable<UserUsage>;
 }
 
-/* The history blocks take stable props and skip the renders of the resources polls. */
+/** The calendar of the active days, in the mode chosen there. */
+const ActiveDays: React.FC<ActiveDaysProps> = React.memo(
+  ({ now, onModeChange, projection, usage }) => {
+    const calendar = useMemo(
+      () => Loadable.map(usage, (usage) => projection.calendar(usage.entries, now)),
+      [now, projection, usage],
+    );
 
-/** The calendar of the active days. */
-const ActiveDays: React.FC<HistoryProps> = React.memo(({ now, projection, usage }) => {
-  const calendar = useMemo(
-    () => Loadable.map(usage, (usage) => projection.calendar(usage.entries, now)),
-    [now, projection, usage],
-  );
+    return (
+      <Section
+        className={css.activeDays}
+        id="active-days"
+        loading={Loadable.isNotLoaded(calendar)}
+        options={
+          projection.modes.length > 0 && (
+            <RadioGroup<ResourceMode>
+              options={projection.modes}
+              value={projection.mode}
+              onChange={onModeChange}
+            />
+          )
+        }
+        title={Loadable.match(calendar, {
+          _: () => 'Active days',
+          Loaded: ({ activeDays }) => `Active days · ${activeDays}`,
+        })}>
+        {Loadable.match(calendar, {
+          _: () => null,
+          Loaded: ({ weeks }) => <UsageCalendar dayValues={projection.day} weeks={weeks} />,
+        })}
+      </Section>
+    );
+  },
+);
 
-  return (
-    <Section
-      id="active-days"
-      loading={Loadable.isNotLoaded(calendar)}
-      title={Loadable.match(calendar, {
-        _: () => 'Active days',
-        Loaded: ({ activeDays }) => `Active days · ${activeDays}`,
-      })}>
-      {Loadable.match(calendar, {
-        _: () => null,
-        Loaded: ({ weeks }) => <UsageCalendar dayValues={projection.day} weeks={weeks} />,
-      })}
-    </Section>
-  );
-});
+interface UsageSectionProps {
+  /** The start of the UTC day the views end with. */
+  now: number;
+  projection: UsageSectionProjection;
+  usage: Loadable<UserUsage>;
+}
 
 /** The usage by day or by month. */
-const Usage: React.FC<HistoryProps> = React.memo(({ now, projection, usage }) => {
+const Usage: React.FC<UsageSectionProps> = React.memo(({ now, projection, usage }) => {
   const [groupBy, setGroupBy] = useState<GroupBy>(GroupBy.Day);
 
   return (
@@ -234,23 +251,21 @@ const Overview: React.FC<{ userId: number }> = ({ userId }) => {
   const auxAbsent =
     Loadable.match(resources, { _: () => false, Loaded: (resources) => !resources.auxMetered }) &&
     usageHasAux === false;
-  const shownMode = auxAbsent ? ResourceMode.Gpu : mode;
+  const projection = usageProjection(mode, !auxAbsent);
   // A hidden mode does not stay selected.
-  useEffect(() => {
-    if (auxAbsent) setMode(ResourceMode.Gpu);
-  }, [auxAbsent]);
-  const projection = useMemo(() => usageProjection(shownMode), [shownMode]);
+  const shownMode = projection.activeDays.mode;
+  useEffect(() => setMode(shownMode), [shownMode]);
 
   return (
     <div className={css.base} data-testid="user-overview">
-      {!auxAbsent && (
-        <div className={css.mode}>
-          <RadioGroup<ResourceMode> options={MODE_OPTIONS} value={mode} onChange={setMode} />
-        </div>
-      )}
-      <CurrentResources projection={projection} resources={resources} />
-      <ActiveDays now={now} projection={projection} usage={usage} />
-      <Usage now={now} projection={projection} usage={usage} />
+      <CurrentResources projection={projection.currentResources} resources={resources} />
+      <ActiveDays
+        now={now}
+        projection={projection.activeDays}
+        usage={usage}
+        onModeChange={setMode}
+      />
+      <Usage now={now} projection={projection.usage} usage={usage} />
     </div>
   );
 };
@@ -260,8 +275,9 @@ interface Props {
 }
 
 /**
- * A user's current resources, active days and usage, in one resource mode: GPU, Aux or both,
- * where the cluster meters Aux containers or the usage holds Aux time.
+ * A user's current resources, active days and usage: GPUs and Aux containers where the cluster
+ * meters Aux containers or the usage holds Aux time, with the active days in a mode chosen there
+ * (GPU, Aux or both); GPUs only elsewhere.
  */
 const UserOverview: React.FC<Props> = ({ userId }: Props) => (
   <Overview key={userId} userId={userId} />

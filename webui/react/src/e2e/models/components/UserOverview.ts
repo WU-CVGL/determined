@@ -33,8 +33,9 @@ class CurrentResources extends BaseComponent {
 }
 
 /**
- * Represents the resource mode control of the overview: GPU, Aux or GPU+Aux, shown unless the
- * cluster does not meter Aux containers and the usage holds no Aux time.
+ * Represents the resource mode control of the Active days section: GPU, Aux or GPU+Aux for the
+ * calendar, its count and the selected day, shown unless the cluster does not meter Aux
+ * containers and the usage holds no Aux time.
  */
 class ModeControl extends BaseComponent {
   readonly gpu = this.option('gpu');
@@ -95,10 +96,6 @@ class UsageRow extends Row {}
  */
 export class UserOverview extends NamedComponent {
   override defaultSelector = '[data-testid="user-overview"]';
-  readonly mode = new ModeControl({
-    parent: this,
-    selector: '[class*="UserOverview_mode"]',
-  });
   readonly currentResources = new CurrentResources({
     parent: this,
     selector: 'section#current-resources',
@@ -106,6 +103,11 @@ export class UserOverview extends NamedComponent {
   readonly activeDays = new BaseComponent({
     parent: this,
     selector: 'section#active-days',
+  });
+  /** The mode control, in the row of the title of Active days. */
+  readonly mode = new ModeControl({
+    parent: this.activeDays,
+    selector: '.ant-radio-group',
   });
   /** "Active days · N". */
   readonly activeDaysTitle = new BaseComponent({

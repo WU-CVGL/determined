@@ -72,13 +72,16 @@ const RESOURCES: UserResources = {
   ],
 };
 
-const projection = usageProjection;
+const MODES = [ResourceMode.Gpu, ResourceMode.Aux, ResourceMode.Both];
+
+/** The projection with Aux shown, or without. */
+const projection = (mode: ResourceMode, auxShown = true) => usageProjection(mode, auxShown);
 
 /** The level of each day of the fixture in the calendar. */
-const levels = (mode: ResourceMode) =>
+const levels = (mode: ResourceMode, auxShown = true) =>
   Object.fromEntries(
-    projection(mode)
-      .calendar(ENTRIES, NOW)
+    projection(mode, auxShown)
+      .activeDays.calendar(ENTRIES, NOW)
       .weeks.flatMap((week) => week.days)
       .filter((day) => day.entry)
       .map((day) => [day.date, day.level]),
@@ -208,115 +211,128 @@ describe('user usage', () => {
   });
 });
 
-describe('the projection of a resource mode', () => {
-  it('shows the current GPUs, Aux containers or both', () => {
-    expect(projection(ResourceMode.Both).cards(RESOURCES)).toEqual([
-      { key: 'gpu', title: 'GPUs', value: 3 },
-      { key: 'aux', title: 'Aux containers', value: 1 },
-    ]);
-    expect(projection(ResourceMode.Gpu).cards(RESOURCES)).toEqual([
-      { key: 'gpu', title: 'GPUs', value: 3 },
-    ]);
-    expect(projection(ResourceMode.Aux).cards(RESOURCES)).toEqual([
-      { key: 'aux', title: 'Aux containers', value: 1 },
-    ]);
-    expect(projection(ResourceMode.Both).cards({ auxMetered: true, pools: [] })).toEqual([
+describe('the projection', () => {
+  const BOTH_CARDS = [
+    { key: 'gpu', title: 'GPUs', value: 3 },
+    { key: 'aux', title: 'Aux containers', value: 1 },
+  ];
+  const DAYS = ['2026-10-20', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06', '2026-11-07'];
+
+  it('shows the current GPUs and Aux containers in every mode, and GPUs only without Aux', () => {
+    MODES.forEach((mode) => {
+      expect(projection(mode).currentResources.cards(RESOURCES)).toEqual(BOTH_CARDS);
+      expect(projection(mode, false).currentResources.cards(RESOURCES)).toEqual([
+        { key: 'gpu', title: 'GPUs', value: 3 },
+      ]);
+    });
+    expect(
+      projection(ResourceMode.Gpu).currentResources.cards({ auxMetered: true, pools: [] }),
+    ).toEqual([
       { key: 'gpu', title: 'GPUs', value: 0 },
       { key: 'aux', title: 'Aux containers', value: 0 },
     ]);
   });
 
-  it('shows the days of the mode in the chart and the table', () => {
-    const time = [
-      '2026-10-20',
-      '2026-11-03',
-      '2026-11-04',
-      '2026-11-05',
-      '2026-11-06',
-      '2026-11-07',
-    ];
-    const both = projection(ResourceMode.Both).usage(GroupBy.Day, ENTRIES, NOW);
-    expect(both.time).toEqual(time);
-    expect(Object.keys(both.hoursByLabel)).toEqual(['GPU', 'Aux']);
-    expect(both.hoursByLabel).toEqual({ Aux: [2, 0, 10, 3, 0, 0], GPU: [1, 26, 0, 3, 0, 0] });
-    expect(both.columns).toEqual([
-      { key: 'periodStart', numeric: false, title: 'Date' },
-      { key: 'gpu', numeric: true, title: 'GPU hours' },
-      { key: 'aux', numeric: true, title: 'Aux container hours' },
-    ]);
-    expect(both.rows).toEqual([
-      { aux: '0.0', gpu: '0.0', periodStart: '2026-11-07' },
-      { aux: '0.0', gpu: '0.0', periodStart: '2026-11-06' },
-      { aux: '3.0', gpu: '3.0', periodStart: '2026-11-05' },
-      { aux: '10.0', gpu: '0.0', periodStart: '2026-11-04' },
-      { aux: '0.0', gpu: '26.0', periodStart: '2026-11-03' },
-      { aux: '2.0', gpu: '1.0', periodStart: '2026-10-20' },
-    ]);
-
-    const gpu = projection(ResourceMode.Gpu).usage(GroupBy.Day, ENTRIES, NOW);
-    expect(gpu.time).toEqual(time);
-    expect(gpu.hoursByLabel).toEqual({ GPU: [1, 26, 0, 3, 0, 0] });
-    expect(gpu.columns.map((column) => column.title)).toEqual(['Date', 'GPU hours']);
-    expect(gpu.rows.map((row) => Object.keys(row))).toEqual(Array(6).fill(['periodStart', 'gpu']));
-    expect(gpu.rows.map((row) => row.gpu)).toEqual(['0.0', '0.0', '3.0', '0.0', '26.0', '1.0']);
-
-    const aux = projection(ResourceMode.Aux).usage(GroupBy.Day, ENTRIES, NOW);
-    expect(aux.time).toEqual(time);
-    expect(aux.hoursByLabel).toEqual({ Aux: [2, 0, 10, 3, 0, 0] });
-    expect(aux.columns.map((column) => column.title)).toEqual(['Date', 'Aux container hours']);
-    expect(aux.rows.map((row) => Object.keys(row))).toEqual(Array(6).fill(['periodStart', 'aux']));
-    expect(aux.rows.map((row) => row.aux)).toEqual(['0.0', '0.0', '3.0', '10.0', '0.0', '2.0']);
+  it('shows the GPU and Aux hours of the days in the chart and the table in every mode', () => {
+    MODES.forEach((mode) => {
+      const view = projection(mode).usage.view(GroupBy.Day, ENTRIES, NOW);
+      expect(view.time).toEqual(DAYS);
+      expect(Object.keys(view.hoursByLabel)).toEqual(['GPU', 'Aux']);
+      expect(view.hoursByLabel).toEqual({ Aux: [2, 0, 10, 3, 0, 0], GPU: [1, 26, 0, 3, 0, 0] });
+      expect(view.columns).toEqual([
+        { key: 'periodStart', numeric: false, title: 'Date' },
+        { key: 'gpu', numeric: true, title: 'GPU hours' },
+        { key: 'aux', numeric: true, title: 'Aux container hours' },
+      ]);
+      expect(view.rows).toEqual([
+        { aux: '0.0', gpu: '0.0', periodStart: '2026-11-07' },
+        { aux: '0.0', gpu: '0.0', periodStart: '2026-11-06' },
+        { aux: '3.0', gpu: '3.0', periodStart: '2026-11-05' },
+        { aux: '10.0', gpu: '0.0', periodStart: '2026-11-04' },
+        { aux: '0.0', gpu: '26.0', periodStart: '2026-11-03' },
+        { aux: '2.0', gpu: '1.0', periodStart: '2026-10-20' },
+      ]);
+    });
   });
 
-  it("sums the months and counts each month's active days of the mode", () => {
-    const both = projection(ResourceMode.Both).usage(GroupBy.Month, ENTRIES, NOW);
-    expect(both.time).toEqual(['2025-11', '2026-10', '2026-11']);
-    expect(both.hoursByLabel).toEqual({ Aux: [0, 2, 13], GPU: [4, 1, 29] });
-    expect(both.columns.map((column) => [column.key, column.title])).toEqual([
-      ['periodStart', 'Month'],
-      ['gpu', 'GPU hours'],
-      ['aux', 'Aux container hours'],
-      ['activeDays', 'Active days'],
-    ]);
-    // November 2026: the GPU day, the Aux day and the day with both, not 2 + 2.
-    expect(both.rows).toEqual([
-      { activeDays: '3', aux: '13.0', gpu: '29.0', periodStart: '2026-11' },
-      { activeDays: '1', aux: '2.0', gpu: '1.0', periodStart: '2026-10' },
-      { activeDays: '1', aux: '0.0', gpu: '4.0', periodStart: '2025-11' },
-    ]);
-    const gpu = projection(ResourceMode.Gpu).usage(GroupBy.Month, ENTRIES, NOW);
-    expect(gpu.columns.map((column) => column.title)).toEqual([
-      'Month',
-      'GPU hours',
-      'Active days',
-    ]);
-    expect(gpu.rows).toEqual([
-      { activeDays: '2', gpu: '29.0', periodStart: '2026-11' },
-      { activeDays: '1', gpu: '1.0', periodStart: '2026-10' },
-      { activeDays: '1', gpu: '4.0', periodStart: '2025-11' },
-    ]);
-    const aux = projection(ResourceMode.Aux).usage(GroupBy.Month, ENTRIES, NOW);
-    expect(aux.columns.map((column) => column.title)).toEqual([
-      'Month',
-      'Aux container hours',
-      'Active days',
-    ]);
-    expect(aux.rows).toEqual([
-      { activeDays: '2', aux: '13.0', periodStart: '2026-11' },
-      { activeDays: '1', aux: '2.0', periodStart: '2026-10' },
-      { activeDays: '0', aux: '0.0', periodStart: '2025-11' },
-    ]);
+  it('shows the GPU hours of the days only without Aux', () => {
+    MODES.forEach((mode) => {
+      const view = projection(mode, false).usage.view(GroupBy.Day, ENTRIES, NOW);
+      expect(view.time).toEqual(DAYS);
+      expect(view.hoursByLabel).toEqual({ GPU: [1, 26, 0, 3, 0, 0] });
+      expect(view.columns.map((column) => column.title)).toEqual(['Date', 'GPU hours']);
+      expect(view.rows.map((row) => Object.keys(row))).toEqual(
+        Array(6).fill(['periodStart', 'gpu']),
+      );
+      expect(view.rows.map((row) => row.gpu)).toEqual(['0.0', '0.0', '3.0', '0.0', '26.0', '1.0']);
+    });
+  });
+
+  it("sums the months and counts each month's days with GPUs or Aux containers in every mode", () => {
+    MODES.forEach((mode) => {
+      const view = projection(mode).usage.view(GroupBy.Month, ENTRIES, NOW);
+      expect(view.time).toEqual(['2025-11', '2026-10', '2026-11']);
+      expect(view.hoursByLabel).toEqual({ Aux: [0, 2, 13], GPU: [4, 1, 29] });
+      expect(view.columns.map((column) => [column.key, column.title])).toEqual([
+        ['periodStart', 'Month'],
+        ['gpu', 'GPU hours'],
+        ['aux', 'Aux container hours'],
+        ['activeDays', 'Active days'],
+      ]);
+      // November 2026: the GPU day, the Aux day and the day with both, not 2 + 2.
+      expect(view.rows).toEqual([
+        { activeDays: '3', aux: '13.0', gpu: '29.0', periodStart: '2026-11' },
+        { activeDays: '1', aux: '2.0', gpu: '1.0', periodStart: '2026-10' },
+        { activeDays: '1', aux: '0.0', gpu: '4.0', periodStart: '2025-11' },
+      ]);
+    });
+  });
+
+  it("counts each month's GPU days without Aux", () => {
+    MODES.forEach((mode) => {
+      const view = projection(mode, false).usage.view(GroupBy.Month, ENTRIES, NOW);
+      expect(view.columns.map((column) => column.title)).toEqual([
+        'Month',
+        'GPU hours',
+        'Active days',
+      ]);
+      expect(view.rows).toEqual([
+        { activeDays: '2', gpu: '29.0', periodStart: '2026-11' },
+        { activeDays: '1', gpu: '1.0', periodStart: '2026-10' },
+        { activeDays: '1', gpu: '4.0', periodStart: '2025-11' },
+      ]);
+    });
+  });
+
+  it('counts the active days of a month with either kind, not with the mode', () => {
+    // 3 GPU days, 2 Aux days and 4 days with either.
+    const month = [
+      entry('2026-10-01', { ...active(2, 0, 2), gpuSeconds: 2 }),
+      entry('2026-10-02', { ...active(2, 0, 2), gpuSeconds: 2 }),
+      entry('2026-10-03', { ...active(1, 1, 1), auxContainerSeconds: 1, gpuSeconds: 1 }),
+      entry('2026-10-04', { ...active(0, 3, 3), auxContainerSeconds: 3 }),
+    ];
+    const activeDays = (mode: ResourceMode, auxShown = true) =>
+      projection(mode, auxShown).usage.view(GroupBy.Month, month, NOW).rows[0].activeDays;
+    MODES.forEach((mode) => {
+      expect(activeDays(mode)).toBe('4');
+      expect(activeDays(mode, false)).toBe('3');
+    });
+    expect(projection(ResourceMode.Gpu).activeDays.calendar(month, NOW).activeDays).toBe(3);
+    expect(projection(ResourceMode.Aux).activeDays.calendar(month, NOW).activeDays).toBe(2);
+    expect(projection(ResourceMode.Both).activeDays.calendar(month, NOW).activeDays).toBe(4);
   });
 
   it('levels the calendar by the active time of the mode, never by CPU slots', () => {
-    expect(levels(ResourceMode.Gpu)).toEqual({
+    const gpu = {
       '2026-10-20': 1,
       '2026-11-03': 3,
       '2026-11-04': 0,
       '2026-11-05': 1,
       '2026-11-06': 0,
       '2026-11-07': 0,
-    });
+    };
+    expect(levels(ResourceMode.Gpu)).toEqual(gpu);
     expect(levels(ResourceMode.Aux)).toEqual({
       '2026-10-20': 1,
       '2026-11-03': 0,
@@ -334,86 +350,94 @@ describe('the projection of a resource mode', () => {
       '2026-11-06': 0,
       '2026-11-07': 0,
     });
+    // Without Aux, the calendar is GPU in every mode.
+    MODES.forEach((mode) => expect(levels(mode, false)).toEqual(gpu));
   });
 
   it('counts the active days of the shown grid only', () => {
     // 2025-11-05 is in the request, before the grid.
-    expect(projection(ResourceMode.Gpu).calendar(ENTRIES, NOW).activeDays).toBe(3);
-    expect(projection(ResourceMode.Aux).calendar(ENTRIES, NOW).activeDays).toBe(3);
-    expect(projection(ResourceMode.Both).calendar(ENTRIES, NOW).activeDays).toBe(4);
-    expect(projection(ResourceMode.Both).calendar([], NOW).activeDays).toBe(0);
+    expect(projection(ResourceMode.Gpu).activeDays.calendar(ENTRIES, NOW).activeDays).toBe(3);
+    expect(projection(ResourceMode.Aux).activeDays.calendar(ENTRIES, NOW).activeDays).toBe(3);
+    expect(projection(ResourceMode.Both).activeDays.calendar(ENTRIES, NOW).activeDays).toBe(4);
+    expect(projection(ResourceMode.Both).activeDays.calendar([], NOW).activeDays).toBe(0);
+    expect(projection(ResourceMode.Aux, false).activeDays.calendar(ENTRIES, NOW).activeDays).toBe(
+      3,
+    );
   });
 
   it("shows a day's values of the mode", () => {
     const day = { date: '2026-11-05', entry: ENTRIES[4], level: 1 as const };
-    expect(projection(ResourceMode.Both).day(day)).toEqual([
+    expect(projection(ResourceMode.Both).activeDays.day(day)).toEqual([
       { title: 'GPU hours', value: '3.0' },
       { title: 'Aux container hours', value: '3.0' },
     ]);
-    expect(projection(ResourceMode.Gpu).day(day)).toEqual([{ title: 'GPU hours', value: '3.0' }]);
-    expect(projection(ResourceMode.Aux).day(day)).toEqual([
+    expect(projection(ResourceMode.Gpu).activeDays.day(day)).toEqual([
+      { title: 'GPU hours', value: '3.0' },
+    ]);
+    expect(projection(ResourceMode.Aux).activeDays.day(day)).toEqual([
       { title: 'Aux container hours', value: '3.0' },
+    ]);
+    expect(projection(ResourceMode.Both, false).activeDays.day(day)).toEqual([
+      { title: 'GPU hours', value: '3.0' },
     ]);
     // The CPU day shows no CPU slots.
     expect(
-      projection(ResourceMode.Both).day({ date: '2026-11-06', entry: ENTRIES[5], level: 0 }),
+      projection(ResourceMode.Both).activeDays.day({
+        date: '2026-11-06',
+        entry: ENTRIES[5],
+        level: 0,
+      }),
     ).toEqual([
       { title: 'GPU hours', value: '0.0' },
       { title: 'Aux container hours', value: '0.0' },
     ]);
     // A day without records.
-    expect(projection(ResourceMode.Both).day({ date: '2026-10-31', level: 0 })).toEqual([]);
+    expect(projection(ResourceMode.Both).activeDays.day({ date: '2026-10-31', level: 0 })).toEqual(
+      [],
+    );
   });
 
-  it('changes the cards, the chart, the table, the calendar and the day together', () => {
-    const view = (mode: ResourceMode) => {
-      const p = projection(mode);
-      const usage = p.usage(GroupBy.Day, ENTRIES, NOW);
-      const calendar = p.calendar(ENTRIES, NOW);
-      const day = calendar.weeks.flatMap((week) => week.days).find((d) => d.date === '2026-11-04');
-      return {
-        activeDays: calendar.activeDays,
-        cards: p.cards(RESOURCES).map((card) => card.title),
-        columns: usage.columns.slice(1).map((column) => column.title),
-        day: day && p.day(day).map((value) => value.title),
-        level: day?.level,
-        series: Object.keys(usage.hoursByLabel),
-      };
-    };
-    expect(view(ResourceMode.Gpu)).toEqual({
-      activeDays: 3,
-      cards: ['GPUs'],
-      columns: ['GPU hours'],
-      day: ['GPU hours'],
-      level: 0,
-      series: ['GPU'],
-    });
-    expect(view(ResourceMode.Aux)).toEqual({
-      activeDays: 3,
-      cards: ['Aux containers'],
-      columns: ['Aux container hours'],
-      day: ['Aux container hours'],
-      level: 2,
-      series: ['Aux'],
-    });
-    expect(view(ResourceMode.Both)).toEqual({
-      activeDays: 4,
-      cards: ['GPUs', 'Aux containers'],
-      columns: ['GPU hours', 'Aux container hours'],
-      day: ['GPU hours', 'Aux container hours'],
-      level: 2,
-      series: ['GPU', 'Aux'],
+  it('offers the three modes with Aux, and none without', () => {
+    MODES.forEach((mode) => {
+      expect(projection(mode).activeDays.mode).toBe(mode);
+      expect(projection(mode).activeDays.modes).toEqual([
+        { id: ResourceMode.Gpu, label: 'GPU' },
+        { id: ResourceMode.Aux, label: 'Aux' },
+        { id: ResourceMode.Both, label: 'GPU+Aux' },
+      ]);
+      expect(projection(mode, false).activeDays.mode).toBe(ResourceMode.Gpu);
+      expect(projection(mode, false).activeDays.modes).toEqual([]);
     });
   });
 
-  it('shows the Aux hours of the mode whatever the cluster meters now', () => {
+  it('changes the Active days section only with the mode', () => {
+    const [gpu, aux, both] = MODES.map((mode) => projection(mode));
+    expect(aux.currentResources).toBe(gpu.currentResources);
+    expect(both.currentResources).toBe(gpu.currentResources);
+    expect(aux.usage).toBe(gpu.usage);
+    expect(both.usage).toBe(gpu.usage);
+    expect(new Set([gpu.activeDays, aux.activeDays, both.activeDays]).size).toBe(3);
+    // The same parts every time.
+    expect(projection(ResourceMode.Aux)).toEqual(aux);
+    expect(projection(ResourceMode.Aux).activeDays).toBe(aux.activeDays);
+    const [gpuOnly, auxOnly] = [ResourceMode.Gpu, ResourceMode.Aux].map((mode) =>
+      projection(mode, false),
+    );
+    expect(auxOnly.activeDays).toBe(gpuOnly.activeDays);
+    expect(auxOnly.usage).toBe(gpuOnly.usage);
+    expect(gpuOnly.usage).not.toBe(gpu.usage);
+  });
+
+  it('shows the Aux hours whatever the cluster meters now', () => {
     const p = projection(ResourceMode.Both);
     const day = entry('2026-11-09', { ...active(0, 2, 2), auxContainerSeconds: 2 });
     expect(day.auxContainerSeconds).toBe(7200);
     expect(
-      p.cards({ auxMetered: false, pools: RESOURCES.pools }).map((card) => card.title),
+      p.currentResources
+        .cards({ auxMetered: false, pools: RESOURCES.pools })
+        .map((card) => card.title),
     ).toEqual(['GPUs', 'Aux containers']);
-    expect(p.day({ date: '2026-11-09', entry: day, level: 1 })).toEqual([
+    expect(p.activeDays.day({ date: '2026-11-09', entry: day, level: 1 })).toEqual([
       { title: 'GPU hours', value: '0.0' },
       { title: 'Aux container hours', value: '2.0' },
     ]);

@@ -29,7 +29,7 @@ const day = (periodStart: string, activeHours: number, auxHours = 0): UserUsageE
 });
 
 const setup = (entries: UserUsageEntry[], mode: ResourceMode = ResourceMode.Both) => {
-  const projection = usageProjection(mode);
+  const projection = usageProjection(mode, true).activeDays;
   return render(
     <UIProvider theme={DefaultTheme.Light}>
       <UsageCalendar dayValues={projection.day} weeks={projection.calendar(entries).weeks} />
