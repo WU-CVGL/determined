@@ -209,7 +209,11 @@ func TestGetExperimentConfig(t *testing.T) {
 	})
 	require.NoError(t, err)
 	// The searcher type is the plain name, as the lists return it, not its JSON encoding.
-	require.Equal(t, expected["searcher"].(map[string]any)["name"], resp.Experiment.SearcherType)
+	searcher := expected["searcher"].(map[string]any)
+	require.Equal(t, searcher["name"], resp.Experiment.SearcherType)
+	// The searcher metric is returned as in the lists, so a reader without the config has it.
+	require.NotEmpty(t, searcher["metric"])
+	require.Equal(t, searcher["metric"], resp.Experiment.SearcherMetric)
 
 	cases := []struct {
 		name   string
