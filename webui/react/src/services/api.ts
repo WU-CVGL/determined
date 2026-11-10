@@ -70,6 +70,18 @@ export const getUser = generateDetApi<
   Type.DetailedUser
 >(Config.getUser);
 
+export const getUserResources = generateDetApi<
+  Service.GetUserParams,
+  Api.V1GetUserResourcesResponse,
+  Type.UserResources
+>(Config.getUserResources);
+
+export const getUserUsage = generateDetApi<
+  Service.GetUserUsageParams,
+  Api.V1GetUserUsageResponse,
+  Type.UserUsage
+>(Config.getUserUsage);
+
 export const postUser = generateDetApi<
   Api.V1PostUserRequest,
   Api.V1PostUserResponse,

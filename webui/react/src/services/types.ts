@@ -387,6 +387,14 @@ export interface GetUsersParams extends PaginationParams {
 export interface GetUserParams {
   userId: number;
 }
+export interface GetUserUsageParams {
+  /** The last day (YYYY-MM-DD) or month (YYYY-MM), UTC, inclusive. */
+  endDate: string;
+  period: Api.V1ResourceAllocationAggregationPeriod;
+  /** The first day (YYYY-MM-DD) or month (YYYY-MM), UTC, inclusive. */
+  startDate: string;
+  userId: number;
+}
 export interface PostUserParams {
   admin: boolean;
   displayName?: string;

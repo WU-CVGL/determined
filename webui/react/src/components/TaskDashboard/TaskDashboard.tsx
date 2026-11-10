@@ -39,6 +39,7 @@ import TaskActionDropdown from 'components/TaskActionDropdown';
 import TensorBoardSourcesModalComponent, {
   TensorBoardSource,
 } from 'components/TensorBoardSourcesModal';
+import UserProfileLink from 'components/UserProfileLink';
 import useFeature from 'hooks/useFeature';
 import {
   GenericTaskActionStateContext,
@@ -865,7 +866,21 @@ const TaskDashboard: React.FC<Props> = ({ projectId, tasksOnly = false, workspac
         key: 'user',
         render: (_: unknown, row: RunRow) => {
           const user = users.find((u) => u.id === row.userId);
-          if (user) return userRenderer(user);
+          if (user) {
+            return (
+              <UserProfileLink name={getDisplayName(user)} userId={user.id}>
+                {userRenderer(user)}
+              </UserProfileLink>
+            );
+          }
+          if (row.userId && row.ownerName) {
+            // The cell's title is the link's text.
+            return (
+              <UserProfileLink name={row.ownerName} userId={row.userId}>
+                {row.ownerName}
+              </UserProfileLink>
+            );
+          }
           return row.ownerName ?? '—';
         },
         sortDirections: ASCEND_FIRST,

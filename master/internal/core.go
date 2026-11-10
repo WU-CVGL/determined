@@ -140,6 +140,12 @@ type Master struct {
 	// xidCache holds the GPUs' recent critical XIDs; gpuXIDs builds it on first use.
 	xidCache     *gpuhealth.XIDCache
 	xidCacheOnce sync.Once
+
+	// userUsageCoverage caches the day of the first metered allocation for GetUserUsage.
+	userUsageCoverage userUsageCoverage
+
+	// bootTime is when this master started, before any allocation could get resources.
+	bootTime time.Time
 }
 
 // New creates an instance of the Determined master.
@@ -1003,7 +1009,7 @@ func (m *Master) restoreGenericTasks(ctx context.Context) error {
 
 func (m *Master) closeOpenAllocations(ctx context.Context) error {
 	allocationIds := task.DefaultService.GetAllAllocationIDs()
-	if err := db.CloseOpenAllocations(ctx, allocationIds); err != nil {
+	if err := db.CloseOpenAllocations(ctx, allocationIds, m.bootTime); err != nil {
 		return err
 	}
 	return nil
@@ -1423,6 +1429,7 @@ func (m *Master) Run(ctx context.Context, gRPCLogInitDone chan struct{}) error {
 	}
 
 	// Resource Manager.
+	m.bootTime = time.Now().UTC()
 	if m.rm, err = m.buildRM(poolWorkerCtx, m.db, m.echo, m.config.ResourceManagers(),
 		&m.config.TaskContainerDefaults,
 		&aproto.MasterSetAgentOptions{

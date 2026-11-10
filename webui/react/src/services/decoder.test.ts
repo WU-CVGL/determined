@@ -487,4 +487,95 @@ describe('Decoder', () => {
       expect(run.experiment?.capabilities).toEqual(hidden);
     });
   });
+
+  describe('user pages', () => {
+    it('decodes the resources a user holds, zero where unset', () => {
+      expect(
+        decoder.mapV1UserResources({
+          asOf: '2026-11-10T15:00:00Z' as DateString,
+          auxMetered: true,
+          pools: [
+            { counts: { auxContainers: 1, cpuSlots: 2, gpus: 4 }, resourcePool: 'default' },
+            { counts: { gpus: 8 }, resourcePool: 'k8s' },
+          ],
+        }),
+      ).toEqual({
+        asOf: new Date('2026-11-10T15:00:00Z'),
+        auxMetered: true,
+        pools: [
+          { counts: { auxContainers: 1, cpuSlots: 2, gpus: 4 }, resourcePool: 'default' },
+          { counts: { auxContainers: 0, cpuSlots: 0, gpus: 8 }, resourcePool: 'k8s' },
+        ],
+      });
+      expect(decoder.mapV1UserResources({})).toEqual({
+        asOf: undefined,
+        auxMetered: false,
+        pools: [],
+      });
+    });
+
+    it('decodes the usage in seconds and days, with UTC days as given', () => {
+      const usage = decoder.mapV1UserUsage({
+        asOf: '2026-11-10T15:00:00Z' as DateString,
+        coverageStart: '2025-01-02',
+        entries: [
+          {
+            auxActiveDays: 1,
+            auxActiveSeconds: 1800,
+            auxContainerSeconds: 3600,
+            cpuSlotSeconds: 3600,
+            gpuActiveDays: 1,
+            gpuActiveSeconds: 7200,
+            gpuOrAuxActiveDays: 1,
+            gpuOrAuxActiveSeconds: 8000,
+            gpuSeconds: 14400,
+            periodStart: '2026-11-09',
+            unclassifiedSlotSeconds: 600,
+          },
+          // A day without anything held, from a master that leaves zeros out.
+          { periodStart: '2026-11-10' },
+          { auxContainerSeconds: null as unknown as undefined, periodStart: '2026-11-11' },
+        ],
+      });
+      expect(usage.asOf?.toISOString()).toBe('2026-11-10T15:00:00.000Z');
+      expect(usage.coverageStart).toBe('2025-01-02');
+      const zero = {
+        auxActiveDays: 0,
+        auxActiveSeconds: 0,
+        auxContainerSeconds: 0,
+        cpuSlotSeconds: 0,
+        gpuActiveDays: 0,
+        gpuActiveSeconds: 0,
+        gpuOrAuxActiveDays: 0,
+        gpuOrAuxActiveSeconds: 0,
+        gpuSeconds: 0,
+        unclassifiedSlotSeconds: 0,
+      };
+      expect(usage.entries).toEqual([
+        {
+          auxActiveDays: 1,
+          auxActiveSeconds: 1800,
+          auxContainerSeconds: 3600,
+          cpuSlotSeconds: 3600,
+          gpuActiveDays: 1,
+          gpuActiveSeconds: 7200,
+          gpuOrAuxActiveDays: 1,
+          gpuOrAuxActiveSeconds: 8000,
+          gpuSeconds: 14400,
+          periodStart: '2026-11-09',
+          unclassifiedSlotSeconds: 600,
+        },
+        { ...zero, periodStart: '2026-11-10' },
+        { ...zero, periodStart: '2026-11-11' },
+      ]);
+    });
+
+    it('decodes an empty coverage start as none', () => {
+      expect(decoder.mapV1UserUsage({ coverageStart: '', entries: [] })).toEqual({
+        asOf: undefined,
+        coverageStart: undefined,
+        entries: [],
+      });
+    });
+  });
 });
