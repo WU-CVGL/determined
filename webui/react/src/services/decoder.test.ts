@@ -289,6 +289,23 @@ describe('Decoder', () => {
       });
     });
 
+    it('should carry the capabilities of GetTask, and none from an older master', () => {
+      const task: V1Task = {
+        allocations: [],
+        startTime: '2026-01-01T00:00:00Z' as DateString,
+        taskId: 'task-1',
+        taskType: V1TaskType.SHELL,
+      };
+      const capabilities = {
+        manageSharing: false,
+        viewConfig: false,
+        viewLogs: true,
+        viewTitle: true,
+      };
+      expect(decoder.mapV1Task({ ...task, capabilities }).capabilities).toStrictEqual(capabilities);
+      expect(decoder.mapV1Task(task).capabilities).toBeUndefined();
+    });
+
     it('should parse the config JSON string', () => {
       expect(decoder.mapGenericTaskConfig('{"entrypoint":["python","eval.py"]}')).toStrictEqual({
         entrypoint: ['python', 'eval.py'],

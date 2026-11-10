@@ -126,6 +126,8 @@ message Task {
   optional string forked_from = 10;
   // Flag for whether task can be paused or not.
   optional bool no_pause = 11;
+  // What the requesting user may do with the content of this task's job.
+  determined.job.v1.JobCapabilities capabilities = 12;
 }
 
 // GenericTask is a generic task with its owner and display fields, as listed by

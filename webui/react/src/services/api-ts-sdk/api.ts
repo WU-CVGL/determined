@@ -11810,6 +11810,12 @@ export interface V1Task {
      * @memberof V1Task
      */
     noPause?: boolean;
+    /**
+     * What the requesting user may do with the content of this task's job.
+     * @type {V1JobCapabilities}
+     * @memberof V1Task
+     */
+    capabilities?: V1JobCapabilities;
 }
 /**
  * 

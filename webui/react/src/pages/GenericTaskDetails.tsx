@@ -142,8 +142,9 @@ const GenericTaskDetails: React.FC = () => {
     fetchChildren();
   }, [fetchChildren, fetchTask]);
 
-  // Owner, name, resources and capabilities are only in the generic task list; look the task up
-  // once, and again when the user comes back to the page, for sharing changed meanwhile.
+  // Owner, name and resources are only in the generic task list, and this page reads the
+  // capabilities from it too; look the task up once, and again when the user comes back to the
+  // page, for sharing changed meanwhile.
   const pageReturns = usePageReturns();
   useEffect(() => {
     if (!isGeneric) return;

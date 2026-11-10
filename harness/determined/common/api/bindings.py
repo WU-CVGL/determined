@@ -15991,6 +15991,7 @@ class v1TableType(DetEnum):
 
 class v1Task(Printable):
     """Task is the model for a task in the database."""
+    capabilities: "typing.Optional[v1JobCapabilities]" = None
     config: "typing.Optional[str]" = None
     endTime: "typing.Optional[str]" = None
     forkedFrom: "typing.Optional[str]" = None
@@ -16005,6 +16006,7 @@ class v1Task(Printable):
         startTime: str,
         taskId: str,
         taskType: "v1TaskType",
+        capabilities: "typing.Union[v1JobCapabilities, None, Unset]" = _unset,
         config: "typing.Union[str, None, Unset]" = _unset,
         endTime: "typing.Union[str, None, Unset]" = _unset,
         forkedFrom: "typing.Union[str, None, Unset]" = _unset,
@@ -16016,6 +16018,8 @@ class v1Task(Printable):
         self.startTime = startTime
         self.taskId = taskId
         self.taskType = taskType
+        if not isinstance(capabilities, Unset):
+            self.capabilities = capabilities
         if not isinstance(config, Unset):
             self.config = config
         if not isinstance(endTime, Unset):
@@ -16037,6 +16041,8 @@ class v1Task(Printable):
             "taskId": obj["taskId"],
             "taskType": v1TaskType(obj["taskType"]),
         }
+        if "capabilities" in obj:
+            kwargs["capabilities"] = v1JobCapabilities.from_json(obj["capabilities"]) if obj["capabilities"] is not None else None
         if "config" in obj:
             kwargs["config"] = obj["config"]
         if "endTime" in obj:
@@ -16058,6 +16064,8 @@ class v1Task(Printable):
             "taskId": self.taskId,
             "taskType": self.taskType.value,
         }
+        if not omit_unset or "capabilities" in vars(self):
+            out["capabilities"] = None if self.capabilities is None else self.capabilities.to_json(omit_unset)
         if not omit_unset or "config" in vars(self):
             out["config"] = self.config
         if not omit_unset or "endTime" in vars(self):

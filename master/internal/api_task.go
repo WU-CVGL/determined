@@ -44,6 +44,7 @@ func (a *apiServer) GetTask(
 		return nil, err
 	}
 	redactTask(t, caps)
+	t.Capabilities = caps.Proto()
 	return &apiv1.GetTaskResponse{Task: t}, nil
 }
 

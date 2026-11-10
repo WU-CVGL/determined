@@ -14,13 +14,14 @@ import useRefusal from 'hooks/useRefusal';
 import { ResetSettings, UpdateSettings, useSettings } from 'hooks/useSettings';
 import { DateString, decode, optional } from 'ioTypes';
 import { paths, serverAddress } from 'routes/utils';
-import { getCommand, getGenericTask, getShells, getTask } from 'services/api';
+import { getTask } from 'services/api';
 import { detApi } from 'services/apiConfig';
 import { mapV1LogsResponse } from 'services/decoder';
 import { readStream } from 'services/utils';
 import { CommandType, JobCapabilities, TaskItem } from 'types';
 import handleError from 'utils/error';
 import { isLogsNotShared, LOGS_NOT_SHARED, logsHidden } from 'utils/jobPrivacy';
+import { lookupLegacyCapabilities } from 'utils/taskLookup';
 
 import css from './TaskLogs.module.scss';
 
@@ -36,24 +37,6 @@ interface Props {
   taskType: string;
 }
 type OrderBy = 'ORDER_BY_UNSPECIFIED' | 'ORDER_BY_ASC' | 'ORDER_BY_DESC';
-
-/* The capabilities of a task, from the record of its type; an ended task has none. */
-const lookupCapabilities = async (
-  taskId: string,
-  taskType: string,
-): Promise<JobCapabilities | undefined> => {
-  switch (taskType) {
-    case CommandType.Command:
-      return (await getCommand({ commandId: taskId })).capabilities;
-    case CommandType.Shell:
-      // The shell list has no private keys, unlike a shell's own lookup.
-      return (await getShells({})).find((shell) => shell.id === taskId)?.capabilities;
-    case 'generic':
-      return (await getGenericTask(taskId))?.capabilities;
-    default:
-      return undefined;
-  }
-};
 
 export const TaskLogsWrapper: React.FC = () => {
   const { taskId, taskType } = useParams<Params>();
@@ -215,8 +198,10 @@ export const TaskLogsViewer: React.FC<ViewerProps> = ({
 
 const TaskLogs: React.FC<Props> = ({ taskId, taskType, onCloseLogs, headerComponent }: Props) => {
   const [task, setTask] = useState<TaskItem>();
-  // The task's capabilities once the lookup of its record has answered, with or without one.
-  const [lookup, setLookup] = useState<{ capabilities?: JobCapabilities; taskId: string }>();
+  // The task's current capabilities, once a read of the task has answered: from the task, or from
+  // the record of its type for an older master. Without any, the logs are read and the master
+  // refuses them if they are not shared.
+  const [access, setAccess] = useState<{ capabilities?: JobCapabilities; taskId: string }>();
 
   const taskTypeLabel =
     taskType === 'generic' ? 'Generic Task' : commandTypeToLabel[taskType as CommandType];
@@ -227,35 +212,37 @@ const TaskLogs: React.FC<Props> = ({ taskId, taskType, onCloseLogs, headerCompon
   const selectedAllocation =
     settings.allocationId?.length === 1 ? settings.allocationId[0] : undefined;
 
-  useEffect(() => {
-    let active = true;
-    setTask(undefined);
-    getTask({ taskId })
-      .then((value) => {
-        if (active) setTask(value);
-      })
-      .catch(() => {
-        // Logs remain available even if the task metadata request fails.
-      });
-    return () => {
-      active = false;
-    };
-  }, [taskId]);
-
-  // The lookup is repeated when the user comes back to the page, for sharing changed meanwhile.
+  // The task is read again when the user comes back to the page, for sharing changed meanwhile.
   const pageReturns = usePageReturns();
 
   useEffect(() => {
     let active = true;
-    lookupCapabilities(taskId, taskType)
-      .then((capabilities) => {
-        if (active) setLookup({ capabilities, taskId });
-      })
-      .catch(() => {
-        // The master refuses logs that are not shared, which the viewer shows. A repeated lookup
-        // that fails keeps the capabilities of the last one.
-        if (active) setLookup((last) => (last?.taskId === taskId ? last : { taskId }));
-      });
+    // A read that fails keeps the capabilities of the last one for this task.
+    const keepLast = () => {
+      if (active) setAccess((last) => (last?.taskId === taskId ? last : { taskId }));
+    };
+    const read = async () => {
+      let value: TaskItem | undefined;
+      try {
+        value = await getTask({ taskId });
+      } catch {
+        return keepLast();
+      }
+      if (!active) return;
+      if (!value) return keepLast();
+      setTask(value);
+      if (value.capabilities) {
+        setAccess({ capabilities: value.capabilities, taskId });
+        return;
+      }
+      try {
+        const capabilities = await lookupLegacyCapabilities(taskId, taskType);
+        if (active) setAccess({ capabilities, taskId });
+      } catch {
+        keepLast();
+      }
+    };
+    void read();
     return () => {
       active = false;
     };
@@ -277,7 +264,7 @@ const TaskLogs: React.FC<Props> = ({ taskId, taskType, onCloseLogs, headerCompon
       headerComponent={headerComponent}
       id="task-logs"
       options={
-        task && (
+        task?.taskId === taskId && (
           <TaskResourcesLink
             nativeUrl={paths.taskResources(task.taskId, selectedAllocation)}
             target={{
@@ -290,9 +277,9 @@ const TaskLogs: React.FC<Props> = ({ taskId, taskType, onCloseLogs, headerCompon
         )
       }
       title={title}>
-      {lookup?.taskId === taskId ? (
+      {access?.taskId === taskId ? (
         <TaskLogsViewer
-          logsHidden={logsHidden(lookup.capabilities)}
+          logsHidden={logsHidden(access.capabilities)}
           resetSettings={resetSettings}
           settings={settings}
           taskId={taskId}

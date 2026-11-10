@@ -887,6 +887,8 @@ interface Allocation {
 
 export interface TaskItem {
   allocations: Allocation[];
+  /** The user's capabilities on the task's job; an older master does not send them. */
+  capabilities?: JobCapabilities;
   endTime?: string;
   forkedFrom?: string;
   noPause?: boolean;

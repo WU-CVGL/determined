@@ -311,6 +311,7 @@ export const mapV1Task = (task: Sdk.V1Task): types.TaskItem => {
           taskId: a.taskId,
         };
       }) || [],
+    capabilities: task.capabilities ?? undefined,
     endTime: task.endTime as string | undefined,
     forkedFrom: task.forkedFrom || undefined,
     noPause: task.noPause,
