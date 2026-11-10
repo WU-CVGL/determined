@@ -47,6 +47,7 @@ vi.mock('pages/UserProfile/UserOverview', () => ({
 }));
 
 const CURRENT_USER: DetailedUser = { id: 1, isActive: true, isAdmin: false, username: 'bunny' };
+const RENAMED_USER: DetailedUser = { ...CURRENT_USER, displayName: 'Bunny' };
 
 vi.mock('hooks/usePermissions', () => {
   const usePermissions = vi.fn(() => {
@@ -421,6 +422,29 @@ const project = (id: number, name: string) => ({
   workspaceName: 'Workspace',
 });
 
+const experiment = (id: number, name: string) => ({
+  archived: false,
+  id,
+  name,
+  projectId: 1,
+  projectName: 'Uncategorized',
+  startTime: `2024-06-14T15:50:${id}Z`,
+  state: 'RUNNING',
+  workspaceId: 1,
+  workspaceName: 'Uncategorized',
+});
+
+const shell = (id: string, displayName: string) => ({
+  displayName,
+  id,
+  name: displayName,
+  startTime: '2024-07-18T15:13:07.401Z',
+  state: 'RUNNING',
+  type: 'shell',
+  userId: 1,
+  workspaceId: 1,
+});
+
 interface Deferred<T> {
   promise: Promise<T>;
   reject: (reason: unknown) => void;
@@ -503,6 +527,48 @@ describe('Dashboard data loading', () => {
     await answer(projects[0], [project(3, 'Older')]);
     expect(screen.getByText('Newer')).toBeInTheDocument();
     expect(screen.queryByText('Older')).not.toBeInTheDocument();
+  });
+
+  it('keeps the newer submissions when an older batch answers last', async () => {
+    const experiments = queue<{ experiments: unknown[] }>(mocks.getExperiments);
+    const shells = queue<unknown[]>(mocks.getShells);
+    setup();
+    await waitFor(() => expect(experiments).toHaveLength(1));
+
+    // An update of the signed-in user restarts the polling while the first batch is pending.
+    act(() => userStore.updateCurrentUser(RENAMED_USER));
+    await waitFor(() => expect(experiments).toHaveLength(2));
+    expect(shells).toHaveLength(2);
+
+    await answer(experiments[1], { experiments: [experiment(11, 'Newer search')] });
+    await answer(shells[1], [shell('newer', 'Newer shell')]);
+    expect(await screen.findByText('Newer search')).toBeInTheDocument();
+    expect(screen.getByText('Newer shell')).toBeInTheDocument();
+
+    await answer(experiments[0], { experiments: [experiment(10, 'Older search')] });
+    await answer(shells[0], [shell('older', 'Older shell')]);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByText('Newer search')).toBeInTheDocument();
+    expect(screen.getByText('Newer shell')).toBeInTheDocument();
+    expect(screen.queryByText('Older search')).not.toBeInTheDocument();
+    expect(screen.queryByText('Older shell')).not.toBeInTheDocument();
+  });
+
+  it('an older batch does not end the loading of the submissions', async () => {
+    const experiments = queue<{ experiments: unknown[] }>(mocks.getExperiments);
+    setup();
+    await waitFor(() => expect(experiments).toHaveLength(1));
+
+    act(() => userStore.updateCurrentUser(RENAMED_USER));
+    await waitFor(() => expect(experiments).toHaveLength(2));
+
+    await answer(experiments[0], { experiments: [] });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(submissionsSpinning()).toBe(true);
+    expect(screen.queryByText('No submissions')).not.toBeInTheDocument();
+
+    await answer(experiments[1], { experiments: [] });
+    expect(await screen.findByText('No submissions')).toBeInTheDocument();
   });
 
   it('shows the page and the overview while both sections load', async () => {
