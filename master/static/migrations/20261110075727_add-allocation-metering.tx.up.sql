@@ -1,7 +1,7 @@
 -- User usage metering: when the resource manager assigned the allocation's resources, when they
 -- were released, and what they are metered as. All NULL on an allocation that never got resources.
--- The default marks the allocations from before metering without rewriting the table; new rows get
--- NULL once it is dropped.
+-- The default marks the allocations from before metering (Postgres 10 rewrites the table for it,
+-- 11 and later do not); new rows get NULL once it is dropped.
 ALTER TABLE allocations
     ADD COLUMN assigned_time timestamp without time zone NULL,
     ADD COLUMN released_time timestamp without time zone NULL,
