@@ -1,10 +1,4 @@
-import {
-  getCommands,
-  getExperiments,
-  getGenericTasks,
-  getShells,
-  getTensorBoards,
-} from 'services/api';
+import { getCommands, getExperiments, getGenericTasks, getShells } from 'services/api';
 import {
   BulkExperimentItem,
   CommandState,
@@ -24,7 +18,6 @@ vi.mock('services/api', () => ({
   getExperiments: vi.fn(),
   getGenericTasks: vi.fn(),
   getShells: vi.fn(),
-  getTensorBoards: vi.fn(),
 }));
 
 const command = (
@@ -111,7 +104,6 @@ describe('fetchRunPage', () => {
         workspaceId: 4,
       }),
     ]);
-    vi.mocked(getTensorBoards).mockResolvedValue([]);
     vi.mocked(getGenericTasks).mockResolvedValue(
       genericPage([generic('g1', '2026-01-04T00:00:00Z')], 7),
     );
@@ -226,12 +218,10 @@ describe('fetchRunPage', () => {
     expect(vi.mocked(getShells).mock.calls[0][0].users).toBeUndefined();
   });
 
-  it('asks for all the shells, commands and TensorBoards (limit 0)', async () => {
+  it('asks for all the shells and commands (limit 0)', async () => {
     await fetchRunPage(globalJobs());
 
-    [getCommands, getShells, getTensorBoards].forEach((fn) =>
-      expect(vi.mocked(fn).mock.calls[0][0].limit).toBe(0),
-    );
+    [getCommands, getShells].forEach((fn) => expect(vi.mocked(fn).mock.calls[0][0].limit).toBe(0));
   });
 
   it('fetches only the kinds of the filter', async () => {
@@ -240,7 +230,6 @@ describe('fetchRunPage', () => {
     expect(getGenericTasks).not.toHaveBeenCalled();
     expect(getExperiments).not.toHaveBeenCalled();
     expect(getCommands).not.toHaveBeenCalled();
-    expect(getTensorBoards).not.toHaveBeenCalled();
     expect(page.rows.map((row) => row.key)).toEqual(['shell:sh-cpu', 'shell:sh-ended']);
     expect(page.total).toBe(2);
   });
@@ -271,7 +260,7 @@ describe('fetchRunPage', () => {
       }
     });
 
-    it('filters shells, commands and TensorBoards by their slots here', async () => {
+    it('filters shells and commands by their slots here', async () => {
       const kinds = [CommandType.Command, CommandType.Shell];
       const many = await fetchRunPage(globalJobs({ kinds, slots: slotsQuery(['multi:1']) }));
       expect(many.rows.map((row) => row.key)).toEqual(['command:cmd-gpu']);
@@ -302,7 +291,7 @@ describe('fetchRunPage', () => {
     expect(listCall(getGenericTasks)).toMatchObject({ workspaceId: 7 });
     expect(listCall(getGenericTasks)?.projectId).toBeUndefined();
     expect(listCall(getExperiments)).toMatchObject({ workspaceId: 7 });
-    expect(vi.mocked(getTensorBoards).mock.calls[0][0]).toMatchObject({ workspaceId: 7 });
+    expect(vi.mocked(getShells).mock.calls[0][0]).toMatchObject({ workspaceId: 7 });
   });
 
   it('filters the global page by workspaces, the other tasks here', async () => {
@@ -325,7 +314,6 @@ describe('fetchRunPage', () => {
 
     expect(getCommands).not.toHaveBeenCalled();
     expect(getShells).not.toHaveBeenCalled();
-    expect(getTensorBoards).not.toHaveBeenCalled();
     expect(listCall(getGenericTasks)).toMatchObject({ projectId: 1 });
     expect(listCall(getGenericTasks)?.workspaceId).toBeUndefined();
     expect(listCall(getExperiments)).toMatchObject({ projectId: 1 });
@@ -358,7 +346,7 @@ describe('fetchRunPage', () => {
     const signal = new AbortController().signal;
     await fetchRunPage(globalJobs(), signal);
 
-    [getCommands, getShells, getTensorBoards, getGenericTasks, getExperiments].forEach((fn) =>
+    [getCommands, getShells, getGenericTasks, getExperiments].forEach((fn) =>
       vi.mocked(fn).mock.calls.forEach((call) => expect(call[1]).toEqual({ signal })),
     );
   });

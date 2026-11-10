@@ -282,7 +282,7 @@ masterMemRequest: 8Gi
 # masterCpuLimit: 2
 # masterMemLimit: 8Gi
 
-## Configure the task container defaults. Tasks include trials, commands, TensorBoards and shells.
+## Configure the task container defaults. Tasks include trials, commands and shells.
 ## For all task containers, shm_size_bytes and network_mode are configurable. For trials, the
 ## network interface used by distributed (multi-machine) training is configurable.
 taskContainerDefaults:
@@ -291,7 +291,7 @@ taskContainerDefaults:
   # forcePullImage: <true or false>
 
   # Configure a default pod spec for all GPU tasks (experiments, shells, commands) and CPU tasks
-  # (CPU shells, TensorBoards, zero-slot commands). If a pod spec is defined for an individual
+  # (CPU shells, zero-slot commands). If a pod spec is defined for an individual
   # task, that pod spec will replace the default one that is defined here. See
   # https://docs:determined.ai/latest/topic-guides/custom-pod-specs.html for more details.
   # cpuPodSpec:
@@ -303,7 +303,7 @@ taskContainerDefaults:
   # checkpointGcPodSpec:
 
   # Configure default Docker images for all GPU tasks (experiments, shells, commands) and
-  # CPU tasks (CPU shells, TensorBoards, zero-slot commands). If a Docker image is defined
+  # CPU tasks (CPU shells, zero-slot commands). If a Docker image is defined
   # for an individual task, that image will replace the default one that is defined here.
   # If specifying a default image, both GPU and CPU default images must be defined.
   # cpuImage:
@@ -330,12 +330,6 @@ telemetry:
 
 ## A user-friendly name to identify this cluster by.
 # clusterName: Dev
-
-## Specifies the duration in seconds before idle
-## TensorBoard instances are automatically terminated.
-## A TensorBoard instance is considered to be idle if
-## it does not receive any HTTP traffic. The default timeout is 300 seconds (5 minutes).
-# tensorboardTimeout: 300
 
 ## deprecated, use initialUserPassword instead.
 # defaultPassword sets the password for the admin and determined user accounts.

@@ -145,7 +145,7 @@ describe('runRows', () => {
   });
 
   describe('state groups', () => {
-    it('maps shells, commands and TensorBoards: terminated is ended, never paused', () => {
+    it('maps shells and commands: terminated is ended, never paused', () => {
       expect(commandStateGroup(CommandState.Terminated)).toBe(StateGroup.Ended);
       [
         CommandState.Queued,
@@ -153,7 +153,6 @@ describe('runRows', () => {
         CommandState.Starting,
         CommandState.Running,
         CommandState.Terminating,
-        CommandState.Waiting,
       ].forEach((state) => expect(commandStateGroup(state)).toBe(StateGroup.Active));
     });
 
@@ -202,11 +201,11 @@ describe('runRows', () => {
   describe('kinds', () => {
     it('lists every kind on the Jobs pages, no experiments in the tasks-only view', () => {
       expect(kindsOf({ type: 'global' }, true)).toContain(RunKind.Experiment);
-      expect(kindsOf({ type: 'global' }, true)).toHaveLength(5);
+      expect(kindsOf({ type: 'global' }, true)).toHaveLength(4);
       expect(kindsOf({ type: 'workspace', workspaceId: 2 }, false)).not.toContain(
         RunKind.Experiment,
       );
-      expect(kindsOf({ type: 'workspace', workspaceId: 2 }, false)).toHaveLength(4);
+      expect(kindsOf({ type: 'workspace', workspaceId: 2 }, false)).toHaveLength(3);
     });
 
     it('lists only experiments and generic tasks in a project', () => {
@@ -295,34 +294,33 @@ describe('runRows', () => {
       ),
       commandRow(command('cpu-cmd', '2026-01-02T00:00:00Z', { name: 'Preprocess' })),
       commandRow(
-        command('old-tb', '2026-01-01T00:00:00Z', {
+        command('old-cmd', '2026-01-01T00:00:00Z', {
           slots: 4,
           state: CommandState.Terminated,
-          type: CommandType.TensorBoard,
           userId: 2,
         }),
       ),
     ];
-    const all = [CommandType.Shell, CommandType.Command, CommandType.TensorBoard];
+    const all = [CommandType.Shell, CommandType.Command];
     const ids = (filtered: CommandRunRow[]) => filtered.map((row) => row.id);
 
     it('filters by kind, state, search, slots, owner and workspace', () => {
       expect(ids(filterCommandRows(rows, { kinds: [CommandType.Shell] }))).toEqual(['gpu-shell']);
       expect(ids(filterCommandRows(rows, { kinds: all, states: [StateGroup.Ended] }))).toEqual([
-        'old-tb',
+        'old-cmd',
       ]);
       expect(ids(filterCommandRows(rows, { kinds: all, states: [StateGroup.Paused] }))).toEqual([]);
       expect(ids(filterCommandRows(rows, { kinds: all, search: 'PREPRO' }))).toEqual(['cpu-cmd']);
-      expect(ids(filterCommandRows(rows, { kinds: all, search: 'old-' }))).toEqual(['old-tb']);
+      expect(ids(filterCommandRows(rows, { kinds: all, search: 'old-' }))).toEqual(['old-cmd']);
       expect(ids(filterCommandRows(rows, { kinds: all, slots: slotsQuery(['multi:0']) }))).toEqual([
         'gpu-shell',
-        'old-tb',
+        'old-cmd',
       ]);
       expect(ids(filterCommandRows(rows, { kinds: all, slots: slotsQuery(['0', '4']) }))).toEqual([
         'cpu-cmd',
-        'old-tb',
+        'old-cmd',
       ]);
-      expect(ids(filterCommandRows(rows, { kinds: all, userIds: [2] }))).toEqual(['old-tb']);
+      expect(ids(filterCommandRows(rows, { kinds: all, userIds: [2] }))).toEqual(['old-cmd']);
       expect(ids(filterCommandRows(rows, { kinds: all, workspaceIds: [3, 4] }))).toEqual([
         'gpu-shell',
       ]);

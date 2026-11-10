@@ -56,8 +56,6 @@ export const commandTypeOfTask = (taskType?: V1TaskType): Type.CommandType | und
       return Type.CommandType.Command;
     case V1TaskType.SHELL:
       return Type.CommandType.Shell;
-    case V1TaskType.TENSORBOARD:
-      return Type.CommandType.TensorBoard;
     default:
       return undefined;
   }
@@ -224,7 +222,6 @@ const commandStateSortOrder: CommandState[] = [
   CommandState.Pulling,
   CommandState.Starting,
   CommandState.Running,
-  CommandState.Waiting,
   CommandState.Terminating,
   CommandState.Terminated,
 ];

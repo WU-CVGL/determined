@@ -10,7 +10,7 @@ import termcolor
 
 from determined import cli
 from determined.cli import ntsc, render, task
-from determined.common import api, check
+from determined.common import api
 from determined.common.api import bindings
 
 # The idle timeout of a viewing session whose configuration sets none.
@@ -48,8 +48,8 @@ def viewing_session_config(
     return config
 
 
-# The kinds of task that the tensorboard commands manage, and a shell that they refuse.
-TENSORBOARD_TASK = "tensorboard"
+# The kinds of shell: a viewing session, which the tensorboard commands manage, and another shell,
+# which they refuse.
 VIEWING_SESSION = "session"
 SHELL = "shell"
 
@@ -64,8 +64,8 @@ def viewing_session_url(master: str, task_id: str) -> str:
 def primary_service(sess: api.Session, task_id: str) -> str:
     """
     Returns the primary service of the task task_id: tensorboard for a viewing session, ssh for any
-    other shell, and none for a TensorBoard task or a task that is not found. The task's services,
-    unlike GetShell, hold no credential, and the master answers them for ended tasks as well.
+    other shell, and none for another task or a task that is not found. The task's services, unlike
+    GetShell, hold no credential, and the master answers them for ended tasks as well.
     """
     try:
         return bindings.get_GetTaskServices(sess, taskId=task_id).primary
@@ -81,33 +81,26 @@ def shell_kind(sess: api.Session, shell: typing.Dict[str, typing.Any]) -> str:
     return VIEWING_SESSION if primary_service(sess, shell["id"]) == "tensorboard" else SHELL
 
 
-def resolve_ids(
-    sess: api.Session, prefixes: typing.List[str], subcommand: str
-) -> typing.List[typing.Tuple[str, str]]:
+def resolve_ids(sess: api.Session, prefixes: typing.List[str], subcommand: str) -> typing.List[str]:
     """
-    Returns the ID and kind, TENSORBOARD_TASK or VIEWING_SESSION, of the task that each ID or ID
-    prefix names: a TensorBoard task first, then a shell the user may see. A shell that is not a
-    viewing session is refused; a full ID that is neither is a TensorBoard task's, for its API to
-    answer.
+    Returns the ID of the viewing session that each ID or ID prefix names, among the shells the
+    user may see. A shell that is not a viewing session is refused, and so is a full ID that names
+    no shell.
     """
-    tensorboards: typing.List[typing.Dict[str, typing.Any]] = []
     shells: typing.List[typing.Dict[str, typing.Any]] = []
     if not all(ntsc.TASK_ID_REGEX.match(p) for p in prefixes):
-        tensorboards = sess.get("api/v1/tensorboards").json()["tensorboards"]
         shells = sess.get("api/v1/shells").json()["shells"]
 
     resolved = []
     for prefix in prefixes:
         if ntsc.TASK_ID_REGEX.match(prefix):
             primary = primary_service(sess, prefix)
-            if primary == "tensorboard":
-                resolved.append((prefix, VIEWING_SESSION))
-            else:
-                resolved.append((prefix, SHELL if primary else TENSORBOARD_TASK))
+            if not primary:
+                raise cli.errors.CliError(f"tensorboard {prefix} not found")
+            resolved.append((prefix, VIEWING_SESSION if primary == "tensorboard" else SHELL))
             continue
-        found = [(x["id"], TENSORBOARD_TASK) for x in tensorboards if x["id"].startswith(prefix)]
         others = [(x["id"], shell_kind(sess, x)) for x in shells if x["id"].startswith(prefix)]
-        found += [x for x in others if x[1] == VIEWING_SESSION]
+        found = [x for x in others if x[1] == VIEWING_SESSION]
         if not found and len(others) == 1:
             found = others
         if len(found) > 1:
@@ -121,7 +114,7 @@ def resolve_ids(
             raise cli.errors.CliError(
                 f"{task_id} is a shell, not a TensorBoard; use det shell {subcommand}"
             )
-    return resolved
+    return [task_id for task_id, _ in resolved]
 
 
 def start_tensorboard(args: argparse.Namespace) -> None:
@@ -155,7 +148,15 @@ def start_tensorboard(args: argparse.Namespace) -> None:
 
     if resp.warnings:
         cli.print_launch_warnings(resp.warnings)
-    cli.wait_ntsc_ready(sess, api.NTSC_Kind.tensorboard, shell.id)
+    loading = render.Animator("Waiting for tensorboard to become ready")
+    err = api.wait_for_task_ready(
+        session=sess, task_id=shell.id, progress_report=loading.next, timeout=60 * 30
+    )
+    loading.clear(
+        f"tensorboard (id: {shell.id}) is ready." if not err else f"Waiting stopped: {err}"
+    )
+    if err:
+        raise cli.errors.CliError(err)
 
     url = viewing_session_url(args.master, shell.id)
     if not args.no_browser:
@@ -165,34 +166,20 @@ def start_tensorboard(args: argparse.Namespace) -> None:
 
 def open_tensorboard(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
-    tensorboard_id, kind = resolve_ids(sess, [args.tensorboard_id], "open")[0]
+    tensorboard_id = resolve_ids(sess, [args.tensorboard_id], "open")[0]
 
     task = bindings.get_GetTask(sess, taskId=tensorboard_id).task
-    if kind == VIEWING_SESSION:
-        if task.endTime is not None:
-            raise cli.errors.CliError("Tensorboard has ended")
-        url = viewing_session_url(args.master, tensorboard_id)
-        webbrowser.open(url)
-        print(url)
-        return
-    check.check_none(task.endTime, "Tensorboard has ended")
-
-    tsb = bindings.get_GetTensorboard(sess, tensorboardId=tensorboard_id).tensorboard
-    assert tsb.serviceAddress is not None, "missing tensorboard serviceAddress"
-    tb_path = ntsc.make_interactive_task_url(
-        task_id=tsb.id,
-        service_address=tsb.serviceAddress,
-        description=tsb.description,
-        resource_pool=tsb.resourcePool,
-        currentSlotsExceeded=False,
-    )
-    webbrowser.open(f"{args.master}/{tb_path}")
+    if task.endTime is not None:
+        raise cli.errors.CliError("Tensorboard has ended")
+    url = viewing_session_url(args.master, tensorboard_id)
+    webbrowser.open(url)
+    print(url)
 
 
 def list_tensorboards(args: argparse.Namespace) -> None:
     """
-    Lists the TensorBoard tasks and the viewing sessions in one table, as det shell list lists
-    shells. --json prints them as api/v1/tensorboards and api/v1/shells return them, in one list.
+    Lists the viewing sessions as det shell list lists shells; --json prints them as api/v1/shells
+    returns them.
     """
     sess = cli.setup_session(args)
     table_header = ntsc.TensorboardTableHeader
@@ -203,9 +190,8 @@ def list_tensorboards(args: argparse.Namespace) -> None:
     if not args.all:
         params["users"] = [sess.username]
 
-    res = sess.get("api/v1/tensorboards", params=params).json()["tensorboards"]
     shells = sess.get("api/v1/shells", params=params).json()["shells"]
-    res += [x for x in shells if shell_kind(sess, x) == VIEWING_SESSION]
+    res = [x for x in shells if shell_kind(sess, x) == VIEWING_SESSION]
 
     if args.quiet:
         for item in res:
@@ -236,14 +222,13 @@ def kill_tensorboards(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
     targets = resolve_ids(sess, args.tensorboard_id, "kill")
 
-    for i, (task_id, kind) in enumerate(targets):
+    for i, task_id in enumerate(targets):
         try:
-            task_type = ntsc.TaskTypeShell if kind == VIEWING_SESSION else ntsc.TaskTypeTensorBoard
-            ntsc._kill(sess, task_type, task_id)
+            ntsc._kill(sess, ntsc.TaskTypeShell, task_id)
             print(termcolor.colored(f"Killed tensorboard {task_id}", "green"))
         except api.errors.APIException as e:
             if not args.force:
-                for ignored, _ in targets[i + 1 :]:
+                for ignored in targets[i + 1 :]:
                     print(f"Cowardly not killing {ignored}")
                 raise e
             print(termcolor.colored(f"Skipping: {e} ({type(e).__name__})", "red"))
@@ -251,37 +236,27 @@ def kill_tensorboards(args: argparse.Namespace) -> None:
 
 def tensorboard_config(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
-    task_id, kind = resolve_ids(sess, [args.tensorboard_id], "config")[0]
-    if kind == VIEWING_SESSION:
-        res_json = sess.get(f"api/v1/shells/{task_id}").json()
-        print(render.format_object_as_yaml(res_json["config"]))
-        return
-    args.tensorboard_id = task_id
-    ntsc.config(args)
+    task_id = resolve_ids(sess, [args.tensorboard_id], "config")[0]
+    res_json = sess.get(f"api/v1/shells/{task_id}").json()
+    print(render.format_object_as_yaml(res_json["config"]))
 
 
 def tensorboard_logs(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
-    args.task_id = resolve_ids(sess, [args.task_id], "logs")[0][0]
+    args.task_id = resolve_ids(sess, [args.task_id], "logs")[0]
     task.logs(args)
 
 
 def set_tensorboard_priority(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
-    task_id, kind = resolve_ids(sess, [args.tensorboard_id], "set priority")[0]
-    if kind == VIEWING_SESSION:
-        try:
-            sess.post(f"api/v1/shells/{task_id}/set_priority", json={"priority": args.priority})
-            print(
-                termcolor.colored(
-                    f"Set priority of tensorboard {task_id} to {args.priority}", "green"
-                )
-            )
-        except api.errors.APIException as e:
-            print(termcolor.colored(f"Skipping: {e} ({type(e).__name__})", "red"))
-        return
-    args.tensorboard_id = task_id
-    ntsc.set_priority(args)
+    task_id = resolve_ids(sess, [args.tensorboard_id], "set priority")[0]
+    try:
+        sess.post(f"api/v1/shells/{task_id}/set_priority", json={"priority": args.priority})
+        print(
+            termcolor.colored(f"Set priority of tensorboard {task_id} to {args.priority}", "green")
+        )
+    except api.errors.APIException as e:
+        print(termcolor.colored(f"Skipping: {e} ({type(e).__name__})", "red"))
 
 
 args_description: cli.ArgsDescription = [

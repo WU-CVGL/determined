@@ -26,7 +26,6 @@ def read_only_tasks(resources: Resources) -> LocustTasksWithMeta:
     tasks.append(LocustGetTaskWithMeta("/api/v1/users", test_name="get users"))
     tasks.append(LocustGetTaskWithMeta("/api/v1/models", test_name="get models"))
     tasks.append(LocustGetTaskWithMeta("/api/v1/master/telemetry", test_name="get telemetry"))
-    tasks.append(LocustGetTaskWithMeta("/api/v1/tensorboards", test_name="get tensorboards"))
     tasks.append(LocustGetTaskWithMeta("/api/v1/shells", test_name="get shells"))
     tasks.append(LocustGetTaskWithMeta("/api/v1/commands", test_name="get commands"))
     tasks.append(LocustGetTaskWithMeta("/api/v1/job-queues", test_name="get job queues"))
@@ -93,11 +92,6 @@ def read_only_tasks(resources: Resources) -> LocustTasksWithMeta:
                 test_name="get project columns"))
 
     if resources.workspace_id is not None:
-        tasks.append(LocustGetTaskWithMeta(
-            "/api/v1/tensorboards", test_name="get workspace tensorboards",
-            params={"sortBy": "SORT_BY_UNSPECIFIED",
-                    "orderBy": "ORDER_BY_UNSPECIFIED",
-                    "workspaceId": resources.workspace_id}))
         tasks.append(LocustGetTaskWithMeta("/api/v1/shells", test_name="get workspace shells",
                                            params={"sortBy": "SORT_BY_UNSPECIFIED",
                                                    "orderBy": "ORDER_BY_UNSPECIFIED",
@@ -288,7 +282,6 @@ def read_only_tasks(resources: Resources) -> LocustTasksWithMeta:
     # The following require launching things to test:
     #   commands
     #   shells
-    #   tensorboards
 
     logger.info(f"There are {len(tasks)} tasks programmed")
     # TODO: weighting?

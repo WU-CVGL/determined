@@ -165,7 +165,7 @@ def test_tensorboard_experiment_capture() -> None:
     assert len(matches) >= 1
 
     # Confirm Tensorboard task is captured
-    if re.search(f"{tb.task_id}.*,TENSORBOARD", r.text) is None:
+    if re.search(f"{tb.task_id}.*,SHELL", r.text) is None:
         msg = f"did not find task_id={tb.task_id} @ {url} in output:\n{r.text}"
         print(msg, file=sys.stderr)
         raise ValueError(msg)

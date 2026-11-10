@@ -35,7 +35,6 @@ func TestNTSCCarriesGPUGroups(t *testing.T) {
 	}{
 		{model.TaskTypeCommand, model.JobTypeCommand},
 		{model.TaskTypeShell, model.JobTypeShell},
-		{model.TaskTypeTensorboard, model.JobTypeTensorboard},
 	} {
 		req := CreateMockGenericReq(t, pgDB)
 		req.Spec.Config.Resources.Slots = 2

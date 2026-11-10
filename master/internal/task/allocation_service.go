@@ -120,15 +120,6 @@ func (as *allocationService) SetReady(ctx context.Context, id model.AllocationID
 	return ref.SetReady(ctx)
 }
 
-// SetWaiting moves the allocation to the waiting state if it has not progressed past it yet.
-func (as *allocationService) SetWaiting(ctx context.Context, id model.AllocationID) error {
-	ref, err := as.waitForRestore(ctx, id)
-	if err != nil {
-		return err
-	}
-	return ref.SetWaiting(ctx)
-}
-
 // SetProxyAddress sets the proxy address of the allocation and sets up proxies for any services
 // it provides.
 func (as *allocationService) SetProxyAddress(

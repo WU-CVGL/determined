@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/determined-ai/determined/master/pkg/model"
-	"github.com/determined-ai/determined/proto/pkg/tensorboardv1"
 )
 
 // NSCAuthZPermissive is permissive implementation of the NSCAuthZ interface.
@@ -58,38 +57,12 @@ func (a *NSCAuthZPermissive) AccessibleScopes(
 	return (&NSCAuthZBasic{}).AccessibleScopes(ctx, curUser, requestedScope)
 }
 
-// FilterTensorboards returns the tensorboards the user has access to.
-func (a *NSCAuthZPermissive) FilterTensorboards(
-	ctx context.Context, curUser model.User, requestedScope model.AccessScopeID,
-	tensorboards []*tensorboardv1.Tensorboard,
-) ([]*tensorboardv1.Tensorboard, error) {
-	_, _ = (&NSCAuthZRBAC{}).FilterTensorboards(ctx, curUser, requestedScope, tensorboards)
-	return (&NSCAuthZBasic{}).FilterTensorboards(ctx, curUser, requestedScope, tensorboards)
-}
-
-// CanGetTensorboard always returns true and nil error.
-func (a *NSCAuthZPermissive) CanGetTensorboard(
-	ctx context.Context, curUser model.User, workspaceID model.AccessScopeID,
-	experimentIDs []int32, trialIDs []int32,
-) error {
-	_ = (&NSCAuthZRBAC{}).CanGetTensorboard(ctx, curUser, workspaceID, experimentIDs, trialIDs)
-	return (&NSCAuthZBasic{}).CanGetTensorboard(ctx, curUser, workspaceID, experimentIDs, trialIDs)
-}
-
 // CanGetTensorBoardSources audits RBAC authorization but enforces basic authorization.
 func (a *NSCAuthZPermissive) CanGetTensorBoardSources(
 	ctx context.Context, curUser model.User, experimentIDs, trialIDs []int32,
 ) error {
 	_ = (&NSCAuthZRBAC{}).CanGetTensorBoardSources(ctx, curUser, experimentIDs, trialIDs)
 	return (&NSCAuthZBasic{}).CanGetTensorBoardSources(ctx, curUser, experimentIDs, trialIDs)
-}
-
-// CanTerminateTensorboard always returns nil.
-func (a *NSCAuthZPermissive) CanTerminateTensorboard(
-	ctx context.Context, curUser model.User, workspaceID model.AccessScopeID,
-) error {
-	_ = (&NSCAuthZRBAC{}).CanTerminateTensorboard(ctx, curUser, workspaceID)
-	return (&NSCAuthZBasic{}).CanTerminateTensorboard(ctx, curUser, workspaceID)
 }
 
 // CanCreateGenericTask always returns nil.

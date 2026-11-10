@@ -65,7 +65,6 @@ def report_ready(report_to: str, service: str) -> None:
 
 def main(
     ready: Pattern,
-    waiting: Optional[Pattern] = None,
     service: Optional[str] = None,
     post: bool = True,
     report_to: Optional[str] = None,
@@ -89,10 +88,6 @@ def main(
             if sess is not None:
                 post_ready(sess, allocation_id, "ready")
             return
-        if waiting and waiting.match(line):
-            if sess is not None:
-                post_ready(sess, allocation_id, "waiting")
-            return
 
 
 if __name__ == "__main__":
@@ -101,9 +96,6 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--ready-regex", type=str, help="the pattern to match task ready", required=True
-    )
-    parser.add_argument(
-        "--waiting-regex", type=str, help="the pattern to match task waiting"
     )
     parser.add_argument(
         "--service", type=str, help="the service whose readiness the task log gets"
@@ -117,5 +109,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     ready_regex = re.compile(args.ready_regex)
-    waiting_regex = re.compile(args.waiting_regex) if args.waiting_regex else None
-    main(ready_regex, waiting_regex, args.service, not args.no_post, args.report_to)
+    main(ready_regex, args.service, not args.no_post, args.report_to)

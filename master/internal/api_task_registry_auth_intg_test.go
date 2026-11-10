@@ -103,7 +103,7 @@ func registryAuthReadLogs(entries []*logrus.Entry) []*logrus.Entry {
 	return out
 }
 
-// ntscReqWithRegistryAuth is a TensorBoard, shell or command request of owner whose
+// ntscReqWithRegistryAuth is a shell or command request of owner whose
 // config sets registry_auth.
 func ntscReqWithRegistryAuth(owner model.User) *command.CreateGeneric {
 	key := "pass"
@@ -183,23 +183,6 @@ func TestNTSCConfigRegistryAuthOnlyForOwnerOrAdmin(t *testing.T) {
 			},
 			kill: func(ctx context.Context, id string) error {
 				_, err := api.KillShell(ctx, &apiv1.KillShellRequest{ShellId: id})
-				return err
-			},
-		},
-		{
-			name:   "tensorboard",
-			launch: launchGeneric(model.TaskTypeTensorboard, model.JobTypeTensorboard),
-			get: func(ctx context.Context, id string) (*structpb.Struct, error) {
-				resp, err := api.GetTensorboard(ctx,
-					&apiv1.GetTensorboardRequest{TensorboardId: id})
-				if err != nil {
-					return nil, err
-				}
-				return resp.Config, nil
-			},
-			kill: func(ctx context.Context, id string) error {
-				_, err := api.KillTensorboard(ctx,
-					&apiv1.KillTensorboardRequest{TensorboardId: id})
 				return err
 			},
 		},

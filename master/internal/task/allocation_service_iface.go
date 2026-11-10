@@ -34,7 +34,6 @@ type AllocationService interface {
 	) error
 	State(id model.AllocationID) (AllocationState, error)
 	SetReady(ctx context.Context, id model.AllocationID) error
-	SetWaiting(ctx context.Context, id model.AllocationID) error
 	SetProxyAddress(
 		ctx context.Context,
 		id model.AllocationID,
