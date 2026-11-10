@@ -31,12 +31,12 @@ const renderBar = (
         <ConfirmationProvider>
           <TaskBar
             handleViewLogsClick={handleViewLogsClick}
-            id="tb-1"
-            name="TensorBoard (lively-calm-fox)"
+            id="cmd-1"
+            name="Command (lively-calm-fox)"
             owner={OWNER}
             resourcePool="default"
             state={CommandState.Running}
-            type={CommandType.TensorBoard}
+            type={CommandType.Command}
             {...props}
           />
         </ConfirmationProvider>
@@ -79,7 +79,7 @@ describe('TaskBar', () => {
     await userEvent.click(await screen.findByText('Kill'));
     await userEvent.click(await screen.findByRole('button', { name: 'Kill' }));
     await waitFor(() =>
-      expect(killTask).toHaveBeenCalledWith({ id: 'tb-1', type: CommandType.TensorBoard }),
+      expect(killTask).toHaveBeenCalledWith({ id: 'cmd-1', type: CommandType.Command }),
     );
   });
 
@@ -102,7 +102,7 @@ describe('TaskBar', () => {
 
   it('shows the name alone when the pool is unknown', () => {
     renderBar({ resourcePool: '' });
-    expect(screen.getByText('TensorBoard (lively-calm-fox)')).toBeInTheDocument();
+    expect(screen.getByText('Command (lively-calm-fox)')).toBeInTheDocument();
     expect(screen.queryByText('—')).not.toBeInTheDocument();
   });
 });

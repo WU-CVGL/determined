@@ -277,10 +277,6 @@
    -  ``task_mapping_delay``: How long an allocation runs before its metrics are attributed to its
       task. Defaults to ``5m``. See :ref:`master-config-observability`.
 
--  ``tensorboardTimeout``: Specifies the duration in seconds before idle TensorBoard instances are
-   automatically terminated. A TensorBoard instance is considered to be idle if it does not receive
-   any HTTP traffic. The default timeout is 300 (5 minutes).
-
 -  ``initialUserPassword``: Specifies a string containing the default password for the admin and
    determined user accounts. (*Required*)
 

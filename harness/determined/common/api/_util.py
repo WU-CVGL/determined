@@ -110,20 +110,17 @@ def read_paginated(
         offset = pagination.endIndex
 
 
-# Literal["tensorboard", "shell", "command"]
+# Literal["shell", "command"]
 class NTSC_Kind(enum.Enum):
-    tensorboard = "tensorboard"
     shell = "shell"
     command = "command"
 
 
-AnyNTSC = Union[bindings.v1Tensorboard, bindings.v1Shell, bindings.v1Command]
+AnyNTSC = Union[bindings.v1Shell, bindings.v1Command]
 
 
 def get_ntsc_details(session: api.Session, typ: NTSC_Kind, ntsc_id: str) -> AnyNTSC:
-    if typ == NTSC_Kind.tensorboard:
-        return bindings.get_GetTensorboard(session, tensorboardId=ntsc_id).tensorboard
-    elif typ == NTSC_Kind.shell:
+    if typ == NTSC_Kind.shell:
         return bindings.get_GetShell(session, shellId=ntsc_id).shell
     elif typ == NTSC_Kind.command:
         return bindings.get_GetCommand(session, commandId=ntsc_id).command

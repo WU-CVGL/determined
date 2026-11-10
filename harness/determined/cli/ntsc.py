@@ -1,4 +1,4 @@
-"""Shared CLI interface for NTSCs (tensorboards, shells, and commands)."""
+"""Shared CLI interface for NTSCs (shells and commands)."""
 
 import argparse
 import base64
@@ -6,10 +6,8 @@ import collections
 import functools
 import json
 import operator
-import os
 import pathlib
 import re
-import urllib
 import webbrowser
 from typing import IO, Any, Dict, Iterable, List, Optional, Tuple, Union
 
@@ -89,42 +87,35 @@ TensorboardTableHeader = collections.OrderedDict(
 
 TaskTypeCommand = "command cmd"
 TaskTypeShell = "shell"
-TaskTypeTensorBoard = "tensorboard"
 
 RemoteTaskName = {
     TaskTypeCommand: "command",
     TaskTypeShell: "shell",
-    TaskTypeTensorBoard: "tensorboard",
 }
 
 RemoteTaskLogName = {
     TaskTypeCommand: "Command",
     TaskTypeShell: "Shell",
-    TaskTypeTensorBoard: "TensorBoard",
 }
 
 RemoteTaskNewAPIs = {
     TaskTypeCommand: "commands",
     TaskTypeShell: "shells",
-    TaskTypeTensorBoard: "tensorboards",
 }
 
 RemoteTaskOldAPIs = {
     TaskTypeCommand: "commands",
     TaskTypeShell: "shells",
-    TaskTypeTensorBoard: "tensorboard",
 }
 
 RemoteTaskListTableHeaders: Dict[str, Dict[str, str]] = {
     "command cmd": CommandTableHeader,
     "shell": CommandTableHeader,
-    "tensorboard": TensorboardTableHeader,
 }
 
 RemoteTaskGetIDsFunc = {
     "command cmd": lambda args: args.command_id,
     "shell": lambda args: args.shell_id,
-    "tensorboard": lambda args: args.tensorboard_id,
 }
 
 
@@ -463,27 +454,3 @@ def launch_command(
 def open_in_browser(master: str, path: str) -> None:
     """Open a path under the master in the browser."""
     webbrowser.open(f"{master}/{path.lstrip('/')}")
-
-
-def make_interactive_task_url(
-    task_id: str,
-    service_address: str,
-    description: str,
-    resource_pool: str,
-    currentSlotsExceeded: bool,
-) -> str:
-    wait_path_url = service_address + "/tensorboard/{}/events?tail=1".format(task_id)
-    public_url = os.environ.get("PUBLIC_URL", "/det")
-    wait_page_url = "{}/wait/tensorboard/{}?eventUrl={}&serviceAddr={}".format(
-        public_url, task_id, wait_path_url, service_address
-    )
-    task_web_url = "{}/interactive/{}/tensorboard/{}/{}/{}?{}".format(
-        public_url,
-        task_id,
-        urllib.parse.quote(description),
-        resource_pool,
-        urllib.parse.quote_plus(wait_page_url),
-        f"currentSlotsExceeded={str(currentSlotsExceeded).lower()}",
-    )
-    # Return a relative path that can be joined to the master_url with a simple "/" separator.
-    return task_web_url.lstrip("/")

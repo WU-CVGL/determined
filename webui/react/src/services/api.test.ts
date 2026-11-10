@@ -15,7 +15,6 @@ import {
   getGenericTaskConfig,
   getGenericTasks,
   getShells,
-  getTensorBoards,
   killGenericTask,
   pauseGenericTask,
   unpauseGenericTask,
@@ -252,12 +251,5 @@ describe('dashboard list services', () => {
   it('getShells forwards the abort signal and reads the slots', async () => {
     const spy = vi.spyOn(detApi.Shells, 'getShells').mockResolvedValue({ shells: [SDK_TASK] });
     await expectSignalAndSlots(getShells, spy);
-  });
-
-  it('getTensorBoards forwards the abort signal and reads the slots', async () => {
-    const spy = vi.spyOn(detApi.TensorBoards, 'getTensorboards').mockResolvedValue({
-      tensorboards: [SDK_TASK],
-    });
-    await expectSignalAndSlots(getTensorBoards, spy);
   });
 });

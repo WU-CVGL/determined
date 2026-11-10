@@ -232,7 +232,7 @@ const mapV1TaskState = (containerState: Sdk.Taskv1State): types.CommandState => 
 };
 
 const mapCommonV1Task = (
-  task: Sdk.V1Command | Sdk.V1Shell | Sdk.V1Tensorboard,
+  task: Sdk.V1Command | Sdk.V1Shell,
   type: types.CommandType,
 ): types.CommandTask => {
   const capabilities = 'capabilities' in task ? task.capabilities : undefined;
@@ -267,17 +267,6 @@ export const mapV1Shell = (shell: Sdk.V1Shell): types.CommandTask => {
   return { ...task, misc: { experimentIds, trialIds } };
 };
 
-export const mapV1TensorBoard = (tensorboard: Sdk.V1Tensorboard): types.CommandTask => {
-  return {
-    ...mapCommonV1Task(tensorboard, types.CommandType.TensorBoard),
-    misc: {
-      experimentIds: tensorboard.experimentIds || [],
-      trialIds: tensorboard.trialIds || [],
-    },
-    serviceAddress: tensorboard.serviceAddress,
-  };
-};
-
 export const mapV1Template = (template: Sdk.V1Template): types.Template => {
   return { config: template.config, name: template.name, workspaceId: template.workspaceId };
 };
@@ -308,7 +297,6 @@ export const mapV1Task = (task: Sdk.V1Task): types.TaskItem => {
             STATE_STARTING: types.CommandState.Starting,
             STATE_TERMINATED: types.CommandState.Terminated,
             STATE_TERMINATING: types.CommandState.Terminating,
-            STATE_WAITING: types.CommandState.Waiting,
           }[String(a?.state) || 'STATE_QUEUED'] || types.CommandState.Queued;
 
         return {

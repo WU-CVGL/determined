@@ -21,7 +21,6 @@ import "determined/api/v1/rbac.proto";
 import "determined/api/v1/run.proto";
 import "determined/api/v1/task.proto";
 import "determined/api/v1/template.proto";
-import "determined/api/v1/tensorboard.proto";
 import "determined/api/v1/trial.proto";
 import "determined/api/v1/shell.proto";
 import "determined/api/v1/token.proto";
@@ -983,17 +982,6 @@ service Determined {
       tags: "Internal"
     };
   }
-  // Set allocation to waiting state.
-  rpc AllocationWaiting(AllocationWaitingRequest)
-      returns (AllocationWaitingResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/allocations/{allocation_id}/waiting"
-      body: "*"
-    };
-    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
-      tags: "Internal"
-    };
-  }
 
   // Persist the given task logs.
   rpc PostTaskLogs(PostTaskLogsRequest) returns (PostTaskLogsResponse) {
@@ -1637,57 +1625,6 @@ service Determined {
     };
   }
 
-  // Get a list of tensorboards.
-  rpc GetTensorboards(GetTensorboardsRequest)
-      returns (GetTensorboardsResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/tensorboards"
-    };
-    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
-      tags: "Tensorboards"
-    };
-  }
-  // Get the requested tensorboard.
-  rpc GetTensorboard(GetTensorboardRequest) returns (GetTensorboardResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/tensorboards/{tensorboard_id}"
-    };
-    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
-      tags: "Tensorboards"
-    };
-  }
-  // Kill the requested tensorboard.
-  rpc KillTensorboard(KillTensorboardRequest)
-      returns (KillTensorboardResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/tensorboards/{tensorboard_id}/kill"
-    };
-    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
-      tags: "Tensorboards"
-    };
-  }
-  // Set the priority of the requested TensorBoard.
-  rpc SetTensorboardPriority(SetTensorboardPriorityRequest)
-      returns (SetTensorboardPriorityResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/tensorboards/{tensorboard_id}/set_priority"
-      body: "*"
-    };
-    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
-      tags: "Tensorboards"
-    };
-  }
-  // Launch a tensorboard.
-  rpc LaunchTensorboard(LaunchTensorboardRequest)
-      returns (LaunchTensorboardResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/tensorboards"
-      body: "*"
-    };
-    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
-      tags: "Tensorboards"
-    };
-  }
   // Delete tensorboard files.
   rpc DeleteTensorboardFiles(DeleteTensorboardFilesRequest)
       returns (DeleteTensorboardFilesResponse) {

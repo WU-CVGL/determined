@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/hashicorp/go-cleanhttp"
@@ -25,11 +24,9 @@ import (
 	"github.com/determined-ai/determined/master/pkg/model"
 )
 
-// Service represents a registered service. The LastRequested field is used by
-// the Tensorboard manager to spin down idle instances of Tensorboard.
+// Service represents a registered service.
 type Service struct {
 	URL                  *url.URL
-	LastRequested        time.Time
 	ProxyTCP             bool
 	AllowUnauthenticated bool
 	// Exec marks a service that runs code as its task's owner. HTTPAuth decides who may reach it,
@@ -57,7 +54,6 @@ func (s Service) Clone() Service {
 	sURL := *s.URL
 	return Service{
 		URL:                  &sURL,
-		LastRequested:        s.LastRequested,
 		ProxyTCP:             s.ProxyTCP,
 		AllowUnauthenticated: s.AllowUnauthenticated,
 		Exec:                 s.Exec,
@@ -155,7 +151,7 @@ func (p *Proxy) Register(serviceID string, url *url.URL, proxyTCP bool, unauth b
 }
 
 // RegisterService registers the service under serviceID, as Register does, with every field of
-// service but LastRequested, which starts now.
+// service.
 func (p *Proxy) RegisterService(serviceID string, service Service) {
 	if serviceID == "" {
 		return
@@ -164,7 +160,6 @@ func (p *Proxy) RegisterService(serviceID string, service Service) {
 	defer p.lock.Unlock()
 
 	p.syslog.Infof("registering service: %s (%v)", serviceID, service.URL)
-	service.LastRequested = time.Now()
 	p.services[serviceID] = &service
 }
 
@@ -192,7 +187,6 @@ func (p *Proxy) GetService(serviceID string) *Service {
 	if service == nil {
 		return nil
 	}
-	service.LastRequested = time.Now()
 
 	// Make a copy to avoid callers mutating the object outside of this locked method.
 	clone := service.Clone()

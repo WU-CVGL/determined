@@ -5,9 +5,8 @@ import (
 	"github.com/determined-ai/determined/master/pkg/schemas/expconf"
 )
 
-// DefaultConfig is the default configuration used by all
-// commands (e.g., commands, shells, TensorBoards) if a request
-// does not specify any configuration options.
+// DefaultConfig is the default configuration used by commands and shells if a request does not
+// specify any configuration options.
 func DefaultConfig(taskContainerDefaults *TaskContainerDefaultsConfig) CommandConfig {
 	out := CommandConfig{
 		Resources:   DefaultResourcesConfig(taskContainerDefaults),
@@ -27,17 +26,16 @@ func DefaultConfig(taskContainerDefaults *TaskContainerDefaultsConfig) CommandCo
 // CommandConfig holds the necessary configurations to launch a command task in
 // the cluster.
 type CommandConfig struct {
-	Description     string              `json:"description"`
-	BindMounts      BindMountsConfig    `json:"bind_mounts"`
-	Environment     Environment         `json:"environment"`
-	Resources       ResourcesConfig     `json:"resources"`
-	Entrypoint      []string            `json:"entrypoint"`
-	TensorBoardArgs []string            `json:"tensorboard_args,omitempty"`
-	IdleTimeout     *Duration           `json:"idle_timeout"`
-	WorkDir         *string             `json:"work_dir"`
-	Debug           bool                `json:"debug"`
-	Pbs             expconf.PbsConfig   `json:"pbs,omitempty"`
-	Slurm           expconf.SlurmConfig `json:"slurm,omitempty"`
+	Description string              `json:"description"`
+	BindMounts  BindMountsConfig    `json:"bind_mounts"`
+	Environment Environment         `json:"environment"`
+	Resources   ResourcesConfig     `json:"resources"`
+	Entrypoint  []string            `json:"entrypoint"`
+	IdleTimeout *Duration           `json:"idle_timeout"`
+	WorkDir     *string             `json:"work_dir"`
+	Debug       bool                `json:"debug"`
+	Pbs         expconf.PbsConfig   `json:"pbs,omitempty"`
+	Slurm       expconf.SlurmConfig `json:"slurm,omitempty"`
 	// Services are the services that a shell runs besides its sshd, by name, and ssh, which only
 	// a shell that views TensorBoard logs disables. Only shells take them.
 	Services map[string]ServiceConfig `json:"services,omitempty"`

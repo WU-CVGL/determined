@@ -13,12 +13,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/docker/docker/api/types/registry"
 	"github.com/sirupsen/logrus"
 	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
+	k8sV1 "k8s.io/api/core/v1"
 
 	"github.com/determined-ai/determined/master/internal/authz"
 	"github.com/determined-ai/determined/master/internal/command"
@@ -795,7 +797,7 @@ func TestLaunchShellTensorBoardSources(t *testing.T) {
 	})
 
 	t.Run("gpu_groups", func(t *testing.T) {
-		// Slots are 0, so the groups' counts cannot add up to them, as for the TensorBoard task.
+		// Slots are 0, so the groups' counts cannot add up to them.
 		requireBothRefuse(t, aliceCtx, tbSourcesConfig(t, tbSourcesExperiments(fs1.ID), nil,
 			map[string]any{"resources": map[string]any{"gpu_groups": []any{
 				map[string]any{"name": "learner", "count": float64(1), "models": []any{"NVIDIA H100"}},
@@ -819,6 +821,34 @@ func TestLaunchShellTensorBoardSources(t *testing.T) {
 	})
 
 	requireNoSentinelInLogs(t, logs)
+}
+
+// createTestExpWithImage creates an experiment of owner that sets an image, image pull secrets and
+// registry_auth named after name.
+//
+// nolint: exhaustruct
+func createTestExpWithImage(
+	t *testing.T, api *apiServer, owner model.User, name string,
+) *model.Experiment {
+	image := "registry.example.com/" + name + "/train:1"
+	conf := expconf.ExperimentConfig{
+		RawName: expconf.Name{RawString: &name},
+		RawEnvironment: &expconf.EnvironmentConfigV0{
+			RawImage: &expconf.EnvironmentImageMapV0{
+				RawCPU: &image, RawCUDA: &image, RawROCM: &image,
+			},
+			RawRegistryAuth: &registry.AuthConfig{
+				Username:      name,
+				Password:      name + "-registry-password",
+				ServerAddress: "registry.example.com",
+			},
+			RawPodSpec: &expconf.PodSpec{Spec: k8sV1.PodSpec{
+				ImagePullSecrets: []k8sV1.LocalObjectReference{{Name: name + "-pull"}},
+			}},
+		},
+	}
+	activeConfig := schemas.WithDefaults(schemas.Merge(minExpConfig, conf))
+	return createTestExpWithActiveConfig(t, api, owner, 1, activeConfig)
 }
 
 // mustStorageTypeAndHost returns the type and host_path of a stored shared_fs checkpoint storage

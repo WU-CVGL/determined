@@ -38,9 +38,11 @@ func legacySpec(taskType model.TaskType, ports ...expconf.ProxyPort) tasks.Gener
 }
 
 // Specs without service records, as every spec was before the master recorded them, get the
-// proxies they had: a shell's sshd as its default TCP port, and plain other ports.
+// proxies they had: a shell's sshd as its default TCP port, and plain other ports, without a token.
 func TestProxyPortConfigsWithoutRecords(t *testing.T) {
 	shell := legacySpec(model.TaskTypeShell, sshdProxyPort(3210))
+	token := testTensorBoardToken
+	shell.Metadata.TensorBoardToken = &token
 	require.Equal(t, []*sproto.ProxyPortConfig{
 		{ServiceID: "task-1", Port: 3210, ProxyTCP: true, Unauthenticated: true},
 		{ServiceID: "task-1:8080", Port: 8080},
@@ -49,31 +51,6 @@ func TestProxyPortConfigsWithoutRecords(t *testing.T) {
 	command := legacySpec(model.TaskTypeCommand)
 	require.Equal(t, []*sproto.ProxyPortConfig{{ServiceID: "task-1:8080", Port: 8080}},
 		proxyPortConfigs(command, "task-1"))
-}
-
-// A TensorBoard's own port gets the spec's token; the config's ports stay plain, and so does a
-// TensorBoard saved without a token. A shell without records gets no token.
-func TestProxyPortConfigsOfTensorBoard(t *testing.T) {
-	tensorBoardPort := expconf.ProxyPort{RawProxyPort: 2700, RawDefaultServiceID: ptrs.Ptr(true)}
-	tensorBoard := legacySpec(model.TaskTypeTensorboard, tensorBoardPort)
-	token := testTensorBoardToken
-	tensorBoard.Metadata.TensorBoardToken = &token
-	require.Equal(t, []*sproto.ProxyPortConfig{
-		{ServiceID: "task-1", Port: 2700, ServiceToken: token},
-		{ServiceID: "task-1:8080", Port: 8080},
-	}, proxyPortConfigs(tensorBoard, "task-1"))
-
-	tensorBoard.Metadata.TensorBoardToken = nil
-	require.Equal(t, []*sproto.ProxyPortConfig{
-		{ServiceID: "task-1", Port: 2700},
-		{ServiceID: "task-1:8080", Port: 8080},
-	}, proxyPortConfigs(tensorBoard, "task-1"))
-
-	shell := legacySpec(model.TaskTypeShell, sshdProxyPort(3210))
-	shell.Metadata.TensorBoardToken = &token
-	for _, port := range proxyPortConfigs(shell, "task-1") {
-		require.Empty(t, port.ServiceToken)
-	}
 }
 
 // A spec with service records gets one proxy policy per container port: each service's from its
@@ -145,7 +122,7 @@ func TestProxyPortConfigsSkipCopiesOfRecords(t *testing.T) {
 }
 
 // A tensorboard record that reads experiments and trials gets the sources check beside Exec and
-// the token; a logdir one, and a legacy TensorBoard, get none.
+// the token; a logdir one gets none.
 func TestProxyPortConfigsSourcesCheck(t *testing.T) {
 	var spec tasks.GenericCommandSpec
 	spec.TaskType = model.TaskTypeShell
@@ -164,12 +141,4 @@ func TestProxyPortConfigsSourcesCheck(t *testing.T) {
 	require.Equal(t, &sproto.ProxyPortConfig{
 		ServiceID: "task-1:3000", Port: 3000, Exec: true, ServiceToken: token,
 	}, proxyPortConfigs(spec, "task-1")[0])
-
-	tensorBoard := legacySpec(model.TaskTypeTensorboard,
-		expconf.ProxyPort{RawProxyPort: 2700, RawDefaultServiceID: ptrs.Ptr(true)})
-	tensorBoard.Metadata.TensorBoardToken = &token
-	tensorBoard.Metadata.ExperimentIDs = []int32{1}
-	for _, port := range proxyPortConfigs(tensorBoard, "task-1") {
-		require.False(t, port.SourcesCheck)
-	}
 }

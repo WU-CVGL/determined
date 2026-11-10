@@ -223,6 +223,25 @@ describe('readFilters', () => {
       filters: { slots: ['2'], state: undefined, type: undefined },
     });
   });
+
+  it('drops the TensorBoard kind of a saved filter, without writing the filter back', () => {
+    expect(read({ type: ['tensor-board', 'shell'] }, 3)).toEqual({
+      cleanup: undefined,
+      filters: {
+        search: undefined,
+        slots: undefined,
+        state: undefined,
+        type: ['shell'],
+        user: undefined,
+        workspace: undefined,
+      },
+      waitsForUser: false,
+    });
+    expect(read({ type: ['tensor-board'] }, 3)).toMatchObject({
+      cleanup: undefined,
+      filters: { type: undefined },
+    });
+  });
 });
 
 describe('urlView', () => {
@@ -281,6 +300,11 @@ describe('urlView', () => {
       sortDesc: true,
       sortKey: 'startTime',
     });
+  });
+
+  it('drops the TensorBoard kind of a link', () => {
+    expect(urlView('?type=tensor-board&type=shell')).toMatchObject({ type: ['shell'] });
+    expect(urlView('?type=tensor-board')).toMatchObject({ type: undefined });
   });
 
   it("reads 0.41.0's GPU, CPU-only and Mine", () => {

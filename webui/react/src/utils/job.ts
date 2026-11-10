@@ -19,8 +19,6 @@ export const jobTypeLabel = (jobType: JobType): string => {
   switch (jobType) {
     case JobType.GENERIC:
       return 'Generic Task';
-    case JobType.TENSORBOARD:
-      return 'TensorBoard';
     default:
       return capitalize(jobTypeIconName(jobType));
   }
@@ -37,8 +35,7 @@ export const genericJobLabel = (name: string, taskId: string): string => {
 };
 
 /*
- * The job name of a shell, command or TensorBoard with its short task ID, as the
- * Tasks page shows it. Tasks without a name keep the type and the short ID.
+ * The job name of a shell or command with its short task ID, as the Tasks page shows it. Tasks without a name keep the type and the short ID.
  */
 export const taskJobLabel = (jobType: JobType, name: string, taskId: string): string => {
   const shortId = taskId.split('-')[0];
@@ -51,8 +48,6 @@ export const jobTypeToCommandType = (jobType: JobType): CommandType | undefined 
   switch (jobType) {
     case JobType.SHELL:
       return CommandType.Shell;
-    case JobType.TENSORBOARD:
-      return CommandType.TensorBoard;
     case JobType.COMMAND:
       return CommandType.Command;
     default:

@@ -26,8 +26,8 @@ type genericCommandSpecMetadata struct {
 	// secret as the private key. The container gets its hash only.
 	CodeServerPassword *string `json:"codeServerPassword,omitempty"`
 	// TensorBoardToken is the token that the master's proxy adds to the requests of the tensorboard
-	// service or of a TensorBoard task and that TensorBoard itself requires of every request, in
-	// every network mode. It stays in the master and the container.
+	// service and that TensorBoard itself requires of every request, in every network mode. It
+	// stays in the master and the container.
 	TensorBoardToken *string `json:"tensorBoardToken,omitempty"`
 }
 
@@ -71,13 +71,10 @@ type GenericCommandSpec struct {
 
 	// Services are the services of a shell, the primary one, ssh, first: their ports and how the
 	// master proxies each. The master builds the services' proxies and environment from them on
-	// every start, also on a restore. Empty for commands and TensorBoards, and for shells saved
-	// before the master recorded them, whose sshd is at SSHDPort or their default TCP proxy port.
+	// every start, also on a restore. Empty for commands, and for shells saved before the master
+	// recorded them, whose sshd is at SSHDPort or their default TCP proxy port.
 	Services []InteractiveService
 
-	// WatchProxyIdleTimeout watches the last request to the task's proxy when its config has an idle
-	// timeout. TensorBoards set it.
-	WatchProxyIdleTimeout bool
 	// WatchTaskActivity watches the task's activity record (see the idle package) when its config
 	// has an idle timeout. Shells set it.
 	WatchTaskActivity bool

@@ -14,8 +14,8 @@ enum Type {
   TYPE_EXPERIMENT = 1;
   reserved 2;
   reserved "TYPE_NOTEBOOK";
-  // TensorBoard Job.
-  TYPE_TENSORBOARD = 3;
+  reserved 3;
+  reserved "TYPE_TENSORBOARD";
   // Shell Job.
   TYPE_SHELL = 4;
   // Command Job.

@@ -22,7 +22,7 @@ import { compareCodePoints, compareText } from 'utils/textOrder';
  */
 
 /**
- * The kinds of runs the dashboard lists. The values are those of the URL's `type` key; the four
+ * The kinds of runs the dashboard lists. The values are those of the URL's `type` key; the three
  * task types keep the values of the old task list, so that its bookmarks still filter.
  */
 export const RunKind = {
@@ -30,7 +30,6 @@ export const RunKind = {
   Experiment: 'experiment',
   GenericTask: 'generic-task',
   Shell: CommandType.Shell,
-  TensorBoard: CommandType.TensorBoard,
 } as const;
 
 export type RunKind = ValueOf<typeof RunKind>;
@@ -43,11 +42,10 @@ export const RUN_KINDS: RunKind[] = [
   RunKind.GenericTask,
   RunKind.Shell,
   RunKind.Command,
-  RunKind.TensorBoard,
 ];
 
-/** Shells, commands and TensorBoards: the kinds the master lists whole, from memory. */
-export const COMMAND_KINDS = [RunKind.Shell, RunKind.Command, RunKind.TensorBoard] as const;
+/** Shells and commands: the kinds the master lists whole, from memory. */
+export const COMMAND_KINDS = [RunKind.Shell, RunKind.Command] as const;
 
 export type ListedCommandKind = (typeof COMMAND_KINDS)[number];
 
@@ -59,7 +57,6 @@ export const runKindLabel: Record<RunKind, string> = {
   [RunKind.Experiment]: 'Experiment',
   [RunKind.GenericTask]: 'Generic Task',
   [RunKind.Shell]: 'Shell',
-  [RunKind.TensorBoard]: 'TensorBoard',
 };
 
 export const runKindPluralLabel: Record<RunKind, string> = {
@@ -67,7 +64,6 @@ export const runKindPluralLabel: Record<RunKind, string> = {
   [RunKind.Experiment]: 'experiments',
   [RunKind.GenericTask]: 'generic tasks',
   [RunKind.Shell]: 'shells',
-  [RunKind.TensorBoard]: 'TensorBoards',
 };
 
 /** Which page a dashboard is and where: the kinds it can list. */
@@ -77,9 +73,8 @@ export type DashboardScope =
   | { type: 'project'; projectId: number };
 
 /**
- * The kinds a dashboard lists. A project has only experiments and generic tasks, since shells,
- * commands and TensorBoards belong to a workspace and not to a project. The tasks-only view leaves
- * experiments out.
+ * The kinds a dashboard lists. A project has only experiments and generic tasks, since shells and
+ * commands belong to a workspace and not to a project. The tasks-only view leaves experiments out.
  */
 export const kindsOf = (scope: DashboardScope, experiments: boolean): RunKind[] => {
   if (scope.type === 'project') return [RunKind.Experiment, RunKind.GenericTask];
@@ -154,7 +149,7 @@ export const experimentStates = (groups?: StateGroup[]): `STATE_${RunState}`[] =
     .flatMap((group) => experimentStatesByGroup[group])
     .map((state) => `STATE_${state}` as const);
 
-/** A shell, command or TensorBoard is active until it is terminated; it never pauses. */
+/** A shell or command is active until it is terminated; it never pauses. */
 export const commandStateGroup = (state: CommandState): StateGroup =>
   state === CommandState.Terminated ? StateGroup.Ended : StateGroup.Active;
 
@@ -500,7 +495,7 @@ export const runComparator =
     return compareTies(a, b);
   };
 
-/** Sorts the shells, commands and TensorBoards, which the master lists unsorted. */
+/** Sorts the shells and commands, which the master lists unsorted. */
 export const sortCommandRows = (rows: CommandRunRow[], sort?: RunSort): CommandRunRow[] =>
   [...rows].sort(runComparator(sort));
 
@@ -578,7 +573,7 @@ export const genericTaskApiSort = (
   sortBy: genericTaskSortBy[sort.key],
 });
 
-/* Filters run in the browser, for shells, commands and TensorBoards */
+/* Filters run in the browser, for shells and commands */
 
 /** A row without a title matches by its ID only. */
 export const matchesSearch = (row: Pick<RunRow, 'id' | 'name'>, search?: string): boolean => {

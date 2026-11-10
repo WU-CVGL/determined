@@ -14,8 +14,7 @@ type Params = {
 };
 
 /**
- * Sends the old task pages, /interactive/:taskId/... with its name, pool and wait-page segments
- * (the CLI still builds them) and /shells/:taskId/terminal, to the task page by ID.
+ * Sends the old terminal page, /shells/:taskId/terminal, to the task page by ID.
  */
 const InteractiveTaskRedirect: React.FC<Props> = ({ tab }: Props) => {
   const { taskId = '' } = useParams<Params>();
