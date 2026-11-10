@@ -39,6 +39,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/configpolicy"
 	"github.com/determined-ai/determined/master/internal/db"
 	expauth "github.com/determined-ai/determined/master/internal/experiment"
+	"github.com/determined-ai/determined/master/internal/jobprivacy"
 	"github.com/determined-ai/determined/master/internal/mocks"
 	modelauth "github.com/determined-ai/determined/master/internal/model"
 	"github.com/determined-ai/determined/master/internal/poolaccess"
@@ -310,6 +311,12 @@ func TestGetExperimentConfig(t *testing.T) {
 		ExperimentId: int32(exp.ID),
 	})
 	require.NoError(t, err)
+	// The searcher type is the plain name, as the lists return it, not its JSON encoding.
+	searcher := expected["searcher"].(map[string]any)
+	require.Equal(t, searcher["name"], resp.Experiment.SearcherType)
+	// The searcher metric is returned as in the lists, so a reader without the config has it.
+	require.NotEmpty(t, searcher["metric"])
+	require.Equal(t, searcher["metric"], resp.Experiment.SearcherMetric)
 
 	cases := []struct {
 		name   string
@@ -1236,6 +1243,10 @@ func testGetExperiments(ctx context.Context, t *testing.T, api *apiServer, pid i
 
 		// Don't compare hyperparameters.
 		res.Experiments[i].Hyperparameters = nil
+
+		// The requests are an admin's, who may do everything with every job.
+		require.True(t, proto.Equal(jobprivacy.AllCaps.Proto(), res.Experiments[i].Capabilities))
+		res.Experiments[i].Capabilities = nil
 
 		// Compare time seperatly due to millisecond precision in postgres.
 		require.WithinDuration(t,
@@ -2216,6 +2227,7 @@ func TestExperimentSearchApiFilterParsing(t *testing.T) {
 		var efr experimentFilterRoot
 		err := json.Unmarshal([]byte(c), &efr)
 		require.NoError(t, err)
+		efr.privacy = jobprivacy.Unrestricted("e.job_id")
 		_, err = efr.toSQL(q)
 		require.Error(t, err)
 	}
@@ -2352,6 +2364,7 @@ func TestExperimentSearchApiFilterParsing(t *testing.T) {
 		var efr experimentFilterRoot
 		err := json.Unmarshal([]byte(c[0]), &efr)
 		require.NoError(t, err)
+		efr.privacy = jobprivacy.Unrestricted("e.job_id")
 		q = q.WhereGroup(" AND ", func(q *bun.SelectQuery) *bun.SelectQuery {
 			_, err = efr.toSQL(q)
 			return q

@@ -571,6 +571,9 @@ func (a *apiServer) GetModelVersion(
 				curUser.Username, currModel.Name))
 	}
 
+	if err = redactModelVersionCheckpoints(ctx, *curUser, mv); err != nil {
+		return nil, err
+	}
 	resp := &apiv1.GetModelVersionResponse{}
 	resp.ModelVersion = mv
 	return resp, nil
@@ -599,6 +602,9 @@ func (a *apiServer) GetModelVersions(
 	resp := &apiv1.GetModelVersionsResponse{Model: parentModel}
 	err = a.m.db.QueryProto("get_model_versions", &resp.ModelVersions, parentModel.Id)
 	if err != nil {
+		return nil, err
+	}
+	if err = redactModelVersionCheckpoints(ctx, *curUser, resp.ModelVersions...); err != nil {
 		return nil, err
 	}
 
@@ -673,11 +679,14 @@ func (a *apiServer) PostModelVersion(
 		req.Notes,
 		model.UserID(user.User.GetId()),
 	)
-
+	if err != nil {
+		return nil, errors.Wrapf(err, "error adding model version to model %q", req.ModelName)
+	}
+	if err = redactModelVersionCheckpoints(ctx, *curUser, modelVersion); err != nil {
+		return nil, err
+	}
 	respModelVersion.ModelVersion = modelVersion
-
-	return respModelVersion, errors.Wrapf(err, "error adding model version to model %q",
-		req.ModelName)
+	return respModelVersion, nil
 }
 
 func (a *apiServer) PatchModelVersion(
@@ -770,6 +779,9 @@ func (a *apiServer) PatchModelVersion(
 	}
 
 	if !madeChanges {
+		if err = redactModelVersionCheckpoints(ctx, *curUser, currModelVersion); err != nil {
+			return nil, err
+		}
 		return &apiv1.PatchModelVersionResponse{ModelVersion: currModelVersion}, nil
 	}
 
@@ -777,9 +789,14 @@ func (a *apiServer) PatchModelVersion(
 	err = a.m.db.QueryProto("update_model_version", finalModelVersion, currModelVersion.Id,
 		parentModel.Id, currModelVersion.Name, currModelVersion.Comment, currModelVersion.Notes,
 		currMeta, currLabels)
-
-	return &apiv1.PatchModelVersionResponse{ModelVersion: finalModelVersion},
-		errors.Wrapf(err, "error updating model version (%v) in database", modelVersionName)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error updating model version (%v) in database",
+			modelVersionName)
+	}
+	if err = redactModelVersionCheckpoints(ctx, *curUser, finalModelVersion); err != nil {
+		return nil, err
+	}
+	return &apiv1.PatchModelVersionResponse{ModelVersion: finalModelVersion}, nil
 }
 
 func (a *apiServer) DeleteModelVersion(

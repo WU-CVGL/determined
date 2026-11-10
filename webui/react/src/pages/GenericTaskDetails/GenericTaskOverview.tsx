@@ -9,6 +9,7 @@ import ResponsiveTable from 'components/Table/ResponsiveTable';
 import { relativeTimeRenderer } from 'components/Table/Table';
 import { paths } from 'routes/utils';
 import { GenericTask, TaskItem } from 'types';
+import { jobDisplayName } from 'utils/jobPrivacy';
 
 type Allocation = TaskItem['allocations'][number];
 
@@ -80,7 +81,9 @@ const GenericTaskOverview: React.FC<Props> = ({ childTasks, task }: Props) => {
               dataIndex: 'name',
               key: 'name',
               render: (_, record) => (
-                <Link path={paths.genericTaskDetails(record.taskId)}>{record.name}</Link>
+                <Link path={paths.genericTaskDetails(record.taskId)}>
+                  {jobDisplayName('Generic Task', record.taskId, record.name, record.capabilities)}
+                </Link>
               ),
               title: 'Name',
             },

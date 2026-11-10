@@ -24,6 +24,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/db"
 	expauth "github.com/determined-ai/determined/master/internal/experiment"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
+	"github.com/determined-ai/determined/master/internal/jobprivacy"
 	"github.com/determined-ai/determined/master/internal/poolaccess"
 	"github.com/determined-ai/determined/master/internal/project"
 	"github.com/determined-ai/determined/master/internal/rm"
@@ -117,12 +118,16 @@ func (m *Master) getExperimentCheckpointsToGC(c echo.Context) (interface{}, erro
 	if err := api.BindArgs(&args, c); err != nil {
 		return nil, err
 	}
-	exp, _, err := echoGetExperimentAndCheckCanDoActions(
+	exp, user, err := echoGetExperimentAndCheckCanDoActions(
 		c.Request().Context(), c, args.ExperimentID,
 		expauth.AuthZProvider.Get().CanGetExperimentArtifacts,
 	)
 	if err != nil {
 		return nil, err
+	}
+	caps, err := experimentJobCaps(c.Request().Context(), user, exp)
+	if err != nil {
+		return nil, echoJobPrivacyError(err)
 	}
 
 	checkpointUUIDs, err := expauth.ExperimentCheckpointsToGCRaw(
@@ -133,6 +138,22 @@ func (m *Master) getExperimentCheckpointsToGC(c echo.Context) (interface{}, erro
 	checkpointsDB, err := checkpoints.CheckpointByUUIDs(c.Request().Context(), checkpointUUIDs)
 	if err != nil {
 		return nil, err
+	}
+
+	// A config the user may not read is reduced to its checkpoint storage, as in the checkpoint
+	// RPCs.
+	if !caps.ViewConfig {
+		for i := range checkpointsDB {
+			cfg := checkpointsDB[i].ExperimentConfig
+			if cfg == nil {
+				continue
+			}
+			reduced := model.JSONObj{}
+			if storage, ok := cfg["checkpoint_storage"]; ok {
+				reduced["checkpoint_storage"] = storage
+			}
+			checkpointsDB[i].ExperimentConfig = reduced
+		}
 	}
 
 	checkpointsWithMetric := map[string]interface{}{
@@ -189,11 +210,16 @@ func (m *Master) getExperimentModelDefinition(c echo.Context) error {
 	if err := api.BindArgs(&args, c); err != nil {
 		return err
 	}
-	if _, _, err := echoGetExperimentAndCheckCanDoActions(
+	exp, user, err := echoGetExperimentAndCheckCanDoActions(
 		c.Request().Context(), c, args.ExperimentID,
 		expauth.AuthZProvider.Get().CanGetExperimentArtifacts,
-	); err != nil {
+	)
+	if err != nil {
 		return err
+	}
+	caps, err := experimentJobCaps(c.Request().Context(), user, exp)
+	if err != nil {
+		return echoJobPrivacyError(err)
 	}
 
 	modelDef, err := m.db.ExperimentModelDefinitionRaw(args.ExperimentID)
@@ -204,8 +230,9 @@ func (m *Master) getExperimentModelDefinition(c echo.Context) error {
 	var cleanName string
 
 	// TODO(DET-8577): Remove unnecessary active config usage.
+	// The file is named after the experiment only for a user who may read its title.
 	activeConfig, err := m.db.ActiveExperimentConfig(args.ExperimentID)
-	if err == nil {
+	if err == nil && caps.ViewTitle {
 		// Make a Regex to remove everything but a whitelist of characters.
 		reg := regexp.MustCompile(`[^A-Za-z0-9_ \-()[\].{}]+`)
 		cleanName = "_" + reg.ReplaceAllString(activeConfig.Name().String(), "")
@@ -226,6 +253,21 @@ func (m *Master) getExperimentModelDefinition(c echo.Context) error {
 			args.ExperimentID,
 			cleanName))
 	return c.Blob(http.StatusOK, "application/x-gtar", modelDef)
+}
+
+// experimentJobCaps returns the user's job privacy capabilities on an experiment's job.
+func experimentJobCaps(
+	ctx context.Context, user model.User, exp *model.Experiment,
+) (jobprivacy.Caps, error) {
+	v, err := jobprivacy.NewViewer(ctx, user)
+	if err != nil {
+		return jobprivacy.Caps{}, err
+	}
+	caps, err := jobprivacy.ForJobs(ctx, v, []model.JobID{exp.JobID})
+	if err != nil {
+		return jobprivacy.Caps{}, err
+	}
+	return caps[exp.JobID], nil
 }
 
 // getCreateExperimentsProject returns the experiment's project, once user may see it: fixedProjectID

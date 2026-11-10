@@ -15,7 +15,7 @@ def render_experiments(
         result = [
             e.id,
             e.username,
-            e.name,
+            render.title_or_omitted(e.name, e.capabilities),
             e.forkedFrom,
             e.state,
             render.format_percent(e.progress),

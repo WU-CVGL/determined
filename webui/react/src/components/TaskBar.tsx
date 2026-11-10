@@ -17,6 +17,8 @@ interface Props {
   handleViewLogsClick: () => void;
   id: string;
   name: string;
+  /** Offers Sharing when given: to the task's owner and admins. */
+  onSharing?: () => void;
   /** The task's owner and workspace, which decide who may kill it; without them, nobody can. */
   owner?: { userId: number; workspaceId: number };
   resourcePool: string;
@@ -28,6 +30,7 @@ interface Props {
 
 const MenuKey = {
   Kill: 'kill',
+  Sharing: 'sharing',
   ViewLogs: 'viewLogs',
 } as const;
 
@@ -35,6 +38,7 @@ export const TaskBar: React.FC<Props> = ({
   handleViewLogsClick,
   id,
   name,
+  onSharing,
   owner,
   resourcePool,
   state,
@@ -76,18 +80,20 @@ export const TaskBar: React.FC<Props> = ({
   }, [confirm, id, type]);
 
   // The task action menu's order: View Logs first, the destructive Kill last.
-  const menuItems: MenuItem[] = useMemo(
-    () => [
-      { key: MenuKey.ViewLogs, label: 'View Logs' },
-      { danger: true, disabled: !canKill, key: MenuKey.Kill, label: 'Kill' },
-    ],
-    [canKill],
-  );
+  const menuItems: MenuItem[] = useMemo(() => {
+    const items: MenuItem[] = [{ key: MenuKey.ViewLogs, label: 'View Logs' }];
+    if (onSharing) items.push({ key: MenuKey.Sharing, label: 'Sharing' });
+    items.push({ danger: true, disabled: !canKill, key: MenuKey.Kill, label: 'Kill' });
+    return items;
+  }, [canKill, onSharing]);
 
   const handleDropdown = (key: string) => {
     switch (key) {
       case MenuKey.Kill:
         deleteTask();
+        break;
+      case MenuKey.Sharing:
+        onSharing?.();
         break;
       case MenuKey.ViewLogs:
         handleViewLogsClick();

@@ -1,6 +1,7 @@
 import { SortOrder } from 'antd/es/table/interface';
 
 import { Job } from 'types';
+import { titleHidden } from 'utils/jobPrivacy';
 import { timeKey } from 'utils/taskTime';
 import { compareText } from 'utils/textOrder';
 
@@ -21,7 +22,11 @@ const MOST_FIRST: SortOrder[] = ['descend', 'ascend'];
 
 /** The columns of the Active tab that sort, by column key. */
 export const ACTIVE_SORTS: Record<string, ColumnSort> = {
-  name: { directions: A_TO_Z_FIRST, value: (job) => ('name' in job ? job.name : undefined) },
+  // A job whose title is not shared sorts last both ways.
+  name: {
+    directions: A_TO_Z_FIRST,
+    value: (job) => ('name' in job && !titleHidden(job.capabilities) ? job.name : undefined),
+  },
   slots: { directions: MOST_FIRST, value: (job) => [job.allocatedSlots, job.requestedSlots] },
   started: {
     directions: MOST_FIRST,

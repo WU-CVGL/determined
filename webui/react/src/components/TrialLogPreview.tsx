@@ -18,6 +18,8 @@ import css from './TrialLogPreview.module.scss';
 interface Props {
   children?: React.ReactNode;
   hidePreview?: boolean;
+  /** The trial's logs are not shared with the viewer: none are read. */
+  logsHidden?: boolean;
   onViewLogs?: () => void;
   trial?: TrialDetails;
 }
@@ -25,6 +27,7 @@ interface Props {
 const TrialLogPreview: React.FC<Props> = ({
   children,
   hidePreview = false,
+  logsHidden = false,
   onViewLogs,
   trial,
 }: Props) => {
@@ -36,7 +39,7 @@ const TrialLogPreview: React.FC<Props> = ({
   const charMeasures = useGetCharMeasureInContainer(containerRef);
   const dateTimeWidth = charMeasures.width * MAX_DATETIME_LENGTH;
 
-  if (hidePreview || !logEntry) classes.push(css.hidePreview);
+  if (hidePreview || logsHidden || !logEntry) classes.push(css.hidePreview);
 
   const fetchTrialLogs = useCallback((trialId: number, time: string, canceler: AbortController) => {
     readStream(
@@ -111,13 +114,13 @@ const TrialLogPreview: React.FC<Props> = ({
   }, [onViewLogs]);
 
   useEffect(() => {
-    if (!trial?.id || trial?.state === RunState.Completed) return;
+    if (logsHidden || !trial?.id || trial?.state === RunState.Completed) return;
 
     const canceler = new AbortController();
     fetchLatestTrialLog(trial.id, trial.state, canceler);
 
     return () => canceler.abort();
-  }, [fetchLatestTrialLog, trial?.id, trial?.state]);
+  }, [fetchLatestTrialLog, logsHidden, trial?.id, trial?.state]);
 
   return (
     <div className={classes.join(' ')}>

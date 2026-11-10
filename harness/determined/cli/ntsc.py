@@ -196,7 +196,7 @@ def describe(args: argparse.Namespace) -> None:
         return
 
     table_header = RemoteTaskListTableHeaders[args._command]
-    values = render.select_values([item], table_header)
+    values = render.select_values([_omit_hidden_description(item)], table_header)
     render.tabulate_or_csv(table_header, values, getattr(args, "csv", False))
 
 
@@ -241,9 +241,16 @@ def list_tasks(args: argparse.Namespace) -> None:
         render.print_json(res)
         return
 
-    values = render.select_values(res, table_header)
+    values = render.select_values([_omit_hidden_description(item) for item in res], table_header)
 
     render.tabulate_or_csv(table_header, values, getattr(args, "csv", False))
+
+
+def _omit_hidden_description(item: Dict[str, Any]) -> Dict[str, Any]:
+    """The item to print in a table, with its description omitted when its title is hidden."""
+    if render.title_shared(item.get("capabilities")):
+        return item
+    return {**item, "description": render.OMITTED_VALUE}
 
 
 def kill(args: argparse.Namespace) -> None:
@@ -284,6 +291,9 @@ def config(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
     task_id = expand_uuid_prefixes(sess, args)
     res_json = sess.get(f"api/v1/{RemoteTaskNewAPIs[args._command]}/{task_id}").json()
+    task = res_json.get(RemoteTaskName[args._command]) or {}
+    if not render.config_shared(task.get("capabilities")):
+        raise cli.CliError(render.CONFIG_NOT_SHARED)
     print(render.format_object_as_yaml(res_json["config"]))
 
 

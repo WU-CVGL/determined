@@ -13,6 +13,7 @@ import TaskResourcesPanel from 'components/TaskResourcesPanel';
 import TrialLogPreview from 'components/TrialLogPreview';
 import { terminalRunStates } from 'constants/states';
 import useFeature from 'hooks/useFeature';
+import usePageReturns from 'hooks/usePageReturns';
 import usePermissions from 'hooks/usePermissions';
 import usePolling from 'hooks/usePolling';
 import { SettingsConfig, useSettings } from 'hooks/useSettings';
@@ -33,6 +34,7 @@ import workspaceStore from 'stores/workspaces';
 import { ApiState, ExperimentBase, TrialDetails, ValueOf, Workspace } from 'types';
 import handleError, { ErrorType } from 'utils/error';
 import { isSingleTrialExperiment } from 'utils/experiment';
+import { jobDisplayName, logsHidden } from 'utils/jobPrivacy';
 import { useObservable } from 'utils/observable';
 import { isAborted, isNotFound } from 'utils/service';
 import { capitalize } from 'utils/string';
@@ -305,6 +307,16 @@ const TrialDetailsComp: React.FC = () => {
     }
   }, [trialDetails.data, stopPolling]);
 
+  // An ended trial is not polled, nor then its experiment: read the experiment again when the
+  // user comes back to the page, for sharing changed meanwhile. A read that fails leaves the page
+  // as it was.
+  usePageReturns(() => {
+    if (!trial || !terminalRunStates.has(trial.state)) return;
+    getExperimentDetails({ id: trial.experimentId }, { signal: canceler.signal })
+      .then(setExperiment)
+      .catch(() => undefined);
+  });
+
   useEffect(() => {
     return () => canceler.abort();
   }, [canceler]);
@@ -342,7 +354,12 @@ const TrialDetailsComp: React.FC = () => {
               path: paths.projectDetails(1),
             },
         {
-          breadcrumbName: experiment?.name ?? '',
+          breadcrumbName: jobDisplayName(
+            capitalize(copyMap.experiment),
+            experiment.id,
+            experiment.name,
+            experiment.capabilities,
+          ),
           path: paths.experimentDetails(experiment.id),
         },
         {
@@ -363,6 +380,7 @@ const TrialDetailsComp: React.FC = () => {
       title={`${capitalize(copyMap.trial)} ${trialId}`}>
       <TrialLogPreview
         hidePreview={tabKey === TabType.Logs}
+        logsHidden={logsHidden(experiment?.capabilities)}
         trial={trial}
         onViewLogs={handleViewLogs}>
         <Spinner spinning={isFetching}>

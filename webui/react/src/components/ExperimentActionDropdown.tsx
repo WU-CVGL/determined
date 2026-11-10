@@ -19,6 +19,7 @@ import HyperparameterSearchModalComponent from 'components/HyperparameterSearchM
 import InterstitialModalComponent, {
   type onInterstitialCloseActionType,
 } from 'components/InterstitialModalComponent';
+import { useJobSharingModal } from 'components/JobSharingModal';
 import useFeature from 'hooks/useFeature';
 import usePermissions from 'hooks/usePermissions';
 import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
@@ -71,9 +72,10 @@ export const Action = {
 type Action = ValueOf<typeof Action>;
 
 // One order wherever the menu appears, after the link and Copy Value items: viewing first, then
-// Copy Experiment ID, then changing the experiment, with Stop, Kill and Delete last. Items that do
-// not apply are left out.
+// Copy Experiment ID and Sharing, then changing the experiment, with Stop, Kill and Delete last.
+// Items that do not apply are left out.
 const viewActions = [Action.ViewLogs, Action.ViewResources, Action.OpenTensorBoard];
+const sharingActions = [Action.Sharing];
 const manageActions = [
   Action.Activate,
   Action.Pause,
@@ -223,6 +225,11 @@ const ExperimentActionDropdown: React.FC<Props> = ({
     onComplete?.(ExperimentAction.RetainLogs, experiment.id);
   }, [experiment.id, onComplete]);
 
+  const handleSharingSaved = useCallback(() => {
+    onComplete?.(ExperimentAction.Sharing, experiment.id);
+  }, [experiment.id, onComplete]);
+  const { modal: sharingModal, open: openSharing } = useJobSharingModal(handleSharingSaved);
+
   const permissions = usePermissions();
   const menuItems: MenuItem[] = useMemo(() => {
     const allowedItems = (actions: ExperimentAction[]): MenuItem[] =>
@@ -232,6 +239,7 @@ const ExperimentActionDropdown: React.FC<Props> = ({
     return [
       ...allowedItems(viewActions),
       { key: Action.CopyExperimentID, label: Action.CopyExperimentID },
+      ...allowedItems(sharingActions),
       ...allowedItems(manageActions),
     ];
   }, [experiment, permissions, taskResourcesEnabled]);
@@ -371,6 +379,9 @@ const ExperimentActionDropdown: React.FC<Props> = ({
               title: `Confirm ${capitalize(entityName)} Deletion`,
             });
             break;
+          case Action.Sharing:
+            openSharing(experiment.jobId);
+            break;
           case Action.Edit:
             ExperimentEditModal.open();
             break;
@@ -416,6 +427,7 @@ const ExperimentActionDropdown: React.FC<Props> = ({
       logsTarget,
       f_flat_runs,
       experiment.id,
+      experiment.jobId,
       onComplete,
       confirm,
       ExperimentEditModal,
@@ -423,6 +435,7 @@ const ExperimentActionDropdown: React.FC<Props> = ({
       ExperimentRetainLogsModal,
       interstitialModalOpen,
       fetchedExperimentItem,
+      openSharing,
       cellCopyData,
       openToast,
       experiment.workspaceId,
@@ -435,7 +448,7 @@ const ExperimentActionDropdown: React.FC<Props> = ({
       <ExperimentEditModal.Component
         description={experiment.description ?? ''}
         experimentId={experiment.id}
-        experimentName={experiment.name}
+        experimentName={experiment.name ?? ''}
         onEditComplete={handleEditComplete}
       />
       <ExperimentMoveModal.Component
@@ -456,6 +469,7 @@ const ExperimentActionDropdown: React.FC<Props> = ({
         />
       )}
       <InterstitialModal loadableData={experimentItem} onCloseAction={onInterstitalClose} />
+      {sharingModal}
     </>
   );
 

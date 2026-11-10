@@ -31,7 +31,8 @@ import Link from './Link';
 export interface Props {
   checkpoint?: CheckpointWorkloadExtended | CoreApiGenericCheckpoint;
   children?: React.ReactNode;
-  config: ExperimentConfig;
+  /** Unset when the experiment's config is not shared with the viewer. */
+  config?: ExperimentConfig;
   onClose?: (reason?: ModalCloseReason) => void;
   searcherValidation?: number;
   title: string;
@@ -156,7 +157,7 @@ ${checkpoint?.totalBatches}? This action may complete or fail without further no
       { label: 'State', value: <Badge state={state} type={BadgeType.State} /> },
     ];
 
-    if (config.integrations?.pachyderm !== undefined) {
+    if (config?.integrations?.pachyderm !== undefined) {
       const pachydermData = config.integrations.pachyderm;
       const url = createPachydermLineageLink(pachydermData);
 
@@ -167,7 +168,9 @@ ${checkpoint?.totalBatches}? This action may complete or fail without further no
     }
 
     if (checkpoint.uuid) glossaryContent.push({ label: 'UUID', value: checkpoint.uuid });
-    glossaryContent.push({ label: 'Location', value: getStorageLocation(config, checkpoint) });
+    if (config) {
+      glossaryContent.push({ label: 'Location', value: getStorageLocation(config, checkpoint) });
+    }
     if (searcherMetric)
       glossaryContent.push({
         label: 'Validation Metric',

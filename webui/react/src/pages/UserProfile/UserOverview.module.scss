@@ -3,7 +3,8 @@
   flex-direction: column;
   gap: 16px;
 }
-.mode {
-  display: flex;
-  justify-content: flex-end;
+.activeDays > :first-child {
+  /* The mode control goes under the title where the row is too narrow for both. */
+  flex-wrap: wrap;
+  row-gap: 8px;
 }

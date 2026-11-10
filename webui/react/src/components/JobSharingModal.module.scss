@@ -1,0 +1,11 @@
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.row {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}

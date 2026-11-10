@@ -13,6 +13,7 @@ import { paths } from 'routes/utils';
 import { patchExperiment } from 'services/api';
 import { ExperimentBase, Note, ValueOf } from 'types';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
+import { titleHidden } from 'utils/jobPrivacy';
 
 import { ExperimentVisualizationType } from './ExperimentVisualization';
 
@@ -117,10 +118,12 @@ const ExperimentMultiTrialTabs: React.FC<Props> = ({
   const showExperimentArtifacts = canViewExperimentArtifacts({
     workspace: { id: experiment.workspaceId },
   });
-  const editableNotes = canModifyExperimentMetadata({
-    userId: experiment.userId,
-    workspace: { id: experiment.workspaceId },
-  });
+  const editableNotes =
+    !titleHidden(experiment.capabilities) &&
+    canModifyExperimentMetadata({
+      userId: experiment.userId,
+      workspace: { id: experiment.workspaceId },
+    });
 
   const tabItems: PivotProps['items'] = useMemo(() => {
     const items: PivotProps['items'] = [

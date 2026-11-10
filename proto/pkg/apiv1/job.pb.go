@@ -561,6 +561,655 @@ func (x *GetJobQueueStatsResponse) GetResults() []*RPQueueStat {
 	return nil
 }
 
+// Get the cluster's job privacy policy.
+type GetJobPrivacyPolicyRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+}
+
+func (x *GetJobPrivacyPolicyRequest) Reset() {
+	*x = GetJobPrivacyPolicyRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_determined_api_v1_job_proto_msgTypes[9]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetJobPrivacyPolicyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetJobPrivacyPolicyRequest) ProtoMessage() {}
+
+func (x *GetJobPrivacyPolicyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_determined_api_v1_job_proto_msgTypes[9]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetJobPrivacyPolicyRequest.ProtoReflect.Descriptor instead.
+func (*GetJobPrivacyPolicyRequest) Descriptor() ([]byte, []int) {
+	return file_determined_api_v1_job_proto_rawDescGZIP(), []int{9}
+}
+
+// Response to GetJobPrivacyPolicyRequest.
+type GetJobPrivacyPolicyResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// One rule per content kind.
+	Rules []*jobv1.JobPrivacyRule `protobuf:"bytes,1,rep,name=rules,proto3" json:"rules,omitempty"`
+}
+
+func (x *GetJobPrivacyPolicyResponse) Reset() {
+	*x = GetJobPrivacyPolicyResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_determined_api_v1_job_proto_msgTypes[10]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetJobPrivacyPolicyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetJobPrivacyPolicyResponse) ProtoMessage() {}
+
+func (x *GetJobPrivacyPolicyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_determined_api_v1_job_proto_msgTypes[10]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetJobPrivacyPolicyResponse.ProtoReflect.Descriptor instead.
+func (*GetJobPrivacyPolicyResponse) Descriptor() ([]byte, []int) {
+	return file_determined_api_v1_job_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *GetJobPrivacyPolicyResponse) GetRules() []*jobv1.JobPrivacyRule {
+	if x != nil {
+		return x.Rules
+	}
+	return nil
+}
+
+// Set the cluster's job privacy policy.
+type PutJobPrivacyPolicyRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// Exactly one rule per content kind.
+	Rules []*jobv1.JobPrivacyRule `protobuf:"bytes,1,rep,name=rules,proto3" json:"rules,omitempty"`
+}
+
+func (x *PutJobPrivacyPolicyRequest) Reset() {
+	*x = PutJobPrivacyPolicyRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_determined_api_v1_job_proto_msgTypes[11]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *PutJobPrivacyPolicyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PutJobPrivacyPolicyRequest) ProtoMessage() {}
+
+func (x *PutJobPrivacyPolicyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_determined_api_v1_job_proto_msgTypes[11]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PutJobPrivacyPolicyRequest.ProtoReflect.Descriptor instead.
+func (*PutJobPrivacyPolicyRequest) Descriptor() ([]byte, []int) {
+	return file_determined_api_v1_job_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *PutJobPrivacyPolicyRequest) GetRules() []*jobv1.JobPrivacyRule {
+	if x != nil {
+		return x.Rules
+	}
+	return nil
+}
+
+// Response to PutJobPrivacyPolicyRequest.
+type PutJobPrivacyPolicyResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// The stored rules.
+	Rules []*jobv1.JobPrivacyRule `protobuf:"bytes,1,rep,name=rules,proto3" json:"rules,omitempty"`
+}
+
+func (x *PutJobPrivacyPolicyResponse) Reset() {
+	*x = PutJobPrivacyPolicyResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_determined_api_v1_job_proto_msgTypes[12]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *PutJobPrivacyPolicyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PutJobPrivacyPolicyResponse) ProtoMessage() {}
+
+func (x *PutJobPrivacyPolicyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_determined_api_v1_job_proto_msgTypes[12]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PutJobPrivacyPolicyResponse.ProtoReflect.Descriptor instead.
+func (*PutJobPrivacyPolicyResponse) Descriptor() ([]byte, []int) {
+	return file_determined_api_v1_job_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *PutJobPrivacyPolicyResponse) GetRules() []*jobv1.JobPrivacyRule {
+	if x != nil {
+		return x.Rules
+	}
+	return nil
+}
+
+// Get the requesting user's job privacy preferences.
+type GetMyJobPrivacyRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+}
+
+func (x *GetMyJobPrivacyRequest) Reset() {
+	*x = GetMyJobPrivacyRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_determined_api_v1_job_proto_msgTypes[13]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetMyJobPrivacyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetMyJobPrivacyRequest) ProtoMessage() {}
+
+func (x *GetMyJobPrivacyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_determined_api_v1_job_proto_msgTypes[13]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetMyJobPrivacyRequest.ProtoReflect.Descriptor instead.
+func (*GetMyJobPrivacyRequest) Descriptor() ([]byte, []int) {
+	return file_determined_api_v1_job_proto_rawDescGZIP(), []int{13}
+}
+
+// Response to GetMyJobPrivacyRequest.
+type GetMyJobPrivacyResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// The user's preferences.
+	Privacy *jobv1.UserJobPrivacy `protobuf:"bytes,1,opt,name=privacy,proto3" json:"privacy,omitempty"`
+}
+
+func (x *GetMyJobPrivacyResponse) Reset() {
+	*x = GetMyJobPrivacyResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_determined_api_v1_job_proto_msgTypes[14]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetMyJobPrivacyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetMyJobPrivacyResponse) ProtoMessage() {}
+
+func (x *GetMyJobPrivacyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_determined_api_v1_job_proto_msgTypes[14]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetMyJobPrivacyResponse.ProtoReflect.Descriptor instead.
+func (*GetMyJobPrivacyResponse) Descriptor() ([]byte, []int) {
+	return file_determined_api_v1_job_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *GetMyJobPrivacyResponse) GetPrivacy() *jobv1.UserJobPrivacy {
+	if x != nil {
+		return x.Privacy
+	}
+	return nil
+}
+
+// Change the requesting user's job privacy preferences. Unset fields are kept.
+type PatchMyJobPrivacyRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// Whether the titles of the user's jobs are shared.
+	ShareTitles *bool `protobuf:"varint,1,opt,name=share_titles,json=shareTitles,proto3,oneof" json:"share_titles,omitempty"`
+	// Whether the logs of the user's jobs are shared.
+	ShareLogs *bool `protobuf:"varint,2,opt,name=share_logs,json=shareLogs,proto3,oneof" json:"share_logs,omitempty"`
+	// The title audience of the user's new jobs.
+	NewJobTitles *jobv1.JobAudience `protobuf:"bytes,3,opt,name=new_job_titles,json=newJobTitles,proto3" json:"new_job_titles,omitempty"`
+	// The logs audience of the user's new jobs.
+	NewJobLogs *jobv1.JobAudience `protobuf:"bytes,4,opt,name=new_job_logs,json=newJobLogs,proto3" json:"new_job_logs,omitempty"`
+	// Return the title audience of new jobs to the cluster default.
+	ResetNewJobTitles bool `protobuf:"varint,5,opt,name=reset_new_job_titles,json=resetNewJobTitles,proto3" json:"reset_new_job_titles,omitempty"`
+	// Return the logs audience of new jobs to the cluster default.
+	ResetNewJobLogs bool `protobuf:"varint,6,opt,name=reset_new_job_logs,json=resetNewJobLogs,proto3" json:"reset_new_job_logs,omitempty"`
+}
+
+func (x *PatchMyJobPrivacyRequest) Reset() {
+	*x = PatchMyJobPrivacyRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_determined_api_v1_job_proto_msgTypes[15]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *PatchMyJobPrivacyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PatchMyJobPrivacyRequest) ProtoMessage() {}
+
+func (x *PatchMyJobPrivacyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_determined_api_v1_job_proto_msgTypes[15]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PatchMyJobPrivacyRequest.ProtoReflect.Descriptor instead.
+func (*PatchMyJobPrivacyRequest) Descriptor() ([]byte, []int) {
+	return file_determined_api_v1_job_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *PatchMyJobPrivacyRequest) GetShareTitles() bool {
+	if x != nil && x.ShareTitles != nil {
+		return *x.ShareTitles
+	}
+	return false
+}
+
+func (x *PatchMyJobPrivacyRequest) GetShareLogs() bool {
+	if x != nil && x.ShareLogs != nil {
+		return *x.ShareLogs
+	}
+	return false
+}
+
+func (x *PatchMyJobPrivacyRequest) GetNewJobTitles() *jobv1.JobAudience {
+	if x != nil {
+		return x.NewJobTitles
+	}
+	return nil
+}
+
+func (x *PatchMyJobPrivacyRequest) GetNewJobLogs() *jobv1.JobAudience {
+	if x != nil {
+		return x.NewJobLogs
+	}
+	return nil
+}
+
+func (x *PatchMyJobPrivacyRequest) GetResetNewJobTitles() bool {
+	if x != nil {
+		return x.ResetNewJobTitles
+	}
+	return false
+}
+
+func (x *PatchMyJobPrivacyRequest) GetResetNewJobLogs() bool {
+	if x != nil {
+		return x.ResetNewJobLogs
+	}
+	return false
+}
+
+// Response to PatchMyJobPrivacyRequest.
+type PatchMyJobPrivacyResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// The user's preferences.
+	Privacy *jobv1.UserJobPrivacy `protobuf:"bytes,1,opt,name=privacy,proto3" json:"privacy,omitempty"`
+}
+
+func (x *PatchMyJobPrivacyResponse) Reset() {
+	*x = PatchMyJobPrivacyResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_determined_api_v1_job_proto_msgTypes[16]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *PatchMyJobPrivacyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PatchMyJobPrivacyResponse) ProtoMessage() {}
+
+func (x *PatchMyJobPrivacyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_determined_api_v1_job_proto_msgTypes[16]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PatchMyJobPrivacyResponse.ProtoReflect.Descriptor instead.
+func (*PatchMyJobPrivacyResponse) Descriptor() ([]byte, []int) {
+	return file_determined_api_v1_job_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *PatchMyJobPrivacyResponse) GetPrivacy() *jobv1.UserJobPrivacy {
+	if x != nil {
+		return x.Privacy
+	}
+	return nil
+}
+
+// Get a job's own sharing.
+type GetJobSharingRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// The job ID.
+	JobId string `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+}
+
+func (x *GetJobSharingRequest) Reset() {
+	*x = GetJobSharingRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_determined_api_v1_job_proto_msgTypes[17]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetJobSharingRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetJobSharingRequest) ProtoMessage() {}
+
+func (x *GetJobSharingRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_determined_api_v1_job_proto_msgTypes[17]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetJobSharingRequest.ProtoReflect.Descriptor instead.
+func (*GetJobSharingRequest) Descriptor() ([]byte, []int) {
+	return file_determined_api_v1_job_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *GetJobSharingRequest) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+// Response to GetJobSharingRequest.
+type GetJobSharingResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// The job's sharing.
+	Sharing *jobv1.JobSharing `protobuf:"bytes,1,opt,name=sharing,proto3" json:"sharing,omitempty"`
+	// The cluster policy, one rule per content kind.
+	Rules []*jobv1.JobPrivacyRule `protobuf:"bytes,2,rep,name=rules,proto3" json:"rules,omitempty"`
+}
+
+func (x *GetJobSharingResponse) Reset() {
+	*x = GetJobSharingResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_determined_api_v1_job_proto_msgTypes[18]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetJobSharingResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetJobSharingResponse) ProtoMessage() {}
+
+func (x *GetJobSharingResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_determined_api_v1_job_proto_msgTypes[18]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetJobSharingResponse.ProtoReflect.Descriptor instead.
+func (*GetJobSharingResponse) Descriptor() ([]byte, []int) {
+	return file_determined_api_v1_job_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *GetJobSharingResponse) GetSharing() *jobv1.JobSharing {
+	if x != nil {
+		return x.Sharing
+	}
+	return nil
+}
+
+func (x *GetJobSharingResponse) GetRules() []*jobv1.JobPrivacyRule {
+	if x != nil {
+		return x.Rules
+	}
+	return nil
+}
+
+// Change a job's own sharing. Unset audiences are kept.
+type PatchJobSharingRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// The job ID.
+	JobId string `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	// Who may read the job's title.
+	Title *jobv1.JobAudience `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	// Who may read the job's logs.
+	Logs *jobv1.JobAudience `protobuf:"bytes,3,opt,name=logs,proto3" json:"logs,omitempty"`
+	// Who may read the job's config.
+	Config *jobv1.JobAudience `protobuf:"bytes,4,opt,name=config,proto3" json:"config,omitempty"`
+}
+
+func (x *PatchJobSharingRequest) Reset() {
+	*x = PatchJobSharingRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_determined_api_v1_job_proto_msgTypes[19]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *PatchJobSharingRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PatchJobSharingRequest) ProtoMessage() {}
+
+func (x *PatchJobSharingRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_determined_api_v1_job_proto_msgTypes[19]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PatchJobSharingRequest.ProtoReflect.Descriptor instead.
+func (*PatchJobSharingRequest) Descriptor() ([]byte, []int) {
+	return file_determined_api_v1_job_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *PatchJobSharingRequest) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+func (x *PatchJobSharingRequest) GetTitle() *jobv1.JobAudience {
+	if x != nil {
+		return x.Title
+	}
+	return nil
+}
+
+func (x *PatchJobSharingRequest) GetLogs() *jobv1.JobAudience {
+	if x != nil {
+		return x.Logs
+	}
+	return nil
+}
+
+func (x *PatchJobSharingRequest) GetConfig() *jobv1.JobAudience {
+	if x != nil {
+		return x.Config
+	}
+	return nil
+}
+
+// Response to PatchJobSharingRequest.
+type PatchJobSharingResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// The job's sharing.
+	Sharing *jobv1.JobSharing `protobuf:"bytes,1,opt,name=sharing,proto3" json:"sharing,omitempty"`
+}
+
+func (x *PatchJobSharingResponse) Reset() {
+	*x = PatchJobSharingResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_determined_api_v1_job_proto_msgTypes[20]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *PatchJobSharingResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PatchJobSharingResponse) ProtoMessage() {}
+
+func (x *PatchJobSharingResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_determined_api_v1_job_proto_msgTypes[20]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PatchJobSharingResponse.ProtoReflect.Descriptor instead.
+func (*PatchJobSharingResponse) Descriptor() ([]byte, []int) {
+	return file_determined_api_v1_job_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *PatchJobSharingResponse) GetSharing() *jobv1.JobSharing {
+	if x != nil {
+		return x.Sharing
+	}
+	return nil
+}
+
 var File_determined_api_v1_job_proto protoreflect.FileDescriptor
 
 var file_determined_api_v1_job_proto_rawDesc = []byte{
@@ -652,10 +1301,104 @@ var file_determined_api_v1_job_proto_rawDesc = []byte{
 	0x6e, 0x65, 0x64, 0x2e, 0x61, 0x70, 0x69, 0x2e, 0x76, 0x31, 0x2e, 0x52, 0x50, 0x51, 0x75, 0x65,
 	0x75, 0x65, 0x53, 0x74, 0x61, 0x74, 0x52, 0x07, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x73, 0x3a,
 	0x0f, 0x92, 0x41, 0x0c, 0x0a, 0x0a, 0xd2, 0x01, 0x07, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x73,
-	0x42, 0x35, 0x5a, 0x33, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x64,
-	0x65, 0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2d, 0x61, 0x69, 0x2f, 0x64, 0x65, 0x74,
-	0x65, 0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x70, 0x6b,
-	0x67, 0x2f, 0x61, 0x70, 0x69, 0x76, 0x31, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x22, 0x1c, 0x0a, 0x1a, 0x47, 0x65, 0x74, 0x4a, 0x6f, 0x62, 0x50, 0x72, 0x69, 0x76, 0x61, 0x63,
+	0x79, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x22, 0x65,
+	0x0a, 0x1b, 0x47, 0x65, 0x74, 0x4a, 0x6f, 0x62, 0x50, 0x72, 0x69, 0x76, 0x61, 0x63, 0x79, 0x50,
+	0x6f, 0x6c, 0x69, 0x63, 0x79, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x37, 0x0a,
+	0x05, 0x72, 0x75, 0x6c, 0x65, 0x73, 0x18, 0x01, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x21, 0x2e, 0x64,
+	0x65, 0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2e, 0x6a, 0x6f, 0x62, 0x2e, 0x76, 0x31,
+	0x2e, 0x4a, 0x6f, 0x62, 0x50, 0x72, 0x69, 0x76, 0x61, 0x63, 0x79, 0x52, 0x75, 0x6c, 0x65, 0x52,
+	0x05, 0x72, 0x75, 0x6c, 0x65, 0x73, 0x3a, 0x0d, 0x92, 0x41, 0x0a, 0x0a, 0x08, 0xd2, 0x01, 0x05,
+	0x72, 0x75, 0x6c, 0x65, 0x73, 0x22, 0x64, 0x0a, 0x1a, 0x50, 0x75, 0x74, 0x4a, 0x6f, 0x62, 0x50,
+	0x72, 0x69, 0x76, 0x61, 0x63, 0x79, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x52, 0x65, 0x71, 0x75,
+	0x65, 0x73, 0x74, 0x12, 0x37, 0x0a, 0x05, 0x72, 0x75, 0x6c, 0x65, 0x73, 0x18, 0x01, 0x20, 0x03,
+	0x28, 0x0b, 0x32, 0x21, 0x2e, 0x64, 0x65, 0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2e,
+	0x6a, 0x6f, 0x62, 0x2e, 0x76, 0x31, 0x2e, 0x4a, 0x6f, 0x62, 0x50, 0x72, 0x69, 0x76, 0x61, 0x63,
+	0x79, 0x52, 0x75, 0x6c, 0x65, 0x52, 0x05, 0x72, 0x75, 0x6c, 0x65, 0x73, 0x3a, 0x0d, 0x92, 0x41,
+	0x0a, 0x0a, 0x08, 0xd2, 0x01, 0x05, 0x72, 0x75, 0x6c, 0x65, 0x73, 0x22, 0x65, 0x0a, 0x1b, 0x50,
+	0x75, 0x74, 0x4a, 0x6f, 0x62, 0x50, 0x72, 0x69, 0x76, 0x61, 0x63, 0x79, 0x50, 0x6f, 0x6c, 0x69,
+	0x63, 0x79, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x37, 0x0a, 0x05, 0x72, 0x75,
+	0x6c, 0x65, 0x73, 0x18, 0x01, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x21, 0x2e, 0x64, 0x65, 0x74, 0x65,
+	0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2e, 0x6a, 0x6f, 0x62, 0x2e, 0x76, 0x31, 0x2e, 0x4a, 0x6f,
+	0x62, 0x50, 0x72, 0x69, 0x76, 0x61, 0x63, 0x79, 0x52, 0x75, 0x6c, 0x65, 0x52, 0x05, 0x72, 0x75,
+	0x6c, 0x65, 0x73, 0x3a, 0x0d, 0x92, 0x41, 0x0a, 0x0a, 0x08, 0xd2, 0x01, 0x05, 0x72, 0x75, 0x6c,
+	0x65, 0x73, 0x22, 0x18, 0x0a, 0x16, 0x47, 0x65, 0x74, 0x4d, 0x79, 0x4a, 0x6f, 0x62, 0x50, 0x72,
+	0x69, 0x76, 0x61, 0x63, 0x79, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x22, 0x67, 0x0a, 0x17,
+	0x47, 0x65, 0x74, 0x4d, 0x79, 0x4a, 0x6f, 0x62, 0x50, 0x72, 0x69, 0x76, 0x61, 0x63, 0x79, 0x52,
+	0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x3b, 0x0a, 0x07, 0x70, 0x72, 0x69, 0x76, 0x61,
+	0x63, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x21, 0x2e, 0x64, 0x65, 0x74, 0x65, 0x72,
+	0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2e, 0x6a, 0x6f, 0x62, 0x2e, 0x76, 0x31, 0x2e, 0x55, 0x73, 0x65,
+	0x72, 0x4a, 0x6f, 0x62, 0x50, 0x72, 0x69, 0x76, 0x61, 0x63, 0x79, 0x52, 0x07, 0x70, 0x72, 0x69,
+	0x76, 0x61, 0x63, 0x79, 0x3a, 0x0f, 0x92, 0x41, 0x0c, 0x0a, 0x0a, 0xd2, 0x01, 0x07, 0x70, 0x72,
+	0x69, 0x76, 0x61, 0x63, 0x79, 0x22, 0xec, 0x02, 0x0a, 0x18, 0x50, 0x61, 0x74, 0x63, 0x68, 0x4d,
+	0x79, 0x4a, 0x6f, 0x62, 0x50, 0x72, 0x69, 0x76, 0x61, 0x63, 0x79, 0x52, 0x65, 0x71, 0x75, 0x65,
+	0x73, 0x74, 0x12, 0x26, 0x0a, 0x0c, 0x73, 0x68, 0x61, 0x72, 0x65, 0x5f, 0x74, 0x69, 0x74, 0x6c,
+	0x65, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x08, 0x48, 0x00, 0x52, 0x0b, 0x73, 0x68, 0x61, 0x72,
+	0x65, 0x54, 0x69, 0x74, 0x6c, 0x65, 0x73, 0x88, 0x01, 0x01, 0x12, 0x22, 0x0a, 0x0a, 0x73, 0x68,
+	0x61, 0x72, 0x65, 0x5f, 0x6c, 0x6f, 0x67, 0x73, 0x18, 0x02, 0x20, 0x01, 0x28, 0x08, 0x48, 0x01,
+	0x52, 0x09, 0x73, 0x68, 0x61, 0x72, 0x65, 0x4c, 0x6f, 0x67, 0x73, 0x88, 0x01, 0x01, 0x12, 0x44,
+	0x0a, 0x0e, 0x6e, 0x65, 0x77, 0x5f, 0x6a, 0x6f, 0x62, 0x5f, 0x74, 0x69, 0x74, 0x6c, 0x65, 0x73,
+	0x18, 0x03, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1e, 0x2e, 0x64, 0x65, 0x74, 0x65, 0x72, 0x6d, 0x69,
+	0x6e, 0x65, 0x64, 0x2e, 0x6a, 0x6f, 0x62, 0x2e, 0x76, 0x31, 0x2e, 0x4a, 0x6f, 0x62, 0x41, 0x75,
+	0x64, 0x69, 0x65, 0x6e, 0x63, 0x65, 0x52, 0x0c, 0x6e, 0x65, 0x77, 0x4a, 0x6f, 0x62, 0x54, 0x69,
+	0x74, 0x6c, 0x65, 0x73, 0x12, 0x40, 0x0a, 0x0c, 0x6e, 0x65, 0x77, 0x5f, 0x6a, 0x6f, 0x62, 0x5f,
+	0x6c, 0x6f, 0x67, 0x73, 0x18, 0x04, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1e, 0x2e, 0x64, 0x65, 0x74,
+	0x65, 0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2e, 0x6a, 0x6f, 0x62, 0x2e, 0x76, 0x31, 0x2e, 0x4a,
+	0x6f, 0x62, 0x41, 0x75, 0x64, 0x69, 0x65, 0x6e, 0x63, 0x65, 0x52, 0x0a, 0x6e, 0x65, 0x77, 0x4a,
+	0x6f, 0x62, 0x4c, 0x6f, 0x67, 0x73, 0x12, 0x2f, 0x0a, 0x14, 0x72, 0x65, 0x73, 0x65, 0x74, 0x5f,
+	0x6e, 0x65, 0x77, 0x5f, 0x6a, 0x6f, 0x62, 0x5f, 0x74, 0x69, 0x74, 0x6c, 0x65, 0x73, 0x18, 0x05,
+	0x20, 0x01, 0x28, 0x08, 0x52, 0x11, 0x72, 0x65, 0x73, 0x65, 0x74, 0x4e, 0x65, 0x77, 0x4a, 0x6f,
+	0x62, 0x54, 0x69, 0x74, 0x6c, 0x65, 0x73, 0x12, 0x2b, 0x0a, 0x12, 0x72, 0x65, 0x73, 0x65, 0x74,
+	0x5f, 0x6e, 0x65, 0x77, 0x5f, 0x6a, 0x6f, 0x62, 0x5f, 0x6c, 0x6f, 0x67, 0x73, 0x18, 0x06, 0x20,
+	0x01, 0x28, 0x08, 0x52, 0x0f, 0x72, 0x65, 0x73, 0x65, 0x74, 0x4e, 0x65, 0x77, 0x4a, 0x6f, 0x62,
+	0x4c, 0x6f, 0x67, 0x73, 0x42, 0x0f, 0x0a, 0x0d, 0x5f, 0x73, 0x68, 0x61, 0x72, 0x65, 0x5f, 0x74,
+	0x69, 0x74, 0x6c, 0x65, 0x73, 0x42, 0x0d, 0x0a, 0x0b, 0x5f, 0x73, 0x68, 0x61, 0x72, 0x65, 0x5f,
+	0x6c, 0x6f, 0x67, 0x73, 0x22, 0x69, 0x0a, 0x19, 0x50, 0x61, 0x74, 0x63, 0x68, 0x4d, 0x79, 0x4a,
+	0x6f, 0x62, 0x50, 0x72, 0x69, 0x76, 0x61, 0x63, 0x79, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73,
+	0x65, 0x12, 0x3b, 0x0a, 0x07, 0x70, 0x72, 0x69, 0x76, 0x61, 0x63, 0x79, 0x18, 0x01, 0x20, 0x01,
+	0x28, 0x0b, 0x32, 0x21, 0x2e, 0x64, 0x65, 0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2e,
+	0x6a, 0x6f, 0x62, 0x2e, 0x76, 0x31, 0x2e, 0x55, 0x73, 0x65, 0x72, 0x4a, 0x6f, 0x62, 0x50, 0x72,
+	0x69, 0x76, 0x61, 0x63, 0x79, 0x52, 0x07, 0x70, 0x72, 0x69, 0x76, 0x61, 0x63, 0x79, 0x3a, 0x0f,
+	0x92, 0x41, 0x0c, 0x0a, 0x0a, 0xd2, 0x01, 0x07, 0x70, 0x72, 0x69, 0x76, 0x61, 0x63, 0x79, 0x22,
+	0x3d, 0x0a, 0x14, 0x47, 0x65, 0x74, 0x4a, 0x6f, 0x62, 0x53, 0x68, 0x61, 0x72, 0x69, 0x6e, 0x67,
+	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x15, 0x0a, 0x06, 0x6a, 0x6f, 0x62, 0x5f, 0x69,
+	0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x6a, 0x6f, 0x62, 0x49, 0x64, 0x3a, 0x0e,
+	0x92, 0x41, 0x0b, 0x0a, 0x09, 0xd2, 0x01, 0x06, 0x6a, 0x6f, 0x62, 0x5f, 0x69, 0x64, 0x22, 0xa2,
+	0x01, 0x0a, 0x15, 0x47, 0x65, 0x74, 0x4a, 0x6f, 0x62, 0x53, 0x68, 0x61, 0x72, 0x69, 0x6e, 0x67,
+	0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x37, 0x0a, 0x07, 0x73, 0x68, 0x61, 0x72,
+	0x69, 0x6e, 0x67, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1d, 0x2e, 0x64, 0x65, 0x74, 0x65,
+	0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2e, 0x6a, 0x6f, 0x62, 0x2e, 0x76, 0x31, 0x2e, 0x4a, 0x6f,
+	0x62, 0x53, 0x68, 0x61, 0x72, 0x69, 0x6e, 0x67, 0x52, 0x07, 0x73, 0x68, 0x61, 0x72, 0x69, 0x6e,
+	0x67, 0x12, 0x37, 0x0a, 0x05, 0x72, 0x75, 0x6c, 0x65, 0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x0b,
+	0x32, 0x21, 0x2e, 0x64, 0x65, 0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2e, 0x6a, 0x6f,
+	0x62, 0x2e, 0x76, 0x31, 0x2e, 0x4a, 0x6f, 0x62, 0x50, 0x72, 0x69, 0x76, 0x61, 0x63, 0x79, 0x52,
+	0x75, 0x6c, 0x65, 0x52, 0x05, 0x72, 0x75, 0x6c, 0x65, 0x73, 0x3a, 0x17, 0x92, 0x41, 0x14, 0x0a,
+	0x12, 0xd2, 0x01, 0x07, 0x73, 0x68, 0x61, 0x72, 0x69, 0x6e, 0x67, 0xd2, 0x01, 0x05, 0x72, 0x75,
+	0x6c, 0x65, 0x73, 0x22, 0xe1, 0x01, 0x0a, 0x16, 0x50, 0x61, 0x74, 0x63, 0x68, 0x4a, 0x6f, 0x62,
+	0x53, 0x68, 0x61, 0x72, 0x69, 0x6e, 0x67, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x15,
+	0x0a, 0x06, 0x6a, 0x6f, 0x62, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05,
+	0x6a, 0x6f, 0x62, 0x49, 0x64, 0x12, 0x34, 0x0a, 0x05, 0x74, 0x69, 0x74, 0x6c, 0x65, 0x18, 0x02,
+	0x20, 0x01, 0x28, 0x0b, 0x32, 0x1e, 0x2e, 0x64, 0x65, 0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x65,
+	0x64, 0x2e, 0x6a, 0x6f, 0x62, 0x2e, 0x76, 0x31, 0x2e, 0x4a, 0x6f, 0x62, 0x41, 0x75, 0x64, 0x69,
+	0x65, 0x6e, 0x63, 0x65, 0x52, 0x05, 0x74, 0x69, 0x74, 0x6c, 0x65, 0x12, 0x32, 0x0a, 0x04, 0x6c,
+	0x6f, 0x67, 0x73, 0x18, 0x03, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1e, 0x2e, 0x64, 0x65, 0x74, 0x65,
+	0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2e, 0x6a, 0x6f, 0x62, 0x2e, 0x76, 0x31, 0x2e, 0x4a, 0x6f,
+	0x62, 0x41, 0x75, 0x64, 0x69, 0x65, 0x6e, 0x63, 0x65, 0x52, 0x04, 0x6c, 0x6f, 0x67, 0x73, 0x12,
+	0x36, 0x0a, 0x06, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x18, 0x04, 0x20, 0x01, 0x28, 0x0b, 0x32,
+	0x1e, 0x2e, 0x64, 0x65, 0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2e, 0x6a, 0x6f, 0x62,
+	0x2e, 0x76, 0x31, 0x2e, 0x4a, 0x6f, 0x62, 0x41, 0x75, 0x64, 0x69, 0x65, 0x6e, 0x63, 0x65, 0x52,
+	0x06, 0x63, 0x6f, 0x6e, 0x66, 0x69, 0x67, 0x3a, 0x0e, 0x92, 0x41, 0x0b, 0x0a, 0x09, 0xd2, 0x01,
+	0x06, 0x6a, 0x6f, 0x62, 0x5f, 0x69, 0x64, 0x22, 0x63, 0x0a, 0x17, 0x50, 0x61, 0x74, 0x63, 0x68,
+	0x4a, 0x6f, 0x62, 0x53, 0x68, 0x61, 0x72, 0x69, 0x6e, 0x67, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e,
+	0x73, 0x65, 0x12, 0x37, 0x0a, 0x07, 0x73, 0x68, 0x61, 0x72, 0x69, 0x6e, 0x67, 0x18, 0x01, 0x20,
+	0x01, 0x28, 0x0b, 0x32, 0x1d, 0x2e, 0x64, 0x65, 0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64,
+	0x2e, 0x6a, 0x6f, 0x62, 0x2e, 0x76, 0x31, 0x2e, 0x4a, 0x6f, 0x62, 0x53, 0x68, 0x61, 0x72, 0x69,
+	0x6e, 0x67, 0x52, 0x07, 0x73, 0x68, 0x61, 0x72, 0x69, 0x6e, 0x67, 0x3a, 0x0f, 0x92, 0x41, 0x0c,
+	0x0a, 0x0a, 0xd2, 0x01, 0x07, 0x73, 0x68, 0x61, 0x72, 0x69, 0x6e, 0x67, 0x42, 0x35, 0x5a, 0x33,
+	0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x64, 0x65, 0x74, 0x65, 0x72,
+	0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2d, 0x61, 0x69, 0x2f, 0x64, 0x65, 0x74, 0x65, 0x72, 0x6d, 0x69,
+	0x6e, 0x65, 0x64, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x70, 0x6b, 0x67, 0x2f, 0x61, 0x70,
+	0x69, 0x76, 0x31, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -670,44 +1413,73 @@ func file_determined_api_v1_job_proto_rawDescGZIP() []byte {
 	return file_determined_api_v1_job_proto_rawDescData
 }
 
-var file_determined_api_v1_job_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_determined_api_v1_job_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_determined_api_v1_job_proto_goTypes = []interface{}{
-	(*GetJobsRequest)(nil),            // 0: determined.api.v1.GetJobsRequest
-	(*GetJobsResponse)(nil),           // 1: determined.api.v1.GetJobsResponse
-	(*GetJobsV2Request)(nil),          // 2: determined.api.v1.GetJobsV2Request
-	(*GetJobsV2Response)(nil),         // 3: determined.api.v1.GetJobsV2Response
-	(*UpdateJobQueueRequest)(nil),     // 4: determined.api.v1.UpdateJobQueueRequest
-	(*UpdateJobQueueResponse)(nil),    // 5: determined.api.v1.UpdateJobQueueResponse
-	(*RPQueueStat)(nil),               // 6: determined.api.v1.RPQueueStat
-	(*GetJobQueueStatsRequest)(nil),   // 7: determined.api.v1.GetJobQueueStatsRequest
-	(*GetJobQueueStatsResponse)(nil),  // 8: determined.api.v1.GetJobQueueStatsResponse
-	(OrderBy)(0),                      // 9: determined.api.v1.OrderBy
-	(jobv1.State)(0),                  // 10: determined.job.v1.State
-	(*Pagination)(nil),                // 11: determined.api.v1.Pagination
-	(*jobv1.Job)(nil),                 // 12: determined.job.v1.Job
-	(*jobv1.RBACJob)(nil),             // 13: determined.job.v1.RBACJob
-	(*jobv1.QueueControl)(nil),        // 14: determined.job.v1.QueueControl
-	(*jobv1.QueueStats)(nil),          // 15: determined.job.v1.QueueStats
-	(*jobv1.AggregateQueueStats)(nil), // 16: determined.job.v1.AggregateQueueStats
+	(*GetJobsRequest)(nil),              // 0: determined.api.v1.GetJobsRequest
+	(*GetJobsResponse)(nil),             // 1: determined.api.v1.GetJobsResponse
+	(*GetJobsV2Request)(nil),            // 2: determined.api.v1.GetJobsV2Request
+	(*GetJobsV2Response)(nil),           // 3: determined.api.v1.GetJobsV2Response
+	(*UpdateJobQueueRequest)(nil),       // 4: determined.api.v1.UpdateJobQueueRequest
+	(*UpdateJobQueueResponse)(nil),      // 5: determined.api.v1.UpdateJobQueueResponse
+	(*RPQueueStat)(nil),                 // 6: determined.api.v1.RPQueueStat
+	(*GetJobQueueStatsRequest)(nil),     // 7: determined.api.v1.GetJobQueueStatsRequest
+	(*GetJobQueueStatsResponse)(nil),    // 8: determined.api.v1.GetJobQueueStatsResponse
+	(*GetJobPrivacyPolicyRequest)(nil),  // 9: determined.api.v1.GetJobPrivacyPolicyRequest
+	(*GetJobPrivacyPolicyResponse)(nil), // 10: determined.api.v1.GetJobPrivacyPolicyResponse
+	(*PutJobPrivacyPolicyRequest)(nil),  // 11: determined.api.v1.PutJobPrivacyPolicyRequest
+	(*PutJobPrivacyPolicyResponse)(nil), // 12: determined.api.v1.PutJobPrivacyPolicyResponse
+	(*GetMyJobPrivacyRequest)(nil),      // 13: determined.api.v1.GetMyJobPrivacyRequest
+	(*GetMyJobPrivacyResponse)(nil),     // 14: determined.api.v1.GetMyJobPrivacyResponse
+	(*PatchMyJobPrivacyRequest)(nil),    // 15: determined.api.v1.PatchMyJobPrivacyRequest
+	(*PatchMyJobPrivacyResponse)(nil),   // 16: determined.api.v1.PatchMyJobPrivacyResponse
+	(*GetJobSharingRequest)(nil),        // 17: determined.api.v1.GetJobSharingRequest
+	(*GetJobSharingResponse)(nil),       // 18: determined.api.v1.GetJobSharingResponse
+	(*PatchJobSharingRequest)(nil),      // 19: determined.api.v1.PatchJobSharingRequest
+	(*PatchJobSharingResponse)(nil),     // 20: determined.api.v1.PatchJobSharingResponse
+	(OrderBy)(0),                        // 21: determined.api.v1.OrderBy
+	(jobv1.State)(0),                    // 22: determined.job.v1.State
+	(*Pagination)(nil),                  // 23: determined.api.v1.Pagination
+	(*jobv1.Job)(nil),                   // 24: determined.job.v1.Job
+	(*jobv1.RBACJob)(nil),               // 25: determined.job.v1.RBACJob
+	(*jobv1.QueueControl)(nil),          // 26: determined.job.v1.QueueControl
+	(*jobv1.QueueStats)(nil),            // 27: determined.job.v1.QueueStats
+	(*jobv1.AggregateQueueStats)(nil),   // 28: determined.job.v1.AggregateQueueStats
+	(*jobv1.JobPrivacyRule)(nil),        // 29: determined.job.v1.JobPrivacyRule
+	(*jobv1.UserJobPrivacy)(nil),        // 30: determined.job.v1.UserJobPrivacy
+	(*jobv1.JobAudience)(nil),           // 31: determined.job.v1.JobAudience
+	(*jobv1.JobSharing)(nil),            // 32: determined.job.v1.JobSharing
 }
 var file_determined_api_v1_job_proto_depIdxs = []int32{
-	9,  // 0: determined.api.v1.GetJobsRequest.order_by:type_name -> determined.api.v1.OrderBy
-	10, // 1: determined.api.v1.GetJobsRequest.states:type_name -> determined.job.v1.State
-	11, // 2: determined.api.v1.GetJobsResponse.pagination:type_name -> determined.api.v1.Pagination
-	12, // 3: determined.api.v1.GetJobsResponse.jobs:type_name -> determined.job.v1.Job
-	9,  // 4: determined.api.v1.GetJobsV2Request.order_by:type_name -> determined.api.v1.OrderBy
-	10, // 5: determined.api.v1.GetJobsV2Request.states:type_name -> determined.job.v1.State
-	11, // 6: determined.api.v1.GetJobsV2Response.pagination:type_name -> determined.api.v1.Pagination
-	13, // 7: determined.api.v1.GetJobsV2Response.jobs:type_name -> determined.job.v1.RBACJob
-	14, // 8: determined.api.v1.UpdateJobQueueRequest.updates:type_name -> determined.job.v1.QueueControl
-	15, // 9: determined.api.v1.RPQueueStat.stats:type_name -> determined.job.v1.QueueStats
-	16, // 10: determined.api.v1.RPQueueStat.aggregates:type_name -> determined.job.v1.AggregateQueueStats
+	21, // 0: determined.api.v1.GetJobsRequest.order_by:type_name -> determined.api.v1.OrderBy
+	22, // 1: determined.api.v1.GetJobsRequest.states:type_name -> determined.job.v1.State
+	23, // 2: determined.api.v1.GetJobsResponse.pagination:type_name -> determined.api.v1.Pagination
+	24, // 3: determined.api.v1.GetJobsResponse.jobs:type_name -> determined.job.v1.Job
+	21, // 4: determined.api.v1.GetJobsV2Request.order_by:type_name -> determined.api.v1.OrderBy
+	22, // 5: determined.api.v1.GetJobsV2Request.states:type_name -> determined.job.v1.State
+	23, // 6: determined.api.v1.GetJobsV2Response.pagination:type_name -> determined.api.v1.Pagination
+	25, // 7: determined.api.v1.GetJobsV2Response.jobs:type_name -> determined.job.v1.RBACJob
+	26, // 8: determined.api.v1.UpdateJobQueueRequest.updates:type_name -> determined.job.v1.QueueControl
+	27, // 9: determined.api.v1.RPQueueStat.stats:type_name -> determined.job.v1.QueueStats
+	28, // 10: determined.api.v1.RPQueueStat.aggregates:type_name -> determined.job.v1.AggregateQueueStats
 	6,  // 11: determined.api.v1.GetJobQueueStatsResponse.results:type_name -> determined.api.v1.RPQueueStat
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	29, // 12: determined.api.v1.GetJobPrivacyPolicyResponse.rules:type_name -> determined.job.v1.JobPrivacyRule
+	29, // 13: determined.api.v1.PutJobPrivacyPolicyRequest.rules:type_name -> determined.job.v1.JobPrivacyRule
+	29, // 14: determined.api.v1.PutJobPrivacyPolicyResponse.rules:type_name -> determined.job.v1.JobPrivacyRule
+	30, // 15: determined.api.v1.GetMyJobPrivacyResponse.privacy:type_name -> determined.job.v1.UserJobPrivacy
+	31, // 16: determined.api.v1.PatchMyJobPrivacyRequest.new_job_titles:type_name -> determined.job.v1.JobAudience
+	31, // 17: determined.api.v1.PatchMyJobPrivacyRequest.new_job_logs:type_name -> determined.job.v1.JobAudience
+	30, // 18: determined.api.v1.PatchMyJobPrivacyResponse.privacy:type_name -> determined.job.v1.UserJobPrivacy
+	32, // 19: determined.api.v1.GetJobSharingResponse.sharing:type_name -> determined.job.v1.JobSharing
+	29, // 20: determined.api.v1.GetJobSharingResponse.rules:type_name -> determined.job.v1.JobPrivacyRule
+	31, // 21: determined.api.v1.PatchJobSharingRequest.title:type_name -> determined.job.v1.JobAudience
+	31, // 22: determined.api.v1.PatchJobSharingRequest.logs:type_name -> determined.job.v1.JobAudience
+	31, // 23: determined.api.v1.PatchJobSharingRequest.config:type_name -> determined.job.v1.JobAudience
+	32, // 24: determined.api.v1.PatchJobSharingResponse.sharing:type_name -> determined.job.v1.JobSharing
+	25, // [25:25] is the sub-list for method output_type
+	25, // [25:25] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_determined_api_v1_job_proto_init() }
@@ -825,14 +1597,159 @@ func file_determined_api_v1_job_proto_init() {
 				return nil
 			}
 		}
+		file_determined_api_v1_job_proto_msgTypes[9].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GetJobPrivacyPolicyRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_determined_api_v1_job_proto_msgTypes[10].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GetJobPrivacyPolicyResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_determined_api_v1_job_proto_msgTypes[11].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*PutJobPrivacyPolicyRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_determined_api_v1_job_proto_msgTypes[12].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*PutJobPrivacyPolicyResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_determined_api_v1_job_proto_msgTypes[13].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GetMyJobPrivacyRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_determined_api_v1_job_proto_msgTypes[14].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GetMyJobPrivacyResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_determined_api_v1_job_proto_msgTypes[15].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*PatchMyJobPrivacyRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_determined_api_v1_job_proto_msgTypes[16].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*PatchMyJobPrivacyResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_determined_api_v1_job_proto_msgTypes[17].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GetJobSharingRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_determined_api_v1_job_proto_msgTypes[18].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GetJobSharingResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_determined_api_v1_job_proto_msgTypes[19].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*PatchJobSharingRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_determined_api_v1_job_proto_msgTypes[20].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*PatchJobSharingResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
 	}
+	file_determined_api_v1_job_proto_msgTypes[15].OneofWrappers = []interface{}{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_determined_api_v1_job_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

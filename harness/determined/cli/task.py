@@ -49,7 +49,7 @@ def render_tasks(args: argparse.Namespace, tasks: Dict[str, bindings.v1Allocatio
         [
             task.taskId,
             task.allocationId,
-            task.name,
+            render.title_or_omitted(task.name, task.capabilities),
             task.slotsNeeded,
             render.format_time(task.registeredTime),
             agent_info(task),
@@ -81,7 +81,9 @@ def list_tasks(args: argparse.Namespace) -> None:
 def logs(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
     task_id = cast(str, ntsc.expand_uuid_prefixes(sess, args, args.task_id))
-    try:
+    with cli.log_stream_ended(
+        f"Task log stream ended. To reopen log stream, run: det task logs -f {task_id}"
+    ):
         logs = api.task_logs(
             sess,
             task_id,
@@ -102,14 +104,6 @@ def logs(args: argparse.Namespace) -> None:
                 render.print_json(log.to_json())
         else:
             api.pprint_logs(logs)
-    finally:
-        print(
-            termcolor.colored(
-                "Task log stream ended. To reopen log stream, run: "
-                "det task logs -f {}".format(task_id),
-                "green",
-            )
-        )
 
 
 def kill(args: argparse.Namespace) -> None:
@@ -210,7 +204,7 @@ def list_generic(args: argparse.Namespace) -> None:
     values = [
         [
             t.taskId,
-            t.name,
+            render.title_or_omitted(t.name, t.capabilities),
             t.username,
             t.state.value.replace("GENERIC_TASK_STATE_", ""),
             t.slots,

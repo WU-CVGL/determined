@@ -214,7 +214,7 @@ def list_tensorboards(args: argparse.Namespace) -> None:
         render.print_json(res)
         return
 
-    values = render.select_values(res, table_header)
+    values = render.select_values([ntsc._omit_hidden_description(x) for x in res], table_header)
     render.tabulate_or_csv(table_header, values, getattr(args, "csv", False))
 
 
@@ -238,6 +238,8 @@ def tensorboard_config(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
     task_id = resolve_ids(sess, [args.tensorboard_id], "config")[0]
     res_json = sess.get(f"api/v1/shells/{task_id}").json()
+    if not render.config_shared((res_json.get("shell") or {}).get("capabilities")):
+        raise cli.CliError(render.CONFIG_NOT_SHARED)
     print(render.format_object_as_yaml(res_json["config"]))
 
 

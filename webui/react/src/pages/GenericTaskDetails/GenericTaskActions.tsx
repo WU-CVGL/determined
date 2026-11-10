@@ -10,6 +10,8 @@ export type { GenericTaskActionTarget } from 'hooks/useGenericTaskActions';
 interface Props {
   canControl: boolean;
   onComplete?: () => void;
+  /** Offers Sharing when given: to the task's owner and admins. */
+  onSharing?: () => void;
   task: GenericTaskActionTarget;
 }
 
@@ -19,7 +21,12 @@ const NO_PERMISSION = 'You need to own this task or be an admin to control it.';
  * The task page's actions. The confirmations and what each action does are shared with the generic
  * task menu (useGenericTaskActions).
  */
-const GenericTaskActions: React.FC<Props> = ({ canControl, onComplete, task }: Props) => {
+const GenericTaskActions: React.FC<Props> = ({
+  canControl,
+  onComplete,
+  onSharing,
+  task,
+}: Props) => {
   const { canKill, canPause, canUnpause, isBusy, isUnpauseRetry, kill, killTree, pause, unpause } =
     useGenericTaskActions({ canControl, onComplete, task });
 
@@ -39,6 +46,11 @@ const GenericTaskActions: React.FC<Props> = ({ canControl, onComplete, task }: P
 
   return (
     <Row>
+      {onSharing && (
+        <Button data-testid="generic-task-sharing" onClick={onSharing}>
+          Sharing
+        </Button>
+      )}
       <Button
         data-testid="generic-task-pause"
         disabled={!canPause || isBusy}

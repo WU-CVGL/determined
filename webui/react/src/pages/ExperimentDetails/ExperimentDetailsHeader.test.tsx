@@ -32,6 +32,20 @@ vi.mock('hew/Toast', async (importOriginal) => ({
   makeToast: vi.fn(),
 }));
 vi.mock('hooks/useFeature', () => ({ default: () => ({ isOn: () => false }) }));
+// Lets a test grant the metadata edits that the default user has not got.
+const grants = vi.hoisted(() => ({ metadata: false }));
+vi.mock('hooks/usePermissions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('hooks/usePermissions')>();
+  return {
+    ...actual,
+    default: () => {
+      const permissions = actual.default();
+      return grants.metadata
+        ? { ...permissions, canModifyExperimentMetadata: () => true }
+        : permissions;
+    },
+  };
+});
 
 const QUEUED: ExperimentBase = {
   ...(RESPONSES.singleTrial.getExperimentsDetails as unknown as ExperimentBase),
@@ -40,13 +54,13 @@ const QUEUED: ExperimentBase = {
   state: RunState.Queued,
 };
 
-const setup = () =>
+const setup = (experiment: ExperimentBase = QUEUED) =>
   render(
     <UIProvider theme={DefaultTheme.Light}>
       <ThemeProvider>
         <ConfirmationProvider>
           <BrowserRouter>
-            <ExperimentDetailsHeader experiment={QUEUED} fetchExperimentDetails={vi.fn()} />
+            <ExperimentDetailsHeader experiment={experiment} fetchExperimentDetails={vi.fn()} />
           </BrowserRouter>
         </ConfirmationProvider>
       </ThemeProvider>
@@ -59,6 +73,39 @@ describe('ExperimentDetailsHeader', () => {
   beforeEach(() => {
     vi.mocked(openTensorBoardSession).mockReset();
     vi.mocked(makeToast).mockReset();
+  });
+
+  it('offers Sharing when the master lets the user manage it', async () => {
+    const capabilities = { manageSharing: true, viewConfig: true, viewLogs: true, viewTitle: true };
+    const { unmount } = setup({ ...QUEUED, capabilities });
+    await userEvent.click(screen.getByRole('button', { name: 'Action menu' }));
+    expect(await screen.findByRole('menuitem', { name: 'Sharing' })).toBeInTheDocument();
+    unmount();
+
+    setup({ ...QUEUED, capabilities: { ...capabilities, manageSharing: false } });
+    await userEvent.click(screen.getByRole('button', { name: 'Action menu' }));
+    await screen.findAllByRole('menuitem');
+    expect(screen.queryByText('Sharing')).not.toBeInTheDocument();
+  });
+
+  it('keeps the tags read-only when the title is not shared', async () => {
+    grants.metadata = true;
+    const capabilities = {
+      manageSharing: false,
+      viewConfig: true,
+      viewLogs: true,
+      viewTitle: true,
+    };
+    const { unmount } = setup({ ...QUEUED, capabilities });
+    await userEvent.click(screen.getByLabelText('Toggle expansion'));
+    expect(await screen.findByText('Add Tag')).toBeInTheDocument();
+    unmount();
+
+    setup({ ...QUEUED, capabilities: { ...capabilities, viewTitle: false }, labels: [] });
+    await userEvent.click(screen.getByLabelText('Toggle expansion'));
+    expect(await screen.findByText('Tags')).toBeInTheDocument();
+    expect(screen.queryByText('Add Tag')).not.toBeInTheDocument();
+    grants.metadata = false;
   });
 
   it("links a queued experiment's job info to the cluster page", async () => {
