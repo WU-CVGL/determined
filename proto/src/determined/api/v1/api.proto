@@ -731,7 +731,7 @@ service Determined {
   rpc PutExperimentLabel(PutExperimentLabelRequest)
       returns (PutExperimentLabelResponse) {
     option (google.api.http) = {
-      put: "/api/v1/experiments/{experiment_id}/labels/{label}"
+      put: "/api/v1/experiments/{experiment_id}/labels/{label=**}"
     };
     option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
       tags: "Experiments"
@@ -742,7 +742,7 @@ service Determined {
   rpc DeleteExperimentLabel(DeleteExperimentLabelRequest)
       returns (DeleteExperimentLabelResponse) {
     option (google.api.http) = {
-      delete: "/api/v1/experiments/{experiment_id}/labels/{label}"
+      delete: "/api/v1/experiments/{experiment_id}/labels/{label=**}"
     };
     option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
       tags: "Experiments"

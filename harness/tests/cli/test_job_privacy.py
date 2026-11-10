@@ -533,3 +533,22 @@ def test_experiment_label_edits(action: str, label: str, shared: bool) -> None:
                 json={"labels": []},
             )
         cli.main(["experiment", "label", action, str(exp_id), label])
+
+
+@pytest.mark.parametrize("action,method", [("add", "PUT"), ("remove", "DELETE")])
+def test_experiment_label_edits_hidden_title_slash(action: str, method: str) -> None:
+    # A label with a slash takes more than one path segment, which the label routes accept.
+    resp = api_responses.sample_get_experiment().to_json()
+    exp_id = resp["experiment"]["id"]
+    resp["experiment"] = with_caps(resp["experiment"], HIDDEN)
+    resp["experiment"]["labels"] = []
+    with util.standard_cli_rsps() as rsps:
+        rsps.get(f"{MASTER}/api/v1/experiments/{exp_id}", json=resp)
+        rsps.add(
+            method,
+            f"{MASTER}/api/v1/experiments/{exp_id}/labels/train/validation",
+            json={"labels": []},
+        )
+        cli.main(["experiment", "label", action, str(exp_id), "train/validation"])
+        sent = [c.request for c in rsps.calls if c.request.method == method]
+    assert [r.path_url for r in sent] == [f"/api/v1/experiments/{exp_id}/labels/train/validation"]
