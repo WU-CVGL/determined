@@ -1093,7 +1093,7 @@ const LaunchForm: React.FC<LaunchFormProps> = ({
         </Row>
       </Form.Item>
       {tensorBoardChecked && (
-        <Form.Item label="Data source">
+        <Form.Item label="TensorBoard Data Source">
           <Form.Item initialValue={DEFAULT_SOURCE_MODE} name={['dataSource', 'mode']} noStyle>
             <RadioGroup
               options={sshOff ? [EXPERIMENTS_OPTION] : SOURCE_OPTIONS}
