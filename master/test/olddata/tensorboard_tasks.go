@@ -72,9 +72,9 @@ INSERT INTO resourcemanagers_agent_containers (container_id, resource_id, agent_
     ('olddata-tb-shell.c', 'olddata-tb-shell.r', 'olddata-agent'),
     ('olddata-tb-session.c', 'olddata-tb-session.r', 'olddata-agent');
 INSERT INTO checkpoints_v2 (uuid, task_id, report_time, state) VALUES
-    (gen_random_uuid(), 'olddata-tensorboard', now(), 'DELETED'),
-    (gen_random_uuid(), 'olddata-tb-shell', now(), 'DELETED'),
-    (gen_random_uuid(), 'olddata-tb-session', now(), 'DELETED');
+    ('0f1e2d3c-0000-4000-8000-000000000001', 'olddata-tensorboard', now(), 'DELETED'),
+    ('0f1e2d3c-0000-4000-8000-000000000002', 'olddata-tb-shell', now(), 'DELETED'),
+    ('0f1e2d3c-0000-4000-8000-000000000003', 'olddata-tb-session', now(), 'DELETED');
 `
 
 // MigrateWithTensorBoardTasks migrates an empty database fully, with the rows of TensorBoardTasks
