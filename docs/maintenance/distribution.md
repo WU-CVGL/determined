@@ -1,12 +1,12 @@
-# Install and deploy version 0.43.1
+# Install and deploy version 0.44.0
 
-Use the [0.43.1 GitHub release](https://github.com/WU-CVGL/determined/releases/tag/0.43.1)
+Use the [0.44.0 GitHub release](https://github.com/WU-CVGL/determined/releases/tag/0.44.0)
 and its tag as the version reference. The matching master and agent images are
-published to GHCR under `ghcr.io/wu-cvgl/determined-master:0.43.1` and
-`ghcr.io/wu-cvgl/determined-agent:0.43.1`. Pin the images to the release's
+published to GHCR under `ghcr.io/wu-cvgl/determined-master:0.44.0` and
+`ghcr.io/wu-cvgl/determined-agent:0.44.0`. Pin the images to the release's
 published digests when preparing a deployment. Master and agent do not check
-each other's version, and their messages are the same from 0.41.0 to 0.43.1, so
-0.41.0 to 0.42.2 agents run under a 0.43.1 master; `gpu_groups` works with them,
+each other's version, and their messages are the same from 0.41.0 to 0.44.0, so
+0.41.0 to 0.42.2 agents run under a 0.44.0 master; `gpu_groups` works with them,
 since the master sets `DET_GPU_GROUPS`. 0.41.0 changed the agent: it reads the GPU
 topology through NVML and sends it when it connects, which a 0.40.1 master
 ignores. 0.42.2 changes the agent again: it starts CUDA tasks with the `nvidia`
@@ -30,12 +30,32 @@ configuration. 0.43.1 changes the master, the WebUI and the harness, with no
 agent change, database migration or API change. A rollback to 0.43.0 is a swap
 of the master image; first end the TensorBoard tasks and the shells with the
 `tensorboard` service that started under 0.43.1, since a 0.43.0 master does not
-send their token. 0.44.0 removes the TensorBoard task type. Its two migrations
-delete the TensorBoard task records and move `tensorboard_args` to
-`services.tensorboard.args` in templates, so a rollback to 0.43.1 restores the
-database backup taken before the upgrade; end the TensorBoard tasks before
-taking the backup. The 0.44.0 master refuses a master configuration that sets
-`tensorboard_timeout`.
+send their token.
+
+0.44.0 does not change the agent, so agents stay on 0.42.2; the files that the
+master ships into task containers change only for tasks started after the
+upgrade. 0.44.0 removes the TensorBoard task type: before the swap, end every
+TensorBoard task, which `det tensorboard list --all` lists for an administrator
+under 0.43.1, and note their IDs, since the upgrade deletes their records and
+leaves a container still running unmanaged; find such a container on its
+agent's host with
+`docker ps --filter label=ai.determined.container.description=cmd-<task ID>`.
+Then back up the database. The first start runs seven migrations and rebuilds
+the cluster usage history, keeping the earlier aggregates in
+`resource_aggregates_legacy`. Allocations from before the upgrade count as GPUs
+in the user usage only when their task container recorded GPUs; the
+administrator statements in
+[historical cluster usage data](../manage/historical-cluster-usage-data.rst)
+classify the rest. The 0.44.0 master refuses a master configuration that sets
+`tensorboard_timeout`, and task configurations and templates that set
+`tensorboard_args`. A rollback restores the database backup taken before the
+upgrade, since the release deletes the TensorBoard task records, drops
+`notebook_sessions` and moves `tensorboard_args`. A 0.43.1 master started on
+the upgraded database without the restore runs tasks but cannot start a shell
+with the JupyterLab service; the tasks it runs are never in the user usage
+after upgrading again, the cluster usage days it aggregates use the old rule,
+and it does not enforce job privacy, so every job's title, logs and config are
+readable again.
 
 ## Install the CLI from the repository
 
@@ -46,8 +66,8 @@ checkout can otherwise report the repository's development version.
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
-VERSION=0.43.1 python -m pip install --upgrade \
-  'git+https://github.com/WU-CVGL/determined.git@0.43.1#subdirectory=harness'
+VERSION=0.44.0 python -m pip install --upgrade \
+  'git+https://github.com/WU-CVGL/determined.git@0.44.0#subdirectory=harness'
 det --version
 ```
 
@@ -59,15 +79,15 @@ does not replace the SDK inside running tasks.
 ## Pull and deploy the images
 
 ```sh
-docker pull ghcr.io/wu-cvgl/determined-master:0.43.1
-docker pull ghcr.io/wu-cvgl/determined-agent:0.43.1
+docker pull ghcr.io/wu-cvgl/determined-master:0.44.0
+docker pull ghcr.io/wu-cvgl/determined-agent:0.44.0
 ```
 
-`det deploy local master-up` and `agent-up` from the 0.43.1 CLI use these
+`det deploy local master-up` and `agent-up` from the 0.44.0 CLI use these
 images by default: the image repository defaults to `ghcr.io/wu-cvgl` and
 `--det-version` to the CLI's version. A 0.40.1 or older CLI defaults to the
 upstream `determinedai` images, which do not exist for this fork's versions;
-pass it `--image-repo-prefix ghcr.io/wu-cvgl --det-version 0.43.1`. Images
+pass it `--image-repo-prefix ghcr.io/wu-cvgl --det-version 0.44.0`. Images
 built from source are tagged `determinedai/...` and need
 `--image-repo-prefix determinedai`.
 
@@ -106,11 +126,11 @@ restore and task/checkpoint visibility in a disposable environment first.
 The release tag identifies the source used for the images. The
 [`Fork release` workflow](https://github.com/WU-CVGL/determined/blob/main/.github/workflows/fork-release.yml)
 defines the Linux amd64 build on a GitHub-hosted runner. It publishes
-PR candidates under separate `0.43.1-rc.<run-id>` tags and publishes the final
+PR candidates under separate `0.44.0-rc.<run-id>` tags and publishes the final
 version from the corresponding Git tag. Confirm the GHCR packages are public
 before using the unauthenticated pull commands above. For a manual
 source build, check out the release tag and set both `VERSION` and
-`FORK_VERSION` to `0.43.1` so binaries, wheel, and WebUI agree; a local build
+`FORK_VERSION` to `0.44.0` so binaries, wheel, and WebUI agree; a local build
 is not published automatically. Run the
 [`tools/fork/smoke.sh`](https://github.com/WU-CVGL/determined/blob/main/tools/fork/smoke.sh) CPU packaging check for a
 new build before deploying it; it does not validate GPU workloads.
