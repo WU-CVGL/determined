@@ -203,5 +203,16 @@ describe('Experiment Utilities', () => {
       expect(utils.experimentSearcherMetric(reduced)).toBe('loss');
       expect(utils.experimentSearcherName(experiment)).toBe('grid');
     });
+
+    it('detects a single trial experiment whose config is not shared', () => {
+      const hidden = {
+        ...experiment,
+        capabilities: caps(true, false),
+        config: undefined as unknown as Type.ExperimentConfig,
+        searcherType: Type.ExperimentSearcherName.Single,
+      };
+      expect(utils.isSingleTrialExperiment(hidden)).toBe(true);
+      expect(utils.isSingleTrialExperiment({ ...hidden, searcherType: 'grid' })).toBe(false);
+    });
   });
 });

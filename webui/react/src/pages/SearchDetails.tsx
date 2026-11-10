@@ -19,7 +19,7 @@ import workspaceStore from 'stores/workspaces';
 import { ExperimentBase, Note, TrialItem, ValueOf, Workspace } from 'types';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
 import { isSingleTrialExperiment } from 'utils/experiment';
-import { jobDisplayName } from 'utils/jobPrivacy';
+import { jobDisplayName, titleHidden } from 'utils/jobPrivacy';
 import { isAborted, isNotFound } from 'utils/service';
 
 import ExperimentCodeViewer from './ExperimentDetails/ExperimentCodeViewer';
@@ -85,6 +85,7 @@ const SearchDetails: React.FC = () => {
     });
   const editableNotes =
     experiment &&
+    !titleHidden(experiment.capabilities) &&
     canModifyExperimentMetadata({
       userId: experiment.userId,
       workspace: { id: experiment.workspaceId },

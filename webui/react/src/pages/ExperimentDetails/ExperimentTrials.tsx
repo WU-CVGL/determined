@@ -37,6 +37,7 @@ import {
   ValueOf,
 } from 'types';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
+import { configHidden } from 'utils/jobPrivacy';
 import { getMetricValue } from 'utils/metric';
 import { routeToReactUrl } from 'utils/routes';
 import { validateDetApiEnum, validateDetApiEnumList } from 'utils/service';
@@ -146,13 +147,15 @@ const ExperimentTrials: React.FC<Props> = ({ experiment, pageRef }: Props) => {
         [TrialAction.ViewLogs]: () => handleViewLogs(trial),
         [TrialAction.HyperparameterSearch]: HyperparameterSearchModal.open,
       };
-      if (!canHparam || !!experiment.unmanaged) {
+      // A search starts from the experiment's config.
+      if (!canHparam || !!experiment.unmanaged || configHidden(experiment.capabilities)) {
         delete opts[TrialAction.HyperparameterSearch];
       }
       return opts;
     },
     [
       canHparam,
+      experiment.capabilities,
       experiment.unmanaged,
       HyperparameterSearchModal,
       handleOpenTensorBoard,
@@ -445,7 +448,9 @@ const ExperimentTrials: React.FC<Props> = ({ experiment, pageRef }: Props) => {
 
       const menuItems = [
         { key: MenuKey.OpenTensorboard, label: TrialAction.OpenTensorBoard },
-        { key: MenuKey.HyperparameterSearch, label: TrialAction.HyperparameterSearch },
+        ...(configHidden(experiment.capabilities)
+          ? []
+          : [{ key: MenuKey.HyperparameterSearch, label: TrialAction.HyperparameterSearch }]),
         { key: MenuKey.ViewLogs, label: TrialAction.ViewLogs },
       ];
 
@@ -469,7 +474,7 @@ const ExperimentTrials: React.FC<Props> = ({ experiment, pageRef }: Props) => {
         </Dropdown>
       );
     },
-    [HyperparameterSearchModal, handleOpenTensorBoard, handleViewLogs],
+    [experiment.capabilities, HyperparameterSearchModal, handleOpenTensorBoard, handleViewLogs],
   );
 
   return (

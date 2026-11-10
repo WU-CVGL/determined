@@ -4,6 +4,7 @@ import pathlib
 from typing import Any, Dict, List, Optional
 
 import pytest
+import responses
 
 from determined.cli import cli, render
 from tests.cli import util
@@ -411,3 +412,53 @@ def test_unary_logs_refusal(capsys: pytest.CaptureFixture) -> None:
         rsps.get(f"{MASTER}/api/v1/tasks/{TASK_ID}/logs", status=403, json=UNARY_LOGS)
         err = run_refused(capsys, ["task", "logs", TASK_ID])
     assert err == "logs not shared"
+
+
+@pytest.mark.parametrize(
+    "args,method,path,body,resp",
+    [
+        (["set", "description", "d"], "PATCH", "", {"description": "d"}, {}),
+        (["set", "name", "n"], "PATCH", "", {"name": "n"}, {}),
+    ],
+)
+def test_experiment_title_edits_change_one_field(
+    args: List[str],
+    method: str,
+    path: str,
+    body: Dict[str, Any],
+    resp: Dict[str, Any],
+) -> None:
+    # The title may not be shared with the editor: an edit changes its one field and never
+    # writes back what the master omitted.
+    with util.standard_cli_rsps() as rsps:
+        match = [responses.matchers.json_params_matcher({"id": 1, **body})]
+        rsps.add(method, f"{MASTER}/api/v1/experiments/1{path}", json=resp, match=match)
+        cli.main(["experiment", args[0], args[1], "1", args[2]])
+
+
+@pytest.mark.parametrize("action,label", [("add", "new"), ("remove", "old")])
+@pytest.mark.parametrize("shared", [True, False])
+def test_experiment_label_edits(action: str, label: str, shared: bool) -> None:
+    resp = api_responses.sample_get_experiment().to_json()
+    exp_id = resp["experiment"]["id"]
+    resp["experiment"] = with_caps(resp["experiment"], SHOWN if shared else HIDDEN)
+    resp["experiment"]["labels"] = ["old"] if shared else []
+    with util.standard_cli_rsps() as rsps:
+        rsps.get(f"{MASTER}/api/v1/experiments/{exp_id}", json=resp)
+        if shared:
+            # The labels the user sees are the stored ones; any label routes in a patch.
+            labels = ["old", "new"] if action == "add" else []
+            rsps.patch(
+                f"{MASTER}/api/v1/experiments/{exp_id}",
+                json={},
+                match=[responses.matchers.json_params_matcher({"id": exp_id, "labels": labels})],
+            )
+        else:
+            # The labels are omitted: the master changes the stored ones.
+            method = "PUT" if action == "add" else "DELETE"
+            rsps.add(
+                method,
+                f"{MASTER}/api/v1/experiments/{exp_id}/labels/{label}",
+                json={"labels": []},
+            )
+        cli.main(["experiment", "label", action, str(exp_id), label])

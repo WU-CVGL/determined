@@ -65,6 +65,7 @@ import {
   getActionsForExperiment,
   isSingleTrialExperiment,
 } from 'utils/experiment';
+import { titleHidden } from 'utils/jobPrivacy';
 import { routeToReactUrl } from 'utils/routes';
 import { capitalize, pluralizer } from 'utils/string';
 import { handleTensorBoardError, openTensorBoardSession } from 'utils/tensorBoardSession';
@@ -690,7 +691,8 @@ const ExperimentDetailsHeader: React.FC<Props> = ({
       label: 'Tags',
       value: (
         <Tags
-          disabled={disabled}
+          // The labels of an experiment whose title is not shared are omitted, not empty.
+          disabled={disabled || titleHidden(experiment.capabilities)}
           ghost={true}
           tags={experiment.config?.labels ?? experiment.labels}
           onAction={experimentTags.handleTagListChange(

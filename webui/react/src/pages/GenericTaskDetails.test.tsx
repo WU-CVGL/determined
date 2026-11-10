@@ -15,6 +15,7 @@ import {
   patchJobSharing,
 } from 'services/api';
 import { V1JobContentKind, V1TaskType } from 'services/api-ts-sdk';
+import { detApi } from 'services/apiConfig';
 import { CommandState, GenericTask, GenericTaskState, JobCapabilities, TaskItem } from 'types';
 import { DetError } from 'utils/error';
 
@@ -116,11 +117,41 @@ describe('GenericTaskDetails', () => {
         ...summary,
         capabilities: hidden,
         description: '',
-        name: undefined,
+        name: '',
       });
       setup();
       const name = await screen.findByTestId('generic-task-name');
       await waitFor(() => expect(name).toHaveTextContent('Generic Task task'));
+      expect(name).toHaveTextContent(/^Generic Task task$/);
+    });
+
+    it('opens no log stream for logs that are not shared', async () => {
+      params.tab = 'logs';
+      const taskLogs = vi.spyOn(detApi.StreamingJobs, 'taskLogs');
+      const taskLogsFields = vi.spyOn(detApi.StreamingJobs, 'taskLogsFields');
+      const fetchMock = vi.fn(() => new Promise<Response>(() => {}));
+      vi.stubGlobal('fetch', fetchMock);
+      let resolveSummary: (value: GenericTask) => void = () => {};
+      vi.mocked(getTask).mockResolvedValue(taskItem(GenericTaskState.Active));
+      vi.mocked(getGenericTask).mockReturnValue(
+        new Promise((resolve) => {
+          resolveSummary = resolve;
+        }),
+      );
+      try {
+        setup();
+        await screen.findByTestId('generic-task-name');
+        await poll(1);
+        resolveSummary({ ...summary, capabilities: hidden });
+        expect(await screen.findByText('Logs not shared')).toBeInTheDocument();
+        expect(taskLogs).not.toHaveBeenCalled();
+        expect(taskLogsFields).not.toHaveBeenCalled();
+        expect(fetchMock).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+        taskLogs.mockRestore();
+        taskLogsFields.mockRestore();
+      }
     });
 
     it('offers Sharing only when the master lets the user manage it', async () => {

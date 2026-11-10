@@ -54,11 +54,11 @@ export const isExperiment = <T extends BulkExperimentItem | FullExperimentItem>(
   return 'hyperparameters' in obj && 'archived' in obj;
 };
 
-// Decided by the config, which an experiment fetched on its own always has and an experiment
-// list row has too (the list routes send it, though the API marks it deprecated there).
+// Decided by the searcher, from the config or, when the config is not shared, from the searcher
+// type the master lists with the experiment.
 export const isSingleTrialExperiment = (experiment: ProjectExperiment): boolean => {
   return (
-    experiment?.config?.searcher?.name === ExperimentSearcherName.Single ||
+    (!!experiment && experimentSearcherName(experiment) === ExperimentSearcherName.Single) ||
     experiment?.config?.searcher?.max_trials === 1
   );
 };

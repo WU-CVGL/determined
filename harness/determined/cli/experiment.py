@@ -786,19 +786,16 @@ def pause(args: argparse.Namespace) -> None:
 
 
 def set_description(args: argparse.Namespace) -> None:
+    # Only the description is patched: the rest of the title may not be shared with the user.
     sess = cli.setup_session(args)
-    exp = bindings.get_GetExperiment(sess, experimentId=args.experiment_id).experiment
-    exp_patch = bindings.v1PatchExperiment.from_json(exp.to_json())
-    exp_patch.description = args.description
+    exp_patch = bindings.v1PatchExperiment(id=args.experiment_id, description=args.description)
     bindings.patch_PatchExperiment(sess, body=exp_patch, experiment_id=args.experiment_id)
     print(f"Set description of experiment {args.experiment_id} to '{args.description}'")
 
 
 def set_name(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
-    exp = bindings.get_GetExperiment(sess, experimentId=args.experiment_id).experiment
-    exp_patch = bindings.v1PatchExperiment.from_json(exp.to_json())
-    exp_patch.name = args.name
+    exp_patch = bindings.v1PatchExperiment(id=args.experiment_id, name=args.name)
     bindings.patch_PatchExperiment(sess, body=exp_patch, experiment_id=args.experiment_id)
     print(f"Set name of experiment {args.experiment_id} to '{args.name}'")
 
@@ -806,11 +803,13 @@ def set_name(args: argparse.Namespace) -> None:
 def add_label(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
     exp = bindings.get_GetExperiment(sess, experimentId=args.experiment_id).experiment
-    exp_patch = bindings.v1PatchExperiment.from_json(exp.to_json())
-    if exp_patch.labels is None:
-        exp_patch.labels = []
-    if args.label not in exp_patch.labels:
-        exp_patch.labels = list(exp_patch.labels) + [args.label]
+    if not render.title_shared(exp.capabilities):
+        # The labels are not shared with the user: the master adds this one to the stored ones.
+        bindings.put_PutExperimentLabel(sess, experimentId=args.experiment_id, label=args.label)
+    elif args.label not in (exp.labels or []):
+        exp_patch = bindings.v1PatchExperiment(
+            id=args.experiment_id, labels=list(exp.labels or []) + [args.label]
+        )
         bindings.patch_PatchExperiment(sess, body=exp_patch, experiment_id=args.experiment_id)
     print(f"Added label '{args.label}' to experiment {args.experiment_id}")
 
@@ -818,9 +817,14 @@ def add_label(args: argparse.Namespace) -> None:
 def remove_label(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
     exp = bindings.get_GetExperiment(sess, experimentId=args.experiment_id).experiment
-    exp_patch = bindings.v1PatchExperiment.from_json(exp.to_json())
-    if (exp_patch.labels) and (args.label in exp_patch.labels):
-        exp_patch.labels = [label for label in exp_patch.labels if label != args.label]
+    if not render.title_shared(exp.capabilities):
+        bindings.delete_DeleteExperimentLabel(
+            sess, experimentId=args.experiment_id, label=args.label
+        )
+    elif exp.labels and args.label in exp.labels:
+        exp_patch = bindings.v1PatchExperiment(
+            id=args.experiment_id, labels=[label for label in exp.labels if label != args.label]
+        )
         bindings.patch_PatchExperiment(sess, body=exp_patch, experiment_id=args.experiment_id)
     print(f"Removed label '{args.label}' from experiment {args.experiment_id}")
 

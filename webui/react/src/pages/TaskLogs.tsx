@@ -2,6 +2,7 @@ import LogViewer, { FetchConfig, FetchDirection, FetchType } from 'hew/LogViewer
 import LogViewerSelect, { Filters } from 'hew/LogViewer/LogViewerSelect';
 import { Settings, settingsConfigForTask } from 'hew/LogViewer/LogViewerSelect.settings';
 import Message from 'hew/Message';
+import Spinner from 'hew/Spinner';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
@@ -11,13 +12,13 @@ import { commandTypeToLabel } from 'constants/states';
 import { ResetSettings, UpdateSettings, useSettings } from 'hooks/useSettings';
 import { DateString, decode, optional } from 'ioTypes';
 import { paths, serverAddress } from 'routes/utils';
-import { getTask } from 'services/api';
+import { getCommand, getGenericTask, getShells, getTask, getTensorBoard } from 'services/api';
 import { detApi } from 'services/apiConfig';
 import { mapV1LogsResponse } from 'services/decoder';
 import { readStream } from 'services/utils';
-import { CommandType, TaskItem } from 'types';
+import { CommandType, JobCapabilities, TaskItem } from 'types';
 import handleError from 'utils/error';
-import { isLogsNotShared, LOGS_NOT_SHARED } from 'utils/jobPrivacy';
+import { isLogsNotShared, LOGS_NOT_SHARED, logsHidden } from 'utils/jobPrivacy';
 
 import css from './TaskLogs.module.scss';
 
@@ -33,6 +34,26 @@ interface Props {
   taskType: string;
 }
 type OrderBy = 'ORDER_BY_UNSPECIFIED' | 'ORDER_BY_ASC' | 'ORDER_BY_DESC';
+
+/* The capabilities of a task, from the record of its type; an ended task has none. */
+const lookupCapabilities = async (
+  taskId: string,
+  taskType: string,
+): Promise<JobCapabilities | undefined> => {
+  switch (taskType) {
+    case CommandType.Command:
+      return (await getCommand({ commandId: taskId })).capabilities;
+    case CommandType.TensorBoard:
+      return (await getTensorBoard({ commandId: taskId })).capabilities;
+    case CommandType.Shell:
+      // The shell list has no private keys, unlike a shell's own lookup.
+      return (await getShells({})).find((shell) => shell.id === taskId)?.capabilities;
+    case 'generic':
+      return (await getGenericTask(taskId))?.capabilities;
+    default:
+      return undefined;
+  }
+};
 
 export const TaskLogsWrapper: React.FC = () => {
   const { taskId, taskType } = useParams<Params>();
@@ -195,6 +216,8 @@ export const TaskLogsViewer: React.FC<ViewerProps> = ({
 
 const TaskLogs: React.FC<Props> = ({ taskId, taskType, onCloseLogs, headerComponent }: Props) => {
   const [task, setTask] = useState<TaskItem>();
+  // The task's capabilities once the lookup of its record has answered, with or without one.
+  const [lookup, setLookup] = useState<{ capabilities?: JobCapabilities; taskId: string }>();
 
   const taskTypeLabel =
     taskType === 'generic' ? 'Generic Task' : commandTypeToLabel[taskType as CommandType];
@@ -219,6 +242,21 @@ const TaskLogs: React.FC<Props> = ({ taskId, taskType, onCloseLogs, headerCompon
       active = false;
     };
   }, [taskId]);
+
+  useEffect(() => {
+    let active = true;
+    lookupCapabilities(taskId, taskType)
+      .then((capabilities) => {
+        if (active) setLookup({ capabilities, taskId });
+      })
+      .catch(() => {
+        // The master refuses logs that are not shared, which the viewer shows.
+        if (active) setLookup({ taskId });
+      });
+    return () => {
+      active = false;
+    };
+  }, [taskId, taskType]);
 
   return (
     <Page
@@ -249,13 +287,18 @@ const TaskLogs: React.FC<Props> = ({ taskId, taskType, onCloseLogs, headerCompon
         )
       }
       title={title}>
-      <TaskLogsViewer
-        resetSettings={resetSettings}
-        settings={settings}
-        taskId={taskId}
-        updateSettings={updateSettings}
-        onCloseLogs={onCloseLogs}
-      />
+      {lookup?.taskId === taskId ? (
+        <TaskLogsViewer
+          logsHidden={logsHidden(lookup.capabilities)}
+          resetSettings={resetSettings}
+          settings={settings}
+          taskId={taskId}
+          updateSettings={updateSettings}
+          onCloseLogs={onCloseLogs}
+        />
+      ) : (
+        <Spinner center spinning />
+      )}
     </Page>
   );
 };

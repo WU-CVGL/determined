@@ -34,7 +34,7 @@ import {
 } from 'services/api';
 import { ExperimentBase, Note, TrialDetails, TrialItem, ValueOf } from 'types';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
-import { logsHidden } from 'utils/jobPrivacy';
+import { configHidden, logsHidden, titleHidden } from 'utils/jobPrivacy';
 
 import ExperimentCheckpoints from './ExperimentCheckpoints';
 import ExperimentCodeViewer from './ExperimentCodeViewer';
@@ -234,7 +234,9 @@ const ExperimentSingleTrialTabs: React.FC<Props> = ({
   const { canCreateExperiment, canModifyExperimentMetadata, canViewExperimentArtifacts } =
     usePermissions();
   const workspace = { id: experiment.workspaceId };
-  const editableNotes = canModifyExperimentMetadata({ userId: experiment.userId, workspace });
+  const editableNotes =
+    !titleHidden(experiment.capabilities) &&
+    canModifyExperimentMetadata({ userId: experiment.userId, workspace });
   const showExperimentArtifacts = canViewExperimentArtifacts({ workspace });
   const showCreateExperiment = canCreateExperiment({ workspace }) && showExperimentArtifacts;
 
@@ -365,7 +367,10 @@ const ExperimentSingleTrialTabs: React.FC<Props> = ({
           activeKey={tabKey}
           items={tabItems}
           tabBarExtraContent={
-            tabKey === TabType.Hyperparameters && showCreateExperiment && !experiment.unmanaged ? (
+            tabKey === TabType.Hyperparameters &&
+            showCreateExperiment &&
+            !experiment.unmanaged &&
+            !configHidden(experiment.capabilities) ? (
               <div style={{ padding: 4 }}>
                 <Button onClick={HyperparameterSearchModal.open}>Hyperparameter Search</Button>
               </div>

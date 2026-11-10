@@ -202,6 +202,7 @@ const GenericTaskDetails: React.FC = () => {
    * Owners and admins can control a task. Without the task's owner, e.g. when the lookup fails,
    * the actions stay enabled and the master decides.
    */
+  const summaryLoaded = !!summary || summaryFailed;
   const canControl = summary
     ? canModifyWorkspaceNSC({ userId: summary.userId, workspace: { id: summary.workspaceId } })
     : summaryFailed;
@@ -222,8 +223,11 @@ const GenericTaskDetails: React.FC = () => {
         label: 'Configuration',
       },
       {
-        children: (
+        // The logs are read once the lookup has said whether they are shared.
+        children: summaryLoaded ? (
           <GenericTaskLogs logsHidden={logsHidden(summary?.capabilities)} taskId={taskId} />
+        ) : (
+          <Spinner center spinning />
         ),
         key: TabType.Logs,
         label: 'Logs',
@@ -251,6 +255,7 @@ const GenericTaskDetails: React.FC = () => {
     configNotShared,
     resourcesEnabled,
     summary?.capabilities,
+    summaryLoaded,
     tabKey,
     task,
     taskId,
