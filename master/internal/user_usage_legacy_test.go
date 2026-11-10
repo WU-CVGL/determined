@@ -22,8 +22,8 @@ func legacyPool(
 	return &resourcepoolv1.ResourcePool{Name: "p", Type: typ, SlotType: slotType, NumAgents: agents}
 }
 
-// A static pool's slot type counts once it is reported the same for the given number of steps,
-// with no fewer agents than before; pools whose slot type is configured count at once.
+// A static pool's slot type counts once it is reported the same, with the same number of agents,
+// for the given number of steps; pools whose slot type is configured count at once.
 func TestUserUsageLegacyStableSlotType(t *testing.T) {
 	static := resourcepoolv1.ResourcePoolType_RESOURCE_POOL_TYPE_STATIC
 	unspecified, cpu, cuda := devicev1.Type_TYPE_UNSPECIFIED, devicev1.Type_TYPE_CPU,
@@ -54,11 +54,16 @@ func TestUserUsageLegacyStableSlotType(t *testing.T) {
 			{legacyPool(static, cuda, 3), "", false},
 			{legacyPool(static, cuda, 3), device.CUDA, true},
 		}},
-		{"fewer agents than seen before", []step{
-			{legacyPool(static, cuda, 3), "", false},
+		{"an agent that never comes back", []step{
+			{legacyPool(static, cuda, 2), "", false},
+			{legacyPool(static, cuda, 2), "", false},
 			{legacyPool(static, cuda, 1), "", false},
 			{legacyPool(static, cuda, 1), "", false},
+			{legacyPool(static, cuda, 1), device.CUDA, true},
+		}},
+		{"agents that keep joining", []step{
 			{legacyPool(static, cuda, 1), "", false},
+			{legacyPool(static, cuda, 2), "", false},
 			{legacyPool(static, cuda, 3), "", false},
 			{legacyPool(static, cuda, 3), "", false},
 			{legacyPool(static, cuda, 3), device.CUDA, true},

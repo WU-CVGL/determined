@@ -280,6 +280,7 @@ func TestRestoreFailedReleasedAtHeartbeat(t *testing.T) {
 	})
 	defer closeDB()
 
+	failed := time.Now().UTC()
 	q.Put(&sproto.ResourcesFailedError{FailureType: sproto.RestoreError, ErrMsg: "gone"})
 	requireTerminated(t, id, exitFuture)
 
@@ -287,6 +288,9 @@ func TestRestoreFailedReleasedAtHeartbeat(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, row.ReleasedTime)
 	require.NotNil(t, row.EndTime)
+	// The end is when the allocation ended, as for every other exit, not the heartbeat.
+	require.False(t, row.EndTime.Before(failed.Truncate(time.Microsecond)), "end %s, failed %s",
+		row.EndTime, failed)
 	if cluster.TheLastBootClusterHeartbeat() != nil {
 		require.True(t, heartbeat.Truncate(time.Microsecond).Equal(*row.ReleasedTime),
 			"released %s, heartbeat %s", row.ReleasedTime, heartbeat)

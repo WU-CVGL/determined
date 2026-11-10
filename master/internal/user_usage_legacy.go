@@ -33,17 +33,17 @@ type legacyClassifier struct {
 	agentOnly bool
 	// noAux is set for a dispatcher resource manager, whose pools have no auxiliary containers.
 	noAux bool
-	// stableTicks is how many steps in a row a static pool must report the same slot type with at
-	// least as many agents as it had at any step before.
+	// stableTicks is how many steps in a row a static pool must report the same slot type with the
+	// same number of agents.
 	stableTicks int
 	pools       map[string]*legacyPoolObservation
 }
 
 // legacyPoolObservation is what a static pool reported so far.
 type legacyPoolObservation struct {
-	slotType  devicev1.Type
-	ticks     int
-	maxAgents int32
+	slotType devicev1.Type
+	agents   int32
+	ticks    int
 }
 
 func newLegacyClassifier(r rm.ResourceManager, rms []*config.ResourceManagerWithPoolsConfig) *legacyClassifier {
@@ -123,7 +123,8 @@ func (c *legacyClassifier) step(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
-// observe records a static pool's slot type and agent count for this step.
+// observe records a static pool's slot type and agent count for this step. A change of either
+// starts the count again: agents that connect or leave may change what the pool reports.
 func (c *legacyClassifier) observe(p *resourcepoolv1.ResourcePool) {
 	if p.Type != resourcepoolv1.ResourcePoolType_RESOURCE_POOL_TYPE_STATIC {
 		return
@@ -133,14 +134,13 @@ func (c *legacyClassifier) observe(p *resourcepoolv1.ResourcePool) {
 		o = &legacyPoolObservation{}
 		c.pools[p.Name] = o
 	}
-	o.maxAgents = max(o.maxAgents, p.NumAgents)
 	switch {
-	case p.SlotType == devicev1.Type_TYPE_UNSPECIFIED || p.NumAgents < o.maxAgents:
-		o.slotType, o.ticks = devicev1.Type_TYPE_UNSPECIFIED, 0
-	case p.SlotType == o.slotType:
+	case p.SlotType == devicev1.Type_TYPE_UNSPECIFIED:
+		o.slotType, o.agents, o.ticks = devicev1.Type_TYPE_UNSPECIFIED, 0, 0
+	case p.SlotType == o.slotType && p.NumAgents == o.agents:
 		o.ticks++
 	default:
-		o.slotType, o.ticks = p.SlotType, 1
+		o.slotType, o.agents, o.ticks = p.SlotType, p.NumAgents, 1
 	}
 }
 

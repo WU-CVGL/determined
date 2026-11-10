@@ -404,9 +404,10 @@ WHERE `+meteredSQL).Scan(ctx, &first); err != nil {
 	return &first.Time, nil
 }
 
-// userUsageCoverage caches the first day of metered allocations. It only changes from none to a
-// day, because no allocation gets an earlier assignment later, so it is read again only while
-// there is none.
+// userUsageCoverage caches the first day of metered allocations, and reads it again only while
+// there is none: no allocation gets an earlier assignment later. The one exception is an allocation
+// from before metering without slots, which is metered from its classification on; a day cached
+// before the classifier's first step, which runs when the master starts, can be later than it.
 type userUsageCoverage struct {
 	mu    sync.Mutex
 	start *time.Time
