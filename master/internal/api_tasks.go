@@ -25,6 +25,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/db"
 	expauth "github.com/determined-ai/determined/master/internal/experiment"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
+	"github.com/determined-ai/determined/master/internal/jobprivacy"
 	"github.com/determined-ai/determined/master/internal/logpattern"
 	"github.com/determined-ai/determined/master/internal/task"
 	"github.com/determined-ai/determined/master/internal/task/idle"
@@ -420,9 +421,21 @@ func (a *apiServer) GetAllocation(
 	if err != nil {
 		return nil, fmt.Errorf("querying allocation %s: %w", req.AllocationId, err)
 	}
-	return &apiv1.GetAllocationResponse{
-		Allocation: allocation.Proto(),
-	}, nil
+	curUser, _, err := grpcutil.GetUser(ctx)
+	if err != nil {
+		return nil, err
+	}
+	v, err := jobprivacy.NewViewer(ctx, *curUser)
+	if err != nil {
+		return nil, err
+	}
+	caps, err := taskCaps(ctx, v, allocation.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	pb := allocation.Proto()
+	redactAllocation(pb, caps)
+	return &apiv1.GetAllocationResponse{Allocation: pb}, nil
 }
 
 func (a *apiServer) PostAllocationProxyAddress(
@@ -600,11 +613,16 @@ func (a *apiServer) TaskLogs(
 		return err
 	}
 
+	// A refusal is answered here as it is, rather than from inside the stream.
+	if err := a.canReadTaskLogs(resp.Context(), model.TaskID(req.TaskId)); err != nil {
+		return err
+	}
+
 	ctx, cancel := context.WithCancel(resp.Context())
 	defer cancel()
 
 	res := make(chan api.BatchResult, taskLogsChanBuffer)
-	go a.taskLogs(ctx, req, res)
+	go a.taskLogs(ctx, req, res, true)
 
 	return processBatches(res, func(b api.Batch) error {
 		return b.ForEach(func(i interface{}) error {
@@ -867,12 +885,87 @@ func (a *apiServer) GetTasks(
 
 		pbAllocationIDToSummary[string(allocationID)] = allocationSummary.Proto()
 	}
+	if err = setAllocationSummaryCapabilities(ctx, *curUser, pbAllocationIDToSummary); err != nil {
+		return nil, err
+	}
 
 	return &apiv1.GetTasksResponse{AllocationIdToSummary: pbAllocationIDToSummary}, nil
 }
 
+// setAllocationSummaryCapabilities sets the user's job privacy capabilities on each summary, from
+// its task's job, and clears what they hide (redactAllocationSummary).
+func setAllocationSummaryCapabilities(
+	ctx context.Context, curUser model.User, summaries map[string]*taskv1.AllocationSummary,
+) error {
+	taskIDs := make([]model.TaskID, 0, len(summaries))
+	for _, s := range summaries {
+		taskIDs = append(taskIDs, model.TaskID(s.TaskId))
+	}
+	caps, err := allocationSummaryCaps(ctx, curUser, taskIDs)
+	if err != nil {
+		return err
+	}
+	for _, s := range summaries {
+		c := caps[model.TaskID(s.TaskId)]
+		redactAllocationSummary(s, c)
+		s.Capabilities = c.Proto()
+	}
+	return nil
+}
+
+// allocationSummaryCaps returns the user's job privacy capabilities on the job of each task of
+// the allocation summaries, which both task summary routes use.
+func allocationSummaryCaps(
+	ctx context.Context, curUser model.User, taskIDs []model.TaskID,
+) (map[model.TaskID]jobprivacy.Caps, error) {
+	v, err := jobprivacy.NewViewer(ctx, curUser)
+	if err != nil {
+		return nil, err
+	}
+	return jobprivacy.ForTasks(ctx, v, taskIDs)
+}
+
+// canReadTaskLogs returns nil when the requesting user may read the task's logs: the existing
+// check (the experiment's artifacts for a trial, the task's read rule otherwise), then job privacy
+// on the task, resolved by jobprivacy.TaskJobs. A task whose logs are not shared with the user is
+// PermissionDenied "logs not shared"; a task the user may not see keeps its NotFound.
+func (a *apiServer) canReadTaskLogs(ctx context.Context, taskID model.TaskID) error {
+	t, err := taskForAction(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	curUser, _, err := grpcutil.GetUser(ctx)
+	if err != nil {
+		return err
+	}
+	if _, _, err = a.canDoActionsOnLoadedTaskForUser(ctx, taskID, t, *curUser,
+		expauth.AuthZProvider.Get().CanGetExperimentArtifacts); err != nil {
+		return err
+	}
+	v, err := jobprivacy.NewViewer(ctx, *curUser)
+	if err != nil {
+		return err
+	}
+	return jobprivacy.RequireTask(ctx, v, taskID, jobprivacy.Logs)
+}
+
+// trialLogsAction is the check of trial log reads, as an experiment action: the experiment's
+// artifacts, then job privacy on the experiment's job.
+func trialLogsAction(ctx context.Context, curUser model.User, e *model.Experiment) error {
+	if err := expauth.AuthZProvider.Get().CanGetExperimentArtifacts(ctx, curUser, e); err != nil {
+		return err
+	}
+	v, err := jobprivacy.NewViewer(ctx, curUser)
+	if err != nil {
+		return err
+	}
+	return jobprivacy.Require(ctx, v, e.JobID, jobprivacy.Logs)
+}
+
+// taskLogs streams a task's logs to res. checked is whether the caller has just run
+// canReadTaskLogs for the task; otherwise taskLogs runs it before any work on the logs.
 func (a *apiServer) taskLogs(
-	ctx context.Context, req *apiv1.TaskLogsRequest, res chan api.BatchResult,
+	ctx context.Context, req *apiv1.TaskLogsRequest, res chan api.BatchResult, checked bool,
 ) {
 	taskID := model.TaskID(req.TaskId)
 	filters, err := constructTaskLogsFilters(req)
@@ -880,15 +973,25 @@ func (a *apiServer) taskLogs(
 		res <- api.ErrBatchResult(
 			status.Error(codes.InvalidArgument, fmt.Sprintf("unsupported filter: %s", err)),
 		)
+		close(res)
 		return
 	}
 
+	// The first check runs before any work on the logs, the count included; the stream checks
+	// again every recheckAuthPeriod, so a privacy change ends an open stream at the next check.
+	if !checked {
+		if err = a.canReadTaskLogs(ctx, taskID); err != nil {
+			res <- api.ErrBatchResult(err)
+			close(res)
+			return
+		}
+	}
+	timeSinceLastAuth := time.Now()
+
 	var followState interface{}
-	var timeSinceLastAuth time.Time
 	fetch := func(r api.BatchRequest) (api.Batch, error) {
 		if time.Since(timeSinceLastAuth) >= recheckAuthPeriod {
-			if _, _, err = a.canDoActionsOnTask(ctx, taskID,
-				expauth.AuthZProvider.Get().CanGetExperimentArtifacts); err != nil {
+			if err := a.canReadTaskLogs(ctx, taskID); err != nil {
 				return nil, err
 			}
 
@@ -915,6 +1018,7 @@ func (a *apiServer) taskLogs(
 	total, err := a.m.taskLogBackend.TaskLogsCount(taskID, filters)
 	if err != nil {
 		res <- api.ErrBatchResult(fmt.Errorf("getting log count from backend: %w", err))
+		close(res)
 		return
 	}
 	effectiveLimit := api.EffectiveLimit(int(req.Limit), 0, total)
@@ -1006,12 +1110,15 @@ func (a *apiServer) TaskLogsFields(
 	req *apiv1.TaskLogsFieldsRequest, resp apiv1.Determined_TaskLogsFieldsServer,
 ) error {
 	taskID := model.TaskID(req.TaskId)
+	// A refusal is answered here as it is, rather than from inside the stream.
+	if err := a.canReadTaskLogs(resp.Context(), taskID); err != nil {
+		return err
+	}
 
-	var timeSinceLastAuth time.Time
+	timeSinceLastAuth := time.Now()
 	fetch := func(lr api.BatchRequest) (api.Batch, error) {
 		if time.Since(timeSinceLastAuth) >= recheckAuthPeriod {
-			if _, _, err := a.canDoActionsOnTask(resp.Context(), taskID,
-				expauth.AuthZProvider.Get().CanGetExperimentArtifacts); err != nil {
+			if err := a.canReadTaskLogs(resp.Context(), taskID); err != nil {
 				return nil, err
 			}
 

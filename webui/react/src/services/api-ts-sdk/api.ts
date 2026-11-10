@@ -1476,6 +1476,12 @@ export interface V1AllocationSummary {
      * @memberof V1AllocationSummary
      */
     proxyPorts?: Array<V1ProxyPortConfig>;
+    /**
+     * What the requesting user may do with the content of this allocation's job.
+     * @type {V1JobCapabilities}
+     * @memberof V1AllocationSummary
+     */
+    capabilities?: V1JobCapabilities;
 }
 /**
  * Response to ArchiveExperimentRequest.
@@ -2142,6 +2148,12 @@ export interface V1Command {
      * @memberof V1Command
      */
     allocationStartTime?: Date | DateString;
+    /**
+     * What the requesting user may do with the content of this command's job.
+     * @type {V1JobCapabilities}
+     * @memberof V1Command
+     */
+    capabilities?: V1JobCapabilities;
 }
 /**
  * Container for a requested trial and its metrics.
@@ -3232,6 +3244,12 @@ export interface V1Experiment {
      * @memberof V1Experiment
      */
     allocationStartTime?: Date | DateString;
+    /**
+     * What the requesting user may do with the content of this experiment's job.
+     * @type {V1JobCapabilities}
+     * @memberof V1Experiment
+     */
+    capabilities?: V1JobCapabilities;
 }
 /**
  * Message for results of individual experiments in a multi-experiment action.
@@ -3636,6 +3654,12 @@ export interface V1FlatRunExperiment {
      * @memberof V1FlatRunExperiment
      */
     pachydermIntegration?: any;
+    /**
+     * What the requesting user may do with the content of this experiment's job.
+     * @type {V1JobCapabilities}
+     * @memberof V1FlatRunExperiment
+     */
+    capabilities?: V1JobCapabilities;
 }
 /**
  * GenericTask is a generic task with its owner and display fields, as listed by GetGenericTasks.
@@ -3757,6 +3781,12 @@ export interface V1GenericTask {
      * @memberof V1GenericTask
      */
     allocationStartTime?: Date | DateString;
+    /**
+     * What the requesting user may do with the content of this task's job.
+     * @type {V1JobCapabilities}
+     * @memberof V1GenericTask
+     */
+    capabilities?: V1JobCapabilities;
 }
 /**
  * State of a Generic task - GENERIC_TASK_STATE_UNSPECIFIED: The task state unknown  - GENERIC_TASK_STATE_ACTIVE: The task state unknown  - GENERIC_TASK_STATE_CANCELED: The task state unknown  - GENERIC_TASK_STATE_COMPLETED: The task state unknown  - GENERIC_TASK_STATE_ERROR: The task state unknown  - GENERIC_TASK_STATE_PAUSED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_PAUSED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_CANCELED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_COMPLETED: The task state unknown  - GENERIC_TASK_STATE_STOPPING_ERROR: The task state unknown
@@ -4281,6 +4311,19 @@ export interface V1GetGroupsResponse {
     pagination?: V1Pagination;
 }
 /**
+ * Response to GetJobPrivacyPolicyRequest.
+ * @export
+ * @interface V1GetJobPrivacyPolicyResponse
+ */
+export interface V1GetJobPrivacyPolicyResponse {
+    /**
+     * One rule per content kind.
+     * @type {Array<V1JobPrivacyRule>}
+     * @memberof V1GetJobPrivacyPolicyResponse
+     */
+    rules: Array<V1JobPrivacyRule>;
+}
+/**
  * Response to GetJobQueueStatsRequest.
  * @export
  * @interface V1GetJobQueueStatsResponse
@@ -4292,6 +4335,25 @@ export interface V1GetJobQueueStatsResponse {
      * @memberof V1GetJobQueueStatsResponse
      */
     results: Array<V1RPQueueStat>;
+}
+/**
+ * Response to GetJobSharingRequest.
+ * @export
+ * @interface V1GetJobSharingResponse
+ */
+export interface V1GetJobSharingResponse {
+    /**
+     * The job's sharing.
+     * @type {V1JobSharing}
+     * @memberof V1GetJobSharingResponse
+     */
+    sharing: V1JobSharing;
+    /**
+     * The cluster policy, one rule per content kind.
+     * @type {Array<V1JobPrivacyRule>}
+     * @memberof V1GetJobSharingResponse
+     */
+    rules: Array<V1JobPrivacyRule>;
 }
 /**
  * Response to GetJobsRequest.
@@ -4678,6 +4740,19 @@ export interface V1GetModelVersionsResponse {
      * @memberof V1GetModelVersionsResponse
      */
     pagination: V1Pagination;
+}
+/**
+ * Response to GetMyJobPrivacyRequest.
+ * @export
+ * @interface V1GetMyJobPrivacyResponse
+ */
+export interface V1GetMyJobPrivacyResponse {
+    /**
+     * The user's preferences.
+     * @type {V1UserJobPrivacy}
+     * @memberof V1GetMyJobPrivacyResponse
+     */
+    privacy: V1UserJobPrivacy;
 }
 /**
  * Response to GetPermissionsSummaryRequest.
@@ -6111,7 +6186,69 @@ export interface V1Job {
      * @memberof V1Job
      */
     allocationStartTime?: Date | DateString;
+    /**
+     * What the requesting user may do with this job's content.
+     * @type {V1JobCapabilities}
+     * @memberof V1Job
+     */
+    capabilities?: V1JobCapabilities;
 }
+/**
+ * Who may read a kind of a job's content besides its owner and admins. Empty means nobody else.
+ * @export
+ * @interface V1JobAudience
+ */
+export interface V1JobAudience {
+    /**
+     * All authenticated users.
+     * @type {boolean}
+     * @memberof V1JobAudience
+     */
+    allUsers?: boolean;
+}
+/**
+ * What the requesting user may do with this job's content, computed by the server.
+ * @export
+ * @interface V1JobCapabilities
+ */
+export interface V1JobCapabilities {
+    /**
+     * The user may read the job's name, description, labels and notes.
+     * @type {boolean}
+     * @memberof V1JobCapabilities
+     */
+    viewTitle: boolean;
+    /**
+     * The user may read the job's logs.
+     * @type {boolean}
+     * @memberof V1JobCapabilities
+     */
+    viewLogs: boolean;
+    /**
+     * The user may read the job's config.
+     * @type {boolean}
+     * @memberof V1JobCapabilities
+     */
+    viewConfig: boolean;
+    /**
+     * The user may change the job's sharing.
+     * @type {boolean}
+     * @memberof V1JobCapabilities
+     */
+    manageSharing: boolean;
+}
+/**
+ * The content kinds of job privacy.   - JOB_CONTENT_KIND_UNSPECIFIED: Unspecified kind.  - JOB_CONTENT_KIND_TITLE: The job's name, description, labels and notes.  - JOB_CONTENT_KIND_LOGS: The job's logs.  - JOB_CONTENT_KIND_CONFIG: The job's config.
+ * @export
+ * @enum {string}
+ */
+export const V1JobContentKind = {
+    UNSPECIFIED: 'JOB_CONTENT_KIND_UNSPECIFIED',
+    TITLE: 'JOB_CONTENT_KIND_TITLE',
+    LOGS: 'JOB_CONTENT_KIND_LOGS',
+    CONFIG: 'JOB_CONTENT_KIND_CONFIG',
+} as const
+export type V1JobContentKind = ValueOf<typeof V1JobContentKind>
 /**
  * The slots a job holds on one agent.
  * @export
@@ -6130,6 +6267,68 @@ export interface V1JobPlacement {
      * @memberof V1JobPlacement
      */
     deviceIds: Array<number>;
+}
+/**
+ * The cluster policy for one kind of job content.
+ * @export
+ * @interface V1JobPrivacyRule
+ */
+export interface V1JobPrivacyRule {
+    /**
+     * The content kind.
+     * @type {V1JobContentKind}
+     * @memberof V1JobPrivacyRule
+     */
+    kind: V1JobContentKind;
+    /**
+     * Whether jobs may share this kind with users other than the owner.
+     * @type {boolean}
+     * @memberof V1JobPrivacyRule
+     */
+    sharingAllowed: boolean;
+    /**
+     * The audience new jobs get unless the owner chose one.
+     * @type {V1JobAudience}
+     * @memberof V1JobPrivacyRule
+     */
+    newJobAudience: V1JobAudience;
+}
+/**
+ * A job's own sharing. An unset audience is a job created before job privacy: no setting.
+ * @export
+ * @interface V1JobSharing
+ */
+export interface V1JobSharing {
+    /**
+     * Who may read the job's title.
+     * @type {V1JobAudience}
+     * @memberof V1JobSharing
+     */
+    title?: V1JobAudience;
+    /**
+     * Who may read the job's logs.
+     * @type {V1JobAudience}
+     * @memberof V1JobSharing
+     */
+    logs?: V1JobAudience;
+    /**
+     * Who may read the job's config.
+     * @type {V1JobAudience}
+     * @memberof V1JobSharing
+     */
+    config?: V1JobAudience;
+    /**
+     * The user who last changed the job's sharing.
+     * @type {number}
+     * @memberof V1JobSharing
+     */
+    updatedBy?: number;
+    /**
+     * When the job's sharing was last changed.
+     * @type {Date | DateString}
+     * @memberof V1JobSharing
+     */
+    updatedAt?: Date | DateString;
 }
 /**
  * Job summary.
@@ -7590,6 +7789,50 @@ export interface V1PatchExperimentResponse {
     experiment?: V1Experiment;
 }
 /**
+ * Change a job's own sharing. Unset audiences are kept.
+ * @export
+ * @interface V1PatchJobSharingRequest
+ */
+export interface V1PatchJobSharingRequest {
+    /**
+     * The job ID.
+     * @type {string}
+     * @memberof V1PatchJobSharingRequest
+     */
+    jobId: string;
+    /**
+     * Who may read the job's title.
+     * @type {V1JobAudience}
+     * @memberof V1PatchJobSharingRequest
+     */
+    title?: V1JobAudience;
+    /**
+     * Who may read the job's logs.
+     * @type {V1JobAudience}
+     * @memberof V1PatchJobSharingRequest
+     */
+    logs?: V1JobAudience;
+    /**
+     * Who may read the job's config.
+     * @type {V1JobAudience}
+     * @memberof V1PatchJobSharingRequest
+     */
+    config?: V1JobAudience;
+}
+/**
+ * Response to PatchJobSharingRequest.
+ * @export
+ * @interface V1PatchJobSharingResponse
+ */
+export interface V1PatchJobSharingResponse {
+    /**
+     * The job's sharing.
+     * @type {V1JobSharing}
+     * @memberof V1PatchJobSharingResponse
+     */
+    sharing: V1JobSharing;
+}
+/**
  * Patch master config.
  * @export
  * @interface V1PatchMasterConfigRequest
@@ -7732,6 +7975,62 @@ export interface V1PatchModelVersionResponse {
      * @memberof V1PatchModelVersionResponse
      */
     modelVersion: V1ModelVersion;
+}
+/**
+ * Change the requesting user's job privacy preferences. Unset fields are kept.
+ * @export
+ * @interface V1PatchMyJobPrivacyRequest
+ */
+export interface V1PatchMyJobPrivacyRequest {
+    /**
+     * Whether the titles of the user's jobs are shared.
+     * @type {boolean}
+     * @memberof V1PatchMyJobPrivacyRequest
+     */
+    shareTitles?: boolean;
+    /**
+     * Whether the logs of the user's jobs are shared.
+     * @type {boolean}
+     * @memberof V1PatchMyJobPrivacyRequest
+     */
+    shareLogs?: boolean;
+    /**
+     * The title audience of the user's new jobs.
+     * @type {V1JobAudience}
+     * @memberof V1PatchMyJobPrivacyRequest
+     */
+    newJobTitles?: V1JobAudience;
+    /**
+     * The logs audience of the user's new jobs.
+     * @type {V1JobAudience}
+     * @memberof V1PatchMyJobPrivacyRequest
+     */
+    newJobLogs?: V1JobAudience;
+    /**
+     * Return the title audience of new jobs to the cluster default.
+     * @type {boolean}
+     * @memberof V1PatchMyJobPrivacyRequest
+     */
+    resetNewJobTitles?: boolean;
+    /**
+     * Return the logs audience of new jobs to the cluster default.
+     * @type {boolean}
+     * @memberof V1PatchMyJobPrivacyRequest
+     */
+    resetNewJobLogs?: boolean;
+}
+/**
+ * Response to PatchMyJobPrivacyRequest.
+ * @export
+ * @interface V1PatchMyJobPrivacyResponse
+ */
+export interface V1PatchMyJobPrivacyResponse {
+    /**
+     * The user's preferences.
+     * @type {V1UserJobPrivacy}
+     * @memberof V1PatchMyJobPrivacyResponse
+     */
+    privacy: V1UserJobPrivacy;
 }
 /**
  * PatchProject is a partial update to a project with all optional fields.
@@ -9247,6 +9546,32 @@ export interface V1PutGlobalConfigPoliciesResponse {
      * @memberof V1PutGlobalConfigPoliciesResponse
      */
     configPolicies?: any;
+}
+/**
+ * Set the cluster's job privacy policy.
+ * @export
+ * @interface V1PutJobPrivacyPolicyRequest
+ */
+export interface V1PutJobPrivacyPolicyRequest {
+    /**
+     * Exactly one rule per content kind.
+     * @type {Array<V1JobPrivacyRule>}
+     * @memberof V1PutJobPrivacyPolicyRequest
+     */
+    rules: Array<V1JobPrivacyRule>;
+}
+/**
+ * Response to PutJobPrivacyPolicyRequest.
+ * @export
+ * @interface V1PutJobPrivacyPolicyResponse
+ */
+export interface V1PutJobPrivacyPolicyResponse {
+    /**
+     * The stored rules.
+     * @type {Array<V1JobPrivacyRule>}
+     * @memberof V1PutJobPrivacyPolicyResponse
+     */
+    rules: Array<V1JobPrivacyRule>;
 }
 /**
  * Request for setting project notes.
@@ -11270,6 +11595,12 @@ export interface V1Shell {
      * @memberof V1Shell
      */
     allocationStartTime?: Date | DateString;
+    /**
+     * What the requesting user may do with the content of this shell's job.
+     * @type {V1JobCapabilities}
+     * @memberof V1Shell
+     */
+    capabilities?: V1JobCapabilities;
 }
 /**
  * Slot wraps a single device on the agent.
@@ -12750,6 +13081,37 @@ export interface V1UserFilters {
      * @memberof V1UserFilters
      */
     admin?: boolean;
+}
+/**
+ * A user's job privacy preferences.
+ * @export
+ * @interface V1UserJobPrivacy
+ */
+export interface V1UserJobPrivacy {
+    /**
+     * Whether the titles of the user's jobs are shared.
+     * @type {boolean}
+     * @memberof V1UserJobPrivacy
+     */
+    shareTitles: boolean;
+    /**
+     * Whether the logs of the user's jobs are shared.
+     * @type {boolean}
+     * @memberof V1UserJobPrivacy
+     */
+    shareLogs: boolean;
+    /**
+     * The title audience of the user's new jobs. Unset: the cluster default.
+     * @type {V1JobAudience}
+     * @memberof V1UserJobPrivacy
+     */
+    newJobTitles?: V1JobAudience;
+    /**
+     * The logs audience of the user's new jobs. Unset: the cluster default.
+     * @type {V1JobAudience}
+     * @memberof V1UserJobPrivacy
+     */
+    newJobLogs?: V1JobAudience;
 }
 /**
  * 
@@ -21004,6 +21366,36 @@ export const InternalApiFetchParamCreator = function (configuration?: Configurat
         },
         /**
          * 
+         * @summary Get the cluster's job privacy policy.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getJobPrivacyPolicy(options: any = {}): FetchArgs {
+            const localVarPath = `/api/v1/job-privacy/policy`;
+            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
+            const localVarRequestOptions = { method: 'GET', ...options };
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+            
+            // authentication BearerToken required
+            if (configuration && configuration.apiKey) {
+                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
+                    ? configuration.apiKey("Authorization")
+                    : configuration.apiKey;
+                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
+            }
+            
+            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
+            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
+            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
+            
+            return {
+                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @summary Get job queue stats for a resource pool.
          * @param {Array<string>} [resourcePools] Filter the results based on a set of resource pools.
          * @param {*} [options] Override http request option.
@@ -21081,6 +21473,42 @@ export const InternalApiFetchParamCreator = function (configuration?: Configurat
             
             if (states) {
                 localVarQueryParameter['states'] = states
+            }
+            
+            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
+            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
+            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
+            
+            return {
+                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary Get a job's own sharing.
+         * @param {string} jobId The job ID.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getJobSharing(jobId: string, options: any = {}): FetchArgs {
+            // verify required parameter 'jobId' is not null or undefined
+            if (jobId === null || jobId === undefined) {
+                throw new RequiredError('jobId','Required parameter jobId was null or undefined when calling getJobSharing.');
+            }
+            const localVarPath = `/api/v1/jobs/{jobId}/sharing`
+                .replace(`{${"jobId"}}`, encodeURIComponent(String(jobId)));
+            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
+            const localVarRequestOptions = { method: 'GET', ...options };
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+            
+            // authentication BearerToken required
+            if (configuration && configuration.apiKey) {
+                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
+                    ? configuration.apiKey("Authorization")
+                    : configuration.apiKey;
+                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
             }
             
             objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
@@ -21197,6 +21625,36 @@ export const InternalApiFetchParamCreator = function (configuration?: Configurat
             const localVarPath = `/api/v1/projects/{projectId}/metadata/{key}`
                 .replace(`{${"projectId"}}`, encodeURIComponent(String(projectId)))
                 .replace(`{${"key"}}`, encodeURIComponent(String(key)));
+            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
+            const localVarRequestOptions = { method: 'GET', ...options };
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+            
+            // authentication BearerToken required
+            if (configuration && configuration.apiKey) {
+                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
+                    ? configuration.apiKey("Authorization")
+                    : configuration.apiKey;
+                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
+            }
+            
+            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
+            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
+            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
+            
+            return {
+                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary Get the requesting user's job privacy preferences.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getMyJobPrivacy(options: any = {}): FetchArgs {
+            const localVarPath = `/api/v1/me/job-privacy`;
             const localVarUrlObj = new URL(localVarPath, BASE_PATH);
             const localVarRequestOptions = { method: 'GET', ...options };
             const localVarHeaderParameter = {} as any;
@@ -22098,6 +22556,88 @@ export const InternalApiFetchParamCreator = function (configuration?: Configurat
         },
         /**
          * 
+         * @summary Change a job's own sharing.
+         * @param {string} jobId The job ID.
+         * @param {V1PatchJobSharingRequest} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        patchJobSharing(jobId: string, body: V1PatchJobSharingRequest, options: any = {}): FetchArgs {
+            // verify required parameter 'jobId' is not null or undefined
+            if (jobId === null || jobId === undefined) {
+                throw new RequiredError('jobId','Required parameter jobId was null or undefined when calling patchJobSharing.');
+            }
+            // verify required parameter 'body' is not null or undefined
+            if (body === null || body === undefined) {
+                throw new RequiredError('body','Required parameter body was null or undefined when calling patchJobSharing.');
+            }
+            const localVarPath = `/api/v1/jobs/{jobId}/sharing`
+                .replace(`{${"jobId"}}`, encodeURIComponent(String(jobId)));
+            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
+            const localVarRequestOptions = { method: 'PATCH', ...options };
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+            
+            // authentication BearerToken required
+            if (configuration && configuration.apiKey) {
+                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
+                    ? configuration.apiKey("Authorization")
+                    : configuration.apiKey;
+                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
+            }
+            
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            
+            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
+            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
+            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
+            localVarRequestOptions.body = JSON.stringify(body)
+            
+            return {
+                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary Change the requesting user's job privacy preferences.
+         * @param {V1PatchMyJobPrivacyRequest} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        patchMyJobPrivacy(body: V1PatchMyJobPrivacyRequest, options: any = {}): FetchArgs {
+            // verify required parameter 'body' is not null or undefined
+            if (body === null || body === undefined) {
+                throw new RequiredError('body','Required parameter body was null or undefined when calling patchMyJobPrivacy.');
+            }
+            const localVarPath = `/api/v1/me/job-privacy`;
+            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
+            const localVarRequestOptions = { method: 'PATCH', ...options };
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+            
+            // authentication BearerToken required
+            if (configuration && configuration.apiKey) {
+                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
+                    ? configuration.apiKey("Authorization")
+                    : configuration.apiKey;
+                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
+            }
+            
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            
+            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
+            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
+            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
+            localVarRequestOptions.body = JSON.stringify(body)
+            
+            return {
+                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @summary Patch (an unmanaged) trial.
          * @param {number} trialId Trial id.
          * @param {V1PatchTrialRequest} body
@@ -22487,6 +23027,44 @@ export const InternalApiFetchParamCreator = function (configuration?: Configurat
             }
             const localVarPath = `/api/v1/experiments/by-external-id/{externalExperimentId}`
                 .replace(`{${"externalExperimentId"}}`, encodeURIComponent(String(externalExperimentId)));
+            const localVarUrlObj = new URL(localVarPath, BASE_PATH);
+            const localVarRequestOptions = { method: 'PUT', ...options };
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+            
+            // authentication BearerToken required
+            if (configuration && configuration.apiKey) {
+                const localVarApiKeyValue = typeof configuration.apiKey === 'function'
+                    ? configuration.apiKey("Authorization")
+                    : configuration.apiKey;
+                localVarHeaderParameter["Authorization"] = localVarApiKeyValue;
+            }
+            
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            
+            objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
+            objToSearchParams(options.query || {}, localVarUrlObj.searchParams);
+            localVarRequestOptions.headers = { ...localVarHeaderParameter, ...options.headers };
+            localVarRequestOptions.body = JSON.stringify(body)
+            
+            return {
+                url: `${localVarUrlObj.pathname}${localVarUrlObj.search}`,
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary Set the cluster's job privacy policy.
+         * @param {V1PutJobPrivacyPolicyRequest} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        putJobPrivacyPolicy(body: V1PutJobPrivacyPolicyRequest, options: any = {}): FetchArgs {
+            // verify required parameter 'body' is not null or undefined
+            if (body === null || body === undefined) {
+                throw new RequiredError('body','Required parameter body was null or undefined when calling putJobPrivacyPolicy.');
+            }
+            const localVarPath = `/api/v1/job-privacy/policy`;
             const localVarUrlObj = new URL(localVarPath, BASE_PATH);
             const localVarRequestOptions = { method: 'PUT', ...options };
             const localVarHeaderParameter = {} as any;
@@ -23865,6 +24443,24 @@ export const InternalApiFp = function (configuration?: Configuration) {
         },
         /**
          * 
+         * @summary Get the cluster's job privacy policy.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getJobPrivacyPolicy(options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetJobPrivacyPolicyResponse> {
+            const localVarFetchArgs = InternalApiFetchParamCreator(configuration).getJobPrivacyPolicy(options);
+            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
+                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                        return response.json();
+                    } else {
+                        throw response;
+                    }
+                });
+            };
+        },
+        /**
+         * 
          * @summary Get job queue stats for a resource pool.
          * @param {Array<string>} [resourcePools] Filter the results based on a set of resource pools.
          * @param {*} [options] Override http request option.
@@ -23895,6 +24491,25 @@ export const InternalApiFp = function (configuration?: Configuration) {
          */
         getJobs(offset?: number, limit?: number, resourcePool?: string, orderBy?: V1OrderBy, states?: Array<Jobv1State>, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetJobsResponse> {
             const localVarFetchArgs = InternalApiFetchParamCreator(configuration).getJobs(offset, limit, resourcePool, orderBy, states, options);
+            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
+                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                        return response.json();
+                    } else {
+                        throw response;
+                    }
+                });
+            };
+        },
+        /**
+         * 
+         * @summary Get a job's own sharing.
+         * @param {string} jobId The job ID.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getJobSharing(jobId: string, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetJobSharingResponse> {
+            const localVarFetchArgs = InternalApiFetchParamCreator(configuration).getJobSharing(jobId, options);
             return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
                 return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
                     if (response.status >= 200 && response.status < 300) {
@@ -23956,6 +24571,24 @@ export const InternalApiFp = function (configuration?: Configuration) {
          */
         getMetadataValues(projectId: number, key: string, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetMetadataValuesResponse> {
             const localVarFetchArgs = InternalApiFetchParamCreator(configuration).getMetadataValues(projectId, key, options);
+            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
+                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                        return response.json();
+                    } else {
+                        throw response;
+                    }
+                });
+            };
+        },
+        /**
+         * 
+         * @summary Get the requesting user's job privacy preferences.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getMyJobPrivacy(options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetMyJobPrivacyResponse> {
+            const localVarFetchArgs = InternalApiFetchParamCreator(configuration).getMyJobPrivacy(options);
             return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
                 return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
                     if (response.status >= 200 && response.status < 300) {
@@ -24377,6 +25010,45 @@ export const InternalApiFp = function (configuration?: Configuration) {
         },
         /**
          * 
+         * @summary Change a job's own sharing.
+         * @param {string} jobId The job ID.
+         * @param {V1PatchJobSharingRequest} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        patchJobSharing(jobId: string, body: V1PatchJobSharingRequest, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1PatchJobSharingResponse> {
+            const localVarFetchArgs = InternalApiFetchParamCreator(configuration).patchJobSharing(jobId, body, options);
+            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
+                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                        return response.json();
+                    } else {
+                        throw response;
+                    }
+                });
+            };
+        },
+        /**
+         * 
+         * @summary Change the requesting user's job privacy preferences.
+         * @param {V1PatchMyJobPrivacyRequest} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        patchMyJobPrivacy(body: V1PatchMyJobPrivacyRequest, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1PatchMyJobPrivacyResponse> {
+            const localVarFetchArgs = InternalApiFetchParamCreator(configuration).patchMyJobPrivacy(body, options);
+            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
+                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                        return response.json();
+                    } else {
+                        throw response;
+                    }
+                });
+            };
+        },
+        /**
+         * 
          * @summary Patch (an unmanaged) trial.
          * @param {number} trialId Trial id.
          * @param {V1PatchTrialRequest} body
@@ -24561,6 +25233,25 @@ export const InternalApiFp = function (configuration?: Configuration) {
          */
         putExperiment(externalExperimentId: string, body: V1CreateExperimentRequest, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1PutExperimentResponse> {
             const localVarFetchArgs = InternalApiFetchParamCreator(configuration).putExperiment(externalExperimentId, body, options);
+            return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
+                return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                        return response.json();
+                    } else {
+                        throw response;
+                    }
+                });
+            };
+        },
+        /**
+         * 
+         * @summary Set the cluster's job privacy policy.
+         * @param {V1PutJobPrivacyPolicyRequest} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        putJobPrivacyPolicy(body: V1PutJobPrivacyPolicyRequest, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1PutJobPrivacyPolicyResponse> {
+            const localVarFetchArgs = InternalApiFetchParamCreator(configuration).putJobPrivacyPolicy(body, options);
             return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
                 return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
                     if (response.status >= 200 && response.status < 300) {
@@ -25222,6 +25913,15 @@ export const InternalApiFactory = function (configuration?: Configuration, fetch
         },
         /**
          * 
+         * @summary Get the cluster's job privacy policy.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getJobPrivacyPolicy(options?: any) {
+            return InternalApiFp(configuration).getJobPrivacyPolicy(options)(fetch, basePath);
+        },
+        /**
+         * 
          * @summary Get job queue stats for a resource pool.
          * @param {Array<string>} [resourcePools] Filter the results based on a set of resource pools.
          * @param {*} [options] Override http request option.
@@ -25243,6 +25943,16 @@ export const InternalApiFactory = function (configuration?: Configuration, fetch
          */
         getJobs(offset?: number, limit?: number, resourcePool?: string, orderBy?: V1OrderBy, states?: Array<Jobv1State>, options?: any) {
             return InternalApiFp(configuration).getJobs(offset, limit, resourcePool, orderBy, states, options)(fetch, basePath);
+        },
+        /**
+         * 
+         * @summary Get a job's own sharing.
+         * @param {string} jobId The job ID.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getJobSharing(jobId: string, options?: any) {
+            return InternalApiFp(configuration).getJobSharing(jobId, options)(fetch, basePath);
         },
         /**
          * 
@@ -25277,6 +25987,15 @@ export const InternalApiFactory = function (configuration?: Configuration, fetch
          */
         getMetadataValues(projectId: number, key: string, options?: any) {
             return InternalApiFp(configuration).getMetadataValues(projectId, key, options)(fetch, basePath);
+        },
+        /**
+         * 
+         * @summary Get the requesting user's job privacy preferences.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getMyJobPrivacy(options?: any) {
+            return InternalApiFp(configuration).getMyJobPrivacy(options)(fetch, basePath);
         },
         /**
          * 
@@ -25509,6 +26228,27 @@ export const InternalApiFactory = function (configuration?: Configuration, fetch
         },
         /**
          * 
+         * @summary Change a job's own sharing.
+         * @param {string} jobId The job ID.
+         * @param {V1PatchJobSharingRequest} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        patchJobSharing(jobId: string, body: V1PatchJobSharingRequest, options?: any) {
+            return InternalApiFp(configuration).patchJobSharing(jobId, body, options)(fetch, basePath);
+        },
+        /**
+         * 
+         * @summary Change the requesting user's job privacy preferences.
+         * @param {V1PatchMyJobPrivacyRequest} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        patchMyJobPrivacy(body: V1PatchMyJobPrivacyRequest, options?: any) {
+            return InternalApiFp(configuration).patchMyJobPrivacy(body, options)(fetch, basePath);
+        },
+        /**
+         * 
          * @summary Patch (an unmanaged) trial.
          * @param {number} trialId Trial id.
          * @param {V1PatchTrialRequest} body
@@ -25612,6 +26352,16 @@ export const InternalApiFactory = function (configuration?: Configuration, fetch
          */
         putExperiment(externalExperimentId: string, body: V1CreateExperimentRequest, options?: any) {
             return InternalApiFp(configuration).putExperiment(externalExperimentId, body, options)(fetch, basePath);
+        },
+        /**
+         * 
+         * @summary Set the cluster's job privacy policy.
+         * @param {V1PutJobPrivacyPolicyRequest} body
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        putJobPrivacyPolicy(body: V1PutJobPrivacyPolicyRequest, options?: any) {
+            return InternalApiFp(configuration).putJobPrivacyPolicy(body, options)(fetch, basePath);
         },
         /**
          * 
@@ -26118,6 +26868,17 @@ export class InternalApi extends BaseAPI {
     
     /**
      * 
+     * @summary Get the cluster's job privacy policy.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof InternalApi
+     */
+    public getJobPrivacyPolicy(options?: any) {
+        return InternalApiFp(this.configuration).getJobPrivacyPolicy(options)(this.fetch, this.basePath)
+    }
+    
+    /**
+     * 
      * @summary Get job queue stats for a resource pool.
      * @param {Array<string>} [resourcePools] Filter the results based on a set of resource pools.
      * @param {*} [options] Override http request option.
@@ -26142,6 +26903,18 @@ export class InternalApi extends BaseAPI {
      */
     public getJobs(offset?: number, limit?: number, resourcePool?: string, orderBy?: V1OrderBy, states?: Array<Jobv1State>, options?: any) {
         return InternalApiFp(this.configuration).getJobs(offset, limit, resourcePool, orderBy, states, options)(this.fetch, this.basePath)
+    }
+    
+    /**
+     * 
+     * @summary Get a job's own sharing.
+     * @param {string} jobId The job ID.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof InternalApi
+     */
+    public getJobSharing(jobId: string, options?: any) {
+        return InternalApiFp(this.configuration).getJobSharing(jobId, options)(this.fetch, this.basePath)
     }
     
     /**
@@ -26182,6 +26955,17 @@ export class InternalApi extends BaseAPI {
      */
     public getMetadataValues(projectId: number, key: string, options?: any) {
         return InternalApiFp(this.configuration).getMetadataValues(projectId, key, options)(this.fetch, this.basePath)
+    }
+    
+    /**
+     * 
+     * @summary Get the requesting user's job privacy preferences.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof InternalApi
+     */
+    public getMyJobPrivacy(options?: any) {
+        return InternalApiFp(this.configuration).getMyJobPrivacy(options)(this.fetch, this.basePath)
     }
     
     /**
@@ -26455,6 +27239,31 @@ export class InternalApi extends BaseAPI {
     
     /**
      * 
+     * @summary Change a job's own sharing.
+     * @param {string} jobId The job ID.
+     * @param {V1PatchJobSharingRequest} body
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof InternalApi
+     */
+    public patchJobSharing(jobId: string, body: V1PatchJobSharingRequest, options?: any) {
+        return InternalApiFp(this.configuration).patchJobSharing(jobId, body, options)(this.fetch, this.basePath)
+    }
+    
+    /**
+     * 
+     * @summary Change the requesting user's job privacy preferences.
+     * @param {V1PatchMyJobPrivacyRequest} body
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof InternalApi
+     */
+    public patchMyJobPrivacy(body: V1PatchMyJobPrivacyRequest, options?: any) {
+        return InternalApiFp(this.configuration).patchMyJobPrivacy(body, options)(this.fetch, this.basePath)
+    }
+    
+    /**
+     * 
      * @summary Patch (an unmanaged) trial.
      * @param {number} trialId Trial id.
      * @param {V1PatchTrialRequest} body
@@ -26577,6 +27386,18 @@ export class InternalApi extends BaseAPI {
      */
     public putExperiment(externalExperimentId: string, body: V1CreateExperimentRequest, options?: any) {
         return InternalApiFp(this.configuration).putExperiment(externalExperimentId, body, options)(this.fetch, this.basePath)
+    }
+    
+    /**
+     * 
+     * @summary Set the cluster's job privacy policy.
+     * @param {V1PutJobPrivacyPolicyRequest} body
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof InternalApi
+     */
+    public putJobPrivacyPolicy(body: V1PutJobPrivacyPolicyRequest, options?: any) {
+        return InternalApiFp(this.configuration).putJobPrivacyPolicy(body, options)(this.fetch, this.basePath)
     }
     
     /**

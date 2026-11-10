@@ -7,6 +7,7 @@ import "google/protobuf/timestamp.proto";
 import "protoc-gen-swagger/options/annotations.proto";
 import "determined/device/v1/device.proto";
 import "determined/log/v1/log.proto";
+import "determined/job/v1/job.proto";
 
 // The current state of the task.
 enum State {
@@ -189,6 +190,8 @@ message GenericTask {
   // Unset if no allocation has received resources.
   // Available only in Agent-only clusters; omitted on other or mixed backends.
   google.protobuf.Timestamp allocation_start_time = 19;
+  // What the requesting user may do with the content of this task's job.
+  determined.job.v1.JobCapabilities capabilities = 20;
 }
 
 // Address represents an exposed port on a container.
@@ -339,6 +342,8 @@ message AllocationSummary {
   optional int32 priority = 9;
   // ProxyPortConfig configures a proxy the allocation should start.
   repeated ProxyPortConfig proxy_ports = 10;
+  // What the requesting user may do with the content of this allocation's job.
+  determined.job.v1.JobCapabilities capabilities = 11;
 }
 
 // TaskLog is the model for a task log in the database

@@ -17,6 +17,7 @@ import (
 	"github.com/determined-ai/determined/master/internal/db/bunutils"
 	"github.com/determined-ai/determined/master/internal/experiment"
 	"github.com/determined-ai/determined/master/internal/grpcutil"
+	"github.com/determined-ai/determined/master/internal/jobprivacy"
 	"github.com/determined-ai/determined/master/internal/run"
 	"github.com/determined-ai/determined/master/internal/storage"
 	"github.com/determined-ai/determined/master/internal/trials"
@@ -84,13 +85,17 @@ func (a *apiServer) SearchRuns(
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get the user: %s", err)
 	}
+	privacy, err := jobprivacy.ForUser(ctx, *curUser, "e.job_id")
+	if err != nil {
+		return nil, err
+	}
 
 	resp := &apiv1.SearchRunsResponse{}
 	var runs []*runv1.FlatRun
 	query := db.Bun().NewSelect().
 		Model(&runs).
 		ModelTableExpr("runs AS r").
-		Apply(getRunsColumns)
+		Apply(getRunsColumns(privacy))
 
 	var proj *projectv1.Project
 	if req.ProjectId != nil {
@@ -109,14 +114,14 @@ func (a *apiServer) SearchRuns(
 	}
 
 	if req.Filter != nil {
-		query, err = filterRunQuery(query, req.Filter)
+		query, err = filterRunQuery(query, req.Filter, privacy)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	if req.Sort != nil {
-		err = sortRuns(req.Sort, query)
+		err = sortRuns(req.Sort, query, privacy)
 		if err != nil {
 			return nil, err
 		}
@@ -133,7 +138,16 @@ func (a *apiServer) SearchRuns(
 	return resp, nil
 }
 
-func getRunsColumns(q *bun.SelectQuery) *bun.SelectQuery {
+// getRunsColumns selects the columns of runs r, with each run's experiment and the viewer's job
+// privacy capabilities on it, from the rule privacy over e.job_id.
+func getRunsColumns(privacy jobprivacy.Exprs) func(q *bun.SelectQuery) *bun.SelectQuery {
+	return func(q *bun.SelectQuery) *bun.SelectQuery {
+		return privacy.Join(runsColumns(q, privacy))
+	}
+}
+
+// runsColumns selects the columns of getRunsColumns, without the joins of privacy.
+func runsColumns(q *bun.SelectQuery, privacy jobprivacy.Exprs) *bun.SelectQuery {
 	return q.
 		Column("r.id").
 		ColumnExpr("proto_time(r.start_time) AS start_time").
@@ -151,7 +165,7 @@ func getRunsColumns(q *bun.SelectQuery) *bun.SelectQuery {
 		ColumnExpr("CASE WHEN r.hparams='null' THEN NULL ELSE r.hparams END AS hyperparameters").
 		ColumnExpr("r.summary_metrics AS summary_metrics").
 		ColumnExpr("e.owner_id AS user_id").
-		ColumnExpr("e.config->>'labels' AS labels").
+		ColumnExpr(privacy.ExpLabelsText() + " AS labels").
 		ColumnExpr("w.id AS workspace_id").
 		ColumnExpr("w.name AS workspace_name").
 		ColumnExpr("(w.archived OR p.archived) AS parent_archived").
@@ -160,17 +174,18 @@ func getRunsColumns(q *bun.SelectQuery) *bun.SelectQuery {
 			'searcher_type', e.config->'searcher'->>'name',
 			'searcher_metric', e.config->'searcher'->>'metric',
 			'resource_pool', e.config->'resources'->>'resource_pool',
-			'name', e.config->>'name',
-			'description', e.config->>'description',
+			'name', ` + privacy.ExpName() + `,
+			'description', ` + privacy.ExpDescription() + `,
 			'unmanaged', e.unmanaged,
 			'progress', e.progress,
 			'forked_from', e.parent_id,
 			'external_experiment_id', e.external_experiment_id,
 			'is_multitrial', (e.config->'searcher'->>'name' != 'single'),
-			'pachyderm_integration', NULLIF(e.config#>'{integrations,pachyderm}', 'null'),
+			'pachyderm_integration', ` + privacy.ExpPachyderm() + `,
+			'capabilities', ` + privacy.CapabilitiesJSON() + `,
 			'id', e.id) AS experiment`).
 		ColumnExpr("rm.metadata AS metadata").
-		ColumnExpr("r.log_policy_matched AS log_policy_matched").
+		ColumnExpr(privacy.LogPolicyMatched("r.log_policy_matched") + " AS log_policy_matched").
 		Join("LEFT JOIN experiments AS e ON r.experiment_id=e.id").
 		Join("LEFT JOIN runs_metadata AS rm ON r.id=rm.run_id").
 		Join("LEFT JOIN users u ON e.owner_id = u.id").
@@ -178,7 +193,9 @@ func getRunsColumns(q *bun.SelectQuery) *bun.SelectQuery {
 		Join("LEFT JOIN workspaces w ON p.workspace_id = w.id")
 }
 
-func sortRuns(sortString *string, runQuery *bun.SelectQuery) error {
+// sortRuns orders runs r by the sort string. The experiment's name and description sort by the
+// job privacy rule privacy: a hidden one is NULL and sorts last in either direction.
+func sortRuns(sortString *string, runQuery *bun.SelectQuery, privacy jobprivacy.Exprs) error {
 	if sortString == nil {
 		return nil
 	}
@@ -188,8 +205,8 @@ func sortRuns(sortString *string, runQuery *bun.SelectQuery) error {
 	}
 	orderColMap := map[string]string{
 		"id":                    "id",
-		"experimentDescription": "e.config->>'description'",
-		"experimentName":        "e.config->>'name'",
+		"experimentDescription": privacy.ExpDescription(),
+		"experimentName":        privacy.ExpName(),
 		"searcherType":          "e.config->'searcher'->>'name'",
 		"searcherMetric":        "e.config->'searcher'->>'metric'",
 		"startTime":             "r.start_time",
@@ -268,12 +285,18 @@ func sortRuns(sortString *string, runQuery *bun.SelectQuery) error {
 	return nil
 }
 
-func filterRunQuery(getQ *bun.SelectQuery, filter *string) (*bun.SelectQuery, error) {
+// filterRunQuery applies the filter to runs r of experiments e. Name, description and tag filters
+// read the experiment by the job privacy rule privacy, so a hidden title matches none of them; the
+// query must join what privacy reads (see filterRunQueryForUser).
+func filterRunQuery(
+	getQ *bun.SelectQuery, filter *string, privacy jobprivacy.Exprs,
+) (*bun.SelectQuery, error) {
 	var efr experimentFilterRoot
 	err := json.Unmarshal([]byte(*filter), &efr)
 	if err != nil {
 		return nil, err
 	}
+	efr.privacy = privacy
 	getQ = getQ.WhereGroup(" AND ", func(q *bun.SelectQuery) *bun.SelectQuery {
 		_, err = efr.toSQL(q)
 		return q
@@ -287,6 +310,18 @@ func filterRunQuery(getQ *bun.SelectQuery, filter *string) (*bun.SelectQuery, er
 		return nil, err
 	}
 	return getQ, nil
+}
+
+// filterRunQueryForUser is filterRunQuery for a query over runs r and experiments e that does not
+// join the job: it joins it and applies the user's job privacy rule.
+func filterRunQueryForUser(
+	ctx context.Context, curUser model.User, getQ *bun.SelectQuery, filter *string,
+) (*bun.SelectQuery, error) {
+	privacy, err := jobprivacy.ForUser(ctx, curUser, "e.job_id")
+	if err != nil {
+		return nil, err
+	}
+	return filterRunQuery(privacy.Join(getQ), filter, privacy)
 }
 
 func getSelectRunsQueryTables() *bun.SelectQuery {
@@ -347,7 +382,7 @@ func (a *apiServer) MoveRuns(
 	if req.Filter == nil {
 		getQ = getQ.Where("r.id IN (?)", bun.In(req.RunIds))
 	} else {
-		getQ, err = filterRunQuery(getQ, req.Filter)
+		getQ, err = filterRunQueryForUser(ctx, *curUser, getQ, req.Filter)
 		if err != nil {
 			return nil, err
 		}
@@ -562,7 +597,7 @@ func (a *apiServer) KillRuns(ctx context.Context, req *apiv1.KillRunsRequest,
 	if req.Filter == nil {
 		getQ = getQ.Where("r.id IN (?)", bun.In(req.RunIds))
 	} else {
-		getQ, err = filterRunQuery(getQ, req.Filter)
+		getQ, err = filterRunQueryForUser(ctx, *curUser, getQ, req.Filter)
 		if err != nil {
 			return nil, err
 		}
@@ -647,7 +682,7 @@ func (a *apiServer) DeleteRuns(ctx context.Context, req *apiv1.DeleteRunsRequest
 	if req.Filter == nil {
 		getQ = getQ.Where("r.id IN (?)", bun.In(req.RunIds))
 	} else {
-		getQ, err = filterRunQuery(getQ, req.Filter)
+		getQ, err = filterRunQueryForUser(ctx, *curUser, getQ, req.Filter)
 		if err != nil {
 			return nil, err
 		}
@@ -804,7 +839,7 @@ func archiveUnarchiveAction(ctx context.Context, archive bool, runIDs []int32,
 	if filter == nil {
 		query = query.Where("r.id IN (?)", bun.In(runIDs))
 	} else {
-		query, err = filterRunQuery(query, filter)
+		query, err = filterRunQueryForUser(ctx, *curUser, query, filter)
 		if err != nil {
 			return nil, err
 		}
@@ -931,7 +966,11 @@ func pauseResumeAction(ctx context.Context, isPause bool, projectID int32,
 	if isRunIDAction {
 		getQ = getQ.Where("r.id IN (?)", bun.In(runIds))
 	} else {
-		getQ, err = filterRunQuery(getQ, filter)
+		curUser, _, uErr := grpcutil.GetUser(ctx)
+		if uErr != nil {
+			return nil, uErr
+		}
+		getQ, err = filterRunQueryForUser(ctx, *curUser, getQ, filter)
 		if err != nil {
 			return nil, err
 		}

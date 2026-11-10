@@ -438,7 +438,7 @@ func AddExperimentTx(
 		JobType: model.JobTypeExperiment,
 		OwnerID: experiment.OwnerID,
 	}
-	if _, err = idb.NewInsert().Model(&job).Exec(ctx); err != nil {
+	if err = AddJobTx(ctx, idb, &job); err != nil {
 		return errors.Wrapf(err, "error inserting job %v", job)
 	}
 
