@@ -1,0 +1,71 @@
+.base {
+  max-width: 100%;
+}
+.scroll {
+  // The padding leaves room for the focus outline of a day at the edge of the box; the margin
+  // keeps the grid where it was.
+  margin: -3px -3px 0;
+  max-width: calc(100% + 6px);
+  overflow-x: auto;
+  padding: 3px 3px 4px;
+  scroll-padding: 3px;
+}
+.months,
+.grid {
+  column-gap: 3px;
+  display: grid;
+  grid-auto-columns: 11px;
+  width: max-content;
+}
+.months {
+  color: var(--theme-surface-on-weak);
+  font-size: 11px;
+  grid-auto-flow: column;
+  height: 16px;
+  white-space: nowrap;
+}
+.grid {
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 11px);
+  row-gap: 3px;
+}
+.cell {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-radius: 2px;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: block;
+  height: 11px;
+  padding: 0;
+  width: 11px;
+
+  &:focus-visible {
+    outline: 2px solid var(--theme-surface-on);
+    outline-offset: 1px;
+  }
+}
+.day {
+  column-gap: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.notCovered {
+  border: 1px solid var(--theme-surface-border);
+}
+.level0 {
+  background-color: var(--theme-surface-strong);
+}
+.level1 {
+  // stylelint-disable-next-line declaration-property-value-no-unknown -- css-tree 2.3 predates color-mix()
+  background-color: color-mix(in srgb, var(--theme-status-active) 40%, var(--theme-surface-strong));
+}
+.level2 {
+  // stylelint-disable-next-line declaration-property-value-no-unknown -- css-tree 2.3 predates color-mix()
+  background-color: color-mix(in srgb, var(--theme-status-active) 70%, var(--theme-surface-strong));
+}
+.level3 {
+  background-color: var(--theme-status-active);
+}

@@ -37,6 +37,10 @@ vi.mock('services/api', () => ({
   updateUserSetting: () => Promise.resolve(),
 }));
 
+vi.mock('pages/UserProfile/UserOverview', () => ({
+  default: ({ userId }: { userId: number }) => <div data-testid="user-overview">{userId}</div>,
+}));
+
 const CURRENT_USER: DetailedUser = { id: 1, isActive: true, isAdmin: false, username: 'bunny' };
 
 vi.mock('hooks/usePermissions', () => {
@@ -84,6 +88,19 @@ const setup = () => {
 };
 
 describe('Dashboard', () => {
+  it("shows the signed-in user's overview between the header and the sections", async () => {
+    setup();
+
+    const overview = await screen.findByTestId('user-overview');
+    expect(overview).toHaveTextContent(/^1$/);
+    const submissions = await screen.findByText('Your Recent Submissions');
+    const launch = screen.getByRole('button', { name: 'Launch Interactive Task' });
+    const follows = (a: Node, b: Node) =>
+      !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(launch, overview)).toBe(true);
+    expect(follows(overview, submissions)).toBe(true);
+  });
+
   it('renders empty state', async () => {
     setup();
 
