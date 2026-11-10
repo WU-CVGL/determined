@@ -10,6 +10,7 @@ import { useJobSharingModal } from 'components/JobSharingModal';
 import Page from 'components/Page';
 import TaskResourcesPanel from 'components/TaskResourcesPanel';
 import { terminalGenericTaskStates } from 'constants/states';
+import usePageReturns from 'hooks/usePageReturns';
 import usePermissions from 'hooks/usePermissions';
 import usePolling from 'hooks/usePolling';
 import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
@@ -142,7 +143,9 @@ const GenericTaskDetails: React.FC = () => {
     fetchChildren();
   }, [fetchChildren, fetchTask]);
 
-  // Owner, name and resources are only in the generic task list; look the task up once.
+  // Owner, name, resources and capabilities are only in the generic task list; look the task up
+  // once, and again when the user comes back to the page, for sharing changed meanwhile.
+  const pageReturns = usePageReturns();
   useEffect(() => {
     if (!isGeneric) return;
     let active = true;
@@ -164,7 +167,7 @@ const GenericTaskDetails: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [isGeneric, sharingSaves, taskId]);
+  }, [isGeneric, pageReturns, sharingSaves, taskId]);
 
   useEffect(() => {
     if (!isGeneric) return;

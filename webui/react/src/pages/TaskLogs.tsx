@@ -9,6 +9,8 @@ import { useParams } from 'react-router-dom';
 import Page from 'components/Page';
 import TaskResourcesLink from 'components/TaskResourcesLink';
 import { commandTypeToLabel } from 'constants/states';
+import useLogsRefusal from 'hooks/useLogsRefusal';
+import usePageReturns from 'hooks/usePageReturns';
 import { ResetSettings, UpdateSettings, useSettings } from 'hooks/useSettings';
 import { DateString, decode, optional } from 'ioTypes';
 import { paths, serverAddress } from 'routes/utils';
@@ -72,7 +74,8 @@ interface ViewerProps {
 /*
  * The log viewer of a task with its filters, without a page around it. The caller owns the log
  * settings so that it can also read them, e.g. for the selected allocation. Logs that are not
- * shared with the viewer, by the task's capabilities or by the master's refusal, are not read.
+ * shared with the viewer, by the task's capabilities or by the master's refusal, are not read
+ * (see useLogsRefusal for when a refusal ends).
  */
 export const TaskLogsViewer: React.FC<ViewerProps> = ({
   logsHidden,
@@ -83,19 +86,17 @@ export const TaskLogsViewer: React.FC<ViewerProps> = ({
   updateSettings,
 }: ViewerProps) => {
   const [filterOptions, setFilterOptions] = useState<Filters>({});
-  // The task whose logs the master refused as not shared.
-  const [refusedTaskId, setRefusedTaskId] = useState<string>();
-  const notShared = !!logsHidden || refusedTaskId === taskId;
+  const { notShared, refuse } = useLogsRefusal(taskId, !!logsHidden);
 
   const handleLogsError = useCallback(
     (e: unknown) => {
       if (isLogsNotShared(e)) {
-        setRefusedTaskId(taskId);
+        refuse();
         return;
       }
       handleError(e);
     },
-    [taskId],
+    [refuse],
   );
 
   const filterValues: Filters = useMemo(
@@ -181,12 +182,12 @@ export const TaskLogsViewer: React.FC<ViewerProps> = ({
       detApi.StreamingJobs.taskLogsFields(taskId, true, { signal: canceler.signal }),
       (event) => setFilterOptions(event as Filters),
       (e) => {
-        if (isLogsNotShared(e)) setRefusedTaskId(taskId);
+        if (isLogsNotShared(e)) refuse();
       },
     );
 
     return () => canceler.abort();
-  }, [notShared, taskId]);
+  }, [notShared, refuse, taskId]);
 
   if (notShared) return <Message title={LOGS_NOT_SHARED} />;
 
@@ -243,6 +244,9 @@ const TaskLogs: React.FC<Props> = ({ taskId, taskType, onCloseLogs, headerCompon
     };
   }, [taskId]);
 
+  // The lookup is repeated when the user comes back to the page, for sharing changed meanwhile.
+  const pageReturns = usePageReturns();
+
   useEffect(() => {
     let active = true;
     lookupCapabilities(taskId, taskType)
@@ -250,13 +254,14 @@ const TaskLogs: React.FC<Props> = ({ taskId, taskType, onCloseLogs, headerCompon
         if (active) setLookup({ capabilities, taskId });
       })
       .catch(() => {
-        // The master refuses logs that are not shared, which the viewer shows.
-        if (active) setLookup({ taskId });
+        // The master refuses logs that are not shared, which the viewer shows. A repeated lookup
+        // that fails keeps the capabilities of the last one.
+        if (active) setLookup((last) => (last?.taskId === taskId ? last : { taskId }));
       });
     return () => {
       active = false;
     };
-  }, [taskId, taskType]);
+  }, [pageReturns, taskId, taskType]);
 
   return (
     <Page

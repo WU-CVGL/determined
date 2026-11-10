@@ -13,6 +13,7 @@ import TaskResourcesPanel from 'components/TaskResourcesPanel';
 import TrialLogPreview from 'components/TrialLogPreview';
 import { terminalRunStates } from 'constants/states';
 import useFeature from 'hooks/useFeature';
+import usePageReturns from 'hooks/usePageReturns';
 import usePermissions from 'hooks/usePermissions';
 import usePolling from 'hooks/usePolling';
 import { SettingsConfig, useSettings } from 'hooks/useSettings';
@@ -305,6 +306,14 @@ const TrialDetailsComp: React.FC = () => {
       stopPolling();
     }
   }, [trialDetails.data, stopPolling]);
+
+  // An ended trial is not polled, nor then its experiment: read the experiment again when the
+  // user comes back to the page, for sharing changed meanwhile.
+  usePageReturns(() => {
+    if (trialDetails.data && terminalRunStates.has(trialDetails.data.state)) {
+      fetchExperimentDetails();
+    }
+  });
 
   useEffect(() => {
     return () => canceler.abort();

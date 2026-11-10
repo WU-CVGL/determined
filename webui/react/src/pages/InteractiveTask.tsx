@@ -15,6 +15,7 @@ import TaskServicePane from 'components/TaskServicePane';
 import useUI from 'components/ThemeProvider';
 import { commandTypeToLabel } from 'constants/states';
 import useFeature from 'hooks/useFeature';
+import usePageReturns from 'hooks/usePageReturns';
 import { useSettings } from 'hooks/useSettings';
 import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
 import { TaskLogsViewer } from 'pages/TaskLogs';
@@ -312,7 +313,9 @@ export const InteractiveTask: React.FC = () => {
   const commandType = commandTypeOfTask(task?.taskType);
   const loaded = !!task;
 
-  // The name and pool, from the lookup of the task's type; an ended task has none.
+  // The name, pool and capabilities, from the lookup of the task's type; an ended task has none.
+  // It is repeated when the user comes back to the page, for sharing changed meanwhile.
+  const pageReturns = usePageReturns();
   useEffect(() => {
     if (!loaded) return;
     let cancelled = false;
@@ -329,7 +332,7 @@ export const InteractiveTask: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [taskId, commandType, loaded, sharingSaves]);
+  }, [taskId, commandType, loaded, pageReturns, sharingSaves]);
 
   const selectTab = useCallback(
     (tab: string) =>

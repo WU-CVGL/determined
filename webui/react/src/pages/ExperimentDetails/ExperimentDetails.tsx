@@ -8,6 +8,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import Page, { BreadCrumbRoute } from 'components/Page';
 import { terminalRunStates } from 'constants/states';
 import useFeature from 'hooks/useFeature';
+import usePageReturns from 'hooks/usePageReturns';
 import usePolling from 'hooks/usePolling';
 import ExperimentDetailsHeader from 'pages/ExperimentDetails/ExperimentDetailsHeader';
 import ExperimentMultiTrialTabs from 'pages/ExperimentDetails/ExperimentMultiTrialTabs';
@@ -76,6 +77,12 @@ const ExperimentDetails: React.FC = () => {
       stopPolling();
     }
   }, [experiment, stopPolling]);
+
+  // An ended experiment is not polled: read it again when the user comes back to the page, for
+  // sharing changed meanwhile.
+  usePageReturns(() => {
+    if (experiment && terminalRunStates.has(experiment.state)) fetchExperimentDetails();
+  });
 
   useEffect(() => {
     fetchExperimentDetails();

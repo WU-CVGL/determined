@@ -9,6 +9,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import useUI from 'components/ThemeProvider';
 import useFeature from 'hooks/useFeature';
+import useLogsRefusal from 'hooks/useLogsRefusal';
 import { useSettings } from 'hooks/useSettings';
 import { DateString, decode, optional } from 'ioTypes';
 import { serverAddress } from 'routes/utils';
@@ -37,19 +38,17 @@ const TrialDetailsLogs: React.FC<Props> = ({ experiment, trial }: Props) => {
   const canceler = useRef(new AbortController());
   const f_flat_runs = useFeature().isOn('flat_runs');
 
-  // The trial whose logs the master refused as not shared.
-  const [refusedTrialId, setRefusedTrialId] = useState<number>();
-  const notShared = logsHidden(experiment.capabilities) || (!!trial && refusedTrialId === trial.id);
+  const { notShared, refuse } = useLogsRefusal(trial?.id, logsHidden(experiment.capabilities));
 
   const handleLogsError = useCallback(
     (e: unknown) => {
       if (isLogsNotShared(e)) {
-        setRefusedTrialId(trial?.id);
+        refuse();
         return;
       }
       handleError(e);
     },
-    [trial?.id],
+    [refuse],
   );
 
   const trialSettingsConfig = useMemo(() => settingsConfigForTrial(trial?.id || -1), [trial?.id]);
@@ -185,12 +184,11 @@ const TrialDetailsLogs: React.FC<Props> = ({ experiment, trial }: Props) => {
     const newCanceler = new AbortController();
     canceler.current = newCanceler;
 
-    const trialId = trial.id;
     readStream(
-      detApi.StreamingExperiments.trialLogsFields(trialId, true, { signal: fieldCanceler.signal }),
+      detApi.StreamingExperiments.trialLogsFields(trial.id, true, { signal: fieldCanceler.signal }),
       (event) => setFilterOptions(event as Filters),
       (e) => {
-        if (isLogsNotShared(e)) setRefusedTrialId(trialId);
+        if (isLogsNotShared(e)) refuse();
       },
     );
 
@@ -198,7 +196,7 @@ const TrialDetailsLogs: React.FC<Props> = ({ experiment, trial }: Props) => {
       canceler.current.abort();
       fieldCanceler.abort();
     };
-  }, [notShared, trial?.id, ui.isPageHidden]);
+  }, [notShared, refuse, trial?.id, ui.isPageHidden]);
 
   const logFilters = (
     <LogViewerSelect
