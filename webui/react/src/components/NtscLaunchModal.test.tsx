@@ -2312,7 +2312,7 @@ describe('NtscLaunchModal', () => {
         expect(request.config.resources.slots).toBe(0);
       }, 15_000);
 
-      it('unlocks a TensorBoard session launched again when its ssh line is deleted', async () => {
+      it('unlocks a TensorBoard session launched again and previews its editors when its ssh line is deleted', async () => {
         mocks.getShellConfig.mockResolvedValue(sessionShellConfig);
         const { onLaunched, user } = await setup(
           { initialTask: task(CommandType.Shell, { name: 'TensorBoard (brave-cat)' }) },
@@ -2320,14 +2320,79 @@ describe('NtscLaunchModal', () => {
         );
         await waitFor(() => expect(launchButton()).toBeEnabled());
         expect(screen.getByLabelText('Slots')).toBeDisabled();
-        await roundTrip(user, (config) => {
+        expect(serviceBox('jupyter')).not.toBeChecked();
+        const trip = await roundTrip(user, (config) => {
           const { ssh: _ssh, ...services } = config.services;
           return { ...config, services };
         });
         expect(screen.getByLabelText('Slots')).toBeEnabled();
         expect(serviceBox('tensorboard')).toBeEnabled();
+        // The master runs its default editors in a shell with ssh.
+        await waitFor(() => expect(serviceBox('jupyter')).toBeChecked());
+        expect(serviceBox('vscode')).toBeChecked();
+        expect(mocks.previewShell).toHaveBeenCalledTimes(trip.calls + 2);
+        await waitFor(() => expect(launchButton()).toBeEnabled());
+        const again = await roundTrip(user);
+        expect(again.config.services).toMatchObject({ jupyter: {}, vscode: {} });
+        expect(mocks.previewShell).toHaveBeenCalledTimes(again.calls + 1);
+        await user.click(serviceBox('vscode'));
         const request = await launched(user, onLaunched);
         expect(request.config.services).not.toHaveProperty('ssh');
+        expect(request.config.services.jupyter).toEqual({});
+        expect(request.config.services.vscode).toEqual({ enabled: false });
+      }, 15_000);
+
+      it('previews the editors of a template without ssh when ssh is turned on', async () => {
+        mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, SESSION_TEMPLATE]);
+        const { onLaunched, user } = await setup();
+        await openStartFrom(user);
+        await user.click(await screen.findByText('session'));
+        await waitFor(() => expect(serviceBox('tensorboard')).toBeDisabled());
+        await waitFor(() => expect(launchButton()).toBeEnabled());
+        expect(serviceBox('jupyter')).not.toBeChecked();
+        const trip = await roundTrip(user, (config) => ({
+          ...config,
+          services: { ...config.services, ssh: { enabled: true } },
+        }));
+        await waitFor(() => expect(serviceBox('jupyter')).toBeChecked());
+        expect(serviceBox('vscode')).toBeChecked();
+        expect(serviceBox('tensorboard')).toBeEnabled();
+        expect(mocks.previewShell).toHaveBeenCalledTimes(trip.calls + 2);
+        await user.click(serviceBox('jupyter'));
+        const request = await launched(user, onLaunched);
+        expect(request.templateName).toBe('session');
+        expect(request.config.services).toEqual({
+          jupyter: { enabled: false },
+          ssh: { enabled: true },
+          tensorboard: { experiment_ids: [3] },
+          vscode: {},
+        });
+      }, 15_000);
+
+      it('replaces a bind mount list that the request holds', async () => {
+        const { onLaunched, user } = await setup({ initialTask: task(CommandType.Shell) });
+        const trip = await roundTrip(user, (config) => ({ ...config, bind_mounts: [] }));
+        expect(trip.request.config.bind_mounts).toEqual(clusterShellConfig.bind_mounts);
+        const request = await launched(user, onLaunched);
+        expect(request.config.bind_mounts).toEqual([]);
+      }, 15_000);
+
+      it('drops the YAML typed after a refused preview of the full config', async () => {
+        const message = 'user may not use the resource pool default';
+        const { onLaunched, user } = await setup();
+        await roundTrip(user, (config) => ({ ...config, idle_timeout: '1h' }));
+        mocks.previewShell.mockImplementationOnce(async () => {
+          throw await masterRefusal(403, message);
+        });
+        await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+        expect(await screen.findByText(message)).toBeInTheDocument();
+        fireEvent.change(screen.getByTestId('code-editor'), {
+          target: { value: yaml.dump({ idle_timeout: '2h', resources: { slots: 1 } }) },
+        });
+        await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
+        expect(await screen.findByRole('button', { name: 'Show Full Config' })).toBeInTheDocument();
+        const request = await launched(user, onLaunched);
+        expect(request.config.idle_timeout).toBe('1h');
       }, 15_000);
 
       it.each(['Shell (my-box)', 'TensorBoard (runs)'])(

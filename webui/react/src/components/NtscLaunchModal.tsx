@@ -338,7 +338,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   // changes. Switching between the simple form and the full config previews nothing, so that the
   // form keeps its changes: the watched fields read undefined while the simple form is replaced,
   // which is no start-from change. The edits of an edited full config are applied to the
-  // start-from's base when the simple form shows again, without a preview.
+  // start-from's base when the simple form shows again, without a preview unless they turn ssh on.
   const [simpleFormShown, setSimpleFormShown] = useState(false);
   const source = Form.useWatch('source', form);
   const pool = Form.useWatch('pool', form);
@@ -451,7 +451,8 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
   /**
    * Applies the edits of a full config whose YAML was edited, the difference to the previewed
    * config, to the request it was previewed for, which becomes the start-from's base; sets the
-   * simple fields that the edits change and confirms its services. The values the master filled
+   * simple fields that the edits change and confirms its services, except where the edits turn
+   * ssh on: the services preview then previews the draft. The values the master filled
    * in and the user left as they were are not in the edits. A YAML that does not parse to a config
    * changes nothing.
    */
@@ -498,6 +499,9 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
     if (hasTensorBoard && !isEqual(after.dataSource, before.dataSource)) {
       form.setFieldValue('dataSource', after.dataSource);
     }
+    // The services that ssh turned on adds, such as the master's default editors, are known only
+    // from a preview: the draft is previewed when the simple form shows.
+    if (sshOff && !baseSshOff) return;
     setServicesPreview({
       baseConfig: base,
       sent: form.getFieldValue('services'),
@@ -506,7 +510,7 @@ const NtscLaunchModalComponent: React.FC<Props> = ({
       source: form.getFieldValue('source'),
       status: 'success',
     });
-  }, [config, form, setServicesPreview]);
+  }, [config, form, setServicesPreview, sshOff]);
 
   const handleSecondary = useCallback(async () => {
     if (showFullConfig) {

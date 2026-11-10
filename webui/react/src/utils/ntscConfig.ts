@@ -212,7 +212,7 @@ const dropMounts = (config: RawJson, drop: (mount: unknown) => boolean): void =>
 /**
  * Prepares a past task's merged config (from the master) for another launch, as a "Start from" of
  * it does and as templates and this browser's history save it. A config the user edits in the
- * launch form is not cleaned up this way (see configEdits).
+ * launch form is not cleaned up this way (see applyConfigEdits).
  * - entrypoint: the master sets it on every launch (for a shell it holds the
  *   sshd command line with a random port).
  * - an auto-generated description, so the next launch gets a new pet name.
@@ -291,7 +291,7 @@ export const minimalDiff = (
  * nulls `after` adds, and `removed` the paths of the keys of `before` that `after` lacks. Objects
  * are compared key by key, everything else (including arrays) as a whole.
  */
-export interface ConfigEdits {
+interface ConfigEdits {
   changed: RawJson;
   removed: string[][];
 }
@@ -307,7 +307,7 @@ const removedPaths = (after: RawJson, before: RawJson, path: string[] = []): str
       : [];
   });
 
-export const configEdits = (after: RawJson, before: RawJson): ConfigEdits => ({
+const configEdits = (after: RawJson, before: RawJson): ConfigEdits => ({
   changed: minimalDiff(after, before, { keepNulls: true }),
   removed: removedPaths(after, before),
 });

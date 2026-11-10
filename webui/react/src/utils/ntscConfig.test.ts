@@ -4,7 +4,6 @@ import { RawJson } from 'types';
 
 import {
   applyConfigEdits,
-  configEdits,
   configFromForm,
   dataSourceFromEntry,
   DEFAULT_SOURCE_MODE,
@@ -112,7 +111,7 @@ describe('ntscConfig', () => {
     });
   });
 
-  describe('configEdits and applyConfigEdits', () => {
+  describe('applyConfigEdits', () => {
     /** The request of a "Launch Again" of mergedShellConfig, which the master previews as it. */
     const request = relaunchConfig(mergedShellConfig);
     /** Applies the edits that turn previewed into edited to the request. */
@@ -123,10 +122,6 @@ describe('ntscConfig', () => {
     ) => applyConfigEdits(base, edited, previewed);
 
     it('leaves the request as it is when nothing was edited', () => {
-      expect(configEdits(mergedShellConfig, mergedShellConfig)).toEqual({
-        changed: {},
-        removed: [],
-      });
       expect(draft(mergedShellConfig)).toEqual(request);
     });
 
@@ -135,10 +130,6 @@ describe('ntscConfig', () => {
         ...mergedShellConfig,
         resources: { ...mergedShellConfig.resources, slots: 4 },
       };
-      expect(configEdits(edited, mergedShellConfig)).toEqual({
-        changed: { resources: { slots: 4 } },
-        removed: [],
-      });
       const out = draft(edited);
       expect(out.resources).toEqual({ resource_pool: 'gpu', slots: 4 });
       expect(out).not.toHaveProperty('entrypoint');
@@ -170,12 +161,6 @@ describe('ntscConfig', () => {
       delete edited.environment.registry_auth;
       delete edited.resources.priority;
       delete edited.resources.slots;
-      expect(configEdits(edited, previewed).removed).toEqual([
-        ['description'],
-        ['environment', 'registry_auth'],
-        ['resources', 'priority'],
-        ['resources', 'slots'],
-      ]);
       const out = draft(edited, previewed, base);
       expect(out).not.toHaveProperty('description');
       expect(out.resources).toEqual({});
@@ -189,7 +174,6 @@ describe('ntscConfig', () => {
     it('recurses into nested objects', () => {
       const previewed = { a: { b: { c: 1, d: 2 }, e: 3 } };
       const edited = { a: { b: { c: 1, d: 5, f: 6 }, e: 3 } };
-      expect(configEdits(edited, previewed).changed).toEqual({ a: { b: { d: 5, f: 6 } } });
       expect(draft(edited, previewed, { a: { b: { c: 9 } }, g: 1 })).toEqual({
         a: { b: { c: 9, d: 5, f: 6 } },
         g: 1,
@@ -218,6 +202,9 @@ describe('ntscConfig', () => {
         bind_mounts: edited.bind_mounts,
         environment: { environment_variables: { cuda: [] } },
       });
+      // An array that the request holds is replaced, not merged.
+      const list = { e: { v: ['A', 'B'] } };
+      expect(draft({ e: { v: ['B'] } }, list, list)).toEqual({ e: { v: ['B'] } });
     });
 
     it('sets a null that the user typed, changed or added', () => {
@@ -227,10 +214,6 @@ describe('ntscConfig', () => {
         services: { jupyter: null, vscode: { opt: null } },
         work_dir: null,
       };
-      expect(configEdits(edited, mergedShellConfig)).toEqual({
-        changed: { debug: null, services: { jupyter: null, vscode: { opt: null } } },
-        removed: [],
-      });
       const out = draft(edited);
       expect(out.debug).toBeNull();
       expect(out.services).toEqual({ jupyter: null, vscode: { opt: null } });
