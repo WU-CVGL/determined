@@ -22,7 +22,7 @@ import { TaskLogsViewer } from 'pages/TaskLogs';
 import { getTask, getTaskServices } from 'services/api';
 import { V1TaskService, V1TaskServiceState } from 'services/api-ts-sdk';
 import { errorText } from 'services/taskService';
-import { CommandState, CommandTask, CommandType, InteractiveTaskTab, TaskItem } from 'types';
+import { CommandState, CommandTask, InteractiveTaskTab, TaskItem } from 'types';
 import handleError, { ErrorLevel, ErrorType, handleWarning } from 'utils/error';
 import { jobDisplayName, logsHidden, titleHidden } from 'utils/jobPrivacy';
 import { isNotFound } from 'utils/service';
@@ -321,9 +321,9 @@ export const InteractiveTask: React.FC = () => {
   // Whether the task shows its title: a kept record read while it was hidden has no name.
   const taskTitleShown = !titleHidden(task?.capabilities);
 
-  // The name, pool and, for a TensorBoard, address, from the lookup of the task's type, which
-  // has no record for an ended task a day after its end. It is repeated when the user comes back
-  // to the page, for sharing changed meanwhile, and when the title turns shown.
+  // The name and pool, from the lookup of the task's type, which has no record for an ended task
+  // a day after its end. It is repeated when the user comes back to the page, for sharing changed
+  // meanwhile, and when the title turns shown.
   const pageReturns = usePageReturns(() => readTaskRef.current?.());
   useEffect(() => {
     if (!loaded) return;

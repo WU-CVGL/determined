@@ -1,10 +1,9 @@
-import { getCommand, getGenericTask, getShells, getTensorBoard } from 'services/api';
+import { getCommand, getGenericTask, getShells } from 'services/api';
 import { CommandTask, CommandType, JobCapabilities } from 'types';
 
 /**
- * The record of a command, shell or TensorBoard: its name, pool and, for a TensorBoard, address.
- * None for a task of another type, nor once the master has let go of the record, a day after the
- * task's end.
+ * The record of a command or shell: its name and pool. None for a task of another type, nor once
+ * the master has let go of the record, a day after the task's end.
  */
 export const lookupCommandTask = async (
   taskId: string,
@@ -13,8 +12,6 @@ export const lookupCommandTask = async (
   switch (type) {
     case CommandType.Command:
       return await getCommand({ commandId: taskId });
-    case CommandType.TensorBoard:
-      return await getTensorBoard({ commandId: taskId });
     case CommandType.Shell:
       // The shell list has no private keys, unlike a shell's own lookup.
       return (await getShells({})).find((shell) => shell.id === taskId);
