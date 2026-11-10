@@ -531,6 +531,82 @@ func TestUserUsageEmptyDatabase(t *testing.T) {
 	}, usageEntries(userUsage(rows, from, to, asOf, usageDaily)))
 }
 
+// An administrator who sets the kind of an allocation from before metering can make it count
+// before the cached first day of metered allocations. The same cache reads the day again once it
+// expires: the day moves earlier and the earlier usage appears. A failed read after it expires
+// keeps the cached day.
+func TestUserUsageCoverageReadAgain(t *testing.T) {
+	ctx := context.Background()
+	api, _, _ := setupAPITest(t, nil, &mocks.ResourceManager{})
+	owner := db.RequireMockUser(t, api.m.db)
+	task := addUsageTask(t, db.RequireMockJob(t, api.m.db, &owner.ID), model.TaskTypeCommand)
+	tx := userUsageScratchTx(ctx, t)
+
+	terminated := model.AllocationStateTerminated
+	// From before metering, without slots and of an unknown kind: not counted.
+	insertUsageAllocation(t, tx, task, 0, usageAllocation{
+		pool: "gpu", kind: userusage.KindUnclassified, queuedEnds: []string{"2021-01-05 10:00"},
+		start: "2021-01-05 10:00", end: "2021-01-05 12:00", state: terminated,
+	})
+	insertUsageAllocation(t, tx, task, 1, usageAllocation{
+		pool: "gpu", slots: 1, kind: userusage.KindGPU, assigned: "2021-02-01 10:00",
+		released: "2021-02-01 11:00", start: "2021-02-01 10:00", end: "2021-02-01 11:00",
+		state: terminated,
+	})
+
+	clock := time.Date(2021, 3, 1, 0, 0, 0, 0, time.UTC)
+	coverage := &userUsageCoverage{now: func() time.Time { return clock }}
+	read := func(ctx context.Context) *time.Time {
+		first, err := coverage.get(ctx, tx)
+		require.NoError(t, err)
+		require.NotNil(t, first)
+		return first
+	}
+	usage := func(first *time.Time) []userUsageEntry {
+		rangeStart, rangeEnd, err := parseUsageRange("2021-01", "2021-02", usageMonthly)
+		require.NoError(t, err)
+		asOf := time.Now().UTC()
+		from, to, ok := usageEntryBounds(rangeStart, rangeEnd, first, asOf, usageMonthly)
+		require.True(t, ok)
+		rows, err := readUserAllocations(ctx, tx, owner.ID, rangeStart, rangeEnd)
+		require.NoError(t, err)
+		return usageEntries(userUsage(rows, from, to, asOf, usageMonthly))
+	}
+	february := time.Date(2021, 2, 1, 0, 0, 0, 0, time.UTC)
+	require.Equal(t, &february, read(ctx))
+	require.Equal(t, []userUsageEntry{gpuHours("2021-02", 1, 1)}, usage(read(ctx)))
+
+	// The administrator statement for aux of the docs, with its optional start time range.
+	res, err := tx.ExecContext(ctx, `
+UPDATE allocations SET metered_kind = 'aux', metered_quantity = 1
+WHERE resource_pool = 'gpu' AND metered_kind = 'unclassified'
+  AND assigned_time IS NULL AND slots = 0
+  AND start_time >= '2021-01-01' AND start_time < '2021-02-01'`)
+	require.NoError(t, err)
+	n, err := res.RowsAffected()
+	require.NoError(t, err)
+	require.EqualValues(t, 1, n)
+
+	// Cached until the limit.
+	clock = clock.Add(userUsageCoverageMaxAge - time.Second)
+	require.Equal(t, &february, read(ctx))
+	require.Equal(t, []userUsageEntry{gpuHours("2021-02", 1, 1)}, usage(read(ctx)))
+
+	// Past it, a failed read keeps the cached day.
+	clock = clock.Add(2 * time.Second)
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	require.Equal(t, &february, read(canceled))
+
+	// And a read moves it earlier.
+	january := time.Date(2021, 1, 5, 0, 0, 0, 0, time.UTC)
+	require.Equal(t, &january, read(ctx))
+	require.Equal(t, []userUsageEntry{
+		{period: "2021-01", aux: 2, auxActive: 2, gpuOrAuxActive: 2, auxDays: 1, gpuOrAuxDays: 1},
+		gpuHours("2021-02", 1, 1),
+	}, usage(read(ctx)))
+}
+
 // The coverage starts with the first allocation that is metered. Older allocations that the
 // metering skips do not move it: one of a kind that is not metered, one from before metering
 // closed at a master start without ever holding resources, ones from before metering that ended

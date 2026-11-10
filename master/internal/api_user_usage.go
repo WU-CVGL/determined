@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/uptrace/bun"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -33,6 +34,9 @@ const (
 	userUsageMaxMonths = 36
 	// userUsageReadTimeout bounds the history read.
 	userUsageReadTimeout = 10 * time.Second
+	// userUsageCoverageMaxAge is how long the first day of metered allocations is served from the
+	// cache before it is read again.
+	userUsageCoverageMaxAge = 10 * time.Minute
 )
 
 // canViewUserPage checks whether cur may read the resources and usage of target. Every
@@ -404,26 +408,44 @@ WHERE `+meteredSQL).Scan(ctx, &first); err != nil {
 	return &first.Time, nil
 }
 
-// userUsageCoverage caches the first day of metered allocations, and reads it again only while
-// there is none: no allocation gets an earlier assignment later.
+// userUsageCoverage caches the first day of metered allocations for userUsageCoverageMaxAge, and
+// reads it on every call while there is none. The master never meters an allocation from before the
+// cached day later, but an administrator who sets the kind of allocations from before metering can
+// make an earlier one count; the day moves once the cache expires. A failed read after it expires
+// keeps the cached day.
 type userUsageCoverage struct {
-	mu    sync.Mutex
-	start *time.Time
+	mu     sync.Mutex
+	start  *time.Time
+	readAt time.Time
+	// now is the clock; nil is time.Now.
+	now func() time.Time
 }
 
 // get returns the first day of metered allocations, or nil when there are none.
 func (c *userUsageCoverage) get(ctx context.Context, idb bun.IDB) (*time.Time, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.start != nil {
+	now := time.Now
+	if c.now != nil {
+		now = c.now
+	}
+	t := now()
+	if c.start != nil && t.Sub(c.readAt) < userUsageCoverageMaxAge {
 		return c.start, nil
 	}
 	first, err := readUsageCoverage(ctx, idb)
-	if err != nil || first == nil {
+	switch {
+	case err != nil && c.start != nil:
+		log.WithError(err).Warn("failed to read the first metered allocation again, keeping the last")
+		return c.start, nil
+	case err != nil:
 		return nil, err
+	case first == nil:
+		c.start = nil
+		return nil, nil
 	}
 	start := truncateDay(*first)
-	c.start = &start
+	c.start, c.readAt = &start, t
 	return c.start, nil
 }
 

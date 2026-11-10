@@ -110,7 +110,8 @@ Both count what the tasks hold, not what they use:
    until the whole allocation is released.
 
 -  History starts with the cluster's first metered allocation, and allocation records that were
-   deleted are not in it.
+   deleted are not in it. When an administrator sets the kind of allocations from before that start,
+   it moves to them within ten minutes.
 
 -  Pool names appear as in the job queue, whether or not ``hide_unusable_pools`` is set.
 
