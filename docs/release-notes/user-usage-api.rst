@@ -8,4 +8,4 @@
    seconds of each in UTC, the slot-seconds of an unknown kind (``unclassified_slot_seconds``), and
    the active time and days for GPUs, auxiliary containers and either. Allocations record when their
    resources were assigned and released and what they count as; earlier allocations count as GPUs
-   when their task container recorded GPUs.
+   when their task container had recorded GPUs before the upgrade.

@@ -80,8 +80,9 @@ Both count what the tasks hold, not what they use:
 
 -  Allocations recorded before the master metered assignments count from the end of their first
    queued period, or else from their start, to their end; one that ended without a recorded end
-   counts nothing. Their slots count as GPUs when their task container recorded GPUs. The slots of
-   the others count as slot-seconds of an unknown kind, and those without slots are not counted,
+   counts nothing. Their slots count as GPUs when their task container had recorded GPUs before the
+   master started metering. The slots of the others, also of an allocation whose container was still
+   starting then, count as slot-seconds of an unknown kind, and those without slots are not counted,
    until an administrator who knows what a pool held in a period sets their kind in the database.
    For allocations with slots, the kind is ``gpu`` or ``cpu``, one unit per slot:
 

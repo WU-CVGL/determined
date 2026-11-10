@@ -146,8 +146,8 @@ type Allocation struct {
 	// AssignedTime is when the resource manager assigned the allocation's resources, and
 	// ReleasedTime is when they were released. MeteredKind and MeteredQuantity are what the
 	// resources are metered as. Allocations from before metering have no times, and the kind
-	// "gpu" when their task container recorded GPUs, else "unclassified" until an administrator
-	// sets it.
+	// "gpu" when their task container had recorded GPUs before the metering migration, else
+	// "unclassified" until an administrator sets it.
 	AssignedTime    *time.Time `db:"assigned_time" bun:"assigned_time"`
 	ReleasedTime    *time.Time `db:"released_time" bun:"released_time"`
 	MeteredKind     *string    `db:"metered_kind" bun:"metered_kind"`
