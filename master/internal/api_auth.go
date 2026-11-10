@@ -189,13 +189,7 @@ func processProxyAuthentication(c echo.Context, service *proxy.Service) (done bo
 	}
 
 	// Continue NTSC task checks.
-	if spec.TaskType == model.TaskTypeTensorboard {
-		err = command.AuthZProvider.Get().CanGetTensorboard(
-			ctx, *usr, spec.WorkspaceID, spec.ExperimentIDs, spec.TrialIDs)
-	} else {
-		err = command.AuthZProvider.Get().CanGetNSC(
-			ctx, *usr, spec.WorkspaceID)
-	}
+	err = command.AuthZProvider.Get().CanGetNSC(ctx, *usr, spec.WorkspaceID)
 	if err == nil && exec {
 		err = authorizeExecPort(ctx, *usr, session, jupyterSession != nil, taskID)
 	}

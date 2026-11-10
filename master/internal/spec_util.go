@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/pkg/errors"
@@ -220,4 +221,21 @@ func getGenericTaskOnAllocationExit(
 			syslog.WithError(err).Error("persisting the end of the task's allocation")
 		}
 	}
+}
+
+func filesToArchive(files []*utilv1.File) archive.Archive {
+	filesArchive := make([]archive.Item, 0, len(files))
+	for _, file := range files {
+		item := archive.Item{
+			Content:      file.Content,
+			FileMode:     os.FileMode(file.Mode),
+			GroupID:      int(file.Gid),
+			ModifiedTime: archive.UnixTime{Time: time.Unix(file.Mtime, 0)},
+			Path:         file.Path,
+			Type:         byte(file.Type),
+			UserID:       int(file.Uid),
+		}
+		filesArchive = append(filesArchive, item)
+	}
+	return filesArchive
 }

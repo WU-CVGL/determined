@@ -353,8 +353,8 @@ func TestRestoreQueuedShellRegistersTensorBoardToken(t *testing.T) {
 }
 
 // A restored task gets the proxies it had: a task saved without service records, as every task was
-// before the master recorded them, by its type, a TensorBoard's own port with its token, and a
-// shell with records by them, with the services' environment.
+// before the master recorded them, by its type, and a shell with records by them, with the
+// services' environment.
 func TestRestoreQueuedTaskKeepsProxyPorts(t *testing.T) {
 	sshd := expconf.ProxyPort{
 		RawProxyPort:        3210,
@@ -442,28 +442,6 @@ func TestRestoreQueuedTaskKeepsProxyPorts(t *testing.T) {
 					tasks.TensorBoardPathPrefixEnvVar: "/proxy/" + taskID + ":3000/",
 					"DET_TENSORBOARD_TOKEN":           testTensorBoardToken,
 				}
-			},
-		},
-		{
-			name:     "tensorboard with a token",
-			taskType: model.TaskTypeTensorboard,
-			jobType:  model.JobTypeTensorboard,
-			configure: func(req *CreateGeneric) {
-				req.Spec.Base.ExtraProxyPorts = expconf.ProxyPortsConfig{{
-					RawProxyPort: 2700, RawDefaultServiceID: ptrs.Ptr(true),
-				}}
-				req.Spec.Config.Environment.ProxyPorts = userPort
-				req.Spec.Metadata.TensorBoardToken = ptrs.Ptr(testTensorBoardToken)
-				req.Spec.Base.ExtraEnvVars = map[string]string{"DET_TENSORBOARD_TOKEN": testTensorBoardToken}
-			},
-			want: func(taskID string) []*sproto.ProxyPortConfig {
-				return []*sproto.ProxyPortConfig{
-					{ServiceID: taskID, Port: 2700, ServiceToken: testTensorBoardToken},
-					{ServiceID: taskID + ":8080", Port: 8080},
-				}
-			},
-			wantEnv: func(string) map[string]string {
-				return map[string]string{"DET_TENSORBOARD_TOKEN": testTensorBoardToken}
 			},
 		},
 	} {

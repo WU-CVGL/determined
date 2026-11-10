@@ -154,13 +154,10 @@ The following configuration settings are supported:
    replaced with the actual agent user id or determined user id. This cannot be set if submitting a
    context directory. Defaults to null.
 
--  ``tensorboard_args``: Lists optional arguments for launching TensorBoard. Each element of the
-   list should be a string of the form ``NAME=VALUE``.
-
 -  ``idle_timeout``: Specifies the duration before an idle instance is automatically terminated.
    This string is a sequence of decimal numbers, each with optional fraction and a unit suffix, such
    as "30s", "1h", or "1m30s". Valid time units are "s", "m", "h". The duration must be positive.
-   This is only used by shells and TensorBoard instances:
+   This is only used by shells:
 
    -  Shells: There is no default, and the shortest value is ``10s``; a shell is only terminated for
       being idle when this is set. The idle time counts from the last activity, once no browser
@@ -170,10 +167,6 @@ The following configuration settings are supported:
       ``jupyter`` service, JupyterLab activity as ``services.jupyter.idle_type`` defines it; by
       default a kernel that is executing. An SSH session or a browser page kept open on the shell
       can therefore delay its termination. Processes that run in the shell are not activity.
-
-   -  TensorBoard: The default is the master's ``tensorboard_timeout``, ``5m`` (5 minutes) unless
-      the master sets another. A TensorBoard instance is considered to be idle if it does not
-      receive any HTTP traffic.
 
 -  ``services``: Shells only. The services that the shell runs in its container besides its SSH
    server, as a map from the name of each service to an object of its options:

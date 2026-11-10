@@ -27,8 +27,8 @@ const (
 	jupyterIdleCheck  = "/run/determined/jupyter/check_idle.py"
 	jupyterCertPath   = "/run/determined/jupyter/jupyterCert.pem"
 	jupyterKeyPath    = "/run/determined/jupyter/jupyterKey.key"
-	// Agent ports 2600 - 3500 are split between TensorBoards, services, and sshd. The services of a
-	// shell other than ssh take their ports from this range.
+	// Agent ports 2900 - 3499 are split between services (2900 - 3199) and sshd (3200 - 3499). The
+	// services of a shell other than ssh take their ports from this range.
 	minServicePort = 2900
 	maxServicePort = minServicePort + 299
 )

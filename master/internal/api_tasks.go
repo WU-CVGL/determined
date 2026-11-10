@@ -372,20 +372,6 @@ func (a *apiServer) ReportTaskActivity(
 	return &apiv1.ReportTaskActivityResponse{}, nil
 }
 
-func (a *apiServer) AllocationWaiting(
-	ctx context.Context, req *apiv1.AllocationWaitingRequest,
-) (*apiv1.AllocationWaitingResponse, error) {
-	if err := a.canControlAllocation(ctx, req.AllocationId); err != nil {
-		return nil, err
-	}
-
-	err := task.DefaultService.SetWaiting(ctx, model.AllocationID(req.AllocationId))
-	if err != nil {
-		return nil, err
-	}
-	return &apiv1.AllocationWaitingResponse{}, nil
-}
-
 func (a *apiServer) AllocationAllGather(
 	ctx context.Context, req *apiv1.AllocationAllGatherRequest,
 ) (*apiv1.AllocationAllGatherResponse, error) {
@@ -842,16 +828,6 @@ func (a *apiServer) GetActiveTasksCount(
 	}
 
 	finalResp := &apiv1.GetActiveTasksCountResponse{}
-
-	resp2, err := command.DefaultCmdService.GetTensorboards(&apiv1.GetTensorboardsRequest{})
-	if err != nil {
-		return nil, err
-	}
-	for _, tb := range resp2.Tensorboards {
-		if tb.State == taskv1.State_STATE_RUNNING {
-			finalResp.Tensorboards++
-		}
-	}
 
 	resp3, err := command.DefaultCmdService.GetCommands(&apiv1.GetCommandsRequest{})
 	if err != nil {

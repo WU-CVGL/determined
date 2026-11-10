@@ -238,14 +238,6 @@ Logo is defined in four variations, all need to be provided.
 -  ``light_horizontal``: The logo to be shown in the light theme in the horizontal layout.
 -  ``light_vertical``: The logo to be shown in the light theme in the vertical layout.
 
-*************************
- ``tensorboard_timeout``
-*************************
-
-Specifies the duration in seconds before idle TensorBoard instances are automatically terminated. A
-TensorBoard instance is considered to be idle if it does not receive any HTTP traffic. The default
-timeout is ``300`` (5 minutes).
-
 .. _master-config-resource-manager:
 
 **********************

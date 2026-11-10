@@ -27,7 +27,6 @@ vi.mock('utils/wait', () => ({
   openCommand: () => null,
   openCommandResponse: mocks.openCommandResponse,
   openInteractiveTask: () => null,
-  waitPageUrl: () => '',
 }));
 
 const WORKSPACE = {

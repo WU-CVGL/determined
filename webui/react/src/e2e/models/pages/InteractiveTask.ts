@@ -104,11 +104,6 @@ export class InteractiveTask extends DeterminedPage {
     label: 'TensorBoard',
     parent: this.tabs.tabContent,
   });
-  /** A TensorBoard task's own page. */
-  readonly tensorBoard = new BaseComponent({
-    parent: this.tabs.tabContent,
-    selector: 'iframe[title="TensorBoard"]',
-  });
   readonly logViewer = new LogViewer({ parent: this.tabs.tabContent });
   /** Why the task cannot be shown, in place of the tabs. */
   readonly message = new Message({ parent: this });
