@@ -17,7 +17,7 @@ import (
 
 // migrationBeforeTensorBoardArgsMove is the last migration before the one that moves
 // tensorboard_args out of the stored configs.
-const migrationBeforeTensorBoardArgsMove = 20261110010810
+const migrationBeforeTensorBoardArgsMove = 20261110190834
 
 // TensorBoardArgsSpecs are the generic_command_spec values, by task ID, that
 // MigrateWithTensorBoardArgs stores in command_state before tensorboard_args is moved.

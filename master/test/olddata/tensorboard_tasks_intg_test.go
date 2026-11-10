@@ -71,7 +71,7 @@ func TestMigrateDeletesTensorBoardTasks(t *testing.T) {
 	check(t)
 
 	migration, err := os.ReadFile(
-		"../../static/migrations/20261110010810_delete-tensorboard-tasks.tx.up.sql")
+		"../../static/migrations/20261110190834_delete-tensorboard-tasks.tx.up.sql")
 	require.NoError(t, err)
 	require.NoError(t, db.Bun().RunInTx(context.Background(), nil,
 		func(ctx context.Context, tx bun.Tx) error {

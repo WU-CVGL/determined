@@ -110,7 +110,7 @@ func TestMigrateMovesTensorBoardArgs(t *testing.T) {
 
 	// The migration is idempotent: it runs again and leaves every row as it was.
 	migration, err := os.ReadFile(
-		"../../static/migrations/20261110010813_move-tensorboard-args.tx.up.sql")
+		"../../static/migrations/20261110190839_move-tensorboard-args.tx.up.sql")
 	require.NoError(t, err)
 	require.NoError(t, db.Bun().RunInTx(context.Background(), nil,
 		func(ctx context.Context, tx bun.Tx) error {

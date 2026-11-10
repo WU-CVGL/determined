@@ -12,7 +12,7 @@ import (
 
 // migrationBeforeTensorBoardDelete is the last migration before the one that deletes TENSORBOARD
 // tasks.
-const migrationBeforeTensorBoardDelete = 20261108010744
+const migrationBeforeTensorBoardDelete = 20261110020802
 
 // TensorBoardTasks names the rows that MigrateWithTensorBoardTasks adds before the TENSORBOARD
 // tasks are deleted: a TENSORBOARD job and task whose allocation is WAITING, a SHELL job and task,
