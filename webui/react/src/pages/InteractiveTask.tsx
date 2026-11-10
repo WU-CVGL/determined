@@ -19,7 +19,7 @@ import usePageReturns from 'hooks/usePageReturns';
 import { useSettings } from 'hooks/useSettings';
 import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
 import { TaskLogsViewer } from 'pages/TaskLogs';
-import { getCommand, getShells, getTask, getTaskServices, getTensorBoard } from 'services/api';
+import { getTask, getTaskServices } from 'services/api';
 import { V1TaskService, V1TaskServiceState } from 'services/api-ts-sdk';
 import { errorText } from 'services/taskService';
 import { CommandState, CommandTask, CommandType, InteractiveTaskTab, TaskItem } from 'types';
@@ -33,6 +33,7 @@ import {
   taskPhase,
   taskServiceSettled,
 } from 'utils/task';
+import { lookupCommandTask } from 'utils/taskLookup';
 import { waitPageUrl } from 'utils/wait';
 
 import css from './InteractiveTask.module.scss';
@@ -82,24 +83,6 @@ interface TaskServices {
   services: V1TaskService[];
 }
 
-/* The task's name, pool and, for a TensorBoard, address: from the lookup of its type, if any. */
-const lookupCommand = async (
-  taskId: string,
-  type?: CommandType,
-): Promise<CommandTask | undefined> => {
-  switch (type) {
-    case CommandType.Command:
-      return await getCommand({ commandId: taskId });
-    case CommandType.TensorBoard:
-      return await getTensorBoard({ commandId: taskId });
-    case CommandType.Shell:
-      // The shell list has no private keys, unlike a shell's own lookup.
-      return (await getShells({})).find((shell) => shell.id === taskId);
-    default:
-      return undefined;
-  }
-};
-
 const LogsPane: React.FC<{ hidden?: boolean; taskId: string }> = ({ hidden, taskId }) => {
   const taskSettingsConfig = useMemo(() => settingsConfigForTask(taskId), [taskId]);
   const { resetSettings, settings, updateSettings } = useSettings<Settings>(taskSettingsConfig);
@@ -133,6 +116,8 @@ export const InteractiveTask: React.FC = () => {
   const [servicesError, setServicesError] = useState<string>();
   const [retrying, setRetrying] = useState(false);
   const retryServicesRef = useRef<() => Promise<void>>();
+  // Reads the task once more, e.g. for its capabilities after the poll has stopped.
+  const readTaskRef = useRef<() => void>();
   const [command, setCommand] = useState<CommandTask>();
   // Whether the lookup of the task's name and pool has answered, with or without a record.
   const [lookedUp, setLookedUp] = useState(false);
@@ -140,7 +125,10 @@ export const InteractiveTask: React.FC = () => {
   // Counts the saves of the task's sharing, to look the task up again after one.
   const [sharingSaves, setSharingSaves] = useState(0);
   const { modal: sharingModal, open: openSharing } = useJobSharingModal(
-    useCallback(() => setSharingSaves((count) => count + 1), []),
+    useCallback(() => {
+      setSharingSaves((count) => count + 1);
+      readTaskRef.current?.();
+    }, []),
   );
 
   const requestedTab = searchParams.get('tab');
@@ -190,12 +178,21 @@ export const InteractiveTask: React.FC = () => {
     let endRead = false;
     let ended = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // The reads of the task sent, and the latest one whose answer was taken: a read on request may
+    // overlap the poll's, and an older answer never replaces a newer one.
+    let taskReads = 0;
+    let taskReadTaken = 0;
+    // Whether the poll has given up on the task.
+    let gone = false;
     // Whether the task has ended, or the page gives up on it.
     const pollTask = async (): Promise<'ended' | 'gone' | undefined> => {
+      const read = ++taskReads;
       try {
         const response = await getTask({ taskId });
         if (cancelled) return 'gone';
         failures = 0;
+        if (read < taskReadTaken) return undefined;
+        taskReadTaken = read;
         if (!response) {
           if (!loaded) setError(`Task ${taskId} not found.`);
           return 'gone';
@@ -275,8 +272,13 @@ export const InteractiveTask: React.FC = () => {
       await readServices();
       setRetrying(false);
     };
+    // One more read of the task, on request, once it has loaded; a failure keeps the last answer.
+    readTaskRef.current = () => {
+      if (loaded && !gone) void pollTask();
+    };
     const poll = async () => {
       const [outcome] = await Promise.all([pollTask(), servicesDue() ? readServices() : undefined]);
+      if (outcome === 'gone') gone = true;
       if (cancelled || outcome === 'gone') return;
       if (outcome === 'ended') {
         ended = true;
@@ -307,21 +309,30 @@ export const InteractiveTask: React.FC = () => {
       clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisibilityChange);
       retryServicesRef.current = undefined;
+      readTaskRef.current = undefined;
     };
   }, [taskId]);
 
   const commandType = commandTypeOfTask(task?.taskType);
   const loaded = !!task;
+  // The user's current capabilities on the task: from the task, read again when the user comes
+  // back to the page and after a save of its sharing; from an older master, whose task has none,
+  // those of the lookup of its type.
+  const capabilities = task?.capabilities ?? command?.capabilities;
+  const titleShown = !titleHidden(capabilities);
+  // Whether the task shows its title: a kept record read while it was hidden has no name.
+  const taskTitleShown = !titleHidden(task?.capabilities);
 
-  // The name, pool and capabilities, from the lookup of the task's type; an ended task has none.
-  // It is repeated when the user comes back to the page, for sharing changed meanwhile.
-  const pageReturns = usePageReturns();
+  // The name, pool and, for a TensorBoard, address, from the lookup of the task's type, which
+  // has no record for an ended task a day after its end. It is repeated when the user comes back
+  // to the page, for sharing changed meanwhile, and when the title turns shown.
+  const pageReturns = usePageReturns(() => readTaskRef.current?.());
   useEffect(() => {
     if (!loaded) return;
     let cancelled = false;
-    lookupCommand(taskId, commandType)
+    lookupCommandTask(taskId, commandType)
       .then((response) => {
-        // A repeated lookup that finds nothing keeps the last answer for this task.
+        // A repeated lookup that finds nothing keeps the last answer for this task, for display.
         if (!cancelled) setCommand((last) => response ?? (last?.id === taskId ? last : undefined));
       })
       .catch((e) => {
@@ -333,7 +344,7 @@ export const InteractiveTask: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [taskId, commandType, loaded, pageReturns, sharingSaves]);
+  }, [taskId, commandType, loaded, pageReturns, sharingSaves, taskTitleShown]);
 
   const selectTab = useCallback(
     (tab: string) =>
@@ -348,11 +359,11 @@ export const InteractiveTask: React.FC = () => {
   );
 
   const name =
-    command && titleHidden(command.capabilities)
-      ? jobDisplayName(commandTypeToLabel[command.type], taskId)
+    commandType && !titleShown
+      ? jobDisplayName(commandTypeToLabel[commandType], taskId)
       : command?.name || taskId;
   const phase = task ? taskPhase(task) : 'waiting';
-  const sharingJobId = command?.capabilities?.manageSharing ? command.jobId : undefined;
+  const sharingJobId = capabilities?.manageSharing ? command?.jobId : undefined;
   const services = useMemo(() => taskServices?.services ?? [], [taskServices]);
 
   // The tabs the task has: its services first, then the logs and resources of every task.
@@ -433,7 +444,7 @@ export const InteractiveTask: React.FC = () => {
             />
           );
         case InteractiveTaskTab.Logs:
-          return <LogsPane hidden={logsHidden(command?.capabilities)} taskId={taskId} />;
+          return <LogsPane hidden={logsHidden(capabilities)} taskId={taskId} />;
         case InteractiveTaskTab.Resources:
           return (
             <TaskResourcesPanel endTime={task.endTime} startTime={task.startTime} taskId={taskId} />
@@ -441,7 +452,7 @@ export const InteractiveTask: React.FC = () => {
       }
     };
     return tabKeys.map((key) => ({ children: pane(key), key, label: TAB_LABELS[key] }));
-  }, [activeKey, command, phase, services, tabKeys, task, taskId]);
+  }, [activeKey, capabilities, command, phase, services, tabKeys, task, taskId]);
 
   const state = task?.allocations[0]?.state;
   const title = ui.isPageHidden ? getTitleState(state, name) : name;
