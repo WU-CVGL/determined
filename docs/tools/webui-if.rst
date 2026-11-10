@@ -115,6 +115,11 @@ pool is a Kubernetes pool, the overview shows GPUs only. CPU slots are not shown
 -  **Usage**: the GPU hours and the auxiliary container hours for each of the last 31 UTC days
    (**Day**) or the last 13 UTC months (**Month**); the months also give their active days.
 
+.. image:: /assets/images/webui-user-page.png
+   :alt: Home with the overview in GPU+Aux: current resources, the active days calendar with a day selected, and the usage by month
+
+|
+
 The current resources refresh every 15 seconds. The usage refreshes every five minutes, at the start
 of each UTC day, and when the page is shown again more than a minute after the usage was last
 loaded; it does not refresh while the page is hidden.
