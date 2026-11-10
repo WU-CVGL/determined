@@ -136,6 +136,9 @@ func (a *apiServer) GetCheckpoint(
 		return resp,
 			errors.Wrapf(err, "error fetching checkpoint %s from database", req.CheckpointUuid)
 	}
+	if err := redactCheckpointTraining(ctx, *curUser, resp.Checkpoint); err != nil {
+		return nil, err
+	}
 	return resp, nil
 }
 
@@ -484,9 +487,13 @@ func (a *apiServer) PostCheckpointMetadata(
 		req.Checkpoint.Uuid, currMeta, newMeta)
 	err = a.m.db.QueryProto("update_checkpoint_metadata",
 		&checkpointv1.Checkpoint{}, req.Checkpoint.Uuid, newMeta)
-
-	return &apiv1.PostCheckpointMetadataResponse{Checkpoint: currCheckpoint},
-		errors.Wrapf(err, "error updating checkpoint %s in database", req.Checkpoint.Uuid)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error updating checkpoint %s in database", req.Checkpoint.Uuid)
+	}
+	if err = redactCheckpointTraining(ctx, *curUser, currCheckpoint); err != nil {
+		return nil, err
+	}
+	return &apiv1.PostCheckpointMetadataResponse{Checkpoint: currCheckpoint}, nil
 }
 
 // Query for all trials that use a given checkpoint and return their metrics.

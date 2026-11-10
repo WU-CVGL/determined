@@ -26,7 +26,7 @@ const HOUR_SECONDS = 3600;
 /** The active hours above which a day reaches calendar levels 2 and 3. */
 const LEVEL_HOURS = [4, 12];
 
-/** The resources a user page shows: GPUs, Aux containers, or both. */
+/** The resources the Active days section shows: GPUs, Aux containers, or both. */
 export const ResourceMode = {
   Aux: 'aux',
   Both: 'both',
@@ -167,7 +167,7 @@ export const totalResources = (pools: UserPoolResources[]): UserResourceCounts =
     { auxContainers: 0, cpuSlots: 0, gpus: 0 },
   );
 
-/* The projection: what each block of a user page shows in a resource mode. */
+/* The projection: what each block of a user page shows, from the daily entries and the resources. */
 
 type Kind = 'aux' | 'gpu';
 
@@ -225,6 +225,17 @@ const MODE_ACTIVE: Record<ResourceMode, ActiveView> = {
   },
 };
 
+const MODE_OPTIONS: ModeOption[] = [
+  { id: ResourceMode.Gpu, label: 'GPU' },
+  { id: ResourceMode.Aux, label: 'Aux' },
+  { id: ResourceMode.Both, label: 'GPU+Aux' },
+];
+
+export interface ModeOption {
+  id: ResourceMode;
+  label: string;
+}
+
 export interface ResourceCard {
   key: string;
   title: string;
@@ -261,22 +272,42 @@ export interface CalendarView {
   weeks: CalendarWeek[];
 }
 
-export interface UsageProjection {
+/** The Active days section: the calendar, its count and the selected day, in one mode. */
+export interface ActiveDaysProjection {
   calendar: (entries: UserUsageEntry[], now?: number) => CalendarView;
-  cards: (resources: UserResources) => ResourceCard[];
   /** The values of a calendar day; none for a day without records. */
   day: (day: CalendarDay) => UsageValue[];
-  usage: (groupBy: GroupBy, entries: UserUsageEntry[], now?: number) => UsageView;
+  /** The mode shown. */
+  mode: ResourceMode;
+  /** The modes to choose from; none where only one is shown. */
+  modes: ModeOption[];
+}
+
+/** The Current resources section. */
+export interface CurrentResourcesProjection {
+  cards: (resources: UserResources) => ResourceCard[];
+}
+
+/** The Usage section: the chart and the table by day or by month. */
+export interface UsageSectionProjection {
+  view: (groupBy: GroupBy, entries: UserUsageEntry[], now?: number) => UsageView;
+}
+
+export interface UsageProjection {
+  activeDays: ActiveDaysProjection;
+  currentResources: CurrentResourcesProjection;
+  usage: UsageSectionProjection;
 }
 
 export const PERIOD_COLUMN = 'periodStart';
 const ACTIVE_DAYS_COLUMN = 'activeDays';
 
-/** What each block of a user page shows in a mode, from the daily entries and the resources. */
-export const usageProjection = (mode: ResourceMode): UsageProjection => {
-  const kinds = MODE_KINDS[mode].map((kind) => ({ key: kind, ...KINDS[kind] }));
-  const active = MODE_ACTIVE[mode];
+const kindViews = (mode: ResourceMode) =>
+  MODE_KINDS[mode].map((kind) => ({ key: kind, ...KINDS[kind] }));
 
+const activeDaysProjection = (mode: ResourceMode, modes: ModeOption[]): ActiveDaysProjection => {
+  const kinds = kindViews(mode);
+  const active = MODE_ACTIVE[mode];
   return {
     calendar: (entries, now = Date.now()) => {
       const weeks = calendarWeeks(entries, active.seconds, now);
@@ -286,15 +317,30 @@ export const usageProjection = (mode: ResourceMode): UsageProjection => {
       );
       return { activeDays, weeks };
     },
-    cards: ({ pools }) => {
-      const total = totalResources(pools);
-      return kinds.map((kind) => ({ key: kind.key, title: kind.card, value: kind.count(total) }));
-    },
     day: ({ entry }) =>
       entry
         ? kinds.map((kind) => ({ title: kind.hours, value: formatHours(kind.seconds(entry)) }))
         : [],
-    usage: (groupBy, entries, now = Date.now()) => {
+    mode,
+    modes,
+  };
+};
+
+const currentResourcesProjection = (mode: ResourceMode): CurrentResourcesProjection => {
+  const kinds = kindViews(mode);
+  return {
+    cards: ({ pools }) => {
+      const total = totalResources(pools);
+      return kinds.map((kind) => ({ key: kind.key, title: kind.card, value: kind.count(total) }));
+    },
+  };
+};
+
+const usageSectionProjection = (mode: ResourceMode): UsageSectionProjection => {
+  const kinds = kindViews(mode);
+  const active = MODE_ACTIVE[mode];
+  return {
+    view: (groupBy, entries, now = Date.now()) => {
       const byMonth = groupBy === GroupBy.Month;
       const shown = byMonth ? lastMonths(entries, now) : lastDays(entries, now);
       const columns: UsageColumn[] = [
@@ -321,3 +367,32 @@ export const usageProjection = (mode: ResourceMode): UsageProjection => {
     },
   };
 };
+
+/*
+ * Built once: the parts of a section are the same objects whatever the other sections show, so a
+ * section whose part does not change does not render again.
+ */
+const ACTIVE_DAYS: Record<ResourceMode, ActiveDaysProjection> = {
+  [ResourceMode.Aux]: activeDaysProjection(ResourceMode.Aux, MODE_OPTIONS),
+  [ResourceMode.Both]: activeDaysProjection(ResourceMode.Both, MODE_OPTIONS),
+  [ResourceMode.Gpu]: activeDaysProjection(ResourceMode.Gpu, MODE_OPTIONS),
+};
+const GPU_ACTIVE_DAYS = activeDaysProjection(ResourceMode.Gpu, []);
+const WITH_AUX = {
+  currentResources: currentResourcesProjection(ResourceMode.Both),
+  usage: usageSectionProjection(ResourceMode.Both),
+};
+const GPU_ONLY = {
+  currentResources: currentResourcesProjection(ResourceMode.Gpu),
+  usage: usageSectionProjection(ResourceMode.Gpu),
+};
+
+/**
+ * What each section of a user page shows. With Aux shown, the Active days section shows the mode
+ * chosen there and the other sections show GPUs and Aux containers both; without, every section
+ * shows GPUs only and there is no mode to choose.
+ */
+export const usageProjection = (mode: ResourceMode, auxShown: boolean): UsageProjection =>
+  auxShown
+    ? { activeDays: ACTIVE_DAYS[mode], ...WITH_AUX }
+    : { activeDays: GPU_ACTIVE_DAYS, ...GPU_ONLY };

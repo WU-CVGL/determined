@@ -69,6 +69,7 @@ import {
   placementLines,
   poolListsJobGpus,
 } from 'utils/job';
+import { titleHidden } from 'utils/jobPrivacy';
 import { useObservable } from 'utils/observable';
 import { routeToReactUrl } from 'utils/routes';
 import { numericSorter } from 'utils/sort';
@@ -100,8 +101,9 @@ const ALL_JOBS = 2 ** 31 - 1;
  * the state of its latest allocation (the master lists the open allocation first).
  */
 const commandTaskFromJob = (job: FullJob, type: CommandType, task: TaskItem): CommandTask => ({
+  capabilities: job.capabilities,
   id: job.entityId,
-  name: job.name,
+  name: titleHidden(job.capabilities) ? undefined : job.name,
   resourcePool: job.resourcePool,
   startTime: task.startTime,
   state: task.allocations[0]?.state ?? CommandState.Queued,

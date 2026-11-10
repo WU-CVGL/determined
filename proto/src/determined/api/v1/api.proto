@@ -750,7 +750,7 @@ service Determined {
   rpc PutExperimentLabel(PutExperimentLabelRequest)
       returns (PutExperimentLabelResponse) {
     option (google.api.http) = {
-      put: "/api/v1/experiments/{experiment_id}/labels/{label}"
+      put: "/api/v1/experiments/{experiment_id}/labels/{label=**}"
     };
     option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
       tags: "Experiments"
@@ -761,7 +761,7 @@ service Determined {
   rpc DeleteExperimentLabel(DeleteExperimentLabelRequest)
       returns (DeleteExperimentLabelResponse) {
     option (google.api.http) = {
-      delete: "/api/v1/experiments/{experiment_id}/labels/{label}"
+      delete: "/api/v1/experiments/{experiment_id}/labels/{label=**}"
     };
     option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
       tags: "Experiments"
@@ -1342,6 +1342,74 @@ service Determined {
     option (google.api.http) = {
       // candidate for moving to /api/v2 service.
       get: "/api/v1/job-queues-v2"
+    };
+    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
+      tags: "Internal"
+    };
+  }
+
+  // Get the cluster's job privacy policy.
+  rpc GetJobPrivacyPolicy(GetJobPrivacyPolicyRequest)
+      returns (GetJobPrivacyPolicyResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/job-privacy/policy"
+    };
+    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
+      tags: "Internal"
+    };
+  }
+
+  // Set the cluster's job privacy policy.
+  rpc PutJobPrivacyPolicy(PutJobPrivacyPolicyRequest)
+      returns (PutJobPrivacyPolicyResponse) {
+    option (google.api.http) = {
+      put: "/api/v1/job-privacy/policy"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
+      tags: "Internal"
+    };
+  }
+
+  // Get the requesting user's job privacy preferences.
+  rpc GetMyJobPrivacy(GetMyJobPrivacyRequest)
+      returns (GetMyJobPrivacyResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/me/job-privacy"
+    };
+    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
+      tags: "Internal"
+    };
+  }
+
+  // Change the requesting user's job privacy preferences.
+  rpc PatchMyJobPrivacy(PatchMyJobPrivacyRequest)
+      returns (PatchMyJobPrivacyResponse) {
+    option (google.api.http) = {
+      patch: "/api/v1/me/job-privacy"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
+      tags: "Internal"
+    };
+  }
+
+  // Get a job's own sharing.
+  rpc GetJobSharing(GetJobSharingRequest) returns (GetJobSharingResponse) {
+    option (google.api.http) = {
+      get: "/api/v1/jobs/{job_id}/sharing"
+    };
+    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
+      tags: "Internal"
+    };
+  }
+
+  // Change a job's own sharing.
+  rpc PatchJobSharing(PatchJobSharingRequest)
+      returns (PatchJobSharingResponse) {
+    option (google.api.http) = {
+      patch: "/api/v1/jobs/{job_id}/sharing"
+      body: "*"
     };
     option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
       tags: "Internal"

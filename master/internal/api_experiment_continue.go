@@ -421,6 +421,9 @@ func (a *apiServer) ContinueExperiment(
 	if err != nil {
 		return nil, err
 	}
+	if err = redactExperimentForViewer(ctx, *actor, protoExp, nil); err != nil {
+		return nil, err
+	}
 	return &apiv1.ContinueExperimentResponse{
 		Experiment: protoExp,
 		Warnings:   command.LaunchWarningToProto(launchWarnings),

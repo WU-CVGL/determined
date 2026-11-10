@@ -40,6 +40,7 @@ import {
 import { canActionCheckpoint, getActionsForCheckpointsUnion } from 'utils/checkpoint';
 import { ensureArray } from 'utils/data';
 import handleError, { DetError, ErrorLevel, ErrorType } from 'utils/error';
+import { experimentSearcherMetric } from 'utils/experiment';
 import { validateDetApiEnum, validateDetApiEnumList } from 'utils/service';
 import { pluralizer } from 'utils/string';
 
@@ -68,6 +69,7 @@ const TrialCheckpoints: React.FC<Props> = ({ experiment, trial, pageRef }: Props
   const config = useMemo(() => configForTrial(trial.id), [trial.id]);
   const { settings, updateSettings } = useSettings<Settings>(config);
 
+  const searcherMetric = experimentSearcherMetric(experiment);
   const [checkpoint, setCheckpoint] = useState<CoreApiGenericCheckpoint>();
   const { checkpointModalComponents, openCheckpoint } = useCheckpointFlow({
     checkpoint: checkpoint,
@@ -248,7 +250,7 @@ const TrialCheckpoints: React.FC<Props> = ({ experiment, trial, pageRef }: Props
           }));
       } else if (column.key === Checkpointv1SortBy.SEARCHERMETRIC) {
         column.render = HumanReadableNumberRenderer;
-        column.title = `Searcher Metric (${experiment.config.searcher.metric})`;
+        column.title = `Searcher Metric (${searcherMetric ?? ''})`;
       } else if (column.key === 'actions') {
         column.render = actionRenderer;
       }
@@ -261,8 +263,8 @@ const TrialCheckpoints: React.FC<Props> = ({ experiment, trial, pageRef }: Props
     return newColumns;
   }, [
     dropDownOnTrigger,
-    experiment.config.searcher.metric,
     handleOpenCheckpoint,
+    searcherMetric,
     settings.sortDesc,
     settings.sortKey,
     stateFilterDropdown,

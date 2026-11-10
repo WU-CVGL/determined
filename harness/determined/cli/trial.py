@@ -6,8 +6,6 @@ import tarfile
 import tempfile
 from typing import Any, List, Optional, Sequence, Tuple, Union
 
-import termcolor
-
 from determined import cli
 from determined.cli import checkpoint, errors, master, render
 from determined.common import api
@@ -208,7 +206,9 @@ def kill_trial(args: argparse.Namespace) -> None:
 
 def trial_logs(args: argparse.Namespace) -> None:
     sess = cli.setup_session(args)
-    try:
+    with cli.log_stream_ended(
+        f"Trial log stream ended. To reopen log stream, run: det trial logs -f {args.trial_id}"
+    ):
         logs = api.trial_logs(
             sess,
             args.trial_id,
@@ -229,14 +229,6 @@ def trial_logs(args: argparse.Namespace) -> None:
                 render.print_json(log.to_json())
         else:
             api.pprint_logs(logs)
-    finally:
-        print(
-            termcolor.colored(
-                "Trial log stream ended. To reopen log stream, run: "
-                "det trial logs -f {}".format(args.trial_id),
-                "green",
-            )
-        )
 
 
 def set_log_retention(args: argparse.Namespace) -> None:

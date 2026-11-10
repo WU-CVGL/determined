@@ -2,12 +2,14 @@ import CodeSample from 'hew/CodeSample';
 import LogViewer, { FetchConfig, FetchDirection, FetchType } from 'hew/LogViewer/LogViewer';
 import LogViewerSelect, { Filters } from 'hew/LogViewer/LogViewerSelect';
 import { Settings, settingsConfigForTrial } from 'hew/LogViewer/LogViewerSelect.settings';
+import Message from 'hew/Message';
 import Spinner from 'hew/Spinner';
 import useConfirm from 'hew/useConfirm';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import useUI from 'components/ThemeProvider';
 import useFeature from 'hooks/useFeature';
+import useRefusal from 'hooks/useRefusal';
 import { useSettings } from 'hooks/useSettings';
 import { DateString, decode, optional } from 'ioTypes';
 import { serverAddress } from 'routes/utils';
@@ -17,6 +19,7 @@ import { readStream } from 'services/utils';
 import { ExperimentBase, TrialDetails } from 'types';
 import { downloadTrialLogs } from 'utils/browser';
 import handleError, { ErrorType } from 'utils/error';
+import { isLogsNotShared, LOGS_NOT_SHARED, logsHidden } from 'utils/jobPrivacy';
 import mergeAbortControllers from 'utils/mergeAbortControllers';
 
 import css from './TrialDetailsLogs.module.scss';
@@ -34,6 +37,19 @@ const TrialDetailsLogs: React.FC<Props> = ({ experiment, trial }: Props) => {
   const confirm = useConfirm();
   const canceler = useRef(new AbortController());
   const f_flat_runs = useFeature().isOn('flat_runs');
+
+  const { notShared, refuse } = useRefusal(trial?.id, logsHidden(experiment.capabilities));
+
+  const handleLogsError = useCallback(
+    (e: unknown) => {
+      if (isLogsNotShared(e)) {
+        refuse();
+        return;
+      }
+      handleError(e);
+    },
+    [refuse],
+  );
 
   const trialSettingsConfig = useMemo(() => settingsConfigForTrial(trial?.id || -1), [trial?.id]);
   const { resetSettings, settings, updateSettings } = useSettings<Settings>(trialSettingsConfig);
@@ -160,7 +176,7 @@ const TrialDetailsLogs: React.FC<Props> = ({ experiment, trial }: Props) => {
   );
 
   useEffect(() => {
-    if (ui.isPageHidden) return;
+    if (ui.isPageHidden || notShared) return;
     if (!trial?.id) return;
 
     const fieldCanceler = new AbortController();
@@ -171,13 +187,19 @@ const TrialDetailsLogs: React.FC<Props> = ({ experiment, trial }: Props) => {
     readStream(
       detApi.StreamingExperiments.trialLogsFields(trial.id, true, { signal: fieldCanceler.signal }),
       (event) => setFilterOptions(event as Filters),
+      (e) => {
+        if (isLogsNotShared(e)) refuse();
+      },
     );
 
     return () => {
       canceler.current.abort();
+      // A log viewer shown again fetches in its own effects, before this effect runs again: its
+      // requests must not be merged with the controller aborted here.
+      canceler.current = new AbortController();
       fieldCanceler.abort();
     };
-  }, [trial?.id, ui.isPageHidden]);
+  }, [notShared, refuse, trial?.id, ui.isPageHidden]);
 
   const logFilters = (
     <LogViewerSelect
@@ -189,6 +211,8 @@ const TrialDetailsLogs: React.FC<Props> = ({ experiment, trial }: Props) => {
     />
   );
 
+  if (notShared) return <Message title={LOGS_NOT_SHARED} />;
+
   return (
     <div className={css.base}>
       <Spinner conditionalRender spinning={!trial}>
@@ -197,7 +221,7 @@ const TrialDetailsLogs: React.FC<Props> = ({ experiment, trial }: Props) => {
           serverAddress={serverAddress}
           title={logFilters}
           onDownload={handleDownloadLogs}
-          onError={handleError}
+          onError={handleLogsError}
           onFetch={handleFetch}
         />
       </Spinner>

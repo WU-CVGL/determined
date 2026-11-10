@@ -27,7 +27,8 @@ const TrialHeaderLeft: React.FC<Props> = ({ experiment, trial }: Props) => {
   return (
     <div className={css.base}>
       <Link className={css.experiment} to={paths.experimentDetails(trial.experimentId)}>
-        {f_flat_runs ? 'Search' : 'Experiment'} {trial.experimentId} | {experiment.name}
+        {f_flat_runs ? 'Search' : 'Experiment'} {trial.experimentId}
+        {experiment.name !== undefined && ` | ${experiment.name}`}
       </Link>
       <Icon decorative name="arrow-right" size="tiny" />
       <div className={css.trial}>

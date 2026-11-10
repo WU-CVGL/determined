@@ -66,11 +66,13 @@ const searchRow: ProjectExperiment = {
 const testData = generateTestExperimentData();
 const trialDetails = { ...testData.trial, experimentId: EXPERIMENT_ID, id: TRIAL_ID };
 const experimentDetails = { ...testData.experiment, id: EXPERIMENT_ID, trialIds: [TRIAL_ID] };
+const experimentConfig = experimentDetails.config;
+if (!experimentConfig) throw new Error('The test experiment has no config.');
 const singleTrialExperimentDetails = {
   ...experimentDetails,
   config: {
-    ...experimentDetails.config,
-    searcher: { ...experimentDetails.config.searcher, name: ExperimentSearcherName.Single },
+    ...experimentConfig,
+    searcher: { ...experimentConfig.searcher, name: ExperimentSearcherName.Single },
   },
 };
 

@@ -101,23 +101,27 @@ You can use the WebUI to view :ref:`historical-cluster-usage-data`.
 list opens the page of that user, which every signed-in user can open: it shows the same overview
 for that user, and **Jobs** on it lists the user's jobs. Your own page is Home.
 
-Where the cluster meters auxiliary containers or the user's usage holds auxiliary container time,
-**GPU**, **Aux** and **GPU+Aux** choose the resources that the whole overview shows, **GPU+Aux** by
-default. Where neither holds, because every resource pool is a Kubernetes pool and the user has no
-auxiliary container time, the overview shows GPUs only. CPU slots are not shown.
+The overview shows the GPUs and the auxiliary containers of the user. Where the cluster meters no
+auxiliary containers, because every resource pool is a Kubernetes pool, and the user's usage holds
+no auxiliary container time, it shows GPUs only. CPU slots are not shown.
 
 -  **Current resources**: the GPUs and the auxiliary containers that the user's tasks hold now.
 
 -  **Active days**: a calendar of the last 53 weeks with a cell for each UTC day, shaded by how long
    the user's tasks held the chosen resources that day: any time, more than 4 hours, or more than 12
-   hours. With **GPU+Aux**, a time with both held counts once. The title gives the number of shaded
-   days. Selecting a day shows its date and its hours.
+   hours. **GPU**, **Aux** and **GPU+Aux**, next to the title, choose those resources, **GPU+Aux**
+   by default; with **GPU+Aux**, a time with both held counts once. The choice applies to this
+   calendar only. The title gives the number of shaded days. Selecting a day shows its date and its
+   hours of the chosen resources. Where the overview shows GPUs only, the calendar is in **GPU** and
+   there is no choice.
 
--  **Usage**: the GPU hours and the auxiliary container hours for each of the last 31 UTC days
-   (**Day**) or the last 13 UTC months (**Month**); the months also give their active days.
+-  **Usage**: a chart of the GPU hours and the auxiliary container hours for each of the last 31 UTC
+   days (**Day**) or the last 13 UTC months (**Month**). The hours are listed under **Details**,
+   closed by default, where the months also give their active days: the days with GPUs or auxiliary
+   containers held.
 
 .. image:: /assets/images/webui-user-page.png
-   :alt: Home with the overview in GPU+Aux: current resources, the active days calendar with a day selected, and the usage by month
+   :alt: Home with the overview: current resources, the active days calendar in GPU+Aux with a day selected, and the usage by month
 
 |
 
@@ -200,6 +204,24 @@ To revert to default settings:
 -  Select **I know what I'm doing**.
 -  Select **Reset to Default**.
 -  Confirm you want to reset all user settings to their default values.
+
+.. _web-ui-job-privacy:
+
+*********************
+ Sharing Job Content
+*********************
+
+Who besides a job's owner and administrators may read the job's title, logs and config is set in
+three places:
+
+-  **Job Privacy** in the user settings: whether your titles and logs are shared, and the default
+   for your new jobs.
+-  **Sharing** in a job's action menu: the job's own sharing.
+-  The **Job Privacy** tab of Admin Settings, for administrators: which of them may be shared, and
+   the default for new jobs.
+
+A job whose title is not shared with you shows its type and ID, such as ``Experiment 12``. To learn
+more, visit :doc:`/maintenance/job-privacy`.
 
 ******************
  Choosing a Theme
@@ -296,14 +318,15 @@ To find out how to view and modify the Job Queue in the WebUI, start with :ref:`
 An interactive task is a shell, which runs JupyterLab by default. To start one, select **Launch
 Interactive Task** on the **Jobs** page or a workspace's **Jobs** tab; under **Services**,
 **JupyterLab** and, when the master serves code-server, **VS Code** are checked, and unchecking a
-service leaves it out. Checking **TensorBoard** adds **Data source**: **Determined experiments**
-reads the TensorBoard logs of the experiments and trials given by ID, a trial of a listed experiment
-with its experiment; **Log directory in the task** is the directory that TensorBoard reads, relative
-to the shell's working directory unless it starts with ``/``; see :ref:`tensorboard-service`. A
-start from a TensorBoard task, or from a template whose ``ssh`` service is off, runs with 0 slots.
+service leaves it out. Checking **TensorBoard** adds **TensorBoard Data Source**: **Determined
+experiments** reads the TensorBoard logs of the experiments and trials given by ID, a trial of a
+listed experiment with its experiment; **Log directory in the task** is the directory that
+TensorBoard reads, relative to the shell's working directory unless it starts with ``/``; see
+:ref:`tensorboard-service`. A start from a TensorBoard task, or from a template whose ``ssh``
+service is off, runs with 0 slots.
 
 .. image:: /assets/images/launch-interactive-task.png
-   :alt: The Launch Interactive Task form with TensorBoard checked under Services and Determined experiments selected under Data source
+   :alt: The Launch Interactive Task form with TensorBoard checked under Services and Determined experiments selected under TensorBoard Data Source
 
 |
 

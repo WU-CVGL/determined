@@ -7,17 +7,19 @@ import { TaskLogsViewer } from 'pages/TaskLogs';
 import css from './GenericTaskLogs.module.scss';
 
 interface Props {
+  logsHidden?: boolean;
   taskId: string;
 }
 
 /* The logs tab of a generic task, with the same viewer and filters as the task logs page. */
-const GenericTaskLogs: React.FC<Props> = ({ taskId }: Props) => {
+const GenericTaskLogs: React.FC<Props> = ({ logsHidden, taskId }: Props) => {
   const taskSettingsConfig = useMemo(() => settingsConfigForTask(taskId), [taskId]);
   const { resetSettings, settings, updateSettings } = useSettings<Settings>(taskSettingsConfig);
 
   return (
     <div className={css.base}>
       <TaskLogsViewer
+        logsHidden={logsHidden}
         resetSettings={resetSettings}
         settings={settings}
         taskId={taskId}

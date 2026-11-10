@@ -72,13 +72,14 @@ describe('shell', () => {
       expect(shellRequest({ template: 'tpl' }).config).not.toHaveProperty('services');
     });
 
-    it('sends a full config as it is, without a template', () => {
+    it('sends a full config as it is, with the template it is given', () => {
       const config = { description: 'debug box', services: { vscode: {} } };
       expect(shellRequest({ config, services: { jupyter: true }, template: 'tpl' })).toEqual({
         config: { description: 'debug box', services: { vscode: {} } },
-        templateName: undefined,
+        templateName: 'tpl',
         workspaceId: undefined,
       });
+      expect(shellRequest({ config }).templateName).toBeUndefined();
     });
   });
 

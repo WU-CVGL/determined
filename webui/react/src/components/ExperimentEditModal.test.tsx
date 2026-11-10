@@ -32,7 +32,7 @@ const ModalTrigger: React.FC = () => {
       <ExperimentEditModal.Component
         description={experiment.description ?? ''}
         experimentId={experiment.id}
-        experimentName={experiment.name}
+        experimentName={experiment.name ?? ''}
         onEditComplete={callback}
       />
     </>

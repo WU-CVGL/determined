@@ -11,6 +11,7 @@ import {
   cancelExperiment,
   deleteExperiment,
   getExpTrials,
+  getJobSharing,
   killExperiment,
   patchExperiment,
   pauseExperiment,
@@ -70,6 +71,7 @@ vi.mock('services/api', () => ({
   cancelExperiment: vi.fn(),
   deleteExperiment: vi.fn(),
   getExpTrials: vi.fn(),
+  getJobSharing: vi.fn(() => new Promise(() => undefined)),
   getWorkspaces: vi.fn(() => Promise.resolve({ workspaces: [] })),
   killExperiment: vi.fn(),
   patchExperiment: vi.fn(),
@@ -408,6 +410,42 @@ describe('ExperimentActionDropdown', () => {
         title: `${capitalize(Action.OpenTensorBoard)} failed.`,
       }),
     );
+  });
+});
+
+describe('ExperimentActionDropdown Sharing', () => {
+  const capabilities = {
+    manageSharing: true,
+    viewConfig: true,
+    viewLogs: true,
+    viewTitle: true,
+  };
+
+  beforeEach(() => {
+    allowEverything();
+    vi.mocked(getJobSharing).mockClear();
+  });
+
+  it('is offered after Copy Experiment ID when the master lets the user manage it', () => {
+    setup(undefined, RunState.Running, false, { capabilities });
+    const labels = menuLabels();
+    expect(labels.indexOf('Sharing')).toBe(labels.indexOf('Copy Experiment ID') + 1);
+  });
+
+  it('is left out otherwise', () => {
+    setup(undefined, RunState.Running, false, {
+      capabilities: { ...capabilities, manageSharing: false },
+    });
+    expect(menuLabels()).not.toContain('Sharing');
+  });
+
+  it('opens the sharing of the experiment’s job', async () => {
+    setup(undefined, RunState.Running, false, { capabilities });
+    expect(getJobSharing).not.toHaveBeenCalled();
+    await user.click(screen.getByText('Sharing'));
+    await waitFor(() => expect(getJobSharing).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(getJobSharing).mock.calls[0][0]).toEqual({ jobId: experiment.jobId });
+    expect(await screen.findByRole('dialog', { name: 'Sharing' })).toBeInTheDocument();
   });
 });
 

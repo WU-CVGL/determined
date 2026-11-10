@@ -12,6 +12,7 @@ import {
   RunState,
   ValueOf,
 } from 'types';
+import { jobDisplayName } from 'utils/jobPrivacy';
 import { timeKey } from 'utils/taskTime';
 import { compareCodePoints, compareText } from 'utils/textOrder';
 
@@ -282,7 +283,8 @@ interface RunRowBase {
   id: string;
   /** Unique across kinds: `${kind}:${id}`. */
   key: string;
-  name: string;
+  /** The title; unset when it is not shared with the viewer, which sorts it last both ways. */
+  name?: string;
   /**
    * The owner's display name, or the username without one, as the list API sends it: the value
    * that the master sorts by. Unset without either.
@@ -311,6 +313,15 @@ export type ExperimentRunRow = RunRowBase & {
 export type RunRow = CommandRunRow | GenericTaskRunRow | ExperimentRunRow;
 
 export const runRowKey = (kind: RunKind, id: string | number): string => `${kind}:${id}`;
+
+/** The name a row shows: its title, or its kind and short ID when the title is not shared. */
+export const runDisplayName = (row: RunRow): string =>
+  jobDisplayName(
+    runKindLabel[row.kind],
+    row.id,
+    row.name,
+    row.kind === RunKind.Experiment ? row.experiment.capabilities : row.task.capabilities,
+  );
 
 const ownerName = (displayName?: string, username?: string): string | undefined =>
   displayName || username || undefined;
@@ -564,10 +575,11 @@ export const genericTaskApiSort = (
 
 /* Filters run in the browser, for shells and commands */
 
+/** A row without a title matches by its ID only. */
 export const matchesSearch = (row: Pick<RunRow, 'id' | 'name'>, search?: string): boolean => {
   const term = search?.trim().toLowerCase();
   if (!term) return true;
-  return row.name.toLowerCase().includes(term) || row.id.toLowerCase().includes(term);
+  return !!row.name?.toLowerCase().includes(term) || row.id.toLowerCase().includes(term);
 };
 
 export interface CommandFilter {

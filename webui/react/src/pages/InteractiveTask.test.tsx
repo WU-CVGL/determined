@@ -6,14 +6,24 @@ import { HelmetProvider } from 'react-helmet-async';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 import { ThemeProvider } from 'components/ThemeProvider';
-import { getCommand, getShells, getTask, getTaskServices, killTask } from 'services/api';
+import usePageVisibility from 'hooks/usePageVisibility';
+import {
+  getCommand,
+  getJobSharing,
+  getShells,
+  getTask,
+  getTaskServices,
+  killTask,
+  patchJobSharing,
+} from 'services/api';
 import {
   TaskServiceProtocol,
   V1GetTaskServicesResponse,
+  V1JobContentKind,
   V1TaskServiceState,
   V1TaskType,
 } from 'services/api-ts-sdk';
-import { CommandState, CommandTask, CommandType, TaskItem } from 'types';
+import { CommandState, CommandTask, CommandType, JobCapabilities, TaskItem } from 'types';
 import { DetError } from 'utils/error';
 import { TaskPhase } from 'utils/task';
 import { isDisabledMenuItem } from 'utils/tests/menu';
@@ -26,10 +36,12 @@ const TASK_ID = 'task-1';
 // loads. Vitest throws if a module uses an export that the mock does not define.
 vi.mock('services/api', () => ({
   getCommand: vi.fn(),
+  getJobSharing: vi.fn(),
   getShells: vi.fn(),
   getTask: vi.fn(),
   getTaskServices: vi.fn(),
   killTask: vi.fn(),
+  patchJobSharing: vi.fn(),
 }));
 
 vi.mock('components/ShellTerminalPane', () => ({
@@ -57,7 +69,11 @@ vi.mock('components/TaskServicePane', () => ({
   ),
 }));
 
-vi.mock('pages/TaskLogs', () => ({ TaskLogsViewer: () => <div data-testid="logs-pane" /> }));
+vi.mock('pages/TaskLogs', () => ({
+  TaskLogsViewer: ({ logsHidden }: { logsHidden?: boolean }) => (
+    <div data-logs-hidden={String(!!logsHidden)} data-testid="logs-pane" />
+  ),
+}));
 vi.mock('components/TaskResourcesPanel', () => ({
   default: () => <div data-testid="resources-pane" />,
 }));
@@ -75,7 +91,7 @@ vi.mock('utils/routes', async (importOriginal) => ({
   routeToReactUrl: vi.fn(),
 }));
 
-const shell: CommandTask = {
+const shell = {
   id: TASK_ID,
   name: 'Shell (brave-otter)',
   resourcePool: 'default',
@@ -84,7 +100,7 @@ const shell: CommandTask = {
   type: CommandType.Shell,
   userId: 7,
   workspaceId: 1,
-};
+} satisfies CommandTask;
 
 const taskWith = (
   isReady: boolean,
@@ -118,11 +134,17 @@ const servicesWith = (
   workspaceId: 1,
 });
 
-const setup = (search = '') =>
+const PageVisibility = () => {
+  usePageVisibility();
+  return null;
+};
+
+const setup = (search = '', pageVisibility = false) =>
   render(
     <MemoryRouter initialEntries={[`/tasks/${TASK_ID}/interactive${search}`]}>
       <UIProvider theme={DefaultTheme.Light}>
         <ThemeProvider>
+          {pageVisibility && <PageVisibility />}
           <HelmetProvider>
             <ConfirmationProvider>
               <Routes>
@@ -491,6 +513,52 @@ describe('InteractiveTask', () => {
     expect(screen.getByTestId('service-pane-jupyter')).toBeInTheDocument();
   });
 
+  it('names a shell whose title is not shared by its kind and short ID, without its logs', async () => {
+    const capabilities = {
+      manageSharing: false,
+      viewConfig: false,
+      viewLogs: false,
+      viewTitle: false,
+    };
+    vi.mocked(getShells).mockResolvedValue([{ ...shell, capabilities, name: undefined }]);
+    setup('?tab=logs');
+    const pane = await screen.findByTestId('logs-pane');
+    await waitFor(() => expect(pane).toHaveAttribute('data-logs-hidden', 'true'));
+    await waitFor(() => expect(document.title).toBe('Shell task'));
+  });
+
+  it('offers Sharing only when the master lets the user manage it', async () => {
+    setup();
+    expect(await screen.findByText(shell.name)).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('task-action-dropdown-trigger'));
+    await screen.findByText('Kill');
+    expect(screen.queryByText('Sharing')).not.toBeInTheDocument();
+  });
+
+  it('looks the shell up again after its sharing was saved', async () => {
+    const capabilities = { manageSharing: true, viewConfig: true, viewLogs: true, viewTitle: true };
+    const rule = { newJobAudience: { allUsers: true }, sharingAllowed: true };
+    vi.mocked(getShells).mockResolvedValue([{ ...shell, capabilities, jobId: 'job-7' }]);
+    vi.mocked(getJobSharing).mockResolvedValue({
+      rules: [
+        { ...rule, kind: V1JobContentKind.TITLE },
+        { ...rule, kind: V1JobContentKind.LOGS },
+        { ...rule, kind: V1JobContentKind.CONFIG },
+      ],
+      sharing: {},
+    });
+    vi.mocked(patchJobSharing).mockResolvedValue({});
+    setup();
+    expect(await screen.findByText(shell.name)).toBeInTheDocument();
+    expect(getShells).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByTestId('task-action-dropdown-trigger'));
+    await userEvent.click(await screen.findByText('Sharing'));
+    await screen.findByTestId('job-sharing-title');
+    expect(vi.mocked(getJobSharing).mock.calls[0][0]).toEqual({ jobId: 'job-7' });
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(getShells).toHaveBeenCalledTimes(2));
+  });
+
   it('lands on the tab of the query, or the first tab', async () => {
     setup('?tab=logs');
     expect(await screen.findByTestId('logs-pane')).toBeInTheDocument();
@@ -782,5 +850,187 @@ describe('InteractiveTask', () => {
     await waitFor(() =>
       expect(killTask).toHaveBeenCalledWith({ id: TASK_ID, type: CommandType.Shell }),
     );
+  });
+});
+
+describe('InteractiveTask capabilities', () => {
+  /*
+   * The master's answers: an ended shell with its capabilities, or without them as an older master
+   * answers, or a failed read; and the shell list, which has no record of a shell a day after its
+   * end.
+   */
+  const master: { failTask: boolean; shells: CommandTask[]; taskCapabilities?: JobCapabilities } = {
+    failTask: false,
+    shells: [],
+  };
+  const caps = (viewTitle: boolean, viewLogs: boolean, manageSharing = false): JobCapabilities => ({
+    manageSharing,
+    viewConfig: viewTitle,
+    viewLogs,
+    viewTitle,
+  });
+
+  const setPageHidden = (hidden: boolean) =>
+    act(() => {
+      Object.defineProperty(document, 'hidden', { configurable: true, value: hidden });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+  const comeBack = async (taskReads: number) => {
+    setPageHidden(true);
+    setPageHidden(false);
+    await waitFor(() => expect(getTask).toHaveBeenCalledTimes(taskReads));
+  };
+  const logsHiddenAttr = () => screen.getByTestId('logs-pane').getAttribute('data-logs-hidden');
+
+  beforeEach(() => {
+    feature.on = true;
+    master.failTask = false;
+    master.shells = [];
+    master.taskCapabilities = undefined;
+    vi.mocked(getTask)
+      .mockReset()
+      .mockImplementation(({ taskId }) =>
+        master.failTask
+          ? Promise.reject(new Error('unavailable'))
+          : Promise.resolve({
+              ...taskWith(false, V1TaskType.SHELL, CommandState.Terminated, '2026-01-01T01:00:00Z'),
+              capabilities: master.taskCapabilities,
+              taskId,
+            }),
+      );
+    vi.mocked(getTaskServices)
+      .mockReset()
+      .mockResolvedValue(servicesWith(['ssh']));
+    vi.mocked(getShells)
+      .mockReset()
+      .mockImplementation(() => Promise.resolve(master.shells));
+  });
+
+  afterEach(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+  });
+
+  it('opens the logs of a shell gone from the shell list once the task shares them again', async () => {
+    master.taskCapabilities = caps(true, false);
+    master.shells = [{ ...shell, capabilities: caps(true, false) }];
+    setup('?tab=logs', true);
+    await waitFor(() => expect(logsHiddenAttr()).toBe('true'));
+    expect(screen.getByText(shell.name)).toBeInTheDocument();
+    expect(getTask).toHaveBeenCalledTimes(1);
+
+    master.shells = [];
+    master.taskCapabilities = caps(true, true);
+    await comeBack(2);
+    await waitFor(() => expect(logsHiddenAttr()).toBe('false'));
+    // The name and pool stay those of the last record found.
+    await waitFor(() => expect(getShells).toHaveBeenCalledTimes(2));
+    expect(screen.getByText(shell.name)).toBeInTheDocument();
+    expect(screen.getByText(shell.resourcePool)).toBeInTheDocument();
+  });
+
+  it('keeps the last capabilities when a read of the task fails', async () => {
+    master.taskCapabilities = caps(true, false);
+    master.shells = [{ ...shell, capabilities: caps(true, false) }];
+    setup('?tab=logs', true);
+    await waitFor(() => expect(logsHiddenAttr()).toBe('true'));
+
+    master.failTask = true;
+    master.shells = [];
+    master.taskCapabilities = caps(true, true);
+    await comeBack(2);
+    await waitFor(() => expect(getShells).toHaveBeenCalledTimes(2));
+    expect(logsHiddenAttr()).toBe('true');
+
+    master.failTask = false;
+    await comeBack(3);
+    await waitFor(() => expect(logsHiddenAttr()).toBe('false'));
+  });
+
+  it('hides a title that the task hides, over the name of a record kept from before', async () => {
+    master.taskCapabilities = caps(true, true);
+    master.shells = [{ ...shell, capabilities: caps(true, true) }];
+    setup('?tab=logs', true);
+    expect(await screen.findByText(shell.name)).toBeInTheDocument();
+
+    master.shells = [];
+    master.taskCapabilities = caps(false, false);
+    await comeBack(2);
+    await waitFor(() => expect(document.title).toBe('Shell task'));
+    expect(screen.queryByText(shell.name)).not.toBeInTheDocument();
+    expect(logsHiddenAttr()).toBe('true');
+  });
+
+  it('reads the task again after a save of its sharing, which the task lets the user manage', async () => {
+    master.taskCapabilities = caps(true, true, true);
+    // The record has no capabilities: Sharing is offered by the task's.
+    master.shells = [{ ...shell, jobId: 'job-7' }];
+    const rule = { newJobAudience: { allUsers: true }, sharingAllowed: true };
+    vi.mocked(getJobSharing).mockResolvedValue({
+      rules: [
+        { ...rule, kind: V1JobContentKind.TITLE },
+        { ...rule, kind: V1JobContentKind.LOGS },
+        { ...rule, kind: V1JobContentKind.CONFIG },
+      ],
+      sharing: {},
+    });
+    vi.mocked(patchJobSharing).mockResolvedValue({});
+    setup();
+    expect(await screen.findByText(shell.name)).toBeInTheDocument();
+    expect(getTask).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByTestId('task-action-dropdown-trigger'));
+    await userEvent.click(await screen.findByText('Sharing'));
+    await screen.findByTestId('job-sharing-title');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(getTask).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getShells).toHaveBeenCalledTimes(2));
+  });
+
+  it('keeps the newer capabilities when the read of a return answers before the poll’s', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getTaskServices).mockResolvedValue(
+        servicesWith(['ssh'], true, V1TaskServiceState.READY),
+      );
+      master.shells = [shell];
+      const running = (capabilities: JobCapabilities): TaskItem => ({
+        ...taskWith(true),
+        capabilities,
+      });
+      let answerPoll: (task: TaskItem) => void = () => undefined;
+      vi.mocked(getTask)
+        .mockResolvedValueOnce(running(caps(true, false)))
+        .mockImplementationOnce(() => new Promise<TaskItem>((resolve) => (answerPoll = resolve)))
+        .mockResolvedValueOnce(running(caps(true, true)));
+      setup('?tab=logs', true);
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(logsHiddenAttr()).toBe('true');
+      // The poll's next read is sent and held.
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+      expect(getTask).toHaveBeenCalledTimes(2);
+
+      setPageHidden(true);
+      setPageHidden(false);
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(getTask).toHaveBeenCalledTimes(3);
+      expect(logsHiddenAttr()).toBe('false');
+
+      // The poll's read, sent before the return's, answers last with the older capabilities.
+      act(() => answerPoll(running(caps(true, false))));
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(logsHiddenAttr()).toBe('false');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('takes the capabilities of the shell record from an older master, whose task has none', async () => {
+    master.shells = [{ ...shell, capabilities: caps(true, false) }];
+    setup('?tab=logs', true);
+    await waitFor(() => expect(logsHiddenAttr()).toBe('true'));
+
+    master.shells = [{ ...shell, capabilities: caps(true, true) }];
+    await comeBack(2);
+    await waitFor(() => expect(getShells).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(logsHiddenAttr()).toBe('false'));
   });
 });

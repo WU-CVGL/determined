@@ -34,6 +34,11 @@ func CanGetTrialsExperimentAndCheckCanDoAction(ctx context.Context,
 	}
 
 	if err = actionFunc(ctx, *curUser, exp); err != nil {
+		// An action that answers with a definite gRPC code, such as a job privacy refusal or an
+		// unavailable policy, keeps its code and message.
+		if s, ok := status.FromError(err); ok && s.Code() != codes.Unknown {
+			return err
+		}
 		return status.Error(codes.PermissionDenied, err.Error())
 	}
 	return nil

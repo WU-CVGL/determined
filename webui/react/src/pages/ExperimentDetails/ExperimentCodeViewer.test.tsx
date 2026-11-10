@@ -170,4 +170,50 @@ describe('CodeViewer', () => {
       'single-in-records.yaml',
     );
   });
+  it('lists the code without the config when the config is not shared', async () => {
+    setup({
+      experiment: {
+        ...experimentMock,
+        capabilities: { manageSharing: false, viewConfig: false, viewLogs: true, viewTitle: true },
+        config: undefined,
+        configRaw: undefined,
+        originalConfig: undefined,
+      },
+    });
+    const { treeNodes } = await getElements();
+
+    expect(treeNodes).toHaveLength(4);
+    expect(screen.getByText('Config not shared')).toBeInTheDocument();
+    expect(screen.queryByText('Submitted Configuration')).not.toBeInTheDocument();
+    expect(screen.queryByText('Runtime Configuration')).not.toBeInTheDocument();
+  });
+
+  it('opens the first file when the config is not shared and no file is picked', async () => {
+    render(
+      <BrowserRouter>
+        <UIProvider theme={DefaultTheme.Light}>
+          <ThemeProvider>
+            <SettingsProvider>
+              <CodeViewer
+                experiment={{
+                  ...experimentMock,
+                  capabilities: {
+                    manageSharing: false,
+                    viewConfig: false,
+                    viewLogs: true,
+                    viewTitle: true,
+                  },
+                  configRaw: undefined,
+                  originalConfig: undefined,
+                }}
+                selectedFilePath=""
+                onSelectFile={vi.fn()}
+              />
+            </SettingsProvider>
+          </ThemeProvider>
+        </UIProvider>
+      </BrowserRouter>,
+    );
+    expect(await screen.findByRole('button', { name: 'Download File' })).toBeInTheDocument();
+  });
 });

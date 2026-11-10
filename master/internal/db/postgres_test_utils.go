@@ -579,3 +579,27 @@ func CleanupMockWorkspace(workspaceIDs []int32) error {
 
 	return err
 }
+
+// jobPrivacyPolicyLockKey is the advisory lock that serializes the tests that change the job
+// privacy policy with those that need the seeded one. Test packages run at the same time against
+// one database, and the policy is global.
+const jobPrivacyPolicyLockKey = 20261110
+
+// LockJobPrivacyPolicyForTests waits for the job privacy policy lock and holds it on a connection
+// of its own until unlock is called.
+func LockJobPrivacyPolicyForTests(ctx context.Context) (unlock func(), err error) {
+	conn, err := Bun().Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock(?)",
+		jobPrivacyPolicyLockKey); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return func() {
+		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock(?)",
+			jobPrivacyPolicyLockKey)
+		_ = conn.Close()
+	}, nil
+}

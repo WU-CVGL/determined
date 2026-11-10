@@ -21,6 +21,7 @@ import {
   TrialDetails,
 } from 'types';
 import handleError from 'utils/error';
+import { experimentSearcherMetric, experimentSearcherName } from 'utils/experiment';
 import { alphaNumericSorter } from 'utils/sort';
 
 import {
@@ -82,12 +83,13 @@ const MultiTrialDetailsHyperparameters: React.FC<Props> = ({
   const loadableMetrics = useMetricNames(experimentIds, handleError);
   const metrics = Loadable.getOrElse([], loadableMetrics);
 
+  const searcherName = experimentSearcherName(experiment);
+  const searcherMetric = experimentSearcherMetric(experiment);
   const isSupported = useMemo(() => {
     return !(
-      ExperimentSearcherName.Single === experiment.config.searcher.name ||
-      ExperimentSearcherName.Pbt === experiment.config.searcher.name
+      ExperimentSearcherName.Single === searcherName || ExperimentSearcherName.Pbt === searcherName
     );
-  }, [experiment.config.searcher.name]);
+  }, [searcherName]);
 
   // Stream available batches.
   useEffect(() => {
@@ -154,11 +156,10 @@ const MultiTrialDetailsHyperparameters: React.FC<Props> = ({
   useEffect(() => {
     if (settings.metric !== undefined) return;
     const activeMetricFound = metrics.find(
-      (metric) =>
-        metric.group === MetricType.Validation && metric.name === experiment.config.searcher.metric,
+      (metric) => metric.group === MetricType.Validation && metric.name === searcherMetric,
     );
     updateSettings({ metric: activeMetricFound ?? metrics.first() });
-  }, [experiment.config.searcher.metric, metrics, settings.metric, updateSettings]);
+  }, [searcherMetric, metrics, settings.metric, updateSettings]);
 
   const visualizationFilters = useMemo(() => {
     return (

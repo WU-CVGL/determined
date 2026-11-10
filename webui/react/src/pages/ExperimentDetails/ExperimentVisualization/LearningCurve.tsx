@@ -32,6 +32,7 @@ import {
 import { glasbeyColor } from 'utils/color';
 import { flattenObject, isPrimitive } from 'utils/data';
 import handleError, { ErrorLevel, ErrorType } from 'utils/error';
+import { experimentSearcherName } from 'utils/experiment';
 import { metricToStr } from 'utils/metric';
 import { isNewTabClickEvent, openBlank, routeToReactUrl } from 'utils/routes';
 import { handleTensorBoardError, openTensorBoardSession } from 'utils/tensorBoardSession';
@@ -124,8 +125,9 @@ const LearningCurve: React.FC<Props> = ({
   const hasTrials = trialHps.length !== 0;
   const isExperimentTerminal = terminalRunStates.has(experiment.state as RunState);
 
+  const searcherName = experimentSearcherName(experiment);
   const hyperparameters = useMemo(() => {
-    if (experiment.config.searcher.name === ExperimentSearcherName.Custom && trialHps.length > 0) {
+    if (searcherName === ExperimentSearcherName.Custom && trialHps.length > 0) {
       return getCustomSearchVaryingHPs(trialHps);
     } else {
       return fullHParams.reduce(
@@ -136,7 +138,7 @@ const LearningCurve: React.FC<Props> = ({
         {} as Record<string, Hyperparameter>,
       );
     }
-  }, [experiment.hyperparameters, fullHParams, trialHps, experiment.config]);
+  }, [experiment.hyperparameters, fullHParams, trialHps, searcherName]);
 
   const handleTrialClick = useCallback(
     (event: MouseEvent, trialId: number) => {
