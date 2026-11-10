@@ -75,6 +75,8 @@ exported from the database, for example the slot-hours by user and day:
 It still holds the usage of tasks whose records were deleted since, which a rebuild cannot
 recompute.
 
+.. _user-pages:
+
 ************
  User Pages
 ************

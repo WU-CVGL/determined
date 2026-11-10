@@ -168,6 +168,12 @@ const routes: RouteConfig[] = [
     title: 'Jobs',
   },
   {
+    id: 'userProfile',
+    needAuth: true,
+    path: '/users/:userId',
+    title: 'User',
+  },
+  {
     icon: 'tasks',
     id: 'taskList',
     needAuth: true,

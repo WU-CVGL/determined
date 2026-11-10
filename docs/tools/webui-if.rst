@@ -91,6 +91,44 @@ use the WebUI to edit model metadata. To find out more, visit :ref:`organizing-m
 
 You can use the WebUI to view :ref:`historical-cluster-usage-data`.
 
+.. _web-ui-user-pages:
+
+************
+ User Pages
+************
+
+**Home** shows an overview of your resources. The owner of a job in the :ref:`Jobs <web-ui-jobs>`
+list opens the page of that user, which every signed-in user can open: it shows the same overview
+for that user, and **Jobs** on it lists the user's jobs. Your own page is Home.
+
+Where the cluster meters auxiliary containers or the user's usage holds auxiliary container time,
+**GPU**, **Aux** and **GPU+Aux** choose the resources that the whole overview shows, **GPU+Aux** by
+default. Where neither holds, because every resource pool is a Kubernetes pool and the user has no
+auxiliary container time, the overview shows GPUs only. CPU slots are not shown.
+
+-  **Current resources**: the GPUs and the auxiliary containers that the user's tasks hold now.
+
+-  **Active days**: a calendar of the last 53 weeks with a cell for each UTC day, shaded by how long
+   the user's tasks held the chosen resources that day: any time, more than 4 hours, or more than 12
+   hours. With **GPU+Aux**, a time with both held counts once. The title gives the number of shaded
+   days. Selecting a day shows its date and its hours.
+
+-  **Usage**: the GPU hours and the auxiliary container hours for each of the last 31 UTC days
+   (**Day**) or the last 13 UTC months (**Month**); the months also give their active days.
+
+.. image:: /assets/images/webui-user-page.png
+   :alt: Home with the overview in GPU+Aux: current resources, the active days calendar with a day selected, and the usage by month
+
+|
+
+The current resources refresh every 15 seconds. The usage refreshes every five minutes, at the start
+of each UTC day, and when the page is shown again more than a minute after the usage was last
+loaded; it does not refresh while the page is hidden.
+
+The overview does not count checkpoint garbage collection, and counts each allocation from when its
+resources were assigned, where the cluster usage charts count from when its containers started
+pulling their images. See :ref:`user-pages` for how the usage is counted.
+
 **************************
  Viewing Cluster Topology
 **************************

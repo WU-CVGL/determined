@@ -126,6 +126,37 @@ export const mapV1ResourcePool = (data: Sdk.V1ResourcePool): types.ResourcePool 
   return { ...data, slotType: mapV1DeviceType(data.slotType) };
 };
 
+export const mapV1UserResources = (data: Sdk.V1GetUserResourcesResponse): types.UserResources => ({
+  asOf: data.asOf ? new Date(data.asOf) : undefined,
+  auxMetered: data.auxMetered ?? false,
+  pools: (data.pools ?? []).map((pool) => ({
+    counts: {
+      auxContainers: pool.counts?.auxContainers ?? 0,
+      cpuSlots: pool.counts?.cpuSlots ?? 0,
+      gpus: pool.counts?.gpus ?? 0,
+    },
+    resourcePool: pool.resourcePool ?? '',
+  })),
+});
+
+export const mapV1UserUsage = (data: Sdk.V1GetUserUsageResponse): types.UserUsage => ({
+  asOf: data.asOf ? new Date(data.asOf) : undefined,
+  coverageStart: data.coverageStart || undefined,
+  entries: (data.entries ?? []).map((entry) => ({
+    auxActiveDays: entry.auxActiveDays ?? 0,
+    auxActiveSeconds: entry.auxActiveSeconds ?? 0,
+    auxContainerSeconds: entry.auxContainerSeconds ?? 0,
+    cpuSlotSeconds: entry.cpuSlotSeconds ?? 0,
+    gpuActiveDays: entry.gpuActiveDays ?? 0,
+    gpuActiveSeconds: entry.gpuActiveSeconds ?? 0,
+    gpuOrAuxActiveDays: entry.gpuOrAuxActiveDays ?? 0,
+    gpuOrAuxActiveSeconds: entry.gpuOrAuxActiveSeconds ?? 0,
+    gpuSeconds: entry.gpuSeconds ?? 0,
+    periodStart: entry.periodStart ?? '',
+    unclassifiedSlotSeconds: entry.unclassifiedSlotSeconds ?? 0,
+  })),
+});
+
 export const jsonToAgents = (agents: Array<Sdk.V1Agent>): types.Agent[] => {
   return agents.map((agent) => {
     const agentSlots = agent.slots || {};
