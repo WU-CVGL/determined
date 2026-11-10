@@ -148,8 +148,15 @@ func TestCloseOpenAllocationsRelease(t *testing.T) {
 	// Assigned between the last heartbeat and the stop: no time is metered.
 	late := add(model.Allocation{State: running}, &assignedAfterHeartbeat)
 	excluded := add(model.Allocation{State: running}, &assignedBefore)
-	// Assigned in this master's lifetime, after the list of live allocations was taken.
+	// Assigned in this master's lifetime, after the list of live allocations was taken: one that
+	// has not started yet and one that runs.
 	current := add(model.Allocation{State: ptrs.Ptr(model.AllocationStateAssigned)}, &assignedAfterBoot)
+	startedAfterBoot := assignedAfterBoot.Add(time.Second)
+	currentRunning := add(model.Allocation{State: running, StartTime: &startedAfterBoot},
+		&assignedAfterBoot)
+	live := map[model.AllocationID]*model.Allocation{
+		current: requireAllocation(t, current), currentRunning: requireAllocation(t, currentRunning),
+	}
 	never := add(model.Allocation{State: ptrs.Ptr(model.AllocationStatePending)}, nil)
 	// Terminated, but its release was not written: released at its end, or without one at its
 	// assignment.
@@ -162,8 +169,38 @@ func TestCloseOpenAllocationsRelease(t *testing.T) {
 		requireTimeEqual(t, heartbeat, requireAllocation(t, open).ReleasedTime, "open")
 		requireTimeEqual(t, assignedAfterHeartbeat, requireAllocation(t, late).ReleasedTime, "late")
 		require.Nil(t, requireAllocation(t, excluded).ReleasedTime, "excluded")
-		require.Nil(t, requireAllocation(t, current).ReleasedTime, "assigned after boot")
+		for id, before := range live {
+			// The cleanup leaves an allocation assigned after boot exactly as it was, and it
+			// accumulates usage until the time of the request.
+			a := requireAllocation(t, id)
+			require.Equal(t, before.State, a.State, "assigned after boot: state")
+			require.Equal(t, before.StartTime, a.StartTime, "assigned after boot: start")
+			require.Equal(t, before.EndTime, a.EndTime, "assigned after boot: end")
+			require.Equal(t, before.ReleasedTime, a.ReleasedTime, "assigned after boot: release")
+			require.Nil(t, a.EndTime, "assigned after boot: end")
+			require.Nil(t, a.ReleasedTime, "assigned after boot: release")
+			asOf := now.Add(time.Hour)
+			require.Equal(t, []userusage.Interval{{
+				Start: assignedAfterBoot, End: asOf, Kind: userusage.KindGPU, Quantity: 1,
+			}}, userusage.Intervals([]userusage.Record{{
+				Kind:     userusage.Kind(*a.MeteredKind),
+				Quantity: *a.MeteredQuantity,
+				Terminal: *a.State == model.AllocationStateTerminated,
+				Assigned: a.AssignedTime,
+				Released: a.ReleasedTime,
+				Start:    a.StartTime,
+				End:      a.EndTime,
+			}}, asOf), "assigned after boot: usage")
+		}
 		require.Nil(t, requireAllocation(t, never).ReleasedTime, "never assigned")
+		// The others are closed.
+		for _, id := range []model.AllocationID{open, late, never} {
+			a := requireAllocation(t, id)
+			require.Equal(t, terminated, a.State, "closed: state")
+			require.NotNil(t, a.EndTime, "closed: end")
+		}
+		require.Equal(t, running, requireAllocation(t, excluded).State, "excluded: state")
+		require.Nil(t, requireAllocation(t, excluded).EndTime, "excluded: end")
 		requireTimeEqual(t, end, requireAllocation(t, ended).ReleasedTime, "terminated with an end")
 		requireTimeEqual(t, assignedBefore, requireAllocation(t, unended).ReleasedTime,
 			"terminated without an end")
