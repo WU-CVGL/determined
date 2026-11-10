@@ -79,9 +79,16 @@ const ExperimentDetails: React.FC = () => {
   }, [experiment, stopPolling]);
 
   // An ended experiment is not polled: read it again when the user comes back to the page, for
-  // sharing changed meanwhile.
+  // sharing changed meanwhile. A read that fails leaves the page as it was.
   usePageReturns(() => {
-    if (experiment && terminalRunStates.has(experiment.state)) fetchExperimentDetails();
+    if (!experiment || !terminalRunStates.has(experiment.state)) return;
+    getExperimentDetails({ id }, { signal: canceler.current?.signal })
+      .then((newExperiment) =>
+        setExperiment((prevExperiment) =>
+          _.isEqual(prevExperiment, newExperiment) ? prevExperiment : newExperiment,
+        ),
+      )
+      .catch(() => undefined);
   });
 
   useEffect(() => {

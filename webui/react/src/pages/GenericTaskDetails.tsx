@@ -152,7 +152,8 @@ const GenericTaskDetails: React.FC = () => {
     getGenericTask(taskId, { signal: canceler.current.signal })
       .then((found) => {
         if (!active) return;
-        setSummary(found);
+        // A repeated lookup that finds nothing keeps the last answer.
+        setSummary((last) => found ?? last);
         setSummaryFailed(!found);
       })
       .catch((e) => {

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import UIProvider, { DefaultTheme } from 'hew/Theme';
 import { ConfirmationProvider } from 'hew/useConfirm';
 import { DndProvider } from 'react-dnd';
@@ -6,6 +6,7 @@ import { HTML5Backend } from 'react-dnd-html5-backend';
 import { HelmetProvider } from 'react-helmet-async';
 
 import { ThemeProvider } from 'components/ThemeProvider';
+import usePageVisibility from 'hooks/usePageVisibility';
 import {
   getExperimentDetails,
   getExpTrials,
@@ -15,6 +16,7 @@ import {
   getWorkspace,
 } from 'services/api';
 import {} from 'stores/cluster';
+import { RunState } from 'types';
 
 import ExperimentDetails, { ERROR_MESSAGE, INVALID_ID_MESSAGE } from './ExperimentDetails';
 import RESPONSES from './ExperimentDetails.test.mock';
@@ -91,11 +93,23 @@ vi.mock('./ExperimentVisualization', () => ({
   default: () => <div>Experiment Visualization</div>,
 }));
 
+const PageVisibility = () => {
+  usePageVisibility();
+  return null;
+};
+
+const setPageHidden = (hidden: boolean) =>
+  act(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: hidden });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+
 const setup = () => {
   const view = render(
     <UIProvider theme={DefaultTheme.Light}>
       <ConfirmationProvider>
         <ThemeProvider>
+          <PageVisibility />
           <HelmetProvider>
             <BrowserRouter>
               <DndProvider backend={HTML5Backend}>
@@ -195,6 +209,25 @@ describe('Experiment Details Page', () => {
 
       expect(screen.getByText('Visualization')).toBeInTheDocument();
       expect(screen.getAllByText('Trials').length).toBeGreaterThan(0);
+    });
+
+    it('reads an ended experiment again on a return to the page, and keeps it on a failure', async () => {
+      const ended = { ...RESPONSES.multiTrial.getExperimentsDetails, state: RunState.Completed };
+      vi.mocked(getExperimentDetails).mockResolvedValue(ended);
+      setup();
+      await waitFor(() =>
+        expect(screen.getByRole('experimentName')).toHaveTextContent(ended.name ?? ''),
+      );
+      const reads = vi.mocked(getExperimentDetails).mock.calls.length;
+
+      vi.mocked(getExperimentDetails).mockRejectedValueOnce(new Error('Fetch Error'));
+      setPageHidden(true);
+      setPageHidden(false);
+      await waitFor(() => expect(getExperimentDetails).toHaveBeenCalledTimes(reads + 1));
+      await act(() => Promise.resolve());
+      expect(screen.queryByText(`${ERROR_MESSAGE} ${ended.id}`)).not.toBeInTheDocument();
+      expect(screen.getByRole('experimentName')).toHaveTextContent(ended.name ?? '');
+      Object.defineProperty(document, 'hidden', { configurable: true, value: false });
     });
   });
 

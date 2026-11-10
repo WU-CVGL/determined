@@ -308,11 +308,13 @@ const TrialDetailsComp: React.FC = () => {
   }, [trialDetails.data, stopPolling]);
 
   // An ended trial is not polled, nor then its experiment: read the experiment again when the
-  // user comes back to the page, for sharing changed meanwhile.
+  // user comes back to the page, for sharing changed meanwhile. A read that fails leaves the page
+  // as it was.
   usePageReturns(() => {
-    if (trialDetails.data && terminalRunStates.has(trialDetails.data.state)) {
-      fetchExperimentDetails();
-    }
+    if (!trial || !terminalRunStates.has(trial.state)) return;
+    getExperimentDetails({ id: trial.experimentId }, { signal: canceler.signal })
+      .then(setExperiment)
+      .catch(() => undefined);
   });
 
   useEffect(() => {

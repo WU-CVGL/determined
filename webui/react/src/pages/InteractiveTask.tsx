@@ -321,7 +321,8 @@ export const InteractiveTask: React.FC = () => {
     let cancelled = false;
     lookupCommand(taskId, commandType)
       .then((response) => {
-        if (!cancelled) setCommand(response);
+        // A repeated lookup that finds nothing keeps the last answer for this task.
+        if (!cancelled) setCommand((last) => response ?? (last?.id === taskId ? last : undefined));
       })
       .catch((e) => {
         if (!cancelled) handleError(e, { publicMessage: 'Unable to load the task.', silent: true });
