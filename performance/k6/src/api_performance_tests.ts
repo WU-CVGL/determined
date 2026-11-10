@@ -115,7 +115,6 @@ const getloadTests = (
     ),
     test("get models", getRequest("/api/v1/models")),
     test("get telemetry", getRequest("/api/v1/master/telemetry")),
-    test("get tensorboards", getRequest("/api/v1/tensorboards")),
     test("get shells", getRequest("/api/v1/shells")),
     test("get commands", getRequest("/api/v1/commands")),
     test("get job queue stats", getRequest("/api/v1/job-queues/stats")),
@@ -130,13 +129,6 @@ const getloadTests = (
       !!sD?.workspace.projectId,
     ),
     test("get user activity", getRequest("/api/v1/user/projects/activity")),
-    test(
-      "get workspace tensorboards",
-      getRequest(
-        `/api/v1/tensorboards?sortBy=SORT_BY_UNSPECIFIED&orderBy=ORDER_BY_UNSPECIFIED&workspaceId=${sD?.workspace.id}`,
-      ),
-      !!sD?.workspace.id,
-    ),
     test(
       "get workspace shells",
       getRequest(

@@ -174,7 +174,6 @@ func TestLaunchShellWithJupyterService(t *testing.T) {
 	// Without an idle timeout, the shell's idle time is not watched.
 	require.Nil(t, alloc.IdleTimeout)
 	require.True(t, spec.WatchTaskActivity)
-	require.False(t, spec.WatchProxyIdleTimeout)
 
 	// The environment of both services, merged with the others.
 	env := spec.Base.ExtraEnvVars
@@ -397,7 +396,6 @@ func TestLaunchShellIdleTimeout(t *testing.T) {
 				ServiceID: taskID, TaskID: model.TaskID(taskID), UseTaskActivity: true,
 				TimeoutDuration: 45 * time.Minute,
 			}, allocateRequest(t, rm, taskID).IdleTimeout)
-			require.False(t, spec.WatchProxyIdleTimeout)
 
 			env := spec.Base.ExtraEnvVars
 			if tc.wantIdleType == "" {
@@ -415,35 +413,94 @@ func TestLaunchShellIdleTimeout(t *testing.T) {
 	}
 }
 
-// A shell's config or template that sets notebook_idle_type is refused with the key that replaces
-// it, and launches nothing.
-func TestLaunchShellRefusesNotebookIdleType(t *testing.T) {
+// A shell's config or template that sets notebook_idle_type or tensorboard_args is refused with the
+// key that replaces it, and launches nothing.
+func TestLaunchShellRefusesRemovedKeys(t *testing.T) {
 	api, curUser, ctx := setupAPITest(t, nil)
 	cs, err := command.NewService(api.m.db, api.m.rm)
 	require.NoError(t, err)
 	command.SetDefaultService(cs)
 
-	templateName := "shell-notebook-idle-" + uuid.NewString()
-	_, err = db.Bun().NewRaw(
+	for key, tc := range map[string]struct {
+		value       any
+		replacement string
+	}{
+		"notebook_idle_type": {"activity", "services.jupyter.idle_type"},
+		"tensorboard_args":   {[]any{"--samples_per_plugin=images=5"}, "services.tensorboard.args"},
+	} {
+		t.Run(key, func(t *testing.T) {
+			templateName := "shell-removed-key-" + uuid.NewString()
+			templateConfig, err := json.Marshal(map[string]any{key: tc.value})
+			require.NoError(t, err)
+			_, err = db.Bun().NewRaw(
+				"INSERT INTO templates (name, config, workspace_id) VALUES (?, ?::jsonb, 1)",
+				templateName, string(templateConfig)).Exec(context.Background())
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				_, _ = db.Bun().NewDelete().Table("templates").Where("name = ?", templateName).
+					Exec(context.Background())
+			})
+			config, err := structpb.NewStruct(map[string]any{key: tc.value})
+			require.NoError(t, err)
+
+			before := launchRows(t, curUser.ID)
+			_, err = api.LaunchShell(ctx, &apiv1.LaunchShellRequest{Config: config})
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+			require.ErrorContains(t, err, ": "+key+": use "+tc.replacement)
+			_, err = api.LaunchShell(ctx, &apiv1.LaunchShellRequest{TemplateName: templateName})
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
+			require.ErrorContains(t, err,
+				": template "+templateName+": "+key+": use "+tc.replacement)
+			require.Equal(t, before, launchRows(t, curUser.ID))
+		})
+	}
+
+	// A config that sets both keys names the first one in sorted order.
+	config, err := structpb.NewStruct(map[string]any{
+		"tensorboard_args": []any{"--x"}, "notebook_idle_type": "activity",
+	})
+	require.NoError(t, err)
+	_, err = api.LaunchShell(ctx, &apiv1.LaunchShellRequest{Config: config})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	require.ErrorContains(t, err, ": notebook_idle_type: use services.jupyter.idle_type")
+	require.NotContains(t, err.Error(), "tensorboard_args")
+}
+
+// A shell template into which the upgrade moved tensorboard_args, with a disabled tensorboard entry
+// that carries the args, launches a shell without TensorBoard, and a viewing session launched from
+// it takes the args.
+func TestLaunchShellFromMovedTensorBoardArgsTemplate(t *testing.T) {
+	api, curUser, ctx := setupPreviewTest(t)
+	exp := createTestExp(t, api, curUser)
+
+	templateName := "shell-moved-tensorboard-args-" + uuid.NewString()
+	_, err := db.Bun().NewRaw(
 		"INSERT INTO templates (name, config, workspace_id) VALUES (?, ?::jsonb, 1)",
-		templateName, `{"notebook_idle_type": "activity"}`).Exec(context.Background())
+		templateName, `{"services": {"jupyter": {},
+			"tensorboard": {"enabled": false, "args": ["--samples_per_plugin=images=5"]}}}`,
+	).Exec(context.Background())
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = db.Bun().NewDelete().Table("templates").Where("name = ?", templateName).
 			Exec(context.Background())
 	})
-	config, err := structpb.NewStruct(map[string]any{"notebook_idle_type": "activity"})
-	require.NoError(t, err)
 
-	before := launchRows(t, curUser.ID)
-	_, err = api.LaunchShell(ctx, &apiv1.LaunchShellRequest{Config: config})
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	require.ErrorContains(t, err, ": notebook_idle_type: use services.jupyter.idle_type")
-	_, err = api.LaunchShell(ctx, &apiv1.LaunchShellRequest{TemplateName: templateName})
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	require.ErrorContains(t, err,
-		": template "+templateName+": notebook_idle_type: use services.jupyter.idle_type")
-	require.Equal(t, before, launchRows(t, curUser.ID))
+	shell, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{TemplateName: templateName})
+	require.NoError(t, err)
+	spec := launchedSpec(t, shell.Shell.Id)
+	_, ok := spec.Service(model.ServiceTensorBoard)
+	require.False(t, ok)
+	require.NotContains(t, spec.Base.ExtraEnvVars, "DET_TENSORBOARD_ARGS")
+
+	session, err := api.LaunchShell(ctx, &apiv1.LaunchShellRequest{
+		TemplateName: templateName,
+		Config:       tbSourcesConfig(t, tbSourcesExperiments(exp.ID), nil, nil),
+	})
+	require.NoError(t, err)
+	spec = launchedSpec(t, session.Shell.Id)
+	require.Equal(t, model.ServiceTensorBoard, spec.Services[0].Name)
+	require.Equal(t, `["--samples_per_plugin=images=5"]`,
+		spec.Base.ExtraEnvVars["DET_TENSORBOARD_ARGS"])
 }
 
 // A shell refuses an idle_timeout shorter than 10s, with or without jupyter, and takes one of
@@ -569,7 +626,7 @@ func TestLaunchRejectsServices(t *testing.T) {
 	jupyter := map[string]any{"jupyter": map[string]any{}}
 
 	// The message ties each rejection to the services check: a launch can be refused with
-	// InvalidArgument for other reasons, such as TensorBoard's experiment 1 not existing.
+	// InvalidArgument for other reasons.
 	requireInvalid := func(err error, what, msg string) {
 		t.Helper()
 		require.Error(t, err, what)
@@ -579,10 +636,6 @@ func TestLaunchRejectsServices(t *testing.T) {
 	const onlyShells = "services: only shells run services"
 	_, err = api.LaunchCommand(ctx, &apiv1.LaunchCommandRequest{Config: servicesConfig(t, jupyter)})
 	requireInvalid(err, "command", onlyShells)
-	_, err = api.LaunchTensorboard(ctx, &apiv1.LaunchTensorboardRequest{
-		ExperimentIds: []int32{1}, Config: servicesConfig(t, jupyter),
-	})
-	requireInvalid(err, "tensorboard", onlyShells)
 
 	for name, tc := range map[string]struct {
 		services any

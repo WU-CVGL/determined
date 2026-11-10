@@ -162,7 +162,6 @@ export const V1SchedulerTypeToLabel: { [key in V1SchedulerType]: string } = {
 };
 
 export const commandStateToLabel: { [key in CommandState]: string } = {
-  [CommandState.Waiting]: 'Waiting',
   [CommandState.Pulling]: 'Pulling',
   [CommandState.Queued]: 'Queued',
   [CommandState.Starting]: 'Starting',
@@ -194,7 +193,6 @@ export const resourceStateToLabel: { [key in ResourceState]: string } = {
 export const commandTypeToLabel: { [key in CommandType]: string } = {
   [CommandType.Command]: 'Command',
   [CommandType.Shell]: 'Shell',
-  [CommandType.TensorBoard]: 'TensorBoard',
 };
 
 export const jobStateToLabel: { [key in JobState]: string } = {

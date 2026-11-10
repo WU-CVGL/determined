@@ -22,8 +22,7 @@ import (
 
 // canViewTaskServices returns the current user and the task's metadata if the user may see the
 // NTSC task taskID, by the rule of GetShell and the proxy: the workspace's NSC view
-// permission, or for a TensorBoard the TensorBoard's. Anyone else gets NotFound, as for a task
-// that does not exist.
+// permission. Anyone else gets NotFound, as for a task that does not exist.
 func canViewTaskServices(
 	ctx context.Context, taskID string,
 ) (*model.User, command.TaskMetadata, error) {
@@ -40,12 +39,7 @@ func canViewTaskServices(
 	}
 
 	ctx = audit.SupplyEntityID(ctx, taskID)
-	if spec.TaskType == model.TaskTypeTensorboard {
-		err = command.AuthZProvider.Get().CanGetTensorboard(
-			ctx, *curUser, spec.WorkspaceID, spec.ExperimentIDs, spec.TrialIDs)
-	} else {
-		err = command.AuthZProvider.Get().CanGetNSC(ctx, *curUser, spec.WorkspaceID)
-	}
+	err = command.AuthZProvider.Get().CanGetNSC(ctx, *curUser, spec.WorkspaceID)
 	if err != nil {
 		return nil, spec, authz.SubIfUnauthorized(err, notFound)
 	}

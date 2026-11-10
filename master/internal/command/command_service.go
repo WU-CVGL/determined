@@ -372,32 +372,3 @@ func (cs *CommandService) GetShellPrivateKey(shellID string) (string, error) {
 	}
 	return c.ShellPrivateKey(), nil
 }
-
-// GetTensorboards returns all tbs in the command service registry matching the workspace ID.
-func (cs *CommandService) GetTensorboards(req *apiv1.GetTensorboardsRequest) (*apiv1.GetTensorboardsResponse, error) {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
-	resp := &apiv1.GetTensorboardsResponse{}
-	cmds := cs.listByType(req.Users, req.UserIds, model.TaskTypeTensorboard, req.WorkspaceId)
-	for _, c := range cmds {
-		resp.Tensorboards = append(resp.Tensorboards, c.ToV1Tensorboard())
-	}
-	return resp, nil
-}
-
-// GetTensorboard looks up a tensorboard by ID returns a summary of the its state and configuration.
-func (cs *CommandService) GetTensorboard(req *apiv1.GetTensorboardRequest) (*apiv1.GetTensorboardResponse, error) {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
-	c, err := cs.getNTSC(model.TaskID(req.TensorboardId), model.TaskTypeTensorboard)
-	if err != nil {
-		return nil, api.NotFoundErrs("tensorboard", req.TensorboardId, true)
-	}
-
-	return &apiv1.GetTensorboardResponse{
-		Tensorboard: c.ToV1Tensorboard(),
-		Config:      protoutils.ToStruct(c.Config),
-	}, nil
-}

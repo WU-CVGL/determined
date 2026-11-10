@@ -132,7 +132,7 @@ describe('Decoder', () => {
     });
   });
 
-  describe('shells, commands and TensorBoards', () => {
+  describe('shells and commands', () => {
     const wire = (endTime?: string) => ({
       description: 'train',
       endTime: endTime as DateString | undefined,
@@ -144,7 +144,7 @@ describe('Decoder', () => {
       username: 'alice',
       workspaceId: 1,
     });
-    const mappers = [decoder.mapV1Command, decoder.mapV1Shell, decoder.mapV1TensorBoard];
+    const mappers = [decoder.mapV1Command, decoder.mapV1Shell];
 
     it('should carry the end time once ended, none while running', () => {
       mappers.forEach((map) => {

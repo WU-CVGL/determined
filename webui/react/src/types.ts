@@ -288,7 +288,6 @@ export const CommandState = {
   Starting: 'STARTING',
   Terminated: 'TERMINATED',
   Terminating: 'TERMINATING',
-  Waiting: 'WAITING',
 } as const;
 
 export type CommandState = ValueOf<typeof CommandState>;
@@ -306,7 +305,6 @@ export interface CommandAddress {
 export const CommandType = {
   Command: 'command',
   Shell: 'shell',
-  TensorBoard: 'tensor-board',
 } as const;
 
 export type CommandType = ValueOf<typeof CommandType>;
@@ -320,7 +318,7 @@ export interface CommandConfig {
   description: string;
 }
 
-// The command type is shared between Commands, TensorBoards, and Shells.
+// The command type is shared between Commands and Shells.
 export interface Command {
   config: CommandConfig; // We do not use this field in the WebUI.
   exitStatus?: string;
@@ -931,7 +929,6 @@ export interface GenericTaskPagination {
 export interface TaskCounts {
   commands: number;
   shells: number;
-  tensorboards: number;
 }
 
 export interface ModelItem {

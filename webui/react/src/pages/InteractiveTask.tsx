@@ -16,7 +16,7 @@ import useFeature from 'hooks/useFeature';
 import { useSettings } from 'hooks/useSettings';
 import useTaskResourcesEnabled from 'hooks/useTaskResourcesEnabled';
 import { TaskLogsViewer } from 'pages/TaskLogs';
-import { getCommand, getShells, getTask, getTaskServices, getTensorBoard } from 'services/api';
+import { getCommand, getShells, getTask, getTaskServices } from 'services/api';
 import { V1TaskService, V1TaskServiceState } from 'services/api-ts-sdk';
 import { errorText } from 'services/taskService';
 import { CommandState, CommandTask, CommandType, InteractiveTaskTab, TaskItem } from 'types';
@@ -29,7 +29,6 @@ import {
   taskPhase,
   taskServiceSettled,
 } from 'utils/task';
-import { waitPageUrl } from 'utils/wait';
 
 import css from './InteractiveTask.module.scss';
 
@@ -57,7 +56,6 @@ const getTitleState = (commandState?: CommandState, taskName?: string): string =
     return DEFAULT_PAGE_TITLE;
   }
   const commandStateTitleMap = {
-    [CommandState.Waiting]: 'Waiting',
     [CommandState.Pulling]: 'Pulling',
     [CommandState.Queued]: 'Queued',
     [CommandState.Running]: taskName || DEFAULT_PAGE_TITLE,
@@ -78,7 +76,7 @@ interface TaskServices {
   services: V1TaskService[];
 }
 
-/* The task's name, pool and, for a TensorBoard, address: from the lookup of its type, if any. */
+/* The task's name and pool: from the lookup of its type, if any. */
 const lookupCommand = async (
   taskId: string,
   type?: CommandType,
@@ -86,8 +84,6 @@ const lookupCommand = async (
   switch (type) {
     case CommandType.Command:
       return await getCommand({ commandId: taskId });
-    case CommandType.TensorBoard:
-      return await getTensorBoard({ commandId: taskId });
     case CommandType.Shell:
       // The shell list has no private keys, unlike a shell's own lookup.
       return (await getShells({})).find((shell) => shell.id === taskId);
@@ -112,9 +108,9 @@ const LogsPane: React.FC<{ taskId: string }> = ({ taskId }) => {
 };
 
 /**
- * A task's page: its services as tabs (a terminal, JupyterLab, VS Code, TensorBoard; a
- * TensorBoard task's own page), then its logs and resources. One poll of the task feeds the title
- * and the panes, which stay mounted once shown so that their sessions keep their state.
+ * A task's page: its services as tabs (a terminal, JupyterLab, VS Code, TensorBoard), then its
+ * logs and resources. One poll of the task feeds the title and the panes, which stay mounted once
+ * shown so that their sessions keep their state.
  */
 export const InteractiveTask: React.FC = () => {
   const { taskId = '' } = useParams<Params>();
@@ -344,18 +340,13 @@ export const InteractiveTask: React.FC = () => {
     if (terminalEnabled && canOpenShellTerminal(services)) keys.push(InteractiveTaskTab.Terminal);
     if (canOpenTaskService(services, 'jupyter')) keys.push(InteractiveTaskTab.JupyterLab);
     if (canOpenTaskService(services, 'vscode')) keys.push(InteractiveTaskTab.VSCode);
-    if (
-      (command?.type === CommandType.TensorBoard && command.serviceAddress) ||
-      canOpenTaskService(services, 'tensorboard')
-    ) {
-      keys.push(InteractiveTaskTab.TensorBoard);
-    }
+    if (canOpenTaskService(services, 'tensorboard')) keys.push(InteractiveTaskTab.TensorBoard);
     keys.push(InteractiveTaskTab.Logs);
     if (resourcesEnabled || requestedTab === InteractiveTaskTab.Resources) {
       keys.push(InteractiveTaskTab.Resources);
     }
     return keys;
-  }, [command, requestedTab, resourcesEnabled, services, terminalEnabled]);
+  }, [requestedTab, resourcesEnabled, services, terminalEnabled]);
 
   const activeKey = tabKeys.find((key) => key === requestedTab) ?? tabKeys[0];
 
@@ -395,17 +386,6 @@ export const InteractiveTask: React.FC = () => {
             />
           );
         case InteractiveTaskTab.TensorBoard:
-          // A TensorBoard task's own page, or a shell's tensorboard service.
-          if (command?.type === CommandType.TensorBoard) {
-            return (
-              <iframe
-                allowFullScreen
-                className={css.frame}
-                src={waitPageUrl(command)}
-                title="TensorBoard"
-              />
-            );
-          }
           return (
             <TaskServicePane
               ended={phase === 'ended'}
@@ -424,15 +404,15 @@ export const InteractiveTask: React.FC = () => {
       }
     };
     return tabKeys.map((key) => ({ children: pane(key), key, label: TAB_LABELS[key] }));
-  }, [activeKey, command, phase, services, tabKeys, task, taskId]);
+  }, [activeKey, phase, services, tabKeys, task, taskId]);
 
   const state = task?.allocations[0]?.state;
   const title = ui.isPageHidden ? getTitleState(state, name) : name;
-  // The state for the task bar's Kill: ended by the phase, else the allocation's, queued without
-  // one or while it waits (a live state, as the task tables show it).
+  // The state for the task bar's Kill: ended by the phase, else the allocation's, or queued
+  // without one (a live state, as the task tables show it).
   let killState: CommandState | undefined;
   if (task && phase === 'ended') killState = CommandState.Terminated;
-  else if (task) killState = state && state !== CommandState.Waiting ? state : CommandState.Queued;
+  else if (task) killState = state ?? CommandState.Queued;
 
   let content: React.ReactNode;
   if (error) {
@@ -442,7 +422,7 @@ export const InteractiveTask: React.FC = () => {
       </div>
     );
   } else if (!task || !lookedUp || (!taskServices && !servicesError)) {
-    // Also the lookup: a TensorBoard's tab comes from it.
+    // Also the lookup: the task bar shows the name and pool from it.
     content = <Spinner center spinning />;
   } else {
     content = (

@@ -86,24 +86,6 @@ def test_shell() -> None:
             assert len(json_out) == 1
 
 
-tensorboard_wait_time = 300
-
-
-def only_tensorboard_can_launch(
-    session: api.Session, workspace: int, typ: api.NTSC_Kind, exp_id: Optional[int] = None
-) -> None:
-    """
-    Tensorboard requires the 'view experiment' permission rather than the 'create NSC' permission
-    and so can be launched in some workspaces other NSCs can't.
-    """
-    if typ == api.NTSC_Kind.tensorboard:
-        api_utils.launch_ntsc(session, workspace, typ, exp_id)
-        return
-
-    with pytest.raises(errors.ForbiddenException):
-        api_utils.launch_ntsc(session, workspace, typ, exp_id)
-
-
 @pytest.mark.e2e_cpu_rbac
 @api_utils.skipif_rbac_not_enabled()
 def test_ntsc_iface_access() -> None:
@@ -134,20 +116,7 @@ def test_ntsc_iface_access() -> None:
     ) as (workspaces, creds):
         # launch one of each ntsc in the first workspace
         for typ in conf.ALL_NTSC:
-            experiment_id = None
-            if typ == api.NTSC_Kind.tensorboard:
-                pid = bindings.post_PostProject(
-                    creds[0],
-                    body=bindings.v1PostProjectRequest(name="test", workspaceId=workspaces[0].id),
-                    workspaceId=workspaces[0].id,
-                ).project.id
-
-                # experiment for tensorboard
-                experiment_id = noop.create_experiment(
-                    creds[0], [noop.Report({"x": 1})], project_id=pid
-                ).id
-
-            created_id = api_utils.launch_ntsc(creds[0], workspaces[0].id, typ, experiment_id).id
+            created_id = api_utils.launch_ntsc(creds[0], workspaces[0].id, typ).id
 
             # user 0
             assert can_access_logs(
@@ -160,10 +129,11 @@ def test_ntsc_iface_access() -> None:
             # user 0 should be able to set priority.
             api_utils.set_prio_ntsc(creds[0], typ, created_id, 1)
             # user 0 should be able to launch in workspace 0.
-            api_utils.launch_ntsc(creds[0], workspaces[0].id, typ, experiment_id)
+            api_utils.launch_ntsc(creds[0], workspaces[0].id, typ)
 
-            # user 0 should be able to launch tensorboards and not NSCs in workspace 1.
-            only_tensorboard_can_launch(creds[0], workspaces[1].id, typ, experiment_id)
+            # user 0 should not be able to launch in workspace 1.
+            with pytest.raises(errors.ForbiddenException):
+                api_utils.launch_ntsc(creds[0], workspaces[1].id, typ)
 
             # user 1
             assert can_access_logs(
@@ -179,11 +149,12 @@ def test_ntsc_iface_access() -> None:
                 # user 1 should not be able to set priority.
                 api_utils.set_prio_ntsc(creds[1], typ, created_id, 1)
             assert "access denied" in fe.value.message
-            # user 1 should be able to launch tensorboards but not NSCs in workspace 0.
-            only_tensorboard_can_launch(creds[1], workspaces[0].id, typ, experiment_id)
+            # user 1 should not be able to launch in workspace 0.
+            with pytest.raises(errors.ForbiddenException):
+                api_utils.launch_ntsc(creds[1], workspaces[0].id, typ)
             # Don't leak workspace information to a user without access.
             with pytest.raises(errors.NotFoundException):
-                api_utils.launch_ntsc(creds[1], workspaces[1].id, typ, experiment_id)
+                api_utils.launch_ntsc(creds[1], workspaces[1].id, typ)
 
             # user 2
             assert not can_access_logs(
@@ -202,18 +173,17 @@ def test_ntsc_iface_access() -> None:
                 api_utils.set_prio_ntsc(creds[2], typ, created_id, 1)
             assert e.value.status_code == 404, f"user 2 should not be able to set priority {typ}"
             with pytest.raises(errors.NotFoundException):
-                api_utils.launch_ntsc(creds[2], workspaces[0].id, typ, experiment_id)
+                api_utils.launch_ntsc(creds[2], workspaces[0].id, typ)
             # user 2 has view access to workspace 1 so gets forbidden instead of not found.
             with pytest.raises(errors.ForbiddenException):
-                api_utils.launch_ntsc(creds[2], workspaces[1].id, typ, experiment_id)
+                api_utils.launch_ntsc(creds[2], workspaces[1].id, typ)
 
             # test visibility
-            created_id2 = api_utils.launch_ntsc(creds[0], workspaces[2].id, typ, experiment_id).id
+            created_id2 = api_utils.launch_ntsc(creds[0], workspaces[2].id, typ).id
 
             # none of the users should be able to get details
             for cred in [creds[1], creds[2]]:
-                # exception for creds[1], who can access the experiment and tensorboard
-                if typ != api.NTSC_Kind.tensorboard and cred == creds[2]:
+                if cred == creds[2]:
                     with pytest.raises(errors.APIException) as e:
                         api.get_ntsc_details(cred, typ, created_id2)
                 assert e.value.status_code == 404
@@ -230,6 +200,16 @@ def test_ntsc_iface_access() -> None:
 
             # kill the ntsc
             api_utils.kill_ntsc(creds[0], typ, created_id)
+
+
+def create_project_experiment(sess: api.Session, workspace_id: int) -> int:
+    """Create a project in the workspace and a completed experiment in it, for TensorBoard."""
+    pid = bindings.post_PostProject(
+        sess,
+        body=bindings.v1PostProjectRequest(name="test", workspaceId=workspace_id),
+        workspaceId=workspace_id,
+    ).project.id
+    return noop.create_experiment(sess, [noop.Report({"x": 1})], project_id=pid).id
 
 
 @pytest.mark.e2e_cpu_rbac
@@ -253,47 +233,32 @@ def test_ntsc_proxy() -> None:
             ],
         ]
     ) as (workspaces, creds):
-        # launch one of each ntsc in the first workspace
-        for typ in conf.PROXIED_NTSC:
-            experiment_id = None
-            if typ == api.NTSC_Kind.tensorboard:
-                pid = bindings.post_PostProject(
-                    creds[0],
-                    body=bindings.v1PostProjectRequest(name="test", workspaceId=workspaces[0].id),
-                    workspaceId=workspaces[0].id,
-                ).project.id
-
-                # experiment for tensorboard
-                experiment_id = noop.create_experiment(
-                    creds[0], [noop.Report({"x": 1})], project_id=pid
-                ).id
-
-            created_id = api_utils.launch_ntsc(creds[0], workspaces[0].id, typ, experiment_id).id
-
-            print(f"created {typ} {created_id}")
+        # A viewing session's primary service, its TensorBoard, has the task ID as its service ID.
+        experiment_id = create_project_experiment(creds[0], workspaces[0].id)
+        created_id = api_utils.launch_viewing_session(
+            creds[0], workspaces[0].id, experiment_ids=[experiment_id]
+        ).id
+        try:
             api.wait_for_ntsc_state(
                 creds[0],
-                api.NTSC_Kind(typ),
+                api.NTSC_Kind.shell,
                 created_id,
                 lambda s: s == bindings.taskv1State.RUNNING,
                 timeout=300,
             )
-            deets = api.get_ntsc_details(creds[0], typ, created_id)
-            assert deets.state == bindings.taskv1State.RUNNING, f"{typ} should be running"
             err = api.wait_for_task_ready(api_utils.admin_session(), created_id)
-            assert err is None, f"{typ} should be ready {err}"
+            assert err is None, f"viewing session should be ready {err}"
             assert (
                 get_proxy(creds[0], created_id) is None
-            ), f"user 0 should be able to access {typ} through proxy"
+            ), "user 0 should be able to access the viewing session through proxy"
             assert (
                 get_proxy(creds[1], created_id) is None
-            ), f"user 1 should be able to access {typ} through proxy"
+            ), "user 1 should be able to access the viewing session through proxy"
             view_err = get_proxy(creds[2], created_id)
-            assert view_err is not None, f"user 2 should not be able to access {typ} through proxy"
-            assert view_err.status_code == 404, f"user 2 should error out with not found{typ}"
-
-            # kill the ntsc
-            api_utils.kill_ntsc(creds[0], typ, created_id)
+            assert view_err is not None, "user 2 should not be able to access it through proxy"
+            assert view_err.status_code == 404, "user 2 should error out with not found"
+        finally:
+            api_utils.kill_ntsc(creds[0], api.NTSC_Kind.shell, created_id)
 
 
 @pytest.mark.e2e_cpu_rbac
@@ -350,29 +315,19 @@ def test_tsb_listed() -> None:
     ) as ([workspace], creds):
         editor_sess = creds[0]
         viewer_sess = creds[1]
-        pid = bindings.post_PostProject(
-            editor_sess,
-            body=bindings.v1PostProjectRequest(name="test", workspaceId=workspace.id),
-            workspaceId=workspace.id,
-        ).project.id
-
-        # experiment for tensorboard
-        experiment_id = noop.create_experiment(
-            editor_sess, [noop.Report({"x": 1})], project_id=pid
+        experiment_id = create_project_experiment(editor_sess, workspace.id)
+        created_id = api_utils.launch_viewing_session(
+            editor_sess, workspace.id, experiment_ids=[experiment_id]
         ).id
-
-        created_id = api_utils.launch_ntsc(
-            editor_sess, workspace.id, api.NTSC_Kind.tensorboard, experiment_id
-        ).id
-
-        # list tensorboards and make sure it's included in the response.
-        tsbs = bindings.get_GetTensorboards(editor_sess, workspaceId=workspace.id).tensorboards
-        assert len(tsbs) == 1, "should be one tensorboard"
-        assert tsbs[0].id == created_id, "should be the tensorboard we created"
-
-        tsbs = bindings.get_GetTensorboards(viewer_sess, workspaceId=workspace.id).tensorboards
-        assert len(tsbs) == 1, "should be one tensorboard"
-        assert tsbs[0].id == created_id, "should be the tensorboard we created"
+        try:
+            # The viewing session is listed as a shell and by det tensorboard list.
+            for sess in [editor_sess, viewer_sess]:
+                shells = bindings.get_GetShells(sess, workspaceId=workspace.id).shells
+                assert [sh.id for sh in shells] == [created_id], shells
+                listed = detproc.check_output(sess, ["det", "tensorboard", "list", "-a", "-q"])
+                assert created_id in listed.split(), listed
+        finally:
+            api_utils.kill_ntsc(editor_sess, api.NTSC_Kind.shell, created_id)
 
 
 @pytest.mark.e2e_cpu_rbac
@@ -383,12 +338,15 @@ def test_tsb_launch_on_trials() -> None:
             [
                 (0, ["Editor"]),
             ],
+            [
+                (1, ["Editor"]),
+            ],
         ]
-    ) as ([workspace], creds):
+    ) as (workspaces, creds):
         pid = bindings.post_PostProject(
             creds[0],
-            body=bindings.v1PostProjectRequest(name="test", workspaceId=workspace.id),
-            workspaceId=workspace.id,
+            body=bindings.v1PostProjectRequest(name="test", workspaceId=workspaces[0].id),
+            workspaceId=workspaces[0].id,
         ).project.id
         experiment_id = noop.create_experiment(
             api_utils.admin_session(), [noop.Report({"x": 1})], project_id=pid
@@ -398,7 +356,15 @@ def test_tsb_launch_on_trials() -> None:
         trial_ids = [t.id for t in trials]
         assert len(trial_ids) == 1, f"we should have 1 trial, but got {trial_ids}"
 
-        bindings.post_LaunchTensorboard(
-            creds[0],
-            body=bindings.v1LaunchTensorboardRequest(workspaceId=workspace.id, trialIds=trial_ids),
-        ).tensorboard.id
+        created_id = api_utils.launch_viewing_session(
+            creds[0], workspaces[0].id, trial_ids=trial_ids
+        ).id
+        api_utils.kill_ntsc(creds[0], api.NTSC_Kind.shell, created_id)
+
+        # A user who may launch shells but not see the trial's artifacts is refused at launch.
+        with pytest.raises(errors.NotFoundException):
+            api_utils.launch_viewing_session(creds[1], workspaces[1].id, trial_ids=trial_ids)
+        with pytest.raises(errors.NotFoundException):
+            api_utils.launch_viewing_session(
+                creds[1], workspaces[1].id, experiment_ids=[experiment_id]
+            )

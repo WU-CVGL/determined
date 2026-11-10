@@ -19,8 +19,7 @@ describe('Job Utilities', () => {
       expect(utils.jobTypeLabel(JobType.GENERIC)).toEqual('Generic Task');
       expect(utils.jobTypeLabel(JobType.EXPERIMENT)).toEqual('Experiment');
     });
-    it('should spell TensorBoard as the WebUI does', () => {
-      expect(utils.jobTypeLabel(JobType.TENSORBOARD)).toEqual('TensorBoard');
+    it('should capitalize the other types', () => {
       expect(utils.jobTypeLabel(JobType.SHELL)).toEqual('Shell');
       expect(utils.jobTypeLabel(JobType.COMMAND)).toEqual('Command');
     });
@@ -47,7 +46,7 @@ describe('Job Utilities', () => {
       );
     });
     it('should fall back to the type and the short task ID without a name', () => {
-      expect(utils.taskJobLabel(JobType.TENSORBOARD, '', taskId)).toEqual('TensorBoard cb96190b');
+      expect(utils.taskJobLabel(JobType.COMMAND, '', taskId)).toEqual('Command cb96190b');
     });
   });
 

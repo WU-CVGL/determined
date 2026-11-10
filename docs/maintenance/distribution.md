@@ -30,7 +30,12 @@ configuration. 0.43.1 changes the master, the WebUI and the harness, with no
 agent change, database migration or API change. A rollback to 0.43.0 is a swap
 of the master image; first end the TensorBoard tasks and the shells with the
 `tensorboard` service that started under 0.43.1, since a 0.43.0 master does not
-send their token.
+send their token. 0.44.0 removes the TensorBoard task type. Its two migrations
+delete the TensorBoard task records and move `tensorboard_args` to
+`services.tensorboard.args` in templates, so a rollback to 0.43.1 restores the
+database backup taken before the upgrade; end the TensorBoard tasks before
+taking the backup. The 0.44.0 master refuses a master configuration that sets
+`tensorboard_timeout`.
 
 ## Install the CLI from the repository
 

@@ -1,7 +1,7 @@
 import functools
 import time
 import uuid
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar
 
 import pytest
 
@@ -88,15 +88,7 @@ def launch_ntsc(
     exp_id: Optional[int] = None,
     template: Optional[str] = None,
 ) -> api.AnyNTSC:
-    if typ == api.NTSC_Kind.tensorboard:
-        experiment_ids = [exp_id] if exp_id else []
-        return bindings.post_LaunchTensorboard(
-            session,
-            body=bindings.v1LaunchTensorboardRequest(
-                workspaceId=workspace_id, experimentIds=experiment_ids, templateName=template
-            ),
-        ).tensorboard
-    elif typ == api.NTSC_Kind.shell:
+    if typ == api.NTSC_Kind.shell:
         return bindings.post_LaunchShell(
             session,
             body=bindings.v1LaunchShellRequest(workspaceId=workspace_id, templateName=template),
@@ -117,9 +109,7 @@ def launch_ntsc(
 
 
 def kill_ntsc(session: api.Session, typ: api.NTSC_Kind, ntsc_id: str) -> None:
-    if typ == api.NTSC_Kind.tensorboard:
-        bindings.post_KillTensorboard(session, tensorboardId=ntsc_id)
-    elif typ == api.NTSC_Kind.shell:
+    if typ == api.NTSC_Kind.shell:
         bindings.post_KillShell(session, shellId=ntsc_id)
     elif typ == api.NTSC_Kind.command:
         bindings.post_KillCommand(session, commandId=ntsc_id)
@@ -128,13 +118,7 @@ def kill_ntsc(session: api.Session, typ: api.NTSC_Kind, ntsc_id: str) -> None:
 
 
 def set_prio_ntsc(session: api.Session, typ: api.NTSC_Kind, ntsc_id: str, prio: int) -> None:
-    if typ == api.NTSC_Kind.tensorboard:
-        bindings.post_SetTensorboardPriority(
-            session,
-            tensorboardId=ntsc_id,
-            body=bindings.v1SetTensorboardPriorityRequest(priority=prio),
-        )
-    elif typ == api.NTSC_Kind.shell:
+    if typ == api.NTSC_Kind.shell:
         bindings.post_SetShellPriority(
             session, shellId=ntsc_id, body=bindings.v1SetShellPriorityRequest(priority=prio)
         )
@@ -149,14 +133,33 @@ def set_prio_ntsc(session: api.Session, typ: api.NTSC_Kind, ntsc_id: str, prio: 
 def list_ntsc(
     session: api.Session, typ: api.NTSC_Kind, workspace_id: Optional[int] = None
 ) -> Sequence[api.AnyNTSC]:
-    if typ == api.NTSC_Kind.tensorboard:
-        return bindings.get_GetTensorboards(session, workspaceId=workspace_id).tensorboards
-    elif typ == api.NTSC_Kind.shell:
+    if typ == api.NTSC_Kind.shell:
         return bindings.get_GetShells(session, workspaceId=workspace_id).shells
     elif typ == api.NTSC_Kind.command:
         return bindings.get_GetCommands(session, workspaceId=workspace_id).commands
     else:
         raise ValueError("unknown type")
+
+
+def launch_viewing_session(
+    session: api.Session,
+    workspace_id: int,
+    experiment_ids: Optional[List[int]] = None,
+    trial_ids: Optional[List[int]] = None,
+) -> bindings.v1Shell:
+    """Launch a TensorBoard viewing session: a shell whose tensorboard service reads the sources."""
+    tensorboard: Dict[str, Any] = {}
+    if experiment_ids:
+        tensorboard["experiment_ids"] = experiment_ids
+    if trial_ids:
+        tensorboard["trial_ids"] = trial_ids
+    config = {
+        "services": {"tensorboard": tensorboard, "ssh": {"enabled": False}},
+        "resources": {"slots": 0},
+    }
+    return bindings.post_LaunchShell(
+        session, body=bindings.v1LaunchShellRequest(workspaceId=workspace_id, config=config)
+    ).shell
 
 
 def launch_shell_with_jupyter(session: api.Session, workspace_id: int) -> bindings.v1Shell:

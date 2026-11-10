@@ -396,7 +396,6 @@ const settingsConfig = (scope: DashboardScope, experiments: boolean): SettingsCo
             literal(RunKind.GenericTask),
             literal(RunKind.Shell),
             literal(RunKind.Command),
-            literal(RunKind.TensorBoard),
           ]),
         ),
       ]),

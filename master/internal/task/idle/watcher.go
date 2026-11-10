@@ -7,9 +7,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/determined-ai/determined/master/internal/proxy"
 	"github.com/determined-ai/determined/master/internal/sproto"
-	"github.com/determined-ai/determined/master/pkg/ptrs"
 	"github.com/determined-ai/determined/master/pkg/syncx/waitgroupx"
 )
 
@@ -18,13 +16,13 @@ var syslog = log.WithField("component", "idle-watcher")
 // ErrIdle indicates that, according to the Watcher configuration, the service is idle.
 var ErrIdle = fmt.Errorf("service is inactive")
 
-// TickInterval is the interval at which to check the proxy activity.
+// TickInterval is the interval at which to check the activity.
 var TickInterval = 5 * time.Second
 
 // TimeoutFn is called when the service is idle.
 type TimeoutFn func(context.Context, error)
 
-// Watcher watches the proxy activity to handle a task actor idle timeout.
+// Watcher watches a task's activity record to handle a task actor idle timeout.
 type Watcher struct {
 	// System dependencies.
 	syslog *log.Entry
@@ -74,14 +72,6 @@ func (w *Watcher) run(ctx context.Context) {
 
 func (w *Watcher) tick(ctx context.Context) (done bool) {
 	var lastActivity *time.Time
-	if w.cfg.UseProxyState {
-		service, ok := proxy.DefaultProxy.Summary(w.cfg.ServiceID)
-		if !ok {
-			return false
-		}
-		lastActivity = ptrs.Ptr(service.LastRequested)
-	}
-
 	if w.cfg.UseTaskActivity {
 		t, held := w.taskActivity()
 		if held {
@@ -89,9 +79,7 @@ func (w *Watcher) tick(ctx context.Context) (done bool) {
 			w.syslog.Debugf("idle timeout watcher ticked while the task is held")
 			return false
 		}
-		if t != nil && (lastActivity == nil || t.After(*lastActivity)) {
-			lastActivity = t
-		}
+		lastActivity = t
 	}
 
 	if lastActivity != nil {
