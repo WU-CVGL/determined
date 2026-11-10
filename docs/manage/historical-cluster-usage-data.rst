@@ -51,6 +51,30 @@ allocation data for analysis:
 -  ``det resources aggregated <start date> <end date>``: Get aggregated allocation information.
    Dates are in the format yyyy-mm-dd.
 
+************************************
+ Aggregates From Before the Rebuild
+************************************
+
+The database table ``resource_aggregates_legacy`` holds the aggregates that were computed before
+running tasks were counted: they miss the usage of a task that was still running when its day was
+aggregated. It has the columns of ``resource_aggregates``: ``date``, ``aggregation_type``,
+``aggregation_key`` and ``seconds``. For the types ``total``, ``username``, ``experiment_label`` and
+``resource_pool`` the seconds are slot-seconds; for ``queued`` they are the average seconds that
+tasks waited in the queue. Neither the WebUI nor the endpoints read that table. It can be queried or
+exported from the database, for example the slot-hours by user and day:
+
+.. code:: sql
+
+   COPY (
+     SELECT date, aggregation_key AS username, seconds / 3600 AS slot_hours
+     FROM resource_aggregates_legacy
+     WHERE aggregation_type = 'username'
+     ORDER BY date, aggregation_key
+   ) TO STDOUT WITH CSV HEADER;
+
+It still holds the usage of tasks whose records were deleted since, which a rebuild cannot
+recompute.
+
 ************
  User Pages
 ************
