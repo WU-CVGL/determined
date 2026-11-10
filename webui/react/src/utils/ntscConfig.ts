@@ -1,4 +1,4 @@
-import { cloneDeep, isEqual, isNil, isPlainObject } from 'lodash';
+import { cloneDeep, isEqual, isNil, isPlainObject, unset } from 'lodash';
 
 import { RawJson } from 'types';
 
@@ -195,18 +195,36 @@ export const simpleLaunchConfig = (options: NtscLaunchOptions): RawJson => {
   };
 };
 
+/** Where the master mounts a shared_fs checkpoint storage for the tensorboard service. */
+export const SHARED_FS_CONTAINER_PATH = '/determined_shared_fs';
+
+const mountList = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+
+/** Removes the bind mounts that `drop` matches, and the list when that empties it. */
+const dropMounts = (config: RawJson, drop: (mount: unknown) => boolean): void => {
+  const mounts = mountList(config.bind_mounts);
+  const kept = mounts.filter((mount) => !drop(mount));
+  if (kept.length === mounts.length) return;
+  if (kept.length === 0) delete config.bind_mounts;
+  else config.bind_mounts = kept;
+};
+
 /**
- * Prepares a merged config (from the master) for another launch.
+ * Prepares a past task's merged config (from the master) for another launch, as a "Start from" of
+ * it does and as templates and this browser's history save it. A config the user edits in the
+ * launch form is not cleaned up this way (see applyConfigEdits).
  * - entrypoint: the master sets it on every launch (for a shell it holds the
  *   sshd command line with a random port).
  * - an auto-generated description, so the next launch gets a new pet name.
  * - environment.registry_auth: it can hold registry credentials.
  * - resources.priority: the master filled in the pool's default; dropping it
  *   lets the default of the chosen pool apply again.
+ * - the read-only mount at SHARED_FS_CONTAINER_PATH of a tensorboard service that reads
+ *   experiments or trials: the master mounts their checkpoint storage there at each launch.
  * Keys are deleted rather than set to null, so the master's defaults apply.
  * Everything else (image, bind mounts, environment variables, ...) is kept.
  */
-export const sanitizeConfig = (config: RawJson): RawJson => {
+export const relaunchConfig = (config: RawJson): RawJson => {
   const out = cloneDeep(config);
   delete out.entrypoint;
   if (isAutoDescription(out.description)) delete out.description;
@@ -214,6 +232,16 @@ export const sanitizeConfig = (config: RawJson): RawJson => {
   if (environment) delete environment.registry_auth;
   const resources = asObject(out.resources);
   if (resources) delete resources.priority;
+  const tensorboard = asObject(asObject(out.services)?.tensorboard);
+  const readsIds = [tensorboard?.experiment_ids, tensorboard?.trial_ids].some(
+    (ids) => (idList(ids)?.length ?? 0) !== 0,
+  );
+  if (readsIds) {
+    dropMounts(out, (mount) => {
+      const item = asObject(mount);
+      return item?.container_path === SHARED_FS_CONTAINER_PATH && item.read_only === true;
+    });
+  }
   return out;
 };
 
@@ -233,30 +261,90 @@ const dropNulls = (value: RawJson): RawJson => {
  *
  * A null clears a setting, so it is kept where the default sets one. Where the
  * default is null or missing too, it changes nothing and is dropped, as are
- * the nulls inside an object that has no default object to compare with.
+ * the nulls inside an object that has no default object to compare with;
+ * with `keepNulls`, only a null where the default is null is dropped.
  */
-export const minimalDiff = (config: RawJson, defaults: RawJson): RawJson => {
+export const minimalDiff = (
+  config: RawJson,
+  defaults: RawJson,
+  { keepNulls = false } = {},
+): RawJson => {
   const out: RawJson = {};
   Object.entries(config).forEach(([key, value]) => {
     const base = defaults[key];
     if (value === undefined || isEqual(value, base)) return;
-    if (value === null && isNil(base)) return;
+    if (value === null && isNil(base) && !keepNulls) return;
     const valueObject = asObject(value);
     const baseObject = asObject(base);
     if (valueObject && baseObject) {
-      const diff = minimalDiff(valueObject, baseObject);
+      const diff = minimalDiff(valueObject, baseObject, { keepNulls });
       if (Object.keys(diff).length !== 0) out[key] = diff;
       return;
     }
-    out[key] = valueObject ? dropNulls(valueObject) : value;
+    out[key] = valueObject && !keepNulls ? dropNulls(valueObject) : cloneDeep(value);
   });
+  return out;
+};
+
+/**
+ * The edits that turn `before` into `after`: `changed` is minimalDiff(after, before) with the
+ * nulls `after` adds, and `removed` the paths of the keys of `before` that `after` lacks. Objects
+ * are compared key by key, everything else (including arrays) as a whole.
+ */
+interface ConfigEdits {
+  changed: RawJson;
+  removed: string[][];
+}
+
+const removedPaths = (after: RawJson, before: RawJson, path: string[] = []): string[][] =>
+  Object.entries(before).flatMap(([key, value]) => {
+    if (value === undefined) return [];
+    if (after[key] === undefined) return [[...path, key]];
+    const afterObject = asObject(after[key]);
+    const beforeObject = asObject(value);
+    return afterObject && beforeObject
+      ? removedPaths(afterObject, beforeObject, [...path, key])
+      : [];
+  });
+
+const configEdits = (after: RawJson, before: RawJson): ConfigEdits => ({
+  changed: minimalDiff(after, before, { keepNulls: true }),
+  removed: removedPaths(after, before),
+});
+
+/**
+ * Sets the changed keys of `after` in `config`, objects key by key. Where `config` holds a value
+ * that is no object, such as an image the master expands into one per runtime, an object of
+ * `after` is set whole.
+ */
+const withChanges = (config: RawJson, changed: RawJson, after: RawJson): RawJson => {
+  const out = cloneDeep(config);
+  Object.entries(changed).forEach(([key, value]) => {
+    const change = asObject(value);
+    const current = asObject(out[key]);
+    if (change && current) out[key] = withChanges(current, change, asObject(after[key]) ?? {});
+    else if (change && out[key] !== undefined) out[key] = cloneDeep(after[key]);
+    else out[key] = cloneDeep(value);
+  });
+  return out;
+};
+
+/**
+ * Applies the edits that turn `before` into `after` (see configEdits) to a config: a changed or
+ * added key is set; a removed key is deleted where the config has it, and ignored where it does
+ * not.
+ */
+export const applyConfigEdits = (config: RawJson, after: RawJson, before: RawJson): RawJson => {
+  const edits = configEdits(after, before);
+  const out = withChanges(config, edits.changed, after);
+  edits.removed.forEach((path) => unset(out, path));
   return out;
 };
 
 /**
  * Builds a template from a launch config.
  *
- * It applies sanitizeConfig and always drops the description (a template
+ * It applies relaunchConfig and always drops the description (a template
  * should not name every task launched from it). A null in a template clears
  * the cluster default, like a null in a launch config does.
  *
@@ -275,9 +363,9 @@ export const minimalDiff = (config: RawJson, defaults: RawJson): RawJson => {
  * the template is picked.
  */
 export const templateFromConfig = (config: RawJson, defaults: RawJson): RawJson => {
-  const clean = sanitizeConfig(config);
+  const clean = relaunchConfig(config);
   delete clean.description;
-  const cleanDefaults = sanitizeConfig(defaults);
+  const cleanDefaults = relaunchConfig(defaults);
   delete cleanDefaults.description;
   const out = minimalDiff(clean, cleanDefaults);
   const resources = asObject(clean.resources);
@@ -312,7 +400,11 @@ export const formFieldsFromConfig = (config: RawJson): LaunchFormFields => {
   };
 };
 
-/** Applies the simple form's fields on top of a base config. */
+/**
+ * Applies the simple form's fields on top of a base config. Everything else of the base, such as
+ * the entrypoint, environment.registry_auth, resources.priority and a service's other options,
+ * stays as it is.
+ */
 export const configFromForm = (base: RawJson, fields: LaunchFormFields): RawJson => {
   const out = cloneDeep(base);
   if (fields.name) out.description = fields.name;

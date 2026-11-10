@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Button from 'hew/Button';
 import { useModal } from 'hew/Modal';
@@ -17,7 +17,7 @@ import userStore from 'stores/users';
 import userSettings from 'stores/userSettings';
 import { CommandState, CommandTask, CommandType, RawJson, WorkspaceState } from 'types';
 import { listLaunchHistory, recordLaunch } from 'utils/launchHistory';
-import { sanitizeConfig } from 'utils/ntscConfig';
+import { relaunchConfig } from 'utils/ntscConfig';
 import { processApiError } from 'utils/service';
 
 const mocks = vi.hoisted(() => ({
@@ -34,6 +34,8 @@ const mocks = vi.hoisted(() => ({
   openCommandResponse: vi.fn(),
   pools: [] as unknown[],
   previewShell: vi.fn(),
+  /** The host path of a shared_fs checkpoint storage that experiments and trials are read from. */
+  sharedFsHostPath: undefined as string | undefined,
   taskTemplatesOn: true,
   updateTaskTemplate: vi.fn(),
 }));
@@ -190,6 +192,13 @@ const TENSORBOARD_TEMPLATE = {
   workspaceId: WORKSPACE.id,
 };
 
+/** A template whose TensorBoard reads an experiment, with ssh on. */
+const EXPERIMENT_TEMPLATE = {
+  config: { services: { tensorboard: { experiment_ids: [7] } } },
+  name: 'exp-seven',
+  workspaceId: WORKSPACE.id,
+};
+
 /** A template of a TensorBoard viewing session: ssh off, experiments, no slots of its own. */
 const SESSION_TEMPLATE = {
   config: {
@@ -197,6 +206,13 @@ const SESSION_TEMPLATE = {
     services: { ssh: { enabled: false }, tensorboard: { experiment_ids: [3] } },
   },
   name: 'session',
+  workspaceId: WORKSPACE.id,
+};
+
+/** A template that pulls its image with registry credentials. */
+const REGISTRY_TEMPLATE = {
+  config: { environment: { registry_auth: { password: 'tpl-secret', username: 'tpl' } } },
+  name: 'private-image',
   workspaceId: WORKSPACE.id,
 };
 
@@ -215,16 +231,25 @@ const DEFAULT_SERVICES = { jupyter: {}, vscode: {} };
 
 /**
  * What the master's shell preview returns for a request config: no description, entrypoint or
- * idle_timeout of its own, and the services it runs: its defaults, under the template's entries,
- * under the request's, which keep the template's options they do not set but its enabled.
+ * idle_timeout of its own; the template's environment under the request's, with the image of its
+ * own; the request's priority, else the template's, else the pool default 42; the bind mounts of
+ * both, and the read-only mount of the shared_fs checkpoint storage (mocks.sharedFsHostPath) when
+ * TensorBoard reads experiments or trials; and the services it runs: its defaults, under the
+ * template's entries, under the request's, which keep the template's options they do not set but
+ * its enabled.
  */
 const previewFor = (params: { config?: RawJson; templateName?: string }) => {
   const config = params.config ?? {};
   const resources = config.resources ?? {};
   const custom = config.description === 'tpl source';
-  const template = [GPU_TEMPLATE, NO_JUPYTER_TEMPLATE, TENSORBOARD_TEMPLATE, SESSION_TEMPLATE].find(
-    (item) => item.name === params.templateName,
-  )?.config as RawJson | undefined;
+  const template = [
+    GPU_TEMPLATE,
+    NO_JUPYTER_TEMPLATE,
+    TENSORBOARD_TEMPLATE,
+    SESSION_TEMPLATE,
+    EXPERIMENT_TEMPLATE,
+    REGISTRY_TEMPLATE,
+  ].find((item) => item.name === params.templateName)?.config as RawJson | undefined;
   const templateServices: RawJson = template?.services ?? {};
   const requestServices: RawJson = config.services ?? {};
   const merged = Object.fromEntries(
@@ -238,12 +263,33 @@ const previewFor = (params: { config?: RawJson; templateName?: string }) => {
   // A shell without ssh has TensorBoard as its primary service and no default editors.
   const tensorBoardPrimary = services.ssh?.enabled === false;
   const idleTimeout = config.idle_timeout ?? template?.idle_timeout;
+  const tensorboard = services.tensorboard;
+  const readsIds = !!(tensorboard?.experiment_ids?.length || tensorboard?.trial_ids?.length);
+  const mounts: RawJson[] = [...(template?.bind_mounts ?? []), ...(config.bind_mounts ?? [])];
+  const sharedFsPath = '/determined_shared_fs';
+  if (
+    mocks.sharedFsHostPath &&
+    readsIds &&
+    !mounts.some((mount) => mount.container_path === sharedFsPath)
+  ) {
+    mounts.push({
+      container_path: sharedFsPath,
+      host_path: mocks.sharedFsHostPath,
+      propagation: 'rprivate',
+      read_only: true,
+    });
+  }
   return Promise.resolve({
+    ...(mounts.length === 0 ? {} : { bind_mounts: mounts }),
     ...(config.description === undefined ? {} : { description: config.description }),
-    environment: { image: { cuda: custom ? 'custom:2' : 'default:1' } },
+    environment: {
+      ...template?.environment,
+      ...config.environment,
+      image: { cuda: custom ? 'custom:2' : 'default:1' },
+    },
     ...(idleTimeout === undefined ? {} : { idle_timeout: idleTimeout }),
     resources: {
-      priority: 42,
+      priority: resources.priority ?? template?.resources?.priority ?? 42,
       resource_pool: resources.resource_pool ?? 'default',
       slots: resources.slots ?? 1,
     },
@@ -277,6 +323,15 @@ const sourceModes = () =>
 const modeRadio = (label: string) => screen.getByRole('radio', { name: label });
 /** The log directory's input, shown in the "Log directory in the task" mode. */
 const logdirField = () => screen.getByPlaceholderText('runs');
+/** The tag of an ID in the Experiments or Trials input. */
+const idTag = (id: string) => document.querySelector(`.ant-select-selection-item[title="${id}"]`);
+/** Adds an ID to the Experiments or Trials tag input: typed, then Enter. */
+const addId = async (_user: ReturnType<typeof userEvent.setup>, label: string, id: string) => {
+  const input = screen.getByLabelText(label);
+  fireEvent.change(input, { target: { value: id } });
+  fireEvent.keyDown(input, { code: 'Enter', key: 'Enter', keyCode: 13 });
+  await waitFor(() => expect(idTag(id)).toBeInTheDocument());
+};
 
 const launchedShell = {
   command: task(CommandType.Shell, {
@@ -397,6 +452,7 @@ describe('NtscLaunchModal', () => {
     mocks.getUserSetting.mockReset().mockResolvedValue({ settings: [] });
     mocks.openCommandResponse.mockReset();
     mocks.previewShell.mockReset().mockImplementation(previewFor);
+    mocks.sharedFsHostPath = undefined;
     userStore.updateCurrentUser({ id: USER_ID, isActive: true, isAdmin: false, username: 'me' });
   });
 
@@ -1054,7 +1110,7 @@ describe('NtscLaunchModal', () => {
       expect(serviceBox('jupyter')).toBeChecked();
       expect(serviceBox('vscode')).toBeChecked();
       expect(serviceBox('tensorboard')).not.toBeChecked();
-      expect(screen.queryByText('Data source')).not.toBeInTheDocument();
+      expect(screen.queryByText('TensorBoard Data Source')).not.toBeInTheDocument();
       // The start-from is previewed without services, so that the master fills its defaults.
       expect(mocks.previewShell).toHaveBeenCalledTimes(1);
       expect(mocks.previewShell).toHaveBeenCalledWith({
@@ -1078,7 +1134,7 @@ describe('NtscLaunchModal', () => {
     it('offers both data sources while TensorBoard is checked, Determined experiments first', async () => {
       const { user } = await setup();
       await user.click(serviceBox('tensorboard'));
-      expect(screen.getByText('Data source')).toBeInTheDocument();
+      expect(screen.getByText('TensorBoard Data Source')).toBeInTheDocument();
       expect(sourceModes()).toEqual([EXPERIMENTS_MODE, LOGDIR_MODE]);
       expect(modeRadio(EXPERIMENTS_MODE)).toBeChecked();
       expect(screen.getByLabelText('Experiments')).toBeInTheDocument();
@@ -1089,7 +1145,7 @@ describe('NtscLaunchModal', () => {
     it('asks for the log directory in its mode and sends it with the service', async () => {
       const { onLaunched, user } = await setup();
       await user.click(serviceBox('tensorboard'));
-      expect(screen.getByText('Data source')).toBeInTheDocument();
+      expect(screen.getByText('TensorBoard Data Source')).toBeInTheDocument();
       await user.click(modeRadio(LOGDIR_MODE));
       const field = logdirField();
       expect(field).toHaveValue('');
@@ -1109,7 +1165,7 @@ describe('NtscLaunchModal', () => {
         services: { tensorboard: { logdir: 'logs/exp' } },
       });
       await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
-      expect(modeRadio(LOGDIR_MODE)).toBeChecked();
+      expect(await screen.findByRole('radio', { name: LOGDIR_MODE })).toBeChecked();
       expect(logdirField()).toHaveValue('logs/exp');
       await launch(user);
       await waitFor(() => expect(onLaunched).toHaveBeenCalled());
@@ -1125,7 +1181,7 @@ describe('NtscLaunchModal', () => {
       await user.click(modeRadio(LOGDIR_MODE));
       await user.type(logdirField(), 'runs');
       await user.click(serviceBox('tensorboard'));
-      expect(screen.queryByText('Data source')).not.toBeInTheDocument();
+      expect(screen.queryByText('TensorBoard Data Source')).not.toBeInTheDocument();
       await launch(user);
       await waitFor(() => expect(onLaunched).toHaveBeenCalled());
       expect(mocks.launchShell.mock.calls[0][0].config.services).toEqual(DEFAULT_SERVICES);
@@ -1656,22 +1712,1021 @@ describe('NtscLaunchModal', () => {
     });
   });
 
-  describe('TensorBoard data source', () => {
-    /** The tag of an ID in the Experiments or Trials input. */
-    const idTag = (id: string) =>
-      document.querySelector(`.ant-select-selection-item[title="${id}"]`);
-    /** Adds an ID to the Experiments or Trials tag input: typed, then Enter. */
-    const addId = async (_user: ReturnType<typeof userEvent.setup>, label: string, id: string) => {
-      const input = screen.getByLabelText(label);
-      fireEvent.change(input, { target: { value: id } });
-      fireEvent.keyDown(input, { code: 'Enter', key: 'Enter', keyCode: 13 });
-      await waitFor(() => expect(idTag(id)).toBeInTheDocument());
+  describe('switching between the simple and the full config', () => {
+    /**
+     * Shows the full config, edits its YAML when given an edit, and shows the simple form again.
+     * Returns the number of previews sent before, the full config's preview request and its YAML.
+     */
+    const roundTrip = async (
+      user: ReturnType<typeof userEvent.setup>,
+      edit?: (config: RawJson) => RawJson,
+    ) => {
+      const calls = mocks.previewShell.mock.calls.length;
+      await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+      await waitFor(() => expect(editorText()).toContain('resource_pool'));
+      const request = mocks.previewShell.mock.calls[calls][0];
+      if (edit) editConfig(edit);
+      const config = yaml.load(editorText()) as RawJson;
+      await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return { calls, config, request };
     };
+
+    it('keeps a changed checkbox of a template', async () => {
+      mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, NO_JUPYTER_TEMPLATE]);
+      const { onLaunched, user } = await setup();
+      await openStartFrom(user);
+      await user.click(await screen.findByText('no-jupyter'));
+      await waitFor(() => expect(serviceBox('vscode')).toBeChecked());
+      await user.click(serviceBox('jupyter'));
+      await user.click(serviceBox('vscode'));
+
+      const request = {
+        config: {
+          description: undefined,
+          resources: { resource_pool: undefined, slots: 1 },
+          services: { jupyter: {}, vscode: { enabled: false } },
+        },
+        templateName: 'no-jupyter',
+        workspaceId: WORKSPACE.id,
+      };
+      for (let i = 0; i < 2; i++) {
+        const trip = await roundTrip(user);
+        expect(trip.request).toEqual(request);
+        expect(trip.config.services).toEqual({ jupyter: {}, vscode: { enabled: false } });
+        expect(serviceBox('jupyter')).toBeChecked();
+        expect(serviceBox('vscode')).not.toBeChecked();
+        // Only the full config was previewed.
+        expect(mocks.previewShell).toHaveBeenCalledTimes(trip.calls + 1);
+      }
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell).toHaveBeenCalledWith(request);
+    });
+
+    it('keeps a changed log directory of a template', async () => {
+      mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, TENSORBOARD_TEMPLATE]);
+      const { onLaunched, user } = await setup();
+      await openStartFrom(user);
+      await user.click(await screen.findByText('tensorboard'));
+      await waitFor(() => expect(serviceBox('tensorboard')).toBeChecked());
+      expect(modeRadio(LOGDIR_MODE)).toBeChecked();
+      const field = logdirField();
+      expect(field).toHaveValue('runs');
+      await user.clear(field);
+      await user.type(field, 'logs/b');
+
+      const trip = await roundTrip(user);
+      expect(trip.request.config.services.tensorboard).toEqual({ logdir: 'logs/b' });
+      expect(trip.config.services.tensorboard).toEqual({
+        args: ['--reload_interval=5'],
+        logdir: 'logs/b',
+      });
+      expect(serviceBox('tensorboard')).toBeChecked();
+      expect(modeRadio(LOGDIR_MODE)).toBeChecked();
+      expect(logdirField()).toHaveValue('logs/b');
+      expect(mocks.previewShell).toHaveBeenCalledTimes(trip.calls + 1);
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell).toHaveBeenCalledWith(trip.request);
+      expect(trip.request.templateName).toBe('tensorboard');
+    });
+
+    it('keeps the edits of a blank start', async () => {
+      const { onLaunched, user } = await setup();
+      await user.type(screen.getByPlaceholderText('Name (optional)'), 'lab');
+      await user.click(serviceBox('vscode'));
+      await user.click(serviceBox('tensorboard'));
+      await user.click(modeRadio(LOGDIR_MODE));
+      await user.type(logdirField(), 'logs/a');
+
+      const trip = await roundTrip(user);
+      expect(trip.request).toEqual({
+        config: {
+          description: 'lab',
+          resources: { resource_pool: undefined, slots: 1 },
+          services: { jupyter: {}, tensorboard: { logdir: 'logs/a' }, vscode: { enabled: false } },
+        },
+        templateName: undefined,
+        workspaceId: WORKSPACE.id,
+      });
+      expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('lab');
+      expect(serviceBox('vscode')).not.toBeChecked();
+      expect(modeRadio(LOGDIR_MODE)).toBeChecked();
+      expect(logdirField()).toHaveValue('logs/a');
+      expect(mocks.previewShell).toHaveBeenCalledTimes(trip.calls + 1);
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell).toHaveBeenCalledWith(trip.request);
+    });
+
+    it('keeps the edits of a "Launch Again" start', async () => {
+      mocks.getShellConfig.mockResolvedValue({
+        ...clusterShellConfig,
+        services: { jupyter: {}, tensorboard: { args: ['--x'], logdir: 'runs' } },
+      });
+      const { onLaunched, user } = await setup({ initialTask: task(CommandType.Shell) });
+      await waitFor(() => expect(serviceBox('vscode')).toBeChecked());
+      await user.click(serviceBox('jupyter'));
+      expect(modeRadio(LOGDIR_MODE)).toBeChecked();
+      const field = logdirField();
+      await user.clear(field);
+      await user.type(field, '/data/runs');
+
+      const trip = await roundTrip(user);
+      const services = {
+        jupyter: { enabled: false },
+        tensorboard: { args: ['--x'], logdir: '/data/runs' },
+        vscode: {},
+      };
+      expect(trip.request.config.services).toEqual(services);
+      expect(trip.config.services).toEqual(services);
+      expect(serviceBox('jupyter')).not.toBeChecked();
+      expect(serviceBox('tensorboard')).toBeChecked();
+      expect(modeRadio(LOGDIR_MODE)).toBeChecked();
+      expect(logdirField()).toHaveValue('/data/runs');
+      expect(mocks.previewShell).toHaveBeenCalledTimes(trip.calls + 1);
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell).toHaveBeenCalledWith(trip.request);
+    });
+
+    it('applies the edits of a full config to the simple form’s request, with the template', async () => {
+      mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, TENSORBOARD_TEMPLATE]);
+      const { onLaunched, user } = await setup();
+      await openStartFrom(user);
+      await user.click(await screen.findByText('tensorboard'));
+      await waitFor(() => expect(serviceBox('tensorboard')).toBeChecked());
+      await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+      await waitFor(() => expect(editorText()).toContain('resource_pool'));
+      editConfig((config) => ({
+        ...config,
+        environment: { ...config.environment, environment_variables: ['EDITED=1'] },
+        services: {
+          ...config.services,
+          tensorboard: { args: ['--reload_interval=30'], logdir: 'logs/c' },
+          vscode: { enabled: false },
+        },
+      }));
+      const calls = mocks.previewShell.mock.calls.length;
+      await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(serviceBox('jupyter')).toBeChecked();
+      expect(serviceBox('vscode')).not.toBeChecked();
+      expect(serviceBox('tensorboard')).toBeChecked();
+      expect(modeRadio(LOGDIR_MODE)).toBeChecked();
+      expect(logdirField()).toHaveValue('logs/c');
+      expect(mocks.previewShell).toHaveBeenCalledTimes(calls);
+
+      const services = {
+        jupyter: {},
+        tensorboard: { args: ['--reload_interval=30'], logdir: 'logs/c' },
+        vscode: { enabled: false },
+      };
+      const trip = await roundTrip(user);
+      expect(trip.request).toEqual({
+        config: {
+          environment: { environment_variables: ['EDITED=1'] },
+          resources: { slots: 1 },
+          services,
+        },
+        templateName: 'tensorboard',
+        workspaceId: WORKSPACE.id,
+      });
+      expect(trip.config.services).toEqual(services);
+      expect(mocks.previewShell).toHaveBeenCalledTimes(trip.calls + 1);
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      expect(mocks.launchShell).toHaveBeenCalledWith(trip.request);
+    });
+
+    it('keeps the full config and shows the error when its YAML does not parse', async () => {
+      const { user } = await setup();
+      await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+      await waitFor(() => expect(editorText()).toContain('resource_pool'));
+      const calls = mocks.previewShell.mock.calls.length;
+      fireEvent.change(screen.getByTestId('code-editor'), { target: { value: 'services: [' } });
+      await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
+      expect(await screen.findByText(/Invalid YAML/)).toBeInTheDocument();
+      expect(screen.getByTestId('code-editor')).toHaveValue('services: [');
+      expect(screen.getByRole('button', { name: 'Show Simple Config' })).toBeInTheDocument();
+      expect(launchButton()).toBeDisabled();
+      expect(mocks.previewShell).toHaveBeenCalledTimes(calls);
+    });
+
+    it.each(['- a', 'foo'])(
+      'keeps the full config and shows the error when its YAML is no mapping: %s',
+      async (value) => {
+        const { user } = await setup();
+        await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+        await waitFor(() => expect(editorText()).toContain('resource_pool'));
+        const calls = mocks.previewShell.mock.calls.length;
+        fireEvent.change(screen.getByTestId('code-editor'), { target: { value } });
+        await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
+        expect(await screen.findByText('Shell config required')).toBeInTheDocument();
+        expect(screen.getByTestId('code-editor')).toHaveValue(value);
+        expect(screen.getByRole('button', { name: 'Show Simple Config' })).toBeInTheDocument();
+        expect(launchButton()).toBeDisabled();
+        expect(mocks.previewShell).toHaveBeenCalledTimes(calls);
+      },
+    );
+
+    it('lets the pool chosen after an edit of the full config set the default priority', async () => {
+      const pool = { auxContainerCapacityPerAgent: 1, slotsAvailable: 0, slotsPerAgent: 0 };
+      mocks.pools = [
+        { ...pool, name: 'a-pool', usable: true },
+        { ...pool, name: 'b-pool', usable: true },
+      ];
+      mocks.availablePools = ['a-pool', 'b-pool'];
+      clusterStore.fetchResourcePools();
+      await waitFor(() =>
+        expect(Loadable.getOrElse([], clusterStore.resourcePools.get())).toHaveLength(2),
+      );
+      try {
+        const { onLaunched, user } = await setup();
+        const picker = screen.getByRole('combobox', { name: 'Resource Pool' });
+        await waitFor(() => expect(picker.closest('.ant-select')).toHaveTextContent('a-pool'));
+        await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+        await waitFor(() => expect(editorText()).toContain('priority: 42'));
+        editConfig((config) => ({
+          ...config,
+          environment: { ...config.environment, environment_variables: ['EDITED=1'] },
+        }));
+        await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
+        await user.click(screen.getByRole('combobox', { name: 'Resource Pool' }));
+        await user.click(await screen.findByTitle('b-pool'));
+
+        await launch(user);
+        await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+        const { config } = mocks.launchShell.mock.lastCall?.[0] ?? {};
+        expect(config.environment.environment_variables).toEqual(['EDITED=1']);
+        expect(config.resources.resource_pool).toBe('b-pool');
+        expect(config.resources).not.toHaveProperty('priority');
+      } finally {
+        mocks.pools = [];
+        mocks.availablePools = [];
+        clusterStore.fetchResourcePools();
+        await waitFor(() =>
+          expect(Loadable.getOrElse([], clusterStore.resourcePools.get())).toHaveLength(0),
+        );
+      }
+    });
+
+    it('launches the edits of the full config after the simple form as the full config does', async () => {
+      const edit = (config: RawJson): RawJson => ({
+        ...config,
+        environment: {
+          ...config.environment,
+          registry_auth: { password: 'hunter2', username: 'me' },
+        },
+        resources: { ...config.resources, priority: 7 },
+        services: {
+          ...config.services,
+          tensorboard: { args: ['--reload_interval=30'], logdir: 'logs/r' },
+        },
+      });
+      const launchEdited = async (viaSimpleForm: boolean) => {
+        const { onLaunched, user } = await setup();
+        await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+        await waitFor(() => expect(editorText()).toContain('resource_pool'));
+        editConfig(edit);
+        if (viaSimpleForm) {
+          await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
+          await waitFor(() => expect(serviceBox('tensorboard')).toBeChecked());
+        }
+        await launch(user);
+        await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+        return mocks.launchShell.mock.lastCall?.[0];
+      };
+
+      const direct = await launchEdited(false);
+      cleanup();
+      const viaSimpleForm = await launchEdited(true);
+      expect(mocks.launchShell).toHaveBeenCalledTimes(2);
+      for (const request of [direct, viaSimpleForm]) {
+        expect(request.config.resources.priority).toBe(7);
+        expect(request.config.environment.registry_auth).toEqual({
+          password: 'hunter2',
+          username: 'me',
+        });
+        expect(request.config.services.tensorboard).toEqual({
+          args: ['--reload_interval=30'],
+          logdir: 'logs/r',
+        });
+      }
+    });
+
+    it('keeps a typed priority and registry_auth through a second edited round trip', async () => {
+      const registryAuth = { password: 'hunter2', username: 'me' };
+      const { onLaunched, user } = await setup();
+      await roundTrip(user, (config) => ({
+        ...config,
+        environment: { ...config.environment, registry_auth: registryAuth },
+        resources: { ...config.resources, priority: 7 },
+      }));
+      const second = await roundTrip(user, (config) => ({
+        ...config,
+        environment: { ...config.environment, environment_variables: ['EDITED=1'] },
+      }));
+      expect(second.request.config.resources.priority).toBe(7);
+      await launch(user);
+      await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+      const { config } = mocks.launchShell.mock.lastCall?.[0] ?? {};
+      expect(config.resources.priority).toBe(7);
+      expect(config.environment).toEqual({
+        environment_variables: ['EDITED=1'],
+        registry_auth: registryAuth,
+      });
+    });
+
+    it.each([false, true])(
+      'sends the template, not its registry_auth, after an edited full config (restored: %s)',
+      async (restored) => {
+        mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, REGISTRY_TEMPLATE]);
+        if (restored) {
+          mocks.getUserSetting.mockResolvedValue(
+            userSettingsResponse({ 'shell-launch': { template: REGISTRY_TEMPLATE.name } }),
+          );
+        }
+        const body = async () => {
+          const { onLaunched, user } = await setup();
+          if (restored) {
+            expect(await screen.findByTitle(REGISTRY_TEMPLATE.name)).toBeInTheDocument();
+          } else {
+            await openStartFrom(user);
+            await user.click(await screen.findByText(REGISTRY_TEMPLATE.name));
+          }
+          await waitFor(() =>
+            expect(mocks.previewShell).toHaveBeenLastCalledWith(
+              expect.objectContaining({ templateName: REGISTRY_TEMPLATE.name }),
+            ),
+          );
+          await waitFor(() => expect(launchButton()).toBeEnabled());
+          await roundTrip(user, (config) => ({
+            ...config,
+            environment: { ...config.environment, environment_variables: ['EDITED=1'] },
+          }));
+          await launch(user);
+          await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+          const request = mocks.launchShell.mock.lastCall?.[0];
+          expect(request.templateName).toBe(REGISTRY_TEMPLATE.name);
+          expect(request.config.environment).toEqual({ environment_variables: ['EDITED=1'] });
+          expect(request.config.resources).not.toHaveProperty('priority');
+        };
+        if (restored) await withLoadedSettings(body);
+        else await body();
+      },
+      15_000,
+    );
+    describe('with the values the master fills in', () => {
+      /** A default bind mount of the task container defaults. */
+      const DEFAULT_MOUNT = {
+        container_path: '/shared',
+        host_path: '/mnt/shared',
+        read_only: false,
+      };
+      /**
+       * previewFor, with what the master fills in where the request sets nothing: a generated
+       * description, a default bind mount and the registry credentials of the task container
+       * defaults, and an image for the slots; an image given as one string is one per runtime.
+       */
+      const previewWithDefaults = async (params: { config?: RawJson; templateName?: string }) => {
+        const previewed: RawJson = await previewFor(params);
+        const config = params.config ?? {};
+        const image = config.environment?.image;
+        return {
+          ...previewed,
+          bind_mounts: config.bind_mounts ?? [DEFAULT_MOUNT],
+          description: config.description ?? 'Shell (lively-calm-fox)',
+          environment: {
+            ...previewed.environment,
+            image:
+              typeof image === 'string'
+                ? { cpu: image, cuda: image, rocm: image }
+                : {
+                    ...(config.resources?.slots === 0 ? { cpu: 'cpu:1' } : { cuda: 'cuda:1' }),
+                    ...image,
+                  },
+            registry_auth: config.environment?.registry_auth ?? { password: 'pw', username: 'det' },
+          },
+        };
+      };
+      beforeEach(() => {
+        mocks.previewShell.mockImplementation(previewWithDefaults);
+      });
+      const launched = async (user: ReturnType<typeof userEvent.setup>, onLaunched: unknown) => {
+        await launch(user);
+        await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+        return mocks.launchShell.mock.lastCall?.[0];
+      };
+
+      it.each([false, true])(
+        'sends only the edit of one environment variable (template: %s)',
+        async (fromTemplate) => {
+          mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, EXPERIMENT_TEMPLATE]);
+          const { onLaunched, user } = await setup();
+          if (fromTemplate) {
+            await openStartFrom(user);
+            await user.click(await screen.findByText('exp-seven'));
+            await waitFor(() => expect(idTag('7')).toBeInTheDocument());
+            await waitFor(() => expect(launchButton()).toBeEnabled());
+          }
+          const trip = await roundTrip(user, (config) => ({
+            ...config,
+            environment: { ...config.environment, environment_variables: ['EDITED=1'] },
+          }));
+          expect(trip.config).toMatchObject({
+            bind_mounts: [DEFAULT_MOUNT],
+            description: 'Shell (lively-calm-fox)',
+            resources: { priority: 42 },
+          });
+          const request = await launched(user, onLaunched);
+          expect(request).toEqual({
+            ...trip.request,
+            config: {
+              ...trip.request.config,
+              environment: { environment_variables: ['EDITED=1'] },
+            },
+          });
+          expect(request.templateName).toBe(fromTemplate ? 'exp-seven' : undefined);
+        },
+        15_000,
+      );
+
+      it('sends no image after an edited trip when the slots change', async () => {
+        mocks.pools = [
+          {
+            auxContainerCapacityPerAgent: 0,
+            name: 'gpu-pool',
+            slotsAvailable: 8,
+            slotsPerAgent: 8,
+            usable: true,
+          },
+        ];
+        mocks.availablePools = ['gpu-pool'];
+        clusterStore.fetchResourcePools();
+        await waitFor(() =>
+          expect(Loadable.getOrElse([], clusterStore.resourcePools.get())).toHaveLength(1),
+        );
+        try {
+          const { onLaunched, user } = await setup();
+          const picker = screen.getByRole('combobox', { name: 'Resource Pool' });
+          await waitFor(() => expect(picker.closest('.ant-select')).toHaveTextContent('gpu-pool'));
+          const trip = await roundTrip(user, (config) => ({ ...config, idle_timeout: '1h' }));
+          expect(trip.config.environment.image).toEqual({ cuda: 'cuda:1' });
+          const slots = screen.getByLabelText('Slots');
+          await user.clear(slots);
+          await user.type(slots, '0');
+          await waitFor(() => expect(slots).toHaveValue('0'));
+          const request = await launched(user, onLaunched);
+          expect(request.config.idle_timeout).toBe('1h');
+          expect(request.config.resources.slots).toBe(0);
+          expect(request.config).not.toHaveProperty('environment');
+        } finally {
+          mocks.pools = [];
+          mocks.availablePools = [];
+          clusterStore.fetchResourcePools();
+          await waitFor(() =>
+            expect(Loadable.getOrElse([], clusterStore.resourcePools.get())).toHaveLength(0),
+          );
+        }
+      }, 15_000);
+
+      it('removes a key that the request has, not one the master fills in', async () => {
+        const { onLaunched, user } = await setup();
+        await roundTrip(user, (config) => ({
+          ...config,
+          description: 'mine',
+          environment: { ...config.environment, environment_variables: ['EDITED=1'] },
+        }));
+        expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('mine');
+        await roundTrip(user, (config) => {
+          const { description: _description, ...rest } = config;
+          const { environment_variables: _variables, ...environment } = config.environment;
+          const { priority: _priority, ...resources } = config.resources;
+          const { bind_mounts: _mounts, ...kept } = rest;
+          return { ...kept, environment, resources };
+        });
+        expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('');
+        const again = await roundTrip(user);
+        expect(again.config.resources.priority).toBe(42);
+        expect(again.config.bind_mounts).toEqual([DEFAULT_MOUNT]);
+        const request = await launched(user, onLaunched);
+        expect(request.config).not.toHaveProperty('description');
+        expect(request.config).not.toHaveProperty('bind_mounts');
+        expect(request.config.environment).toEqual({});
+        expect(request.config.resources).not.toHaveProperty('priority');
+      }, 15_000);
+
+      it('sends an edited bind mount list as a whole', async () => {
+        const mount = { container_path: '/scratch', host_path: '/mnt/scratch' };
+        const { onLaunched, user } = await setup();
+        const trip = await roundTrip(user, (config) => ({
+          ...config,
+          bind_mounts: [...config.bind_mounts, mount],
+        }));
+        const request = await launched(user, onLaunched);
+        expect(request.config.bind_mounts).toEqual([DEFAULT_MOUNT, mount]);
+        expect(request.config.bind_mounts).toEqual(trip.config.bind_mounts);
+      }, 15_000);
+
+      it('sends an image edited in one runtime whole where the request gave it as one string', async () => {
+        const { onLaunched, user } = await setup();
+        await roundTrip(user, (config) => ({
+          ...config,
+          environment: { ...config.environment, image: 'my/img:1' },
+        }));
+        const second = await roundTrip(user, (config) => ({
+          ...config,
+          environment: {
+            ...config.environment,
+            image: { ...config.environment.image, cuda: 'my/img:2' },
+          },
+        }));
+        expect(second.request.config.environment).toEqual({ image: 'my/img:1' });
+        const request = await launched(user, onLaunched);
+        expect(request.config.environment).toEqual({
+          image: { cpu: 'my/img:1', cuda: 'my/img:2', rocm: 'my/img:1' },
+        });
+      }, 15_000);
+
+      it('keeps a template without ssh locked after an edit of something else', async () => {
+        mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, SESSION_TEMPLATE]);
+        const { onLaunched, user } = await setup();
+        await openStartFrom(user);
+        await user.click(await screen.findByText('session'));
+        await waitFor(() => expect(serviceBox('tensorboard')).toBeDisabled());
+        await waitFor(() => expect(launchButton()).toBeEnabled());
+        await roundTrip(user, (config) => ({ ...config, idle_timeout: '1h' }));
+        expect(serviceBox('tensorboard')).toBeDisabled();
+        expect(screen.getByLabelText('Slots')).toBeDisabled();
+        expect(screen.getByLabelText('Slots')).toHaveValue('0');
+        expect(sourceModes()).toEqual([EXPERIMENTS_MODE]);
+        const request = await launched(user, onLaunched);
+        expect(request.templateName).toBe('session');
+        expect(request.config.idle_timeout).toBe('1h');
+        expect(request.config.resources.slots).toBe(0);
+      }, 15_000);
+
+      it('keeps a template without ssh locked when its ssh line is deleted', async () => {
+        mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, SESSION_TEMPLATE]);
+        const { onLaunched, user } = await setup();
+        await openStartFrom(user);
+        await user.click(await screen.findByText('session'));
+        await waitFor(() => expect(serviceBox('tensorboard')).toBeDisabled());
+        await waitFor(() => expect(launchButton()).toBeEnabled());
+        await roundTrip(user, (config) => {
+          const { ssh: _ssh, ...services } = config.services;
+          return { ...config, idle_timeout: '1h', services };
+        });
+        expect(serviceBox('tensorboard')).toBeDisabled();
+        expect(screen.getByLabelText('Slots')).toBeDisabled();
+        expect(screen.getByLabelText('Slots')).toHaveValue('0');
+        expect(sourceModes()).toEqual([EXPERIMENTS_MODE]);
+        const again = await roundTrip(user);
+        expect(again.config.services.ssh).toEqual({ enabled: false });
+        const request = await launched(user, onLaunched);
+        expect(request.templateName).toBe('session');
+        expect(request.config.services).not.toHaveProperty('ssh');
+        expect(request.config.resources.slots).toBe(0);
+      }, 15_000);
+
+      it('keeps the locked TensorBoard of a template without ssh when its line is deleted', async () => {
+        mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, SESSION_TEMPLATE]);
+        const { onLaunched, user } = await setup();
+        await openStartFrom(user);
+        await user.click(await screen.findByText('session'));
+        await waitFor(() => expect(serviceBox('tensorboard')).toBeDisabled());
+        await waitFor(() => expect(launchButton()).toBeEnabled());
+        await roundTrip(user, (config) => {
+          const { tensorboard: _tensorboard, ...services } = config.services;
+          return { ...config, idle_timeout: '1h', services };
+        });
+        expect(serviceBox('tensorboard')).toBeChecked();
+        expect(serviceBox('tensorboard')).toBeDisabled();
+        expect(idTag('3')).toBeInTheDocument();
+        const request = await launched(user, onLaunched);
+        expect(request.templateName).toBe('session');
+        expect(request.config.services.tensorboard).toEqual({ experiment_ids: [3] });
+        expect(request.config.resources.slots).toBe(0);
+      }, 15_000);
+
+      it('unlocks a TensorBoard session launched again and previews its editors when its ssh line is deleted', async () => {
+        mocks.getShellConfig.mockResolvedValue(sessionShellConfig);
+        const { onLaunched, user } = await setup(
+          { initialTask: task(CommandType.Shell, { name: 'TensorBoard (brave-cat)' }) },
+          { settled: false },
+        );
+        await waitFor(() => expect(launchButton()).toBeEnabled());
+        expect(screen.getByLabelText('Slots')).toBeDisabled();
+        expect(serviceBox('jupyter')).not.toBeChecked();
+        const trip = await roundTrip(user, (config) => {
+          const { ssh: _ssh, ...services } = config.services;
+          return { ...config, services };
+        });
+        expect(screen.getByLabelText('Slots')).toBeEnabled();
+        expect(serviceBox('tensorboard')).toBeEnabled();
+        // The master runs its default editors in a shell with ssh.
+        await waitFor(() => expect(serviceBox('jupyter')).toBeChecked());
+        expect(serviceBox('vscode')).toBeChecked();
+        expect(mocks.previewShell).toHaveBeenCalledTimes(trip.calls + 2);
+        await waitFor(() => expect(launchButton()).toBeEnabled());
+        const again = await roundTrip(user);
+        expect(again.config.services).toMatchObject({ jupyter: {}, vscode: {} });
+        expect(mocks.previewShell).toHaveBeenCalledTimes(again.calls + 1);
+        await user.click(serviceBox('vscode'));
+        const request = await launched(user, onLaunched);
+        expect(request.config.services).not.toHaveProperty('ssh');
+        expect(request.config.services.jupyter).toEqual({});
+        expect(request.config.services.vscode).toEqual({ enabled: false });
+      }, 15_000);
+
+      it('previews the editors of a template without ssh when ssh is turned on', async () => {
+        mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, SESSION_TEMPLATE]);
+        const { onLaunched, user } = await setup();
+        await openStartFrom(user);
+        await user.click(await screen.findByText('session'));
+        await waitFor(() => expect(serviceBox('tensorboard')).toBeDisabled());
+        await waitFor(() => expect(launchButton()).toBeEnabled());
+        expect(serviceBox('jupyter')).not.toBeChecked();
+        const trip = await roundTrip(user, (config) => ({
+          ...config,
+          services: { ...config.services, ssh: { enabled: true } },
+        }));
+        await waitFor(() => expect(serviceBox('jupyter')).toBeChecked());
+        expect(serviceBox('vscode')).toBeChecked();
+        expect(serviceBox('tensorboard')).toBeEnabled();
+        expect(mocks.previewShell).toHaveBeenCalledTimes(trip.calls + 2);
+        await user.click(serviceBox('jupyter'));
+        const request = await launched(user, onLaunched);
+        expect(request.templateName).toBe('session');
+        expect(request.config.services).toEqual({
+          jupyter: { enabled: false },
+          ssh: { enabled: true },
+          tensorboard: { experiment_ids: [3] },
+          vscode: {},
+        });
+      }, 15_000);
+
+      it('replaces a bind mount list that the request holds', async () => {
+        const { onLaunched, user } = await setup({ initialTask: task(CommandType.Shell) });
+        const trip = await roundTrip(user, (config) => ({ ...config, bind_mounts: [] }));
+        expect(trip.request.config.bind_mounts).toEqual(clusterShellConfig.bind_mounts);
+        const request = await launched(user, onLaunched);
+        expect(request.config.bind_mounts).toEqual([]);
+      }, 15_000);
+
+      it('drops the YAML typed after a refused preview of the full config', async () => {
+        const message = 'user may not use the resource pool default';
+        const { onLaunched, user } = await setup();
+        await roundTrip(user, (config) => ({ ...config, idle_timeout: '1h' }));
+        mocks.previewShell.mockImplementationOnce(async () => {
+          throw await masterRefusal(403, message);
+        });
+        await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+        expect(await screen.findByText(message)).toBeInTheDocument();
+        fireEvent.change(screen.getByTestId('code-editor'), {
+          target: { value: yaml.dump({ idle_timeout: '2h', resources: { slots: 1 } }) },
+        });
+        await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
+        expect(await screen.findByRole('button', { name: 'Show Full Config' })).toBeInTheDocument();
+        const request = await launched(user, onLaunched);
+        expect(request.config.idle_timeout).toBe('1h');
+      }, 15_000);
+
+      it.each(['Shell (my-box)', 'TensorBoard (runs)'])(
+        'sends a description edited to look generated: %s',
+        async (description) => {
+          const { onLaunched, user } = await setup();
+          await roundTrip(user, (config) => ({ ...config, description }));
+          expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue(description);
+          const request = await launched(user, onLaunched);
+          expect(request.config.description).toBe(description);
+        },
+        15_000,
+      );
+
+      it('keeps a typed name that looks generated through an edit of something else', async () => {
+        const { onLaunched, user } = await setup();
+        await user.type(screen.getByPlaceholderText('Name (optional)'), 'Shell (dev)');
+        await roundTrip(user, (config) => ({ ...config, idle_timeout: '1h' }));
+        expect(screen.getByPlaceholderText('Name (optional)')).toHaveValue('Shell (dev)');
+        const request = await launched(user, onLaunched);
+        expect(request.config.description).toBe('Shell (dev)');
+        expect(request.config.idle_timeout).toBe('1h');
+      }, 15_000);
+
+      it('turns a service off whose line is deleted, as its box shows', async () => {
+        const { onLaunched, user } = await setup();
+        expect(serviceBox('jupyter')).toBeChecked();
+        await roundTrip(user, (config) => {
+          const { jupyter: _jupyter, ...services } = config.services;
+          return { ...config, idle_timeout: '1h', services };
+        });
+        expect(serviceBox('jupyter')).not.toBeChecked();
+        const again = await roundTrip(user);
+        expect(again.config.services.jupyter).toEqual({ enabled: false });
+        expect(serviceBox('jupyter')).not.toBeChecked();
+        await user.click(serviceBox('jupyter'));
+        await user.click(serviceBox('jupyter'));
+        const request = await launched(user, onLaunched);
+        expect(request.config.services.jupyter).toEqual({ enabled: false });
+        expect(request.config.idle_timeout).toBe('1h');
+      }, 15_000);
+    });
+    describe('with the TensorBoard data source', () => {
+      /** An edit of the YAML that the simple form does not show. */
+      const addEnv = (config: RawJson): RawJson => ({
+        ...config,
+        environment: { ...config.environment, environment_variables: ['EDITED=1'] },
+      });
+      const launched = async (user: ReturnType<typeof userEvent.setup>, onLaunched: unknown) => {
+        await launch(user);
+        await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+        expect(mocks.launchShell).toHaveBeenCalledTimes(1);
+        return mocks.launchShell.mock.calls[0][0];
+      };
+
+      it('keeps an experiment added to a template’s across round trips', async () => {
+        mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, EXPERIMENT_TEMPLATE]);
+        const { onLaunched, user } = await setup();
+        await openStartFrom(user);
+        await user.click(await screen.findByText('exp-seven'));
+        await waitFor(() => expect(serviceBox('tensorboard')).toBeChecked());
+        expect(modeRadio(EXPERIMENTS_MODE)).toBeChecked();
+        expect(idTag('7')).toBeInTheDocument();
+        await addId(user, 'Experiments', '12');
+
+        for (let i = 0; i < 2; i++) {
+          const trip = await roundTrip(user);
+          expect(trip.request.config.services.tensorboard).toEqual({ experiment_ids: [7, 12] });
+          expect(trip.config.services.tensorboard).toEqual({ experiment_ids: [7, 12] });
+          expect(idTag('7')).toBeInTheDocument();
+          expect(idTag('12')).toBeInTheDocument();
+        }
+        const request = await launched(user, onLaunched);
+        expect(request.templateName).toBe('exp-seven');
+        expect(request.config.services.tensorboard).toEqual({ experiment_ids: [7, 12] });
+      }, 15_000);
+
+      it('keeps an experiment added to a template’s through an edited full config', async () => {
+        mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, EXPERIMENT_TEMPLATE]);
+        const { onLaunched, user } = await setup();
+        await openStartFrom(user);
+        await user.click(await screen.findByText('exp-seven'));
+        await waitFor(() => expect(idTag('7')).toBeInTheDocument());
+        await addId(user, 'Experiments', '12');
+
+        const edited = await roundTrip(user, addEnv);
+        expect(edited.config.services.tensorboard).toEqual({ experiment_ids: [7, 12] });
+        expect(modeRadio(EXPERIMENTS_MODE)).toBeChecked();
+        expect(idTag('7')).toBeInTheDocument();
+        expect(idTag('12')).toBeInTheDocument();
+        const again = await roundTrip(user);
+        expect(again.config.services.tensorboard).toEqual({ experiment_ids: [7, 12] });
+        expect(idTag('12')).toBeInTheDocument();
+
+        const request = await launched(user, onLaunched);
+        expect(request.config.environment.environment_variables).toEqual(['EDITED=1']);
+        expect(request.config.services.tensorboard).toEqual({ experiment_ids: [7, 12] });
+      }, 15_000);
+
+      it.each([false, true])(
+        'sends no log directory after a switch to experiments (YAML edited: %s)',
+        async (editYaml) => {
+          const { onLaunched, user } = await setup();
+          await user.click(serviceBox('tensorboard'));
+          await user.click(modeRadio(LOGDIR_MODE));
+          await user.type(logdirField(), 'runs');
+          await user.click(modeRadio(EXPERIMENTS_MODE));
+          await addId(user, 'Experiments', '5');
+
+          const trip = await roundTrip(user, editYaml ? addEnv : undefined);
+          expect(trip.config.services.tensorboard).toEqual({ experiment_ids: [5] });
+          expect(modeRadio(EXPERIMENTS_MODE)).toBeChecked();
+          expect(idTag('5')).toBeInTheDocument();
+          const request = await launched(user, onLaunched);
+          expect(request.config.services.tensorboard).toEqual({ experiment_ids: [5] });
+        },
+        15_000,
+      );
+
+      it.each([false, true])(
+        'sends no experiments or trials after a switch to a log directory (YAML edited: %s)',
+        async (editYaml) => {
+          const { onLaunched, user } = await setup();
+          await user.click(serviceBox('tensorboard'));
+          await addId(user, 'Experiments', '5');
+          await addId(user, 'Trials', '6');
+          await user.click(modeRadio(LOGDIR_MODE));
+          await user.type(logdirField(), 'runs');
+
+          const trip = await roundTrip(user, editYaml ? addEnv : undefined);
+          expect(trip.config.services.tensorboard).toEqual({ logdir: 'runs' });
+          expect(modeRadio(LOGDIR_MODE)).toBeChecked();
+          expect(logdirField()).toHaveValue('runs');
+          const request = await launched(user, onLaunched);
+          expect(request.config.services.tensorboard).toEqual({ logdir: 'runs' });
+        },
+        15_000,
+      );
+
+      it('keeps the other mode’s log directory through an edit of something else', async () => {
+        const { onLaunched, user } = await setup();
+        await user.click(serviceBox('tensorboard'));
+        await user.click(modeRadio(LOGDIR_MODE));
+        await user.type(logdirField(), 'runs');
+        await user.click(modeRadio(EXPERIMENTS_MODE));
+        await addId(user, 'Experiments', '5');
+        await roundTrip(user, addEnv);
+        await user.click(modeRadio(LOGDIR_MODE));
+        expect(logdirField()).toHaveValue('runs');
+        const request = await launched(user, onLaunched);
+        expect(request.config.services.tensorboard).toEqual({ logdir: 'runs' });
+        expect(request.config.environment.environment_variables).toEqual(['EDITED=1']);
+      }, 15_000);
+
+      it('keeps the IDs of an unchecked TensorBoard through an edit of something else', async () => {
+        const { onLaunched, user } = await setup();
+        await user.click(serviceBox('tensorboard'));
+        await addId(user, 'Experiments', '5');
+        await user.click(serviceBox('tensorboard'));
+        const trip = await roundTrip(user, addEnv);
+        expect(trip.request.config.services).not.toHaveProperty('tensorboard');
+        await user.click(serviceBox('tensorboard'));
+        expect(modeRadio(EXPERIMENTS_MODE)).toBeChecked();
+        expect(idTag('5')).toBeInTheDocument();
+        const request = await launched(user, onLaunched);
+        expect(request.config.services.tensorboard).toEqual({ experiment_ids: [5] });
+      }, 15_000);
+
+      it('keeps a TensorBoard session launched again without ssh across round trips', async () => {
+        mocks.getShellConfig.mockResolvedValue(sessionShellConfig);
+        const { onLaunched, user } = await setup(
+          { initialTask: task(CommandType.Shell, { name: 'TensorBoard (brave-cat)' }) },
+          { settled: false },
+        );
+        await waitFor(() => expect(launchButton()).toBeEnabled());
+        await roundTrip(user, addEnv);
+        await roundTrip(user);
+        for (const box of [serviceBox('tensorboard'), screen.getByLabelText('Slots')]) {
+          expect(box).toBeDisabled();
+        }
+        expect(serviceBox('tensorboard')).toBeChecked();
+        expect(screen.getByLabelText('Slots')).toHaveValue('0');
+        expect(sourceModes()).toEqual([EXPERIMENTS_MODE]);
+        expect(idTag('3')).toBeInTheDocument();
+        expect(idTag('7')).toBeInTheDocument();
+
+        expect(await launched(user, onLaunched)).toEqual({
+          config: {
+            environment: { environment_variables: ['EDITED=1'], image: { cpu: 'default:1' } },
+            idle_timeout: '5m',
+            resources: { resource_pool: 'aux', slots: 0 },
+            services: { ssh: { enabled: false }, tensorboard: { experiment_ids: [3, 7] } },
+          },
+          templateName: undefined,
+          workspaceId: WORKSPACE.id,
+        });
+      }, 15_000);
+
+      it('sends no checkpoint storage mount of the preview after a switch to a log directory', async () => {
+        mocks.sharedFsHostPath = '/mnt/ckpt-a';
+        const { onLaunched, user } = await setup();
+        await user.click(serviceBox('tensorboard'));
+        await addId(user, 'Experiments', '5');
+        const trip = await roundTrip(user, addEnv);
+        expect(trip.config.bind_mounts).toEqual([
+          expect.objectContaining({ container_path: '/determined_shared_fs', read_only: true }),
+        ]);
+        await user.click(modeRadio(LOGDIR_MODE));
+        await user.type(logdirField(), 'runs');
+
+        const request = await launched(user, onLaunched);
+        expect(request.config).not.toHaveProperty('bind_mounts');
+        expect(request.config.environment.environment_variables).toEqual(['EDITED=1']);
+        expect(request.config.services.tensorboard).toEqual({ logdir: 'runs' });
+      }, 15_000);
+
+      it('sends no checkpoint storage mount of a TensorBoard session launched again', async () => {
+        const sharedFs = {
+          container_path: '/determined_shared_fs',
+          host_path: '/mnt/ckpt-a',
+          propagation: 'rprivate',
+          read_only: true,
+        };
+        mocks.getShellConfig.mockResolvedValue({ ...sessionShellConfig, bind_mounts: [sharedFs] });
+        const { onLaunched, user } = await setup(
+          { initialTask: task(CommandType.Shell, { name: 'TensorBoard (brave-cat)' }) },
+          { settled: false },
+        );
+        await waitFor(() => expect(launchButton()).toBeEnabled());
+        const request = await launched(user, onLaunched);
+        expect(request.config).not.toHaveProperty('bind_mounts');
+      }, 15_000);
+
+      it('locks TensorBoard and the slots of an edited full config that turns ssh off', async () => {
+        const { onLaunched, user } = await setup();
+        await roundTrip(user, (config) => ({
+          ...config,
+          services: { ssh: { enabled: false }, tensorboard: { experiment_ids: [4] } },
+        }));
+        expect(serviceBox('tensorboard')).toBeChecked();
+        expect(serviceBox('tensorboard')).toBeDisabled();
+        expect(screen.getByLabelText('Slots')).toHaveValue('0');
+        expect(screen.getByLabelText('Slots')).toBeDisabled();
+        expect(sourceModes()).toEqual([EXPERIMENTS_MODE]);
+        expect(idTag('4')).toBeInTheDocument();
+
+        // The deleted editors' boxes show unchecked and turn them off.
+        expect(serviceBox('jupyter')).not.toBeChecked();
+        expect(serviceBox('vscode')).not.toBeChecked();
+        const request = await launched(user, onLaunched);
+        expect(request.config.resources.slots).toBe(0);
+        expect(request.config.services).toEqual({
+          jupyter: { enabled: false },
+          ssh: { enabled: false },
+          tensorboard: { experiment_ids: [4] },
+          vscode: { enabled: false },
+        });
+      }, 15_000);
+
+      it('launches a typed priority and registry_auth with an edited source as the full config does', async () => {
+        const edit = (config: RawJson): RawJson => ({
+          ...config,
+          environment: {
+            ...config.environment,
+            registry_auth: { password: 'hunter2', username: 'me' },
+          },
+          resources: { ...config.resources, priority: 7 },
+          services: { ...config.services, tensorboard: { experiment_ids: [7, 9] } },
+        });
+        const launchEdited = async (viaSimpleForm: boolean) => {
+          const { onLaunched, user } = await setup();
+          await user.click(serviceBox('tensorboard'));
+          await addId(user, 'Experiments', '7');
+          await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
+          await waitFor(() => expect(editorText()).toContain('experiment_ids'));
+          editConfig(edit);
+          if (viaSimpleForm) {
+            await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
+            await waitFor(() => expect(idTag('9')).toBeInTheDocument());
+            expect(idTag('7')).toBeInTheDocument();
+          }
+          await launch(user);
+          await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+          return mocks.launchShell.mock.lastCall?.[0];
+        };
+
+        const direct = await launchEdited(false);
+        cleanup();
+        const viaSimpleForm = await launchEdited(true);
+        expect(mocks.launchShell).toHaveBeenCalledTimes(2);
+        for (const request of [direct, viaSimpleForm]) {
+          expect(request.config.resources.priority).toBe(7);
+          expect(request.config.environment.registry_auth).toEqual({
+            password: 'hunter2',
+            username: 'me',
+          });
+          expect(request.config.services.tensorboard).toEqual({ experiment_ids: [7, 9] });
+        }
+      }, 15_000);
+
+      it('shows the source mode of an edited full config in the TensorBoard Data Source block', async () => {
+        mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, TENSORBOARD_TEMPLATE]);
+        const { onLaunched, user } = await setup();
+        await openStartFrom(user);
+        await user.click(await screen.findByText('tensorboard'));
+        await waitFor(() => expect(serviceBox('tensorboard')).toBeChecked());
+        expect(modeRadio(LOGDIR_MODE)).toBeChecked();
+
+        await roundTrip(user, (config) => ({
+          ...config,
+          services: {
+            ...config.services,
+            tensorboard: { args: ['--reload_interval=5'], experiment_ids: [4] },
+          },
+        }));
+        expect(modeRadio(EXPERIMENTS_MODE)).toBeChecked();
+        expect(idTag('4')).toBeInTheDocument();
+        expect(screen.queryByPlaceholderText('runs')).not.toBeInTheDocument();
+
+        // The template's args stay the template's.
+        const request = await launched(user, onLaunched);
+        expect(request.templateName).toBe('tensorboard');
+        expect(request.config.services.tensorboard).toEqual({ experiment_ids: [4] });
+      }, 15_000);
+    });
+  });
+
+  describe('TensorBoard data source', () => {
     const showFullConfig = async (user: ReturnType<typeof userEvent.setup>) => {
       await user.click(screen.getByRole('button', { name: 'Show Full Config' }));
     };
     const showSimpleConfig = async (user: ReturnType<typeof userEvent.setup>) => {
       await user.click(screen.getByRole('button', { name: 'Show Simple Config' }));
+      await screen.findByRole('button', { name: 'Show Full Config' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
     };
     const fullConfigTensorBoard = () =>
       (yaml.load(editorText()) as RawJson).services?.tensorboard as RawJson | undefined;
@@ -1867,7 +2922,7 @@ describe('NtscLaunchModal', () => {
 
       await launch(user);
       await waitFor(() => expect(onLaunched).toHaveBeenCalled());
-      const base = sanitizeConfig(sessionShellConfig);
+      const base = relaunchConfig(sessionShellConfig);
       expect(base).not.toHaveProperty('description');
       expect(mocks.launchShell).toHaveBeenCalledWith({
         config: base,

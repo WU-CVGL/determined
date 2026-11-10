@@ -1,6 +1,9 @@
 import { cloneDeep } from 'lodash';
 
+import { RawJson } from 'types';
+
 import {
+  applyConfigEdits,
   configFromForm,
   dataSourceFromEntry,
   DEFAULT_SOURCE_MODE,
@@ -8,7 +11,7 @@ import {
   isAutoDescription,
   minimalDiff,
   redactSensitiveEnv,
-  sanitizeConfig,
+  relaunchConfig,
   sensitiveEnvNames,
   ShellServiceChoices,
   simpleLaunchConfig,
@@ -62,9 +65,9 @@ const podSpecConfig = {
 };
 
 describe('ntscConfig', () => {
-  describe('sanitizeConfig', () => {
+  describe('relaunchConfig', () => {
     it('deletes launch-specific and secret keys and keeps the rest', () => {
-      const out = sanitizeConfig(mergedShellConfig);
+      const out = relaunchConfig(mergedShellConfig);
       expect(out).not.toHaveProperty('entrypoint');
       expect(out).not.toHaveProperty('description');
       expect(out.environment).not.toHaveProperty('registry_auth');
@@ -78,13 +81,172 @@ describe('ntscConfig', () => {
     });
 
     it('keeps a description the user chose', () => {
-      expect(sanitizeConfig({ description: 'my shell' }).description).toBe('my shell');
+      expect(relaunchConfig({ description: 'my shell' }).description).toBe('my shell');
+    });
+
+    it('drops the checkpoint storage mount of a tensorboard service that reads experiments', () => {
+      const sharedFs = {
+        container_path: '/determined_shared_fs',
+        host_path: '/mnt/ckpt-a',
+        propagation: 'rprivate',
+        read_only: true,
+      };
+      const session = {
+        ...mergedShellConfig,
+        bind_mounts: [...mergedShellConfig.bind_mounts, sharedFs],
+        services: { tensorboard: { trial_ids: [5] } },
+      };
+      expect(relaunchConfig(session).bind_mounts).toEqual(mergedShellConfig.bind_mounts);
+      const onlyShared = { ...session, bind_mounts: [sharedFs] };
+      expect(relaunchConfig(onlyShared)).not.toHaveProperty('bind_mounts');
+      // A log directory reads no checkpoint storage: the mount is the user's.
+      const logdirShell = { ...session, services: { tensorboard: { logdir: 'runs' } } };
+      expect(relaunchConfig(logdirShell).bind_mounts).toEqual(session.bind_mounts);
     });
 
     it('does not change its input', () => {
       const input = cloneDeep(mergedShellConfig);
-      sanitizeConfig(input);
+      relaunchConfig(input);
       expect(input).toEqual(mergedShellConfig);
+    });
+  });
+
+  describe('applyConfigEdits', () => {
+    /** The request of a "Launch Again" of mergedShellConfig, which the master previews as it. */
+    const request = relaunchConfig(mergedShellConfig);
+    /** Applies the edits that turn previewed into edited to the request. */
+    const draft = (
+      edited: RawJson,
+      previewed: RawJson = mergedShellConfig,
+      base: RawJson = request,
+    ) => applyConfigEdits(base, edited, previewed);
+
+    it('leaves the request as it is when nothing was edited', () => {
+      expect(draft(mergedShellConfig)).toEqual(request);
+    });
+
+    it('sets a changed value and keeps the values the master filled in out', () => {
+      const edited = {
+        ...mergedShellConfig,
+        resources: { ...mergedShellConfig.resources, slots: 4 },
+      };
+      const out = draft(edited);
+      expect(out.resources).toEqual({ resource_pool: 'gpu', slots: 4 });
+      expect(out).not.toHaveProperty('entrypoint');
+      expect(out.environment).not.toHaveProperty('registry_auth');
+    });
+
+    it('sets an added value, also under a key the request does not have', () => {
+      const registryAuth = { password: 'other', username: 'you' };
+      const edited = {
+        ...mergedShellConfig,
+        environment: { ...mergedShellConfig.environment, registry_auth: registryAuth },
+        resources: { ...mergedShellConfig.resources, priority: 7 },
+        services: { tensorboard: { args: ['--x'], logdir: 'runs' } },
+      };
+      const out = draft(edited, mergedShellConfig, { description: 'lab' });
+      expect(out).toEqual({
+        description: 'lab',
+        environment: { registry_auth: registryAuth },
+        resources: { priority: 7 },
+        services: { tensorboard: { args: ['--x'], logdir: 'runs' } },
+      });
+    });
+
+    it('deletes a removed key that the request has and ignores one it does not', () => {
+      const base = { ...request, description: 'mine', resources: { slots: 2 } };
+      const previewed = { ...mergedShellConfig, description: 'mine' };
+      const edited: RawJson = cloneDeep(previewed);
+      delete edited.description;
+      delete edited.environment.registry_auth;
+      delete edited.resources.priority;
+      delete edited.resources.slots;
+      const out = draft(edited, previewed, base);
+      expect(out).not.toHaveProperty('description');
+      expect(out.resources).toEqual({});
+      expect(out.environment).toEqual(request.environment);
+      // A removed section whose keys the request partly has.
+      const { bind_mounts: _mounts, ...withoutMounts } = previewed;
+      expect(draft(withoutMounts, previewed, base)).not.toHaveProperty('bind_mounts');
+      expect(draft(withoutMounts, previewed, {})).toEqual({});
+    });
+
+    it('recurses into nested objects', () => {
+      const previewed = { a: { b: { c: 1, d: 2 }, e: 3 } };
+      const edited = { a: { b: { c: 1, d: 5, f: 6 }, e: 3 } };
+      expect(draft(edited, previewed, { a: { b: { c: 9 } }, g: 1 })).toEqual({
+        a: { b: { c: 9, d: 5, f: 6 } },
+        g: 1,
+      });
+      const removed = { a: { b: { c: 1 }, e: 3 } };
+      expect(draft(removed, previewed, { a: { b: { c: 9, d: 2 } } })).toEqual({
+        a: { b: { c: 9 } },
+      });
+    });
+
+    it('sets an edited array as a whole', () => {
+      const mount = { container_path: '/scratch', host_path: '/mnt/scratch' };
+      const edited = {
+        ...mergedShellConfig,
+        bind_mounts: [...mergedShellConfig.bind_mounts, mount],
+        environment: {
+          ...mergedShellConfig.environment,
+          environment_variables: {
+            ...mergedShellConfig.environment.environment_variables,
+            cuda: [],
+          },
+        },
+      };
+      const out = draft(edited, mergedShellConfig, {});
+      expect(out).toEqual({
+        bind_mounts: edited.bind_mounts,
+        environment: { environment_variables: { cuda: [] } },
+      });
+      // An array that the request holds is replaced, not merged.
+      const list = { e: { v: ['A', 'B'] } };
+      expect(draft({ e: { v: ['B'] } }, list, list)).toEqual({ e: { v: ['B'] } });
+    });
+
+    it('sets a null that the user typed, changed or added', () => {
+      const edited = {
+        ...mergedShellConfig,
+        debug: null,
+        services: { jupyter: null, vscode: { opt: null } },
+        work_dir: null,
+      };
+      const out = draft(edited);
+      expect(out.debug).toBeNull();
+      expect(out.services).toEqual({ jupyter: null, vscode: { opt: null } });
+      // The previewed null is no edit.
+      expect(draft(edited, mergedShellConfig, {})).not.toHaveProperty('work_dir');
+      // A null the user removes is removed where the request has it.
+      const { idle_timeout: _timeout, ...withoutTimeout } = mergedShellConfig;
+      expect(draft(withoutTimeout, mergedShellConfig, { idle_timeout: null })).toEqual({});
+    });
+
+    it('sets an edited object whole where the request holds a value that is no object', () => {
+      // The master expands an image given as one string into one per runtime.
+      const base = { environment: { image: 'my/img:1' } };
+      const previewed = {
+        environment: { image: { cpu: 'my/img:1', cuda: 'my/img:1', rocm: 'my/img:1' } },
+      };
+      const edited = cloneDeep(previewed);
+      edited.environment.image.cuda = 'my/img:2';
+      expect(draft(edited, previewed, base)).toEqual(edited);
+      // Where the request has none, only the changed key is set.
+      expect(draft(edited, previewed, {})).toEqual({
+        environment: { image: { cuda: 'my/img:2' } },
+      });
+    });
+
+    it('does not change its inputs', () => {
+      const base = cloneDeep(request);
+      const edited = { ...mergedShellConfig, debug: true };
+      const out = applyConfigEdits(base, edited, mergedShellConfig);
+      expect(base).toEqual(request);
+      expect(edited.debug).toBe(true);
+      out.resources.slots = 9;
+      expect(base.resources.slots).toBe(2);
     });
   });
 
@@ -180,6 +342,16 @@ describe('ntscConfig', () => {
           { a: 'x', b: null, d: { e: 2, f: 1 } },
         ),
       ).toEqual({ a: null, d: { e: null }, g: { i: 1 } });
+    });
+
+    it('keeps every null but one where the default is null, with keepNulls', () => {
+      expect(
+        minimalDiff(
+          { a: null, b: null, c: null, d: { e: null, f: 1 }, g: { h: null, i: 1 } },
+          { a: 'x', b: null, d: { e: 2, f: 1 } },
+          { keepNulls: true },
+        ),
+      ).toEqual({ a: null, c: null, d: { e: null }, g: { h: null, i: 1 } });
     });
   });
 
@@ -322,7 +494,7 @@ describe('ntscConfig', () => {
     });
 
     it('applies the form on top of a base config without touching other keys', () => {
-      const out = configFromForm(sanitizeConfig(mergedShellConfig), {
+      const out = configFromForm(relaunchConfig(mergedShellConfig), {
         name: 'again',
         pool: 'cpu',
         slots: 0,
@@ -333,6 +505,19 @@ describe('ntscConfig', () => {
 
       const cleared = configFromForm({ description: 'x', resources: { resource_pool: 'a' } }, {});
       expect(cleared).toEqual({ resources: {} });
+    });
+
+    it('reads an edited config into the form and back without changing it', () => {
+      const edited = {
+        ...mergedShellConfig,
+        description: 'my shell',
+        services: {
+          jupyter: { enabled: false },
+          tensorboard: { args: ['--reload_interval=30'], logdir: 'runs' },
+          vscode: {},
+        },
+      };
+      expect(configFromForm(edited, formFieldsFromConfig(edited))).toEqual(edited);
     });
 
     it('reads template resources', () => {
@@ -467,7 +652,7 @@ describe('ntscConfig', () => {
       expect(isAutoDescription('TensorBoard (brave-cat)')).toBe(true);
       expect(isAutoDescription('Shell (gently-brave-otter)')).toBe(true);
       expect(isAutoDescription('TensorBoard of exp 7')).toBe(false);
-      expect(sanitizeConfig(sessionConfig)).not.toHaveProperty('description');
+      expect(relaunchConfig(sessionConfig)).not.toHaveProperty('description');
       expect(formFieldsFromConfig(sessionConfig).name).toBe('');
     });
 
@@ -477,16 +662,61 @@ describe('ntscConfig', () => {
         services: { jupyter: {}, tensorboard: { args: ['--x'], logdir: 'runs' } },
       };
       [sessionConfig, logdirShell, mergedShellConfig].forEach((config) => {
-        const base = sanitizeConfig(config);
+        const base = relaunchConfig(config);
         expect(configFromForm(base, formFieldsFromConfig(base))).toEqual(base);
       });
-      expect(formFieldsFromConfig(sanitizeConfig(sessionConfig))).toEqual({
+      expect(formFieldsFromConfig(relaunchConfig(sessionConfig))).toEqual({
         dataSource: experiments([3, 7], []),
         name: '',
         pool: 'aux',
         services: { tensorboard: true },
         slots: 0,
       });
+    });
+
+    it('applies the edits of a session config and reads its source back unchanged', () => {
+      const edited = { ...sessionConfig, description: 'my session', idle_timeout: '10m' };
+      const base = relaunchConfig(sessionConfig);
+      const draft = applyConfigEdits(base, edited, sessionConfig);
+      expect(draft).toEqual({ ...base, description: 'my session', idle_timeout: '10m' });
+      const fields = formFieldsFromConfig(draft);
+      expect(fields.dataSource).toEqual(experiments([3, 7], []));
+      expect(sshDisabled(draft)).toBe(true);
+      expect(configFromForm(draft, fields)).toEqual(draft);
+      // Another round trip without edits changes nothing.
+      const request = configFromForm(draft, fields);
+      const again = applyConfigEdits(request, edited, edited);
+      expect(configFromForm(again, formFieldsFromConfig(again))).toEqual(draft);
+      // An ID added in the form joins the draft's; ssh stays off with 0 slots.
+      const added = configFromForm(draft, { ...fields, dataSource: experiments([3, 7, '12']) });
+      expect(added.services).toEqual({
+        ssh: { enabled: false },
+        tensorboard: { experiment_ids: [3, 7, 12] },
+      });
+      expect(added.resources).toEqual({ resource_pool: 'aux', slots: 0 });
+    });
+
+    it('reads the mode of an edited draft and sends only the chosen one', () => {
+      const previewed = {
+        ...mergedShellConfig,
+        services: { tensorboard: { args: ['--x'], logdir: 'runs' } },
+      };
+      const edited = { ...previewed, services: { tensorboard: { args: ['--x'], trial_ids: [5] } } };
+      const draft = applyConfigEdits(relaunchConfig(previewed), edited, previewed);
+      const fields = formFieldsFromConfig(draft);
+      expect(fields.dataSource).toEqual(experiments([], [5]));
+      expect(configFromForm(draft, fields).services).toEqual(edited.services);
+      // Back to a log directory: no IDs are left.
+      expect(configFromForm(draft, { ...fields, dataSource: logdir('logs') }).services).toEqual({
+        tensorboard: { args: ['--x'], logdir: 'logs' },
+      });
+      // From a log directory draft to IDs: no log directory is left.
+      const logdirDraft = applyConfigEdits(relaunchConfig(edited), previewed, edited);
+      const logdirFields = formFieldsFromConfig(logdirDraft);
+      expect(logdirFields.dataSource).toEqual(logdir('runs'));
+      expect(
+        configFromForm(logdirDraft, { ...logdirFields, dataSource: experiments([4]) }).services,
+      ).toEqual({ tensorboard: { args: ['--x'], experiment_ids: [4] } });
     });
 
     it('keeps ssh off, the sources, 0 slots and the idle timeout of a session in a template', () => {

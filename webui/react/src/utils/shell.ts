@@ -10,14 +10,14 @@ import { NtscLaunchOptions, simpleLaunchConfig } from 'utils/ntscConfig';
 import { getResponseStatus } from 'utils/service';
 
 export interface ShellLaunchOptions extends NtscLaunchOptions {
-  /** A full config. When given, name, pool, slots, services and template are ignored. */
+  /** A full config. When given, name, pool, slots and services are ignored; a template is not. */
   config?: RawJson;
 }
 
 /** The request a launch and a preview send for these options: the same for both. */
 export const shellRequest = (options: ShellLaunchOptions): LaunchShellParams => ({
   config: options.config ?? simpleLaunchConfig(options),
-  templateName: options.config || options.template === '' ? undefined : options.template,
+  templateName: options.template === '' ? undefined : options.template,
   workspaceId: options.workspaceId,
 });
 
