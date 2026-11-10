@@ -11,6 +11,13 @@ ALTER TABLE allocations
     ADD COLUMN metered_quantity smallint NULL;
 ALTER TABLE allocations ALTER COLUMN metered_kind DROP DEFAULT;
 
--- Allocations from before metering that still wait for their pool's slot type.
-CREATE INDEX ix_allocations_unclassified_pool ON allocations (resource_pool)
-WHERE metered_kind = 'unclassified' AND assigned_time IS NULL;
+-- An allocation from before metering with slots whose task container recorded GPUs held GPUs, one
+-- per slot. The kind of every other one is not known.
+UPDATE allocations a SET metered_kind = 'gpu', metered_quantity = a.slots
+WHERE a.slots > 0
+  AND EXISTS (
+      SELECT 1 FROM allocation_accelerators x
+      WHERE x.allocation_id = a.allocation_id
+        AND x.accelerator_type IN ('cuda', 'rocm')
+        AND cardinality(x.accelerator_uuids) > 0
+  );

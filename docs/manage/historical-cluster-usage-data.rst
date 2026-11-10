@@ -80,19 +80,29 @@ Both count what the tasks hold, not what they use:
 
 -  Allocations recorded before the master metered assignments count from the end of their first
    queued period, or else from their start, to their end; one that ended without a recorded end
-   counts nothing. Their slots take their pool's slot type the first time the master knows it, and
-   keep it. A static pool's slot type is known once the same number of connected agents has reported
-   one type for ten minutes. Until then, and for pools without agents or that no longer exist, their
-   slots count as slot-seconds of an unknown kind. Without slots they count as auxiliary containers,
-   also in pools that no longer exist when the cluster has only agent resource pools, and are not
-   counted on Kubernetes. An administrator who knows what such a pool held can set the kind (``gpu``
-   or ``cpu``) in the database:
+   counts nothing. Their slots count as GPUs when their task container recorded GPUs. The slots of
+   the others count as slot-seconds of an unknown kind, and those without slots are not counted,
+   until an administrator who knows what a pool held in a period sets their kind in the database.
+   For allocations with slots, the kind is ``gpu`` or ``cpu``, one unit per slot:
 
    .. code:: sql
 
       UPDATE allocations SET metered_kind = 'gpu', metered_quantity = slots
       WHERE resource_pool = '<pool>' AND metered_kind = 'unclassified'
-        AND assigned_time IS NULL AND slots > 0;
+        AND assigned_time IS NULL AND slots > 0
+        AND start_time >= '<start>' AND start_time < '<end>';
+
+   For allocations without slots, the kind is ``aux``, one auxiliary container each:
+
+   .. code:: sql
+
+      UPDATE allocations SET metered_kind = 'aux', metered_quantity = 1
+      WHERE resource_pool = '<pool>' AND metered_kind = 'unclassified'
+        AND assigned_time IS NULL AND slots = 0
+        AND start_time >= '<start>' AND start_time < '<end>';
+
+   The last line of each is optional: it limits the statement to the allocations that started in the
+   period, in UTC.
 
 -  Checkpoint garbage collection is not counted.
 

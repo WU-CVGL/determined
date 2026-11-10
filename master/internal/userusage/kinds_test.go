@@ -66,29 +66,3 @@ func TestAssigned(t *testing.T) {
 		})
 	}
 }
-
-func TestLegacyKind(t *testing.T) {
-	for _, tc := range []struct {
-		slots    int
-		k8s      bool
-		slotType device.Type
-		kind     Kind
-		ok       bool
-	}{
-		{0, false, device.ZeroSlot, KindAux, true},
-		{0, false, device.CUDA, KindAux, true},
-		{0, true, device.CUDA, KindNone, true},
-		{2, false, device.CUDA, KindGPU, true},
-		{2, false, device.ROCM, KindGPU, true},
-		{2, true, device.CUDA, KindGPU, true},
-		{2, false, device.CPU, KindCPU, true},
-		{2, true, device.CPU, KindCPU, true},
-		// An unspecified slot type is not GPU.
-		{2, false, device.ZeroSlot, "", false},
-		{2, true, device.ZeroSlot, "", false},
-	} {
-		kind, ok := LegacyKind(tc.slots, tc.k8s, tc.slotType)
-		require.Equal(t, tc.kind, kind, "%+v", tc)
-		require.Equal(t, tc.ok, ok, "%+v", tc)
-	}
-}

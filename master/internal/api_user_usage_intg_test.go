@@ -263,8 +263,8 @@ func setupUserUsageTest(t *testing.T) (*apiServer, context.Context, model.User, 
 		},
 		// 14: Ended without a release: never counts.
 		{pool: "gpu", slots: 1, kind: gpu, assigned: "2020-03-03 10:00", state: terminated},
-		// 15, 16: From before metering, of a pool whose slot type was never known: the slots are
-		// unclassified, and an allocation without slots counts nothing.
+		// 15, 16: From before metering, of an unknown kind: the slots are unclassified, and an
+		// allocation without slots counts nothing.
 		{
 			pool: "gone", slots: 3, kind: userusage.KindUnclassified, queuedEnds: []string{"2020-03-03 08:00"},
 			start: "2020-03-03 08:00", end: "2020-03-03 09:00", state: terminated,
@@ -624,61 +624,32 @@ FROM allocations a`+heldSQL).Scan(ctx, &rows))
 }
 
 // After a master restart, before the agents reconnect, finished history keeps its kind: a new
-// allocation by its assigned devices, and one from before metering by the kind its pool's slot
-// type gave it once, whatever the pool reports later.
+// allocation by its assigned devices, and one from before metering by what the migration gave it,
+// whatever its pool reports.
 func TestUserUsageRestartBeforeAgentsReconnect(t *testing.T) {
-	ctx := context.Background()
-	api, _, userCtx := setupAPITest(t, nil, &mocks.ResourceManager{})
+	api, _, userCtx := setupAPITest(t, nil, userUsageMockRM(nil))
 	owner := db.RequireMockUser(t, api.m.db)
 	job := db.RequireMockJob(t, api.m.db, &owner.ID)
-	pool := "reconnect-" + uuid.NewString()[:8]
 	terminated := model.AllocationStateTerminated
-	// CPU slots assigned at 10:00 and released at the stopped master's last heartbeat at 11:00.
+	// CPU slots assigned at 10:00 and released at the stopped master's last heartbeat at 11:00, in
+	// a pool that reports GPUs now.
 	addUsageAllocation(t, addUsageTask(t, job, model.TaskTypeCommand), 0, usageAllocation{
-		pool: pool, slots: 2, kind: userusage.KindCPU, assigned: "2020-05-01 10:00",
+		pool: "gpu", slots: 2, kind: userusage.KindCPU, assigned: "2020-05-01 10:00",
 		released: "2020-05-01 11:00", start: "2020-05-01 10:00", end: "2020-05-01 11:00", state: terminated,
 	})
-	// From before metering, not classified yet.
+	// From before metering, of an unknown kind.
 	addUsageAllocation(t, addUsageTask(t, job, model.TaskTypeCommand), 0, usageAllocation{
-		pool: pool, slots: 2, kind: userusage.KindUnclassified, queuedEnds: []string{"2020-05-02 10:00"},
+		pool: "gpu", slots: 2, kind: userusage.KindUnclassified, queuedEnds: []string{"2020-05-02 10:00"},
 		start: "2020-05-02 10:00", end: "2020-05-02 11:00", state: terminated,
 	})
 
-	read := func() []userUsageEntry {
-		resp, err := api.GetUserUsage(userCtx, &apiv1.GetUserUsageRequest{
-			UserId: int32(owner.ID), StartDate: "2020-05-01", EndDate: "2020-05-02", Period: usageDaily,
-		})
-		require.NoError(t, err)
-		return usageEntries(resp.Entries)
-	}
-	cpuDay := userUsageEntry{period: "2020-05-01", cpu: 2}
-	require.Equal(t, []userUsageEntry{cpuDay, {period: "2020-05-02", unclassified: 2}}, read())
-
-	var classifierRM mocks.ResourceManager
-	report := func(slotType devicev1.Type, agents int32) {
-		classifierRM.On("GetResourcePools").Return(&apiv1.GetResourcePoolsResponse{
-			ResourcePools: []*resourcepoolv1.ResourcePool{{
-				Name: pool, Type: resourcepoolv1.ResourcePoolType_RESOURCE_POOL_TYPE_STATIC,
-				SlotType: slotType, NumAgents: agents,
-			}},
-		}, nil).Once()
-	}
-	c := &legacyClassifier{rm: &classifierRM, stableTicks: 1, pools: map[string]*legacyPoolObservation{}}
-	for _, step := range []struct {
-		slotType devicev1.Type
-		agents   int32
-		want     userUsageEntry
-	}{
-		{devicev1.Type_TYPE_UNSPECIFIED, 0, userUsageEntry{period: "2020-05-02", unclassified: 2}},
-		{devicev1.Type_TYPE_CPU, 1, userUsageEntry{period: "2020-05-02", cpu: 2}},
-		{devicev1.Type_TYPE_UNSPECIFIED, 0, userUsageEntry{period: "2020-05-02", cpu: 2}},
-		{devicev1.Type_TYPE_CUDA, 2, userUsageEntry{period: "2020-05-02", cpu: 2}},
-	} {
-		report(step.slotType, step.agents)
-		_, err := c.step(ctx)
-		require.NoError(t, err)
-		require.Equal(t, []userUsageEntry{cpuDay, step.want}, read(), step.slotType)
-	}
+	resp, err := api.GetUserUsage(userCtx, &apiv1.GetUserUsageRequest{
+		UserId: int32(owner.ID), StartDate: "2020-05-01", EndDate: "2020-05-02", Period: usageDaily,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []userUsageEntry{
+		{period: "2020-05-01", cpu: 2}, {period: "2020-05-02", unclassified: 2},
+	}, usageEntries(resp.Entries))
 }
 
 func TestUserResources(t *testing.T) {
