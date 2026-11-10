@@ -77,25 +77,23 @@ const UsageCalendar: React.FC<Props> = ({ dayValues, weeks }: Props) => {
           ))}
         </div>
         <div className={css.grid} ref={grid} onKeyDown={handleKeyDown}>
-          {weeks.flatMap((week) =>
-            week.days.map((day) => {
-              const classes = [css.cell];
-              classes.push(day.entry ? css[`level${day.level}`] : css.notCovered);
-              return (
-                <Tooltip content={day.date} key={day.date}>
-                  <button
-                    aria-label={day.date}
-                    className={classes.join(' ')}
-                    data-date={day.date}
-                    tabIndex={day.date === tabStop ? 0 : -1}
-                    type="button"
-                    onClick={() => setSelectedDate(day.date)}
-                    onFocus={() => setFocusDate(day.date)}
-                  />
-                </Tooltip>
-              );
-            }),
-          )}
+          {days.map((day) => {
+            const classes = [css.cell];
+            classes.push(day.entry ? css[`level${day.level}`] : css.notCovered);
+            return (
+              <Tooltip content={day.date} key={day.date}>
+                <button
+                  aria-label={day.date}
+                  className={classes.join(' ')}
+                  data-date={day.date}
+                  tabIndex={day.date === tabStop ? 0 : -1}
+                  type="button"
+                  onClick={() => setSelectedDate(day.date)}
+                  onFocus={() => setFocusDate(day.date)}
+                />
+              </Tooltip>
+            );
+          })}
         </div>
       </div>
       {selected && <DayLine day={selected} values={dayValues(selected)} />}
