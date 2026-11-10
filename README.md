@@ -13,9 +13,10 @@ any program in a container.
 
 # Interactive
 
-A shell task runs an SSH server; a new shell also runs JupyterLab by default, and VS Code in the
-browser when the master serves code-server, in the same container with the same user, files and
-GPUs. JupyterLab comes from the task image; the default does not install it. Start a shell with
+A shell task runs an SSH server; a new shell also runs JupyterLab by default, VS Code in the
+browser when the master serves code-server, and TensorBoard when its configuration names a log
+directory or experiments, in the same container with the same user, files and GPUs. JupyterLab
+comes from the task image; the default does not install it. Start a shell with
 **Launch Interactive Task** on the **Jobs** page and work on its task page, in the **Terminal**,
 **JupyterLab**, **VS Code**, **Logs** and **Resources** tabs. A shell runs until it is killed,
 or until it has been idle for the `idle_timeout` its configuration sets.
@@ -32,7 +33,8 @@ det task open <shell id> vscode    # VS Code in the browser
 
 - **Experiments** with hyperparameter search and distributed training, with metrics,
   checkpoints and a model registry.
-- **Commands and TensorBoards** for one-off programs and for viewing training metrics.
+- **Commands** for one-off programs, and **TensorBoard** for viewing training metrics, a service
+  of a shell started with `det tensorboard start <experiment id>` or from an experiment's page.
 - **GPU groups**: `resources.gpu_groups` places named groups of GPUs of exact models on one agent.
 - **Resource-pool access control**: pools are public until an administrator restricts them to
   the users granted access.

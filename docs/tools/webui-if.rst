@@ -315,7 +315,7 @@ from the CLI. A service that stops while the page is open shows its state in its
 
 .. image:: /assets/images/interactive-task-page-dark.png
    :class: only-dark
-   :alt: The page of a shell with its Terminal, JupyterLab, VS Code, Logs and Resources tabs, JupyterLab open, in dark mode
+   :alt: The page of a shell with its Terminal, JupyterLab, VS Code, Logs and Resources tabs, VS Code open, in dark mode
 
 .. image:: /assets/images/interactive-task-page.png
    :class: only-light
