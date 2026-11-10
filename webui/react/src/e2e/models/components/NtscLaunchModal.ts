@@ -43,7 +43,7 @@ export class NtscLaunchModal extends Modal {
   readonly mode = (label: string): BaseComponent =>
     new BaseComponent({
       parent: this,
-      selector: `.ant-form-item:has(label[title="TensorBoard data source"]) label.ant-radio-wrapper:has(span:text-is("${label}"))`,
+      selector: `.ant-form-item:has(label[title="TensorBoard Data Source"]) label.ant-radio-wrapper:has(span:text-is("${label}"))`,
     });
   /** The tag input of the experiments to read, in the "Determined experiments" mode. */
   readonly experimentIds = new BaseComponent({
@@ -61,7 +61,7 @@ export class NtscLaunchModal extends Modal {
   readonly logdir = new BaseComponent({
     parent: this,
     selector:
-      '.ant-form-item:has(label[title="TensorBoard data source"]) input[placeholder="runs"]',
+      '.ant-form-item:has(label[title="TensorBoard Data Source"]) input[placeholder="runs"]',
   });
 }
 

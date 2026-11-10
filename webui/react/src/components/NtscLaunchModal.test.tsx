@@ -1111,7 +1111,7 @@ describe('NtscLaunchModal', () => {
       expect(serviceBox('jupyter')).toBeChecked();
       expect(serviceBox('vscode')).toBeChecked();
       expect(serviceBox('tensorboard')).not.toBeChecked();
-      expect(screen.queryByText('TensorBoard data source')).not.toBeInTheDocument();
+      expect(screen.queryByText('TensorBoard Data Source')).not.toBeInTheDocument();
       // The start-from is previewed without services, so that the master fills its defaults.
       expect(mocks.previewShell).toHaveBeenCalledTimes(1);
       expect(mocks.previewShell).toHaveBeenCalledWith({
@@ -1135,7 +1135,7 @@ describe('NtscLaunchModal', () => {
     it('offers both data sources while TensorBoard is checked, Determined experiments first', async () => {
       const { user } = await setup();
       await user.click(serviceBox('tensorboard'));
-      expect(screen.getByText('TensorBoard data source')).toBeInTheDocument();
+      expect(screen.getByText('TensorBoard Data Source')).toBeInTheDocument();
       expect(sourceModes()).toEqual([EXPERIMENTS_MODE, LOGDIR_MODE]);
       expect(modeRadio(EXPERIMENTS_MODE)).toBeChecked();
       expect(screen.getByLabelText('Experiments')).toBeInTheDocument();
@@ -1146,7 +1146,7 @@ describe('NtscLaunchModal', () => {
     it('asks for the log directory in its mode and sends it with the service', async () => {
       const { onLaunched, user } = await setup();
       await user.click(serviceBox('tensorboard'));
-      expect(screen.getByText('TensorBoard data source')).toBeInTheDocument();
+      expect(screen.getByText('TensorBoard Data Source')).toBeInTheDocument();
       await user.click(modeRadio(LOGDIR_MODE));
       const field = logdirField();
       expect(field).toHaveValue('');
@@ -1182,7 +1182,7 @@ describe('NtscLaunchModal', () => {
       await user.click(modeRadio(LOGDIR_MODE));
       await user.type(logdirField(), 'runs');
       await user.click(serviceBox('tensorboard'));
-      expect(screen.queryByText('TensorBoard data source')).not.toBeInTheDocument();
+      expect(screen.queryByText('TensorBoard Data Source')).not.toBeInTheDocument();
       await launch(user);
       await waitFor(() => expect(onLaunched).toHaveBeenCalled());
       expect(mocks.launchShell.mock.calls[0][0].config.services).toEqual(DEFAULT_SERVICES);
@@ -2693,7 +2693,7 @@ describe('NtscLaunchModal', () => {
         }
       }, 15_000);
 
-      it('shows the source mode of an edited full config in the TensorBoard data source block', async () => {
+      it('shows the source mode of an edited full config in the TensorBoard Data Source block', async () => {
         mocks.getTaskTemplates.mockResolvedValue([GPU_TEMPLATE, TENSORBOARD_TEMPLATE]);
         const { onLaunched, user } = await setup();
         await openStartFrom(user);

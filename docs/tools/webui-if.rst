@@ -258,7 +258,7 @@ To find out how to view and modify the Job Queue in the WebUI, start with :ref:`
 An interactive task is a shell, which runs JupyterLab by default. To start one, select **Launch
 Interactive Task** on the **Jobs** page or a workspace's **Jobs** tab; under **Services**,
 **JupyterLab** and, when the master serves code-server, **VS Code** are checked, and unchecking a
-service leaves it out. Checking **TensorBoard** adds **TensorBoard data source**: **Determined
+service leaves it out. Checking **TensorBoard** adds **TensorBoard Data Source**: **Determined
 experiments** reads the TensorBoard logs of the experiments and trials given by ID, a trial of a
 listed experiment with its experiment; **Log directory in the task** is the directory that
 TensorBoard reads, relative to the shell's working directory unless it starts with ``/``; see
@@ -266,7 +266,7 @@ TensorBoard reads, relative to the shell's working directory unless it starts wi
 service is off, runs with 0 slots.
 
 .. image:: /assets/images/launch-interactive-task.png
-   :alt: The Launch Interactive Task form with TensorBoard checked under Services and Determined experiments selected under TensorBoard data source
+   :alt: The Launch Interactive Task form with TensorBoard checked under Services and Determined experiments selected under TensorBoard Data Source
 
 |
 
