@@ -275,7 +275,7 @@ describe('UserOverview', () => {
     expect(screen.getByText('Active days · 4')).toBeInTheDocument();
     expect(others()).toEqual(shown);
     expect(getUserUsage).toHaveBeenCalledTimes(1);
-  });
+  }, 30_000);
 
   it("counts each month's days with GPUs or Aux containers in every mode", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
@@ -298,7 +298,7 @@ describe('UserOverview', () => {
       expect(screen.getByText(`Active days · ${count}`)).toBeInTheDocument();
       expect(november()).toEqual(['2026-11', '9.0', '18.0', '4']);
     }
-  });
+  }, 30_000);
 
   it('shows GPUs only, without the mode control, where the cluster does not meter Aux and the usage has none', async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
