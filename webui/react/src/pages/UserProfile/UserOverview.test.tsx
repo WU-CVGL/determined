@@ -22,17 +22,44 @@ vi.mock('utils/error', async (importOriginal) => ({
   default: vi.fn(),
 }));
 
+/** The renders of the history blocks. */
+const renders = vi.hoisted(() => ({ calendar: 0, chart: 0, table: 0 }));
+
 /* The chart draws on a canvas; the stub shows what it was given. */
 vi.mock('pages/Cluster/ClusterHistoricalUsageChart', () => ({
-  default: (props: { hoursByLabel: Record<string, number[]>; label?: string; time: string[] }) => (
-    <div data-testid="usage-chart">
-      <span data-testid="chart-series">{Object.keys(props.hoursByLabel).join(',')}</span>
-      <span data-testid="chart-time">{props.time.join(',')}</span>
-      <span data-testid="chart-label">{props.label}</span>
-      <span data-testid="chart-values">{JSON.stringify(props.hoursByLabel)}</span>
-    </div>
-  ),
+  default: (props: { hoursByLabel: Record<string, number[]>; label?: string; time: string[] }) => {
+    renders.chart++;
+    return (
+      <div data-testid="usage-chart">
+        <span data-testid="chart-series">{Object.keys(props.hoursByLabel).join(',')}</span>
+        <span data-testid="chart-time">{props.time.join(',')}</span>
+        <span data-testid="chart-label">{props.label}</span>
+        <span data-testid="chart-values">{JSON.stringify(props.hoursByLabel)}</span>
+      </div>
+    );
+  },
 }));
+
+vi.mock('./UsageCalendar', async (importOriginal) => {
+  const { default: UsageCalendar } = await importOriginal<typeof import('./UsageCalendar')>();
+  return {
+    default: (props: React.ComponentProps<typeof UsageCalendar>) => {
+      renders.calendar++;
+      return <UsageCalendar {...props} />;
+    },
+  };
+});
+
+vi.mock('components/Table/ResponsiveTable', async (importOriginal) => {
+  const { default: ResponsiveTable } =
+    await importOriginal<typeof import('components/Table/ResponsiveTable')>();
+  return {
+    default: (props: React.ComponentProps<typeof ResponsiveTable>) => {
+      renders.table++;
+      return <ResponsiveTable {...props} />;
+    },
+  };
+});
 
 // A Tuesday: today is 2026-11-10 (UTC).
 const NOW = new Date('2026-11-10T15:00:00Z');
@@ -124,6 +151,7 @@ describe('UserOverview', () => {
   });
 
   afterEach(() => {
+    Object.assign(renders, { calendar: 0, chart: 0, table: 0 });
     visibility.mockRestore();
     vi.useRealTimers();
     vi.clearAllMocks();
@@ -134,7 +162,10 @@ describe('UserOverview', () => {
     await waitFor(() => expect(stat('GPUs')).toHaveTextContent('3'));
     expect(stat('Aux containers')).toHaveTextContent('1');
     expect(screen.queryByText('CPU slots')).not.toBeInTheDocument();
-    expect(getUserResources).toHaveBeenCalledWith({ userId: 4 });
+    expect(getUserResources).toHaveBeenCalledWith(
+      { userId: 4 },
+      { signal: expect.any(AbortSignal) },
+    );
     expect(screen.getByRole('radio', { name: 'GPU+Aux' })).toBeChecked();
   });
 
@@ -401,6 +432,46 @@ describe('UserOverview', () => {
     expect(getUserResources).toHaveBeenCalledTimes(4);
   });
 
+  it('renders the calendar, the chart and the table no more for the resources polls', async () => {
+    const pools = (gpus: number) => ({
+      auxMetered: true,
+      pools: [{ counts: { auxContainers: 0, cpuSlots: 0, gpus }, resourcePool: 'default' }],
+    });
+    setup();
+    await waitFor(() => expect(stat('GPUs')).toHaveTextContent('3'));
+    expect(await screen.findByTestId('usage-chart')).toBeInTheDocument();
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    const before = { ...renders };
+    expect(before.calendar).toBeGreaterThan(0);
+    expect(before.chart).toBeGreaterThan(0);
+    expect(before.table).toBeGreaterThan(0);
+
+    for (const gpus of [4, 5, 6]) {
+      vi.mocked(getUserResources).mockResolvedValue(pools(gpus));
+      await act(() => vi.advanceTimersByTimeAsync(RESOURCES_POLL_INTERVAL));
+      await waitFor(() => expect(stat('GPUs')).toHaveTextContent(String(gpus)));
+    }
+    expect(getUserResources).toHaveBeenCalledTimes(4);
+    expect(getUserUsage).toHaveBeenCalledTimes(1);
+    expect(renders).toEqual(before);
+  });
+
+  it('cancels the requests in flight when the overview goes away', async () => {
+    vi.mocked(getUserResources).mockReturnValue(new Promise(() => undefined));
+    vi.mocked(getUserUsage).mockReturnValue(new Promise(() => undefined));
+    const { unmount } = setup();
+    await waitFor(() => expect(getUserUsage).toHaveBeenCalled());
+    await waitFor(() => expect(getUserResources).toHaveBeenCalled());
+    const resourcesSignal = vi.mocked(getUserResources).mock.calls[0][1]?.signal;
+    const usageSignal = vi.mocked(getUserUsage).mock.calls[0][1]?.signal;
+    expect(resourcesSignal?.aborted).toBe(false);
+    expect(usageSignal?.aborted).toBe(false);
+    unmount();
+    expect(resourcesSignal?.aborted).toBe(true);
+    expect(usageSignal?.aborted).toBe(true);
+    expect(handleError).not.toHaveBeenCalled();
+  });
+
   it('keeps the last counts when a refresh fails', async () => {
     setup();
     await waitFor(() => expect(stat('GPUs')).toHaveTextContent('3'));
@@ -450,6 +521,8 @@ describe('UserOverview', () => {
     setup();
     await waitFor(() => expect(getUserResources).toHaveBeenCalledTimes(1));
     setHidden(true);
+    // Hiding the page cancels the request.
+    expect(vi.mocked(getUserResources).mock.calls[0][1]?.signal?.aborted).toBe(true);
     setHidden(false);
     await waitFor(() => expect(stat('GPUs')).toHaveTextContent('7'));
     await act(() => {
@@ -542,6 +615,28 @@ describe('UserOverview', () => {
       expect(screen.getByLabelText('2026-11-11')).toHaveClass('notCovered');
       expect(screen.getByLabelText('2026-11-09')).toHaveClass('level2');
       expect(screen.getByTestId('chart-time').textContent?.split(',')[0]).toBe('2026-10-12');
+    });
+
+    it("cancels the previous day's load at UTC midnight", async () => {
+      vi.setSystemTime(new Date('2026-11-10T23:59:50Z'));
+      const first = deferred<UserUsage>();
+      vi.mocked(getUserUsage).mockReturnValueOnce(first.promise);
+      setup();
+      await waitFor(() => expect(getUserUsage).toHaveBeenCalledTimes(1));
+      await act(() => vi.advanceTimersByTimeAsync(15_000));
+      expect(getUserUsage).toHaveBeenCalledTimes(2);
+      const signal = (call: number) => vi.mocked(getUserUsage).mock.calls[call][1]?.signal;
+      expect(signal(0)?.aborted).toBe(true);
+      expect(signal(1)?.aborted).toBe(false);
+      await act(() => {
+        first.resolve(coveredUsage(() => [13]));
+        return Promise.resolve();
+      });
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      // The new day's answer, not the late one.
+      expect(screen.getByLabelText('2026-11-11')).toBeInTheDocument();
+      expect(screen.getByLabelText('2026-11-09')).toHaveClass('level2');
+      expect(screen.getByLabelText('2026-11-08')).toHaveClass('level0');
     });
 
     it('keeps the usage shown, without a loading state or a toast, while a refresh loads and when it fails', async () => {

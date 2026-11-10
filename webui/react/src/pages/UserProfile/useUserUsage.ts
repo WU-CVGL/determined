@@ -48,23 +48,19 @@ const useUserUsage = (userId: number): UserUsageState => {
   const hasLoaded = useRef(false);
   const hasFailed = useRef(false);
   const pendingDay = useRef<string>();
-  const sequence = useRef(0);
-  const canceler = useRef(new AbortController());
+  const canceler = useRef<AbortController>();
 
-  // Answers that arrive after the unmount are dropped.
-  useEffect(() => {
-    const current = new AbortController();
-    canceler.current = current;
-    return () => current.abort();
-  }, []);
+  // Leaving the page cancels the load in flight.
+  useEffect(() => () => canceler.current?.abort(), []);
 
   const load = useCallback(
     async (day: string) => {
-      const request = ++sequence.current;
+      // A new load cancels the one in flight.
+      canceler.current?.abort();
+      canceler.current = new AbortController();
+      const { signal } = canceler.current;
       pendingDay.current = day;
       const { endDate, startDate } = usageRange(dayjs.utc(day).valueOf());
-      const signal = canceler.current.signal;
-      const current = () => !signal.aborted && request === sequence.current;
       try {
         const response = await getUserUsage(
           {
@@ -75,11 +71,11 @@ const useUserUsage = (userId: number): UserUsageState => {
           },
           { signal },
         );
-        if (!current()) return;
+        if (signal.aborted) return;
         hasLoaded.current = true;
         setUsage(Loaded(response));
       } catch (e) {
-        if (!current() || isAborted(e)) return;
+        if (signal.aborted || isAborted(e)) return;
         // A toast for the first failure only, not for every refresh after it.
         handleError(e, {
           publicSubject: 'Unable to fetch usage.',
