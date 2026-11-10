@@ -55,13 +55,13 @@ allocation data for analysis:
  Aggregates From Before the Rebuild
 ************************************
 
-The aggregates are derived from the allocation records. A master that changes how they are computed
-rebuilds them from those records and keeps the earlier ones in the database table
-``resource_aggregates_legacy``, with the columns of ``resource_aggregates``: ``date``,
-``aggregation_type`` (``total``, ``username``, ``experiment_label``, ``resource_pool``, and
-``queued`` for the queued time), ``aggregation_key`` and ``seconds``, which are slot-seconds.
-Neither the WebUI nor the endpoints read that table. It can be queried or exported from the
-database, for example the slot-hours by user and day:
+The database table ``resource_aggregates_legacy`` holds the aggregates that were computed before
+running tasks were counted: they miss the usage of a task that was still running when its day was
+aggregated. It has the columns of ``resource_aggregates``: ``date``, ``aggregation_type``,
+``aggregation_key`` and ``seconds``. For the types ``total``, ``username``, ``experiment_label`` and
+``resource_pool`` the seconds are slot-seconds; for ``queued`` they are the average seconds that
+tasks waited in the queue. Neither the WebUI nor the endpoints read that table. It can be queried or
+exported from the database, for example the slot-hours by user and day:
 
 .. code:: sql
 
