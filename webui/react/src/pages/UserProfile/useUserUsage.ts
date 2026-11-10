@@ -10,6 +10,7 @@ import handleError from 'utils/error';
 import { isAborted } from 'utils/service';
 
 import { DAY_FORMAT, todayUtc, usageRange } from './usage';
+import usePageHidden from './usePageHidden';
 
 dayjs.extend(utc);
 
@@ -39,18 +40,6 @@ export interface UserUsageState {
  * shown again after a minute. Nothing loads while the page is hidden; a failed refresh keeps the
  * usage shown.
  */
-/** Whether the page is hidden, from the document itself: also for a page opened hidden. */
-const usePageHidden = (): boolean => {
-  const [hidden, setHidden] = useState(() => document.hidden);
-  useEffect(() => {
-    const update = () => setHidden(document.hidden);
-    update();
-    document.addEventListener('visibilitychange', update);
-    return () => document.removeEventListener('visibilitychange', update);
-  }, []);
-  return hidden;
-};
-
 const useUserUsage = (userId: number): UserUsageState => {
   const hidden = usePageHidden();
   const [usage, setUsage] = useState<Loadable<UserUsage>>(NotLoaded);

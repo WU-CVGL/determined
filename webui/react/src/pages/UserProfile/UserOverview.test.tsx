@@ -5,7 +5,6 @@ import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { ThemeProvider } from 'components/ThemeProvider';
-import usePageVisibility from 'hooks/usePageVisibility';
 import { getUserResources, getUserUsage } from 'services/api';
 import { UserResources, UserUsage, UserUsageEntry } from 'types';
 import handleError from 'utils/error';
@@ -80,16 +79,9 @@ const coveredUsage = (
 /** GPU hours on two days. */
 const USAGE = coveredUsage((date) => [date === '2026-11-09' ? 6 : date === '2026-10-02' ? 2 : 0]);
 
-/* App keeps the page's visibility in the UI store; the overview alone does not. */
-const PageVisibility = () => {
-  usePageVisibility();
-  return null;
-};
-
 const Wrapper: React.FC<{ children?: React.ReactNode }> = ({ children }) => (
   <UIProvider theme={DefaultTheme.Light}>
     <ThemeProvider>
-      <PageVisibility />
       <MemoryRouter>{children}</MemoryRouter>
     </ThemeProvider>
   </UIProvider>
@@ -386,6 +378,51 @@ describe('UserOverview', () => {
       expect.any(Error),
       expect.objectContaining({ silent: true }),
     );
+  });
+
+  it('shows one toast while the current resources keep failing', async () => {
+    vi.mocked(getUserResources).mockRejectedValue(new Error('offline'));
+    setup();
+    await waitFor(() => expect(getUserResources).toHaveBeenCalledTimes(1));
+    await act(() => vi.advanceTimersByTimeAsync(4 * RESOURCES_POLL_INTERVAL));
+    expect(getUserResources).toHaveBeenCalledTimes(5);
+    const toasts = vi
+      .mocked(handleError)
+      .mock.calls.filter(([, options]) => options?.publicSubject?.includes('current resources'));
+    expect(toasts).toHaveLength(5);
+    expect(toasts.filter(([, options]) => !options?.silent)).toHaveLength(1);
+  });
+
+  it('reads no current resources while hidden from the start, and reads when shown', async () => {
+    hidden = true;
+    setup();
+    await act(() => vi.advanceTimersByTimeAsync(4 * RESOURCES_POLL_INTERVAL));
+    expect(getUserResources).not.toHaveBeenCalled();
+    setHidden(false);
+    await waitFor(() => expect(getUserResources).toHaveBeenCalledTimes(1));
+    await act(() => vi.advanceTimersByTimeAsync(RESOURCES_POLL_INTERVAL));
+    expect(getUserResources).toHaveBeenCalledTimes(2);
+  });
+
+  it('drops a late answer to a request sent before the page was hidden', async () => {
+    const first = deferred<UserResources>();
+    vi.mocked(getUserResources)
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValue({
+        auxMetered: true,
+        pools: [{ counts: { auxContainers: 0, cpuSlots: 0, gpus: 7 }, resourcePool: 'default' }],
+      });
+    setup();
+    await waitFor(() => expect(getUserResources).toHaveBeenCalledTimes(1));
+    setHidden(true);
+    setHidden(false);
+    await waitFor(() => expect(stat('GPUs')).toHaveTextContent('7'));
+    await act(() => {
+      first.resolve(RESOURCES);
+      return Promise.resolve();
+    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(stat('GPUs')).toHaveTextContent('7');
   });
 
   it('shows empty blocks when the requests fail', async () => {

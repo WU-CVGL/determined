@@ -7,7 +7,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import OverviewStats from 'components/OverviewStats';
 import Section from 'components/Section';
 import ResponsiveTable from 'components/Table/ResponsiveTable';
-import usePolling from 'hooks/usePolling';
 import { GroupBy } from 'pages/Cluster/ClusterHistoricalUsage.settings';
 import ClusterHistoricalUsageChart from 'pages/Cluster/ClusterHistoricalUsageChart';
 import { getUserResources } from 'services/api';
@@ -27,6 +26,7 @@ import {
   UsageRow,
 } from './usage';
 import UsageCalendar from './UsageCalendar';
+import usePageHidden from './usePageHidden';
 import css from './UserOverview.module.scss';
 import useUserUsage from './useUserUsage';
 
@@ -176,8 +176,11 @@ const UsageSections: React.FC<UsageSectionsProps> = ({ projection, userId }) => 
 const Overview: React.FC<{ userId: number }> = ({ userId }) => {
   const [resources, setResources] = useState<Loadable<UserResources>>(NotLoaded);
   const [mode, setMode] = useState<ResourceMode>(ResourceMode.Both);
+  const hidden = usePageHidden();
   const hasLoaded = useRef(false);
+  const hasFailed = useRef(false);
   const mounted = useRef(true);
+  const sequence = useRef(0);
 
   useEffect(() => {
     mounted.current = true;
@@ -187,23 +190,40 @@ const Overview: React.FC<{ userId: number }> = ({ userId }) => {
   }, []);
 
   const fetchResources = useCallback(async () => {
+    const request = ++sequence.current;
+    const current = () => mounted.current && request === sequence.current;
     try {
       const response = await getUserResources({ userId });
-      if (!mounted.current) return;
+      if (!current()) return;
       hasLoaded.current = true;
       setResources(Loaded(response));
     } catch (e) {
-      if (!mounted.current) return;
-      // A failed refresh keeps the last counts.
+      if (!current()) return;
+      // A failed refresh keeps the last counts; a toast for the first failure only.
       handleError(e, {
         publicSubject: 'Unable to fetch current resources.',
-        silent: hasLoaded.current,
+        silent: hasLoaded.current || hasFailed.current,
       });
+      hasFailed.current = true;
       if (!hasLoaded.current) setResources(Failed(e as Error));
     }
   }, [userId]);
 
-  usePolling(fetchResources, { interval: RESOURCES_POLL_INTERVAL });
+  // Every 15 s while the page is visible, from the end of the previous request.
+  useEffect(() => {
+    if (hidden) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      await fetchResources();
+      if (!stopped) timer = setTimeout(poll, RESOURCES_POLL_INTERVAL);
+    };
+    poll();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [fetchResources, hidden]);
 
   // Aux is shown where the cluster meters it; without the resources, GPUs only.
   const auxMetered = Loadable.match(resources, {
