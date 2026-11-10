@@ -20,12 +20,24 @@ allocs_in_range AS (
     FROM
         (
             SELECT
-                *,
-                tsrange(start_time, greatest(start_time, end_time)) AS range
+                allocations.*,
+                tsrange(
+                    allocations.start_time,
+                    -- An allocation that is still running (no end time) counts until the end of the
+                    -- period: days are aggregated once they have ended, so it ran for the rest of the
+                    -- period. Unlike now(), the end of the period does not depend on when or in which
+                    -- session time zone this runs. `greatest` keeps the range valid for an
+                    -- allocation that starts after the period.
+                    greatest(
+                        allocations.start_time,
+                        coalesce(allocations.end_time, upper(const.period))
+                    )
+                ) AS range
             FROM
-                allocations
+                allocations,
+                const
             WHERE
-                start_time IS NOT NULL
+                allocations.start_time IS NOT NULL
         ) AS a,
         const
     WHERE

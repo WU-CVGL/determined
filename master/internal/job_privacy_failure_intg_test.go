@@ -51,6 +51,13 @@ func (jobPrivacyEditorAuthZ) CanEditExperiment(
 	return nil
 }
 
+// CanEditExperimentsMetadata allows every user.
+func (jobPrivacyEditorAuthZ) CanEditExperimentsMetadata(
+	context.Context, model.User, *model.Experiment,
+) error {
+	return nil
+}
+
 var registerJobPrivacyEditorAuthZ sync.Once
 
 // useJobPrivacyEditorAuthZ makes every user an editor of every experiment until the test ends.
@@ -162,6 +169,121 @@ func TestJobPrivacyTrialUpsert(t *testing.T) {
 			require.Equal(t, want, put.Trial.LogPolicyMatched, "PutTrial")
 		})
 	}
+}
+
+// TestJobPrivacyUnmanagedTrialTasks checks that the tasks of unmanaged trials, created by
+// CreateTrial and PutTrial without a job of their own, take the capabilities of their experiment's
+// job, hidden and then shared, from jobprivacy.ForTasks and taskCaps.
+func TestJobPrivacyUnmanagedTrialTasks(t *testing.T) {
+	var aux, compute string
+	api, admin, _ := setupAPITest(t, nil, mockRMWithResolver(resolveOmittedPoolTo(&aux, &compute)))
+	lockJobPrivacyPolicy(t)
+	aux = accessTestPool(t, "aux", admin, false)
+	compute = accessTestPool(t, "compute", admin, false)
+	owner := addGCTestOwner(t)
+	other := addGCTestOwner(t)
+	ownerCtx := userContext(t, owner)
+	ctx := context.Background()
+
+	exp, err := api.PutExperiment(ownerCtx, &apiv1.PutExperimentRequest{
+		CreateExperimentRequest: &apiv1.CreateExperimentRequest{
+			Config: accessTestExperimentConfig(compute), Unmanaged: ptrs.Ptr(true), ProjectId: 1,
+		},
+		ExternalExperimentId: uuid.NewString(),
+	})
+	require.NoError(t, err)
+	created, err := api.CreateTrial(ownerCtx, &apiv1.CreateTrialRequest{
+		ExperimentId: exp.Experiment.Id, Unmanaged: true,
+	})
+	require.NoError(t, err)
+	put, err := api.PutTrial(ownerCtx, &apiv1.PutTrialRequest{
+		CreateTrialRequest: &apiv1.CreateTrialRequest{
+			ExperimentId: exp.Experiment.Id, Unmanaged: true,
+		},
+		ExternalTrialId: uuid.NewString(),
+	})
+	require.NoError(t, err)
+	taskIDs := []model.TaskID{
+		model.TaskID(created.Trial.TaskIds[0]), model.TaskID(put.Trial.TaskIds[0]),
+	}
+	for _, id := range taskIDs {
+		task, err := db.TaskByID(ctx, id)
+		require.NoError(t, err)
+		require.Nil(t, task.JobID, "the task of an unmanaged trial has no job of its own")
+	}
+
+	requireCaps := func(u model.User, want jobprivacy.Caps, msg string) {
+		t.Helper()
+		v := jobprivacy.Viewer{ID: u.ID}
+		caps, err := jobprivacy.ForTasks(ctx, v, taskIDs)
+		require.NoError(t, err, msg)
+		for _, id := range taskIDs {
+			require.Equal(t, want, caps[id], "ForTasks: %s", msg)
+			got, err := taskCaps(ctx, v, id)
+			require.NoError(t, err, msg)
+			require.Equal(t, want, got, "taskCaps: %s", msg)
+		}
+	}
+	jobID := exp.Experiment.JobId
+	shareJob(ownerCtx, t, api, jobID, false, false, false)
+	requireCaps(other, jobprivacy.Caps{}, "hidden")
+	requireCaps(owner, jobprivacy.AllCaps, "hidden, the owner")
+	shareJob(ownerCtx, t, api, jobID, true, true, true)
+	requireCaps(other, jobprivacy.Caps{ViewTitle: true, ViewLogs: true, ViewConfig: true}, "shared")
+	shareJob(ownerCtx, t, api, jobID, true, false, true)
+	requireCaps(other, jobprivacy.Caps{ViewTitle: true, ViewConfig: true}, "logs hidden")
+}
+
+// TestJobPrivacyLabelEdits checks that an editor who may not read an experiment's title can add
+// and remove one label: every response, those that change nothing included, carries no labels,
+// and the stored labels keep the others, which the editor never saw.
+func TestJobPrivacyLabelEdits(t *testing.T) {
+	api, _, _ := setupAPITest(t, nil)
+	lockJobPrivacyPolicy(t)
+	useJobPrivacyEditorAuthZ(t)
+	owner := addGCTestOwner(t)
+	editor := addGCTestOwner(t)
+	ownerCtx, editorCtx := userContext(t, owner), userContext(t, editor)
+
+	keepA, keepB, label := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	exp := createTestExpWithProjectID(t, api, owner, 1, keepA, keepB)
+	shareJob(ownerCtx, t, api, exp.JobID.String(), false, true, true)
+	expID := int32(exp.ID)
+
+	stored := func() []string {
+		t.Helper()
+		var labels []string
+		require.NoError(t, db.Bun().NewRaw(
+			`SELECT jsonb_array_elements_text(config->'labels') FROM experiments WHERE id = ?`,
+			expID).Scan(context.Background(), &labels))
+		return labels
+	}
+
+	put := func(msg string) {
+		t.Helper()
+		resp, err := api.PutExperimentLabel(editorCtx,
+			&apiv1.PutExperimentLabelRequest{ExperimentId: expID, Label: label})
+		require.NoError(t, err, msg)
+		require.Empty(t, resp.Labels, msg)
+		require.ElementsMatch(t, []string{keepA, keepB, label}, stored(), msg)
+	}
+	del := func(msg string) {
+		t.Helper()
+		resp, err := api.DeleteExperimentLabel(editorCtx,
+			&apiv1.DeleteExperimentLabelRequest{ExperimentId: expID, Label: label})
+		require.NoError(t, err, msg)
+		require.Empty(t, resp.Labels, msg)
+		require.ElementsMatch(t, []string{keepA, keepB}, stored(), msg)
+	}
+	put("add")
+	put("add a label that exists")
+	del("remove")
+	del("remove a label that is absent")
+
+	resp, err := api.PutExperimentLabel(ownerCtx,
+		&apiv1.PutExperimentLabelRequest{ExperimentId: expID, Label: label})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{keepA, keepB, label}, resp.Labels, "the owner reads them")
 }
 
 // exitAllocationService starts allocations as its AllocationService does and keeps their exit
