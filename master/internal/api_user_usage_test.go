@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
@@ -10,14 +9,12 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/determined-ai/determined/master/internal/sproto"
+	"github.com/determined-ai/determined/master/internal/userusage"
 	"github.com/determined-ai/determined/master/pkg/aproto"
 	"github.com/determined-ai/determined/master/pkg/device"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/master/pkg/ptrs"
-	"github.com/determined-ai/determined/proto/pkg/apiv1"
-	"github.com/determined-ai/determined/proto/pkg/devicev1"
 	"github.com/determined-ai/determined/proto/pkg/masterv1"
-	"github.com/determined-ai/determined/proto/pkg/resourcepoolv1"
 )
 
 const (
@@ -40,304 +37,59 @@ func day(t *testing.T, s string) time.Time {
 	return v
 }
 
-// usageRow is an allocation assigned at start (its QUEUED end) and ended at end, if set.
-func usageRow(pool string, slots int, start time.Time, end *time.Time) userAllocationRow {
+// usageRow is an allocation of a GPU assigned at start and released at end, if set.
+func usageRow(start time.Time, end *time.Time) userAllocationRow {
 	state := model.AllocationStateRunning
 	if end != nil {
 		state = model.AllocationStateTerminated
 	}
 	return userAllocationRow{
-		AllocationID: fmt.Sprintf("a-%s-%d", start, slots),
-		ResourcePool: pool,
-		Slots:        slots,
-		StartTime:    ptrs.Ptr(start.Add(time.Minute)),
-		EndTime:      end,
 		State:        &state,
-		QueuedEnd:    ptrs.Ptr(start),
+		MeteredKind:  string(userusage.KindGPU),
+		Quantity:     1,
+		AssignedTime: &start,
+		ReleasedTime: end,
 	}
-}
-
-// testPools has a CUDA, a CPU, an unspecified and a Kubernetes pool.
-func testPools() map[string]poolKind {
-	return poolKinds(&apiv1.GetResourcePoolsResponse{ResourcePools: []*resourcepoolv1.ResourcePool{
-		{
-			Name: "gpu", Type: resourcepoolv1.ResourcePoolType_RESOURCE_POOL_TYPE_STATIC,
-			SlotType: devicev1.Type_TYPE_CUDA,
-		},
-		{
-			Name: "cpu", Type: resourcepoolv1.ResourcePoolType_RESOURCE_POOL_TYPE_STATIC,
-			SlotType: devicev1.Type_TYPE_CPU,
-		},
-		{
-			Name: "mixed", Type: resourcepoolv1.ResourcePoolType_RESOURCE_POOL_TYPE_STATIC,
-			SlotType: devicev1.Type_TYPE_UNSPECIFIED,
-		},
-		{
-			Name: "k8s", Type: resourcepoolv1.ResourcePoolType_RESOURCE_POOL_TYPE_K8S,
-			SlotType: devicev1.Type_TYPE_CUDA,
-		},
-	}})
-}
-
-// dailyUsage returns the daily entries of rows from the first to the last day, both inclusive.
-func dailyUsage(
-	t *testing.T, rows []userAllocationRow, first, last string, asOf time.Time,
-	pools map[string]poolKind,
-) []*apiv1.UserUsageEntry {
-	return userUsage(rows, day(t, first), day(t, last), asOf, pools, usageDaily)
-}
-
-func TestUserUsageMidnightSplit(t *testing.T) {
-	asOf := utc(t, "2026-03-10 00:00")
-	rows := []userAllocationRow{
-		usageRow("gpu", 1, utc(t, "2026-03-01 20:00"), ptrs.Ptr(utc(t, "2026-03-02 04:00"))),
-	}
-	entries := dailyUsage(t, rows, "2026-03-01", "2026-03-03", asOf, testPools())
-	require.Len(t, entries, 3)
-	for i, label := range []string{"2026-03-01", "2026-03-02"} {
-		require.Equal(t, label, entries[i].PeriodStart)
-		require.InDelta(t, 4*hour, entries[i].GpuSeconds, 1e-6)
-		require.InDelta(t, 4*hour, entries[i].ActiveSeconds, 1e-6)
-		require.Equal(t, int32(1), entries[i].ActiveDays)
-		require.Zero(t, entries[i].CpuSlotSeconds)
-		require.Zero(t, *entries[i].AuxContainerSeconds)
-	}
-	require.Equal(t, "2026-03-03", entries[2].PeriodStart)
-	require.Zero(t, entries[2].ActiveSeconds)
-	require.Zero(t, entries[2].ActiveDays)
 }
 
 func TestUserUsageOpenAllocationCutAtAsOf(t *testing.T) {
 	asOf := utc(t, "2026-03-02 06:30")
-	rows := []userAllocationRow{usageRow("gpu", 2, utc(t, "2026-03-01 22:00"), nil)}
+	rows := []userAllocationRow{usageRow(utc(t, "2026-03-01 22:00"), nil)}
 	coverage := day(t, "2026-01-01")
 	rangeStart, rangeEnd, err := parseUsageRange("2026-03-01", "2026-03-05", usageDaily)
 	require.NoError(t, err)
 	from, to, ok := usageEntryBounds(rangeStart, rangeEnd, &coverage, asOf, usageDaily)
 	require.True(t, ok)
-	entries := userUsage(rows, from, to, asOf, testPools(), usageDaily)
+	entries := userUsage(rows, from, to, asOf, usageDaily)
 
 	require.Len(t, entries, 2, "days after as_of are absent")
 	require.Equal(t, "2026-03-01", entries[0].PeriodStart)
-	require.InDelta(t, 2*2*hour, entries[0].GpuSeconds, 1e-6)
+	require.InDelta(t, 2*hour, entries[0].GpuSeconds, 1e-6)
 	require.Equal(t, "2026-03-02", entries[1].PeriodStart)
-	require.InDelta(t, 2*6.5*hour, entries[1].GpuSeconds, 1e-6)
-	require.InDelta(t, 6.5*hour, entries[1].ActiveSeconds, 1e-6)
+	require.InDelta(t, 6.5*hour, entries[1].GpuSeconds, 1e-6)
+	require.InDelta(t, 6.5*hour, entries[1].GpuActiveSeconds, 1e-6)
+	require.InDelta(t, 6.5*hour, entries[1].GpuOrAuxActiveSeconds, 1e-6)
+	require.Equal(t, int32(1), entries[1].GpuActiveDays)
 }
 
-func TestUserUsageAux(t *testing.T) {
-	asOf := utc(t, "2026-03-10 00:00")
-	start, end := utc(t, "2026-03-01 10:00"), ptrs.Ptr(utc(t, "2026-03-01 13:00"))
-
-	entries := dailyUsage(t, []userAllocationRow{usageRow("gpu", 0, start, end)},
-		"2026-03-01", "2026-03-01", asOf, testPools())
-	require.Len(t, entries, 1)
-	require.Zero(t, entries[0].GpuSeconds)
-	require.Zero(t, entries[0].CpuSlotSeconds)
-	require.InDelta(t, 3*hour, *entries[0].AuxContainerSeconds, 1e-6)
-	require.InDelta(t, 3*hour, entries[0].ActiveSeconds, 1e-6)
-
-	// A zero-slot allocation in a Kubernetes pool counts nothing.
-	entries = dailyUsage(t, []userAllocationRow{usageRow("k8s", 0, start, end)},
-		"2026-03-01", "2026-03-01", asOf, testPools())
-	require.Len(t, entries, 1)
-	require.Zero(t, *entries[0].AuxContainerSeconds)
-	require.Zero(t, entries[0].ActiveSeconds)
-	require.Zero(t, entries[0].ActiveDays)
-
-	// Aux is unset when every pool is Kubernetes.
-	k8sOnly := map[string]poolKind{"k8s": {k8s: true}}
-	entries = dailyUsage(t, []userAllocationRow{
-		usageRow("k8s", 0, start, end), usageRow("k8s", 2, start, end),
-	}, "2026-03-01", "2026-03-01", asOf, k8sOnly)
-	require.Len(t, entries, 1)
-	require.Nil(t, entries[0].AuxContainerSeconds)
-	require.InDelta(t, 2*3*hour, entries[0].GpuSeconds, 1e-6)
-	require.InDelta(t, 3*hour, entries[0].ActiveSeconds, 1e-6)
-}
-
-func TestUserUsagePoolSlotType(t *testing.T) {
-	asOf := utc(t, "2026-03-10 00:00")
-	start, end := utc(t, "2026-03-01 10:00"), ptrs.Ptr(utc(t, "2026-03-01 11:00"))
-	cases := []struct {
-		pool          string
-		gpus, cpuSlot float64
-	}{
-		{"cpu", 0, 3 * hour},
-		{"gpu", 3 * hour, 0},
-		{"mixed", 3 * hour, 0},
-		{"removed", 3 * hour, 0},
-		{"k8s", 3 * hour, 0},
-	}
-	for _, c := range cases {
-		t.Run(c.pool, func(t *testing.T) {
-			entries := dailyUsage(t, []userAllocationRow{usageRow(c.pool, 3, start, end)},
-				"2026-03-01", "2026-03-01", asOf, testPools())
-			require.Len(t, entries, 1)
-			require.InDelta(t, c.gpus, entries[0].GpuSeconds, 1e-6)
-			require.InDelta(t, c.cpuSlot, entries[0].CpuSlotSeconds, 1e-6)
-			require.InDelta(t, hour, entries[0].ActiveSeconds, 1e-6)
-		})
-	}
-}
-
-func TestUserUsageIntervalGuards(t *testing.T) {
-	asOf := utc(t, "2026-03-01 12:00")
-	queued := utc(t, "2026-03-01 08:00")
-	pulled := utc(t, "2026-03-01 09:00")
-	ended := utc(t, "2026-03-01 10:00")
-	terminated := model.AllocationStateTerminated
-	running := model.AllocationStateRunning
-	cases := []struct {
-		name  string
-		row   userAllocationRow
-		start time.Time
-		end   time.Time
-		none  bool
-	}{
-		{
-			name: "closed at a master start without holding resources",
-			row: userAllocationRow{
-				Slots: 1, QueuedEnd: &queued, StartTime: &ended, EndTime: &ended, State: &terminated,
-			},
-			none: true,
-		},
-		{
-			name: "killed before pulling",
-			row:  userAllocationRow{Slots: 1, QueuedEnd: &queued, State: &terminated},
-			none: true,
-		},
-		{
-			name:  "in finalize's write window",
-			row:   userAllocationRow{Slots: 1, QueuedEnd: &queued, StartTime: &pulled, State: &terminated},
-			start: queued,
-			end:   asOf,
-		},
-		{
-			name: "no QUEUED row and no start time",
-			row:  userAllocationRow{Slots: 1, EndTime: &ended, State: &terminated},
-			none: true,
-		},
-		{
-			name:  "the QUEUED end before the start time",
-			row:   userAllocationRow{Slots: 1, QueuedEnd: &queued, StartTime: &pulled, EndTime: &ended},
-			start: queued,
-			end:   ended,
-		},
-		{
-			name:  "no QUEUED row",
-			row:   userAllocationRow{Slots: 1, StartTime: &pulled, EndTime: &ended, State: &terminated},
-			start: pulled,
-			end:   ended,
-		},
-		{
-			name:  "running",
-			row:   userAllocationRow{Slots: 1, QueuedEnd: &queued, StartTime: &pulled, State: &running},
-			start: queued,
-			end:   asOf,
-		},
-		{
-			name:  "ended after as_of",
-			row:   userAllocationRow{Slots: 1, QueuedEnd: &queued, EndTime: ptrs.Ptr(asOf.Add(time.Hour))},
-			start: queued,
-			end:   asOf,
-		},
-		{
-			name: "assigned after as_of",
-			row:  userAllocationRow{Slots: 1, QueuedEnd: ptrs.Ptr(asOf.Add(time.Hour)), State: &running},
-			none: true,
-		},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			intervals := usageIntervals([]userAllocationRow{c.row}, asOf, testPools())
-			if c.none {
-				require.Empty(t, intervals)
-				return
-			}
-			require.Len(t, intervals, 1)
-			require.Equal(t, c.start, intervals[0].start)
-			require.Equal(t, c.end, intervals[0].end)
-		})
-	}
-}
-
-func TestUserUsageUnion(t *testing.T) {
-	asOf := utc(t, "2026-03-10 00:00")
-	rows := []userAllocationRow{
-		usageRow("gpu", 1, utc(t, "2026-03-01 10:00"), ptrs.Ptr(utc(t, "2026-03-01 12:00"))),
-		usageRow("gpu", 1, utc(t, "2026-03-01 11:00"), ptrs.Ptr(utc(t, "2026-03-01 13:00"))),
-	}
-	entries := dailyUsage(t, rows, "2026-03-01", "2026-03-01", asOf, testPools())
-	require.Len(t, entries, 1)
-	require.InDelta(t, 4*hour, entries[0].GpuSeconds, 1e-6)
-	require.InDelta(t, 3*hour, entries[0].ActiveSeconds, 1e-6)
-
-	require.Zero(t, unionSeconds(nil))
-	require.InDelta(t, 3*hour, unionSeconds([]timeSpan{
-		{utc(t, "2026-03-01 12:00"), utc(t, "2026-03-01 13:00")},
-		{utc(t, "2026-03-01 08:00"), utc(t, "2026-03-01 09:00")},
-		{utc(t, "2026-03-01 08:30"), utc(t, "2026-03-01 08:45")},
-		{utc(t, "2026-03-01 09:00"), utc(t, "2026-03-01 10:00")},
-	}), 1e-6)
-}
-
-func TestUserUsageMonthly(t *testing.T) {
+func TestUserUsageMonthlyEntries(t *testing.T) {
 	asOf := utc(t, "2026-01-01 00:00")
 	rows := []userAllocationRow{
-		// Leap February, and January and March around it.
-		usageRow("gpu", 2, utc(t, "2024-01-31 12:00"), ptrs.Ptr(utc(t, "2024-03-01 06:00"))),
-		// April has 30 days.
-		usageRow("cpu", 1, utc(t, "2024-04-30 23:00"), ptrs.Ptr(utc(t, "2024-05-01 01:00"))),
-		usageRow("gpu", 0, utc(t, "2024-04-10 00:00"), ptrs.Ptr(utc(t, "2024-04-12 00:00"))),
+		usageRow(utc(t, "2024-01-31 12:00"), ptrs.Ptr(utc(t, "2024-03-01 06:00"))),
 	}
-	pools := testPools()
-	months := userUsage(rows, day(t, "2024-01-01"), day(t, "2024-05-01"), asOf, pools, usageMonthly)
-	days := userUsage(rows, day(t, "2024-01-01"), day(t, "2024-05-31"), asOf, pools, usageDaily)
-	require.Len(t, days, 31+29+31+30+31)
-	require.Len(t, months, 5)
-
-	type want struct {
-		label                 string
-		gpu, cpu, aux, active float64
-		activeDays            int32
+	entries := userUsage(rows, day(t, "2024-01-01"), day(t, "2024-04-01"), asOf, usageMonthly)
+	require.Len(t, entries, 4)
+	for i, want := range []struct {
+		label string
+		hours float64
+		days  int32
+	}{{"2024-01", 12, 1}, {"2024-02", 29 * 24, 29}, {"2024-03", 6, 1}, {"2024-04", 0, 0}} {
+		require.Equal(t, want.label, entries[i].PeriodStart)
+		require.InDelta(t, want.hours*hour, entries[i].GpuSeconds, 1e-6, want.label)
+		require.Equal(t, want.days, entries[i].GpuActiveDays, want.label)
+		require.Equal(t, want.days, entries[i].GpuOrAuxActiveDays, want.label)
+		require.Zero(t, entries[i].AuxActiveDays, want.label)
 	}
-	wants := []want{
-		{"2024-01", 2 * 12 * hour, 0, 0, 12 * hour, 1},
-		{"2024-02", 2 * 29 * 24 * hour, 0, 0, 29 * 24 * hour, 29},
-		{"2024-03", 2 * 6 * hour, 0, 0, 6 * hour, 1},
-		{"2024-04", 0, hour, 48 * hour, 49 * hour, 3},
-		{"2024-05", 0, hour, 0, hour, 1},
-	}
-	for i, w := range wants {
-		m := months[i]
-		require.Equal(t, w.label, m.PeriodStart)
-		require.InDelta(t, w.gpu, m.GpuSeconds, 1e-6, w.label)
-		require.InDelta(t, w.cpu, m.CpuSlotSeconds, 1e-6, w.label)
-		require.InDelta(t, w.aux, *m.AuxContainerSeconds, 1e-6, w.label)
-		require.InDelta(t, w.active, m.ActiveSeconds, 1e-6, w.label)
-		require.Equal(t, w.activeDays, m.ActiveDays, w.label)
-
-		// A month is the sum of its days.
-		var gpu, cpu, aux, active float64
-		var activeDays int32
-		for _, d := range days {
-			if d.PeriodStart[:7] == w.label {
-				gpu += d.GpuSeconds
-				cpu += d.CpuSlotSeconds
-				aux += *d.AuxContainerSeconds
-				active += d.ActiveSeconds
-				activeDays += d.ActiveDays
-			}
-		}
-		require.InDelta(t, gpu, m.GpuSeconds, 1e-6, w.label)
-		require.InDelta(t, cpu, m.CpuSlotSeconds, 1e-6, w.label)
-		require.InDelta(t, aux, *m.AuxContainerSeconds, 1e-6, w.label)
-		require.InDelta(t, active, m.ActiveSeconds, 1e-6, w.label)
-		require.Equal(t, activeDays, m.ActiveDays, w.label)
-	}
-	require.Equal(t, "2024-02-29", days[31+28].PeriodStart)
-	require.InDelta(t, 2*24*hour, days[31+28].GpuSeconds, 1e-6)
 }
 
 func TestUserUsageRange(t *testing.T) {
@@ -383,7 +135,7 @@ func TestUserUsageEntryBounds(t *testing.T) {
 	require.Equal(t, coverage, from)
 	require.Equal(t, day(t, "2026-03-20"), to)
 
-	entries := userUsage(nil, from, to, asOf, testPools(), usageDaily)
+	entries := userUsage(nil, from, to, asOf, usageDaily)
 	require.Len(t, entries, 11)
 	require.Equal(t, "2026-03-10", entries[0].PeriodStart)
 	require.Equal(t, "2026-03-20", entries[10].PeriodStart)
@@ -402,7 +154,7 @@ func TestUserUsageEntryBounds(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, day(t, "2026-03-01"), from)
 	require.Equal(t, day(t, "2026-03-01"), to)
-	entries = userUsage(nil, from, to, asOf, testPools(), usageMonthly)
+	entries = userUsage(nil, from, to, asOf, usageMonthly)
 	require.Len(t, entries, 1)
 	require.Equal(t, "2026-03", entries[0].PeriodStart)
 }
@@ -415,11 +167,11 @@ func containerSummary(agent string, devices ...device.Device) sproto.ResourcesSu
 	}
 }
 
-// k8sSummary is the summary of a Kubernetes job holding n typeless devices.
-func k8sSummary(n int) sproto.ResourcesSummary {
+// k8sSummary is the summary of a Kubernetes job holding n devices of a type.
+func k8sSummary(typ device.Type, n int) sproto.ResourcesSummary {
 	return sproto.ResourcesSummary{
 		ResourcesType: sproto.ResourcesTypeK8sJob,
-		AgentDevices:  map[aproto.ID][]device.Device{"pods": make([]device.Device, n)},
+		AgentDevices:  map[aproto.ID][]device.Device{"pods": devices(typ, n)},
 	}
 }
 
@@ -440,8 +192,7 @@ func TestCurrentResources(t *testing.T) {
 	agentrm := func(gpus, cpuSlots, aux int32) counts { return counts{gpus, cpuSlots, &aux} }
 	k8s := func(gpus, cpuSlots int32) counts { return counts{gpus, cpuSlots, nil} }
 
-	pools := testPools()
-	pools["k8s-cpu"] = poolKind{k8s: true, cpu: true}
+	k8sPools := map[string]bool{"gpu": false, "cpu": false, "k8s": true}
 	distributed := []sproto.ResourcesSummary{
 		containerSummary("a1", devices(device.CUDA, 4)...),
 		containerSummary("a2", devices(device.CUDA, 4)...),
@@ -468,22 +219,35 @@ func TestCurrentResources(t *testing.T) {
 			ptrs.Ptr(agentrm(0, 1, 0)),
 		},
 		{
-			"typeless in a CPU pool", "cpu",
-			[]sproto.ResourcesSummary{containerSummary("a1", devices(device.ZeroSlot, 2)...)},
-			ptrs.Ptr(agentrm(0, 2, 0)),
+			"cuda and cpu: the gpus", "gpu",
+			[]sproto.ResourcesSummary{containerSummary("a1",
+				append(devices(device.CUDA, 1), device.Device{ID: 7, Type: device.CPU})...)},
+			ptrs.Ptr(agentrm(1, 0, 0)),
 		},
 		{
-			"typeless in an unknown pool", "removed",
-			[]sproto.ResourcesSummary{containerSummary("a1", devices(device.ZeroSlot, 2)...)},
-			ptrs.Ptr(agentrm(2, 0, 0)),
+			"unknown device type: not counted", "removed",
+			[]sproto.ResourcesSummary{containerSummary("a1", devices("tpu", 2)...)},
+			nil,
 		},
 		{"0 devices", "gpu", []sproto.ResourcesSummary{containerSummary("a1")}, ptrs.Ptr(agentrm(0, 0, 1))},
+		{
+			"0 devices in an unreported pool",
+			"removed",
+			[]sproto.ResourcesSummary{containerSummary("a1")},
+			ptrs.Ptr(agentrm(0, 0, 1)),
+		},
 		{"distributed", "gpu", distributed, ptrs.Ptr(agentrm(8, 0, 0))},
 		{"distributed after one container is released", "gpu", distributed[1:], ptrs.Ptr(agentrm(4, 0, 0))},
 		{"queued", "gpu", nil, nil},
-		{"k8s in a CUDA pool", "k8s", []sproto.ResourcesSummary{k8sSummary(8)}, ptrs.Ptr(k8s(8, 0))},
-		{"k8s in a CPU pool", "k8s-cpu", []sproto.ResourcesSummary{k8sSummary(8)}, ptrs.Ptr(k8s(0, 8))},
-		{"k8s without devices", "k8s", []sproto.ResourcesSummary{k8sSummary(0)}, nil},
+		{"k8s cuda", "k8s", []sproto.ResourcesSummary{k8sSummary(device.CUDA, 8)}, ptrs.Ptr(k8s(8, 0))},
+		{"k8s cpu", "k8s", []sproto.ResourcesSummary{k8sSummary(device.CPU, 8)}, ptrs.Ptr(k8s(0, 8))},
+		{
+			"k8s job in an unreported pool",
+			"removed",
+			[]sproto.ResourcesSummary{k8sSummary(device.CUDA, 2)},
+			ptrs.Ptr(k8s(2, 0)),
+		},
+		{"k8s without devices", "k8s", []sproto.ResourcesSummary{k8sSummary(device.CUDA, 0)}, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -494,7 +258,7 @@ func TestCurrentResources(t *testing.T) {
 					Resources: []sproto.ResourcesSummary{containerSummary("a3", devices(device.CUDA, 1)...)},
 				},
 			}
-			got := currentResources(summaries, map[model.TaskID]bool{"mine": true}, pools)
+			got := currentResources(summaries, map[model.TaskID]bool{"mine": true}, k8sPools)
 			if c.want == nil {
 				require.Empty(t, got)
 				return
@@ -517,10 +281,12 @@ func TestCurrentResourcesByPool(t *testing.T) {
 		"t3.1": {TaskID: "t3", ResourcePool: "cpu", Resources: []sproto.ResourcesSummary{
 			containerSummary("c1", devices(device.CPU, 3)...),
 		}},
-		"t4.1": {TaskID: "t4", ResourcePool: "k8s", Resources: []sproto.ResourcesSummary{k8sSummary(1)}},
+		"t4.1": {TaskID: "t4", ResourcePool: "k8s", Resources: []sproto.ResourcesSummary{
+			k8sSummary(device.CUDA, 1),
+		}},
 	}
 	owned := map[model.TaskID]bool{"t1": true, "t2": true, "t3": true, "t4": true}
-	got := currentResources(summaries, owned, testPools())
+	got := currentResources(summaries, owned, map[string]bool{"k8s": true})
 	require.Len(t, got, 3)
 	require.Equal(t, "cpu", got[0].ResourcePool)
 	require.Equal(t, int32(3), got[0].Counts.CpuSlots)

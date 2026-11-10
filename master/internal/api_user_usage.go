@@ -18,7 +18,6 @@ import (
 	"github.com/determined-ai/determined/master/internal/userusage"
 	"github.com/determined-ai/determined/master/pkg/model"
 	"github.com/determined-ai/determined/proto/pkg/apiv1"
-	"github.com/determined-ai/determined/proto/pkg/devicev1"
 	"github.com/determined-ai/determined/proto/pkg/masterv1"
 	"github.com/determined-ai/determined/proto/pkg/resourcepoolv1"
 )
@@ -60,9 +59,17 @@ func (a *apiServer) GetUserResources(
 	}
 	asOf := time.Now().UTC().Truncate(time.Second)
 
-	pools, err := a.resourcePoolKinds()
+	// The resource manager's pools are not filtered by the viewer's pool access.
+	pools, err := a.m.rm.GetResourcePools()
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Unavailable, "reading resource pools: %s", err)
+	}
+	k8sPools := map[string]bool{}
+	auxMetered := false
+	for _, p := range pools.GetResourcePools() {
+		k8s := p.Type == resourcepoolv1.ResourcePoolType_RESOURCE_POOL_TYPE_K8S
+		k8sPools[p.Name] = k8s
+		auxMetered = auxMetered || !k8s
 	}
 	summaries, err := a.m.rm.GetAllocationSummaries()
 	if err != nil {
@@ -83,8 +90,9 @@ func (a *apiServer) GetUserResources(
 	}
 
 	return &apiv1.GetUserResourcesResponse{
-		Pools: currentResources(summaries, owned, pools),
-		AsOf:  timestamppb.New(asOf),
+		Pools:      currentResources(summaries, owned, k8sPools),
+		AsOf:       timestamppb.New(asOf),
+		AuxMetered: auxMetered,
 	}, nil
 }
 
@@ -109,11 +117,9 @@ func (a *apiServer) GetUserUsage(
 	}
 	asOf := time.Now().UTC().Truncate(time.Second)
 
-	pools, err := a.resourcePoolKinds()
-	if err != nil {
-		return nil, err
-	}
-	coverageStart, err := a.m.userUsageCoverage.get(ctx)
+	readCtx, cancel := context.WithTimeout(ctx, userUsageReadTimeout)
+	defer cancel()
+	coverageStart, err := a.m.userUsageCoverage.get(readCtx, db.Bun())
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "reading the first allocation: %s", err)
 	}
@@ -130,58 +136,12 @@ func (a *apiServer) GetUserUsage(
 		return resp, nil
 	}
 
-	readCtx, cancel := context.WithTimeout(ctx, userUsageReadTimeout)
-	defer cancel()
 	rows, err := readUserAllocations(readCtx, db.Bun(), target.ID, rangeStart, minTime(rangeEnd, asOf))
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "reading allocations: %s", err)
 	}
-	resp.Entries = userUsage(rows, from, to, asOf, pools, req.Period)
+	resp.Entries = userUsage(rows, from, to, asOf, req.Period)
 	return resp, nil
-}
-
-// poolKind is what metering needs to know about a resource pool. The zero value, used for a pool
-// that is not reported (removed, or never seen), is an agentrm pool whose slots count as GPUs.
-type poolKind struct {
-	// k8s is set for a Kubernetes pool, which has no Aux containers.
-	k8s bool
-	// cpu is set when the pool's slot type is CPU; any other slot type counts as GPUs.
-	cpu bool
-}
-
-// resourcePoolKinds reads the resource pools from the resource manager.
-func (a *apiServer) resourcePoolKinds() (map[string]poolKind, error) {
-	resp, err := a.m.rm.GetResourcePools()
-	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "reading resource pools: %s", err)
-	}
-	return poolKinds(resp), nil
-}
-
-// poolKinds maps each reported pool's name to its kind.
-func poolKinds(resp *apiv1.GetResourcePoolsResponse) map[string]poolKind {
-	kinds := map[string]poolKind{}
-	for _, p := range resp.GetResourcePools() {
-		kinds[p.Name] = poolKind{
-			k8s: p.Type == resourcepoolv1.ResourcePoolType_RESOURCE_POOL_TYPE_K8S,
-			cpu: p.SlotType == devicev1.Type_TYPE_CPU,
-		}
-	}
-	return kinds
-}
-
-// auxAvailable reports whether Aux containers are metered: unless every reported pool is a
-// Kubernetes pool. Unreported pools count as agentrm pools, so an empty list meters Aux.
-func auxAvailable(pools map[string]poolKind) bool {
-	if len(pools) == 0 {
-		return true
-	}
-	for _, p := range pools {
-		if !p.k8s {
-			return true
-		}
-	}
-	return false
 }
 
 // userTaskIDs returns which of taskIDs belong to jobs the user owns. Checkpoint GC tasks run
@@ -215,30 +175,34 @@ type poolCounts struct {
 	k8s bool
 }
 
-// currentResources counts the resources the owned tasks hold, by pool (userusage.Count). Pools
-// without any count are left out; the result is sorted by pool name.
+// currentResources counts the resources the owned tasks hold, by pool, as the assignment meters
+// them (userusage.Assigned); unclassified resources are not counted. k8sPools marks the
+// Kubernetes pools, which have no aux containers. Pools without any count are left out; the
+// result is sorted by pool name.
 func currentResources(
 	summaries map[model.AllocationID]sproto.AllocationSummary,
 	owned map[model.TaskID]bool,
-	pools map[string]poolKind,
+	k8sPools map[string]bool,
 ) []*apiv1.UserPoolResources {
 	counts := map[string]*poolCounts{}
 	for _, s := range summaries {
 		if !owned[s.TaskID] || len(s.Resources) == 0 {
 			continue
 		}
-		pool := pools[s.ResourcePool]
 		c := counts[s.ResourcePool]
 		if c == nil {
-			c = &poolCounts{k8s: pool.k8s}
+			c = &poolCounts{k8s: k8sPools[s.ResourcePool]}
 			counts[s.ResourcePool] = c
 		}
-		for _, r := range s.Resources {
-			rc := userusage.Count(r, pool.k8s, pool.cpu)
-			c.gpus += rc.GPUs
-			c.cpuSlots += rc.CPUSlots
-			c.aux += rc.Aux
-			c.k8s = c.k8s || rc.K8s
+		c.k8s = c.k8s || s.Resources[0].ResourcesType == sproto.ResourcesTypeK8sJob
+		kind, n := userusage.Assigned(s.Resources, s.SlotsNeeded)
+		switch kind {
+		case userusage.KindGPU:
+			c.gpus += n
+		case userusage.KindCPU:
+			c.cpuSlots += n
+		case userusage.KindAux:
+			c.aux += n
 		}
 	}
 
@@ -331,19 +295,77 @@ func usageEntryBounds(
 	return from, to, true
 }
 
-// userAllocationRow is one allocation of a user's tasks, with the end of its first QUEUED
-// task_stats row, when its resources were assigned.
+// userAllocationRow is one allocation of a user's tasks as stored.
 type userAllocationRow struct {
 	AllocationID string                 `bun:"allocation_id"`
-	ResourcePool string                 `bun:"resource_pool"`
-	Slots        int                    `bun:"slots"`
+	State        *model.AllocationState `bun:"state"`
+	MeteredKind  string                 `bun:"metered_kind"`
+	Quantity     int                    `bun:"quantity"`
+	AssignedTime *time.Time             `bun:"assigned_time"`
+	ReleasedTime *time.Time             `bun:"released_time"`
 	StartTime    *time.Time             `bun:"start_time"`
 	EndTime      *time.Time             `bun:"end_time"`
-	State        *model.AllocationState `bun:"state"`
 	QueuedEnd    *time.Time             `bun:"queued_end"`
 }
 
-// readUserAllocations reads the allocations of the user's tasks that may overlap
+// record returns the row as userusage meters it.
+func (r userAllocationRow) record() userusage.Record {
+	return userusage.Record{
+		Kind:      userusage.Kind(r.MeteredKind),
+		Quantity:  r.Quantity,
+		Terminal:  r.State != nil && *r.State == model.AllocationStateTerminated,
+		Assigned:  r.AssignedTime,
+		Released:  r.ReleasedTime,
+		QueuedEnd: r.QueuedEnd,
+		Start:     r.StartTime,
+		End:       r.EndTime,
+	}
+}
+
+// heldSQL joins, for the allocations a, when their resources were held: held_from and held_until,
+// timestamp with time zone. The allocations times are timestamp without time zone in UTC; AT TIME
+// ZONE 'UTC' reads them as UTC whatever the session time zone. Allocations from before metering
+// have no assignment record: they are held from the end of their first QUEUED task_stats row (a
+// restored allocation records another one at each master start), else their start time, to their
+// end time. The QUEUED row is looked up for those only.
+const heldSQL = `
+LEFT JOIN LATERAL (
+    SELECT min(ts.end_time) AS queued_end
+    FROM task_stats ts
+    WHERE a.assigned_time IS NULL
+      AND ts.allocation_id = a.allocation_id
+      AND ts.event_type = 'QUEUED' AND ts.end_time IS NOT NULL
+) q ON true
+CROSS JOIN LATERAL (
+    SELECT
+        CASE WHEN a.assigned_time IS NOT NULL THEN a.assigned_time AT TIME ZONE 'UTC'
+             ELSE coalesce(q.queued_end, a.start_time AT TIME ZONE 'UTC') END AS held_from,
+        CASE WHEN a.assigned_time IS NOT NULL THEN a.released_time
+             ELSE a.end_time END AT TIME ZONE 'UTC' AS held_until
+) h`
+
+// meteredSQL holds for the allocations a, joined with heldSQL, that userusage.Intervals meters
+// them, apart from the cut at the time of the request: a kind other than none, a quantity, a
+// start, and a positive time held, or, without an end, no terminated state. An allocation from
+// before metering whose start time equals its end time was closed at a master start without ever
+// holding resources.
+const meteredSQL = `(
+    a.metered_kind IS NOT NULL AND a.metered_kind <> 'none'
+    AND coalesce(a.metered_quantity, a.slots) > 0
+    AND h.held_from IS NOT NULL
+    AND NOT (a.assigned_time IS NULL AND a.start_time IS NOT NULL
+             AND a.start_time IS NOT DISTINCT FROM a.end_time)
+    AND CASE WHEN h.held_until IS NULL THEN a.state IS DISTINCT FROM 'TERMINATED'
+             ELSE h.held_until > h.held_from END
+)`
+
+// userAllocationColumns selects a userAllocationRow from the allocations a joined with heldSQL. An
+// allocation from before metering whose kind is not known yet counts its slots.
+const userAllocationColumns = `a.allocation_id, a.state, a.metered_kind,
+       coalesce(a.metered_quantity, a.slots) AS quantity,
+       a.assigned_time, a.released_time, a.start_time, a.end_time, q.queued_end`
+
+// readUserAllocations reads the metered allocations of the user's tasks that may overlap
 // [rangeStart, rangeEnd). Checkpoint GC tasks are not counted.
 func readUserAllocations(
 	ctx context.Context, idb bun.IDB, userID model.UserID, rangeStart, rangeEnd time.Time,
@@ -351,26 +373,15 @@ func readUserAllocations(
 	rows := []userAllocationRow{}
 	// bun sends the bounds as UTC literals with the offset +00:00.
 	err := idb.NewRaw(`
-SELECT a.allocation_id, a.resource_pool, a.slots, a.start_time, a.end_time, a.state,
-       q.queued_end
+SELECT `+userAllocationColumns+`
 FROM jobs j
 JOIN tasks t ON t.job_id = j.job_id
-JOIN allocations a ON a.task_id = t.task_id
--- The first QUEUED row ends when the allocation got its resources (a restored allocation
--- records another one at each master start).
-LEFT JOIN LATERAL (
-    SELECT min(ts.end_time) AS queued_end
-    FROM task_stats ts
-    WHERE ts.allocation_id = a.allocation_id
-      AND ts.event_type = 'QUEUED' AND ts.end_time IS NOT NULL
-) q ON true
+JOIN allocations a ON a.task_id = t.task_id`+heldSQL+`
 WHERE j.owner_id = ?
   AND t.task_type <> 'CHECKPOINT_GC'
-  -- task_stats times are timestamp with time zone, allocations times timestamp without time
-  -- zone written in UTC. Both sides compare as timestamp with time zone, with the allocations
-  -- times read as UTC: otherwise Postgres reads them in the session TimeZone.
-  AND coalesce(q.queued_end, a.start_time AT TIME ZONE 'UTC') < ?
-  AND (a.end_time IS NULL OR a.end_time AT TIME ZONE 'UTC' > ?)`,
+  AND `+meteredSQL+`
+  AND h.held_from < ?
+  AND (h.held_until IS NULL OR h.held_until > ?)`,
 		userID, rangeEnd.UTC(), rangeStart.UTC()).Scan(ctx, &rows)
 	if err != nil {
 		return nil, err
@@ -378,213 +389,81 @@ WHERE j.owner_id = ?
 	return rows, nil
 }
 
-// userUsageCoverage caches the first day with allocation records. It only changes from none to a
-// day, so it is read again only while there is none.
-type userUsageCoverage struct {
-	mu    sync.Mutex
-	start *time.Time
-}
-
-// get returns the first day with allocation records, or nil when there are none.
-func (c *userUsageCoverage) get(ctx context.Context) (*time.Time, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.start != nil {
-		return c.start, nil
-	}
+// readUsageCoverage returns the start of the first metered allocation, or nil when there is none.
+func readUsageCoverage(ctx context.Context, idb bun.IDB) (*time.Time, error) {
 	var first sql.NullTime
-	if err := db.Bun().NewRaw(
-		`SELECT date_trunc('day', min(start_time)) FROM allocations`,
-	).Scan(ctx, &first); err != nil {
+	if err := idb.NewRaw(`
+SELECT min(h.held_from)
+FROM allocations a`+heldSQL+`
+WHERE `+meteredSQL).Scan(ctx, &first); err != nil {
 		return nil, err
 	}
 	if !first.Valid {
 		return nil, nil
 	}
-	start := truncateDay(first.Time)
+	return &first.Time, nil
+}
+
+// userUsageCoverage caches the first day of metered allocations, and reads it again only while
+// there is none: no allocation gets an earlier assignment later. The one exception is an allocation
+// from before metering without slots, which is metered from its classification on; a day cached
+// before the classifier's first step, which runs when the master starts, can be later than it.
+type userUsageCoverage struct {
+	mu    sync.Mutex
+	start *time.Time
+}
+
+// get returns the first day of metered allocations, or nil when there are none.
+func (c *userUsageCoverage) get(ctx context.Context, idb bun.IDB) (*time.Time, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.start != nil {
+		return c.start, nil
+	}
+	first, err := readUsageCoverage(ctx, idb)
+	if err != nil || first == nil {
+		return nil, err
+	}
+	start := truncateDay(*first)
 	c.start = &start
 	return c.start, nil
 }
 
-// usageKind is what an interval holds.
-type usageKind int
-
-const (
-	usageGPU usageKind = iota
-	usageCPUSlot
-	usageAux
-)
-
-// usageInterval is the time an allocation held quantity units of one kind.
-type usageInterval struct {
-	start, end time.Time
-	kind       usageKind
-	quantity   float64
-}
-
-// usageIntervals builds one interval per allocation, from when it got its resources (the end of
-// the first QUEUED row, else start_time) to its end, or asOf while it runs. It skips allocations
-// that never held resources: start_time equal to end_time (closed at a master start), and
-// start_time and end_time both unset with state TERMINATED (killed before pulling). Slots count
-// as CPU slots in a CPU pool and as GPUs otherwise; an allocation without slots is one Aux
-// container, except on Kubernetes.
-func usageIntervals(
-	rows []userAllocationRow, asOf time.Time, pools map[string]poolKind,
-) []usageInterval {
-	intervals := make([]usageInterval, 0, len(rows))
-	for _, r := range rows {
-		var start time.Time
-		switch {
-		case r.QueuedEnd != nil:
-			start = r.QueuedEnd.UTC()
-		case r.StartTime != nil:
-			start = r.StartTime.UTC()
-		default:
-			continue
-		}
-		if r.StartTime != nil && r.EndTime != nil && r.StartTime.Equal(*r.EndTime) {
-			continue
-		}
-		if r.StartTime == nil && r.EndTime == nil &&
-			r.State != nil && *r.State == model.AllocationStateTerminated {
-			continue
-		}
-		end := asOf.UTC()
-		if r.EndTime != nil && r.EndTime.Before(end) {
-			end = r.EndTime.UTC()
-		}
-		if !end.After(start) {
-			continue
-		}
-
-		pool := pools[r.ResourcePool]
-		iv := usageInterval{start: start, end: end, kind: usageGPU, quantity: float64(r.Slots)}
-		switch {
-		case r.Slots == 0 && pool.k8s:
-			continue
-		case r.Slots == 0:
-			iv.kind, iv.quantity = usageAux, 1
-		case pool.cpu:
-			iv.kind = usageCPUSlot
-		}
-		intervals = append(intervals, iv)
-	}
-	return intervals
-}
-
-// dayUsage is the usage in one UTC day, in seconds.
-type dayUsage struct {
-	gpu, cpuSlot, aux, active float64
-}
-
-// timeSpan is a half-open time range.
-type timeSpan struct {
-	start, end time.Time
-}
-
-// usageByDay buckets the intervals into the UTC days [from, to), both UTC midnights. Active
-// seconds are the length of the union of the intervals in the day.
-func usageByDay(intervals []usageInterval, from, to time.Time) []dayUsage {
-	n := int(to.Sub(from) / usageDay)
-	if n <= 0 {
-		return nil
-	}
-	days := make([]dayUsage, n)
-	spans := make([][]timeSpan, n)
-	for _, iv := range intervals {
-		start, end := maxTime(iv.start, from), minTime(iv.end, to)
-		for i := int(start.Sub(from) / usageDay); i < n; i++ {
-			dayStart := from.Add(time.Duration(i) * usageDay)
-			s, e := maxTime(start, dayStart), minTime(end, dayStart.Add(usageDay))
-			if !e.After(s) {
-				break
-			}
-			seconds := e.Sub(s).Seconds()
-			switch iv.kind {
-			case usageGPU:
-				days[i].gpu += iv.quantity * seconds
-			case usageCPUSlot:
-				days[i].cpuSlot += iv.quantity * seconds
-			case usageAux:
-				days[i].aux += iv.quantity * seconds
-			}
-			spans[i] = append(spans[i], timeSpan{start: s, end: e})
-		}
-	}
-	for i := range days {
-		days[i].active = unionSeconds(spans[i])
-	}
-	return days
-}
-
-// unionSeconds returns the length of the union of the spans.
-func unionSeconds(spans []timeSpan) float64 {
-	if len(spans) == 0 {
-		return 0
-	}
-	sort.Slice(spans, func(i, j int) bool { return spans[i].start.Before(spans[j].start) })
-	var total time.Duration
-	cur := spans[0]
-	for _, s := range spans[1:] {
-		if s.start.After(cur.end) {
-			total += cur.end.Sub(cur.start)
-			cur = s
-		} else if s.end.After(cur.end) {
-			cur.end = s.end
-		}
-	}
-	total += cur.end.Sub(cur.start)
-	return total.Seconds()
-}
-
 // userUsage returns the entries for the periods whose starts run from the first, from, to the
-// last, to. A month is the sum of its days, and its active days are the days with any usage.
-// Aux seconds are unset when Aux is not metered.
+// last, to.
 func userUsage(
-	rows []userAllocationRow, from, to, asOf time.Time, pools map[string]poolKind,
+	rows []userAllocationRow, from, to, asOf time.Time,
 	period masterv1.ResourceAllocationAggregationPeriod,
 ) []*apiv1.UserUsageEntry {
-	monthly := period ==
-		masterv1.ResourceAllocationAggregationPeriod_RESOURCE_ALLOCATION_AGGREGATION_PERIOD_MONTHLY
-	daysEnd := to.AddDate(0, 0, 1)
-	if monthly {
-		daysEnd = to.AddDate(0, 1, 0)
+	records := make([]userusage.Record, 0, len(rows))
+	for _, r := range rows {
+		records = append(records, r.record())
 	}
-	days := usageByDay(usageIntervals(rows, asOf, pools), from, daysEnd)
-	withAux := auxAvailable(pools)
+	intervals := userusage.Intervals(records, asOf)
+	var usage []userusage.Entry
+	layout := usageDayLayout
+	if period == masterv1.ResourceAllocationAggregationPeriod_RESOURCE_ALLOCATION_AGGREGATION_PERIOD_MONTHLY {
+		usage, layout = userusage.Monthly(intervals, from, to.AddDate(0, 1, 0)), usageMonthLayout
+	} else {
+		usage = userusage.Daily(intervals, from, to.AddDate(0, 0, 1))
+	}
 
-	entries := []*apiv1.UserUsageEntry{}
-	var cur *apiv1.UserUsageEntry
-	var curAux float64
-	flush := func() {
-		if cur == nil {
-			return
-		}
-		if withAux {
-			aux := curAux
-			cur.AuxContainerSeconds = &aux
-		}
-		entries = append(entries, cur)
+	entries := make([]*apiv1.UserUsageEntry, 0, len(usage))
+	for _, e := range usage {
+		entries = append(entries, &apiv1.UserUsageEntry{
+			PeriodStart:             e.Start.Format(layout),
+			GpuSeconds:              e.GPU,
+			CpuSlotSeconds:          e.CPU,
+			AuxContainerSeconds:     e.Aux,
+			UnclassifiedSlotSeconds: e.Unclassified,
+			GpuActiveSeconds:        e.GPUActive,
+			AuxActiveSeconds:        e.AuxActive,
+			GpuOrAuxActiveSeconds:   e.GPUOrAuxActive,
+			GpuActiveDays:           int32(e.GPUDays),
+			AuxActiveDays:           int32(e.AuxDays),
+			GpuOrAuxActiveDays:      int32(e.GPUOrAuxDays),
+		})
 	}
-	for i, d := range days {
-		day := from.AddDate(0, 0, i)
-		label := day.Format(usageDayLayout)
-		if monthly {
-			label = day.Format(usageMonthLayout)
-		}
-		if cur == nil || cur.PeriodStart != label {
-			flush()
-			cur, curAux = &apiv1.UserUsageEntry{PeriodStart: label}, 0
-		}
-		cur.GpuSeconds += d.gpu
-		cur.CpuSlotSeconds += d.cpuSlot
-		curAux += d.aux
-		cur.ActiveSeconds += d.active
-		if d.active > 0 {
-			cur.ActiveDays++
-		}
-	}
-	flush()
 	return entries
 }
 

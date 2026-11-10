@@ -1,5 +1,6 @@
 import { matchPath } from 'react-router-dom';
 
+import { CommandState, CommandTask, CommandType } from 'types';
 import { reactHostAddress } from 'utils/routes';
 
 import { findReactRoute, paths } from './utils';
@@ -84,6 +85,25 @@ describe('Routing Utilities', () => {
       const b = reactHostAddress();
       expect(a).toEqual(b);
       process.env = { ...process.env, PUBLIC_URL: init };
+    });
+  });
+
+  describe('paths.taskLogs', () => {
+    it('builds the path from the task type and ID, without the task name', () => {
+      const task: CommandTask = {
+        id: 'shell-1',
+        name: 'Shell (secret-project)',
+        resourcePool: 'default',
+        startTime: '2026-01-01T00:00:00Z',
+        state: CommandState.Running,
+        type: CommandType.Shell,
+        userId: 1,
+        workspaceId: 1,
+      };
+      const path = paths.taskLogs(task);
+      expect(path).toBe('/shell/shell-1/logs');
+      expect(path).not.toContain('?');
+      expect(path).not.toContain('secret');
     });
   });
 });

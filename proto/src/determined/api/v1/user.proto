@@ -241,7 +241,7 @@ message UserResourceCounts {
   int32 gpus = 1;
   // CPU slots the user's tasks hold.
   int32 cpu_slots = 2;
-  // Containers without slots; unset when not available (Kubernetes).
+  // Containers without slots; unset on Kubernetes pools.
   optional int32 aux_containers = 3;
 }
 message UserPoolResources {
@@ -255,6 +255,8 @@ message GetUserResourcesResponse {
   repeated UserPoolResources pools = 1;
   // When the counts were read.
   google.protobuf.Timestamp as_of = 2;
+  // Whether containers without slots are metered on this cluster.
+  bool aux_metered = 3;
 }
 
 message GetUserUsageRequest {
@@ -274,12 +276,22 @@ message UserUsageEntry {
   double gpu_seconds = 2;
   // CPU-slot-seconds held.
   double cpu_slot_seconds = 3;
-  // Aux-container-seconds held; unset when not available.
-  optional double aux_container_seconds = 4;
-  // Seconds with any resource held (union of intervals).
-  double active_seconds = 5;
-  // Days with any resource held (0 or 1 for a day).
-  int32 active_days = 6;
+  // Aux-container-seconds held.
+  double aux_container_seconds = 4;
+  // Slot-seconds held of an unknown kind.
+  double unclassified_slot_seconds = 5;
+  // Seconds with any GPU held.
+  double gpu_active_seconds = 6;
+  // Seconds with any aux container held.
+  double aux_active_seconds = 7;
+  // Seconds with any GPU or aux container held.
+  double gpu_or_aux_active_seconds = 8;
+  // Days with any GPU held.
+  int32 gpu_active_days = 9;
+  // Days with any aux container held.
+  int32 aux_active_days = 10;
+  // Days with any GPU or aux container held.
+  int32 gpu_or_aux_active_days = 11;
 }
 message GetUserUsageResponse {
   // Covered entries in order; an absent period is not covered.

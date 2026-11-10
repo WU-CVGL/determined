@@ -60,29 +60,48 @@ allocation data for analysis:
 Every signed-in user can read the current resources and the usage history of any user:
 
 -  ``GET /api/v1/users/{user_id}/resources``: the GPUs, CPU slots and auxiliary containers that the
-   user's tasks hold at the time of the request, by resource pool.
--  ``GET /api/v1/users/{user_id}/usage``: the hours of each that the user's tasks held, by day or by
-   month.
+   user's tasks hold at the time of the request, by resource pool, and whether auxiliary containers
+   are metered on the cluster: they are unless every resource pool is a Kubernetes pool.
+
+-  ``GET /api/v1/users/{user_id}/usage``: by day or by month, the GPU-, CPU-slot- and
+   auxiliary-container-seconds that the user's tasks held, the slot-seconds of an unknown kind, and
+   the seconds and the days with any GPU, with any auxiliary container, and with either held.
 
 Both count what the tasks hold, not what they use:
 
 -  Usage is counted in UTC days, or in UTC months as the sum of their days. Each allocation of a
-   task counts as one interval, from when its resources were assigned to when it was released. A
-   task that still runs counts until the time of the request.
+   task counts from when the resource manager assigned its resources to when they were released,
+   also when it ends before its containers start. A task that still runs counts until the time of
+   the request. An allocation that a master failure left open counts until the master's last
+   heartbeat.
 
--  Slots count as CPU slots in a pool whose slot type is CPU and as GPUs otherwise. History uses the
-   pool's current slot type, so a pool without connected agents, or a pool that no longer exists,
-   counts as GPUs.
+-  What an allocation counts is fixed when its resources are assigned. GPU devices count as GPUs,
+   and CPU devices as CPU slots; an allocation that holds both counts only its GPUs. An allocation
+   without slots counts as one auxiliary container. On Kubernetes, slots count by the resource
+   manager's slot type, and an allocation without slots is not counted.
 
--  An auxiliary container is a container without slots. Kubernetes pools do not report them, so
-   neither endpoint counts them there.
+-  Allocations recorded before the master metered assignments count from the end of their first
+   queued period, or else from their start, to their end; one that ended without a recorded end
+   counts nothing. Their slots take their pool's slot type the first time the master knows it, and
+   keep it. A static pool's slot type is known once the same number of connected agents has reported
+   one type for ten minutes. Until then, and for pools without agents or that no longer exist, their
+   slots count as slot-seconds of an unknown kind. Without slots they count as auxiliary containers,
+   also in pools that no longer exist when the cluster has only agent resource pools, and are not
+   counted on Kubernetes. An administrator who knows what such a pool held can set the kind (``gpu``
+   or ``cpu``) in the database:
+
+   .. code:: sql
+
+      UPDATE allocations SET metered_kind = 'gpu', metered_quantity = slots
+      WHERE resource_pool = '<pool>' AND metered_kind = 'unclassified'
+        AND assigned_time IS NULL AND slots > 0;
 
 -  Checkpoint garbage collection is not counted.
 
 -  A container of a task that is released before the task's other containers counts in the history
    until the whole allocation is released.
 
--  History starts with the cluster's first allocation record, and allocation records that were
+-  History starts with the cluster's first metered allocation, and allocation records that were
    deleted are not in it.
 
 -  Pool names appear as in the job queue, whether or not ``hide_unusable_pools`` is set.
