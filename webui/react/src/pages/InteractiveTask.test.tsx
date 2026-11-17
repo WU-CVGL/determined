@@ -1,9 +1,12 @@
+import { join } from 'path';
+
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DefaultTheme, UIProvider } from 'hew/Theme';
 import { ConfirmationProvider } from 'hew/useConfirm';
 import { HelmetProvider } from 'react-helmet-async';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { compile } from 'sass';
 
 import { ThemeProvider } from 'components/ThemeProvider';
 import usePageVisibility from 'hooks/usePageVisibility';
@@ -619,16 +622,26 @@ describe('InteractiveTask', () => {
   });
 
   it('scrolls the resources inside their tab, which the page does not', async () => {
-    vi.mocked(getTask).mockResolvedValue(taskWith(false, V1TaskType.COMMAND));
-    vi.mocked(getTaskServices).mockResolvedValue(servicesWith([]));
-    vi.mocked(getCommand).mockResolvedValue({
-      ...shell,
-      name: 'Command',
-      type: CommandType.Command,
-    });
-    setup('?tab=resources');
-    const panel = await screen.findByTestId('resources-pane');
-    expect(panel.parentElement).toHaveClass('scrollPane');
+    // The tests do not load stylesheets, so this one compiles the page's own and adds it.
+    const style = document.createElement('style');
+    style.textContent = compile(join(__dirname, 'InteractiveTask.module.scss')).css;
+    document.head.append(style);
+    try {
+      vi.mocked(getTask).mockResolvedValue(taskWith(false, V1TaskType.COMMAND));
+      vi.mocked(getTaskServices).mockResolvedValue(servicesWith([]));
+      vi.mocked(getCommand).mockResolvedValue({
+        ...shell,
+        name: 'Command',
+        type: CommandType.Command,
+      });
+      setup('?tab=resources');
+      const panel = await screen.findByTestId('resources-pane');
+      expect(getComputedStyle(document.querySelector('.base') as Element).overflow).toBe('hidden');
+      expect(getComputedStyle(panel.parentElement as Element).overflowY).toBe('auto');
+      expect(getComputedStyle(panel.parentElement as Element).height).toBe('100%');
+    } finally {
+      style.remove();
+    }
   });
 
   it('gives a command its logs and resources', async () => {
