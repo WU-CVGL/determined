@@ -192,7 +192,8 @@ type GetAgentsResponse struct {
 	// Pagination information of the full dataset.
 	Pagination *Pagination `protobuf:"bytes,2,opt,name=pagination,proto3" json:"pagination,omitempty"`
 	// When the master read the GPU memory, by the master's clock. It is set
-	// only when include_gpu_memory was requested and the query succeeded.
+	// only when include_gpu_memory was requested and the read succeeded; with no
+	// GPUs, nothing is queried and it is the time of the request.
 	GpuMemoryQueriedAt *timestamp.Timestamp `protobuf:"bytes,3,opt,name=gpu_memory_queried_at,json=gpuMemoryQueriedAt,proto3" json:"gpu_memory_queried_at,omitempty"`
 }
 

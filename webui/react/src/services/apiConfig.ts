@@ -614,15 +614,17 @@ export const getTelemetry: DetApi<EmptyParams, Api.V1GetTelemetryResponse, Telem
 export const getAgents: DetApi<Service.GetAgentsParams, Api.V1GetAgentsResponse, Type.Agent[]> = {
   name: 'getAgents',
   postProcess: (response) => decoder.jsonToAgents(response.agents || []),
+  // Every request keeps the slots, which the agents' resources come from, and reads no GPU
+  // memory.
   request: (params: Service.GetAgentsParams) =>
     detApi.Cluster.getAgents(
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      params.excludeSlots ?? true,
-      true,
+      undefined, // sortBy
+      undefined, // orderBy
+      undefined, // offset
+      undefined, // limit
+      undefined, // excludeSlots
+      params.excludeContainers ?? true,
+      undefined, // includeGpuMemory
     ),
 };
 

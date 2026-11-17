@@ -440,10 +440,12 @@ GPU memory
 
 ``GetAgents`` with ``include_gpu_memory`` (``GET /api/v1/agents?includeGpuMemory=true``) adds each
 GPU's latest memory readings from the cluster's DCGM-Exporter to ``gpu_topology.gpus[].memory``:
-``total``, ``used``, ``free`` and ``reserved``, each with ``bytes`` and ``sampled_at``, the time of
-the exporter's sample. The response's ``gpu_memory_queried_at`` is when the master read them; a
-master without this feature ignores the parameter and leaves it out. The readings are observations
-only: whether a GPU can take a task still depends on its slot.
+``total``, ``used``, ``free`` and ``reserved``, each with ``bytes`` and ``sampled_at``, the
+timestamp of the sample in Prometheus. DCGM-Exporter sets no timestamps of its own, so it is the
+time Prometheus scraped the exporter, not when DCGM read the GPU. The response's
+``gpu_memory_queried_at`` is when the master read the memory, or the time of the request when there
+are no GPUs to query; a master without this feature ignores the parameter and leaves it out. The
+readings are observations only: whether a GPU can take a task still depends on its slot.
 
 The master evaluates one query at a single time, a range query whose start equals its end, for all
 GPUs at once:
@@ -462,13 +464,14 @@ reports in MiB, and Prometheus must give them the ``det_cluster`` and ``gpu_uuid
 minutes by default, so ``sampled_at`` can be up to that old. A reading without a sample is null, and
 a GPU without any has a ``memory`` with all readings null.
 
-The request fails, rather than returning partial or cached data, when the master has no Prometheus
-for task resources (``FAILED_PRECONDITION``), the query fails or times out after 5 seconds
-(``UNAVAILABLE``), no GPU has any sample (``UNAVAILABLE``), or the result is invalid (``INTERNAL``):
-two samples for one GPU and reading, a reading without its time, or a value that is not a whole
-number of MiB from 0 to 16 TiB. It also fails for a user who may not view sensitive agent
-information (``PERMISSION_DENIED``) and together with ``exclude_slots`` (``INVALID_ARGUMENT``).
-``GetAgent`` and agent enable and disable responses never carry memory.
+Missing samples read null, as above. A failed read fails the whole request, with no cached data and
+no readings from part of the query: the request fails when the master has no Prometheus for task
+resources (``FAILED_PRECONDITION``), the query fails or times out after 5 seconds (``UNAVAILABLE``),
+no GPU has any sample (``UNAVAILABLE``), or the result is invalid (``INTERNAL``): two samples for
+one GPU and reading, a reading without its time, or a value that is not a whole number of MiB from 0
+to 16 TiB. It also fails for a user who may not view sensitive agent information
+(``PERMISSION_DENIED``) and together with ``exclude_slots`` (``INVALID_ARGUMENT``). ``GetAgent`` and
+agent enable and disable responses never carry memory.
 
 CLI and WebUI
 =============

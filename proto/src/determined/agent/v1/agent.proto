@@ -166,7 +166,8 @@ message GpuInfo {
   // The critical XIDs that the cluster's DCGM-Exporter reported for the GPU in
   // the last 24 hours, by code.
   repeated GpuXid recent_xids = 12;
-  // The GPU's memory as the cluster's DCGM-Exporter last reported it. Only
+  // The GPU's memory as Prometheus last scraped it from the cluster's
+  // DCGM-Exporter. Only
   // GetAgents with include_gpu_memory sets it.
   GpuMemory memory = 13;
 }
@@ -191,7 +192,8 @@ message GpuMemoryReading {
   };
   // The reading in bytes.
   int64 bytes = 1;
-  // When the exporter took the sample.
+  // The timestamp of the sample in Prometheus. With an exporter that sets no
+  // timestamps of its own, such as DCGM-Exporter, it is the scrape time.
   google.protobuf.Timestamp sampled_at = 2;
 }
 

@@ -3902,7 +3902,7 @@ export interface V1GetAgentsResponse {
      */
     pagination?: V1Pagination;
     /**
-     * When the master read the GPU memory, by the master's clock. It is set only when include_gpu_memory was requested and the query succeeded.
+     * When the master read the GPU memory, by the master's clock. It is set only when include_gpu_memory was requested and the read succeeded; with no GPUs, nothing is queried and it is the time of the request.
      * @type {Date | DateString}
      * @memberof V1GetAgentsResponse
      */
@@ -5740,7 +5740,7 @@ export interface V1GpuInfo {
      */
     recentXids?: Array<V1GpuXid>;
     /**
-     * The GPU's memory as the cluster's DCGM-Exporter last reported it. Only GetAgents with include_gpu_memory sets it.
+     * The GPU's memory as Prometheus last scraped it from the cluster's DCGM-Exporter. Only GetAgents with include_gpu_memory sets it.
      * @type {V1GpuMemory}
      * @memberof V1GpuInfo
      */
@@ -5866,7 +5866,7 @@ export interface V1GpuMemoryReading {
      */
     bytes: string;
     /**
-     * When the exporter took the sample.
+     * The timestamp of the sample in Prometheus. With an exporter that sets no timestamps of its own, such as DCGM-Exporter, it is the scrape time.
      * @type {Date | DateString}
      * @memberof V1GpuMemoryReading
      */

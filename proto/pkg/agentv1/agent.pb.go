@@ -850,7 +850,8 @@ type GpuInfo struct {
 	// The critical XIDs that the cluster's DCGM-Exporter reported for the GPU in
 	// the last 24 hours, by code.
 	RecentXids []*GpuXid `protobuf:"bytes,12,rep,name=recent_xids,json=recentXids,proto3" json:"recent_xids,omitempty"`
-	// The GPU's memory as the cluster's DCGM-Exporter last reported it. Only
+	// The GPU's memory as Prometheus last scraped it from the cluster's
+	// DCGM-Exporter. Only
 	// GetAgents with include_gpu_memory sets it.
 	Memory *GpuMemory `protobuf:"bytes,13,opt,name=memory,proto3" json:"memory,omitempty"`
 }
@@ -1063,7 +1064,8 @@ type GpuMemoryReading struct {
 
 	// The reading in bytes.
 	Bytes int64 `protobuf:"varint,1,opt,name=bytes,proto3" json:"bytes,omitempty"`
-	// When the exporter took the sample.
+	// The timestamp of the sample in Prometheus. With an exporter that sets no
+	// timestamps of its own, such as DCGM-Exporter, it is the scrape time.
 	SampledAt *timestamp.Timestamp `protobuf:"bytes,2,opt,name=sampled_at,json=sampledAt,proto3" json:"sampled_at,omitempty"`
 }
 
