@@ -81,12 +81,21 @@ describe('UsageCalendar', () => {
     expect(cell('2026-11-02')).toHaveClass('level0');
   });
 
-  it("shows a day's date in its tooltip", async () => {
+  it("shows a day's date and hours in its tooltip", async () => {
     const user = userEvent.setup();
-    setup([day('2026-11-03', 3)]);
+    setup([day('2026-11-03', 3, 1.5)]);
     await act(() => user.hover(cell('2026-11-03')));
-    expect(await screen.findByRole('tooltip')).toHaveTextContent('2026-11-03');
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      /^2026-11-03 · GPU hours 6.0 · Aux container hours 1.5$/,
+    );
     expect(screen.queryByTestId('usage-calendar-day')).not.toBeInTheDocument();
+  });
+
+  it('shows only the date of a day without records in its tooltip', async () => {
+    const user = userEvent.setup();
+    setup([]);
+    await act(() => user.hover(cell('2026-10-31')));
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/^2026-10-31$/);
   });
 
   it("shows a day's hours under the grid when clicked", async () => {

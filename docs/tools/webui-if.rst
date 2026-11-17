@@ -111,8 +111,8 @@ no auxiliary container time, it shows GPUs only. CPU slots are not shown.
    the user's tasks held the chosen resources that day: any time, more than 4 hours, or more than 12
    hours. **GPU**, **Aux** and **GPU+Aux**, next to the title, choose those resources, **GPU+Aux**
    by default; with **GPU+Aux**, a time with both held counts once. The choice applies to this
-   calendar only. The title gives the number of shaded days. Selecting a day shows its date and its
-   hours of the chosen resources. Where the overview shows GPUs only, the calendar is in **GPU** and
+   calendar only. The title gives the number of shaded days. Pointing at a day or selecting it shows
+   its date and its hours of the chosen resources. Where the overview shows GPUs only, the calendar is in **GPU** and
    there is no choice.
 
 -  **Usage**: a chart of the GPU hours and the auxiliary container hours for each of the last 31 UTC
