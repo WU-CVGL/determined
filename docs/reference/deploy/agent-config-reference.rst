@@ -477,12 +477,12 @@ from 0 to 10,000 W.
 Missing samples read null, as above. A failed read fails the whole request, with no cached data and
 no readings from part of the query: the request fails when the master has no Prometheus for task
 resources (``FAILED_PRECONDITION``), the query fails or times out after 5 seconds (``UNAVAILABLE``),
-no GPU has any sample of a requested reading (``UNAVAILABLE``), or the result is invalid
-(``INTERNAL``): two samples for one GPU and reading, a reading without its time, a memory value that
-is not a whole number of MiB from 0 to 16 TiB, or a power value outside 0 to 10,000 W. It also fails
-for a user who may not view sensitive agent information (``PERMISSION_DENIED``) and together with
-``exclude_slots`` (``INVALID_ARGUMENT``). ``GetAgent`` and agent enable and disable responses never
-carry memory or power.
+a requested group (memory or power) has no samples on any GPU (``UNAVAILABLE``), or the result is
+invalid (``INTERNAL``): two samples for one GPU and reading, a reading without its time, a memory
+value that is not a whole number of MiB from 0 to 16 TiB, or a power value outside 0 to 10,000 W. It
+also fails for a user who may not view sensitive agent information (``PERMISSION_DENIED``) and
+together with ``exclude_slots`` (``INVALID_ARGUMENT``). ``GetAgent`` and agent enable and disable
+responses never carry memory or power.
 
 CLI and WebUI
 =============
