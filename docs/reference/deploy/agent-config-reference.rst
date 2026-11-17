@@ -435,8 +435,8 @@ about every 30 seconds. Until its first query succeeds after a master start, onl
 
 .. _agent-gpu-memory:
 
-GPU memory
-==========
+GPU memory and power
+====================
 
 ``GetAgents`` with ``include_gpu_memory`` (``GET /api/v1/agents?includeGpuMemory=true``) adds each
 GPU's latest memory readings from the cluster's DCGM-Exporter to ``gpu_topology.gpus[].memory``:
@@ -453,8 +453,8 @@ GPUs at once:
 .. code::
 
    label_replace(DCGM_FI_DEV_FB_USED{job="dcgm", det_cluster="<det_cluster>", gpu_uuid!=""},
-     "det_gpu_memory_field", "used", "", "")
-   or label_replace(timestamp(DCGM_FI_DEV_FB_USED{...}), "det_gpu_memory_field", "used_at", "", "")
+     "det_gpu_reading", "memory_used", "", "")
+   or label_replace(timestamp(DCGM_FI_DEV_FB_USED{...}), "det_gpu_reading", "memory_used_at", "", "")
    or ...
 
 with the same two terms for ``DCGM_FI_DEV_FB_TOTAL``, ``DCGM_FI_DEV_FB_FREE`` and
@@ -464,14 +464,25 @@ reports in MiB, and Prometheus must give them the ``det_cluster`` and ``gpu_uuid
 minutes by default, so ``sampled_at`` can be up to that old. A reading without a sample is null, and
 a GPU without any has a ``memory`` with all readings null.
 
+``include_gpu_power`` (``includeGpuPower=true``) adds ``gpu_topology.gpus[].power`` the same way,
+with ``gpu_power_queried_at``: ``draw`` (``DCGM_FI_DEV_POWER_USAGE``), ``limit``, the configured
+power limit (``DCGM_FI_DEV_POWER_MGMT_LIMIT``), ``default_limit``, the device's default power limit
+(``DCGM_FI_DEV_POWER_MGMT_LIMIT_DEF``), and ``enforced_limit``, the limit in effect after every
+constraint (``DCGM_FI_DEV_ENFORCED_POWER_LIMIT``), each with ``watts`` and ``sampled_at``. The
+default limit is the nearest reading to a GPU's TDP, but it need not equal a vendor's rated TDP; the
+configured and enforced limits can differ from it and from each other. With both flags, the master
+sends one query with the terms of both. Power readings may have a fraction of a watt and must be
+from 0 to 10,000 W.
+
 Missing samples read null, as above. A failed read fails the whole request, with no cached data and
 no readings from part of the query: the request fails when the master has no Prometheus for task
 resources (``FAILED_PRECONDITION``), the query fails or times out after 5 seconds (``UNAVAILABLE``),
-no GPU has any sample (``UNAVAILABLE``), or the result is invalid (``INTERNAL``): two samples for
-one GPU and reading, a reading without its time, or a value that is not a whole number of MiB from 0
-to 16 TiB. It also fails for a user who may not view sensitive agent information
-(``PERMISSION_DENIED``) and together with ``exclude_slots`` (``INVALID_ARGUMENT``). ``GetAgent`` and
-agent enable and disable responses never carry memory.
+no GPU has any sample of a requested reading (``UNAVAILABLE``), or the result is invalid
+(``INTERNAL``): two samples for one GPU and reading, a reading without its time, a memory value that
+is not a whole number of MiB from 0 to 16 TiB, or a power value outside 0 to 10,000 W. It also fails
+for a user who may not view sensitive agent information (``PERMISSION_DENIED``) and together with
+``exclude_slots`` (``INVALID_ARGUMENT``). ``GetAgent`` and agent enable and disable responses never
+carry memory or power.
 
 CLI and WebUI
 =============

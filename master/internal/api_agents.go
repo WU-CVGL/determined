@@ -24,9 +24,10 @@ import (
 func (a *apiServer) GetAgents(
 	ctx context.Context, req *apiv1.GetAgentsRequest,
 ) (*apiv1.GetAgentsResponse, error) {
-	if req.IncludeGpuMemory && req.ExcludeSlots {
+	readings := gpuReadingGroups{memory: req.IncludeGpuMemory, power: req.IncludeGpuPower}
+	if readings.any() && req.ExcludeSlots {
 		return nil, status.Error(codes.InvalidArgument,
-			"include_gpu_memory cannot be combined with exclude_slots")
+			"include_gpu_memory and include_gpu_power cannot be combined with exclude_slots")
 	}
 	resp, err := a.m.rm.GetAgents()
 	if err != nil {
@@ -42,9 +43,9 @@ func (a *apiServer) GetAgents(
 	switch {
 	case err != nil:
 		return nil, err
-	case permErr != nil && req.IncludeGpuMemory:
+	case permErr != nil && readings.any():
 		return nil, status.Error(codes.PermissionDenied,
-			"GPU memory requires the permission to view agent details")
+			"GPU memory and power require the permission to view agent details")
 	case permErr != nil:
 		for _, agent := range resp.Agents {
 			if err := authz.ObfuscateAgent(agent); err != nil {
@@ -76,18 +77,23 @@ func (a *apiServer) GetAgents(
 		}
 	}
 
-	if req.IncludeGpuMemory {
+	if readings.any() {
 		now := time.Now()
 		if countTopologyGPUs(resp.Agents) > 0 {
-			memory, err := readGPUMemory(ctx, a.m.config.Integrations.TaskResources, now)
+			values, err := readGPUReadings(ctx, a.m.config.Integrations.TaskResources, now, readings)
 			if err != nil {
 				return nil, err
 			}
-			if err := applyGPUMemory(resp.Agents, memory); err != nil {
+			if err := applyGPUReadings(resp.Agents, values, readings); err != nil {
 				return nil, err
 			}
 		}
-		resp.GpuMemoryQueriedAt = timestamppb.New(now)
+		if readings.memory {
+			resp.GpuMemoryQueriedAt = timestamppb.New(now)
+		}
+		if readings.power {
+			resp.GpuPowerQueriedAt = timestamppb.New(now)
+		}
 	}
 
 	api.Sort(resp.Agents, req.OrderBy, req.SortBy, apiv1.GetAgentsRequest_SORT_BY_ID)
