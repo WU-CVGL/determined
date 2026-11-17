@@ -21,6 +21,10 @@ const DayLine: React.FC<{ day: CalendarDay; values: UsageValue[] }> = ({ day, va
   </div>
 );
 
+/** A day's date and its values, on one line. */
+const tooltip = (day: CalendarDay, values: UsageValue[]): string =>
+  [`${day.date} (UTC)`, ...values.map(({ title, value }) => `${title} ${value}`)].join(' · ');
+
 // The step in days of an arrow key: a column is a week, a row a weekday.
 const KEY_STEPS: Record<string, number> = {
   ArrowDown: 1,
@@ -81,7 +85,7 @@ const UsageCalendar: React.FC<Props> = ({ dayValues, weeks }: Props) => {
             const classes = [css.cell];
             classes.push(day.entry ? css[`level${day.level}`] : css.notCovered);
             return (
-              <Tooltip content={day.date} key={day.date}>
+              <Tooltip content={tooltip(day, dayValues(day))} key={day.date}>
                 <button
                   aria-label={day.date}
                   className={classes.join(' ')}
