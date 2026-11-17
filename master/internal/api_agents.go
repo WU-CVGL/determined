@@ -2,9 +2,11 @@ package internal
 
 import (
 	"context"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/pkg/errors"
 
@@ -22,6 +24,10 @@ import (
 func (a *apiServer) GetAgents(
 	ctx context.Context, req *apiv1.GetAgentsRequest,
 ) (*apiv1.GetAgentsResponse, error) {
+	if req.IncludeGpuMemory && req.ExcludeSlots {
+		return nil, status.Error(codes.InvalidArgument,
+			"include_gpu_memory cannot be combined with exclude_slots")
+	}
 	resp, err := a.m.rm.GetAgents()
 	if err != nil {
 		return nil, err
@@ -36,6 +42,9 @@ func (a *apiServer) GetAgents(
 	switch {
 	case err != nil:
 		return nil, err
+	case permErr != nil && req.IncludeGpuMemory:
+		return nil, status.Error(codes.PermissionDenied,
+			"GPU memory requires the permission to view agent details")
 	case permErr != nil:
 		for _, agent := range resp.Agents {
 			if err := authz.ObfuscateAgent(agent); err != nil {
@@ -65,6 +74,20 @@ func (a *apiServer) GetAgents(
 		for _, agent := range resp.Agents {
 			gpuhealth.Apply(agent.GpuTopology, xids)
 		}
+	}
+
+	if req.IncludeGpuMemory {
+		now := time.Now()
+		if countTopologyGPUs(resp.Agents) > 0 {
+			memory, err := readGPUMemory(ctx, a.m.config.Integrations.TaskResources, now)
+			if err != nil {
+				return nil, err
+			}
+			if err := applyGPUMemory(resp.Agents, memory); err != nil {
+				return nil, err
+			}
+		}
+		resp.GpuMemoryQueriedAt = timestamppb.New(now)
 	}
 
 	api.Sort(resp.Agents, req.OrderBy, req.SortBy, apiv1.GetAgentsRequest_SORT_BY_ID)

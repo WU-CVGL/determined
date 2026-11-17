@@ -3,6 +3,7 @@ syntax = "proto3";
 package determined.api.v1;
 option go_package = "github.com/determined-ai/determined/proto/pkg/apiv1";
 
+import "google/protobuf/timestamp.proto";
 import "determined/api/v1/pagination.proto";
 import "protoc-gen-swagger/options/annotations.proto";
 
@@ -34,6 +35,11 @@ message GetAgentsRequest {
   bool exclude_slots = 6;
   // exclude containers
   bool exclude_containers = 7;
+  // Read each GPU's memory from the cluster's DCGM-Exporter in the Prometheus
+  // of integrations.task_resources into gpu_topology.gpus[].memory. It needs
+  // the permission to view agent details, and it cannot be combined with
+  // exclude_slots. A failed query fails the request.
+  bool include_gpu_memory = 8;
 }
 // Response to GetAgentsRequest.
 message GetAgentsResponse {
@@ -45,6 +51,9 @@ message GetAgentsResponse {
   repeated determined.agent.v1.Agent agents = 1;
   // Pagination information of the full dataset.
   Pagination pagination = 2;
+  // When the master read the GPU memory, by the master's clock. It is set
+  // only when include_gpu_memory was requested and the query succeeded.
+  google.protobuf.Timestamp gpu_memory_queried_at = 3;
 }
 
 // Get the requested agent.

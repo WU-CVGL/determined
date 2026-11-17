@@ -4775,15 +4775,19 @@ class v1GetAgentsRequestSortBy(DetEnum):
 
 class v1GetAgentsResponse(Printable):
     """Response to GetAgentsRequest."""
+    gpuMemoryQueriedAt: "typing.Optional[str]" = None
     pagination: "typing.Optional[v1Pagination]" = None
 
     def __init__(
         self,
         *,
         agents: "typing.Sequence[v1Agent]",
+        gpuMemoryQueriedAt: "typing.Union[str, None, Unset]" = _unset,
         pagination: "typing.Union[v1Pagination, None, Unset]" = _unset,
     ):
         self.agents = agents
+        if not isinstance(gpuMemoryQueriedAt, Unset):
+            self.gpuMemoryQueriedAt = gpuMemoryQueriedAt
         if not isinstance(pagination, Unset):
             self.pagination = pagination
 
@@ -4792,6 +4796,8 @@ class v1GetAgentsResponse(Printable):
         kwargs: "typing.Dict[str, typing.Any]" = {
             "agents": [v1Agent.from_json(x) for x in obj["agents"]],
         }
+        if "gpuMemoryQueriedAt" in obj:
+            kwargs["gpuMemoryQueriedAt"] = obj["gpuMemoryQueriedAt"]
         if "pagination" in obj:
             kwargs["pagination"] = v1Pagination.from_json(obj["pagination"]) if obj["pagination"] is not None else None
         return cls(**kwargs)
@@ -4800,6 +4806,8 @@ class v1GetAgentsResponse(Printable):
         out: "typing.Dict[str, typing.Any]" = {
             "agents": [x.to_json(omit_unset) for x in self.agents],
         }
+        if not omit_unset or "gpuMemoryQueriedAt" in vars(self):
+            out["gpuMemoryQueriedAt"] = self.gpuMemoryQueriedAt
         if not omit_unset or "pagination" in vars(self):
             out["pagination"] = None if self.pagination is None else self.pagination.to_json(omit_unset)
         return out
@@ -7625,6 +7633,7 @@ class v1GpuInfo(Printable):
     """GpuInfo describes one GPU of an agent: a slot, or a GPU left out by the
     agent's exclude list.
     """
+    memory: "typing.Optional[v1GpuMemory]" = None
     recentXids: "typing.Optional[typing.Sequence[v1GpuXid]]" = None
 
     def __init__(
@@ -7641,6 +7650,7 @@ class v1GpuInfo(Printable):
         pcieLinkWidth: int,
         pcieLinkWidthMax: int,
         uuid: str,
+        memory: "typing.Union[v1GpuMemory, None, Unset]" = _unset,
         recentXids: "typing.Union[typing.Sequence[v1GpuXid], None, Unset]" = _unset,
     ):
         self.deviceId = deviceId
@@ -7654,6 +7664,8 @@ class v1GpuInfo(Printable):
         self.pcieLinkWidth = pcieLinkWidth
         self.pcieLinkWidthMax = pcieLinkWidthMax
         self.uuid = uuid
+        if not isinstance(memory, Unset):
+            self.memory = memory
         if not isinstance(recentXids, Unset):
             self.recentXids = recentXids
 
@@ -7672,6 +7684,8 @@ class v1GpuInfo(Printable):
             "pcieLinkWidthMax": obj["pcieLinkWidthMax"],
             "uuid": obj["uuid"],
         }
+        if "memory" in obj:
+            kwargs["memory"] = v1GpuMemory.from_json(obj["memory"]) if obj["memory"] is not None else None
         if "recentXids" in obj:
             kwargs["recentXids"] = [v1GpuXid.from_json(x) for x in obj["recentXids"]] if obj["recentXids"] is not None else None
         return cls(**kwargs)
@@ -7690,6 +7704,8 @@ class v1GpuInfo(Printable):
             "pcieLinkWidthMax": self.pcieLinkWidthMax,
             "uuid": self.uuid,
         }
+        if not omit_unset or "memory" in vars(self):
+            out["memory"] = None if self.memory is None else self.memory.to_json(omit_unset)
         if not omit_unset or "recentXids" in vars(self):
             out["recentXids"] = None if self.recentXids is None else [x.to_json(omit_unset) for x in self.recentXids]
         return out
@@ -7766,6 +7782,86 @@ class v1GpuLinkLevel(DetEnum):
     PHB = "GPU_LINK_LEVEL_PHB"
     NODE = "GPU_LINK_LEVEL_NODE"
     SYS = "GPU_LINK_LEVEL_SYS"
+
+class v1GpuMemory(Printable):
+    """GpuMemory holds a GPU's latest memory readings. A reading without a sample
+    is null.
+    """
+    free: "typing.Optional[v1GpuMemoryReading]" = None
+    reserved: "typing.Optional[v1GpuMemoryReading]" = None
+    total: "typing.Optional[v1GpuMemoryReading]" = None
+    used: "typing.Optional[v1GpuMemoryReading]" = None
+
+    def __init__(
+        self,
+        *,
+        free: "typing.Union[v1GpuMemoryReading, None, Unset]" = _unset,
+        reserved: "typing.Union[v1GpuMemoryReading, None, Unset]" = _unset,
+        total: "typing.Union[v1GpuMemoryReading, None, Unset]" = _unset,
+        used: "typing.Union[v1GpuMemoryReading, None, Unset]" = _unset,
+    ):
+        if not isinstance(free, Unset):
+            self.free = free
+        if not isinstance(reserved, Unset):
+            self.reserved = reserved
+        if not isinstance(total, Unset):
+            self.total = total
+        if not isinstance(used, Unset):
+            self.used = used
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1GpuMemory":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+        }
+        if "free" in obj:
+            kwargs["free"] = v1GpuMemoryReading.from_json(obj["free"]) if obj["free"] is not None else None
+        if "reserved" in obj:
+            kwargs["reserved"] = v1GpuMemoryReading.from_json(obj["reserved"]) if obj["reserved"] is not None else None
+        if "total" in obj:
+            kwargs["total"] = v1GpuMemoryReading.from_json(obj["total"]) if obj["total"] is not None else None
+        if "used" in obj:
+            kwargs["used"] = v1GpuMemoryReading.from_json(obj["used"]) if obj["used"] is not None else None
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+        }
+        if not omit_unset or "free" in vars(self):
+            out["free"] = None if self.free is None else self.free.to_json(omit_unset)
+        if not omit_unset or "reserved" in vars(self):
+            out["reserved"] = None if self.reserved is None else self.reserved.to_json(omit_unset)
+        if not omit_unset or "total" in vars(self):
+            out["total"] = None if self.total is None else self.total.to_json(omit_unset)
+        if not omit_unset or "used" in vars(self):
+            out["used"] = None if self.used is None else self.used.to_json(omit_unset)
+        return out
+
+class v1GpuMemoryReading(Printable):
+    """GpuMemoryReading is one memory sample of a GPU."""
+
+    def __init__(
+        self,
+        *,
+        bytes: str,
+        sampledAt: str,
+    ):
+        self.bytes = bytes
+        self.sampledAt = sampledAt
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1GpuMemoryReading":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "bytes": obj["bytes"],
+            "sampledAt": obj["sampledAt"],
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "bytes": self.bytes,
+            "sampledAt": self.sampledAt,
+        }
+        return out
 
 class v1GpuP2p(DetEnum):
     """GpuP2p is the P2P state of a pair, derived from its four raw statuses.
@@ -19931,6 +20027,7 @@ def get_GetAgents(
     *,
     excludeContainers: "typing.Optional[bool]" = None,
     excludeSlots: "typing.Optional[bool]" = None,
+    includeGpuMemory: "typing.Optional[bool]" = None,
     limit: "typing.Optional[int]" = None,
     offset: "typing.Optional[int]" = None,
     orderBy: "typing.Optional[v1OrderBy]" = None,
@@ -19940,6 +20037,10 @@ def get_GetAgents(
 
     - excludeContainers: exclude containers.
     - excludeSlots: exclude slots.
+    - includeGpuMemory: Read each GPU's memory from the cluster's DCGM-Exporter in the Prometheus
+of integrations.task_resources into gpu_topology.gpus[].memory. It needs
+the permission to view agent details, and it cannot be combined with
+exclude_slots. A failed query fails the request.
     - limit: Limit the number of agents. A value of 0 denotes no limit.
     - offset: Skip the number of agents before returning results. Negative values
 denote number of agents to skip from the end before returning results.
@@ -19957,6 +20058,7 @@ denote number of agents to skip from the end before returning results.
     _params = {
         "excludeContainers": str(excludeContainers).lower() if excludeContainers is not None else None,
         "excludeSlots": str(excludeSlots).lower() if excludeSlots is not None else None,
+        "includeGpuMemory": str(includeGpuMemory).lower() if includeGpuMemory is not None else None,
         "limit": limit,
         "offset": offset,
         "orderBy": orderBy.value if orderBy is not None else None,
