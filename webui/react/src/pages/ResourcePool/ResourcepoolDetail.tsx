@@ -117,7 +117,7 @@ const ResourcepoolDetailInner: React.FC = () => {
       return;
     }
     try {
-      const response = await getAgents({ excludeSlots: false });
+      const response = await getAgents({ excludeContainers: false });
       setAgentsWithSlots(response);
     } catch (e) {
       handleError(e, { publicSubject: 'Could not get agents with slots' });

@@ -112,6 +112,26 @@ describe('requests to the master', () => {
     return { headers: (init.headers ?? {}) as Record<string, string>, init, url };
   };
 
+  it('requests agents with their slots and without GPU memory', async () => {
+    const params = async (request: Parameters<typeof utils.getAgents.request>[0]) => {
+      fetchMock.mockClear();
+      await utils.getAgents.request(request);
+      const { url } = sent();
+      expect(url).toMatch(/\/api\/v1\/agents\?/);
+      return new URL(url, 'http://master').searchParams;
+    };
+
+    const polled = await params({});
+    expect(polled.get('excludeContainers')).toBe('true');
+    expect(polled.has('excludeSlots')).toBe(false);
+    expect(polled.has('includeGpuMemory')).toBe(false);
+
+    const withContainers = await params({ excludeContainers: false });
+    expect(withContainers.get('excludeContainers')).toBe('false');
+    expect(withContainers.has('excludeSlots')).toBe(false);
+    expect(withContainers.has('includeGpuMemory')).toBe(false);
+  });
+
   it('sends no token: the session cookie authenticates the web UI', async () => {
     await utils.getCurrentUser.request({});
     const { headers, url } = sent();

@@ -367,14 +367,14 @@ Recent critical XIDs
 ====================
 
 An XID is an error report of the NVIDIA driver. When the master has a Prometheus for :ref:`task
-resources <task-resources>` (``integrations.task_resources``), it reads each GPU's
-critical XIDs of the last 24 hours from the cluster's DCGM-Exporter. A GPU with one is in error, and
-its details list each code with the first and last 5-minute window in which the master saw it, for
-example ``79 (2026-10-07 10:05-10:10+0000 to 2026-10-07 10:10-10:15+0000)`` in ``det agent
-describe`` (in UTC) and the same in local time in the WebUI. The WebUI adds the date to a window
-that ends on another date, and the UTC offset to the windows of a GPU when they span a change of
-daylight saving time. A GPU stays in error until its XIDs leave the 24 hours, also after a reboot
-that fixed it. A CLI older than this release shows such a GPU as ``error`` without its XIDs.
+resources <task-resources>` (``integrations.task_resources``), it reads each GPU's critical XIDs of
+the last 24 hours from the cluster's DCGM-Exporter. A GPU with one is in error, and its details list
+each code with the first and last 5-minute window in which the master saw it, for example ``79
+(2026-10-07 10:05-10:10+0000 to 2026-10-07 10:10-10:15+0000)`` in ``det agent describe`` (in UTC)
+and the same in local time in the WebUI. The WebUI adds the date to a window that ends on another
+date, and the UTC offset to the windows of a GPU when they span a change of daylight saving time. A
+GPU stays in error until its XIDs leave the 24 hours, also after a reboot that fixed it. A CLI older
+than this release shows such a GPU as ``error`` without its XIDs.
 
 Every XID code counts except 13, 31, 43 and 45. This is an exclusion policy: applications commonly
 trigger these codes, and counting them would raise false alarms. It does not mean that they always
@@ -432,6 +432,46 @@ successful result once and uses it for every task it places. It counts the XIDs 
 in the 24 hours that a query at the time of the pass covers, the XIDs that a failed query then
 keeps. So that this result stays current, the master with a Prometheus asks for the XIDs itself
 about every 30 seconds. Until its first query succeeds after a master start, only NVML errors count.
+
+.. _agent-gpu-memory:
+
+GPU memory
+==========
+
+``GetAgents`` with ``include_gpu_memory`` (``GET /api/v1/agents?includeGpuMemory=true``) adds each
+GPU's latest memory readings from the cluster's DCGM-Exporter to ``gpu_topology.gpus[].memory``:
+``total``, ``used``, ``free`` and ``reserved``, each with ``bytes`` and ``sampled_at``, the
+timestamp of the sample in Prometheus. DCGM-Exporter sets no timestamps of its own, so it is the
+time Prometheus scraped the exporter, not when DCGM read the GPU. The response's
+``gpu_memory_queried_at`` is when the master read the memory, or the time of the request when there
+are no GPUs to query; a master without this feature ignores the parameter and leaves it out. The
+readings are observations only: whether a GPU can take a task still depends on its slot.
+
+The master evaluates one query at a single time, a range query whose start equals its end, for all
+GPUs at once:
+
+.. code::
+
+   label_replace(DCGM_FI_DEV_FB_USED{job="dcgm", det_cluster="<det_cluster>", gpu_uuid!=""},
+     "det_gpu_memory_field", "used", "", "")
+   or label_replace(timestamp(DCGM_FI_DEV_FB_USED{...}), "det_gpu_memory_field", "used_at", "", "")
+   or ...
+
+with the same two terms for ``DCGM_FI_DEV_FB_TOTAL``, ``DCGM_FI_DEV_FB_FREE`` and
+``DCGM_FI_DEV_FB_RESERVED``. The exporter's counters file must enable the four gauges, which DCGM
+reports in MiB, and Prometheus must give them the ``det_cluster`` and ``gpu_uuid`` labels as for
+:ref:`XIDs <agent-gpu-xids>`. Prometheus returns the latest sample within its lookback period, 5
+minutes by default, so ``sampled_at`` can be up to that old. A reading without a sample is null, and
+a GPU without any has a ``memory`` with all readings null.
+
+Missing samples read null, as above. A failed read fails the whole request, with no cached data and
+no readings from part of the query: the request fails when the master has no Prometheus for task
+resources (``FAILED_PRECONDITION``), the query fails or times out after 5 seconds (``UNAVAILABLE``),
+no GPU has any sample (``UNAVAILABLE``), or the result is invalid (``INTERNAL``): two samples for
+one GPU and reading, a reading without its time, or a value that is not a whole number of MiB from 0
+to 16 TiB. It also fails for a user who may not view sensitive agent information
+(``PERMISSION_DENIED``) and together with ``exclude_slots`` (``INVALID_ARGUMENT``). ``GetAgent`` and
+agent enable and disable responses never carry memory.
 
 CLI and WebUI
 =============

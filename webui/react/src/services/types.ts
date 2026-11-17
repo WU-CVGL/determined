@@ -397,7 +397,7 @@ export interface PostUserParams {
 }
 
 export interface GetAgentsParams {
-  excludeSlots?: boolean;
+  excludeContainers?: boolean;
 }
 
 export interface SetUserPasswordParams {
