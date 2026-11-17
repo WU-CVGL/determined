@@ -618,6 +618,19 @@ describe('InteractiveTask', () => {
     expect(tabLabels()).toEqual(['Logs', 'Resources']);
   });
 
+  it('scrolls the resources inside their tab, which the page does not', async () => {
+    vi.mocked(getTask).mockResolvedValue(taskWith(false, V1TaskType.COMMAND));
+    vi.mocked(getTaskServices).mockResolvedValue(servicesWith([]));
+    vi.mocked(getCommand).mockResolvedValue({
+      ...shell,
+      name: 'Command',
+      type: CommandType.Command,
+    });
+    setup('?tab=resources');
+    const panel = await screen.findByTestId('resources-pane');
+    expect(panel.parentElement).toHaveClass('scrollPane');
+  });
+
   it('gives a command its logs and resources', async () => {
     vi.mocked(getTask).mockResolvedValue(taskWith(false, V1TaskType.COMMAND));
     vi.mocked(getTaskServices).mockResolvedValue(servicesWith([]));
