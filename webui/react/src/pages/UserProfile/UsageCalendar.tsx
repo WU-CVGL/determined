@@ -23,7 +23,7 @@ const DayLine: React.FC<{ day: CalendarDay; values: UsageValue[] }> = ({ day, va
 
 /** A day's date and its values, on one line. */
 const tooltip = (day: CalendarDay, values: UsageValue[]): string =>
-  [day.date, ...values.map(({ title, value }) => `${title} ${value}`)].join(' · ');
+  [`${day.date} (UTC)`, ...values.map(({ title, value }) => `${title} ${value}`)].join(' · ');
 
 // The step in days of an arrow key: a column is a week, a row a weekday.
 const KEY_STEPS: Record<string, number> = {

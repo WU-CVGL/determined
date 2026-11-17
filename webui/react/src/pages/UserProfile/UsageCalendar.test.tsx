@@ -86,7 +86,7 @@ describe('UsageCalendar', () => {
     setup([day('2026-11-03', 3, 1.5)]);
     await act(() => user.hover(cell('2026-11-03')));
     expect(await screen.findByRole('tooltip')).toHaveTextContent(
-      /^2026-11-03 · GPU hours 6.0 · Aux container hours 1.5$/,
+      /^2026-11-03 \(UTC\) · GPU hours 6.0 · Aux container hours 1.5$/,
     );
     expect(screen.queryByTestId('usage-calendar-day')).not.toBeInTheDocument();
   });
@@ -95,7 +95,7 @@ describe('UsageCalendar', () => {
     const user = userEvent.setup();
     setup([]);
     await act(() => user.hover(cell('2026-10-31')));
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(/^2026-10-31$/);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/^2026-10-31 \(UTC\)$/);
   });
 
   it("shows a day's hours under the grid when clicked", async () => {
