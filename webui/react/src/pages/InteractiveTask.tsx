@@ -428,8 +428,15 @@ export const InteractiveTask: React.FC = () => {
         case InteractiveTaskTab.Logs:
           return <LogsPane hidden={logsHidden(capabilities)} taskId={taskId} />;
         case InteractiveTaskTab.Resources:
+          // The page does not scroll, so the pane does: the panel is taller than the window.
           return (
-            <TaskResourcesPanel endTime={task.endTime} startTime={task.startTime} taskId={taskId} />
+            <div className={css.scrollPane}>
+              <TaskResourcesPanel
+                endTime={task.endTime}
+                startTime={task.startTime}
+                taskId={taskId}
+              />
+            </div>
           );
       }
     };
