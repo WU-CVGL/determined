@@ -4776,6 +4776,7 @@ class v1GetAgentsRequestSortBy(DetEnum):
 class v1GetAgentsResponse(Printable):
     """Response to GetAgentsRequest."""
     gpuMemoryQueriedAt: "typing.Optional[str]" = None
+    gpuPowerQueriedAt: "typing.Optional[str]" = None
     pagination: "typing.Optional[v1Pagination]" = None
 
     def __init__(
@@ -4783,11 +4784,14 @@ class v1GetAgentsResponse(Printable):
         *,
         agents: "typing.Sequence[v1Agent]",
         gpuMemoryQueriedAt: "typing.Union[str, None, Unset]" = _unset,
+        gpuPowerQueriedAt: "typing.Union[str, None, Unset]" = _unset,
         pagination: "typing.Union[v1Pagination, None, Unset]" = _unset,
     ):
         self.agents = agents
         if not isinstance(gpuMemoryQueriedAt, Unset):
             self.gpuMemoryQueriedAt = gpuMemoryQueriedAt
+        if not isinstance(gpuPowerQueriedAt, Unset):
+            self.gpuPowerQueriedAt = gpuPowerQueriedAt
         if not isinstance(pagination, Unset):
             self.pagination = pagination
 
@@ -4798,6 +4802,8 @@ class v1GetAgentsResponse(Printable):
         }
         if "gpuMemoryQueriedAt" in obj:
             kwargs["gpuMemoryQueriedAt"] = obj["gpuMemoryQueriedAt"]
+        if "gpuPowerQueriedAt" in obj:
+            kwargs["gpuPowerQueriedAt"] = obj["gpuPowerQueriedAt"]
         if "pagination" in obj:
             kwargs["pagination"] = v1Pagination.from_json(obj["pagination"]) if obj["pagination"] is not None else None
         return cls(**kwargs)
@@ -4808,6 +4814,8 @@ class v1GetAgentsResponse(Printable):
         }
         if not omit_unset or "gpuMemoryQueriedAt" in vars(self):
             out["gpuMemoryQueriedAt"] = self.gpuMemoryQueriedAt
+        if not omit_unset or "gpuPowerQueriedAt" in vars(self):
+            out["gpuPowerQueriedAt"] = self.gpuPowerQueriedAt
         if not omit_unset or "pagination" in vars(self):
             out["pagination"] = None if self.pagination is None else self.pagination.to_json(omit_unset)
         return out
@@ -7634,6 +7642,7 @@ class v1GpuInfo(Printable):
     agent's exclude list.
     """
     memory: "typing.Optional[v1GpuMemory]" = None
+    power: "typing.Optional[v1GpuPower]" = None
     recentXids: "typing.Optional[typing.Sequence[v1GpuXid]]" = None
 
     def __init__(
@@ -7651,6 +7660,7 @@ class v1GpuInfo(Printable):
         pcieLinkWidthMax: int,
         uuid: str,
         memory: "typing.Union[v1GpuMemory, None, Unset]" = _unset,
+        power: "typing.Union[v1GpuPower, None, Unset]" = _unset,
         recentXids: "typing.Union[typing.Sequence[v1GpuXid], None, Unset]" = _unset,
     ):
         self.deviceId = deviceId
@@ -7666,6 +7676,8 @@ class v1GpuInfo(Printable):
         self.uuid = uuid
         if not isinstance(memory, Unset):
             self.memory = memory
+        if not isinstance(power, Unset):
+            self.power = power
         if not isinstance(recentXids, Unset):
             self.recentXids = recentXids
 
@@ -7686,6 +7698,8 @@ class v1GpuInfo(Printable):
         }
         if "memory" in obj:
             kwargs["memory"] = v1GpuMemory.from_json(obj["memory"]) if obj["memory"] is not None else None
+        if "power" in obj:
+            kwargs["power"] = v1GpuPower.from_json(obj["power"]) if obj["power"] is not None else None
         if "recentXids" in obj:
             kwargs["recentXids"] = [v1GpuXid.from_json(x) for x in obj["recentXids"]] if obj["recentXids"] is not None else None
         return cls(**kwargs)
@@ -7706,6 +7720,8 @@ class v1GpuInfo(Printable):
         }
         if not omit_unset or "memory" in vars(self):
             out["memory"] = None if self.memory is None else self.memory.to_json(omit_unset)
+        if not omit_unset or "power" in vars(self):
+            out["power"] = None if self.power is None else self.power.to_json(omit_unset)
         if not omit_unset or "recentXids" in vars(self):
             out["recentXids"] = None if self.recentXids is None else [x.to_json(omit_unset) for x in self.recentXids]
         return out
@@ -7917,6 +7933,86 @@ class v1GpuP2pStatus(DetEnum):
     TOPOLOGY_NOT_SUPPORTED = "GPU_P2P_STATUS_TOPOLOGY_NOT_SUPPORTED"
     DISABLED_BY_REGKEY = "GPU_P2P_STATUS_DISABLED_BY_REGKEY"
     NOT_SUPPORTED = "GPU_P2P_STATUS_NOT_SUPPORTED"
+
+class v1GpuPower(Printable):
+    """GpuPower holds a GPU's latest power readings. A reading without a sample is
+    null.
+    """
+    defaultLimit: "typing.Optional[v1GpuPowerReading]" = None
+    draw: "typing.Optional[v1GpuPowerReading]" = None
+    enforcedLimit: "typing.Optional[v1GpuPowerReading]" = None
+    limit: "typing.Optional[v1GpuPowerReading]" = None
+
+    def __init__(
+        self,
+        *,
+        defaultLimit: "typing.Union[v1GpuPowerReading, None, Unset]" = _unset,
+        draw: "typing.Union[v1GpuPowerReading, None, Unset]" = _unset,
+        enforcedLimit: "typing.Union[v1GpuPowerReading, None, Unset]" = _unset,
+        limit: "typing.Union[v1GpuPowerReading, None, Unset]" = _unset,
+    ):
+        if not isinstance(defaultLimit, Unset):
+            self.defaultLimit = defaultLimit
+        if not isinstance(draw, Unset):
+            self.draw = draw
+        if not isinstance(enforcedLimit, Unset):
+            self.enforcedLimit = enforcedLimit
+        if not isinstance(limit, Unset):
+            self.limit = limit
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1GpuPower":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+        }
+        if "defaultLimit" in obj:
+            kwargs["defaultLimit"] = v1GpuPowerReading.from_json(obj["defaultLimit"]) if obj["defaultLimit"] is not None else None
+        if "draw" in obj:
+            kwargs["draw"] = v1GpuPowerReading.from_json(obj["draw"]) if obj["draw"] is not None else None
+        if "enforcedLimit" in obj:
+            kwargs["enforcedLimit"] = v1GpuPowerReading.from_json(obj["enforcedLimit"]) if obj["enforcedLimit"] is not None else None
+        if "limit" in obj:
+            kwargs["limit"] = v1GpuPowerReading.from_json(obj["limit"]) if obj["limit"] is not None else None
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+        }
+        if not omit_unset or "defaultLimit" in vars(self):
+            out["defaultLimit"] = None if self.defaultLimit is None else self.defaultLimit.to_json(omit_unset)
+        if not omit_unset or "draw" in vars(self):
+            out["draw"] = None if self.draw is None else self.draw.to_json(omit_unset)
+        if not omit_unset or "enforcedLimit" in vars(self):
+            out["enforcedLimit"] = None if self.enforcedLimit is None else self.enforcedLimit.to_json(omit_unset)
+        if not omit_unset or "limit" in vars(self):
+            out["limit"] = None if self.limit is None else self.limit.to_json(omit_unset)
+        return out
+
+class v1GpuPowerReading(Printable):
+    """GpuPowerReading is one power sample of a GPU."""
+
+    def __init__(
+        self,
+        *,
+        sampledAt: str,
+        watts: float,
+    ):
+        self.sampledAt = sampledAt
+        self.watts = watts
+
+    @classmethod
+    def from_json(cls, obj: Json) -> "v1GpuPowerReading":
+        kwargs: "typing.Dict[str, typing.Any]" = {
+            "sampledAt": obj["sampledAt"],
+            "watts": float(obj["watts"]),
+        }
+        return cls(**kwargs)
+
+    def to_json(self, omit_unset: bool = False) -> typing.Dict[str, typing.Any]:
+        out: "typing.Dict[str, typing.Any]" = {
+            "sampledAt": self.sampledAt,
+            "watts": dump_float(self.watts),
+        }
+        return out
 
 class v1GpuTopology(Printable):
     """GpuTopology is what an agent measured with NVML when it started, and the
@@ -20028,6 +20124,7 @@ def get_GetAgents(
     excludeContainers: "typing.Optional[bool]" = None,
     excludeSlots: "typing.Optional[bool]" = None,
     includeGpuMemory: "typing.Optional[bool]" = None,
+    includeGpuPower: "typing.Optional[bool]" = None,
     limit: "typing.Optional[int]" = None,
     offset: "typing.Optional[int]" = None,
     orderBy: "typing.Optional[v1OrderBy]" = None,
@@ -20041,6 +20138,9 @@ def get_GetAgents(
 of integrations.task_resources into gpu_topology.gpus[].memory. It needs
 the permission to view agent details, and it cannot be combined with
 exclude_slots. A failed query fails the request.
+    - includeGpuPower: Read each GPU's power draw and limits into gpu_topology.gpus[].power, from
+the same source and under the same conditions as include_gpu_memory. With
+both, the master sends one query.
     - limit: Limit the number of agents. A value of 0 denotes no limit.
     - offset: Skip the number of agents before returning results. Negative values
 denote number of agents to skip from the end before returning results.
@@ -20059,6 +20159,7 @@ denote number of agents to skip from the end before returning results.
         "excludeContainers": str(excludeContainers).lower() if excludeContainers is not None else None,
         "excludeSlots": str(excludeSlots).lower() if excludeSlots is not None else None,
         "includeGpuMemory": str(includeGpuMemory).lower() if includeGpuMemory is not None else None,
+        "includeGpuPower": str(includeGpuPower).lower() if includeGpuPower is not None else None,
         "limit": limit,
         "offset": offset,
         "orderBy": orderBy.value if orderBy is not None else None,

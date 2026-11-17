@@ -40,6 +40,10 @@ message GetAgentsRequest {
   // the permission to view agent details, and it cannot be combined with
   // exclude_slots. A failed query fails the request.
   bool include_gpu_memory = 8;
+  // Read each GPU's power draw and limits into gpu_topology.gpus[].power, from
+  // the same source and under the same conditions as include_gpu_memory. With
+  // both, the master sends one query.
+  bool include_gpu_power = 9;
 }
 // Response to GetAgentsRequest.
 message GetAgentsResponse {
@@ -55,6 +59,9 @@ message GetAgentsResponse {
   // only when include_gpu_memory was requested and the read succeeded; with no
   // GPUs, nothing is queried and it is the time of the request.
   google.protobuf.Timestamp gpu_memory_queried_at = 3;
+  // When the master read the GPU power, as gpu_memory_queried_at for
+  // include_gpu_power.
+  google.protobuf.Timestamp gpu_power_queried_at = 4;
 }
 
 // Get the requested agent.

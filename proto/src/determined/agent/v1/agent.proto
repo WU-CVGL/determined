@@ -170,6 +170,9 @@ message GpuInfo {
   // DCGM-Exporter. Only
   // GetAgents with include_gpu_memory sets it.
   GpuMemory memory = 13;
+  // The GPU's power draw and limits as Prometheus last scraped them from the
+  // cluster's DCGM-Exporter. Only GetAgents with include_gpu_power sets it.
+  GpuPower power = 14;
 }
 
 // GpuMemory holds a GPU's latest memory readings. A reading without a sample
@@ -183,6 +186,31 @@ message GpuMemory {
   GpuMemoryReading free = 3;
   // The memory the device reserves (DCGM_FI_DEV_FB_RESERVED).
   GpuMemoryReading reserved = 4;
+}
+
+// GpuPower holds a GPU's latest power readings. A reading without a sample is
+// null.
+message GpuPower {
+  // The power draw (DCGM_FI_DEV_POWER_USAGE).
+  GpuPowerReading draw = 1;
+  // The configured power limit (DCGM_FI_DEV_POWER_MGMT_LIMIT).
+  GpuPowerReading limit = 2;
+  // The default power limit (DCGM_FI_DEV_POWER_MGMT_LIMIT_DEF).
+  GpuPowerReading default_limit = 3;
+  // The enforced power limit, after every constraint
+  // (DCGM_FI_DEV_ENFORCED_POWER_LIMIT).
+  GpuPowerReading enforced_limit = 4;
+}
+
+// GpuPowerReading is one power sample of a GPU.
+message GpuPowerReading {
+  option (grpc.gateway.protoc_gen_swagger.options.openapiv2_schema) = {
+    json_schema: { required: [ "watts", "sampled_at" ] }
+  };
+  // The reading in watts.
+  double watts = 1;
+  // The timestamp of the sample in Prometheus, as for GpuMemoryReading.
+  google.protobuf.Timestamp sampled_at = 2;
 }
 
 // GpuMemoryReading is one memory sample of a GPU.

@@ -615,7 +615,7 @@ export const getAgents: DetApi<Service.GetAgentsParams, Api.V1GetAgentsResponse,
   name: 'getAgents',
   postProcess: (response) => decoder.jsonToAgents(response.agents || []),
   // Every request keeps the slots, which the agents' resources come from, and reads no GPU
-  // memory.
+  // memory or power.
   request: (params: Service.GetAgentsParams) =>
     detApi.Cluster.getAgents(
       undefined, // sortBy

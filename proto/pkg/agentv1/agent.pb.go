@@ -854,6 +854,9 @@ type GpuInfo struct {
 	// DCGM-Exporter. Only
 	// GetAgents with include_gpu_memory sets it.
 	Memory *GpuMemory `protobuf:"bytes,13,opt,name=memory,proto3" json:"memory,omitempty"`
+	// The GPU's power draw and limits as Prometheus last scraped them from the
+	// cluster's DCGM-Exporter. Only GetAgents with include_gpu_power sets it.
+	Power *GpuPower `protobuf:"bytes,14,opt,name=power,proto3" json:"power,omitempty"`
 }
 
 func (x *GpuInfo) Reset() {
@@ -979,6 +982,13 @@ func (x *GpuInfo) GetMemory() *GpuMemory {
 	return nil
 }
 
+func (x *GpuInfo) GetPower() *GpuPower {
+	if x != nil {
+		return x.Power
+	}
+	return nil
+}
+
 // GpuMemory holds a GPU's latest memory readings. A reading without a sample
 // is null.
 type GpuMemory struct {
@@ -1056,6 +1066,142 @@ func (x *GpuMemory) GetReserved() *GpuMemoryReading {
 	return nil
 }
 
+// GpuPower holds a GPU's latest power readings. A reading without a sample is
+// null.
+type GpuPower struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// The power draw (DCGM_FI_DEV_POWER_USAGE).
+	Draw *GpuPowerReading `protobuf:"bytes,1,opt,name=draw,proto3" json:"draw,omitempty"`
+	// The configured power limit (DCGM_FI_DEV_POWER_MGMT_LIMIT).
+	Limit *GpuPowerReading `protobuf:"bytes,2,opt,name=limit,proto3" json:"limit,omitempty"`
+	// The default power limit (DCGM_FI_DEV_POWER_MGMT_LIMIT_DEF).
+	DefaultLimit *GpuPowerReading `protobuf:"bytes,3,opt,name=default_limit,json=defaultLimit,proto3" json:"default_limit,omitempty"`
+	// The enforced power limit, after every constraint
+	// (DCGM_FI_DEV_ENFORCED_POWER_LIMIT).
+	EnforcedLimit *GpuPowerReading `protobuf:"bytes,4,opt,name=enforced_limit,json=enforcedLimit,proto3" json:"enforced_limit,omitempty"`
+}
+
+func (x *GpuPower) Reset() {
+	*x = GpuPower{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_determined_agent_v1_agent_proto_msgTypes[7]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GpuPower) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GpuPower) ProtoMessage() {}
+
+func (x *GpuPower) ProtoReflect() protoreflect.Message {
+	mi := &file_determined_agent_v1_agent_proto_msgTypes[7]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GpuPower.ProtoReflect.Descriptor instead.
+func (*GpuPower) Descriptor() ([]byte, []int) {
+	return file_determined_agent_v1_agent_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *GpuPower) GetDraw() *GpuPowerReading {
+	if x != nil {
+		return x.Draw
+	}
+	return nil
+}
+
+func (x *GpuPower) GetLimit() *GpuPowerReading {
+	if x != nil {
+		return x.Limit
+	}
+	return nil
+}
+
+func (x *GpuPower) GetDefaultLimit() *GpuPowerReading {
+	if x != nil {
+		return x.DefaultLimit
+	}
+	return nil
+}
+
+func (x *GpuPower) GetEnforcedLimit() *GpuPowerReading {
+	if x != nil {
+		return x.EnforcedLimit
+	}
+	return nil
+}
+
+// GpuPowerReading is one power sample of a GPU.
+type GpuPowerReading struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// The reading in watts.
+	Watts float64 `protobuf:"fixed64,1,opt,name=watts,proto3" json:"watts,omitempty"`
+	// The timestamp of the sample in Prometheus, as for GpuMemoryReading.
+	SampledAt *timestamp.Timestamp `protobuf:"bytes,2,opt,name=sampled_at,json=sampledAt,proto3" json:"sampled_at,omitempty"`
+}
+
+func (x *GpuPowerReading) Reset() {
+	*x = GpuPowerReading{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_determined_agent_v1_agent_proto_msgTypes[8]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GpuPowerReading) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GpuPowerReading) ProtoMessage() {}
+
+func (x *GpuPowerReading) ProtoReflect() protoreflect.Message {
+	mi := &file_determined_agent_v1_agent_proto_msgTypes[8]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GpuPowerReading.ProtoReflect.Descriptor instead.
+func (*GpuPowerReading) Descriptor() ([]byte, []int) {
+	return file_determined_agent_v1_agent_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *GpuPowerReading) GetWatts() float64 {
+	if x != nil {
+		return x.Watts
+	}
+	return 0
+}
+
+func (x *GpuPowerReading) GetSampledAt() *timestamp.Timestamp {
+	if x != nil {
+		return x.SampledAt
+	}
+	return nil
+}
+
 // GpuMemoryReading is one memory sample of a GPU.
 type GpuMemoryReading struct {
 	state         protoimpl.MessageState
@@ -1072,7 +1218,7 @@ type GpuMemoryReading struct {
 func (x *GpuMemoryReading) Reset() {
 	*x = GpuMemoryReading{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_determined_agent_v1_agent_proto_msgTypes[7]
+		mi := &file_determined_agent_v1_agent_proto_msgTypes[9]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1085,7 +1231,7 @@ func (x *GpuMemoryReading) String() string {
 func (*GpuMemoryReading) ProtoMessage() {}
 
 func (x *GpuMemoryReading) ProtoReflect() protoreflect.Message {
-	mi := &file_determined_agent_v1_agent_proto_msgTypes[7]
+	mi := &file_determined_agent_v1_agent_proto_msgTypes[9]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1098,7 +1244,7 @@ func (x *GpuMemoryReading) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GpuMemoryReading.ProtoReflect.Descriptor instead.
 func (*GpuMemoryReading) Descriptor() ([]byte, []int) {
-	return file_determined_agent_v1_agent_proto_rawDescGZIP(), []int{7}
+	return file_determined_agent_v1_agent_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *GpuMemoryReading) GetBytes() int64 {
@@ -1133,7 +1279,7 @@ type GpuXid struct {
 func (x *GpuXid) Reset() {
 	*x = GpuXid{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_determined_agent_v1_agent_proto_msgTypes[8]
+		mi := &file_determined_agent_v1_agent_proto_msgTypes[10]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1146,7 +1292,7 @@ func (x *GpuXid) String() string {
 func (*GpuXid) ProtoMessage() {}
 
 func (x *GpuXid) ProtoReflect() protoreflect.Message {
-	mi := &file_determined_agent_v1_agent_proto_msgTypes[8]
+	mi := &file_determined_agent_v1_agent_proto_msgTypes[10]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1159,7 +1305,7 @@ func (x *GpuXid) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GpuXid.ProtoReflect.Descriptor instead.
 func (*GpuXid) Descriptor() ([]byte, []int) {
-	return file_determined_agent_v1_agent_proto_rawDescGZIP(), []int{8}
+	return file_determined_agent_v1_agent_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *GpuXid) GetXid() int32 {
@@ -1198,7 +1344,7 @@ type GpuP2PCaps struct {
 func (x *GpuP2PCaps) Reset() {
 	*x = GpuP2PCaps{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_determined_agent_v1_agent_proto_msgTypes[9]
+		mi := &file_determined_agent_v1_agent_proto_msgTypes[11]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1211,7 +1357,7 @@ func (x *GpuP2PCaps) String() string {
 func (*GpuP2PCaps) ProtoMessage() {}
 
 func (x *GpuP2PCaps) ProtoReflect() protoreflect.Message {
-	mi := &file_determined_agent_v1_agent_proto_msgTypes[9]
+	mi := &file_determined_agent_v1_agent_proto_msgTypes[11]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1224,7 +1370,7 @@ func (x *GpuP2PCaps) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GpuP2PCaps.ProtoReflect.Descriptor instead.
 func (*GpuP2PCaps) Descriptor() ([]byte, []int) {
-	return file_determined_agent_v1_agent_proto_rawDescGZIP(), []int{9}
+	return file_determined_agent_v1_agent_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GpuP2PCaps) GetRead() GpuP2PStatus {
@@ -1271,7 +1417,7 @@ type GpuLink struct {
 func (x *GpuLink) Reset() {
 	*x = GpuLink{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_determined_agent_v1_agent_proto_msgTypes[10]
+		mi := &file_determined_agent_v1_agent_proto_msgTypes[12]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1284,7 +1430,7 @@ func (x *GpuLink) String() string {
 func (*GpuLink) ProtoMessage() {}
 
 func (x *GpuLink) ProtoReflect() protoreflect.Message {
-	mi := &file_determined_agent_v1_agent_proto_msgTypes[10]
+	mi := &file_determined_agent_v1_agent_proto_msgTypes[12]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1297,7 +1443,7 @@ func (x *GpuLink) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GpuLink.ProtoReflect.Descriptor instead.
 func (*GpuLink) Descriptor() ([]byte, []int) {
-	return file_determined_agent_v1_agent_proto_rawDescGZIP(), []int{10}
+	return file_determined_agent_v1_agent_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *GpuLink) GetDeviceA() int32 {
@@ -1510,7 +1656,7 @@ var file_determined_agent_v1_agent_proto_rawDesc = []byte{
 	0x31, 0xd2, 0x01, 0x0e, 0x75, 0x6e, 0x6b, 0x6e, 0x6f, 0x77, 0x6e, 0x5f, 0x72, 0x65, 0x61, 0x73,
 	0x6f, 0x6e, 0xd2, 0x01, 0x0e, 0x64, 0x72, 0x69, 0x76, 0x65, 0x72, 0x5f, 0x76, 0x65, 0x72, 0x73,
 	0x69, 0x6f, 0x6e, 0xd2, 0x01, 0x04, 0x67, 0x70, 0x75, 0x73, 0xd2, 0x01, 0x05, 0x6c, 0x69, 0x6e,
-	0x6b, 0x73, 0x22, 0xa7, 0x05, 0x0a, 0x07, 0x47, 0x70, 0x75, 0x49, 0x6e, 0x66, 0x6f, 0x12, 0x1b,
+	0x6b, 0x73, 0x22, 0xdc, 0x05, 0x0a, 0x07, 0x47, 0x70, 0x75, 0x49, 0x6e, 0x66, 0x6f, 0x12, 0x1b,
 	0x0a, 0x09, 0x64, 0x65, 0x76, 0x69, 0x63, 0x65, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28,
 	0x05, 0x52, 0x08, 0x64, 0x65, 0x76, 0x69, 0x63, 0x65, 0x49, 0x64, 0x12, 0x12, 0x0a, 0x04, 0x75,
 	0x75, 0x69, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x04, 0x75, 0x75, 0x69, 0x64, 0x12,
@@ -1542,33 +1688,62 @@ var file_determined_agent_v1_agent_proto_rawDesc = []byte{
 	0x73, 0x12, 0x36, 0x0a, 0x06, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x18, 0x0d, 0x20, 0x01, 0x28,
 	0x0b, 0x32, 0x1e, 0x2e, 0x64, 0x65, 0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2e, 0x61,
 	0x67, 0x65, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x70, 0x75, 0x4d, 0x65, 0x6d, 0x6f, 0x72,
-	0x79, 0x52, 0x06, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x3a, 0xa0, 0x01, 0x92, 0x41, 0x9c, 0x01,
-	0x0a, 0x99, 0x01, 0xd2, 0x01, 0x09, 0x64, 0x65, 0x76, 0x69, 0x63, 0x65, 0x5f, 0x69, 0x64, 0xd2,
-	0x01, 0x04, 0x75, 0x75, 0x69, 0x64, 0xd2, 0x01, 0x0a, 0x70, 0x63, 0x69, 0x5f, 0x62, 0x75, 0x73,
-	0x5f, 0x69, 0x64, 0xd2, 0x01, 0x09, 0x6e, 0x75, 0x6d, 0x61, 0x5f, 0x6e, 0x6f, 0x64, 0x65, 0xd2,
-	0x01, 0x0f, 0x70, 0x63, 0x69, 0x65, 0x5f, 0x6c, 0x69, 0x6e, 0x6b, 0x5f, 0x77, 0x69, 0x64, 0x74,
-	0x68, 0xd2, 0x01, 0x13, 0x70, 0x63, 0x69, 0x65, 0x5f, 0x6c, 0x69, 0x6e, 0x6b, 0x5f, 0x77, 0x69,
-	0x64, 0x74, 0x68, 0x5f, 0x6d, 0x61, 0x78, 0xd2, 0x01, 0x0d, 0x70, 0x63, 0x69, 0x65, 0x5f, 0x6c,
-	0x69, 0x6e, 0x6b, 0x5f, 0x67, 0x65, 0x6e, 0xd2, 0x01, 0x11, 0x70, 0x63, 0x69, 0x65, 0x5f, 0x6c,
-	0x69, 0x6e, 0x6b, 0x5f, 0x67, 0x65, 0x6e, 0x5f, 0x6d, 0x61, 0x78, 0xd2, 0x01, 0x0a, 0x6e, 0x76,
-	0x6d, 0x6c, 0x5f, 0x65, 0x72, 0x72, 0x6f, 0x72, 0xd2, 0x01, 0x06, 0x68, 0x65, 0x61, 0x6c, 0x74,
-	0x68, 0xd2, 0x01, 0x08, 0x65, 0x78, 0x63, 0x6c, 0x75, 0x64, 0x65, 0x64, 0x22, 0x81, 0x02, 0x0a,
-	0x09, 0x47, 0x70, 0x75, 0x4d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x12, 0x3b, 0x0a, 0x05, 0x74, 0x6f,
-	0x74, 0x61, 0x6c, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x25, 0x2e, 0x64, 0x65, 0x74, 0x65,
-	0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2e, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e,
-	0x47, 0x70, 0x75, 0x4d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x52, 0x65, 0x61, 0x64, 0x69, 0x6e, 0x67,
-	0x52, 0x05, 0x74, 0x6f, 0x74, 0x61, 0x6c, 0x12, 0x39, 0x0a, 0x04, 0x75, 0x73, 0x65, 0x64, 0x18,
-	0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x25, 0x2e, 0x64, 0x65, 0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e,
+	0x79, 0x52, 0x06, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x12, 0x33, 0x0a, 0x05, 0x70, 0x6f, 0x77,
+	0x65, 0x72, 0x18, 0x0e, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1d, 0x2e, 0x64, 0x65, 0x74, 0x65, 0x72,
+	0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2e, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x47,
+	0x70, 0x75, 0x50, 0x6f, 0x77, 0x65, 0x72, 0x52, 0x05, 0x70, 0x6f, 0x77, 0x65, 0x72, 0x3a, 0xa0,
+	0x01, 0x92, 0x41, 0x9c, 0x01, 0x0a, 0x99, 0x01, 0xd2, 0x01, 0x09, 0x64, 0x65, 0x76, 0x69, 0x63,
+	0x65, 0x5f, 0x69, 0x64, 0xd2, 0x01, 0x04, 0x75, 0x75, 0x69, 0x64, 0xd2, 0x01, 0x0a, 0x70, 0x63,
+	0x69, 0x5f, 0x62, 0x75, 0x73, 0x5f, 0x69, 0x64, 0xd2, 0x01, 0x09, 0x6e, 0x75, 0x6d, 0x61, 0x5f,
+	0x6e, 0x6f, 0x64, 0x65, 0xd2, 0x01, 0x0f, 0x70, 0x63, 0x69, 0x65, 0x5f, 0x6c, 0x69, 0x6e, 0x6b,
+	0x5f, 0x77, 0x69, 0x64, 0x74, 0x68, 0xd2, 0x01, 0x13, 0x70, 0x63, 0x69, 0x65, 0x5f, 0x6c, 0x69,
+	0x6e, 0x6b, 0x5f, 0x77, 0x69, 0x64, 0x74, 0x68, 0x5f, 0x6d, 0x61, 0x78, 0xd2, 0x01, 0x0d, 0x70,
+	0x63, 0x69, 0x65, 0x5f, 0x6c, 0x69, 0x6e, 0x6b, 0x5f, 0x67, 0x65, 0x6e, 0xd2, 0x01, 0x11, 0x70,
+	0x63, 0x69, 0x65, 0x5f, 0x6c, 0x69, 0x6e, 0x6b, 0x5f, 0x67, 0x65, 0x6e, 0x5f, 0x6d, 0x61, 0x78,
+	0xd2, 0x01, 0x0a, 0x6e, 0x76, 0x6d, 0x6c, 0x5f, 0x65, 0x72, 0x72, 0x6f, 0x72, 0xd2, 0x01, 0x06,
+	0x68, 0x65, 0x61, 0x6c, 0x74, 0x68, 0xd2, 0x01, 0x08, 0x65, 0x78, 0x63, 0x6c, 0x75, 0x64, 0x65,
+	0x64, 0x22, 0x81, 0x02, 0x0a, 0x09, 0x47, 0x70, 0x75, 0x4d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x12,
+	0x3b, 0x0a, 0x05, 0x74, 0x6f, 0x74, 0x61, 0x6c, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x25,
+	0x2e, 0x64, 0x65, 0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2e, 0x61, 0x67, 0x65, 0x6e,
+	0x74, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x70, 0x75, 0x4d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x52, 0x65,
+	0x61, 0x64, 0x69, 0x6e, 0x67, 0x52, 0x05, 0x74, 0x6f, 0x74, 0x61, 0x6c, 0x12, 0x39, 0x0a, 0x04,
+	0x75, 0x73, 0x65, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x25, 0x2e, 0x64, 0x65, 0x74,
+	0x65, 0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2e, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x2e, 0x76, 0x31,
+	0x2e, 0x47, 0x70, 0x75, 0x4d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x52, 0x65, 0x61, 0x64, 0x69, 0x6e,
+	0x67, 0x52, 0x04, 0x75, 0x73, 0x65, 0x64, 0x12, 0x39, 0x0a, 0x04, 0x66, 0x72, 0x65, 0x65, 0x18,
+	0x03, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x25, 0x2e, 0x64, 0x65, 0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e,
 	0x65, 0x64, 0x2e, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x70, 0x75, 0x4d,
-	0x65, 0x6d, 0x6f, 0x72, 0x79, 0x52, 0x65, 0x61, 0x64, 0x69, 0x6e, 0x67, 0x52, 0x04, 0x75, 0x73,
-	0x65, 0x64, 0x12, 0x39, 0x0a, 0x04, 0x66, 0x72, 0x65, 0x65, 0x18, 0x03, 0x20, 0x01, 0x28, 0x0b,
-	0x32, 0x25, 0x2e, 0x64, 0x65, 0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2e, 0x61, 0x67,
-	0x65, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x70, 0x75, 0x4d, 0x65, 0x6d, 0x6f, 0x72, 0x79,
-	0x52, 0x65, 0x61, 0x64, 0x69, 0x6e, 0x67, 0x52, 0x04, 0x66, 0x72, 0x65, 0x65, 0x12, 0x41, 0x0a,
-	0x08, 0x72, 0x65, 0x73, 0x65, 0x72, 0x76, 0x65, 0x64, 0x18, 0x04, 0x20, 0x01, 0x28, 0x0b, 0x32,
-	0x25, 0x2e, 0x64, 0x65, 0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2e, 0x61, 0x67, 0x65,
-	0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x70, 0x75, 0x4d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x52,
-	0x65, 0x61, 0x64, 0x69, 0x6e, 0x67, 0x52, 0x08, 0x72, 0x65, 0x73, 0x65, 0x72, 0x76, 0x65, 0x64,
+	0x65, 0x6d, 0x6f, 0x72, 0x79, 0x52, 0x65, 0x61, 0x64, 0x69, 0x6e, 0x67, 0x52, 0x04, 0x66, 0x72,
+	0x65, 0x65, 0x12, 0x41, 0x0a, 0x08, 0x72, 0x65, 0x73, 0x65, 0x72, 0x76, 0x65, 0x64, 0x18, 0x04,
+	0x20, 0x01, 0x28, 0x0b, 0x32, 0x25, 0x2e, 0x64, 0x65, 0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x65,
+	0x64, 0x2e, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x70, 0x75, 0x4d, 0x65,
+	0x6d, 0x6f, 0x72, 0x79, 0x52, 0x65, 0x61, 0x64, 0x69, 0x6e, 0x67, 0x52, 0x08, 0x72, 0x65, 0x73,
+	0x65, 0x72, 0x76, 0x65, 0x64, 0x22, 0x98, 0x02, 0x0a, 0x08, 0x47, 0x70, 0x75, 0x50, 0x6f, 0x77,
+	0x65, 0x72, 0x12, 0x38, 0x0a, 0x04, 0x64, 0x72, 0x61, 0x77, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b,
+	0x32, 0x24, 0x2e, 0x64, 0x65, 0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2e, 0x61, 0x67,
+	0x65, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x70, 0x75, 0x50, 0x6f, 0x77, 0x65, 0x72, 0x52,
+	0x65, 0x61, 0x64, 0x69, 0x6e, 0x67, 0x52, 0x04, 0x64, 0x72, 0x61, 0x77, 0x12, 0x3a, 0x0a, 0x05,
+	0x6c, 0x69, 0x6d, 0x69, 0x74, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x24, 0x2e, 0x64, 0x65,
+	0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2e, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x2e, 0x76,
+	0x31, 0x2e, 0x47, 0x70, 0x75, 0x50, 0x6f, 0x77, 0x65, 0x72, 0x52, 0x65, 0x61, 0x64, 0x69, 0x6e,
+	0x67, 0x52, 0x05, 0x6c, 0x69, 0x6d, 0x69, 0x74, 0x12, 0x49, 0x0a, 0x0d, 0x64, 0x65, 0x66, 0x61,
+	0x75, 0x6c, 0x74, 0x5f, 0x6c, 0x69, 0x6d, 0x69, 0x74, 0x18, 0x03, 0x20, 0x01, 0x28, 0x0b, 0x32,
+	0x24, 0x2e, 0x64, 0x65, 0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2e, 0x61, 0x67, 0x65,
+	0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x70, 0x75, 0x50, 0x6f, 0x77, 0x65, 0x72, 0x52, 0x65,
+	0x61, 0x64, 0x69, 0x6e, 0x67, 0x52, 0x0c, 0x64, 0x65, 0x66, 0x61, 0x75, 0x6c, 0x74, 0x4c, 0x69,
+	0x6d, 0x69, 0x74, 0x12, 0x4b, 0x0a, 0x0e, 0x65, 0x6e, 0x66, 0x6f, 0x72, 0x63, 0x65, 0x64, 0x5f,
+	0x6c, 0x69, 0x6d, 0x69, 0x74, 0x18, 0x04, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x24, 0x2e, 0x64, 0x65,
+	0x74, 0x65, 0x72, 0x6d, 0x69, 0x6e, 0x65, 0x64, 0x2e, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x2e, 0x76,
+	0x31, 0x2e, 0x47, 0x70, 0x75, 0x50, 0x6f, 0x77, 0x65, 0x72, 0x52, 0x65, 0x61, 0x64, 0x69, 0x6e,
+	0x67, 0x52, 0x0d, 0x65, 0x6e, 0x66, 0x6f, 0x72, 0x63, 0x65, 0x64, 0x4c, 0x69, 0x6d, 0x69, 0x74,
+	0x22, 0x7e, 0x0a, 0x0f, 0x47, 0x70, 0x75, 0x50, 0x6f, 0x77, 0x65, 0x72, 0x52, 0x65, 0x61, 0x64,
+	0x69, 0x6e, 0x67, 0x12, 0x14, 0x0a, 0x05, 0x77, 0x61, 0x74, 0x74, 0x73, 0x18, 0x01, 0x20, 0x01,
+	0x28, 0x01, 0x52, 0x05, 0x77, 0x61, 0x74, 0x74, 0x73, 0x12, 0x39, 0x0a, 0x0a, 0x73, 0x61, 0x6d,
+	0x70, 0x6c, 0x65, 0x64, 0x5f, 0x61, 0x74, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1a, 0x2e,
+	0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2e,
+	0x54, 0x69, 0x6d, 0x65, 0x73, 0x74, 0x61, 0x6d, 0x70, 0x52, 0x09, 0x73, 0x61, 0x6d, 0x70, 0x6c,
+	0x65, 0x64, 0x41, 0x74, 0x3a, 0x1a, 0x92, 0x41, 0x17, 0x0a, 0x15, 0xd2, 0x01, 0x05, 0x77, 0x61,
+	0x74, 0x74, 0x73, 0xd2, 0x01, 0x0a, 0x73, 0x61, 0x6d, 0x70, 0x6c, 0x65, 0x64, 0x5f, 0x61, 0x74,
 	0x22, 0x7f, 0x0a, 0x10, 0x47, 0x70, 0x75, 0x4d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x52, 0x65, 0x61,
 	0x64, 0x69, 0x6e, 0x67, 0x12, 0x14, 0x0a, 0x05, 0x62, 0x79, 0x74, 0x65, 0x73, 0x18, 0x01, 0x20,
 	0x01, 0x28, 0x03, 0x52, 0x05, 0x62, 0x79, 0x74, 0x65, 0x73, 0x12, 0x39, 0x0a, 0x0a, 0x73, 0x61,
@@ -1699,7 +1874,7 @@ func file_determined_agent_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_determined_agent_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_determined_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_determined_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_determined_agent_v1_agent_proto_goTypes = []interface{}{
 	(GpuLinkLevel)(0),             // 0: determined.agent.v1.GpuLinkLevel
 	(GpuP2PStatus)(0),             // 1: determined.agent.v1.GpuP2pStatus
@@ -1713,60 +1888,68 @@ var file_determined_agent_v1_agent_proto_goTypes = []interface{}{
 	(*GpuTopology)(nil),           // 9: determined.agent.v1.GpuTopology
 	(*GpuInfo)(nil),               // 10: determined.agent.v1.GpuInfo
 	(*GpuMemory)(nil),             // 11: determined.agent.v1.GpuMemory
-	(*GpuMemoryReading)(nil),      // 12: determined.agent.v1.GpuMemoryReading
-	(*GpuXid)(nil),                // 13: determined.agent.v1.GpuXid
-	(*GpuP2PCaps)(nil),            // 14: determined.agent.v1.GpuP2pCaps
-	(*GpuLink)(nil),               // 15: determined.agent.v1.GpuLink
-	nil,                           // 16: determined.agent.v1.DeviceStats.StatesEntry
-	nil,                           // 17: determined.agent.v1.SlotStats.TypeStatsEntry
-	nil,                           // 18: determined.agent.v1.SlotStats.BrandStatsEntry
-	nil,                           // 19: determined.agent.v1.Agent.SlotsEntry
-	nil,                           // 20: determined.agent.v1.Agent.ContainersEntry
-	(*timestamp.Timestamp)(nil),   // 21: google.protobuf.Timestamp
-	(*devicev1.Device)(nil),       // 22: determined.device.v1.Device
-	(*containerv1.Container)(nil), // 23: determined.container.v1.Container
+	(*GpuPower)(nil),              // 12: determined.agent.v1.GpuPower
+	(*GpuPowerReading)(nil),       // 13: determined.agent.v1.GpuPowerReading
+	(*GpuMemoryReading)(nil),      // 14: determined.agent.v1.GpuMemoryReading
+	(*GpuXid)(nil),                // 15: determined.agent.v1.GpuXid
+	(*GpuP2PCaps)(nil),            // 16: determined.agent.v1.GpuP2pCaps
+	(*GpuLink)(nil),               // 17: determined.agent.v1.GpuLink
+	nil,                           // 18: determined.agent.v1.DeviceStats.StatesEntry
+	nil,                           // 19: determined.agent.v1.SlotStats.TypeStatsEntry
+	nil,                           // 20: determined.agent.v1.SlotStats.BrandStatsEntry
+	nil,                           // 21: determined.agent.v1.Agent.SlotsEntry
+	nil,                           // 22: determined.agent.v1.Agent.ContainersEntry
+	(*timestamp.Timestamp)(nil),   // 23: google.protobuf.Timestamp
+	(*devicev1.Device)(nil),       // 24: determined.device.v1.Device
+	(*containerv1.Container)(nil), // 25: determined.container.v1.Container
 }
 var file_determined_agent_v1_agent_proto_depIdxs = []int32{
-	16, // 0: determined.agent.v1.DeviceStats.states:type_name -> determined.agent.v1.DeviceStats.StatesEntry
-	17, // 1: determined.agent.v1.SlotStats.type_stats:type_name -> determined.agent.v1.SlotStats.TypeStatsEntry
-	18, // 2: determined.agent.v1.SlotStats.brand_stats:type_name -> determined.agent.v1.SlotStats.BrandStatsEntry
-	21, // 3: determined.agent.v1.Agent.registered_time:type_name -> google.protobuf.Timestamp
-	19, // 4: determined.agent.v1.Agent.slots:type_name -> determined.agent.v1.Agent.SlotsEntry
-	20, // 5: determined.agent.v1.Agent.containers:type_name -> determined.agent.v1.Agent.ContainersEntry
+	18, // 0: determined.agent.v1.DeviceStats.states:type_name -> determined.agent.v1.DeviceStats.StatesEntry
+	19, // 1: determined.agent.v1.SlotStats.type_stats:type_name -> determined.agent.v1.SlotStats.TypeStatsEntry
+	20, // 2: determined.agent.v1.SlotStats.brand_stats:type_name -> determined.agent.v1.SlotStats.BrandStatsEntry
+	23, // 3: determined.agent.v1.Agent.registered_time:type_name -> google.protobuf.Timestamp
+	21, // 4: determined.agent.v1.Agent.slots:type_name -> determined.agent.v1.Agent.SlotsEntry
+	22, // 5: determined.agent.v1.Agent.containers:type_name -> determined.agent.v1.Agent.ContainersEntry
 	6,  // 6: determined.agent.v1.Agent.slot_stats:type_name -> determined.agent.v1.SlotStats
 	9,  // 7: determined.agent.v1.Agent.gpu_topology:type_name -> determined.agent.v1.GpuTopology
-	22, // 8: determined.agent.v1.Slot.device:type_name -> determined.device.v1.Device
-	23, // 9: determined.agent.v1.Slot.container:type_name -> determined.container.v1.Container
-	21, // 10: determined.agent.v1.GpuTopology.collected_at:type_name -> google.protobuf.Timestamp
+	24, // 8: determined.agent.v1.Slot.device:type_name -> determined.device.v1.Device
+	25, // 9: determined.agent.v1.Slot.container:type_name -> determined.container.v1.Container
+	23, // 10: determined.agent.v1.GpuTopology.collected_at:type_name -> google.protobuf.Timestamp
 	10, // 11: determined.agent.v1.GpuTopology.gpus:type_name -> determined.agent.v1.GpuInfo
-	15, // 12: determined.agent.v1.GpuTopology.links:type_name -> determined.agent.v1.GpuLink
+	17, // 12: determined.agent.v1.GpuTopology.links:type_name -> determined.agent.v1.GpuLink
 	4,  // 13: determined.agent.v1.GpuTopology.xid_query_status:type_name -> determined.agent.v1.GpuXidQueryStatus
-	21, // 14: determined.agent.v1.GpuTopology.xid_queried_at:type_name -> google.protobuf.Timestamp
+	23, // 14: determined.agent.v1.GpuTopology.xid_queried_at:type_name -> google.protobuf.Timestamp
 	3,  // 15: determined.agent.v1.GpuInfo.health:type_name -> determined.agent.v1.GpuHealth
-	13, // 16: determined.agent.v1.GpuInfo.recent_xids:type_name -> determined.agent.v1.GpuXid
+	15, // 16: determined.agent.v1.GpuInfo.recent_xids:type_name -> determined.agent.v1.GpuXid
 	11, // 17: determined.agent.v1.GpuInfo.memory:type_name -> determined.agent.v1.GpuMemory
-	12, // 18: determined.agent.v1.GpuMemory.total:type_name -> determined.agent.v1.GpuMemoryReading
-	12, // 19: determined.agent.v1.GpuMemory.used:type_name -> determined.agent.v1.GpuMemoryReading
-	12, // 20: determined.agent.v1.GpuMemory.free:type_name -> determined.agent.v1.GpuMemoryReading
-	12, // 21: determined.agent.v1.GpuMemory.reserved:type_name -> determined.agent.v1.GpuMemoryReading
-	21, // 22: determined.agent.v1.GpuMemoryReading.sampled_at:type_name -> google.protobuf.Timestamp
-	21, // 23: determined.agent.v1.GpuXid.first_observed:type_name -> google.protobuf.Timestamp
-	21, // 24: determined.agent.v1.GpuXid.last_observed:type_name -> google.protobuf.Timestamp
-	1,  // 25: determined.agent.v1.GpuP2pCaps.read:type_name -> determined.agent.v1.GpuP2pStatus
-	1,  // 26: determined.agent.v1.GpuP2pCaps.write:type_name -> determined.agent.v1.GpuP2pStatus
-	0,  // 27: determined.agent.v1.GpuLink.level:type_name -> determined.agent.v1.GpuLinkLevel
-	14, // 28: determined.agent.v1.GpuLink.p2p_a_to_b:type_name -> determined.agent.v1.GpuP2pCaps
-	14, // 29: determined.agent.v1.GpuLink.p2p_b_to_a:type_name -> determined.agent.v1.GpuP2pCaps
-	2,  // 30: determined.agent.v1.GpuLink.p2p:type_name -> determined.agent.v1.GpuP2p
-	5,  // 31: determined.agent.v1.SlotStats.TypeStatsEntry.value:type_name -> determined.agent.v1.DeviceStats
-	5,  // 32: determined.agent.v1.SlotStats.BrandStatsEntry.value:type_name -> determined.agent.v1.DeviceStats
-	8,  // 33: determined.agent.v1.Agent.SlotsEntry.value:type_name -> determined.agent.v1.Slot
-	23, // 34: determined.agent.v1.Agent.ContainersEntry.value:type_name -> determined.container.v1.Container
-	35, // [35:35] is the sub-list for method output_type
-	35, // [35:35] is the sub-list for method input_type
-	35, // [35:35] is the sub-list for extension type_name
-	35, // [35:35] is the sub-list for extension extendee
-	0,  // [0:35] is the sub-list for field type_name
+	12, // 18: determined.agent.v1.GpuInfo.power:type_name -> determined.agent.v1.GpuPower
+	14, // 19: determined.agent.v1.GpuMemory.total:type_name -> determined.agent.v1.GpuMemoryReading
+	14, // 20: determined.agent.v1.GpuMemory.used:type_name -> determined.agent.v1.GpuMemoryReading
+	14, // 21: determined.agent.v1.GpuMemory.free:type_name -> determined.agent.v1.GpuMemoryReading
+	14, // 22: determined.agent.v1.GpuMemory.reserved:type_name -> determined.agent.v1.GpuMemoryReading
+	13, // 23: determined.agent.v1.GpuPower.draw:type_name -> determined.agent.v1.GpuPowerReading
+	13, // 24: determined.agent.v1.GpuPower.limit:type_name -> determined.agent.v1.GpuPowerReading
+	13, // 25: determined.agent.v1.GpuPower.default_limit:type_name -> determined.agent.v1.GpuPowerReading
+	13, // 26: determined.agent.v1.GpuPower.enforced_limit:type_name -> determined.agent.v1.GpuPowerReading
+	23, // 27: determined.agent.v1.GpuPowerReading.sampled_at:type_name -> google.protobuf.Timestamp
+	23, // 28: determined.agent.v1.GpuMemoryReading.sampled_at:type_name -> google.protobuf.Timestamp
+	23, // 29: determined.agent.v1.GpuXid.first_observed:type_name -> google.protobuf.Timestamp
+	23, // 30: determined.agent.v1.GpuXid.last_observed:type_name -> google.protobuf.Timestamp
+	1,  // 31: determined.agent.v1.GpuP2pCaps.read:type_name -> determined.agent.v1.GpuP2pStatus
+	1,  // 32: determined.agent.v1.GpuP2pCaps.write:type_name -> determined.agent.v1.GpuP2pStatus
+	0,  // 33: determined.agent.v1.GpuLink.level:type_name -> determined.agent.v1.GpuLinkLevel
+	16, // 34: determined.agent.v1.GpuLink.p2p_a_to_b:type_name -> determined.agent.v1.GpuP2pCaps
+	16, // 35: determined.agent.v1.GpuLink.p2p_b_to_a:type_name -> determined.agent.v1.GpuP2pCaps
+	2,  // 36: determined.agent.v1.GpuLink.p2p:type_name -> determined.agent.v1.GpuP2p
+	5,  // 37: determined.agent.v1.SlotStats.TypeStatsEntry.value:type_name -> determined.agent.v1.DeviceStats
+	5,  // 38: determined.agent.v1.SlotStats.BrandStatsEntry.value:type_name -> determined.agent.v1.DeviceStats
+	8,  // 39: determined.agent.v1.Agent.SlotsEntry.value:type_name -> determined.agent.v1.Slot
+	25, // 40: determined.agent.v1.Agent.ContainersEntry.value:type_name -> determined.container.v1.Container
+	41, // [41:41] is the sub-list for method output_type
+	41, // [41:41] is the sub-list for method input_type
+	41, // [41:41] is the sub-list for extension type_name
+	41, // [41:41] is the sub-list for extension extendee
+	0,  // [0:41] is the sub-list for field type_name
 }
 
 func init() { file_determined_agent_v1_agent_proto_init() }
@@ -1860,7 +2043,7 @@ func file_determined_agent_v1_agent_proto_init() {
 			}
 		}
 		file_determined_agent_v1_agent_proto_msgTypes[7].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GpuMemoryReading); i {
+			switch v := v.(*GpuPower); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1872,7 +2055,7 @@ func file_determined_agent_v1_agent_proto_init() {
 			}
 		}
 		file_determined_agent_v1_agent_proto_msgTypes[8].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GpuXid); i {
+			switch v := v.(*GpuPowerReading); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1884,7 +2067,7 @@ func file_determined_agent_v1_agent_proto_init() {
 			}
 		}
 		file_determined_agent_v1_agent_proto_msgTypes[9].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GpuP2PCaps); i {
+			switch v := v.(*GpuMemoryReading); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1896,6 +2079,30 @@ func file_determined_agent_v1_agent_proto_init() {
 			}
 		}
 		file_determined_agent_v1_agent_proto_msgTypes[10].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GpuXid); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_determined_agent_v1_agent_proto_msgTypes[11].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GpuP2PCaps); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_determined_agent_v1_agent_proto_msgTypes[12].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*GpuLink); i {
 			case 0:
 				return &v.state
@@ -1914,7 +2121,7 @@ func file_determined_agent_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_determined_agent_v1_agent_proto_rawDesc,
 			NumEnums:      5,
-			NumMessages:   16,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

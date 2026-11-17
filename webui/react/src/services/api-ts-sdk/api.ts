@@ -3907,6 +3907,12 @@ export interface V1GetAgentsResponse {
      * @memberof V1GetAgentsResponse
      */
     gpuMemoryQueriedAt?: Date | DateString;
+    /**
+     * When the master read the GPU power, as gpu_memory_queried_at for include_gpu_power.
+     * @type {Date | DateString}
+     * @memberof V1GetAgentsResponse
+     */
+    gpuPowerQueriedAt?: Date | DateString;
 }
 /**
  * 
@@ -5745,6 +5751,12 @@ export interface V1GpuInfo {
      * @memberof V1GpuInfo
      */
     memory?: V1GpuMemory;
+    /**
+     * The GPU's power draw and limits as Prometheus last scraped them from the cluster's DCGM-Exporter. Only GetAgents with include_gpu_power sets it.
+     * @type {V1GpuPower}
+     * @memberof V1GpuInfo
+     */
+    power?: V1GpuPower;
 }
 /**
  * GpuLink describes one pair of GPUs of an agent.
@@ -5917,6 +5929,56 @@ export const V1GpuP2pStatus = {
     NOTSUPPORTED: 'GPU_P2P_STATUS_NOT_SUPPORTED',
 } as const
 export type V1GpuP2pStatus = ValueOf<typeof V1GpuP2pStatus>
+/**
+ * GpuPower holds a GPU's latest power readings. A reading without a sample is null.
+ * @export
+ * @interface V1GpuPower
+ */
+export interface V1GpuPower {
+    /**
+     * The power draw (DCGM_FI_DEV_POWER_USAGE).
+     * @type {V1GpuPowerReading}
+     * @memberof V1GpuPower
+     */
+    draw?: V1GpuPowerReading;
+    /**
+     * The configured power limit (DCGM_FI_DEV_POWER_MGMT_LIMIT).
+     * @type {V1GpuPowerReading}
+     * @memberof V1GpuPower
+     */
+    limit?: V1GpuPowerReading;
+    /**
+     * The default power limit (DCGM_FI_DEV_POWER_MGMT_LIMIT_DEF).
+     * @type {V1GpuPowerReading}
+     * @memberof V1GpuPower
+     */
+    defaultLimit?: V1GpuPowerReading;
+    /**
+     * The enforced power limit, after every constraint (DCGM_FI_DEV_ENFORCED_POWER_LIMIT).
+     * @type {V1GpuPowerReading}
+     * @memberof V1GpuPower
+     */
+    enforcedLimit?: V1GpuPowerReading;
+}
+/**
+ * GpuPowerReading is one power sample of a GPU.
+ * @export
+ * @interface V1GpuPowerReading
+ */
+export interface V1GpuPowerReading {
+    /**
+     * The reading in watts.
+     * @type {number}
+     * @memberof V1GpuPowerReading
+     */
+    watts: number;
+    /**
+     * The timestamp of the sample in Prometheus, as for GpuMemoryReading.
+     * @type {Date | DateString}
+     * @memberof V1GpuPowerReading
+     */
+    sampledAt: Date | DateString;
+}
 /**
  * GpuTopology is what an agent measured with NVML when it started, and the GPUs' recent critical XIDs from the master's Prometheus.
  * @export
@@ -15055,10 +15117,11 @@ export const ClusterApiFetchParamCreator = function (configuration?: Configurati
          * @param {boolean} [excludeSlots] exclude slots.
          * @param {boolean} [excludeContainers] exclude containers.
          * @param {boolean} [includeGpuMemory] Read each GPU's memory from the cluster's DCGM-Exporter in the Prometheus of integrations.task_resources into gpu_topology.gpus[].memory. It needs the permission to view agent details, and it cannot be combined with exclude_slots. A failed query fails the request.
+         * @param {boolean} [includeGpuPower] Read each GPU's power draw and limits into gpu_topology.gpus[].power, from the same source and under the same conditions as include_gpu_memory. With both, the master sends one query.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getAgents(sortBy?: V1GetAgentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, excludeSlots?: boolean, excludeContainers?: boolean, includeGpuMemory?: boolean, options: any = {}): FetchArgs {
+        getAgents(sortBy?: V1GetAgentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, excludeSlots?: boolean, excludeContainers?: boolean, includeGpuMemory?: boolean, includeGpuPower?: boolean, options: any = {}): FetchArgs {
             const localVarPath = `/api/v1/agents`;
             const localVarUrlObj = new URL(localVarPath, BASE_PATH);
             const localVarRequestOptions = { method: 'GET', ...options };
@@ -15099,6 +15162,10 @@ export const ClusterApiFetchParamCreator = function (configuration?: Configurati
             
             if (includeGpuMemory !== undefined) {
                 localVarQueryParameter['includeGpuMemory'] = includeGpuMemory
+            }
+            
+            if (includeGpuPower !== undefined) {
+                localVarQueryParameter['includeGpuPower'] = includeGpuPower
             }
             
             objToSearchParams(localVarQueryParameter, localVarUrlObj.searchParams);
@@ -15662,11 +15729,12 @@ export const ClusterApiFp = function (configuration?: Configuration) {
          * @param {boolean} [excludeSlots] exclude slots.
          * @param {boolean} [excludeContainers] exclude containers.
          * @param {boolean} [includeGpuMemory] Read each GPU's memory from the cluster's DCGM-Exporter in the Prometheus of integrations.task_resources into gpu_topology.gpus[].memory. It needs the permission to view agent details, and it cannot be combined with exclude_slots. A failed query fails the request.
+         * @param {boolean} [includeGpuPower] Read each GPU's power draw and limits into gpu_topology.gpus[].power, from the same source and under the same conditions as include_gpu_memory. With both, the master sends one query.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getAgents(sortBy?: V1GetAgentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, excludeSlots?: boolean, excludeContainers?: boolean, includeGpuMemory?: boolean, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetAgentsResponse> {
-            const localVarFetchArgs = ClusterApiFetchParamCreator(configuration).getAgents(sortBy, orderBy, offset, limit, excludeSlots, excludeContainers, includeGpuMemory, options);
+        getAgents(sortBy?: V1GetAgentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, excludeSlots?: boolean, excludeContainers?: boolean, includeGpuMemory?: boolean, includeGpuPower?: boolean, options?: any): (fetch?: FetchAPI, basePath?: string) => Promise<V1GetAgentsResponse> {
+            const localVarFetchArgs = ClusterApiFetchParamCreator(configuration).getAgents(sortBy, orderBy, offset, limit, excludeSlots, excludeContainers, includeGpuMemory, includeGpuPower, options);
             return (fetch: FetchAPI = window.fetch, basePath: string = BASE_PATH) => {
                 return fetch(basePath + localVarFetchArgs.url, localVarFetchArgs.options).then((response) => {
                     if (response.status >= 200 && response.status < 300) {
@@ -15970,11 +16038,12 @@ export const ClusterApiFactory = function (configuration?: Configuration, fetch?
          * @param {boolean} [excludeSlots] exclude slots.
          * @param {boolean} [excludeContainers] exclude containers.
          * @param {boolean} [includeGpuMemory] Read each GPU's memory from the cluster's DCGM-Exporter in the Prometheus of integrations.task_resources into gpu_topology.gpus[].memory. It needs the permission to view agent details, and it cannot be combined with exclude_slots. A failed query fails the request.
+         * @param {boolean} [includeGpuPower] Read each GPU's power draw and limits into gpu_topology.gpus[].power, from the same source and under the same conditions as include_gpu_memory. With both, the master sends one query.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        getAgents(sortBy?: V1GetAgentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, excludeSlots?: boolean, excludeContainers?: boolean, includeGpuMemory?: boolean, options?: any) {
-            return ClusterApiFp(configuration).getAgents(sortBy, orderBy, offset, limit, excludeSlots, excludeContainers, includeGpuMemory, options)(fetch, basePath);
+        getAgents(sortBy?: V1GetAgentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, excludeSlots?: boolean, excludeContainers?: boolean, includeGpuMemory?: boolean, includeGpuPower?: boolean, options?: any) {
+            return ClusterApiFp(configuration).getAgents(sortBy, orderBy, offset, limit, excludeSlots, excludeContainers, includeGpuMemory, includeGpuPower, options)(fetch, basePath);
         },
         /**
          * 
@@ -16183,12 +16252,13 @@ export class ClusterApi extends BaseAPI {
      * @param {boolean} [excludeSlots] exclude slots.
      * @param {boolean} [excludeContainers] exclude containers.
      * @param {boolean} [includeGpuMemory] Read each GPU's memory from the cluster's DCGM-Exporter in the Prometheus of integrations.task_resources into gpu_topology.gpus[].memory. It needs the permission to view agent details, and it cannot be combined with exclude_slots. A failed query fails the request.
+     * @param {boolean} [includeGpuPower] Read each GPU's power draw and limits into gpu_topology.gpus[].power, from the same source and under the same conditions as include_gpu_memory. With both, the master sends one query.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      * @memberof ClusterApi
      */
-    public getAgents(sortBy?: V1GetAgentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, excludeSlots?: boolean, excludeContainers?: boolean, includeGpuMemory?: boolean, options?: any) {
-        return ClusterApiFp(this.configuration).getAgents(sortBy, orderBy, offset, limit, excludeSlots, excludeContainers, includeGpuMemory, options)(this.fetch, this.basePath)
+    public getAgents(sortBy?: V1GetAgentsRequestSortBy, orderBy?: V1OrderBy, offset?: number, limit?: number, excludeSlots?: boolean, excludeContainers?: boolean, includeGpuMemory?: boolean, includeGpuPower?: boolean, options?: any) {
+        return ClusterApiFp(this.configuration).getAgents(sortBy, orderBy, offset, limit, excludeSlots, excludeContainers, includeGpuMemory, includeGpuPower, options)(this.fetch, this.basePath)
     }
     
     /**
